@@ -1,0 +1,23 @@
+# secrets & env
+.env
+.env.*
+!.env.example
+
+# node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# editor
+.vscode/
+.idea/
+.DS_Store
+
+# client data — never commit (also excluded at repo root)
+*.mdf
+*.ldf

@@ -1,0 +1,25 @@
+{
+  "name": "sms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IFL Sack Management System — monorepo root",
+  "workspaces": [
+    "shared",
+    "sync-worker",
+    "cli",
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace @sms/shared",
+    "dev": "echo \"Step 0 scaffold — per-workspace dev scripts arrive with Steps 1-3\" && exit 0",
+    "typecheck": "tsc -b shared sync-worker cli api",
+    "test": "vitest run",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "devDependencies": {
+    "mssql": "^11.0.1",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

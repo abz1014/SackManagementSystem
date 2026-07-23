@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.local
+*.env
+
+# Client data — never commit production data or DB files
+SPS.adding
+extracted/
+schema_dump/
+*.mdf
+*.ldf
+*.bak
+
+# Dependencies / build
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

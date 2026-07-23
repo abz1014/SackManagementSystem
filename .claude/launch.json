@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sms-web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d sms\\web && npx vite --port 5173"],
+      "port": 5173
+    }
+  ]
+}

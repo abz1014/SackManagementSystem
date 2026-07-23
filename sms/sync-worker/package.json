@@ -1,0 +1,25 @@
+{
+  "name": "@sms/sync-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only sync: IFL SQL Server -> app DB (raw layer).",
+  "main": "dist/lib.js",
+  "types": "dist/lib.d.ts",
+  "exports": {
+    ".": { "types": "./dist/lib.d.ts", "default": "./dist/lib.js" }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "sync:once": "node dist/index.js --once"
+  },
+  "dependencies": {
+    "@sms/shared": "*",
+    "mssql": "^11.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.5",
+    "@types/node": "^20.14.0"
+  }
+}

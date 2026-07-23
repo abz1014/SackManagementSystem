@@ -1,0 +1,21 @@
+{
+  "name": "@sms/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "sms CLI — sync / verify / summary / rebuild",
+  "bin": { "sms": "dist/index.js" },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@sms/shared": "*",
+    "@sms/sync-worker": "*",
+    "argon2": "^0.41.1",
+    "mssql": "^11.0.1"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.5",
+    "@types/node": "^20.14.0"
+  }
+}
