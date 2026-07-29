@@ -347,7 +347,7 @@ function PerformanceHub({
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
 }) {
-  const [sub, setSub] = useState<'oee' | 'downtime'>('oee');
+  const [sub, setSub] = useState<'oee' | 'downtime' | 'patterns'>('oee');
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -357,13 +357,16 @@ function PerformanceHub({
           options={[
             { key: 'oee', label: 'OEE' },
             { key: 'downtime', label: 'Downtime & Throughput' },
+            { key: 'patterns', label: 'Stoppage patterns' },
           ]}
         />
       </div>
       {sub === 'oee' ? (
         <OeeView range={range} onMeta={onMeta} />
-      ) : (
+      ) : sub === 'downtime' ? (
         <DowntimeView range={range} onMeta={onMeta} onInspect={onInspect} />
+      ) : (
+        <StoppagePatternView range={range} onMeta={onMeta} />
       )}
     </>
   );
@@ -1617,6 +1620,425 @@ function DetailRow({ label, value, mismatch }: { label: string; value: ReactNode
 
 const STOPPAGE_PREVIEW_COUNT = 5;
 
+/** Stoppage patterns across many days. Hour-of-day clustering only means
+ * anything with repeats — one day gives one sample per hour — so this view is
+ * range-based, unlike the single-day Downtime view it sits beside. */
+function StoppagePatternView({
+  range,
+  onMeta,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+}) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [threshold, setThreshold] = useState(120);
+  const [days, setDays] = useState<DowntimeData[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (range.min && range.max && !from && !to) {
+      setFrom(range.min);
+      setTo(range.max);
+    }
+  }, [range.min, range.max, from, to]);
+
+  useEffect(() => {
+    if (!from || !to) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const list: string[] = [];
+    for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86_400_000) {
+      list.push(new Date(t).toISOString().slice(0, 10));
+    }
+    Promise.all(list.map((d) => getDowntime(d, threshold)))
+      .then((rs) => {
+        if (cancelled) return;
+        setDays(rs.map((r) => r.data));
+        if (rs[0]) onMeta(rs[0].metadata);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [from, to, threshold, onMeta]);
+
+  const analysis = useMemo(() => {
+    if (!days) return null;
+    const all = days.flatMap((d) => d.stoppages);
+    const buckets = DURATION_BUCKETS.map((b) => {
+      const inB = all.filter((s) => s.durationSeconds >= b.min && s.durationSeconds < b.max);
+      return { ...b, count: inB.length, downSeconds: inB.reduce((a, s) => a + s.durationSeconds, 0) };
+    });
+    const hourDays = Array.from({ length: 24 }, () => new Set<string>());
+    const byHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0, downSeconds: 0, days: 0, maxSingle: 0 }));
+    for (const s of all) {
+      const h = new Date(s.startTs).getUTCHours();
+      byHour[h]!.count += 1;
+      byHour[h]!.downSeconds += s.durationSeconds;
+      byHour[h]!.maxSingle = Math.max(byHour[h]!.maxSingle, s.durationSeconds);
+      hourDays[h]!.add(s.startTs.slice(0, 10));
+    }
+    byHour.forEach((h, i) => (h.days = hourDays[i]!.size));
+
+    const totalDown = all.reduce((a, s) => a + s.durationSeconds, 0);
+    const micro = buckets[0]!;
+    const long = buckets.slice(2).reduce((a, b) => a + b.count, 0);
+    const longDown = buckets.slice(2).reduce((a, b) => a + b.downSeconds, 0);
+
+    // Rank the "worst hour" by RECURRENCE, not total seconds. A single long
+    // outage can put 30% of all downtime into one hour of the clock and read
+    // as a daily pattern when it happened exactly once — verified in the data,
+    // where hour 08 was dominated by one 19.7h stop.
+    const worstHour = [...byHour].sort((a, b) => b.days - a.days || b.count - a.count)[0]!;
+    const biggestByTime = [...byHour].sort((a, b) => b.downSeconds - a.downSeconds)[0]!;
+    const skewed = biggestByTime.downSeconds > 0 && biggestByTime.maxSingle / biggestByTime.downSeconds > 0.5;
+    // 06/14/22 are the shift changes — recurrence there is a handover signal.
+    const handover = [6, 14, 22].map((h) => byHour[h]!);
+    const medianDays = [...byHour].map((h) => h.days).sort((a, b) => a - b)[12]!;
+
+    return {
+      all,
+      buckets,
+      byHour,
+      totalDown,
+      microPct: all.length > 0 ? (100 * micro.count) / all.length : 0,
+      microDownPct: totalDown > 0 ? (100 * micro.downSeconds) / totalDown : 0,
+      longCount: long,
+      longDownPct: totalDown > 0 ? (100 * longDown) / totalDown : 0,
+      worstHour,
+      biggestByTime,
+      skewed,
+      handoverElevated: handover.filter((h) => h.days > medianDays),
+      dayCount: days.length,
+    };
+  }, [days]);
+
+  return (
+    <>
+      <div className="filters">
+        <div className="field">
+          <label>From</label>
+          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>To</label>
+          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Stoppage threshold</label>
+          <div className="dt-threshold">
+            <input
+              type="number"
+              min={30}
+              max={3600}
+              step={30}
+              value={threshold}
+              onChange={(e) => setThreshold(Math.max(30, Math.min(3600, Number(e.target.value) || 120)))}
+            />
+            <span className="dt-unit">seconds</span>
+          </div>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="error-card"><b>Couldn't load stoppage patterns.</b> {error}</div>
+      ) : loading || !analysis ? (
+        <div className="tile skeleton" style={{ height: 340 }} />
+      ) : analysis.all.length === 0 ? (
+        <div className="hint">No stoppages over {threshold}s in this range.</div>
+      ) : (
+        <>
+          <div className="callout">
+            <div className="big">
+              <span className="accent">{Math.round(analysis.microPct)}%</span> of stoppages are under 5 minutes —
+              but they are only <span className="accent">{Math.round(analysis.microDownPct)}%</span> of lost time
+            </div>
+            <p>
+              {fmtInt(analysis.all.length)} stoppages across {analysis.dayCount} days, {fmtDuration(analysis.totalDown)} down
+              in total. The <b>{analysis.longCount}</b> stoppages over 15 minutes account for{' '}
+              <b>{Math.round(analysis.longDownPct)}%</b> of it. Chasing the count and chasing the lost hours are two
+              different jobs — this is which one you're looking at.
+            </p>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <h2>How long do stoppages last?</h2>
+              <span className="sub">{from} to {to}</span>
+            </div>
+            <div className="hint">
+              Micro-stops an operator clears, versus breakdowns someone gets called out for. Bars are counts; the figure
+              on the right is the downtime that bucket actually cost.
+            </div>
+            <div className="bars">
+              {analysis.buckets.map((b) => {
+                const max = Math.max(1, ...analysis.buckets.map((x) => x.count));
+                return (
+                  <div className="bar-row wide" key={b.label}>
+                    <span className="name">{b.label}</span>
+                    <span className="bar-track">
+                      <span className="bar-fill" style={{ width: `${(100 * b.count) / max}%` }} />
+                    </span>
+                    <span className="val">
+                      {fmtInt(b.count)}
+                      <span className="val-pct">{fmtDuration(b.downSeconds)}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ height: 16 }} />
+
+          <div className="panel">
+            <div className="panel-head">
+              <h2>When in the day do stoppages happen?</h2>
+              <span className="sub">
+                most days affected: {String(analysis.worstHour.hour).padStart(2, '0')}:00 · {analysis.worstHour.days} of{' '}
+                {analysis.dayCount}
+              </span>
+            </div>
+            <div className="hint">
+              Downtime by hour of day, pooled over {analysis.dayCount} days and banded by shift. What makes an hour worth
+              acting on is <b>recurrence</b> — how many separate days it goes down — not the total, which one long
+              outage can dominate on its own.
+              {analysis.handoverElevated.length > 0 && (
+                <>
+                  {' '}The shift-change hours{' '}
+                  <b>
+                    {analysis.handoverElevated.map((h) => `${String(h.hour).padStart(2, '0')}:00`).join(', ')}
+                  </b>{' '}
+                  go down on more days than a typical hour — the handover itself is worth a look.
+                </>
+              )}
+            </div>
+            {analysis.skewed && (
+              <div className="hint" style={{ color: 'var(--amber)' }}>
+                Note: {String(analysis.biggestByTime.hour).padStart(2, '0')}:00 has the tallest bar
+                ({fmtDuration(analysis.biggestByTime.downSeconds)}), but a single{' '}
+                {fmtDuration(analysis.biggestByTime.maxSingle)} stoppage is most of it — one incident, not a daily habit.
+              </div>
+            )}
+            <ResizableChart initialHeight={280}>
+              {(h) => <HourClusterChart byHour={analysis.byHour} height={h} />}
+            </ResizableChart>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Downtime by hour of day (0–23), with the three shifts banded behind. */
+function HourClusterChart({
+  byHour,
+  height = 280,
+}: {
+  byHour: { hour: number; count: number; downSeconds: number; days: number }[];
+  height?: number;
+}) {
+  const W = 1000;
+  const LM = 58;
+  const H = height;
+  const [hover, setHover] = useState<number | null>(null);
+  const maxDown = Math.max(1, ...byHour.map((h) => h.downSeconds));
+  const bandW = W / 24;
+  const barW = bandW * 0.62;
+  const y = (v: number) => H - (v / maxDown) * H;
+  const bx = (i: number) => LM + i * bandW;
+
+  const shiftBands = [
+    { from: 6, to: 14, label: 'Morning' },
+    { from: 14, to: 22, label: 'Evening' },
+    { from: 22, to: 24, label: 'Night' },
+    { from: 0, to: 6, label: 'Night' },
+  ];
+  const hs = hover != null ? byHour[hover] : null;
+  const tipW = 190;
+  const tipX = hover != null ? Math.min(Math.max(bx(hover) + bandW / 2 + 8, LM), LM + W - tipW) : 0;
+
+  return (
+    <div className="spc-chart-wrap">
+      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66} preserveAspectRatio="none">
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">down</text>
+        {shiftBands.map((b, i) => (
+          <g key={i}>
+            <rect className={`dt-band ${b.label.toLowerCase()}`} x={bx(b.from)} y={0} width={(b.to - b.from) * bandW} height={H} />
+            {b.to - b.from >= 6 && (
+              <text className="dt-band-label" x={bx((b.from + b.to) / 2)} y={15} textAnchor="middle">{b.label}</text>
+            )}
+          </g>
+        ))}
+        <line className="grid-line" x1={LM} y1={H} x2={LM + W} y2={H} />
+        <text className="axis-label" x={LM - 6} y={H + 4} textAnchor="end">0</text>
+        <text className="axis-label" x={LM - 6} y={12} textAnchor="end">{fmtDuration(maxDown)}</text>
+        {byHour.map((h, i) => (
+          <rect
+            key={h.hour}
+            className={`dt-stop${hover === i ? ' hot' : ''}`}
+            x={bx(i) + (bandW - barW) / 2}
+            y={y(h.downSeconds)}
+            width={barW}
+            height={Math.max(0, H - y(h.downSeconds))}
+            rx={1.5}
+          />
+        ))}
+        {byHour.map((h, i) =>
+          h.hour % 2 === 0 ? (
+            <text key={h.hour} className="x-tick" x={bx(i) + bandW / 2} y={H + 20} textAnchor="middle">
+              {String(h.hour).padStart(2, '0')}
+            </text>
+          ) : null,
+        )}
+        {hs && (
+          <g transform={`translate(${tipX}, 4)`}>
+            <rect className="tooltip-bg" width={tipW} height={16 + 3 * 15} rx={5} />
+            <text className="tooltip-text strong" x={9} y={17}>{String(hs.hour).padStart(2, '0')}:00–{String((hs.hour + 1) % 24).padStart(2, '0')}:00</text>
+            <text className="tooltip-text" x={9} y={32}>{fmtDuration(hs.downSeconds)} over {hs.count} stoppage{hs.count === 1 ? '' : 's'}</text>
+            <text className="tooltip-text" x={9} y={47}>on {hs.days} separate day{hs.days === 1 ? '' : 's'}</text>
+          </g>
+        )}
+        {byHour.map((h, i) => (
+          <rect
+            key={h.hour}
+            x={bx(i)}
+            y={0}
+            width={bandW}
+            height={H}
+            fill="transparent"
+            style={{ pointerEvents: 'all' }}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+/** Stoppage duration buckets. The split that matters operationally is
+ * micro-stop (an operator clears it) vs breakdown (someone is called out) —
+ * so the buckets are chosen around that, not on an even numeric scale. */
+const DURATION_BUCKETS: { label: string; short: string; min: number; max: number }[] = [
+  { label: 'under 5 min', short: '<5m', min: 0, max: 300 },
+  { label: '5–15 min', short: '5–15m', min: 300, max: 900 },
+  { label: '15–30 min', short: '15–30m', min: 900, max: 1800 },
+  { label: '30–60 min', short: '30–60m', min: 1800, max: 3600 },
+  { label: 'over 1 hour', short: '>1h', min: 3600, max: Infinity },
+];
+
+/** A day's stoppages on a real time axis, banded by shift. Height encodes
+ * duration so one long breakdown doesn't read the same as a run of micro-stops. */
+function StoppageTimeline({
+  firstTs,
+  lastTs,
+  stoppages,
+  height = 280,
+  onPick,
+}: {
+  firstTs: string;
+  lastTs: string;
+  stoppages: Stoppage[];
+  height?: number;
+  onPick?: (s: Stoppage) => void;
+}) {
+  const W = 1000;
+  const LM = 58;
+  const H = height;
+  const [hover, setHover] = useState<number | null>(null);
+
+  const t0 = new Date(firstTs).getTime();
+  const t1 = new Date(lastTs).getTime();
+  const span = Math.max(1, t1 - t0);
+  const x = (t: number) => LM + ((t - t0) / span) * W;
+  const maxDur = Math.max(60, ...stoppages.map((s) => s.durationSeconds));
+  const y = (d: number) => H - (d / maxDur) * H;
+
+  // Shift boundaries (06/14/22) that actually fall inside the observed window.
+  const start = new Date(firstTs);
+  const marks: { t: number; label: string }[] = [];
+  for (let dayOff = 0; dayOff <= 1; dayOff++) {
+    for (const [h, label] of [[6, 'Morning'], [14, 'Evening'], [22, 'Night']] as [number, string][]) {
+      const t = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + dayOff, h, 0, 0);
+      if (t > t0 && t < t1) marks.push({ t, label });
+    }
+  }
+  marks.sort((a, b) => a.t - b.t);
+
+  // Band = the stretch between two boundaries; its shift is whichever one owns
+  // the band's midpoint, so no running cursor to keep in sync.
+  const labelFor = (h: number) => (h >= 6 && h < 14 ? 'Morning' : h >= 14 && h < 22 ? 'Evening' : 'Night');
+  const edges = [t0, ...marks.map((m) => m.t), t1];
+  const bands = edges.slice(0, -1).map((e, i) => {
+    const next = edges[i + 1]!;
+    return { x0: x(e), x1: x(next), label: labelFor(new Date((e + next) / 2).getUTCHours()) };
+  });
+
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => t0 + f * span);
+  const hs = hover != null ? stoppages[hover] : null;
+  const tipW = 200;
+  const tipX = hs ? Math.min(Math.max(x(new Date(hs.startTs).getTime()) + 10, LM), LM + W - tipW) : 0;
+
+  return (
+    <div className="spc-chart-wrap">
+      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66} preserveAspectRatio="none">
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">down</text>
+        {bands.map((b, i) => (
+          <g key={i}>
+            <rect className={`dt-band ${b.label.toLowerCase()}`} x={b.x0} y={0} width={Math.max(0, b.x1 - b.x0)} height={H} />
+            {b.x1 - b.x0 > 70 && (
+              <text className="dt-band-label" x={(b.x0 + b.x1) / 2} y={15} textAnchor="middle">{b.label}</text>
+            )}
+          </g>
+        ))}
+        {marks.map((m, i) => (
+          <line key={i} className="dt-shiftline" x1={x(m.t)} y1={0} x2={x(m.t)} y2={H} />
+        ))}
+        <line className="grid-line" x1={LM} y1={H} x2={LM + W} y2={H} />
+        <text className="axis-label" x={LM - 6} y={H + 4} textAnchor="end">0</text>
+        <text className="axis-label" x={LM - 6} y={12} textAnchor="end">{fmtDuration(maxDur)}</text>
+        {stoppages.map((s, i) => {
+          const sx = x(new Date(s.startTs).getTime());
+          const w = Math.max(2, (s.durationSeconds * 1000 / span) * W);
+          return (
+            <rect
+              key={i}
+              className={`dt-stop${hover === i ? ' hot' : ''}`}
+              x={sx}
+              y={y(s.durationSeconds)}
+              width={w}
+              height={H - y(s.durationSeconds)}
+              rx={1}
+              style={{ pointerEvents: 'all', cursor: onPick ? 'pointer' : 'default' }}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onPick?.(s)}
+            />
+          );
+        })}
+        {ticks.map((t, i) => (
+          <text key={i} className="x-tick" x={x(t)} y={H + 20} textAnchor={i === 0 ? 'start' : i === ticks.length - 1 ? 'end' : 'middle'}>
+            {fmtTime(new Date(t).toISOString())}
+          </text>
+        ))}
+        {hs && (
+          <g transform={`translate(${tipX}, 4)`}>
+            <rect className="tooltip-bg" width={tipW} height={16 + 3 * 15} rx={5} />
+            <text className="tooltip-text strong" x={9} y={17}>{fmtDuration(hs.durationSeconds)} down</text>
+            <text className="tooltip-text" x={9} y={32}>{fmtTime(hs.startTs)} – {fmtTime(hs.endTs)}</text>
+            <text className="tooltip-text" x={9} y={47}>click to see cones either side</text>
+          </g>
+        )}
+      </svg>
+    </div>
+  );
+}
+
 function DowntimeView({
   range,
   onMeta,
@@ -1739,36 +2161,22 @@ function DowntimeView({
             <h2>Stoppage timeline</h2>
             <div className="hint">
               {data.firstTs && data.lastTs
-                ? `${fmtDateTime(data.firstTs)} — ${fmtDateTime(data.lastTs)}`
+                ? `${fmtDateTime(data.firstTs)} — ${fmtDateTime(data.lastTs)}. Bar height is the stoppage's duration, so a long breakdown reads differently from a cluster of micro-stops. Click one to open the cones either side of it.`
                 : 'No data this day.'}
             </div>
-            <div className="dt-timeline-track">
-              {data.firstTs &&
-                data.lastTs &&
-                data.stoppages.map((s, i) => {
-                  const spanMs = new Date(data.lastTs!).getTime() - new Date(data.firstTs!).getTime();
-                  const leftPct = ((new Date(s.startTs).getTime() - new Date(data.firstTs!).getTime()) / spanMs) * 100;
-                  const widthPct = Math.max(0.3, (s.durationSeconds * 1000 / spanMs) * 100);
-                  return (
-                    <div
-                      key={i}
-                      className="dt-timeline-seg"
-                      style={{ left: `${revealed ? leftPct : 0}%`, width: `${revealed ? widthPct : 0}%`, cursor: 'pointer' }}
-                      onClick={() => inspectStoppage(s)}
-                    >
-                      <span className="tip">
-                        {fmtTime(s.startTs)} – {fmtTime(s.endTs)}
-                        <br />
-                        {fmtDuration(s.durationSeconds)} down
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-            <div className="dt-timeline-axis">
-              <span>{data.firstTs ? fmtTime(data.firstTs) : ''}</span>
-              <span>{data.lastTs ? fmtTime(data.lastTs) : ''}</span>
-            </div>
+            {data.firstTs && data.lastTs ? (
+              <ResizableChart initialHeight={280}>
+                {(h) => (
+                  <StoppageTimeline
+                    firstTs={data.firstTs!}
+                    lastTs={data.lastTs!}
+                    stoppages={data.stoppages}
+                    height={h}
+                    onPick={inspectStoppage}
+                  />
+                )}
+              </ResizableChart>
+            ) : null}
 
             <h2>Throughput — cones per hour</h2>
             <div className="hint">Detected stoppages line up with the low bars below.</div>

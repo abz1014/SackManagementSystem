@@ -824,3 +824,23 @@ body {
 .data-note[open] summary::before { transform: rotate(90deg); }
 .data-note summary:hover { color: var(--ink); }
 .data-note p { margin: 12px 0 16px; color: var(--graphite); font-size: 14.5px; max-width: 78ch; line-height: 1.55; }
+
+/* ---- Performance: stoppage timeline + hour-of-day clustering ---- */
+.dt-timeline .dt-band { opacity: 1; }
+.dt-timeline .dt-band.morning { fill: var(--mist); opacity: 0.5; }
+.dt-timeline .dt-band.evening { fill: var(--mist); opacity: 0.22; }
+.dt-timeline .dt-band.night { fill: var(--mist-strong); opacity: 0.42; }
+.dt-timeline .dt-band-label {
+  fill: var(--graphite-dim); font-size: 11px; font-family: var(--font-sans);
+  text-transform: uppercase; letter-spacing: 0.09em;
+}
+.dt-timeline .dt-shiftline { stroke: var(--graphite-dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.dt-timeline .dt-stop { fill: var(--neutral); }
+.dt-timeline .dt-stop.hot { fill: var(--alert); }
+
+/* duration buckets need room for a second figure in the value column */
+.bar-row.wide { grid-template-columns: 130px 1fr 132px; }
+.bar-row.wide .val { display: flex; justify-content: flex-end; gap: 10px; align-items: baseline; }
+.bar-row.wide .val .val-pct { width: auto; }
+/* sentence-case bucket labels — .bar-row .name capitalizes for shift names */
+.bar-row.wide .name { text-transform: none; }
