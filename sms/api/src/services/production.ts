@@ -138,6 +138,12 @@ export async function getProduction(
     r.sackWeightKg = Math.round(kg * 10) / 10;
   }
 
-  const rows = [...map.values()].sort((a, b) => a.group.localeCompare(b.group));
+  // 'station' groups are numeric strings (varchar-cast for the shared group
+  // key) — a plain string sort orders them "1,10,11,...,2,3" alphabetically.
+  // Sort numerically for that dimension; string sort is correct for the rest
+  // (day = ISO date, shift = already a fixed short list, none = single row).
+  const rows = [...map.values()].sort((a, b) =>
+    byStation ? Number(a.group) - Number(b.group) : a.group.localeCompare(b.group),
+  );
   return { groupBy: p.groupBy, rows };
 }

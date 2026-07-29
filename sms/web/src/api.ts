@@ -393,12 +393,14 @@ export interface SpcQuery {
   productId?: number;
   usl?: number;
   lsl?: number;
+  shift?: string;
 }
 export function getSpc(q: SpcQuery): Promise<Envelope<SpcData>> {
   const p = new URLSearchParams({ type: q.type, from: q.from, to: q.to });
   if (q.productId != null) p.set('productId', String(q.productId));
   if (q.usl != null) p.set('usl', String(q.usl));
   if (q.lsl != null) p.set('lsl', String(q.lsl));
+  if (q.shift) p.set('shift', q.shift);
   return get(`/api/spc?${p.toString()}`);
 }
 
@@ -467,11 +469,13 @@ export interface OeeQuery {
   thresholdSeconds?: number;
   plannedHoursPerDay?: number;
   idealCycleSeconds?: number;
+  shift?: string;
 }
 export function getOee(q: OeeQuery): Promise<Envelope<OeeData>> {
   const p = new URLSearchParams({ from: q.from, to: q.to });
   if (q.thresholdSeconds != null) p.set('thresholdSeconds', String(q.thresholdSeconds));
   if (q.plannedHoursPerDay != null) p.set('plannedHoursPerDay', String(q.plannedHoursPerDay));
   if (q.idealCycleSeconds != null) p.set('idealCycleSeconds', String(q.idealCycleSeconds));
+  if (q.shift) p.set('shift', q.shift);
   return get(`/api/oee?${p.toString()}`);
 }

@@ -168,20 +168,25 @@ export async function getWeightSpc(
   from: string,
   to: string,
   spec: SpecLimits,
+  shift: string | null = null,
 ): Promise<SpcData> {
   const table = type === 'cone' ? 'sms.cone_event' : 'sms.sack_event';
   const col = type === 'cone' ? 'weight_g' : 'weight_kg';
   const unit: 'g' | 'kg' = type === 'cone' ? 'g' : 'kg';
 
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
-  const where = `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL AND in_range = 1`;
+  const where =
+    `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL AND in_range = 1` +
+    (shift ? ' AND shift_code=@shift' : '');
 
   // 1. Overall summary — one pass, no row transfer. Drives the bucket sizing.
-  const sumRes = await pool
+  const sumReq = pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
+    .input('to', mssql.Date, to);
+  if (shift) sumReq.input('shift', mssql.VarChar(10), shift);
+  const sumRes = await sumReq
     .query<{ n: number; mean: number | null; sd: number | null }>(
       `SELECT COUNT(*) n, AVG(CAST(${col} AS float)) mean, STDEV(CAST(${col} AS float)) sd
        FROM ${table} WHERE ${where}`,
@@ -202,6 +207,7 @@ export async function getWeightSpc(
       .input('from', mssql.Date, from)
       .input('to', mssql.Date, to)
       .input('bucketMin', mssql.Int, bucketMinutes);
+    if (shift) r.input('shift', mssql.VarChar(10), shift);
     extra?.(r);
     return r;
   };

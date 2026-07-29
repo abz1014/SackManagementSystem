@@ -64,7 +64,42 @@ import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmt
 
 type Shift = 'all' | 'morning' | 'evening' | 'night';
 const SHIFTS: Shift[] = ['all', 'morning', 'evening', 'night'];
-type View = 'dashboard' | 'register' | 'downtime' | 'spc' | 'rejectspc' | 'oee' | 'shift' | 'rejects' | 'weights' | 'admin';
+type View = 'dashboard' | 'register' | 'performance' | 'weight' | 'shift' | 'rejects' | 'admin';
+
+/** The register detail page is a real URL, not modal state — permalink-able,
+ * survives refresh, and cooperates with browser back/forward. No router
+ * dependency: the native History API is enough for one addressable sub-page. */
+interface Route {
+  view: View;
+  detailType?: RegisterType;
+  detailId?: string;
+}
+
+function parseRoute(): Route {
+  if (typeof window === 'undefined') return { view: 'dashboard' };
+  const p = new URLSearchParams(window.location.search);
+  const v = p.get('v');
+  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'admin'] as const).includes(v as View)
+    ? (v as View)
+    : 'dashboard';
+  const dtype = p.get('dtype');
+  const did = p.get('did');
+  return {
+    view,
+    detailType: dtype === 'cone' || dtype === 'sack' ? dtype : undefined,
+    detailId: did ?? undefined,
+  };
+}
+
+function routeSearch(r: Route): string {
+  const p = new URLSearchParams();
+  p.set('v', r.view);
+  if (r.detailType && r.detailId) {
+    p.set('dtype', r.detailType);
+    p.set('did', r.detailId);
+  }
+  return `?${p.toString()}`;
+}
 
 /** A pre-filtered entry point into the Register, handed off from an
  * anomaly-surfacing view (SPC point, downtime stoppage) so a user never has
@@ -189,12 +224,34 @@ export function App() {
 }
 
 function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
-  const [view, setView] = useState<View>('dashboard');
+  const [route, setRoute] = useState<Route>(() => parseRoute());
   const [range, setRange] = useState<{ min: string | null; max: string | null }>({ min: null, max: null });
   const [rangeErr, setRangeErr] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<Meta | null>(null);
   const [registerSeed, setRegisterSeed] = useState<RegisterSeed | null>(null);
   const rank = ROLE_RANK[user.role] ?? 1;
+  const view = route.view;
+
+  useEffect(() => {
+    const onPop = () => setRoute(parseRoute());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const navigate = (patch: Partial<Route>) => {
+    const next: Route = { ...route, ...patch };
+    window.history.pushState(null, '', routeSearch(next));
+    setRoute(next);
+  };
+
+  // kept as `setView` — every existing call site (nav buttons, deep-link
+  // callbacks) already calls it by that name; only its implementation
+  // changed, from a raw dispatch to a real URL navigation.
+  const setView = (v: View) => navigate({ view: v, detailType: undefined, detailId: undefined });
+
+  const openRegisterDetail = (detailType: RegisterType, detailId: string | number) =>
+    navigate({ view: 'register', detailType, detailId: String(detailId) });
+  const closeRegisterDetail = () => navigate({ view: 'register', detailType: undefined, detailId: undefined });
 
   const navigateToRegister = (seed: RegisterSeed) => {
     setRegisterSeed(seed);
@@ -221,15 +278,12 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           </span>
           <span className="sub">TP1 Line 3 · Unit 2</span>
           <span className="segmented nav">
-            <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Dashboard</button>
-            <button className={view === 'oee' ? 'active' : ''} onClick={() => setView('oee')}>OEE</button>
+            <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Overview</button>
             <button className={view === 'register' ? 'active' : ''} onClick={() => { setRegisterSeed(null); setView('register'); }}>Register</button>
-            <button className={view === 'downtime' ? 'active' : ''} onClick={() => setView('downtime')}>Downtime</button>
-            <button className={view === 'spc' ? 'active' : ''} onClick={() => setView('spc')}>Weight SPC</button>
-            <button className={view === 'shift' ? 'active' : ''} onClick={() => setView('shift')}>Shift Analysis</button>
+            <button className={view === 'performance' ? 'active' : ''} onClick={() => setView('performance')}>Performance</button>
+            <button className={view === 'weight' ? 'active' : ''} onClick={() => setView('weight')}>Weight</button>
             <button className={view === 'rejects' ? 'active' : ''} onClick={() => setView('rejects')}>Rejects</button>
-            <button className={view === 'rejectspc' ? 'active' : ''} onClick={() => setView('rejectspc')}>Reject Trend</button>
-            <button className={view === 'weights' ? 'active' : ''} onClick={() => setView('weights')}>Weights</button>
+            <button className={view === 'shift' ? 'active' : ''} onClick={() => setView('shift')}>Shifts</button>
             {rank >= 4 && (
               <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
             )}
@@ -255,27 +309,272 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       {rangeErr ? (
         <div className="error-card"><b>Couldn't reach the API.</b> {rangeErr}</div>
       ) : view === 'dashboard' ? (
-        <DashboardView range={range} onMeta={setFreshness} rank={rank} />
-      ) : view === 'oee' ? (
-        <OeeView range={range} onMeta={setFreshness} />
+        <DashboardView range={range} onMeta={setFreshness} rank={rank} onNavigate={setView} />
       ) : view === 'register' ? (
-        <RegisterView range={range} seed={registerSeed} />
-      ) : view === 'downtime' ? (
-        <DowntimeView range={range} onMeta={setFreshness} onInspect={navigateToRegister} />
-      ) : view === 'spc' ? (
-        <SpcView range={range} onMeta={setFreshness} onInspect={navigateToRegister} />
+        <RegisterView
+          range={range}
+          seed={registerSeed}
+          detail={route.detailType && route.detailId ? { type: route.detailType, id: route.detailId } : null}
+          onOpenDetail={openRegisterDetail}
+          onCloseDetail={closeRegisterDetail}
+        />
+      ) : view === 'performance' ? (
+        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} />
+      ) : view === 'weight' ? (
+        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} />
       ) : view === 'shift' ? (
         <ShiftView range={range} onMeta={setFreshness} />
       ) : view === 'rejects' ? (
-        <RejectView onMeta={setFreshness} rank={rank} />
-      ) : view === 'rejectspc' ? (
-        <RejectSpcView range={range} onMeta={setFreshness} />
-      ) : view === 'weights' ? (
-        <WeightView onMeta={setFreshness} />
+        <RejectsHub range={range} onMeta={setFreshness} rank={rank} />
       ) : (
         <AdminView />
       )}
     </div>
+  );
+}
+
+/* ---------------- Consolidated nav hubs (Phase 2 — 10 nav items -> 7) ----------------
+ * Each hub is a thin sub-tab wrapper around two previously-separate top-level
+ * pages that answered the same underlying question. No page logic changed —
+ * only where it lives in the nav. */
+
+function PerformanceHub({
+  range,
+  onMeta,
+  onInspect,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+  onInspect: (seed: RegisterSeed) => void;
+}) {
+  const [sub, setSub] = useState<'oee' | 'downtime'>('oee');
+  return (
+    <>
+      <div className="filters" style={{ marginBottom: 6 }}>
+        <Segmented
+          value={sub}
+          onChange={setSub}
+          options={[
+            { key: 'oee', label: 'OEE' },
+            { key: 'downtime', label: 'Downtime & Throughput' },
+          ]}
+        />
+      </div>
+      {sub === 'oee' ? (
+        <OeeView range={range} onMeta={onMeta} />
+      ) : (
+        <DowntimeView range={range} onMeta={onMeta} onInspect={onInspect} />
+      )}
+    </>
+  );
+}
+
+function WeightHub({
+  range,
+  onMeta,
+  onInspect,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+  onInspect: (seed: RegisterSeed) => void;
+}) {
+  const [sub, setSub] = useState<'spc' | 'distribution'>('spc');
+  return (
+    <>
+      <div className="filters" style={{ marginBottom: 6 }}>
+        <Segmented
+          value={sub}
+          onChange={setSub}
+          options={[
+            { key: 'spc', label: 'Process control' },
+            { key: 'distribution', label: 'Distribution' },
+          ]}
+        />
+      </div>
+      {sub === 'spc' ? (
+        <SpcView range={range} onMeta={onMeta} onInspect={onInspect} />
+      ) : (
+        <WeightView range={range} onMeta={onMeta} />
+      )}
+    </>
+  );
+}
+
+function RejectsHub({
+  range,
+  onMeta,
+  rank,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+  rank: number;
+}) {
+  const [sub, setSub] = useState<'pareto' | 'trend' | 'station'>('pareto');
+  return (
+    <>
+      <div className="filters" style={{ marginBottom: 6 }}>
+        <Segmented
+          value={sub}
+          onChange={setSub}
+          options={[
+            { key: 'pareto', label: 'Reasons' },
+            { key: 'trend', label: 'Trend' },
+            { key: 'station', label: 'By station' },
+          ]}
+        />
+      </div>
+      {sub === 'pareto' ? (
+        <RejectView onMeta={onMeta} rank={rank} />
+      ) : sub === 'trend' ? (
+        <RejectSpcView range={range} onMeta={onMeta} />
+      ) : (
+        <RejectStationView range={range} onMeta={onMeta} />
+      )}
+    </>
+  );
+}
+
+/** Where rejects happen, not just what or when. Reuses the same per-station
+ * ANOM methodology already built for weight bias (pooled rate ± 3σ/√n for
+ * statistical significance, plus a practical-magnitude threshold so the
+ * flagged set is the few worth a maintenance look, not everything that's
+ * merely measurable) — computed entirely from /api/production's existing
+ * groupBy=station rows, no new backend endpoint. Cross-references the
+ * weight-bias stations already surfaced in Weight SPC: a station that is
+ * BOTH light/heavy AND rejecting more is the genuinely actionable finding. */
+function RejectStationView({
+  range,
+  onMeta,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+}) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [rows, setRows] = useState<ProductionRow[]>([]);
+  const [weightStations, setWeightStations] = useState<StationStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // default to the full available window — same rationale as Trend: a
+    // station's true bias only separates from noise with enough volume.
+    if (range.max && !to) {
+      setTo(range.max);
+      setFrom(range.min ?? range.max);
+    }
+  }, [range.max, range.min, to]);
+
+  useEffect(() => {
+    if (!from || !to) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      getProduction({ from, to, groupBy: 'station' }),
+      getSpc({ type: 'cone', from, to }),
+    ])
+      .then(([p, sp]) => {
+        if (cancelled) return;
+        setRows(p.data.rows);
+        setWeightStations(sp.data.stations);
+        onMeta(p.metadata);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [from, to, onMeta]);
+
+  const analysis = useMemo(() => {
+    const stationRows = rows.filter((r) => r.group !== 'total' && Number(r.group) >= 1);
+    const totalCones = stationRows.reduce((s, r) => s + r.cones, 0);
+    const totalRejects = stationRows.reduce((s, r) => s + r.rejectedCones, 0);
+    const pooledRate = totalCones + totalRejects > 0 ? totalRejects / (totalCones + totalRejects) : 0;
+    // practical threshold: at least 0.5 pt, or 25% relative to baseline —
+    // mirrors the weight-bias "statistically real but too small to matter"
+    // distinction so a handful of stations get flagged, not all fourteen.
+    const practicalPct = Math.max(0.5, pooledRate * 100 * 0.25);
+    const stations: StationStat[] = stationRows.map((r) => {
+      const n = r.cones + r.rejectedCones;
+      const rate = n > 0 ? r.rejectedCones / n : 0;
+      const se = n > 0 ? Math.sqrt((pooledRate * (1 - pooledRate)) / n) : 0;
+      const deltaPct = (rate - pooledRate) * 100;
+      const distinguishable = se > 0 && Math.abs(rate - pooledRate) > 3 * se;
+      return {
+        station: Number(r.group),
+        n,
+        mean: round1(rate * 100),
+        stdev: null,
+        delta: round1(deltaPct),
+        distinguishable,
+        // unlike weight (off-target in EITHER direction is a problem), reject
+        // rate has a direction: only "rejects meaningfully MORE than the
+        // line" is a concern worth flagging red — a station rejecting less
+        // is a good outcome, not an exception.
+        flagged: distinguishable && deltaPct > 0 && deltaPct >= practicalPct,
+      };
+    });
+    const flagged = stations.filter((s) => s.flagged).sort((a, b) => b.delta - a.delta);
+    const weightFlaggedNums = new Set(weightStations.filter((s) => s.flagged).map((s) => s.station));
+    const crossRef = flagged.filter((s) => weightFlaggedNums.has(s.station));
+    return { stations, pooledRatePct: round1(pooledRate * 100), practicalPct: round1(practicalPct), flagged, crossRef };
+  }, [rows, weightStations]);
+
+  return (
+    <>
+      <div className="filters">
+        <div className="field">
+          <label>From</label>
+          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>To</label>
+          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
+        </div>
+      </div>
+
+      {error ? (
+        <div className="error-card"><b>Couldn't load per-station rejects.</b> {error}</div>
+      ) : loading ? (
+        <div className="tile skeleton" style={{ height: 320 }} />
+      ) : (
+        <>
+          {analysis.crossRef.length > 0 && (
+            <div className="callout" style={{ borderLeftColor: 'var(--alert)' }}>
+              <div className="big">
+                <span className="accent" style={{ color: 'var(--alert)' }}>{analysis.crossRef.length}</span> station
+                {analysis.crossRef.length === 1 ? '' : 's'} both off-target on weight <b>and</b> rejecting more
+              </div>
+              <p>
+                {analysis.crossRef.map((s) => `Station ${s.station}`).join(', ')} — the same station showing up in both
+                the weight-bias chart and the reject-rate chart is the actionable pattern: it's not measurement noise, it's
+                that station's process.
+              </p>
+            </div>
+          )}
+
+          <div className="panel">
+            <div className="panel-head">
+              <h2>Reject rate by station</h2>
+              <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+            </div>
+            <div className="hint">
+              Line baseline <b>{analysis.pooledRatePct}%</b>. Dashed lines are the ±{analysis.practicalPct}pt practical
+              threshold — {analysis.flagged.length > 0 ? (
+                <>only <b>{analysis.flagged.length}</b> station{analysis.flagged.length === 1 ? '' : 's'} cross it and reject meaningfully more than the line.</>
+              ) : (
+                <>no station rejects meaningfully more than the line.</>
+              )}
+            </div>
+            <ResizableChart initialHeight={300}>
+              {(h) => <StationChart stations={analysis.stations} grandMean={analysis.pooledRatePct} threshold={analysis.practicalPct} unit="%" height={h} />}
+            </ResizableChart>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -323,20 +622,51 @@ function LoginScreen({ onLogin }: { onLogin: (u: AuthUser) => void }) {
 
 /* ---------------- Dashboard ---------------- */
 
+/** A single derived finding surfaced on Overview — the "what's wrong right
+ * now" feed. Built entirely client-side from data every hub page already
+ * exposes (SPC stations/subgroups, downtime, reject episodes) — no new
+ * backend endpoint, just synthesis across existing, already-verified ones. */
+interface Exception {
+  severity: 'fault' | 'warn' | 'info';
+  title: string;
+  message: ReactNode;
+  view: View;
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+function computeDelta(current: number, priorValues: number[]): { pct: number; dir: 'up' | 'down' | 'flat'; text: string } | null {
+  const valid = priorValues.filter((v) => Number.isFinite(v));
+  if (valid.length === 0) return null;
+  const avg = valid.reduce((s, v) => s + v, 0) / valid.length;
+  if (avg === 0) return null;
+  const pct = ((current - avg) / avg) * 100;
+  const dir: 'up' | 'down' | 'flat' = Math.abs(pct) < 2 ? 'flat' : pct > 0 ? 'up' : 'down';
+  return { pct, dir, text: `${pct > 0 ? '+' : ''}${pct.toFixed(1)}% vs ${valid.length}-day avg` };
+}
+
 function DashboardView({
   range,
   onMeta,
   rank,
+  onNavigate,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
+  onNavigate: (v: View) => void;
 }) {
   const [date, setDate] = useState<string>('');
   const [shift, setShift] = useState<Shift>('all');
   const [kpi, setKpi] = useState<Envelope<ProductionData> | null>(null);
   const [byShift, setByShift] = useState<ProductionData | null>(null);
   const [trend, setTrend] = useState<ProductionRow[]>([]);
+  const [downtime, setDowntime] = useState<DowntimeData | null>(null);
+  const [baselineAvailability, setBaselineAvailability] = useState<number | null>(null);
+  const [spc, setSpc] = useState<SpcData | null>(null);
+  const [rejectSpc, setRejectSpc] = useState<RejectSpcData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -362,16 +692,27 @@ function DashboardView({
     const from7 = new Date(date);
     from7.setDate(from7.getDate() - 6);
     const trendFrom = from7.toISOString().slice(0, 10);
+    const dayBefore = new Date(date);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const baselineTo = dayBefore.toISOString().slice(0, 10);
     Promise.all([
       getProduction({ from: date, to: date, shift: shiftParam, groupBy: 'none' }),
       getProduction({ from: date, to: date, groupBy: 'shift' }),
       getProduction({ from: trendFrom, to: date, groupBy: 'day' }),
+      getDowntime(date, 120),
+      baselineTo >= trendFrom ? getOee({ from: trendFrom, to: baselineTo }) : Promise.resolve(null),
+      getSpc({ type: 'cone', from: date, to: date }),
+      getRejectSpc(trendFrom, date, 'all', 'day'),
     ])
-      .then(([k, s, t]) => {
+      .then(([k, s, t, d, base, sp, rj]) => {
         if (cancelled) return;
         setKpi(k);
         setByShift(s.data);
         setTrend(t.data.rows);
+        setDowntime(d.data);
+        setBaselineAvailability(base?.data.availabilityPct ?? null);
+        setSpc(sp.data);
+        setRejectSpc(rj.data);
         onMeta(k.metadata);
       })
       .catch((e) => !cancelled && setError(String(e.message ?? e)))
@@ -388,6 +729,93 @@ function DashboardView({
     const denom = total.cones + total.rejectedCones;
     return denom > 0 ? (100 * total.rejectedCones) / denom : 0;
   }, [total]);
+
+  const priorTrend = trend.length > 1 ? trend.slice(0, -1) : [];
+  const conesDelta = total ? computeDelta(total.cones, priorTrend.map((r) => r.cones)) : null;
+  const sacksDelta = total?.sacks != null ? computeDelta(total.sacks, priorTrend.map((r) => r.sacks ?? 0)) : null;
+  const weightDelta = total?.sackWeightKg != null ? computeDelta(total.sackWeightKg, priorTrend.map((r) => r.sackWeightKg ?? 0)) : null;
+  const rejectRateDelta = useMemo(() => {
+    if (!total) return null;
+    const priorRates = priorTrend
+      .map((r) => {
+        const denom = r.cones + r.rejectedCones;
+        return denom > 0 ? (100 * r.rejectedCones) / denom : NaN;
+      })
+      .filter((v) => Number.isFinite(v));
+    return rejectRate != null ? computeDelta(rejectRate, priorRates) : null;
+  }, [total, priorTrend, rejectRate]);
+
+  const exceptions = useMemo<Exception[]>(() => {
+    const out: Exception[] = [];
+    if (spc && spc.stations.length > 0) {
+      const flagged = spc.stations.filter((s) => s.flagged).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+      if (flagged.length > 0) {
+        const top = flagged[0]!;
+        out.push({
+          severity: 'fault',
+          title: flagged.length === 1 ? `Station ${top.station} off-target` : `${flagged.length} stations off-target`,
+          message: (
+            <>
+              Station <b>{top.station}</b> is <b>{top.delta > 0 ? '+' : ''}{top.delta}{spc.unit}</b> vs the line average — past the{' '}
+              <b>±{spc.practicalThresholdG}{spc.unit}</b> action threshold.
+              {flagged.length > 1 && <> {flagged.length - 1} other station{flagged.length > 2 ? 's' : ''} also flagged.</>}
+            </>
+          ),
+          view: 'weight',
+        });
+      }
+    }
+    if (spc && spc.subgroups.length > 0) {
+      const oocFrac = spc.xbarOutOfControl / spc.subgroups.length;
+      if (spc.xbarOutOfControl >= 3 && oocFrac >= 0.15) {
+        out.push({
+          severity: 'warn',
+          title: 'Weight mean drifted out of control',
+          message: (
+            <>
+              <b>{spc.xbarOutOfControl} of {spc.subgroups.length}</b> {spc.bucketLabel} subgroups breached the ±3σ control band today.
+            </>
+          ),
+          view: 'weight',
+        });
+      }
+    }
+    if (downtime && baselineAvailability != null && downtime.availabilityPct != null) {
+      const gap = baselineAvailability - downtime.availabilityPct;
+      if (gap >= 5) {
+        out.push({
+          severity: gap >= 15 ? 'fault' : 'warn',
+          title: 'Availability below normal',
+          message: (
+            <>
+              <b>{downtime.availabilityPct.toFixed(1)}%</b> today vs a <b>{baselineAvailability.toFixed(1)}%</b> 6-day baseline —{' '}
+              <b>{downtime.stoppageCount}</b> stoppages cost <b>{fmtDuration(downtime.totalDownSeconds)}</b>.
+            </>
+          ),
+          view: 'performance',
+        });
+      }
+    }
+    if (rejectSpc) {
+      const activeEpisode = rejectSpc.episodes.find((e) => e.startTs.slice(0, 10) <= date && date <= e.endTs.slice(0, 10));
+      if (activeEpisode) {
+        const pct = activeEpisode.totalProduced > 0 ? (100 * activeEpisode.totalRejects) / activeEpisode.totalProduced : 0;
+        out.push({
+          severity: 'fault',
+          title: `Reject burst — ${activeEpisode.bucketCount}-day run`,
+          message: (
+            <>
+              <b>{fmtInt(activeEpisode.totalRejects)}</b> rejects of <b>{fmtInt(activeEpisode.totalProduced)}</b> produced
+              (<b>{pct.toFixed(2)}%</b>) across this burst — a genuine event, not an isolated spike.
+            </>
+          ),
+          view: 'rejects',
+        });
+      }
+    }
+    const order = { fault: 0, warn: 1, info: 2 };
+    return out.sort((a, b) => order[a.severity] - order[b.severity]);
+  }, [spc, downtime, baselineAvailability, rejectSpc, date]);
 
   return (
     <>
@@ -419,25 +847,57 @@ function DashboardView({
           <b>Couldn't load production data.</b> {error}
         </div>
       ) : loading || !total ? (
-        <div className="kpis">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="tile skeleton" />
-          ))}
-        </div>
+        <>
+          <div className="tile skeleton" style={{ height: 100, marginBottom: 22 }} />
+          <div className="kpis">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="tile skeleton" />
+            ))}
+          </div>
+        </>
       ) : (
         <>
-          <div className="kpis">
+          {downtime && <LineStatusPanel downtime={downtime} />}
+
+          <div className="panel" style={{ marginTop: 16 }}>
+            <div className="panel-head">
+              <h2>Needs attention</h2>
+              <span className="sub">{exceptions.length} open</span>
+            </div>
+            {exceptions.length === 0 ? (
+              <div className="exc-empty">✓ Nothing flagged — weight, rejects, and availability are all within normal range today.</div>
+            ) : (
+              <div className="exc-list">
+                {exceptions.map((e, i) => (
+                  <div key={i} className="exc-item" onClick={() => onNavigate(e.view)}>
+                    <div className={`exc-sev ${e.severity}`}>{e.severity}</div>
+                    <div className="exc-body">
+                      <div className="exc-title">{e.title}</div>
+                      <div className="exc-msg">{e.message}</div>
+                    </div>
+                    <div className="exc-go">›</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="kpis" style={{ marginTop: 16 }}>
             <Tile label="Total Cones" value={total.cones} format={fmtInt}
               trend={trend.map((r) => r.cones)}
+              delta={conesDelta ? { text: conesDelta.text, tone: 'neutral' } : null}
               foot={<><span className="em">{total.conesInRangePct ?? '—'}%</span> in weight range</>} />
             <Tile label="Rejected Cones" value={total.rejectedCones} format={fmtInt}
               trend={trend.map((r) => r.rejectedCones)}
+              delta={rejectRateDelta ? { text: rejectRateDelta.text, tone: rejectRateDelta.dir === 'flat' ? 'neutral' : rejectRateDelta.dir === 'up' ? 'bad' : 'good' } : null}
               foot={<>reject rate <span className="em">{rejectRate?.toFixed(2)}%</span></>} />
             <Tile label="Total Sacks" value={total.sacks} format={fmtInt}
               trend={trend.map((r) => r.sacks ?? 0)}
+              delta={sacksDelta ? { text: sacksDelta.text, tone: 'neutral' } : null}
               foot={total.sacks && total.cones ? <>~<span className="em">{(total.cones / total.sacks).toFixed(1)}</span> cones/sack</> : <>&nbsp;</>} />
             <Tile label="Sack Weight" value={total.sackWeightKg} format={fmtKg} unit="kg"
               trend={trend.map((r) => r.sackWeightKg ?? 0)}
+              delta={weightDelta ? { text: weightDelta.text, tone: 'neutral' } : null}
               foot={<>basis <span className="em">{meta?.weightBasis}</span></>} />
           </div>
           <ShiftBreakdown data={byShift} />
@@ -448,6 +908,68 @@ function DashboardView({
   );
 }
 
+/** The line status strip — the Overview signature element. A real 24h
+ * run/stop timeline (from the same gap-detection data Downtime uses) with
+ * shift boundaries marked, so "how did the line do" is a glance, not a
+ * multi-page investigation. */
+function LineStatusPanel({ downtime }: { downtime: DowntimeData }) {
+  const hasData = !!(downtime.firstTs && downtime.lastTs);
+  const t0 = hasData ? new Date(downtime.firstTs!).getTime() : 0;
+  const t1 = hasData ? new Date(downtime.lastTs!).getTime() : 0;
+  const span = Math.max(1, t1 - t0);
+
+  // shift boundaries at 14:00 and 22:00 local-labelled wall clock, expressed
+  // as a fraction of the observed [firstTs,lastTs] window for this date.
+  const dayStart = hasData ? new Date(downtime.firstTs!) : null;
+  const shiftFracs =
+    dayStart != null
+      ? [14, 22].map((h) => {
+          const t = Date.UTC(dayStart.getUTCFullYear(), dayStart.getUTCMonth(), dayStart.getUTCDate(), h, 0, 0);
+          const tAdj = t < t0 ? t + 86_400_000 : t;
+          return (tAdj - t0) / span;
+        })
+      : [];
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Line status — {downtime.date}</h2>
+        <span className="sub">{downtime.stoppageCount} stoppages · {fmtDuration(downtime.totalDownSeconds)} down</span>
+      </div>
+      <div className="status-strip-wrap">
+        <div className="status-strip">
+          {hasData &&
+            downtime.stoppages.map((s, i) => {
+              const l = ((new Date(s.startTs).getTime() - t0) / span) * 100;
+              const w = Math.max(0.25, (s.durationSeconds * 1000 / span) * 100);
+              return <div key={i} className="status-seg" style={{ left: `${l}%`, width: `${w}%` }} title={`${fmtTime(s.startTs)} — ${fmtDuration(s.durationSeconds)}`} />;
+            })}
+          {shiftFracs.map((f, i) => (
+            <div key={i} className="status-shiftline" style={{ left: `${f * 100}%` }} />
+          ))}
+        </div>
+        <div className="status-labels">
+          <span style={{ left: '0%' }}>{hasData ? fmtTime(downtime.firstTs!) : '—'}</span>
+          <span style={{ left: '100%' }}>{hasData ? fmtTime(downtime.lastTs!) : '—'}</span>
+        </div>
+        <div className="status-shiftband">
+          <div>Morning</div>
+          <div>Evening</div>
+          <div>Night</div>
+        </div>
+        <div className="status-legend">
+          <span><span className="dot ok" /> running — {downtime.availabilityPct ?? '—'}%</span>
+          <span><span className="dot stop" /> stopped ≥120s</span>
+          <span style={{ color: 'var(--graphite-dim)' }}>
+            MTBF <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>{fmtDuration(downtime.mtbfSeconds)}</b>
+            {' · '}MTTR <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>{fmtDuration(downtime.mttrSeconds)}</b>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Tile({
   label,
   value,
@@ -455,6 +977,7 @@ function Tile({
   unit,
   foot,
   trend,
+  delta,
 }: {
   label: string;
   value: number | null;
@@ -462,6 +985,7 @@ function Tile({
   unit?: string;
   foot: ReactNode;
   trend?: number[];
+  delta?: { text: string; tone: 'good' | 'bad' | 'neutral' } | null;
 }) {
   // the KPI "settling on a reading" motion — tweens toward the new value
   // whenever the filtered date/shift changes.
@@ -476,6 +1000,7 @@ function Tile({
         {value == null ? '—' : format(shown)}
         {unit && value != null && <span className="unit">{unit}</span>}
       </div>
+      {delta && <div className={`k-delta ${delta.tone === 'good' ? 'up' : delta.tone === 'bad' ? 'down' : 'flat'}`}>{delta.text}</div>}
       {trend && trend.length > 1 && <Sparkline values={trend} />}
       <div className="k-foot">{foot}</div>
     </div>
@@ -580,11 +1105,25 @@ function ShiftBreakdown({ data }: { data: ProductionData | null }) {
 const STATIONS = Array.from({ length: 14 }, (_, i) => i + 1);
 const PAGE_SIZE = 25;
 
-function RegisterView({ range, seed }: { range: { min: string | null; max: string | null }; seed: RegisterSeed | null }) {
+function RegisterView({
+  range,
+  seed,
+  detail,
+  onOpenDetail,
+  onCloseDetail,
+}: {
+  range: { min: string | null; max: string | null };
+  seed: RegisterSeed | null;
+  detail: { type: RegisterType; id: string } | null;
+  onOpenDetail: (type: RegisterType, id: string | number) => void;
+  onCloseDetail: () => void;
+}) {
   const [type, setType] = useState<RegisterType>(() => seed?.type ?? 'cone');
   const [from, setFrom] = useState(() => seed?.from ?? '');
   const [to, setTo] = useState(() => seed?.to ?? '');
-  const [shift, setShift] = useState<'all' | 'morning' | 'evening' | 'night'>('all');
+  // default scope: latest FULL day + its last (most recently completed)
+  // shift — landing here should never show all 142k+ rows unfiltered.
+  const [shift, setShift] = useState<'all' | 'morning' | 'evening' | 'night'>(() => (seed ? 'all' : 'night'));
   const [station, setStation] = useState<string>(() => (seed?.station != null ? String(seed.station) : ''));
   const [inRange, setInRange] = useState<'all' | 'true' | 'false'>('all');
   const [wMin, setWMin] = useState(() => (seed?.wMin != null ? String(seed.wMin) : ''));
@@ -599,7 +1138,16 @@ function RegisterView({ range, seed }: { range: { min: string | null; max: strin
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<RegisterRow | null>(null);
+
+  useEffect(() => {
+    if (seed || from || !range.max) return;
+    const prior = new Date(`${range.max}T12:00:00Z`);
+    prior.setUTCDate(prior.getUTCDate() - 1);
+    const priorStr = prior.toISOString().slice(0, 10);
+    const d = range.min && priorStr >= range.min ? priorStr : range.max;
+    setFrom(d);
+    setTo(d);
+  }, [range.max, range.min, seed, from]);
 
   const clearFilters = () => {
     setType('cone');
@@ -642,6 +1190,7 @@ function RegisterView({ range, seed }: { range: { min: string | null; max: strin
   );
 
   useEffect(() => {
+    if (detail) return; // detail page open — list isn't visible, skip the fetch
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -656,7 +1205,7 @@ function RegisterView({ range, seed }: { range: { min: string | null; max: strin
     return () => {
       cancelled = true;
     };
-  }, [query]);
+  }, [query, detail]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const weightUnit = type === 'cone' ? 'g' : 'kg';
@@ -669,6 +1218,10 @@ function RegisterView({ range, seed }: { range: { min: string | null; max: strin
       setDir('desc');
     }
   };
+
+  if (detail) {
+    return <RegisterDetailPage type={detail.type} id={detail.id} onBack={onCloseDetail} onOpenDetail={onOpenDetail} />;
+  }
 
   return (
     <>
@@ -786,7 +1339,7 @@ function RegisterView({ range, seed }: { range: { min: string | null; max: strin
                   <tr><td colSpan={5} className="reg-empty">No records match these filters.</td></tr>
                 ) : (
                   rows.map((r) => (
-                    <tr key={String(r.source_row_id)} className="reg-row" onClick={() => setSelected(r)}>
+                    <tr key={String(r.source_row_id)} className="reg-row" onClick={() => onOpenDetail(type, r.source_row_id)}>
                       <td className="mono">{fmtDateTime(r.production_ts_utc)}</td>
                       <td className="cap">{r.shift_code}</td>
                       <td className="mono">{type === 'cone' ? (r.source_station ?? '—') : (r.sack_num ?? '—')}</td>
@@ -810,69 +1363,244 @@ function RegisterView({ range, seed }: { range: { min: string | null; max: strin
           </div>
         </div>
       )}
-
-      {selected && (
-        <DetailDrawer type={type} row={selected} onClose={() => setSelected(null)} />
-      )}
     </>
   );
 }
 
-function DetailDrawer({ type, row, onClose }: { type: RegisterType; row: RegisterRow; onClose: () => void }) {
-  const [full, setFull] = useState<Record<string, unknown> | null>(null);
+/** The register detail page — a real URL (?v=register&dtype=...&did=...),
+ * not modal state: permalink-able, survives refresh, works with browser
+ * back/forward. Fetches everything itself from just {type, id} so it never
+ * depends on the list having already loaded that row. Adds the context the
+ * old drawer didn't have: which SPC subgroup this reading falls in, how its
+ * station is trending, and the readings immediately around it in time. */
+function RegisterDetailPage({
+  type,
+  id,
+  onBack,
+  onOpenDetail,
+}: {
+  type: RegisterType;
+  id: string;
+  onBack: () => void;
+  onOpenDetail: (type: RegisterType, id: string | number) => void;
+}) {
+  const [row, setRow] = useState<Record<string, unknown> | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [spc, setSpc] = useState<SpcData | null>(null);
+  const [neighbors, setNeighbors] = useState<RegisterRow[] | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    getEventDetail(type, row.source_row_id)
-      .then((r) => !cancelled && setFull(r.row))
+    setRow(null);
+    setNotFound(false);
+    setSpc(null);
+    setNeighbors(null);
+    getEventDetail(type, id)
+      .then((r) => {
+        if (cancelled) return;
+        if (!r.row) {
+          setNotFound(true);
+          return;
+        }
+        setRow(r.row);
+      })
+      .catch(() => !cancelled && setNotFound(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [type, id]);
+
+  const shiftDate = row ? String(row.shift_date).slice(0, 10) : null;
+  const productionTs = row ? String(row.production_ts_utc) : null;
+  const sourceStation = row && type === 'cone' ? (row.source_station as number | null) : null;
+
+  useEffect(() => {
+    if (!shiftDate) return;
+    let cancelled = false;
+    getSpc({ type, from: shiftDate, to: shiftDate })
+      .then((r) => !cancelled && setSpc(r.data))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [type, row.source_row_id]);
+  }, [type, shiftDate]);
+
+  useEffect(() => {
+    if (!productionTs) return;
+    let cancelled = false;
+    const stationFilter = sourceStation ?? undefined;
+    Promise.all([
+      getEvents({ type, station: stationFilter, tsTo: productionTs, sort: 'time', dir: 'desc', page: 1, pageSize: 6 }),
+      getEvents({ type, station: stationFilter, tsFrom: productionTs, sort: 'time', dir: 'asc', page: 1, pageSize: 6 }),
+    ])
+      .then(([before, after]) => {
+        if (cancelled) return;
+        const beforeAsc = [...before.data.rows].reverse(); // desc → asc, ends with this row
+        const afterRows = after.data.rows.slice(1); // drop the duplicate leading row
+        setNeighbors([...beforeAsc, ...afterRows]);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [type, productionTs, sourceStation]);
+
+  const subgroup = useMemo(() => {
+    if (!spc || !productionTs) return null;
+    const t = new Date(productionTs).getTime();
+    return spc.subgroups.find((g) => {
+      const gStart = new Date(g.ts).getTime();
+      return t >= gStart && t < gStart + spc.bucketMinutes * 60_000;
+    }) ?? null;
+  }, [spc, productionTs]);
+
+  const stationStat = useMemo(() => {
+    if (!spc || sourceStation == null) return null;
+    return spc.stations.find((s) => s.station === sourceStation) ?? null;
+  }, [spc, sourceStation]);
+
+  if (notFound) {
+    return (
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Not found</h2>
+        </div>
+        <div style={{ padding: '4px 0' }}>
+          <p>{type === 'cone' ? 'Cone' : 'Sack'} #{id} doesn't exist, or doesn't match this line.</p>
+          <button className="abtn primary" onClick={onBack}>← Back to register</button>
+        </div>
+      </div>
+    );
+  }
+  if (!row) {
+    return <div className="tile skeleton" style={{ height: 260 }} />;
+  }
 
   const weightUnit = type === 'cone' ? 'g' : 'kg';
   const weight = type === 'cone' ? row.weight_g : row.weight_kg;
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-head">
-          <h2>{type === 'cone' ? 'Cone' : 'Sack'} #{row.source_row_id}</h2>
-          <button className="abtn" onClick={onClose}>Close ✕</button>
+    <>
+      <button className="abtn" style={{ marginBottom: 14 }} onClick={onBack}>← Back to register</button>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>{type === 'cone' ? 'Cone' : 'Sack'} #{String(row.source_row_id)}</h2>
+          <span className="sub">{fmtDateTime(String(row.production_ts_utc))}</span>
         </div>
-        <div className="drawer-body">
-          <DetailRow label="Production time" value={fmtDateTime(row.production_ts_utc)} />
-          <DetailRow label="Shift (corrected)" value={row.shift_code} />
-          <DetailRow label="Shift (legacy)" value={row.shift_code_legacy ?? '—'} mismatch={row.shift_code_legacy != null && row.shift_code_legacy !== row.shift_code} />
-          <DetailRow label="Weight" value={`${weight ?? '—'} ${weightUnit}`} />
-          <DetailRow label="In range" value={row.in_range ? 'Yes' : 'No'} />
-          {type === 'cone' ? (
-            <>
-              <DetailRow label="Source station" value={row.source_station ?? '—'} />
-              <DetailRow label="Lifter station" value={row.lifter_station ?? '—'} />
-              <DetailRow label="Hanger" value={row.hanger_num ?? '—'} />
-            </>
-          ) : (
-            <DetailRow label="Sack number" value={row.sack_num ?? '—'} />
-          )}
-          <DetailRow label="Product" value={row.lot_code ?? 'Not attributed (Q1)'} />
-          <DetailRow
-            label="Merge key"
-            value={row.merge_key_is_unique ? 'Unique' : 'Collision (DQ-2)'}
-            mismatch={!row.merge_key_is_unique}
-          />
-          {full && (
-            <>
-              <DetailRow label="Source system" value={String(full.source_system ?? '—')} />
-              <DetailRow label="Transform version" value={`v${full.transform_version ?? '—'}`} />
-              {full.ingest_ts_utc != null && (
-                <DetailRow label="Synced at" value={fmtDateTime(String(full.ingest_ts_utc))} />
-              )}
-            </>
-          )}
-        </div>
+        <DetailRow label="Production time" value={fmtDateTime(String(row.production_ts_utc))} />
+        <DetailRow label="Shift (corrected)" value={String(row.shift_code)} />
+        <DetailRow
+          label="Shift (legacy)"
+          value={row.shift_code_legacy != null ? String(row.shift_code_legacy) : '—'}
+          mismatch={row.shift_code_legacy != null && row.shift_code_legacy !== row.shift_code}
+        />
+        <DetailRow label="Weight" value={`${weight ?? '—'} ${weightUnit}`} />
+        <DetailRow label="In range" value={row.in_range ? 'Yes' : 'No'} />
+        {type === 'cone' ? (
+          <>
+            <DetailRow label="Source station" value={String(row.source_station ?? '—')} />
+            <DetailRow label="Lifter station" value={String(row.lifter_station ?? '—')} />
+            <DetailRow label="Hanger" value={String(row.hanger_num ?? '—')} />
+          </>
+        ) : (
+          <DetailRow label="Sack number" value={String(row.sack_num ?? '—')} />
+        )}
+        <DetailRow label="Product" value={row.lot_code != null ? String(row.lot_code) : 'Not attributed (Q1)'} />
+        <DetailRow
+          label="Merge key"
+          value={row.merge_key_is_unique ? 'Unique' : 'Collision (DQ-2)'}
+          mismatch={!row.merge_key_is_unique}
+        />
+        <DetailRow label="Source system" value={String(row.source_system ?? '—')} />
+        <DetailRow label="Transform version" value={`v${row.transform_version ?? '—'}`} />
+        {row.ingest_ts_utc != null && <DetailRow label="Synced at" value={fmtDateTime(String(row.ingest_ts_utc))} />}
       </div>
-    </div>
+
+      {subgroup && (
+        <div className="panel" style={{ marginTop: 16 }}>
+          <div className="panel-head">
+            <h2>Its subgroup</h2>
+            <span className="sub">{spc!.bucketLabel}</span>
+          </div>
+          <div className="hint">
+            The {spc!.bucketLabel} window this reading falls in — n = {subgroup.n}, mean {subgroup.mean}{spc!.unit}.
+          </div>
+          <div className="stat-row">
+            <Stat label="Subgroup mean" val={`${subgroup.mean}`} u={spc!.unit} accent />
+            <Stat label="Control limits" val={`${subgroup.xLcl}–${subgroup.xUcl}`} u={spc!.unit} />
+            <Stat label="n" val={`${subgroup.n}`} />
+          </div>
+          {subgroup.xViolates && (
+            <div className="rule-note">This subgroup's mean was outside its ±3σ control limit — the line genuinely shifted in this window.</div>
+          )}
+        </div>
+      )}
+
+      {stationStat && (
+        <div className="panel" style={{ marginTop: 16 }}>
+          <div className="panel-head">
+            <h2>Its station</h2>
+            <span className="sub">station {stationStat.station}</span>
+          </div>
+          <div className="hint">
+            How station {stationStat.station} ran on {shiftDate}, across all {fmtInt(stationStat.n)} of its cones that day.
+          </div>
+          <div className="stat-row">
+            <Stat label="Station mean" val={`${stationStat.mean}`} u={spc!.unit} accent={stationStat.flagged} />
+            <Stat label="vs line" val={`${stationStat.delta > 0 ? '+' : ''}${stationStat.delta}`} u={spc!.unit} />
+            <Stat label="n" val={`${fmtInt(stationStat.n)}`} />
+          </div>
+          {stationStat.flagged && (
+            <div className="rule-note">
+              Past the ±{spc!.practicalThresholdG}{spc!.unit} practical threshold — this station is worth a maintenance look.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head">
+          <h2>Time-neighbours</h2>
+          <span className="sub">{sourceStation != null ? `station ${sourceStation}` : 'same stream'}</span>
+        </div>
+        <div className="hint">The readings immediately before and after this one{sourceStation != null ? ' from the same station' : ''}. Click one to jump to it.</div>
+        {!neighbors ? (
+          <div className="tile skeleton" style={{ height: 120 }} />
+        ) : (
+          <div className="table-scroll">
+            <table className="reg-table">
+              <thead>
+                <tr>
+                  <th>Production time</th>
+                  <th>Shift</th>
+                  <th className="num">Weight</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {neighbors.map((n) => {
+                  const isCurrent = String(n.source_row_id) === String(row.source_row_id);
+                  return (
+                    <tr
+                      key={String(n.source_row_id)}
+                      className="reg-row"
+                      style={isCurrent ? { background: 'var(--green-pale)', fontWeight: 650 } : undefined}
+                      onClick={() => !isCurrent && onOpenDetail(type, n.source_row_id)}
+                    >
+                      <td className="mono">{fmtDateTime(n.production_ts_utc)}{isCurrent ? ' (this one)' : ''}</td>
+                      <td className="cap">{n.shift_code}</td>
+                      <td className="mono num">{type === 'cone' ? n.weight_g : n.weight_kg} {weightUnit}</td>
+                      <td><span className={`pill ${n.in_range ? 'on' : 'off'}`}>{n.in_range ? 'in range' : 'out of range'}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1334,7 +2062,7 @@ function SpcView({
                   <>No station crosses it — the {data.distinguishableStationCount} statistically-distinguishable stations are all within the practical band.</>
                 )}
               </div>
-              <ResizableChart initialHeight={240}>
+              <ResizableChart initialHeight={300}>
                 {(h) => (
                   <StationChart stations={data.stations} grandMean={data.grandMean} threshold={data.practicalThresholdG} unit={unit} height={h} onStationClick={inspectStation} />
                 )}
@@ -1349,7 +2077,7 @@ function SpcView({
               A point outside the band means the line mean genuinely shifted. Click a point to inspect those {noun}.
               {data.spec.usl != null && ' Amber lines are the spec tolerance.'}
             </div>
-            <ResizableChart initialHeight={220}>
+            <ResizableChart initialHeight={320}>
               {(h) => (
                 <SubgroupChart
                   subgroups={data.subgroups}
@@ -1382,7 +2110,7 @@ function SpcView({
                 ? ' This is a valid consistency signal, unlike a raw cone-to-cone moving range across interleaved stations.'
                 : ''}
             </div>
-            <ResizableChart initialHeight={150}>
+            <ResizableChart initialHeight={260}>
               {(h) => (
                 <SubgroupChart
                   subgroups={data.subgroups.filter((g) => g.s != null)}
@@ -1406,7 +2134,7 @@ function SpcView({
               Every in-range {type === 'cone' ? 'cone' : 'sack'}, binned. The green line is the mean;
               {data.spec.usl != null ? ' amber lines are the spec tolerance — bars near or past them are the capability risk.' : ' add a spec above to overlay the tolerance.'}
             </div>
-            <ResizableChart initialHeight={200}>
+            <ResizableChart initialHeight={300}>
               {(h) => <Histogram bins={data.histogram} mean={data.mean} usl={data.spec.usl} lsl={data.spec.lsl} unit={unit} height={h} />}
             </ResizableChart>
           </div>
@@ -1470,7 +2198,7 @@ function SubgroupChart({
   lslLine,
   unit,
   noun,
-  height = 220,
+  height = 320,
   onPointClick,
 }: {
   subgroups: Subgroup[];
@@ -1487,6 +2215,7 @@ function SubgroupChart({
   onPointClick?: (g: Subgroup) => void;
 }) {
   const W = 1000;
+  const LM = 46;
   const RM = 56;
   const [hover, setHover] = useState<number | null>(null);
   const valid = subgroups.filter((g) => valueOf(g) != null);
@@ -1501,7 +2230,7 @@ function SubgroupChart({
   const pad = (dMax - dMin) * 0.12 || 1;
   const yMin = dMin - pad;
   const yMax = dMax + pad;
-  const x = (i: number) => (i / Math.max(1, valid.length - 1)) * W;
+  const x = (i: number) => LM + (i / Math.max(1, valid.length - 1)) * W;
   const y = (v: number) => height - ((v - yMin) / (yMax - yMin)) * height;
 
   const bandTop = valid.map((g, i) => `${x(i).toFixed(1)},${y(uclOf(g) ?? centerline).toFixed(1)}`);
@@ -1523,23 +2252,27 @@ function SubgroupChart({
   const hg = hover != null ? valid[hover] : null;
   const hVal = hg ? valueOf(hg) : null;
   const tipW = 172;
-  const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, 0), W - tipW) : 0;
+  const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
     <div className="spc-chart-wrap">
-      <svg className="spc-chart" viewBox={`0 0 ${W + RM} ${height + 24}`} width="100%" height={height + 24} preserveAspectRatio="none">
+      <svg className="spc-chart" viewBox={`${LM - 80} -28 ${W + 80 + RM} ${height + 52}`} width="100%" height={height + 52} preserveAspectRatio="none">
         {gridVals.map((gv, i) => (
-          <line key={i} className="grid-line" x1={0} y1={y(gv)} x2={W} y2={y(gv)} />
+          <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
         ))}
         <path className="ctl-band" d={bandPath} />
-        <line className="center-line" x1={0} y1={y(centerline)} x2={W} y2={y(centerline)} />
-        {uslLine != null && uslLine <= yMax && <line className="spec-line" x1={0} y1={y(uslLine)} x2={W} y2={y(uslLine)} />}
-        {lslLine != null && lslLine >= yMin && <line className="spec-line" x1={0} y1={y(lslLine)} x2={W} y2={y(lslLine)} />}
+        <line className="center-line" x1={LM} y1={y(centerline)} x2={LM + W} y2={y(centerline)} />
+        {uslLine != null && uslLine <= yMax && <line className="spec-line" x1={LM} y1={y(uslLine)} x2={LM + W} y2={y(uslLine)} />}
+        {lslLine != null && lslLine >= yMin && <line className="spec-line" x1={LM} y1={y(lslLine)} x2={LM + W} y2={y(lslLine)} />}
         <polyline className="series-line" points={linePts} />
         {valid.map((g, i) => (
           <circle key={i} className={violatesOf(g) ? 'pt-limit' : 'pt-ok'} cx={x(i)} cy={y(valueOf(g)!)} r={violatesOf(g) ? 3.6 : 2.4} />
         ))}
-        <text className="axis-label" x={W + 4} y={y(centerline) + 3}>{centerline.toFixed(1)}</text>
+        <text className="axis-label" x={LM + W + 4} y={y(centerline) + 3}>{centerline.toFixed(1)}</text>
+        {gridVals.map((gv, i) => (
+          <text key={`gl${i}`} className="axis-label" x={LM - 6} y={y(gv) + 3} textAnchor="end">{gv.toFixed(0)}</text>
+        ))}
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">{unit}</text>
         {tickIdxs.map((i) => (
           <text key={i} className="x-tick" x={x(i)} y={height + 16} textAnchor="middle">{fmtTime(valid[i]!.ts)}</text>
         ))}
@@ -1557,7 +2290,7 @@ function SubgroupChart({
           </>
         )}
         <rect
-          x={0}
+          x={LM}
           y={0}
           width={W}
           height={height}
@@ -1584,7 +2317,7 @@ function StationChart({
   grandMean,
   threshold,
   unit,
-  height = 240,
+  height = 300,
   onStationClick,
 }: {
   stations: StationStat[];
@@ -1595,6 +2328,7 @@ function StationChart({
   onStationClick?: (s: StationStat) => void;
 }) {
   const W = 1000;
+  const LM = 46;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
   const n = stations.length;
@@ -1603,30 +2337,35 @@ function StationChart({
   const barW = bandW * 0.5;
   const yMid = H / 2;
   const y = (d: number) => yMid - (d / maxAbs) * (H / 2);
+  const bx = (i: number) => LM + i * bandW;
 
   const hs = hover != null ? stations[hover] : null;
   const tipW = 184;
-  const tipX = hover != null ? Math.min(Math.max(hover * bandW + bandW / 2 + 8, 0), W - tipW) : 0;
+  const tipX = hover != null ? Math.min(Math.max(bx(hover) + bandW / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
     <div className="spc-chart-wrap">
-      <svg className="spc-chart st-chart" viewBox={`0 0 ${W} ${H + 26}`} width="100%" height={H + 26} preserveAspectRatio="none">
+      <svg className="spc-chart st-chart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 54}`} width="100%" height={H + 54} preserveAspectRatio="none">
         {threshold > 0 && (
           <>
-            <line className="st-dl" x1={0} y1={y(threshold)} x2={W} y2={y(threshold)} />
-            <line className="st-dl" x1={0} y1={y(-threshold)} x2={W} y2={y(-threshold)} />
+            <line className="st-dl" x1={LM} y1={y(threshold)} x2={LM + W} y2={y(threshold)} />
+            <line className="st-dl" x1={LM} y1={y(-threshold)} x2={LM + W} y2={y(-threshold)} />
+            <text className="axis-label" x={LM - 6} y={y(threshold) + 3} textAnchor="end">+{threshold}</text>
+            <text className="axis-label" x={LM - 6} y={y(-threshold) + 3} textAnchor="end">−{threshold}</text>
           </>
         )}
-        <line className="st-zero" x1={0} y1={yMid} x2={W} y2={yMid} />
+        <line className="st-zero" x1={LM} y1={yMid} x2={LM + W} y2={yMid} />
+        <text className="axis-label" x={LM - 6} y={yMid + 3} textAnchor="end">0</text>
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">Δ {unit}</text>
         {stations.map((s, i) => {
-          const cx = i * bandW + bandW / 2;
+          const cx = bx(i) + bandW / 2;
           const top = Math.min(y(0), y(s.delta));
           const h = Math.abs(y(s.delta) - y(0)) || 1;
           const cls = `st-bar${s.flagged ? ' flagged' : ''}`;
           return <rect key={s.station} className={cls} x={cx - barW / 2} y={top} width={barW} height={h} rx={1.5} />;
         })}
         {stations.map((s, i) => (
-          <text key={s.station} className={`x-tick${s.flagged ? ' flagged' : ''}`} x={i * bandW + bandW / 2} y={H + 16} textAnchor="middle">{s.station}</text>
+          <text key={s.station} className={`x-tick${s.flagged ? ' flagged' : ''}`} x={bx(i) + bandW / 2} y={H + 16} textAnchor="middle">{s.station}</text>
         ))}
         {hover != null && hs && (
           <g transform={`translate(${tipX}, 4)`}>
@@ -1642,7 +2381,7 @@ function StationChart({
         {stations.map((s, i) => (
           <rect
             key={s.station}
-            x={i * bandW}
+            x={bx(i)}
             y={0}
             width={bandW}
             height={H}
@@ -1665,7 +2404,7 @@ function Histogram({
   usl,
   lsl,
   unit,
-  height = 200,
+  height = 300,
 }: {
   bins: HistBin[];
   mean: number;
@@ -1675,29 +2414,35 @@ function Histogram({
   height?: number;
 }) {
   const W = 1000;
+  const LM = 46;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
   if (bins.length === 0) return <div className="empty-note">Not enough data to chart.</div>;
   const maxC = Math.max(1, ...bins.map((b) => b.count));
   const lo = bins[0]!.start;
   const hi = bins[bins.length - 1]!.end;
-  const xv = (v: number) => ((v - lo) / (hi - lo)) * W;
+  const xv = (v: number) => LM + ((v - lo) / (hi - lo)) * W;
   const bw = W / bins.length;
   const y = (c: number) => H - (c / maxC) * H;
 
+  const gridN = 4;
+  const gridVals = Array.from({ length: gridN + 1 }, (_, i) => (i / gridN) * maxC);
   const tickVals = [lo, lo + (hi - lo) * 0.25, (lo + hi) / 2, lo + (hi - lo) * 0.75, hi];
   const hb = hover != null ? bins[hover] : null;
   const tipW = 150;
-  const tipX = hover != null ? Math.min(Math.max(hover * bw + bw / 2 + 8, 0), W - tipW) : 0;
+  const tipX = hover != null ? Math.min(Math.max(LM + hover * bw + bw / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
     <div className="spc-chart-wrap">
-      <svg className="spc-chart histchart" viewBox={`0 0 ${W} ${H + 24}`} width="100%" height={H + 24} preserveAspectRatio="none">
+      <svg className="spc-chart histchart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 68}`} width="100%" height={H + 68} preserveAspectRatio="none">
+        {gridVals.map((gv, i) => (
+          <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
+        ))}
         {bins.map((b, i) => (
           <rect
             key={i}
             className={`hist-bar${hover === i ? ' hi' : ''}`}
-            x={i * bw + 0.5}
+            x={LM + i * bw + 0.5}
             y={y(b.count)}
             width={bw - 1}
             height={H - y(b.count)}
@@ -1708,9 +2453,14 @@ function Histogram({
         {lsl != null && lsl >= lo && lsl <= hi && <line className="spec-line" x1={xv(lsl)} y1={0} x2={xv(lsl)} y2={H} />}
         {usl != null && usl >= lo && usl <= hi && <line className="spec-line" x1={xv(usl)} y1={0} x2={xv(usl)} y2={H} />}
         <line className="mean-line" x1={xv(mean)} y1={0} x2={xv(mean)} y2={H} />
-        {tickVals.map((v, i) => (
-          <text key={i} className="x-tick" x={Math.max(14, Math.min(W - 14, xv(v)))} y={H + 16} textAnchor="middle">{Math.round(v)}</text>
+        {gridVals.map((gv, i) => (
+          <text key={`gl${i}`} className="axis-label" x={LM - 6} y={y(gv) + 3} textAnchor="end">{fmtInt(Math.round(gv))}</text>
         ))}
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">count</text>
+        {tickVals.map((v, i) => (
+          <text key={i} className="x-tick" x={Math.max(LM + 14, Math.min(LM + W - 14, xv(v)))} y={H + 16} textAnchor="middle">{Math.round(v)}</text>
+        ))}
+        <text className="axis-title" x={LM + W / 2} y={H + 34} textAnchor="middle">{unit}</text>
         {hover != null && hb && (
           <g transform={`translate(${tipX}, 4)`}>
             <rect className="tooltip-bg" width={tipW} height={16 + 2 * 15} rx={5} />
@@ -1839,7 +2589,7 @@ function RejectSpcView({
             <div className="hint">
               Dashed line is each bucket's own 3σ upper limit (based on its production volume); flat line is the overall baseline rate.
             </div>
-            <ResizableChart initialHeight={220}>
+            <ResizableChart initialHeight={320}>
               {(h) => <PChart buckets={data.buckets} pBar={data.pBar} bucketSize={data.bucketSize} revealed={revealed} height={h} />}
             </ResizableChart>
             <div className="spc-legend">
@@ -1858,7 +2608,7 @@ function PChart({
   pBar,
   bucketSize,
   revealed,
-  height = 220,
+  height = 320,
 }: {
   buckets: RejectBucket[];
   pBar: number | null;
@@ -1867,6 +2617,7 @@ function PChart({
   height?: number;
 }) {
   const W = 1000;
+  const LM = 46;
   const H = height;
   const RM = 56;
   const [hover, setHover] = useState<number | null>(null);
@@ -1877,7 +2628,7 @@ function PChart({
   const rates = withRate.map((b) => b.rate!);
   const ucls = withRate.map((b) => b.ucl ?? 0);
   const yMax = Math.max(...rates, ...ucls, pBar) * 1.15 || 0.01;
-  const x = (i: number) => (i / Math.max(1, withRate.length - 1)) * W;
+  const x = (i: number) => LM + (i / Math.max(1, withRate.length - 1)) * W;
   const y = (v: number) => (revealed ? H - (v / yMax) * H : H);
 
   const ratePts = withRate.map((b, i) => `${x(i).toFixed(1)},${y(b.rate!).toFixed(1)}`).join(' ');
@@ -1901,27 +2652,31 @@ function PChart({
 
   const hb = hover != null ? withRate[hover] : null;
   const tipW = 168;
-  const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, 0), W - tipW) : 0;
+  const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
     <div className="spc-chart-wrap">
       <svg
         className="spc-chart pchart"
-        viewBox={`0 0 ${W + RM} ${H + 24}`}
+        viewBox={`${LM - 80} -28 ${W + 80 + RM} ${H + 52}`}
         width="100%"
-        height={H + 24}
+        height={H + 52}
         preserveAspectRatio="none"
       >
         {gridVals.map((gv, i) => (
-          <line key={i} className="grid-line" x1={0} y1={y(gv)} x2={W} y2={y(gv)} />
+          <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
         ))}
         <polyline className="ucl-band" points={uclPts} />
-        <line className="center-line" x1={0} y1={y(pBar)} x2={W} y2={y(pBar)} />
+        <line className="center-line" x1={LM} y1={y(pBar)} x2={LM + W} y2={y(pBar)} />
         <polyline className="rate-line" points={ratePts} style={{ transition: 'opacity 300ms' }} />
         {withRate.map((b, i) => (
           <circle key={i} className={b.outOfControl ? 'pt-burst' : 'pt-ok'} cx={x(i)} cy={y(b.rate!)} r={b.outOfControl ? 3.2 : 1.6} />
         ))}
-        <text className="axis-label" x={W + 4} y={y(pBar) + 3}>{(pBar * 100).toFixed(2)}%</text>
+        <text className="axis-label" x={LM + W + 4} y={y(pBar) + 3}>{(pBar * 100).toFixed(2)}%</text>
+        {gridVals.map((gv, i) => (
+          <text key={`gl${i}`} className="axis-label" x={LM - 6} y={y(gv) + 3} textAnchor="end">{(gv * 100).toFixed(1)}</text>
+        ))}
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">rate %</text>
 
         {tickIdxs.map((i) => (
           <text key={i} className="x-tick" x={x(i)} y={H + 16} textAnchor="middle">
@@ -1945,7 +2700,7 @@ function PChart({
           </>
         )}
         <rect
-          x={0}
+          x={LM}
           y={0}
           width={W}
           height={H}
@@ -2135,16 +2890,53 @@ function OeeView({
 
 /* ---------------- Shift Analysis (Q7) ---------------- */
 
+const WORK_SHIFTS = ['morning', 'evening', 'night'] as const;
+type ShiftKey = (typeof WORK_SHIFTS)[number];
+const SHIFT_HOURS: Record<ShiftKey, string> = { morning: '06–14', evening: '14–22', night: '22–06' };
+
+interface ShiftScore {
+  shift: ShiftKey;
+  cones: number;
+  rejects: number;
+  rejectRatePct: number;
+  availabilityPct: number;
+  stoppages: number;
+  oeePct: number;
+  weightSd: number;
+  weightMean: number;
+}
+
+/** One row of the scorecard: a metric measured across all three shifts. */
+interface ShiftMetric {
+  key: string;
+  label: string;
+  unit: string;
+  /** true when a HIGHER number is the better outcome */
+  higherIsBetter: boolean;
+  value: (s: ShiftScore) => number;
+  format: (n: number) => string;
+  note: string;
+}
+
+const SHIFT_METRICS: ShiftMetric[] = [
+  { key: 'cones', label: 'Cones produced', unit: '', higherIsBetter: true, value: (s) => s.cones, format: fmtInt, note: 'Total good cones wound during the shift.' },
+  { key: 'reject', label: 'Reject rate', unit: '%', higherIsBetter: false, value: (s) => s.rejectRatePct, format: (n) => `${n.toFixed(2)}%`, note: 'Rejects ÷ (good + rejected).' },
+  { key: 'avail', label: 'Availability', unit: '%', higherIsBetter: true, value: (s) => s.availabilityPct, format: (n) => `${n.toFixed(1)}%`, note: 'Run time ÷ shift time, from detected stoppages.' },
+  { key: 'stops', label: 'Stoppages', unit: '', higherIsBetter: false, value: (s) => s.stoppages, format: fmtInt, note: 'Gaps over the detection threshold.' },
+  { key: 'oee', label: 'OEE (estimated)', unit: '%', higherIsBetter: true, value: (s) => s.oeePct, format: (n) => `${n.toFixed(1)}%`, note: 'Availability × Performance × Quality. Inferred, not certified.' },
+  { key: 'sd', label: 'Weight consistency (σ)', unit: 'g', higherIsBetter: false, value: (s) => s.weightSd, format: (n) => `${n.toFixed(2)} g`, note: 'Spread of cone weight. Lower = tighter control.' },
+];
+
 function ShiftView({ range, onMeta }: { range: { min: string | null; max: string | null }; onMeta: (m: Meta) => void }) {
-  const [data, setData] = useState<ShiftAnalysisData | null>(null);
-  const [basis, setBasis] = useState<'corrected' | 'legacy'>('corrected');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [scores, setScores] = useState<ShiftScore[] | null>(null);
+  const [trend, setTrend] = useState<Record<ShiftKey, ProductionRow[]> | null>(null);
+  const [legacy, setLegacy] = useState<ShiftAnalysisData | null>(null);
+  const [trendMetric, setTrendMetric] = useState<'cones' | 'reject'>('cones');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // default to the full data window — the shift-mismatch story is systemic,
-  // so the whole range is the useful default; narrow it to inspect a period.
   useEffect(() => {
     if (range.min && range.max && !from && !to) {
       setFrom(range.min);
@@ -2156,11 +2948,38 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
     if (!from || !to) return;
     let cancelled = false;
     setLoading(true);
-    getShiftAnalysis(from, to)
-      .then((r) => {
+    setError(null);
+    Promise.all([
+      // plannedHoursPerDay=8 because each shift only owns a third of the day —
+      // the default 24 would understate availability by 3×.
+      Promise.all(WORK_SHIFTS.map((s) => getOee({ from, to, shift: s, plannedHoursPerDay: 8 }))),
+      Promise.all(WORK_SHIFTS.map((s) => getSpc({ type: 'cone', from, to, shift: s }))),
+      Promise.all(WORK_SHIFTS.map((s) => getProduction({ from, to, shift: s, groupBy: 'day' }))),
+      getShiftAnalysis(from, to),
+    ])
+      .then(([oees, spcs, prods, leg]) => {
         if (cancelled) return;
-        setData(r.data);
-        onMeta(r.metadata);
+        setScores(
+          WORK_SHIFTS.map((s, i) => {
+            const o = oees[i]!.data;
+            const sp = spcs[i]!.data;
+            const denom = o.producedCount + o.rejectedCount;
+            return {
+              shift: s,
+              cones: o.producedCount,
+              rejects: o.rejectedCount,
+              rejectRatePct: denom > 0 ? (100 * o.rejectedCount) / denom : 0,
+              availabilityPct: o.availabilityPct,
+              stoppages: o.stoppageCount,
+              oeePct: o.oeePct,
+              weightSd: sp.stdevOverall,
+              weightMean: sp.mean,
+            };
+          }),
+        );
+        setTrend({ morning: prods[0]!.data.rows, evening: prods[1]!.data.rows, night: prods[2]!.data.rows });
+        setLegacy(leg.data);
+        onMeta(oees[0]!.metadata);
       })
       .catch((e) => !cancelled && setError(String(e.message ?? e)))
       .finally(() => !cancelled && setLoading(false));
@@ -2169,34 +2988,45 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
     };
   }, [from, to, onMeta]);
 
-  // grow-in retriggers on data load AND whenever the basis toggle switches
-  const revealed = useRevealOnData(data ? `${basis}:${JSON.stringify(data.corrected)}` : null);
+  // The headline: which shift is weakest, and on how many of the six metrics.
+  const verdict = useMemo(() => {
+    if (!scores || scores.length < 3) return null;
+    const worstCount = new Map<ShiftKey, string[]>(WORK_SHIFTS.map((s) => [s, []]));
+    for (const m of SHIFT_METRICS) {
+      const sorted = [...scores].sort((a, b) => (m.higherIsBetter ? m.value(a) - m.value(b) : m.value(b) - m.value(a)));
+      worstCount.get(sorted[0]!.shift)!.push(m.label.toLowerCase());
+    }
+    const ranked = [...worstCount.entries()].sort((a, b) => b[1].length - a[1].length);
+    const [shift, metrics] = ranked[0]!;
+    const oee = scores.map((s) => s.oeePct);
+    return { shift, metrics, spreadPp: Math.max(...oee) - Math.min(...oee) };
+  }, [scores]);
 
-  if (error) return <div className="error-card"><b>Couldn't load shift analysis.</b> {error}</div>;
-  if (loading || !data) return <div className="tile skeleton" style={{ height: 220 }} />;
+  const trendSeries = useMemo(() => {
+    if (!trend) return null;
+    const days = [...new Set(WORK_SHIFTS.flatMap((s) => trend[s].map((r) => r.group)))].sort();
+    return {
+      days,
+      series: WORK_SHIFTS.map((s) => {
+        const byDay = new Map(trend[s].map((r) => [r.group, r]));
+        return {
+          name: s,
+          points: days.map((d) => {
+            const r = byDay.get(d);
+            if (!r) return null;
+            if (trendMetric === 'cones') return r.cones;
+            const n = r.cones + r.rejectedCones;
+            return n > 0 ? (100 * r.rejectedCones) / n : null;
+          }),
+        };
+      }),
+    };
+  }, [trend, trendMetric]);
 
-  const byShift = (arr: { shift: string; cones: number }[]) =>
-    new Map(arr.map((r) => [r.shift, r.cones]));
-  const corr = byShift(data.corrected);
-  const leg = byShift(data.legacy);
-  const shifts = ['morning', 'evening', 'night'];
-  const active = basis === 'corrected' ? corr : leg;
-  const max = Math.max(1, ...shifts.map((s) => active.get(s) ?? 0));
+  if (error) return <div className="error-card"><b>Couldn't load shift performance.</b> {error}</div>;
 
   return (
     <>
-      <div className="callout">
-        <div className="big">
-          <span className="accent">{fmtInt(data.mismatch.differing)}</span> of {fmtInt(data.mismatch.total)} cones
-          {' '}(<span className="accent">{data.mismatch.pct}%</span>) fall in a different shift once corrected.
-        </div>
-        <p>
-          IFL's existing system stamps each cone's shift from the time the record was <em>saved</em> to the database,
-          not when it was produced (a ~3.8h lag). SMS recomputes the shift from the real production time. Below,
-          the same cones are counted both ways — toggle to compare.
-        </p>
-      </div>
-
       <div className="filters">
         <div className="field">
           <label>From</label>
@@ -2206,69 +3036,250 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
           <label>To</label>
           <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
         </div>
-        <div className="field">
-          <label>Shift basis</label>
-          <Segmented
-            value={basis}
-            onChange={setBasis}
-            options={[
-              { key: 'corrected', label: 'Corrected (SMS)' },
-              { key: 'legacy', label: 'Legacy (existing)' },
-            ]}
-          />
-        </div>
       </div>
 
-      <div className="panel">
-        <h2>Cones per shift — corrected vs legacy</h2>
-        <div className="hint">{from === to ? from : `${from} to ${to}`} ({fmtInt(data.mismatch.total)} cones). Bars show the selected basis.</div>
-        <div className="bars" style={{ marginBottom: 22 }}>
-          {shifts.map((s) => {
-            const v = active.get(s) ?? 0;
-            const w = revealed ? (100 * v) / max : 0;
-            return (
-              <div className="bar-row" key={s}>
-                <span className="name">{s}</span>
-                <span className="bar-track">
-                  <span className="bar-fill" style={{ width: `${w}%` }} />
-                </span>
-                <span className="val">{fmtInt(v)}</span>
-              </div>
-            );
-          })}
-        </div>
+      {loading || !scores || !verdict ? (
+        <div className="tile skeleton" style={{ height: 360 }} />
+      ) : (
+        <>
+          <div className="callout" style={verdict.metrics.length >= 3 ? { borderLeftColor: 'var(--alert)' } : undefined}>
+            <div className="big">
+              <span className="accent" style={{ textTransform: 'capitalize' }}>{verdict.shift}</span> is the weakest shift —
+              worst on <span className="accent">{verdict.metrics.length}</span> of {SHIFT_METRICS.length} measures
+            </div>
+            <p>
+              {verdict.metrics.length > 0 ? <>It ranks last on {verdict.metrics.join(', ')}. </> : null}
+              OEE spans <b>{verdict.spreadPp.toFixed(1)} points</b> between the best and worst shift over{' '}
+              {from === to ? from : `${from} to ${to}`}. Same line, same machines — a gap this size is a crewing,
+              handover, or maintenance-timing question, not an equipment one.
+            </p>
+          </div>
 
-        <div className="table-scroll">
-        <table className="compare">
-          <thead>
-            <tr>
-              <th className="name">Shift</th>
-              <th className={basis === 'corrected' ? 'col-active' : 'col-idle'}>Corrected</th>
-              <th className={basis === 'legacy' ? 'col-active' : 'col-idle'}>Legacy</th>
-              <th>Δ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shifts.map((s) => {
-              const c = corr.get(s) ?? 0;
-              const l = leg.get(s) ?? 0;
-              const d = c - l;
-              return (
-                <tr key={s}>
-                  <td className="name">{s}</td>
-                  <td className={basis === 'corrected' ? 'col-active' : 'col-idle'}>{fmtInt(c)}</td>
-                  <td className={basis === 'legacy' ? 'col-active' : 'col-idle'}>{fmtInt(l)}</td>
-                  <td className={`delta ${d > 0 ? 'up' : d < 0 ? 'down' : ''}`}>
-                    {d > 0 ? '+' : ''}{fmtInt(d)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      </div>
+          <div className="panel">
+            <div className="panel-head">
+              <h2>Shift scorecard</h2>
+              <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+            </div>
+            <div className="hint">
+              Best value in each row is emphasised; the worst is marked when being worst actually signals a problem.
+            </div>
+            <div className="table-scroll">
+              <table className="compare shift-scorecard">
+                <thead>
+                  <tr>
+                    <th className="name">Measure</th>
+                    {scores.map((s) => (
+                      <th key={s.shift}>
+                        <span className="sh-name">{s.shift}</span>
+                        <span className="sh-hours">{SHIFT_HOURS[s.shift]}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {SHIFT_METRICS.map((m) => {
+                    const vals = scores.map(m.value);
+                    const best = m.higherIsBetter ? Math.max(...vals) : Math.min(...vals);
+                    const worst = m.higherIsBetter ? Math.min(...vals) : Math.max(...vals);
+                    return (
+                      <tr key={m.key}>
+                        <td className="name" title={m.note}>{m.label}</td>
+                        {scores.map((s) => {
+                          const v = m.value(s);
+                          const cls = v === best ? 'col-active' : v === worst ? 'is-worst' : '';
+                          return <td key={s.shift} className={cls}>{m.format(v)}</td>;
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={{ height: 16 }} />
+
+          <div className="panel">
+            <div className="panel-head">
+              <h2>Day over day, by shift</h2>
+              <Segmented
+                value={trendMetric}
+                onChange={setTrendMetric}
+                options={[
+                  { key: 'cones', label: 'Cones' },
+                  { key: 'reject', label: 'Reject rate' },
+                ]}
+              />
+            </div>
+            <div className="hint">
+              Whether a shift's gap is a persistent pattern or a bad day. Three lines that stay separated day after day
+              point at the crew or the schedule; lines that cross around point at the process.
+            </div>
+            {trendSeries && trendSeries.days.length > 0 ? (
+              <ResizableChart initialHeight={300}>
+                {(h) => (
+                  <ShiftTrendChart
+                    days={trendSeries.days}
+                    series={trendSeries.series}
+                    unit={trendMetric === 'cones' ? 'cones' : '%'}
+                    height={h}
+                  />
+                )}
+              </ResizableChart>
+            ) : (
+              <div className="hint">No daily data in this range.</div>
+            )}
+          </div>
+
+          {legacy && (
+            <>
+              <div style={{ height: 16 }} />
+              <details className="data-note">
+                <summary>
+                  Data integrity: {legacy.mismatch.pct}% of cones sat in the wrong shift before SMS
+                </summary>
+                <p>
+                  IFL's existing system stamps each cone's shift from the time the record was <em>saved</em> to the
+                  database, not when it was produced — a ~3.8h lag. SMS recomputes the shift from the real production
+                  time, which moves <b>{fmtInt(legacy.mismatch.differing)}</b> of {fmtInt(legacy.mismatch.total)} cones.
+                  Every figure on this page uses the corrected assignment.
+                </p>
+                <div className="table-scroll">
+                  <table className="compare">
+                    <thead>
+                      <tr>
+                        <th className="name">Shift</th>
+                        <th>Corrected</th>
+                        <th>Legacy</th>
+                        <th>Δ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {WORK_SHIFTS.map((s) => {
+                        const c = legacy.corrected.find((r) => r.shift === s)?.cones ?? 0;
+                        const l = legacy.legacy.find((r) => r.shift === s)?.cones ?? 0;
+                        const d = c - l;
+                        return (
+                          <tr key={s}>
+                            <td className="name">{s}</td>
+                            <td className="col-active">{fmtInt(c)}</td>
+                            <td className="col-idle">{fmtInt(l)}</td>
+                            <td className={`delta ${d > 0 ? 'up' : d < 0 ? 'down' : ''}`}>
+                              {d > 0 ? '+' : ''}{fmtInt(d)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </>
+          )}
+        </>
+      )}
     </>
+  );
+}
+
+/** Three shift series over the same day axis. Distinguished by dash pattern as
+ * well as tone, so the lines stay separable without spending status colours. */
+function ShiftTrendChart({
+  days,
+  series,
+  unit,
+  height = 300,
+}: {
+  days: string[];
+  series: { name: string; points: (number | null)[] }[];
+  unit: string;
+  height?: number;
+}) {
+  const W = 1000;
+  const LM = 62;
+  const H = height;
+  const [hover, setHover] = useState<number | null>(null);
+
+  const all = series.flatMap((s) => s.points).filter((v): v is number => v != null);
+  const lo = all.length ? Math.min(...all) : 0;
+  const hi = all.length ? Math.max(...all) : 1;
+  const pad = (hi - lo) * 0.15 || Math.max(1, hi * 0.1);
+  const yMin = Math.max(0, lo - pad);
+  const yMax = hi + pad;
+  const y = (v: number) => H - ((v - yMin) / (yMax - yMin || 1)) * H;
+  const x = (i: number) => (days.length === 1 ? LM + W / 2 : LM + (i / (days.length - 1)) * W);
+
+  const fmtV = (v: number) => (unit === '%' ? `${v.toFixed(2)}%` : fmtInt(Math.round(v)));
+  const ticks = [yMin, yMin + (yMax - yMin) / 2, yMax];
+  const xStep = Math.max(1, Math.ceil(days.length / 9));
+  const tipW = 190;
+  const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
+
+  return (
+    <div className="spc-chart-wrap">
+      <svg className="spc-chart trend-chart" viewBox={`${LM - 80} -28 ${W + 96} ${H + 60}`} width="100%" height={H + 60} preserveAspectRatio="none">
+        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">{unit === '%' ? 'reject %' : 'cones'}</text>
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line className="grid-line" x1={LM} y1={y(t)} x2={LM + W} y2={y(t)} />
+            <text className="axis-label" x={LM - 6} y={y(t) + 4} textAnchor="end">{fmtV(t)}</text>
+          </g>
+        ))}
+        {series.map((s, si) => {
+          const d = s.points
+            .map((v, i) => (v == null ? null : `${x(i)},${y(v)}`))
+            .filter(Boolean)
+            .map((p, i) => `${i === 0 ? 'M' : 'L'}${p}`)
+            .join(' ');
+          return <path key={s.name} className={`trend-line s${si}`} d={d} />;
+        })}
+        {series.map((s, si) =>
+          s.points.map((v, i) =>
+            v == null ? null : <circle key={`${s.name}-${i}`} className={`trend-dot s${si}`} cx={x(i)} cy={y(v)} r={2.6} />,
+          ),
+        )}
+        {days.map((d, i) =>
+          i % xStep === 0 ? (
+            <text key={d} className="x-tick" x={x(i)} y={H + 18} textAnchor="middle">{d.slice(5)}</text>
+          ) : null,
+        )}
+        {hover != null && (
+          <>
+            <line className="crosshair" x1={x(hover)} y1={0} x2={x(hover)} y2={H} />
+            <g transform={`translate(${tipX}, 4)`}>
+              <rect className="tooltip-bg" width={tipW} height={16 + series.length * 15} rx={5} />
+              <text className="tooltip-text strong" x={9} y={17}>{days[hover]}</text>
+              {series.map((s, si) => (
+                <text key={s.name} className="tooltip-text" x={9} y={32 + si * 15}>
+                  {s.name}: {s.points[hover] != null ? fmtV(s.points[hover]!) : '—'}
+                </text>
+              ))}
+            </g>
+          </>
+        )}
+        {days.map((d, i) => (
+          <rect
+            key={d}
+            x={x(i) - W / (2 * Math.max(1, days.length - 1))}
+            y={0}
+            width={W / Math.max(1, days.length - 1)}
+            height={H}
+            fill="transparent"
+            style={{ pointerEvents: 'all' }}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+          />
+        ))}
+      </svg>
+      <div className="trend-legend">
+        {series.map((s, si) => (
+          <span key={s.name} className="tl-item">
+            <span className={`tl-swatch s${si}`} />
+            {s.name}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -2398,16 +3409,35 @@ function ParetoRow({
 
 /* ---------------- Weight consistency (Q4/Q5) ---------------- */
 
-function WeightView({ onMeta }: { onMeta: (m: Meta) => void }) {
+function WeightView({
+  range,
+  onMeta,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+}) {
   const [basis, setBasis] = useState<Basis>('as_recorded');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [data, setData] = useState<WeightsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // default to the full available window — matches this page's original
+    // behaviour (no date filter at all) while now making the range visible
+    // and adjustable, since annualising needs a real, known day-count.
+    if (range.max && !to) {
+      setTo(range.max);
+      setFrom(range.min ?? range.max);
+    }
+  }, [range.max, range.min, to]);
+
+  useEffect(() => {
+    if (!from || !to) return;
     let cancelled = false;
     setLoading(true);
-    getWeights(basis)
+    getWeights(basis, from, to)
       .then((r) => {
         if (cancelled) return;
         setData(r.data);
@@ -2418,13 +3448,28 @@ function WeightView({ onMeta }: { onMeta: (m: Meta) => void }) {
     return () => {
       cancelled = true;
     };
-  }, [basis, onMeta]);
+  }, [basis, from, to, onMeta]);
+
+  const days = from && to ? Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1 : null;
+  const giveaway = useMemo(() => {
+    if (!data?.cone.giveawayTotalKg || !days) return null;
+    const kgPerDay = data.cone.giveawayTotalKg / days;
+    return { kgPerDay: round1(kgPerDay), annualizedKg: Math.round(kgPerDay * 365), annualizedTonnes: round1((kgPerDay * 365) / 1000) };
+  }, [data, days]);
 
   if (error) return <div className="error-card"><b>Couldn't load weight analysis.</b> {error}</div>;
 
   return (
     <>
       <div className="filters">
+        <div className="field">
+          <label>From</label>
+          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>To</label>
+          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
+        </div>
         <div className="field">
           <label>Weight basis (Q4 / Q5)</label>
           <Segmented
@@ -2445,15 +3490,23 @@ function WeightView({ onMeta }: { onMeta: (m: Meta) => void }) {
           {data.cone.giveawayPerConeG != null && (
             <div className="callout">
               <div className="big">
-                Avg cone <span className="accent">{data.cone.avg} g</span>
-                {' · '}
-                {data.cone.giveawayPerConeG >= 0 ? 'overfill' : 'underfill'} vs {data.cone.nominalSetpointG} g nominal:{' '}
-                <span className="accent">
-                  {data.cone.giveawayPerConeG > 0 ? '+' : ''}
-                  {data.cone.giveawayPerConeG} g/cone
-                </span>
+                {giveaway ? (
+                  <>
+                    <span className="accent">{Math.abs(giveaway.kgPerDay)} kg/day</span> {data.cone.giveawayPerConeG >= 0 ? 'overfill' : 'underfill'}
+                    {' — '}<span className="accent">≈{Math.abs(giveaway.annualizedTonnes)} t/year</span> projected
+                  </>
+                ) : (
+                  <>
+                    {data.cone.giveawayPerConeG >= 0 ? 'Overfill' : 'Underfill'} vs {data.cone.nominalSetpointG}g nominal
+                  </>
+                )}
               </div>
-              <p>{data.note} {data.cone.giveawayTotalKg != null && <>Across {fmtInt(data.cone.count)} cones ≈ <b>{data.cone.giveawayTotalKg} kg</b> vs nominal.</>}</p>
+              <p>
+                {data.note} Avg cone <b>{data.cone.avg}g</b> vs {data.cone.nominalSetpointG}g nominal — {data.cone.giveawayPerConeG > 0 ? '+' : ''}
+                {data.cone.giveawayPerConeG} g/cone. Across {fmtInt(data.cone.count)} cones over {days} day{days === 1 ? '' : 's'}
+                {data.cone.giveawayTotalKg != null && <> ≈ <b>{data.cone.giveawayTotalKg} kg</b> vs nominal</>}.
+                {giveaway && <> At this rate: <b>{giveaway.annualizedKg > 0 ? '+' : ''}{fmtInt(giveaway.annualizedKg)} kg/year</b> projected — a straight-line extrapolation of the selected window, not a forecast.</>}
+              </p>
             </div>
           )}
 
@@ -2528,11 +3581,23 @@ function Stat({ label, val, u, accent }: { label: string; val: string; u?: strin
 
 /* ---------------- Current Product (Q1) ---------------- */
 
+/** Some products in sms.product share an identical description + setpoint —
+ * verified live (ids 12/13 are both "201-IH0-SD" @ 1960g with no other
+ * distinguishing field) — so the id is the only real disambiguator and must
+ * always be shown, in both the picker and the current-product readout,
+ * or switching between two such products looks like nothing happened. */
+function productLabel(p: ProductOption): string {
+  const base = p.description || p.lotCode || `Product ${p.productId}`;
+  const wt = p.setpointG ? ` · ${p.setpointG}g` : '';
+  return `${base}${wt} · #${p.productId}`;
+}
+
 function CurrentProductBar({ rank }: { rank: number }) {
   const [current, setCurrent] = useState<TimelineEntry | null>(null);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [sel, setSel] = useState<number | ''>('');
   const [saving, setSaving] = useState(false);
+  const [justChanged, setJustChanged] = useState<ProductOption | null>(null);
   const canSet = rank >= 2; // supervisor+
 
   const load = () => {
@@ -2543,13 +3608,32 @@ function CurrentProductBar({ rank }: { rank: number }) {
     getProducts().then((r) => setProducts(r.products)).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!justChanged) return;
+    const t = setTimeout(() => setJustChanged(null), 5000);
+    return () => clearTimeout(t);
+  }, [justChanged]);
+
+  const sortedProducts = useMemo(
+    () =>
+      [...products].sort(
+        (a, b) =>
+          (a.description ?? '').localeCompare(b.description ?? '') ||
+          (a.setpointG ?? 0) - (b.setpointG ?? 0) ||
+          a.productId - b.productId,
+      ),
+    [products],
+  );
+
   const apply = async () => {
     if (sel === '') return;
     setSaving(true);
     try {
+      const chosen = products.find((p) => p.productId === Number(sel)) ?? null;
       const r = await setCurrentProduct(Number(sel));
       setCurrent(r.current);
       setSel('');
+      setJustChanged(chosen);
     } finally {
       setSaving(false);
     }
@@ -2561,7 +3645,9 @@ function CurrentProductBar({ rank }: { rank: number }) {
         <span className="lab">Current product</span>
         {current ? (
           <>
-            <span className="val">{current.productLabel}</span>
+            <span className="val">
+              {current.productLabel} <span className="cp-id">#{current.productId}</span>
+            </span>
             <span className="meta">
               since {new Date(current.effectiveFrom).toLocaleString()} · set by {current.changedBy ?? '—'}
             </span>
@@ -2569,15 +3655,17 @@ function CurrentProductBar({ rank }: { rank: number }) {
         ) : (
           <span className="val none">Not set — production is unattributed (Q1)</span>
         )}
+        {justChanged && (
+          <span className="cp-confirm">✓ Changed to {productLabel(justChanged)}</span>
+        )}
       </div>
       {canSet && (
         <div className="cp-set">
           <select value={sel} onChange={(e) => setSel(e.target.value === '' ? '' : Number(e.target.value))}>
             <option value="">Change product…</option>
-            {products.map((p) => (
+            {sortedProducts.map((p) => (
               <option key={p.productId} value={p.productId}>
-                {p.description || p.lotCode || `Product ${p.productId}`}
-                {p.setpointG ? ` (${p.setpointG}g)` : ''}
+                {productLabel(p)}
               </option>
             ))}
           </select>

@@ -81,26 +81,40 @@ export async function getOee(
   thresholdSeconds: number,
   plannedHoursPerDay: number,
   manualIdealCycleSeconds: number | null,
+  shift: string | null = null,
 ): Promise<OeeData> {
-  const tsRes = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
-    .query<{ ts: Date }>(
-      `SELECT production_ts_utc ts FROM sms.cone_event
-       WHERE line_id=@line AND shift_date BETWEEN @from AND @to
+  const shiftFilter = shift ? ' AND shift_code=@shift' : '';
+  const bind = () => {
+    const r = pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .input('from', mssql.Date, from)
+      .input('to', mssql.Date, to);
+    if (shift) r.input('shift', mssql.VarChar(10), shift);
+    return r;
+  };
+
+  const tsRes = await bind().query<{ ts: Date; d: Date }>(
+    `SELECT production_ts_utc ts, shift_date d FROM sms.cone_event
+       WHERE line_id=@line AND shift_date BETWEEN @from AND @to${shiftFilter}
        ORDER BY production_ts_utc`,
-    );
-  const times = tsRes.recordset.map((r) => r.ts.getTime());
+  );
+  const rows = tsRes.recordset;
+  const times = rows.map((r) => r.ts.getTime());
   const producedCount = times.length;
 
-  const gaps: number[] = [];
-  for (let i = 1; i < times.length; i++) gaps.push((times[i]! - times[i - 1]!) / 1000);
-
+  // Only gaps BETWEEN two events of the same shift_date are real stoppages. A
+  // gap that spans a shift_date boundary is time we simply didn't query (the
+  // rest of the day when a shift filter is applied, or the roll to the next
+  // day) — counting it as downtime would report ~16h of "stoppage" per day on
+  // any per-shift view.
   let downSeconds = 0;
   let stoppageCount = 0;
-  for (const g of gaps) {
+  let observedSeconds = 0;
+  for (let i = 1; i < times.length; i++) {
+    if (rows[i]!.d.getTime() !== rows[i - 1]!.d.getTime()) continue;
+    const g = (times[i]! - times[i - 1]!) / 1000;
+    observedSeconds += g;
     if (g >= thresholdSeconds) {
       downSeconds += g;
       stoppageCount++;
@@ -111,16 +125,11 @@ export async function getOee(
   if (manualIdealCycleSeconds != null) {
     idealCycleSeconds = manualIdealCycleSeconds;
   } else {
-    const hourlyRes = await pool
-      .request()
-      .input('line', mssql.Int, lineId)
-      .input('from', mssql.Date, from)
-      .input('to', mssql.Date, to)
-      .query<{ n: number }>(
-        `SELECT COUNT(*) n FROM sms.cone_event
-         WHERE line_id=@line AND shift_date BETWEEN @from AND @to
+    const hourlyRes = await bind().query<{ n: number }>(
+      `SELECT COUNT(*) n FROM sms.cone_event
+         WHERE line_id=@line AND shift_date BETWEEN @from AND @to${shiftFilter}
          GROUP BY DATEADD(HOUR, DATEDIFF(HOUR, 0, production_ts_utc), 0)`,
-      );
+    );
     const hourlyCounts = hourlyRes.recordset.map((r) => r.n).sort((a, b) => a - b);
     const bestHourly = percentile(hourlyCounts, 0.95) || 1;
     idealCycleSeconds = 3600 / bestHourly;
@@ -145,19 +154,17 @@ export async function getOee(
   // we just can't tell "down" from "no data yet" out here at the boundary.
   const possiblyPartial = producedCount > 0 && (headGapSeconds > thresholdSeconds || tailGapSeconds > thresholdSeconds);
 
-  const observedSpanSeconds = firstEventMs != null && lastEventMs != null ? (lastEventMs - firstEventMs) / 1000 : 0;
+  // Observed span = the summed within-shift_date span, not last−first. With a
+  // shift filter, last−first still spans the whole date range even though we
+  // only observed ~8h of each day, which would inflate planned time 3×.
+  const observedSpanSeconds = observedSeconds;
   const plannedSeconds = observedSpanSeconds > 0 ? Math.min(calendarPlannedSeconds, observedSpanSeconds) : calendarPlannedSeconds;
   const runSeconds = Math.max(0, plannedSeconds - downSeconds);
   const availabilityPct = plannedSeconds > 0 ? (100 * runSeconds) / plannedSeconds : 0;
 
-  const rejRes = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
-    .query<{ n: number }>(
-      `SELECT COUNT(*) n FROM sms.reject_event WHERE line_id=@line AND shift_date BETWEEN @from AND @to`,
-    );
+  const rejRes = await bind().query<{ n: number }>(
+    `SELECT COUNT(*) n FROM sms.reject_event WHERE line_id=@line AND shift_date BETWEEN @from AND @to${shiftFilter}`,
+  );
   const rejectedCount = rejRes.recordset[0]?.n ?? 0;
 
   const performancePct = runSeconds > 0 ? (100 * (idealCycleSeconds * producedCount)) / runSeconds : 0;

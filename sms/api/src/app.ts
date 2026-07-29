@@ -226,6 +226,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           productId: z.coerce.number().int().positive().optional(),
           usl: z.coerce.number().optional(),
           lsl: z.coerce.number().optional(),
+          shift: z.enum(['morning', 'evening', 'night']).optional(),
         })
         .safeParse(req.query);
       if (!q.success) {
@@ -238,7 +239,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null);
-      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec);
+      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, q.data.shift ?? null);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -283,6 +284,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           thresholdSeconds: z.coerce.number().int().min(30).max(3600).default(120),
           plannedHoursPerDay: z.coerce.number().min(1).max(24).default(24),
           idealCycleSeconds: z.coerce.number().positive().optional(),
+          shift: z.enum(['morning', 'evening', 'night']).optional(),
         })
         .safeParse(req.query);
       if (!q.success) {
@@ -302,6 +304,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         q.data.thresholdSeconds,
         q.data.plannedHoursPerDay,
         q.data.idealCycleSeconds ?? null,
+        q.data.shift ?? null,
       );
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
