@@ -67,6 +67,15 @@ import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmt
 type Shift = 'all' | 'morning' | 'evening' | 'night';
 const SHIFTS: Shift[] = ['all', 'morning', 'evening', 'night'];
 type View = 'dashboard' | 'register' | 'performance' | 'weight' | 'shift' | 'rejects' | 'admin';
+const VIEW_LABEL: Record<View, string> = {
+  dashboard: 'Overview',
+  register: 'Register',
+  performance: 'Performance',
+  weight: 'Weight',
+  shift: 'Shifts',
+  rejects: 'Rejects',
+  admin: 'Admin',
+};
 
 /** The register detail page is a real URL, not modal state — permalink-able,
  * survives refresh, and cooperates with browser back/forward. No router
@@ -231,6 +240,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [rangeErr, setRangeErr] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<Meta | null>(null);
   const [registerSeed, setRegisterSeed] = useState<RegisterSeed | null>(null);
+  const [navContext, setNavContext] = useState<NavContext | null>(null);
   const rank = ROLE_RANK[user.role] ?? 1;
   const view = route.view;
 
@@ -249,7 +259,24 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   // kept as `setView` — every existing call site (nav buttons, deep-link
   // callbacks) already calls it by that name; only its implementation
   // changed, from a raw dispatch to a real URL navigation.
-  const setView = (v: View) => navigate({ view: v, detailType: undefined, detailId: undefined });
+  // Picking a view from the nav is a deliberate move — clear any "you came
+  // here from a finding" context so it can't go stale on an unrelated page.
+  const setView = (v: View) => {
+    setNavContext(null);
+    navigate({ view: v, detailType: undefined, detailId: undefined });
+  };
+
+  /** Follow a finding to the page that explains it, carrying the reason. */
+  const followException = (e: Exception) => {
+    setNavContext({
+      fromView: view,
+      fromLabel: VIEW_LABEL[view],
+      title: e.title,
+      detail: e.because,
+      sub: e.sub,
+    });
+    navigate({ view: e.view, detailType: undefined, detailId: undefined });
+  };
 
   const openRegisterDetail = (detailType: RegisterType, detailId: string | number) =>
     navigate({ view: 'register', detailType, detailId: String(detailId) });
@@ -273,23 +300,24 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
 
   return (
     <div className="app">
+      <a className="skip-link" href="#main">Skip to content</a>
       <header className="topbar">
         <div className="brand">
           <span className="mark">
             SMS<span className="dot">.</span>
           </span>
           <span className="sub">TP1 Line 3 · Unit 2</span>
-          <span className="segmented nav">
-            <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Overview</button>
-            <button className={view === 'register' ? 'active' : ''} onClick={() => { setRegisterSeed(null); setView('register'); }}>Register</button>
-            <button className={view === 'performance' ? 'active' : ''} onClick={() => setView('performance')}>Performance</button>
-            <button className={view === 'weight' ? 'active' : ''} onClick={() => setView('weight')}>Weight</button>
-            <button className={view === 'rejects' ? 'active' : ''} onClick={() => setView('rejects')}>Rejects</button>
-            <button className={view === 'shift' ? 'active' : ''} onClick={() => setView('shift')}>Shifts</button>
+          <nav className="segmented nav" aria-label="Views">
+            <button aria-current={view === 'dashboard' ? 'page' : undefined} className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Overview</button>
+            <button aria-current={view === 'register' ? 'page' : undefined} className={view === 'register' ? 'active' : ''} onClick={() => { setRegisterSeed(null); setView('register'); }}>Register</button>
+            <button aria-current={view === 'performance' ? 'page' : undefined} className={view === 'performance' ? 'active' : ''} onClick={() => setView('performance')}>Performance</button>
+            <button aria-current={view === 'weight' ? 'page' : undefined} className={view === 'weight' ? 'active' : ''} onClick={() => setView('weight')}>Weight</button>
+            <button aria-current={view === 'rejects' ? 'page' : undefined} className={view === 'rejects' ? 'active' : ''} onClick={() => setView('rejects')}>Rejects</button>
+            <button aria-current={view === 'shift' ? 'page' : undefined} className={view === 'shift' ? 'active' : ''} onClick={() => setView('shift')}>Shifts</button>
             {rank >= 4 && (
-              <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
+              <button aria-current={view === 'admin' ? 'page' : undefined} className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
             )}
-          </span>
+          </nav>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {freshness && (
@@ -308,10 +336,39 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         </div>
       </header>
 
+      <main id="main" tabIndex={-1}>
+      {/* Announces the view change to a screen reader — without it, switching
+          tabs updates the page silently. */}
+      <p className="sr-only" aria-live="polite">{VIEW_LABEL[view]} view</p>
+      {navContext && (
+        <div className="nav-context">
+          <button
+            type="button"
+            className="nc-back"
+            onClick={() => {
+              const back = navContext.fromView;
+              setNavContext(null);
+              navigate({ view: back, detailType: undefined, detailId: undefined });
+            }}
+          >
+            ← {navContext.fromLabel}
+          </button>
+          <div className="nc-body">
+            <span className="nc-trail">
+              {navContext.fromLabel} <span aria-hidden="true">›</span> {VIEW_LABEL[view]}
+            </span>
+            <span className="nc-title">Following up: {navContext.title}</span>
+            {navContext.detail && <span className="nc-detail">{navContext.detail}</span>}
+          </div>
+          <button type="button" className="nc-dismiss" onClick={() => setNavContext(null)} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
       {rangeErr ? (
-        <div className="error-card"><b>Couldn't reach the API.</b> {rangeErr}</div>
+        <div className="error-card" role="alert"><b>Couldn't reach the API.</b> {rangeErr}</div>
       ) : view === 'dashboard' ? (
-        <DashboardView range={range} onMeta={setFreshness} rank={rank} onNavigate={setView} />
+        <DashboardView range={range} onMeta={setFreshness} rank={rank} onNavigate={followException} />
       ) : view === 'register' ? (
         <RegisterView
           range={range}
@@ -321,16 +378,17 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           onCloseDetail={closeRegisterDetail}
         />
       ) : view === 'performance' ? (
-        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} />
+        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} initialSub={navContext?.sub} />
       ) : view === 'weight' ? (
-        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} />
+        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} initialSub={navContext?.sub} />
       ) : view === 'shift' ? (
         <ShiftView range={range} onMeta={setFreshness} />
       ) : view === 'rejects' ? (
-        <RejectsHub range={range} onMeta={setFreshness} rank={rank} />
+        <RejectsHub range={range} onMeta={setFreshness} rank={rank} initialSub={navContext?.sub} />
       ) : (
         <AdminView />
       )}
+      </main>
     </div>
   );
 }
@@ -344,12 +402,16 @@ function PerformanceHub({
   range,
   onMeta,
   onInspect,
+  initialSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
+  initialSub?: string;
 }) {
-  const [sub, setSub] = useState<'oee' | 'downtime' | 'patterns'>('oee');
+  const [sub, setSub] = useState<'oee' | 'downtime' | 'patterns'>(
+    (initialSub as 'oee' | 'downtime' | 'patterns') ?? 'oee',
+  );
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -378,12 +440,14 @@ function WeightHub({
   range,
   onMeta,
   onInspect,
+  initialSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
+  initialSub?: string;
 }) {
-  const [sub, setSub] = useState<'spc' | 'distribution'>('spc');
+  const [sub, setSub] = useState<'spc' | 'distribution'>((initialSub as 'spc' | 'distribution') ?? 'spc');
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -409,12 +473,16 @@ function RejectsHub({
   range,
   onMeta,
   rank,
+  initialSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
+  initialSub?: string;
 }) {
-  const [sub, setSub] = useState<'pareto' | 'trend' | 'station'>('pareto');
+  const [sub, setSub] = useState<'pareto' | 'trend' | 'station'>(
+    (initialSub as 'pareto' | 'trend' | 'station') ?? 'pareto',
+  );
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -610,15 +678,31 @@ function LoginScreen({ onLogin }: { onLogin: (u: AuthUser) => void }) {
           <h1>SMS<span className="dot">.</span></h1>
           <div className="tag">Sack Management System · TP1 Line 3 · Unit 2</div>
           <div className="field">
-            <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+            <input
+              id="login-user"
+              aria-label="Username"
+              autoComplete="username"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+            />
           </div>
           <div className="field">
-            <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <input
+              id="login-pass"
+              type="password"
+              aria-label="Password"
+              autoComplete="current-password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
           </div>
           <button className="primary" type="submit" disabled={busy || !username || !password}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
-          {err && <div className="err">{err}</div>}
+          {err && <div className="err" role="alert">{err}</div>}
         </form>
       </div>
     </div>
@@ -636,10 +720,72 @@ interface Exception {
   title: string;
   message: ReactNode;
   view: View;
+  /** Which sub-tab of the destination hub actually shows this finding. Without
+   * it a link lands on the hub's default tab, which is right only by luck. */
+  sub?: string;
+  /** Plain-language restatement of what the user clicked, shown on arrival. */
+  because?: string;
+}
+
+/** Why the user is on this page, when they didn't pick it from the nav.
+ * Jumping between views used to carry nothing: you clicked "2 stations
+ * off-target" and landed on a generic Weight page with no statement of what
+ * you were meant to be looking at, or any way back. */
+interface NavContext {
+  fromView: View;
+  fromLabel: string;
+  title: string;
+  detail?: string;
+  sub?: string;
 }
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
+}
+
+/**
+ * Measure a container's inner width so a chart can set its viewBox to the real
+ * pixel width and scale 1:1.
+ *
+ * Every chart drew into a fixed 1000-unit viewBox and then stretched it with
+ *. That scales x and y by different factors —
+ * measured at 0.82 vs 1.0 on a 1280px layout — so all axis text, tick labels
+ * and data dots were squashed horizontally by ~18%, on every chart in the app.
+ * Matching the viewBox to the measured width keeps both axes at scale 1.
+ */
+function useMeasuredWidth(fallback = 1000): [React.RefObject<HTMLDivElement>, number] {
+  const ref = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const next = entry?.contentRect.width ?? 0;
+      if (next > 0) setW(next);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+
+/** Props that make a non-button element (a table row, mostly) behave like one
+ * for keyboard users: focusable, and activated by Enter or Space. Rows are the
+ * primary drill-down in this app, so leaving them mouse-only put the main
+ * navigation out of reach on a plant terminal without a working mouse. */
+function activatable(onActivate: () => void, label?: string) {
+  return {
+    tabIndex: 0,
+    role: 'button' as const,
+    'aria-label': label,
+    onClick: onActivate,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
 }
 
 function computeDelta(current: number, priorValues: number[]): { pct: number; dir: 'up' | 'down' | 'flat'; text: string } | null {
@@ -661,7 +807,7 @@ function DashboardView({
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
-  onNavigate: (v: View) => void;
+  onNavigate: (e: Exception) => void;
 }) {
   const [date, setDate] = useState<string>('');
   const [shift, setShift] = useState<Shift>('all');
@@ -767,6 +913,8 @@ function DashboardView({
             </>
           ),
           view: 'weight',
+          sub: 'spc',
+          because: `Station ${top.station} sits ${top.delta > 0 ? '+' : ''}${top.delta}${spc.unit} off the line average. The per-station chart below is where that shows up.`,
         });
       }
     }
@@ -782,6 +930,8 @@ function DashboardView({
             </>
           ),
           view: 'weight',
+          sub: 'spc',
+          because: `${spc.xbarOutOfControl} subgroups breached the control band. Look at the X-bar chart for when the mean moved.`,
         });
       }
     }
@@ -798,6 +948,8 @@ function DashboardView({
             </>
           ),
           view: 'performance',
+          sub: 'downtime',
+          because: `${downtime.stoppageCount} stoppages cost ${fmtDuration(downtime.totalDownSeconds)} today. The timeline shows when the line was down.`,
         });
       }
     }
@@ -815,6 +967,8 @@ function DashboardView({
             </>
           ),
           view: 'rejects',
+          sub: 'trend',
+          because: `A ${activeEpisode.bucketCount}-day burst, not an isolated spike. The control chart shows the run.`,
         });
       }
     }
@@ -874,14 +1028,20 @@ function DashboardView({
             ) : (
               <div className="exc-list">
                 {exceptions.map((e, i) => (
-                  <div key={i} className="exc-item" onClick={() => onNavigate(e.view)}>
+                  <button
+                    key={i}
+                    type="button"
+                    className="exc-item"
+                    onClick={() => onNavigate(e)}
+                    aria-label={`${e.severity}: ${e.title}. ${e.message}. Open ${e.view}.`}
+                  >
                     <div className={`exc-sev ${e.severity}`}>{e.severity}</div>
                     <div className="exc-body">
                       <div className="exc-title">{e.title}</div>
                       <div className="exc-msg">{e.message}</div>
                     </div>
-                    <div className="exc-go">›</div>
-                  </div>
+                    <div className="exc-go" aria-hidden="true">›</div>
+                  </button>
                 ))}
               </div>
             )}
@@ -918,6 +1078,7 @@ function DashboardView({
  * shift boundaries marked, so "how did the line do" is a glance, not a
  * multi-page investigation. */
 function LineStatusPanel({ downtime }: { downtime: DowntimeData }) {
+  const [hover, setHover] = useState<number | null>(null);
   const hasData = !!(downtime.firstTs && downtime.lastTs);
   const t0 = hasData ? new Date(downtime.firstTs!).getTime() : 0;
   const t1 = hasData ? new Date(downtime.lastTs!).getTime() : 0;
@@ -947,8 +1108,34 @@ function LineStatusPanel({ downtime }: { downtime: DowntimeData }) {
             downtime.stoppages.map((s, i) => {
               const l = ((new Date(s.startTs).getTime() - t0) / span) * 100;
               const w = Math.max(0.25, (s.durationSeconds * 1000 / span) * 100);
-              return <div key={i} className="status-seg" style={{ left: `${l}%`, width: `${w}%` }} title={`${fmtTime(s.startTs)} — ${fmtDuration(s.durationSeconds)}`} />;
+              return (
+                <div
+                  key={i}
+                  className={`status-seg${hover === i ? ' hot' : ''}`}
+                  style={{ left: `${l}%`, width: `${w}%` }}
+                  onMouseEnter={() => setHover(i)}
+                  onMouseLeave={() => setHover(null)}
+                >
+                  {/* segments can be 2px wide, so widen the hover target
+                      beyond the visible bar or thin stops are unhittable */}
+                  <span className="status-seg-hit" />
+                </div>
+              );
             })}
+          {hover != null && downtime.stoppages[hover] && (
+            <div
+              className="status-tip"
+              style={{
+                left: `${((new Date(downtime.stoppages[hover]!.startTs).getTime() - t0) / span) * 100}%`,
+              }}
+            >
+              <b>{fmtDuration(downtime.stoppages[hover]!.durationSeconds)} down</b>
+              <span>{fmtTime(downtime.stoppages[hover]!.startTs)} – {fmtTime(downtime.stoppages[hover]!.endTs)}</span>
+              <span className="tip-rank">
+                stoppage {hover + 1} of {downtime.stoppages.length} · longest first
+              </span>
+            </div>
+          )}
           {shiftFracs.map((f, i) => (
             <div key={i} className="status-shiftline" style={{ left: `${f * 100}%` }} />
           ))}
@@ -1326,13 +1513,17 @@ function RegisterView({
             <table className="reg-table">
               <thead>
                 <tr>
-                  <th className="sortable" onClick={() => toggleSort('time')}>
-                    Production time {sort === 'time' && (dir === 'desc' ? '▾' : '▴')}
+                  <th className="sortable" aria-sort={sort === 'time' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+                    <button type="button" className="th-sort" onClick={() => toggleSort('time')}>
+                      Production time <span aria-hidden="true">{sort === 'time' ? (dir === 'desc' ? '▾' : '▴') : ''}</span>
+                    </button>
                   </th>
                   <th>Shift</th>
                   {type === 'cone' ? <th>Station</th> : <th>Sack #</th>}
-                  <th className="sortable num" onClick={() => toggleSort('weight')}>
-                    Weight {sort === 'weight' && (dir === 'desc' ? '▾' : '▴')}
+                  <th className="sortable num" aria-sort={sort === 'weight' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+                    <button type="button" className="th-sort" onClick={() => toggleSort('weight')}>
+                      Weight <span aria-hidden="true">{sort === 'weight' ? (dir === 'desc' ? '▾' : '▴') : ''}</span>
+                    </button>
                   </th>
                   <th>Status</th>
                 </tr>
@@ -1344,7 +1535,14 @@ function RegisterView({
                   <tr><td colSpan={5} className="reg-empty">No records match these filters.</td></tr>
                 ) : (
                   rows.map((r) => (
-                    <tr key={String(r.source_row_id)} className="reg-row" onClick={() => onOpenDetail(type, r.source_row_id)}>
+                    <tr
+                      key={String(r.source_row_id)}
+                      className="reg-row"
+                      {...activatable(
+                        () => onOpenDetail(type, r.source_row_id),
+                        `Open ${type} ${r.source_row_id}, ${fmtDateTime(r.production_ts_utc)}, ${type === 'cone' ? r.weight_g : r.weight_kg} ${weightUnit}`,
+                      )}
+                    >
                       <td className="mono">{fmtDateTime(r.production_ts_utc)}</td>
                       <td className="cap">{r.shift_code}</td>
                       <td className="mono">{type === 'cone' ? (r.source_station ?? '—') : (r.sack_num ?? '—')}</td>
@@ -1591,7 +1789,13 @@ function RegisterDetailPage({
                       key={String(n.source_row_id)}
                       className="reg-row"
                       style={isCurrent ? { background: 'var(--green-pale)', fontWeight: 650 } : undefined}
-                      onClick={() => !isCurrent && onOpenDetail(type, n.source_row_id)}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      {...(isCurrent
+                        ? {}
+                        : activatable(
+                            () => onOpenDetail(type, n.source_row_id),
+                            `Jump to ${type} at ${fmtDateTime(n.production_ts_utc)}`,
+                          ))}
                     >
                       <td className="mono">{fmtDateTime(n.production_ts_utc)}{isCurrent ? ' (this one)' : ''}</td>
                       <td className="cap">{n.shift_code}</td>
@@ -1840,7 +2044,8 @@ function HourClusterChart({
   byHour: { hour: number; count: number; downSeconds: number; days: number }[];
   height?: number;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 92);
   const LM = 58;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
@@ -1861,8 +2066,8 @@ function HourClusterChart({
   const tipX = hover != null ? Math.min(Math.max(bx(hover) + bandW / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
-      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66} preserveAspectRatio="none">
+    <div className="spc-chart-wrap" ref={wrapRef}>
+      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66}>
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">down</text>
         {shiftBands.map((b, i) => (
           <g key={i}>
@@ -1945,7 +2150,8 @@ function StoppageTimeline({
   height?: number;
   onPick?: (s: Stoppage) => void;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 92);
   const LM = 58;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
@@ -1983,8 +2189,8 @@ function StoppageTimeline({
   const tipX = hs ? Math.min(Math.max(x(new Date(hs.startTs).getTime()) + 10, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
-      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66} preserveAspectRatio="none">
+    <div className="spc-chart-wrap" ref={wrapRef}>
+      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66}>
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">down</text>
         {bands.map((b, i) => (
           <g key={i}>
@@ -2212,7 +2418,14 @@ function DowntimeView({
                   </thead>
                   <tbody>
                     {(stoppagesExpanded ? data.stoppages : data.stoppages.slice(0, STOPPAGE_PREVIEW_COUNT)).map((s, i) => (
-                      <tr key={i} className="reg-row" onClick={() => inspectStoppage(s)}>
+                      <tr
+                        key={i}
+                        className="reg-row"
+                        {...activatable(
+                          () => inspectStoppage(s),
+                          `Inspect stoppage at ${fmtDateTime(s.startTs)}, ${fmtDuration(s.durationSeconds)} down`,
+                        )}
+                      >
                         <td>{fmtDateTime(s.startTs)}</td>
                         <td>{fmtDateTime(s.endTs)}</td>
                         <td className="num">{fmtDuration(s.durationSeconds)}</td>
@@ -2584,7 +2797,31 @@ function ResizableChart({
   return (
     <div className="resizable-chart">
       {children(height)}
-      <div className="resize-handle" onMouseDown={startDrag} title="Drag to resize" role="separator" aria-orientation="horizontal">
+      <div
+        className="resize-handle"
+        onMouseDown={startDrag}
+        title="Drag to resize (or focus and use arrow keys)"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize chart"
+        aria-valuenow={height}
+        aria-valuemin={minHeight}
+        aria-valuemax={maxHeight}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 60 : 20;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setHeight((h) => Math.min(maxHeight, h + step));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setHeight((h) => Math.max(minHeight, h - step));
+          } else if (e.key === 'Home') {
+            e.preventDefault();
+            setHeight(initialHeight);
+          }
+        }}
+      >
         <span className="grip" />
       </div>
     </div>
@@ -2620,7 +2857,8 @@ function SubgroupChart({
   height?: number;
   onPointClick?: (g: Subgroup) => void;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 136);
   const LM = 46;
   const RM = 56;
   const [hover, setHover] = useState<number | null>(null);
@@ -2661,8 +2899,8 @@ function SubgroupChart({
   const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
-      <svg className="spc-chart" viewBox={`${LM - 80} -28 ${W + 80 + RM} ${height + 52}`} width="100%" height={height + 52} preserveAspectRatio="none">
+    <div className="spc-chart-wrap" ref={wrapRef}>
+      <svg className="spc-chart" viewBox={`${LM - 80} -28 ${W + 80 + RM} ${height + 52}`} width="100%" height={height + 52}>
         {gridVals.map((gv, i) => (
           <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
         ))}
@@ -2733,7 +2971,8 @@ function StationChart({
   height?: number;
   onStationClick?: (s: StationStat) => void;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 80);
   const LM = 46;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
@@ -2750,8 +2989,8 @@ function StationChart({
   const tipX = hover != null ? Math.min(Math.max(bx(hover) + bandW / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
-      <svg className="spc-chart st-chart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 54}`} width="100%" height={H + 54} preserveAspectRatio="none">
+    <div className="spc-chart-wrap" ref={wrapRef}>
+      <svg className="spc-chart st-chart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 54}`} width="100%" height={H + 54}>
         {threshold > 0 && (
           <>
             <line className="st-dl" x1={LM} y1={y(threshold)} x2={LM + W} y2={y(threshold)} />
@@ -2819,7 +3058,8 @@ function Histogram({
   unit: string;
   height?: number;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 80);
   const LM = 46;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
@@ -2839,8 +3079,8 @@ function Histogram({
   const tipX = hover != null ? Math.min(Math.max(LM + hover * bw + bw / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
-      <svg className="spc-chart histchart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 68}`} width="100%" height={H + 68} preserveAspectRatio="none">
+    <div className="spc-chart-wrap" ref={wrapRef}>
+      <svg className="spc-chart histchart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 68}`} width="100%" height={H + 68}>
         {gridVals.map((gv, i) => (
           <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
         ))}
@@ -3022,7 +3262,8 @@ function PChart({
   revealed: boolean;
   height?: number;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 136);
   const LM = 46;
   const H = height;
   const RM = 56;
@@ -3061,13 +3302,13 @@ function PChart({
   const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
+    <div className="spc-chart-wrap" ref={wrapRef}>
       <svg
         className="spc-chart pchart"
         viewBox={`${LM - 80} -28 ${W + 80 + RM} ${H + 52}`}
         width="100%"
         height={H + 52}
-        preserveAspectRatio="none"
+       
       >
         {gridVals.map((gv, i) => (
           <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
@@ -3601,7 +3842,8 @@ function ShiftTrendChart({
   unit: string;
   height?: number;
 }) {
-  const W = 1000;
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(560, measuredW - 96);
   const LM = 62;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
@@ -3622,8 +3864,8 @@ function ShiftTrendChart({
   const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
-    <div className="spc-chart-wrap">
-      <svg className="spc-chart trend-chart" viewBox={`${LM - 80} -28 ${W + 96} ${H + 60}`} width="100%" height={H + 60} preserveAspectRatio="none">
+    <div className="spc-chart-wrap" ref={wrapRef}>
+      <svg className="spc-chart trend-chart" viewBox={`${LM - 80} -28 ${W + 96} ${H + 60}`} width="100%" height={H + 60}>
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">{unit === '%' ? 'reject %' : 'cones'}</text>
         {ticks.map((t, i) => (
           <g key={i}>
