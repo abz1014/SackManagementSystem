@@ -330,6 +330,18 @@ export function getDowntime(date: string, thresholdSeconds: number): Promise<Env
   return get(`/api/downtime?${p.toString()}`);
 }
 
+export interface StoppagePatternData {
+  from: string;
+  to: string;
+  thresholdSeconds: number;
+  dayCount: number;
+  stoppages: Stoppage[];
+}
+export function getStoppagePatterns(from: string, to: string, thresholdSeconds: number): Promise<Envelope<StoppagePatternData>> {
+  const p = new URLSearchParams({ from, to, thresholdSeconds: String(thresholdSeconds) });
+  return get(`/api/stoppage-patterns?${p.toString()}`);
+}
+
 // ---- Weight SPC ----
 export type SpcType = 'cone' | 'sack';
 export interface Subgroup {

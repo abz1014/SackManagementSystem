@@ -25,6 +25,7 @@ import {
   getEventDetail,
   eventsExportUrl,
   getDowntime,
+  getStoppagePatterns,
   getSpc,
   getRejectSpc,
   getOee,
@@ -49,6 +50,7 @@ import {
   type RegisterSort,
   type RegisterRow,
   type DowntimeData,
+  type StoppagePatternData,
   type Stoppage,
   type SpcType,
   type SpcData,
@@ -1633,7 +1635,7 @@ function StoppagePatternView({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [threshold, setThreshold] = useState(120);
-  const [days, setDays] = useState<DowntimeData[] | null>(null);
+  const [data, setData] = useState<StoppagePatternData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -1649,15 +1651,11 @@ function StoppagePatternView({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const list: string[] = [];
-    for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86_400_000) {
-      list.push(new Date(t).toISOString().slice(0, 10));
-    }
-    Promise.all(list.map((d) => getDowntime(d, threshold)))
-      .then((rs) => {
+    getStoppagePatterns(from, to, threshold)
+      .then((r) => {
         if (cancelled) return;
-        setDays(rs.map((r) => r.data));
-        if (rs[0]) onMeta(rs[0].metadata);
+        setData(r.data);
+        onMeta(r.metadata);
       })
       .catch((e) => !cancelled && setError(String(e.message ?? e)))
       .finally(() => !cancelled && setLoading(false));
@@ -1667,8 +1665,8 @@ function StoppagePatternView({
   }, [from, to, threshold, onMeta]);
 
   const analysis = useMemo(() => {
-    if (!days) return null;
-    const all = days.flatMap((d) => d.stoppages);
+    if (!data) return null;
+    const all = data.stoppages;
     const buckets = DURATION_BUCKETS.map((b) => {
       const inB = all.filter((s) => s.durationSeconds >= b.min && s.durationSeconds < b.max);
       return { ...b, count: inB.length, downSeconds: inB.reduce((a, s) => a + s.durationSeconds, 0) };
@@ -1713,9 +1711,9 @@ function StoppagePatternView({
       biggestByTime,
       skewed,
       handoverElevated: handover.filter((h) => h.days > medianDays),
-      dayCount: days.length,
+      dayCount: data.dayCount,
     };
-  }, [days]);
+  }, [data]);
 
   return (
     <>
@@ -3828,6 +3826,7 @@ function WeightView({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [data, setData] = useState<WeightsData | null>(null);
+  const [dailyCones, setDailyCones] = useState<number[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -3845,10 +3844,11 @@ function WeightView({
     if (!from || !to) return;
     let cancelled = false;
     setLoading(true);
-    getWeights(basis, from, to)
-      .then((r) => {
+    Promise.all([getWeights(basis, from, to), getProduction({ from, to, groupBy: 'day' })])
+      .then(([r, p]) => {
         if (cancelled) return;
         setData(r.data);
+        setDailyCones(p.data.rows.filter((x) => x.group !== 'total').map((x) => x.cones));
         onMeta(r.metadata);
       })
       .catch((e) => !cancelled && setError(String(e.message ?? e)))
@@ -3859,11 +3859,27 @@ function WeightView({
   }, [basis, from, to, onMeta]);
 
   const days = from && to ? Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1 : null;
+
+  // Annualise from a RATE (g/cone × a typical day's cones), never from
+  // total ÷ calendar days. A range almost always includes a partial day —
+  // always, once live, because today is still running — and dividing by whole
+  // days understates the figure (measured: 3.9 t/yr vs 4.3 t/yr on an 18-day
+  // window with two partial edges). The median daily count is used as the
+  // "typical day" precisely so those partial days can't drag it.
   const giveaway = useMemo(() => {
-    if (!data?.cone.giveawayTotalKg || !days) return null;
-    const kgPerDay = data.cone.giveawayTotalKg / days;
-    return { kgPerDay: round1(kgPerDay), annualizedKg: Math.round(kgPerDay * 365), annualizedTonnes: round1((kgPerDay * 365) / 1000) };
-  }, [data, days]);
+    const perCone = data?.cone.giveawayPerConeG;
+    if (perCone == null || !dailyCones || dailyCones.length === 0) return null;
+    const sorted = [...dailyCones].sort((a, b) => a - b);
+    const medianConesPerDay = sorted[Math.floor(sorted.length / 2)]!;
+    const kgPerDay = (perCone * medianConesPerDay) / 1000;
+    return {
+      kgPerDay: round1(kgPerDay),
+      annualizedKg: Math.round(kgPerDay * 365),
+      annualizedTonnes: round1((kgPerDay * 365) / 1000),
+      medianConesPerDay,
+      partialDays: dailyCones.filter((c) => c < medianConesPerDay * 0.5).length,
+    };
+  }, [data, dailyCones]);
 
   if (error) return <div className="error-card"><b>Couldn't load weight analysis.</b> {error}</div>;
 
@@ -3913,7 +3929,14 @@ function WeightView({
                 {data.note} Avg cone <b>{data.cone.avg}g</b> vs {data.cone.nominalSetpointG}g nominal — {data.cone.giveawayPerConeG > 0 ? '+' : ''}
                 {data.cone.giveawayPerConeG} g/cone. Across {fmtInt(data.cone.count)} cones over {days} day{days === 1 ? '' : 's'}
                 {data.cone.giveawayTotalKg != null && <> ≈ <b>{data.cone.giveawayTotalKg} kg</b> vs nominal</>}.
-                {giveaway && <> At this rate: <b>{giveaway.annualizedKg > 0 ? '+' : ''}{fmtInt(giveaway.annualizedKg)} kg/year</b> projected — a straight-line extrapolation of the selected window, not a forecast.</>}
+                {giveaway && (
+                  <>
+                    {' '}The daily and yearly figures apply that per-cone rate to a typical day of{' '}
+                    <b>{fmtInt(giveaway.medianConesPerDay)} cones</b> (the median), so a partly-finished day can't drag
+                    them{giveaway.partialDays > 0 ? ` — ${giveaway.partialDays} in this range` : ''}. Straight-line
+                    extrapolation, not a forecast.
+                  </>
+                )}
               </p>
             </div>
           )}

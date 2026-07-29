@@ -14,7 +14,7 @@ import { getRejectPareto, setRejectLabel } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent } from './services/currentProduct.js';
 import { listEvents, getEventDetail, exportEventsCsv, type EventType } from './services/register.js';
-import { getDowntime } from './services/downtime.js';
+import { getDowntime, getStoppagePatterns } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getOee } from './services/oee.js';
@@ -209,6 +209,32 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const data = await getDowntime(pool, cfg.lineId, q.data.date, q.data.thresholdSeconds);
+      res.json(await envelope(pool, cfg.lineId, data));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Stoppage patterns across a range — one query, not one call per day ----
+  app.get('/api/stoppage-patterns', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = z
+        .object({
+          from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          thresholdSeconds: z.coerce.number().int().min(30).max(3600).default(120),
+        })
+        .safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query — from/to=YYYY-MM-DD required' });
+        return;
+      }
+      const rangeErr = validateRange(q.data.from, q.data.to);
+      if (rangeErr) {
+        res.status(400).json({ error: rangeErr });
+        return;
+      }
+      const data = await getStoppagePatterns(pool, cfg.lineId, q.data.from, q.data.to, q.data.thresholdSeconds);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
