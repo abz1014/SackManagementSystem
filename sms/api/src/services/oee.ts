@@ -94,32 +94,49 @@ export async function getOee(
     return r;
   };
 
-  const tsRes = await bind().query<{ ts: Date; d: Date }>(
-    `SELECT production_ts_utc ts, shift_date d FROM sms.cone_event
-       WHERE line_id=@line AND shift_date BETWEEN @from AND @to${shiftFilter}
-       ORDER BY production_ts_utc`,
-  );
-  const rows = tsRes.recordset;
-  const times = rows.map((r) => r.ts.getTime());
-  const producedCount = times.length;
-
-  // Only gaps BETWEEN two events of the same shift_date are real stoppages. A
-  // gap that spans a shift_date boundary is time we simply didn't query (the
-  // rest of the day when a shift filter is applied, or the roll to the next
-  // day) — counting it as downtime would report ~16h of "stoppage" per day on
-  // any per-shift view.
-  let downSeconds = 0;
-  let stoppageCount = 0;
-  let observedSeconds = 0;
-  for (let i = 1; i < times.length; i++) {
-    if (rows[i]!.d.getTime() !== rows[i - 1]!.d.getTime()) continue;
-    const g = (times[i]! - times[i - 1]!) / 1000;
-    observedSeconds += g;
-    if (g >= thresholdSeconds) {
-      downSeconds += g;
-      stoppageCount++;
-    }
-  }
+  // Gap detection runs IN SQL, not by streaming timestamps into Node. The
+  // previous version pulled one row per cone — 142k over an 18-day snapshot,
+  // and roughly a million per shift per year of live history — to do
+  // arithmetic the database can do during its own index scan.
+  //
+  // LAG PARTITION BY shift_date encodes the rule directly: only gaps between
+  // two events of the SAME shift_date count. A gap spanning that boundary is
+  // time we didn't query (the rest of the day under a shift filter, or the
+  // roll to the next day), not a stoppage — without the partition a per-shift
+  // view reports ~16h of "downtime" per day.
+  //
+  // DATEDIFF(SECOND) truncates to whole seconds where the old JS used
+  // fractional ms. That is a sub-0.01% shift on these totals and it makes OEE
+  // agree exactly with the Downtime and Stoppage-patterns views, which have
+  // always counted in whole seconds.
+  const aggRes = await bind()
+    .input('thr', mssql.Int, thresholdSeconds)
+    .query<{ n: number; first_ts: Date | null; last_ts: Date | null; down_s: number | null; stop_n: number | null; obs_s: number | null }>(
+      `;WITH ordered AS (
+         SELECT production_ts_utc,
+                LAG(production_ts_utc) OVER (PARTITION BY shift_date ORDER BY production_ts_utc) AS prev_ts
+         FROM sms.cone_event
+         WHERE line_id=@line AND shift_date BETWEEN @from AND @to${shiftFilter}
+       ),
+       gaps AS (
+         SELECT production_ts_utc,
+                CASE WHEN prev_ts IS NULL THEN NULL
+                     ELSE DATEDIFF(SECOND, prev_ts, production_ts_utc) END AS g
+         FROM ordered
+       )
+       SELECT COUNT(*) AS n,
+              MIN(production_ts_utc) AS first_ts,
+              MAX(production_ts_utc) AS last_ts,
+              ISNULL(SUM(CASE WHEN g >= @thr THEN g ELSE 0 END), 0) AS down_s,
+              ISNULL(SUM(CASE WHEN g >= @thr THEN 1 ELSE 0 END), 0) AS stop_n,
+              ISNULL(SUM(g), 0) AS obs_s
+       FROM gaps`,
+    );
+  const agg = aggRes.recordset[0]!;
+  const producedCount = agg.n ?? 0;
+  const downSeconds = Number(agg.down_s ?? 0);
+  const stoppageCount = Number(agg.stop_n ?? 0);
+  const observedSeconds = Number(agg.obs_s ?? 0);
 
   let idealCycleSeconds: number;
   if (manualIdealCycleSeconds != null) {
@@ -145,8 +162,8 @@ export async function getOee(
   const rangeStartMs = Date.parse(`${from}T00:00:00.000Z`) + morningStartMs;
   const rangeEndMs = Date.parse(`${to}T00:00:00.000Z`) + 86_400_000 + morningStartMs;
 
-  const firstEventMs = producedCount > 0 ? times[0]! : null;
-  const lastEventMs = producedCount > 0 ? times[producedCount - 1]! : null;
+  const firstEventMs = agg.first_ts != null ? new Date(agg.first_ts).getTime() : null;
+  const lastEventMs = agg.last_ts != null ? new Date(agg.last_ts).getTime() : null;
   const headGapSeconds = firstEventMs != null ? Math.max(0, (firstEventMs - rangeStartMs) / 1000) : 0;
   const tailGapSeconds = lastEventMs != null ? Math.max(0, (rangeEndMs - lastEventMs) / 1000) : 0;
   // possiblyPartial: the gap at either edge of the queried window is itself big enough
