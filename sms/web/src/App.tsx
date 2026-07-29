@@ -1122,20 +1122,26 @@ function LineStatusPanel({ downtime }: { downtime: DowntimeData }) {
                 </div>
               );
             })}
-          {hover != null && downtime.stoppages[hover] && (
-            <div
-              className="status-tip"
-              style={{
-                left: `${((new Date(downtime.stoppages[hover]!.startTs).getTime() - t0) / span) * 100}%`,
-              }}
-            >
-              <b>{fmtDuration(downtime.stoppages[hover]!.durationSeconds)} down</b>
-              <span>{fmtTime(downtime.stoppages[hover]!.startTs)} – {fmtTime(downtime.stoppages[hover]!.endTs)}</span>
-              <span className="tip-rank">
-                stoppage {hover + 1} of {downtime.stoppages.length} · longest first
-              </span>
-            </div>
-          )}
+          {hover != null && downtime.stoppages[hover] && (() => {
+            const s = downtime.stoppages[hover]!;
+            const pct = ((new Date(s.startTs).getTime() - t0) / span) * 100;
+            // The panel clips overflow, so a centred tooltip on a stoppage near
+            // either edge gets its outer half cut off. Anchor by which third of
+            // the strip the stoppage sits in instead of always centring.
+            const edge = pct < 18 ? 'left' : pct > 82 ? 'right' : 'mid';
+            return (
+              <div
+                className={`status-tip ${edge}`}
+                style={edge === 'right' ? { right: `${100 - pct}%` } : { left: `${pct}%` }}
+              >
+                <b>{fmtDuration(s.durationSeconds)} down</b>
+                <span>{fmtTime(s.startTs)} – {fmtTime(s.endTs)}</span>
+                <span className="tip-rank">
+                  stoppage {hover + 1} of {downtime.stoppages.length} · longest first
+                </span>
+              </div>
+            );
+          })()}
           {shiftFracs.map((f, i) => (
             <div key={i} className="status-shiftline" style={{ left: `${f * 100}%` }} />
           ))}
