@@ -31,6 +31,47 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - `APP_DB_*` → the local app DB + `sms_app` (a **strong, unique** password — never the dev password).
    - `SESSION_SECRET` → a long random string.
    - `WEB_DIST=./web/dist`.
+   - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
+
+### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
+
+The session cookie is issued `Secure` by default, so browsers only keep it over
+HTTPS. The exception is `http://localhost`, which browsers treat as trustworthy.
+That combination hides the problem exactly where you'd test it first:
+
+| Browsing from | `COOKIE_SECURE=true` over plain HTTP |
+|---|---|
+| The plant server itself (`http://localhost:4000`) | **works** |
+| Any other PC (`http://<plant-ip>:4000`) | **login silently fails** |
+
+The failure has no error: the login POST returns `200` with the user object, the
+browser discards the cookie, and the next request is anonymous — so the UI just
+returns to the login screen. It looks like a wrong password.
+
+**On a plain-HTTP plant LAN, set `COOKIE_SECURE=false`.** Keep it `true` only if
+you put real TLS in front. The API logs an explicit warning to stderr
+(`logs\api.err.log`) whenever a login arrives over plain HTTP from a non-localhost
+host while `COOKIE_SECURE=true`, so this shows up as a clear message rather than a
+mystery.
+
+### Reaching it from other machines
+
+- Open the port once: `netsh advfirewall firewall add rule name="SMS API" dir=in action=allow protocol=TCP localport=4000`
+- The API binds all interfaces (`0.0.0.0`), so no host config is needed.
+- Give the plant PC a **static IP or DNS name** — operators should not be typing a
+  DHCP address that changes.
+
+### Internet access is not required
+
+The built SPA references no external hosts: fonts are system stacks (Segoe UI /
+Cascadia Mono), and there are no CDN scripts, styles, or web fonts. Everything is
+served from `:4000`. An air-gapped plant LAN is the intended environment — Node,
+SQL Server and the build output are the only prerequisites, all installed locally.
+
+> **ngrok is a review-time tool only.** The tunnel and its watchdog
+> (`ops/sms-watchdog.ps1`) exist to share the app with reviewers over the
+> internet. Neither is part of the plant deployment: no tunnel, no `ops/`
+> watchdog, no outbound dependency. Use the NSSM services below instead.
 5. **Build:** `npm ci && npm run build:shared && npm run build --workspaces --if-present && npm run build --workspace @sms/web`.
 6. **Migrate the app DB:** apply `db/migrations/*.sql` in order (via `sqlcmd` or `npm run db:migrate`).
 7. **Create the first admin:** `node cli/dist/index.js user:create --username=admin --password=<strong> --role=admin`.

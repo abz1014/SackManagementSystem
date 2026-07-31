@@ -106,7 +106,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       loginLimiter.clear(clientKey);
       const s = await createSession(pool, user.userId);
-      setSessionCookie(res, s.id, s.expires);
+      setSessionCookie(res, s.id, s.expires, req);
       res.json({ user: { username: user.username, displayName: user.displayName, role: user.role } });
       // opportunistic housekeeping — don't block the response
       void pruneExpiredSessions(pool).catch(() => {});

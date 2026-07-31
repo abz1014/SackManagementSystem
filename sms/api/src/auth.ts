@@ -151,7 +151,31 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
-export function setSessionCookie(res: Response, id: string, expires: Date): void {
+/**
+ * Warn when a Secure cookie is about to be issued over a plain-HTTP request
+ * from somewhere other than localhost.
+ *
+ * Browsers treat http://localhost as a trustworthy origin and keep Secure
+ * cookies there, but drop them for http://<lan-ip>. On a plain-HTTP intranet
+ * deployment that makes login fail in the least debuggable way possible: the
+ * POST returns 200 with the user, the browser silently discards the cookie,
+ * and the very next request is anonymous — so the UI just bounces back to the
+ * login screen with no error anywhere. Say so in the log instead.
+ */
+function warnIfCookieWillBeDropped(req: Request): void {
+  if (!cookieSecure()) return;
+  if (req.secure) return; // real TLS (or a trusted proxy reported https)
+  const host = (req.hostname ?? '').toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return;
+  console.warn(
+    `[auth] COOKIE_SECURE=true but this login arrived over plain HTTP for host "${host}". ` +
+      `The browser will DISCARD the session cookie and the user will appear unable to log in. ` +
+      `For a plain-HTTP intranet set COOKIE_SECURE=false; keep it true only behind TLS.`,
+  );
+}
+
+export function setSessionCookie(res: Response, id: string, expires: Date, req?: Request): void {
+  if (req) warnIfCookieWillBeDropped(req);
   res.cookie(SESSION_COOKIE, id, {
     httpOnly: true,
     sameSite: 'strict',
