@@ -23,3 +23,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Tunnel policy — contains a shared basic-auth password
+sms/ops/sms-tunnel-policy.yml
