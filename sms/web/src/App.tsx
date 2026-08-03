@@ -822,6 +822,72 @@ function useMeasuredWidth(fallback = 1000): [React.RefObject<HTMLDivElement>, nu
   return [ref, w];
 }
 
+/**
+ * Chart tooltip geometry, derived from the text instead of hardcoded.
+ *
+ * Every tooltip used to carry a fixed pixel width (190, 200, 172 ...) and 15px
+ * line spacing, both hand-tuned for ~11px text. Raising the type scale to 16px
+ * made the content wider and taller than its box, so labels spilled outside the
+ * dark panel and got clipped at the chart edge. Sizing from the content means
+ * that can't recur the next time the scale moves — including when a user picks
+ * Large or Extra large, which multiplies the font at runtime.
+ *
+ * Tooltip text is monospace, so width is predictable: Cascadia Mono advances
+ * ~0.6em per character. We over-estimate slightly rather than risk clipping.
+ */
+const TIP_PAD = 11;
+const TIP_CHAR_W = 0.62; // em, monospace advance (rounded up for safety)
+const TIP_LINE = 1.42; // line height in em
+
+function tipMetrics(lines: string[], fontPx: number) {
+  const longest = lines.reduce((m, l) => Math.max(m, l.length), 0);
+  const lineH = Math.ceil(fontPx * TIP_LINE);
+  return {
+    w: Math.ceil(longest * fontPx * TIP_CHAR_W) + TIP_PAD * 2,
+    h: TIP_PAD * 2 + lines.length * lineH - Math.round(lineH - fontPx),
+    lineH,
+    baseline: (i: number) => TIP_PAD + fontPx + i * lineH,
+  };
+}
+
+/** Resolved --fs-xs in px, so tooltips track the user's Display size setting. */
+function useTipFontPx(): number {
+  const [px, setPx] = useState(16);
+  useEffect(() => {
+    const read = () => {
+      const root = getComputedStyle(document.documentElement);
+      const rem = parseFloat(root.fontSize) || 16;
+      const xs = root.getPropertyValue('--fs-xs').trim();
+      setPx(xs.endsWith('rem') ? parseFloat(xs) * rem : parseFloat(xs) || rem);
+    };
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    return () => mo.disconnect();
+  }, []);
+  return px;
+}
+
+interface TipLine {
+  t: string;
+  cls?: string;
+}
+
+/** A chart tooltip that fits its own content. */
+function ChartTip({ x, y = 4, lines, fontPx }: { x: number; y?: number; lines: TipLine[]; fontPx: number }) {
+  const m = tipMetrics(lines.map((l) => l.t), fontPx);
+  return (
+    <g transform={`translate(${x}, ${y})`} pointerEvents="none">
+      <rect className="tooltip-bg" width={m.w} height={m.h} rx={5} />
+      {lines.map((l, i) => (
+        <text key={i} className={`tooltip-text ${l.cls ?? ''}`} x={TIP_PAD} y={m.baseline(i)}>
+          {l.t}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 /** Props that make a non-button element (a table row, mostly) behave like one
  * for keyboard users: focusable, and activated by Enter or Space. Rows are the
  * primary drill-down in this app, so leaving them mouse-only put the main
@@ -2121,7 +2187,15 @@ function HourClusterChart({
     { from: 0, to: 6, label: 'Night' },
   ];
   const hs = hover != null ? byHour[hover] : null;
-  const tipW = 190;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] = hs
+    ? [
+        { t: `${String(hs.hour).padStart(2, '0')}:00–${String((hs.hour + 1) % 24).padStart(2, '0')}:00`, cls: 'strong' },
+        { t: `${fmtDuration(hs.downSeconds)} over ${hs.count} stoppage${hs.count === 1 ? '' : 's'}` },
+        { t: `on ${hs.days} separate day${hs.days === 1 ? '' : 's'}` },
+      ]
+    : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hover != null ? Math.min(Math.max(bx(hover) + bandW / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
@@ -2158,12 +2232,7 @@ function HourClusterChart({
           ) : null,
         )}
         {hs && (
-          <g transform={`translate(${tipX}, 4)`}>
-            <rect className="tooltip-bg" width={tipW} height={16 + 3 * 15} rx={5} />
-            <text className="tooltip-text strong" x={9} y={17}>{String(hs.hour).padStart(2, '0')}:00–{String((hs.hour + 1) % 24).padStart(2, '0')}:00</text>
-            <text className="tooltip-text" x={9} y={32}>{fmtDuration(hs.downSeconds)} over {hs.count} stoppage{hs.count === 1 ? '' : 's'}</text>
-            <text className="tooltip-text" x={9} y={47}>on {hs.days} separate day{hs.days === 1 ? '' : 's'}</text>
-          </g>
+          <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
         )}
         {byHour.map((h, i) => (
           <rect
@@ -2244,7 +2313,15 @@ function StoppageTimeline({
 
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => t0 + f * span);
   const hs = hover != null ? stoppages[hover] : null;
-  const tipW = 200;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] = hs
+    ? [
+        { t: `${fmtDuration(hs.durationSeconds)} down`, cls: 'strong' },
+        { t: `${fmtTime(hs.startTs)} – ${fmtTime(hs.endTs)}` },
+        { t: 'click to see cones either side' },
+      ]
+    : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hs ? Math.min(Math.max(x(new Date(hs.startTs).getTime()) + 10, LM), LM + W - tipW) : 0;
 
   return (
@@ -2290,12 +2367,7 @@ function StoppageTimeline({
           </text>
         ))}
         {hs && (
-          <g transform={`translate(${tipX}, 4)`}>
-            <rect className="tooltip-bg" width={tipW} height={16 + 3 * 15} rx={5} />
-            <text className="tooltip-text strong" x={9} y={17}>{fmtDuration(hs.durationSeconds)} down</text>
-            <text className="tooltip-text" x={9} y={32}>{fmtTime(hs.startTs)} – {fmtTime(hs.endTs)}</text>
-            <text className="tooltip-text" x={9} y={47}>click to see cones either side</text>
-          </g>
+          <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
         )}
       </svg>
     </div>
@@ -2954,7 +3026,17 @@ function SubgroupChart({
   };
   const hg = hover != null ? valid[hover] : null;
   const hVal = hg ? valueOf(hg) : null;
-  const tipW = 172;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] =
+    hg && hVal != null
+      ? [
+          { t: fmtDateTime(hg.ts) },
+          { t: `${hVal.toFixed(2)} ${unit}`, cls: 'strong' },
+          { t: `n = ${hg.n} ${noun}` },
+          ...(violatesOf(hg) ? [{ t: 'out of control', cls: 'warn' }] : []),
+        ]
+      : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
@@ -2983,13 +3065,7 @@ function SubgroupChart({
           <>
             <line className="crosshair" x1={x(hover)} y1={0} x2={x(hover)} y2={height} />
             <circle className={violatesOf(hg) ? 'hover-dot burst' : 'hover-dot'} cx={x(hover)} cy={y(hVal)} r={4} />
-            <g transform={`translate(${tipX}, 4)`}>
-              <rect className="tooltip-bg" width={tipW} height={16 + (violatesOf(hg) ? 4 : 3) * 15} rx={5} />
-              <text className="tooltip-text" x={9} y={17}>{fmtDateTime(hg.ts)}</text>
-              <text className="tooltip-text strong" x={9} y={32}>{hVal.toFixed(2)} {unit}</text>
-              <text className="tooltip-text" x={9} y={47}>n = {hg.n} {noun}</text>
-              {violatesOf(hg) && <text className="tooltip-text warn" x={9} y={62}>out of control</text>}
-            </g>
+            <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
           </>
         )}
         <rect
@@ -3044,7 +3120,19 @@ function StationChart({
   const bx = (i: number) => LM + i * bandW;
 
   const hs = hover != null ? stations[hover] : null;
-  const tipW = 184;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] = hs
+    ? [
+        { t: `Station ${hs.station}`, cls: 'strong' },
+        { t: `mean ${hs.mean} ${unit}` },
+        { t: `${hs.delta > 0 ? '+' : ''}${hs.delta} ${unit} vs line · n=${fmtInt(hs.n)}` },
+        {
+          t: hs.flagged ? `off-target (past ±${threshold}${unit})` : 'within practical band',
+          cls: hs.flagged ? 'warn' : '',
+        },
+      ]
+    : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hover != null ? Math.min(Math.max(bx(hover) + bandW / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
@@ -3072,15 +3160,7 @@ function StationChart({
           <text key={s.station} className={`x-tick${s.flagged ? ' flagged' : ''}`} x={bx(i) + bandW / 2} y={H + 16} textAnchor="middle">{s.station}</text>
         ))}
         {hover != null && hs && (
-          <g transform={`translate(${tipX}, 4)`}>
-            <rect className="tooltip-bg" width={tipW} height={16 + 4 * 15} rx={5} />
-            <text className="tooltip-text strong" x={9} y={17}>Station {hs.station}</text>
-            <text className="tooltip-text" x={9} y={32}>mean {hs.mean} {unit}</text>
-            <text className="tooltip-text" x={9} y={47}>{hs.delta > 0 ? '+' : ''}{hs.delta} {unit} vs line · n={fmtInt(hs.n)}</text>
-            <text className={`tooltip-text ${hs.flagged ? 'warn' : ''}`} x={9} y={62}>
-              {hs.flagged ? `off-target (past ±${threshold}${unit})` : 'within practical band'}
-            </text>
-          </g>
+          <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
         )}
         {stations.map((s, i) => (
           <rect
@@ -3134,7 +3214,14 @@ function Histogram({
   const gridVals = Array.from({ length: gridN + 1 }, (_, i) => (i / gridN) * maxC);
   const tickVals = [lo, lo + (hi - lo) * 0.25, (lo + hi) / 2, lo + (hi - lo) * 0.75, hi];
   const hb = hover != null ? bins[hover] : null;
-  const tipW = 150;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] = hb
+    ? [
+        { t: `${hb.start}–${hb.end} ${unit}` },
+        { t: `${fmtInt(hb.count)} ${hb.count === 1 ? 'unit' : 'units'}`, cls: 'strong' },
+      ]
+    : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hover != null ? Math.min(Math.max(LM + hover * bw + bw / 2 + 8, LM), LM + W - tipW) : 0;
 
   return (
@@ -3167,11 +3254,7 @@ function Histogram({
         ))}
         <text className="axis-title" x={LM + W / 2} y={H + 34} textAnchor="middle">{unit}</text>
         {hover != null && hb && (
-          <g transform={`translate(${tipX}, 4)`}>
-            <rect className="tooltip-bg" width={tipW} height={16 + 2 * 15} rx={5} />
-            <text className="tooltip-text" x={9} y={17}>{hb.start}–{hb.end} {unit}</text>
-            <text className="tooltip-text strong" x={9} y={32}>{fmtInt(hb.count)} {hb.count === 1 ? 'unit' : 'units'}</text>
-          </g>
+          <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
         )}
       </svg>
     </div>
@@ -3357,7 +3440,16 @@ function PChart({
   };
 
   const hb = hover != null ? withRate[hover] : null;
-  const tipW = 168;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] = hb
+    ? [
+        { t: bucketSize === 'hour' ? fmtDateTime(hb.bucketTs) : hb.bucketTs.slice(0, 10) },
+        { t: `${((hb.rate ?? 0) * 100).toFixed(2)}% rate`, cls: 'strong' },
+        { t: `${fmtInt(hb.rejects)} of ${fmtInt(hb.produced)} produced` },
+        ...(hb.outOfControl ? [{ t: 'beyond control limit', cls: 'warn' }] : []),
+      ]
+    : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
@@ -3394,15 +3486,7 @@ function PChart({
           <>
             <line className="crosshair" x1={x(hover)} y1={0} x2={x(hover)} y2={H} />
             <circle className={hb.outOfControl ? 'hover-dot burst' : 'hover-dot'} cx={x(hover)} cy={y(hb.rate!)} r={4} />
-            <g transform={`translate(${tipX}, 4)`}>
-              <rect className="tooltip-bg" width={tipW} height={16 + 4 * 15} rx={5} />
-              <text className="tooltip-text" x={9} y={17}>
-                {bucketSize === 'hour' ? fmtDateTime(hb.bucketTs) : hb.bucketTs.slice(0, 10)}
-              </text>
-              <text className="tooltip-text strong" x={9} y={17 + 16}>{((hb.rate ?? 0) * 100).toFixed(2)}% rate</text>
-              <text className="tooltip-text" x={9} y={17 + 31}>{fmtInt(hb.rejects)} of {fmtInt(hb.produced)} produced</text>
-              {hb.outOfControl && <text className="tooltip-text warn" x={9} y={17 + 46}>beyond control limit</text>}
-            </g>
+            <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
           </>
         )}
         <rect
@@ -3919,7 +4003,17 @@ function ShiftTrendChart({
   const fmtV = (v: number) => (unit === '%' ? `${v.toFixed(2)}%` : fmtInt(Math.round(v)));
   const ticks = [yMin, yMin + (yMax - yMin) / 2, yMax];
   const xStep = Math.max(1, Math.ceil(days.length / 9));
-  const tipW = 190;
+  const tipFont = useTipFontPx();
+  const tipLines: TipLine[] =
+    hover != null
+      ? [
+          { t: days[hover] ?? '', cls: 'strong' },
+          ...series.map((sr) => ({
+            t: `${sr.name}: ${sr.points[hover] != null ? fmtV(sr.points[hover]!) : '—'}`,
+          })),
+        ]
+      : [];
+  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
   const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
 
   return (
@@ -3953,15 +4047,7 @@ function ShiftTrendChart({
         {hover != null && (
           <>
             <line className="crosshair" x1={x(hover)} y1={0} x2={x(hover)} y2={H} />
-            <g transform={`translate(${tipX}, 4)`}>
-              <rect className="tooltip-bg" width={tipW} height={16 + series.length * 15} rx={5} />
-              <text className="tooltip-text strong" x={9} y={17}>{days[hover]}</text>
-              {series.map((s, si) => (
-                <text key={s.name} className="tooltip-text" x={9} y={32 + si * 15}>
-                  {s.name}: {s.points[hover] != null ? fmtV(s.points[hover]!) : '—'}
-                </text>
-              ))}
-            </g>
+            <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
           </>
         )}
         {days.map((d, i) => (
