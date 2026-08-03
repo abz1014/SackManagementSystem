@@ -17,7 +17,7 @@
   --graphite-dim: #656e78;
   --mist: #e4e8ea;
   --mist-strong: #cdd3d7;
-  --paper: #f7f9f8;
+  --paper: #f3f6f3;   /* flat, a hair of brand green - not the cold blue-grey default */
   --card: #ffffff;
 
   /* neutral — the default for plain data (bars, trend lines, distributions) */
@@ -1077,10 +1077,12 @@ body {
 /* ================= Brand colour in the chrome ==================
    Data marks stay neutral; identity lives in the surrounding UI. */
 
-/* Panel headers pick up a brand-tinted gradient rather than flat near-black. */
+/* Panel headers are flat brand-tinted dark, not generic near-black. Flat, not
+   a gradient: a real instrument fascia is matte, and a vertical sheen on a
+   header is the standard tell of decoration applied for its own sake. */
 .panel > .panel-head:first-child,
 .panel > h2:first-child {
-  background: linear-gradient(180deg, var(--bezel-2) 0%, var(--bezel) 100%);
+  background: var(--bezel);
 }
 
 /* KPI tiles: a brand rule on the leading edge, so a healthy dashboard still
@@ -1088,8 +1090,8 @@ body {
 .tile { border-left: 3px solid var(--brand-600); }
 .tile:hover { border-color: var(--mist-strong); border-left-color: var(--brand-500); }
 
-/* Page background: a faint brand wash instead of flat cold grey. */
-body { background-image: linear-gradient(180deg, var(--brand-50) 0%, var(--paper) 340px); }
+/* Page background stays flat. The brand tint lives in --paper itself rather
+   than in a wash that fades down the page. */
 
 /* Section eyebrows / axis titles carry the brand rather than another grey. */
 .spc-chart .axis-title { fill: var(--brand-700); }
@@ -1113,7 +1115,5 @@ body { background-image: linear-gradient(180deg, var(--brand-50) 0%, var(--paper
 .trend-legend .sw.s2 { color: var(--series-3); }
 
 @media print {
-  /* the brand wash and tile rules would waste toner */
-  body { background-image: none; }
   .tile { border-left-color: #999; }
 }
