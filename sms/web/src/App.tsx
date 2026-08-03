@@ -4653,7 +4653,7 @@ function StationsPanel() {
 
   return (
     <div className="panel">
-      <h2>Station labels <span style={{ color: 'var(--graphite-dim)', fontWeight: 400, fontSize: 12 }}>(Q11)</span></h2>
+      <h2>Station labels <span style={{ color: 'var(--bezel-dim)', fontWeight: 400, fontSize: 12 }}>(Q11)</span></h2>
       <div className="hint">Name the 14 source/lifter stations so station-wise reports read meaningfully.</div>
       <div className="table-scroll">
       <table className="atable">
@@ -4694,7 +4694,7 @@ function RulesPanel() {
 
   return (
     <div className="panel">
-      <h2>Interpretation rules <span style={{ color: 'var(--graphite-dim)', fontWeight: 400, fontSize: 12 }}>(Q4/Q5 · Q7)</span></h2>
+      <h2>Interpretation rules <span style={{ color: 'var(--bezel-dim)', fontWeight: 400, fontSize: 12 }}>(Q4/Q5 · Q7)</span></h2>
       <div className="hint">Versioned — each change appends a new effective rule. When IFL answers, set it here once.</div>
 
       <div style={{ marginTop: 14 }}>
