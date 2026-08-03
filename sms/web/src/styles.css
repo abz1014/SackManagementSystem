@@ -35,14 +35,50 @@
   --green-pale: #e7f4ea;
   --alert: #c1432b;
   --alert-pale: #fbeae7;
+  /* alert text ON alert-pale: the base --alert measures only 4.39:1 there and
+     misses AA, so chips and pills use this slightly deeper red (4.77:1). */
+  --alert-ink: #b93e27;
   --amber: #8f6417;
   --amber-pale: #faf1de;
 
-  /* bezel chrome — the dark frame around instrument panels */
-  --bezel: #222a30;
-  --bezel-2: #2c353c;
-  --bezel-rule: #3a444b;
-  --bezel-dim: #9aa5ad;
+  /* ---- Brand ramp -----------------------------------------------------------
+     Built out from the Q Tech engineering green. The app previously carried no
+     colour at all outside status: chrome, panels, nav and tiles were all
+     grey/black/white, so the interface only gained colour when something was
+     WRONG — meaning a well-running plant rendered as a monochrome screen, and
+     the design effectively punished good performance. "Colour is state" is the
+     right rule for DATA MARKS; it was never a reason to strip identity from
+     the surrounding UI. This ramp gives the chrome somewhere to live. */
+  --brand-950: #10281a;
+  --brand-900: #16341f;
+  --brand-800: #1b4429;
+  --brand-700: #1f6b39;
+  --brand-600: #297f45;
+  --brand-500: #359a56;
+  --brand-300: #8ac4a0;
+  --brand-100: #d6ebdd;
+  --brand-50:  #eef7f1;
+
+  /* Multi-series ramp — for charts plotting SEVERAL things at once (the three
+     shifts), where grey-on-grey-on-grey is worse information design, not
+     better. Excludes red/amber so status keeps its meaning.
+     Spread across LIGHTNESS, not just hue: measured 9.4:1 / 5.7:1 / 3.2:1
+     against white, so the three stay separable in greyscale, in print, and
+     under colour-vision deficiency. A first attempt used three hues of equal
+     lightness (1.14:1 apart) which would have looked identical to a
+     red-green-deficient viewer. Dash patterns are kept as a further redundant
+     channel. Single-series charts stay neutral. */
+  --series-1: #14512c; /* deep green  — 9.4:1 */
+  --series-2: #1f6f8b; /* teal        — 5.7:1 */
+  --series-3: #8f88cf; /* light indigo — 3.2:1 */
+
+  /* bezel chrome — the dark frame around instrument panels.
+     Warmed toward the brand green so panel headers read as part of the
+     product rather than as generic near-black. */
+  --bezel: #1a2b21;
+  --bezel-2: #24382c;
+  --bezel-rule: #354a3c;
+  --bezel-dim: #9db3a5;
 
   /* ---- Type scale ----------------------------------------------------------
      Was 128 font-size declarations across 24 arbitrary values (11, 11.5, 12,
@@ -349,7 +385,11 @@ body {
 }
 
 .bars { display: flex; flex-direction: column; gap: 13px; }
-.bar-row { display: grid; grid-template-columns: 100px 1fr 84px; align-items: center; gap: 12px; }
+/* Columns in rem, not px: they hold text, so they must grow with the type
+   scale and with the user's Display size. As fixed px (100/84) the value
+   column was narrower than "2,860 35%" once body type moved to 18px, and the
+   right-aligned number spilled back over the bar. */
+.bar-row { display: grid; grid-template-columns: 7rem 1fr 8.5rem; align-items: center; gap: 12px; }
 .bar-row .name { text-transform: capitalize; color: var(--graphite); font-size: var(--fs-sm); }
 .bar-track { display: block; height: 10px; background: var(--mist); border-radius: 3px; overflow: hidden; }
 .bar-fill { display: block; height: 100%; background: var(--neutral); border-radius: 3px; transition: width 650ms cubic-bezier(0.16, 1, 0.3, 1); }
@@ -357,7 +397,7 @@ body {
   text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono);
   font-size: var(--fs-sm); font-weight: 600; display: flex; justify-content: flex-end; gap: 8px; align-items: baseline;
 }
-.bar-row .val .val-pct { color: var(--graphite-dim); font-weight: 500; font-size: var(--fs-xs); width: 36px; text-align: right; }
+.bar-row .val .val-pct { color: var(--graphite-dim); font-weight: 500; font-size: var(--fs-xs); width: 2.7rem; text-align: right; }
 .empty-note {
   color: var(--graphite-dim); font-size: var(--fs-sm); padding: 20px; text-align: center;
   border: 1px dashed var(--mist-strong); border-radius: var(--radius-sm);
@@ -411,7 +451,7 @@ body {
 
 /* ---- reject Pareto ---- */
 .pareto { display: flex; flex-direction: column; gap: 11px; }
-.pareto-row { display: grid; grid-template-columns: 250px 1fr 140px; align-items: center; gap: 12px; }
+.pareto-row { display: grid; grid-template-columns: 15rem 1fr 9rem; align-items: center; gap: 12px; }
 .pareto-row .reason { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pareto-row .reason .lbl { font-size: var(--fs-sm); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pareto-row .reason input {
@@ -642,7 +682,7 @@ body {
 .spc-spec-note.none { background: var(--mist); color: var(--graphite); }
 
 .cap-row { display: flex; gap: 30px; flex-wrap: wrap; margin: 4px 0 4px; }
-.cap-tile { display: flex; flex-direction: column; gap: 3px; min-width: 96px; }
+.cap-tile { display: flex; flex-direction: column; gap: 3px; min-width: 6rem; }
 .cap-tile .cap-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--graphite-dim); font-weight: 600; }
 .cap-tile .cap-val { font-size: var(--fs-xl); font-weight: 700; font-family: var(--font-mono); }
 .cap-tile .cap-val.good { color: var(--green-deep); }
@@ -790,10 +830,10 @@ body {
 .exc-item:last-child { border-bottom: 0; }
 .exc-item:hover { background: var(--neutral-pale); margin: 0 -8px; padding: 15px 8px; }
 .exc-sev {
-  flex: none; width: 68px; text-align: center; font-size: var(--fs-xs); font-weight: 700;
+  flex: none; min-width: 4.6rem; text-align: center; font-size: var(--fs-xs); font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 0; border-radius: 4px; margin-top: 2px;
 }
-.exc-sev.fault { background: var(--alert-pale); color: var(--alert); }
+.exc-sev.fault { background: var(--alert-pale); color: var(--alert-ink); }
 .exc-sev.warn { background: var(--amber-pale); color: var(--amber); }
 .exc-sev.info { background: var(--mist); color: var(--graphite); }
 .exc-body { flex: 1; min-width: 0; }
@@ -873,7 +913,7 @@ body {
 .dt-timeline .dt-stop.hot { fill: var(--alert); }
 
 /* duration buckets need room for a second figure in the value column */
-.bar-row.wide { grid-template-columns: 130px 1fr 132px; }
+.bar-row.wide { grid-template-columns: 8.5rem 1fr 8.5rem; }
 .bar-row.wide .val { display: flex; justify-content: flex-end; gap: 10px; align-items: baseline; }
 .bar-row.wide .val .val-pct { width: auto; }
 /* sentence-case bucket labels — .bar-row .name capitalizes for shift names */
@@ -1033,3 +1073,47 @@ body {
 }
 .uiscale button:hover { background: var(--mist); color: var(--ink); }
 .uiscale button.active { background: var(--bezel); color: #fff; }
+
+/* ================= Brand colour in the chrome ==================
+   Data marks stay neutral; identity lives in the surrounding UI. */
+
+/* Panel headers pick up a brand-tinted gradient rather than flat near-black. */
+.panel > .panel-head:first-child,
+.panel > h2:first-child {
+  background: linear-gradient(180deg, var(--bezel-2) 0%, var(--bezel) 100%);
+}
+
+/* KPI tiles: a brand rule on the leading edge, so a healthy dashboard still
+   reads as a designed product instead of a blank grid. */
+.tile { border-left: 3px solid var(--brand-600); }
+.tile:hover { border-color: var(--mist-strong); border-left-color: var(--brand-500); }
+
+/* Page background: a faint brand wash instead of flat cold grey. */
+body { background-image: linear-gradient(180deg, var(--brand-50) 0%, var(--paper) 340px); }
+
+/* Section eyebrows / axis titles carry the brand rather than another grey. */
+.spc-chart .axis-title { fill: var(--brand-700); }
+.hint b, .callout .big .accent { color: var(--brand-700); }
+
+/* Nav: the active view gets a solid brand marker, not a grey underline. */
+.segmented.nav button.active::after { background: var(--brand-600); height: 3px; }
+
+/* Multi-series trend lines — three distinguishable hues. Dash patterns are
+   KEPT as a redundant channel so the chart still works in greyscale, when
+   printed, and for colour-vision deficiency. */
+.trend-chart .trend-line { stroke-width: 2.2; }
+.trend-chart .trend-line.s0 { stroke: var(--series-1); }
+.trend-chart .trend-line.s1 { stroke: var(--series-2); stroke-dasharray: 6 3; }
+.trend-chart .trend-line.s2 { stroke: var(--series-3); stroke-dasharray: 2 3; }
+.trend-chart .trend-dot.s0 { fill: var(--series-1); }
+.trend-chart .trend-dot.s1 { fill: var(--series-2); }
+.trend-chart .trend-dot.s2 { fill: var(--series-3); }
+.trend-legend .sw.s0 { color: var(--series-1); }
+.trend-legend .sw.s1 { color: var(--series-2); }
+.trend-legend .sw.s2 { color: var(--series-3); }
+
+@media print {
+  /* the brand wash and tile rules would waste toner */
+  body { background-image: none; }
+  .tile { border-left-color: #999; }
+}
