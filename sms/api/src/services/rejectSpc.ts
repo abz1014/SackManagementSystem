@@ -13,7 +13,19 @@
  * A bucket is out-of-control if its rate exceeds its own UCL_i.
  * "Episodes" = runs of 1+ consecutive out-of-control buckets — a run of 2+ is
  * the practical definition of a burst; a lone bucket is an isolated spike.
+ *
+ * The normal approximation behind UCL_i is only valid once n_i·p̄ ≥ 5 (the
+ * standard p-chart rule of thumb). Below that it isn't a wider band, it's a
+ * DIFFERENT, WRONG DISTRIBUTION — verified on real data: a bucket at the edge
+ * of the queried range with n=2 (a partial day where sync coverage starts
+ * mid-day) produced UCL=33%, vs ~2.7% for every real full day. One bucket
+ * that low-volume then set the y-axis for the entire chart, squashing 20 days
+ * of real ~1-2% signal into a sliver — reported as "the chart is broken."
+ * Below the threshold we still report the observed rate (it's real) but
+ * ucl/lcl/outOfControl are null/false — there is no valid control limit to
+ * compare against, not a generous one.
  */
+const MIN_EXPECTED_REJECTS_FOR_VALID_LIMITS = 5;
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 
@@ -110,10 +122,12 @@ export async function getRejectSpc(
     let outOfControl = false;
     if (produced > 0 && pBar != null) {
       rate = rejects / produced;
-      const sigma = Math.sqrt((pBar * (1 - pBar)) / produced);
-      ucl = pBar + 3 * sigma;
-      lcl = Math.max(0, pBar - 3 * sigma);
-      outOfControl = rate > ucl;
+      if (produced * pBar >= MIN_EXPECTED_REJECTS_FOR_VALID_LIMITS) {
+        const sigma = Math.sqrt((pBar * (1 - pBar)) / produced);
+        ucl = pBar + 3 * sigma;
+        lcl = Math.max(0, pBar - 3 * sigma);
+        outOfControl = rate > ucl;
+      }
     }
     return {
       bucketTs: new Date(t).toISOString(),

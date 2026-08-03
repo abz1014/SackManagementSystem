@@ -371,7 +371,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
             )}
           </nav>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div className="topbar-tools">
           <DisplayScale />
           {freshness && (
             <span className="freshness" title={`last sync ${freshness.lastSyncUtc ?? 'never'}`}>
@@ -2179,6 +2179,13 @@ function HourClusterChart({
   const barW = bandW * 0.62;
   const y = (v: number) => H - (v / maxDown) * H;
   const bx = (i: number) => LM + i * bandW;
+  // The top-left duration label ("21h 37m") right-anchors at LM-6 and needs
+  // room to its LEFT to the viewBox edge. The fixed 76px margin was sized for
+  // the old font; measured on real data at Extra Large (20px) the label needs
+  // ~82px and only had ~70, clipping "21h 37m" against the chart's own edge.
+  const axisFontPx = useTipFontPx();
+  const maxDownLabel = fmtDuration(maxDown);
+  const leftPad = Math.max(76, Math.ceil(maxDownLabel.length * axisFontPx * TIP_CHAR_W) + 16);
 
   const shiftBands = [
     { from: 6, to: 14, label: 'Morning' },
@@ -2200,7 +2207,7 @@ function HourClusterChart({
 
   return (
     <div className="spc-chart-wrap" ref={wrapRef}>
-      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66}>
+      <svg className="spc-chart dt-timeline" viewBox={`${LM - leftPad} -28 ${W + leftPad + 16} ${H + 66}`} width="100%" height={H + 66}>
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">down</text>
         {shiftBands.map((b, i) => (
           <g key={i}>
@@ -2290,6 +2297,10 @@ function StoppageTimeline({
   const x = (t: number) => LM + ((t - t0) / span) * W;
   const maxDur = Math.max(60, ...stoppages.map((s) => s.durationSeconds));
   const y = (d: number) => H - (d / maxDur) * H;
+  // Same fix as HourClusterChart's identical top-left duration label/viewBox.
+  const axisFontPx = useTipFontPx();
+  const maxDurLabel = fmtDuration(maxDur);
+  const leftPad = Math.max(76, Math.ceil(maxDurLabel.length * axisFontPx * TIP_CHAR_W) + 16);
 
   // Shift boundaries (06/14/22) that actually fall inside the observed window.
   const start = new Date(firstTs);
@@ -2326,7 +2337,7 @@ function StoppageTimeline({
 
   return (
     <div className="spc-chart-wrap" ref={wrapRef}>
-      <svg className="spc-chart dt-timeline" viewBox={`${LM - 76} -28 ${W + 92} ${H + 66}`} width="100%" height={H + 66}>
+      <svg className="spc-chart dt-timeline" viewBox={`${LM - leftPad} -28 ${W + leftPad + 16} ${H + 66}`} width="100%" height={H + 66}>
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">down</text>
         {bands.map((b, i) => (
           <g key={i}>
@@ -2991,7 +3002,17 @@ function SubgroupChart({
   const [wrapRef, measuredW] = useMeasuredWidth();
   const W = Math.max(560, measuredW - 136);
   const LM = 46;
-  const RM = 56;
+  const rmFontPx = useTipFontPx();
+  // RM was a fixed 56px, sized for the ~12px axis-label font this chart used
+  // before the type-scale change — "1952.3" at the new 16px (or 20px at Extra
+  // large) no longer fit and spilled past the chart's own right edge.
+  // RM must clear TWO different right-edge labels, not just one: the
+  // right-anchored centre-line value, AND the last x-tick timestamp, which is
+  // CENTRE-anchored exactly at the plot's right edge — so only its right HALF
+  // needs to fit in this margin, but that half was sized only for the
+  // centre-line text and clipped "5:30:00 AM" by a few px on real data.
+  const halfTimeTick = ("12:00:01 PM".length * rmFontPx * TIP_CHAR_W) / 2;
+  const RM = Math.max(56, Math.ceil(centerline.toFixed(1).length * rmFontPx * TIP_CHAR_W) + 14, Math.ceil(halfTimeTick) + 10);
   const [hover, setHover] = useState<number | null>(null);
   const valid = subgroups.filter((g) => valueOf(g) != null);
   if (valid.length === 0) return <div className="empty-note">Not enough data to chart.</div>;
@@ -3202,6 +3223,22 @@ function Histogram({
   const LM = 46;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
+  // This is the one chart that stacks two text lines below the plot (the
+  // x-tick values, then the unit title). Both baselines and the viewBox's
+  // bottom padding were fixed px (16/34/68) sized for the old ~12px axis
+  // font — at 16px+ the two lines collided, and the unit label got squeezed
+  // against the resize handle below the chart (reported: "G" overlapping it).
+  const axisFontPx = useTipFontPx();
+  // viewBox starts at y=-28 (room for the top axis-title) — the total SVG
+  // height has to cover that same 28 units again on top of whatever sits
+  // below H, or the last line renders past the element's own box and
+  // spills into whatever sits after it in the DOM. Missed on the first pass
+  // of this fix: it under-allocated by almost exactly 28px, which is why the
+  // unit label still touched the resize handle after the first attempt.
+  const TOP_OFFSET = 28;
+  const tickY = H + Math.ceil(axisFontPx * 1.1);
+  const unitY = tickY + Math.ceil(axisFontPx * 1.5);
+  const bottomPad = unitY - H + Math.ceil(axisFontPx * 0.4) + TOP_OFFSET;
   if (bins.length === 0) return <div className="empty-note">Not enough data to chart.</div>;
   const maxC = Math.max(1, ...bins.map((b) => b.count));
   const lo = bins[0]!.start;
@@ -3213,6 +3250,11 @@ function Histogram({
   const gridN = 4;
   const gridVals = Array.from({ length: gridN + 1 }, (_, i) => (i / gridN) * maxC);
   const tickVals = [lo, lo + (hi - lo) * 0.25, (lo + hi) / 2, lo + (hi - lo) * 0.75, hi];
+  // The last tick is centred (textAnchor="middle") right at the plot's own
+  // right edge, so at a wider font half its text extends past the viewBox
+  // with nothing to clip against but the edge — "1983" reported clipped to
+  // "198". Reserve room for half that label's width instead of a fixed 14px.
+  const halfLastLabel = Math.ceil((String(Math.round(hi)).length * axisFontPx * TIP_CHAR_W) / 2) + 3;
   const hb = hover != null ? bins[hover] : null;
   const tipFont = useTipFontPx();
   const tipLines: TipLine[] = hb
@@ -3226,7 +3268,12 @@ function Histogram({
 
   return (
     <div className="spc-chart-wrap" ref={wrapRef}>
-      <svg className="spc-chart histchart" viewBox={`${LM - 80} -28 ${W + 80} ${H + 68}`} width="100%" height={H + 68}>
+      <svg
+        className="spc-chart histchart"
+        viewBox={`${LM - 80} -28 ${W + 80 + halfLastLabel} ${H + bottomPad}`}
+        width="100%"
+        height={H + bottomPad}
+      >
         {gridVals.map((gv, i) => (
           <line key={i} className="grid-line" x1={LM} y1={y(gv)} x2={LM + W} y2={y(gv)} />
         ))}
@@ -3250,9 +3297,17 @@ function Histogram({
         ))}
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">count</text>
         {tickVals.map((v, i) => (
-          <text key={i} className="x-tick" x={Math.max(LM + 14, Math.min(LM + W - 14, xv(v)))} y={H + 16} textAnchor="middle">{Math.round(v)}</text>
+          <text
+            key={i}
+            className="x-tick"
+            x={Math.max(LM + halfLastLabel, Math.min(LM + W - halfLastLabel, xv(v)))}
+            y={tickY}
+            textAnchor="middle"
+          >
+            {Math.round(v)}
+          </text>
         ))}
-        <text className="axis-title" x={LM + W / 2} y={H + 34} textAnchor="middle">{unit}</text>
+        <text className="axis-title" x={LM + W / 2} y={unitY} textAnchor="middle">{unit}</text>
         {hover != null && hb && (
           <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
         )}
@@ -3408,12 +3463,15 @@ function PChart({
   const W = Math.max(560, measuredW - 136);
   const LM = 46;
   const H = height;
-  const RM = 56;
+  const rmFontPx = useTipFontPx();
   const [hover, setHover] = useState<number | null>(null);
   const withRate = buckets.filter((b) => b.rate != null);
   if (withRate.length === 0 || pBar == null) {
     return <div className="empty-note">Not enough data to chart.</div>;
   }
+  // Same fix as SubgroupChart's RM — was a fixed 56px sized for the old
+  // ~12px axis font; "2.03%" at 16px+ was clipping against the right edge.
+  const RM = Math.max(56, Math.ceil(`${(pBar * 100).toFixed(2)}%`.length * rmFontPx * TIP_CHAR_W) + 14);
   const rates = withRate.map((b) => b.rate!);
   const ucls = withRate.map((b) => b.ucl ?? 0);
   const yMax = Math.max(...rates, ...ucls, pBar) * 1.15 || 0.01;
@@ -3421,7 +3479,13 @@ function PChart({
   const y = (v: number) => (revealed ? H - (v / yMax) * H : H);
 
   const ratePts = withRate.map((b, i) => `${x(i).toFixed(1)},${y(b.rate!).toFixed(1)}`).join(' ');
-  const uclPts = withRate.map((b, i) => `${x(i).toFixed(1)},${y(b.ucl ?? 0).toFixed(1)}`).join(' ');
+  // Buckets below the p-chart validity threshold (n·p̄ < 5) carry ucl: null —
+  // skip them rather than plot at 0, which used to draw a sharp false notch
+  // down to the axis right where the real control limit simply isn't defined.
+  const uclPts = withRate
+    .map((b, i) => (b.ucl == null ? null : `${x(i).toFixed(1)},${y(b.ucl).toFixed(1)}`))
+    .filter((p): p is string => p != null)
+    .join(' ');
 
   const gridN = 4;
   const gridVals = Array.from({ length: gridN + 1 }, (_, i) => (i / gridN) * yMax);
@@ -3990,6 +4054,13 @@ function ShiftTrendChart({
   const LM = 62;
   const H = height;
   const [hover, setHover] = useState<number | null>(null);
+  // Top-left y-axis unit label ("cones" or "reject %") right-anchors at
+  // LM-6 — the fixed 80px left viewBox margin fit "cones" (5 chars) but not
+  // the wider "reject %" (8 chars) once toggled, clipping it against the
+  // chart's own edge at larger font sizes.
+  const axisFontPx = useTipFontPx();
+  const unitLabel = unit === '%' ? 'reject %' : 'cones';
+  const leftPad = Math.max(80, Math.ceil(unitLabel.length * axisFontPx * TIP_CHAR_W) + 16);
 
   const all = series.flatMap((s) => s.points).filter((v): v is number => v != null);
   const lo = all.length ? Math.min(...all) : 0;
@@ -4018,7 +4089,7 @@ function ShiftTrendChart({
 
   return (
     <div className="spc-chart-wrap" ref={wrapRef}>
-      <svg className="spc-chart trend-chart" viewBox={`${LM - 80} -28 ${W + 96} ${H + 60}`} width="100%" height={H + 60}>
+      <svg className="spc-chart trend-chart" viewBox={`${LM - leftPad} -28 ${W + leftPad + 16} ${H + 60}`} width="100%" height={H + 60}>
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">{unit === '%' ? 'reject %' : 'cones'}</text>
         {ticks.map((t, i) => (
           <g key={i}>
@@ -4628,24 +4699,27 @@ function RulesPanel() {
 
       <div style={{ marginTop: 14 }}>
         <div className="s-label" style={{ marginBottom: 6 }}>Weight basis (applies immediately — read-time)</div>
-        <div className="segmented">
-          {['as_recorded', 'gross', 'net'].map((b) => (
-            <button key={b} className={rules.weight?.basis === b ? 'active' : ''} onClick={() => setWeight(b)}>
-              {b === 'as_recorded' ? 'As recorded' : b[0]!.toUpperCase() + b.slice(1)}
-            </button>
-          ))}
-        </div>
+        {/* Was hand-rolled markup missing the sliding <span class="seg-indicator">
+            pill the real Segmented component renders. .segmented button.active
+            sets color:#fff with no background of its own — white text on
+            nothing behind it, i.e. invisible. Reported as an empty button. */}
+        <Segmented
+          value={(rules.weight?.basis ?? 'as_recorded') as 'as_recorded' | 'gross' | 'net'}
+          onChange={setWeight}
+          options={(['as_recorded', 'gross', 'net'] as const).map((b) => ({
+            key: b,
+            label: b === 'as_recorded' ? 'As recorded' : b[0]!.toUpperCase() + b.slice(1),
+          }))}
+        />
       </div>
 
       <div style={{ marginTop: 18 }}>
         <div className="s-label" style={{ marginBottom: 6 }}>Shift basis (needs a canonical rebuild to apply to stored data)</div>
-        <div className="segmented">
-          {['corrected', 'legacy'].map((m) => (
-            <button key={m} className={rules.shift?.mode === m ? 'active' : ''} onClick={() => setShift(m)}>
-              {m[0]!.toUpperCase() + m.slice(1)}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={(rules.shift?.mode ?? 'corrected') as 'corrected' | 'legacy'}
+          onChange={setShift}
+          options={(['corrected', 'legacy'] as const).map((m) => ({ key: m, label: m[0]!.toUpperCase() + m.slice(1) }))}
+        />
         {note && <div className="rule-note">⚠ {note}</div>}
       </div>
     </div>
