@@ -67,6 +67,58 @@ import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmt
 type Shift = 'all' | 'morning' | 'evening' | 'night';
 const SHIFTS: Shift[] = ['all', 'morning', 'evening', 'night'];
 type View = 'dashboard' | 'register' | 'performance' | 'weight' | 'shift' | 'rejects' | 'admin';
+/**
+ * Text size is an environment decision, not a design one. An operator reading a
+ * wall-mounted screen across the shop floor and a supervisor at a desk need
+ * genuinely different sizes, and plant staff skew older — so rather than us
+ * guessing a single value and fielding "make it bigger" every review, the user
+ * sets it. It scales the ENTIRE interface (one CSS variable feeding a rem
+ * scale), so layout proportions hold instead of text outgrowing its boxes.
+ *
+ * Stored per browser, not per account: the right size follows the screen you
+ * are sitting at, and the same operator at a different station wants different
+ * settings.
+ */
+const UI_SCALES = [
+  { key: '1', label: 'Normal', px: 18 },
+  { key: '1.125', label: 'Large', px: 20 },
+  { key: '1.25', label: 'Extra large', px: 22 },
+] as const;
+
+function DisplayScale() {
+  const [scale, setScale] = useState<string>(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('sms.uiScale') : null;
+    return UI_SCALES.some((s) => s.key === saved) ? saved! : '1';
+  });
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ui-scale', scale);
+    try {
+      localStorage.setItem('sms.uiScale', scale);
+    } catch {
+      /* private mode — the setting just won't persist */
+    }
+  }, [scale]);
+
+  return (
+    <div className="uiscale" role="group" aria-label="Text size">
+      {UI_SCALES.map((s) => (
+        <button
+          key={s.key}
+          type="button"
+          className={scale === s.key ? 'active' : ''}
+          style={{ fontSize: `${11 + Number(s.key) * 3}px` }}
+          onClick={() => setScale(s.key)}
+          aria-pressed={scale === s.key}
+          title={`Text size: ${s.label}`}
+        >
+          A<span className="sr-only"> — {s.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const VIEW_LABEL: Record<View, string> = {
   dashboard: 'Overview',
   register: 'Register',
@@ -320,6 +372,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           </nav>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <DisplayScale />
           {freshness && (
             <span className="freshness" title={`last sync ${freshness.lastSyncUtc ?? 'never'}`}>
               <span className={`led ${freshnessLevel(freshness.sourceAgeSeconds)}`} />
