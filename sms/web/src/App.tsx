@@ -29,6 +29,7 @@ import {
   getSpc,
   getRejectSpc,
   getOee,
+  getOperations,
   ROLE_RANK,
   type AuthUser,
   type AdminUser,
@@ -61,12 +62,13 @@ import {
   type RejectBucket,
   type RejectTypeFilter,
   type OeeData,
+  type OperationsData,
 } from './api';
 import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmtDateTime, fmtTime } from './format';
 
 type Shift = 'all' | 'morning' | 'evening' | 'night';
 const SHIFTS: Shift[] = ['all', 'morning', 'evening', 'night'];
-type View = 'dashboard' | 'register' | 'performance' | 'weight' | 'shift' | 'rejects' | 'admin';
+type View = 'dashboard' | 'register' | 'performance' | 'weight' | 'shift' | 'rejects' | 'operations' | 'admin';
 /**
  * Text size is an environment decision, not a design one. An operator reading a
  * wall-mounted screen across the shop floor and a supervisor at a desk need
@@ -126,6 +128,7 @@ const VIEW_LABEL: Record<View, string> = {
   weight: 'Weight',
   shift: 'Shifts',
   rejects: 'Rejects',
+  operations: 'Operations',
   admin: 'Admin',
 };
 
@@ -142,7 +145,7 @@ function parseRoute(): Route {
   if (typeof window === 'undefined') return { view: 'dashboard' };
   const p = new URLSearchParams(window.location.search);
   const v = p.get('v');
-  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'admin'] as const).includes(v as View)
+  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'admin'] as const).includes(v as View)
     ? (v as View)
     : 'dashboard';
   const dtype = p.get('dtype');
@@ -366,6 +369,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
             <button aria-current={view === 'weight' ? 'page' : undefined} className={view === 'weight' ? 'active' : ''} onClick={() => setView('weight')}>Weight</button>
             <button aria-current={view === 'rejects' ? 'page' : undefined} className={view === 'rejects' ? 'active' : ''} onClick={() => setView('rejects')}>Rejects</button>
             <button aria-current={view === 'shift' ? 'page' : undefined} className={view === 'shift' ? 'active' : ''} onClick={() => setView('shift')}>Shifts</button>
+            <button aria-current={view === 'operations' ? 'page' : undefined} className={view === 'operations' ? 'active' : ''} onClick={() => setView('operations')}>Operations</button>
             {rank >= 4 && (
               <button aria-current={view === 'admin' ? 'page' : undefined} className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
             )}
@@ -374,10 +378,15 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         <div className="topbar-tools">
           <DisplayScale />
           {freshness && (
-            <span className="freshness" title={`last sync ${freshness.lastSyncUtc ?? 'never'}`}>
+            <button
+              type="button"
+              className="freshness as-link"
+              title={`last sync ${freshness.lastSyncUtc ?? 'never'} — open Operations`}
+              onClick={() => setView('operations')}
+            >
               <span className={`led ${freshnessLevel(freshness.sourceAgeSeconds)}`} />
               synced {ageLabel(freshness.sourceAgeSeconds)}
-            </span>
+            </button>
           )}
           <span className="userchip">
             <span className="who">
@@ -438,6 +447,8 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         <ShiftView range={range} onMeta={setFreshness} />
       ) : view === 'rejects' ? (
         <RejectsHub range={range} onMeta={setFreshness} rank={rank} initialSub={navContext?.sub} />
+      ) : view === 'operations' ? (
+        <OperationsView onMeta={setFreshness} />
       ) : (
         <AdminView />
       )}
@@ -4623,6 +4634,220 @@ function CurrentProductBar({ rank }: { rank: number }) {
 }
 
 /* ---------------- Admin (admin only) ---------------- */
+
+/* ---------------- Operations: can you trust what the other pages say? ----------------
+ *
+ * Every other view answers a question about the LINE. This one answers a question
+ * about the DATA, and it is the first place to look when a dashboard reads low or
+ * zero: is the number small because the plant was slow, or because ingestion
+ * stopped four hours ago?
+ *
+ * The endpoint already existed and returned all of this; there was simply no
+ * screen, so the provenance work was invisible. Three things are worth a
+ * customer's attention here, and none of them are visible anywhere else:
+ *   - a per-table watermark, which is what makes the sync incremental and
+ *     resumable rather than a nightly re-import;
+ *   - a schema fingerprint per source table, which HALTS the sync when IFL's
+ *     schema changes underneath us instead of silently writing wrong data;
+ *   - data-quality findings by severity, published rather than suppressed.
+ */
+function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
+  const [data, setData] = useState<OperationsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getOperations()
+      .then((r) => {
+        if (cancelled) return;
+        setData(r.data);
+        onMeta(r.metadata);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [onMeta, reloadKey]);
+
+  if (error) return <div className="error-card" role="alert"><b>Couldn't load operations status.</b> {error}</div>;
+  if (loading || !data) return <div className="tile skeleton" style={{ height: 260 }} />;
+
+  // Freshness is judged on the OLDEST table, not an average: one stalled table
+  // is a stalled pipeline, and averaging would hide it.
+  const ages = data.sync.map((s) => s.ageSeconds).filter((a): a is number => a != null);
+  const worstAge = ages.length ? Math.max(...ages) : null;
+  const level = freshnessLevel(worstAge);
+  const anyFailed = data.sync.some((s) => s.outcome !== 'success');
+  const sev = data.dq.bySeverity;
+  const blocking = (sev.CRITICAL ?? 0) + (sev.ERROR ?? 0);
+
+  return (
+    <>
+      <div className="callout" style={{ borderLeftColor: level === 'ok' ? 'var(--green)' : level === 'warn' ? 'var(--amber)' : 'var(--alert)' }}>
+        <div className="big">
+          {anyFailed ? (
+            <>Ingestion <span className="accent" style={{ color: 'var(--alert)' }}>reported a failure</span> on its last pass</>
+          ) : level === 'ok' ? (
+            <>Ingestion healthy — all {data.sync.length} tables current</>
+          ) : (
+            <>
+              Ingestion last completed <span className="accent" style={{ color: level === 'crit' ? 'var(--alert)' : 'var(--amber)' }}>{ageLabel(worstAge)}</span>
+            </>
+          )}
+        </div>
+        <p>
+          Everything the other pages show is derived from this pipeline, so this is the page to check
+          first if a figure looks wrong. {level !== 'ok' && !anyFailed && (
+            <>
+              A large age here does not mean data was lost — the raw layer is append-only and the sync
+              resumes from its stored watermark, so restarting the worker picks up exactly where it
+              stopped. It means the newest events on the line may not be in the app yet.
+            </>
+          )}
+        </p>
+        <button className="abtn" onClick={() => setReloadKey((k) => k + 1)}>Re-check now</button>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Ingestion by table</h2>
+          <span className="sub">{data.sync.length} source tables</span>
+        </div>
+        <div className="hint">
+          Each table advances its own <b>watermark</b> — the highest source row id already ingested — so a
+          pass reads only what is new and a restart never re-reads from the beginning. Rows read exceeds
+          rows written because a deliberate overlap window re-reads recent rows to catch late-arriving
+          edits; re-ingesting an unchanged row writes nothing.
+        </div>
+        <div className="table-scroll">
+          <table className="atable">
+            <thead>
+              <tr>
+                <th>Target table</th>
+                <th>Outcome</th>
+                <th className="num">Watermark</th>
+                <th className="num">Read</th>
+                <th className="num">Written</th>
+                <th>Last completed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.sync.map((s) => (
+                <tr key={s.targetTable}>
+                  <td className="mono">{s.targetTable}</td>
+                  <td>
+                    <span className={`pill ${s.outcome === 'success' ? 'on' : 'off'}`}>{s.outcome}</span>
+                  </td>
+                  <td className="mono num">{s.watermark == null ? '—' : fmtInt(s.watermark)}</td>
+                  <td className="mono num">{fmtInt(s.rowsRead)}</td>
+                  <td className="mono num">{fmtInt(s.rowsWritten)}</td>
+                  <td className="mono">
+                    {s.finishedAtUtc ? fmtDateTime(s.finishedAtUtc) : '—'}
+                    <span className="sub" style={{ marginLeft: 8 }}>{ageLabel(s.ageSeconds)}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Schema-drift guard</h2>
+          <span className="sub">{data.schema.length} source tables fingerprinted</span>
+        </div>
+        <div className="hint">
+          Each source table's column names and types are hashed. If IFL changes a table we depend on,
+          the fingerprint stops matching and <b>the sync halts with an explicit error instead of writing
+          wrong data</b>. A silent corruption is far more expensive than a loud stop, so this is
+          deliberately fail-closed.
+        </div>
+        <div className="table-scroll">
+          <table className="atable">
+            <thead>
+              <tr><th>Source table</th><th>Status</th><th>Fingerprint</th></tr>
+            </thead>
+            <tbody>
+              {data.schema.map((f) => (
+                <tr key={f.table}>
+                  <td className="mono">{f.table}</td>
+                  <td><span className="pill on">{f.status === 'ok' ? 'matching' : f.status}</span></td>
+                  <td className="mono" style={{ color: 'var(--graphite-dim)' }}>{f.fingerprint}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Data-quality findings</h2>
+          <span className="sub">
+            {data.dq.findings.length === 0 ? 'none open' : `${data.dq.findings.length} open`}
+          </span>
+        </div>
+        <div className="hint">
+          Published, not suppressed. These are checks the pipeline runs on every pass against IFL's own
+          data; a finding describes something about the source, not a defect in this app. Severity
+          decides whether it merely annotates a figure or blocks a rebuild.
+        </div>
+        <div className="stat-row">
+          <Stat label="Critical" val={String(sev.CRITICAL ?? 0)} accent={(sev.CRITICAL ?? 0) > 0} />
+          <Stat label="Error" val={String(sev.ERROR ?? 0)} accent={(sev.ERROR ?? 0) > 0} />
+          <Stat label="Warning" val={String(sev.WARNING ?? 0)} />
+          <Stat label="Info" val={String(sev.INFO ?? 0)} />
+        </div>
+        {data.dq.findings.length > 0 && (
+          <div className="table-scroll" style={{ marginTop: 14 }}>
+            <table className="atable">
+              <thead>
+                <tr><th>Severity</th><th>Check</th><th>Subject</th><th>Detail</th></tr>
+              </thead>
+              <tbody>
+                {data.dq.findings.map((f, i) => (
+                  <tr key={i}>
+                    <td>
+                      <span className={`pill ${f.severity === 'CRITICAL' || f.severity === 'ERROR' ? 'off' : 'on'}`}>
+                        {f.severity.toLowerCase()}
+                      </span>
+                    </td>
+                    <td className="mono">{f.checkName}</td>
+                    <td className="mono">{f.subjectTable ?? '—'}</td>
+                    <td>{f.detail ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="hint" style={{ marginTop: 12 }}>
+          {blocking > 0 ? (
+            <>
+              <b>{blocking}</b> finding{blocking === 1 ? '' : 's'} at error or above. These are real
+              readings in IFL's data — a non-positive weight is a scale fault, not a light sack — and they
+              are excluded from statistics while remaining visible here and in the register.
+            </>
+          ) : (
+            <>No findings at error or above on the most recent pass.</>
+          )}
+          {data.dq.latestRunId && (
+            <span className="sub" style={{ marginLeft: 8 }}>run {data.dq.latestRunId.slice(0, 8)}</span>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
 
 function AdminView() {
   return (

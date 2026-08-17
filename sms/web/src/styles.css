@@ -1156,3 +1156,28 @@ body {
 .panel.spec-disagree > .panel-head:first-child { background: var(--amber); }
 .panel.spec-disagree > .panel-head:first-child h2,
 .panel.spec-disagree > .panel-head:first-child .sub { color: #fff; }
+
+/* The freshness badge became a button (it opens Operations — the natural place a
+   user goes when asking "is this current?"). Reset the UA chrome it inherits and
+   make the affordance visible, without turning a status readout into a CTA. */
+.freshness.as-link {
+  font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+.freshness.as-link:hover { border-color: var(--brand-600); color: var(--ink); }
+
+/* Nav strip at narrow widths. The 8th item (Operations) makes the nav 815px in a
+   single nowrap row, which forced the whole PAGE to scroll horizontally below
+   ~900px — the topbar and brand already wrap, but the nav strip could not.
+   Above 900px nothing changes and the underline design is untouched. Below it
+   the nav wraps, and the active marker becomes a pill because the underline is
+   positioned to meet the topbar's bottom border and would land mid-bar on a
+   wrapped first row. Wrapping rather than scrolling on purpose: a scrolling nav
+   hides items, and every view should stay discoverable. */
+@media (max-width: 900px) {
+  .segmented.nav { flex-wrap: wrap; }
+  .segmented.nav button.active::after { display: none; }
+  .segmented.nav button.active {
+    background: var(--brand-100); color: var(--brand-900); border-radius: var(--radius-sm);
+  }
+}

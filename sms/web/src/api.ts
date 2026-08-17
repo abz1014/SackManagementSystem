@@ -510,3 +510,28 @@ export function getOee(q: OeeQuery): Promise<Envelope<OeeData>> {
   if (q.shift) p.set('shift', q.shift);
   return get(`/api/oee?${p.toString()}`);
 }
+
+// ---- Operations: sync health, schema-drift guard, data-quality roll-up ----
+export interface SyncStatus {
+  targetTable: string;
+  outcome: string;
+  watermark: number | null;
+  rowsRead: number;
+  rowsWritten: number;
+  finishedAtUtc: string | null;
+  ageSeconds: number | null;
+}
+export interface SchemaFingerprint { table: string; fingerprint: string; status: string; }
+export interface DqFinding { checkName: string; severity: string; subjectTable: string | null; detail: string | null; }
+export interface OperationsData {
+  sync: SyncStatus[];
+  schema: SchemaFingerprint[];
+  dq: {
+    latestRunId: string | null;
+    bySeverity: Record<string, number>;
+    findings: DqFinding[];
+  };
+}
+export function getOperations(): Promise<Envelope<OperationsData>> {
+  return get('/api/operations');
+}
