@@ -4387,8 +4387,27 @@ function WeightView({
                   </>
                 )}
               </div>
+
+              {/* This is the most quotable number in the app and its SIGN is not
+                  yet settled — on this range, net basis turns +1.5 g/cone into
+                  −68.5 g/cone. The caveat travels with the number so it cannot be
+                  screenshotted or quoted without it. */}
+              {data.cone.provisionalReasons.length > 0 && (
+                <div className="provisional" role="note">
+                  <b>Provisional — not for quoting yet.</b>
+                  <ul>
+                    {data.cone.provisionalReasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <p>
-                {data.note} Avg cone <b>{data.cone.avg}g</b> vs {data.cone.nominalSetpointG}g nominal — {data.cone.giveawayPerConeG > 0 ? '+' : ''}
+                {data.note} Avg cone <b>{data.cone.avg}g</b> vs {data.cone.nominalSetpointG}g nominal
+                {data.cone.nominalSource === 'current_product'
+                  ? ` (${data.cone.nominalLabel}'s own setpoint)`
+                  : ' (fallback — no product selected)'}
+                {' — '}{data.cone.giveawayPerConeG > 0 ? '+' : ''}
                 {data.cone.giveawayPerConeG} g/cone. Across {fmtInt(data.cone.count)} cones over {days} day{days === 1 ? '' : 's'}
                 {data.cone.giveawayTotalKg != null && <> ≈ <b>{data.cone.giveawayTotalKg} kg</b> vs nominal</>}.
                 {giveaway && (

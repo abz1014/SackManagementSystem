@@ -24,14 +24,44 @@ export interface WeightStats {
   outliers: Outlier[];
 }
 
+/** Where the nominal the giveaway is measured against actually came from. */
+export type NominalSource = 'current_product' | 'fallback';
+
 export interface WeightsData {
   basis: Basis;
-  cone: WeightStats & { nominalSetpointG: number; giveawayPerConeG: number | null; giveawayTotalKg: number | null };
+  cone: WeightStats & {
+    nominalSetpointG: number;
+    nominalSource: NominalSource;
+    nominalLabel: string | null;
+    /** Non-empty = the giveaway figure is NOT safe to quote. */
+    provisionalReasons: string[];
+    giveawayPerConeG: number | null;
+    giveawayTotalKg: number | null;
+  };
   sack: WeightStats;
   note: string;
 }
 
-const NOMINAL_CONE_SETPOINT_G = 1950; // most materials 1950–1960; nominal until Q1/Q5
+/**
+ * Last-resort nominal, used only when no product has been selected.
+ *
+ * This was previously the ONLY reference in the code, hardcoded, and it drives
+ * the giveaway kg/day and t/year figures — the most quotable numbers in the app.
+ * Two things make that dangerous, so both are now reported instead of hidden:
+ *
+ *  1. The real setpoint is per-product (the product master holds 1950 and 1960
+ *     with ±30/40/50 offsets), so a single constant is wrong for some products
+ *     by more than the giveaway it is trying to measure.
+ *  2. Q4/Q5 (gross vs net) is still unanswered, and it does not merely shift the
+ *     number — measured over the same 18 days it moves giveaway from +1.5 g/cone
+ *     (+213.8 kg) to −68.5 g/cone (−9,761.9 kg). It REVERSES the conclusion from
+ *     overfill to underfill.
+ *
+ * Historical rows also carry no product attribution (attribution_method='none'),
+ * so applying the currently-selected product's setpoint backwards over the range
+ * is an approximation — flagged, not silently applied.
+ */
+const FALLBACK_CONE_SETPOINT_G = 1950;
 
 export async function getWeights(
   pool: ConnectionPool,
@@ -110,10 +140,48 @@ export async function getWeights(
      FROM sms.sack_event WHERE ${dateWhere()} AND (weight_kg < @sackOut OR weight_kg <= 0) ORDER BY weight_kg`,
   );
 
+  // Nominal comes from the product actually selected for this line, when one is.
+  // The net-basis adjustment must be applied to it too, otherwise a net-basis
+  // average is compared against a gross setpoint and the whole tube weight shows
+  // up as fake "underfill" — which is most of the -68.5 g/cone seen on net.
+  const npRes = await pool.request().input('line', mssql.Int, lineId).query<{
+    sp: number | null; descr: string | null; lot: string | null; pid: number | null;
+  }>(
+    `SELECT TOP 1 p.setpoint_weight_g AS sp, p.description AS descr, p.lot_code AS lot, p.product_id AS pid
+     FROM sms.product_timeline t
+     JOIN sms.product p ON p.product_id = t.product_id
+     WHERE t.line_id = @line AND t.superseded = 0 AND p.setpoint_weight_g IS NOT NULL
+     ORDER BY t.effective_from DESC, t.timeline_id DESC`,
+  );
+  const np = npRes.recordset[0];
+  const nominalSource: NominalSource = np?.sp != null ? 'current_product' : 'fallback';
+  const nominalGross = np?.sp != null ? Number(np.sp) : FALLBACK_CONE_SETPOINT_G;
+  const nominalSetpointG = Math.round((nominalGross - coneAdj) * 10) / 10;
+  const nominalLabel =
+    np?.sp != null ? (np.descr || np.lot || `product ${np.pid}`) : null;
+
+  // Everything that makes the giveaway figure unquotable, stated explicitly so
+  // the UI cannot present it as settled and nobody can quote it by accident.
+  const provisionalReasons: string[] = [];
+  if (basis === 'as_recorded') {
+    provisionalReasons.push(
+      'Weight basis is unconfirmed (Q4/Q5). On this range, switching to net moves giveaway from +1.5 g/cone to −68.5 g/cone — it reverses overfill to underfill.',
+    );
+  }
+  if (nominalSource === 'fallback') {
+    provisionalReasons.push(
+      `No product selected, so giveaway is measured against a fallback ${FALLBACK_CONE_SETPOINT_G} g. Real setpoints are per-product (1950 and 1960 g in the product master).`,
+    );
+  } else {
+    provisionalReasons.push(
+      `Measured against the currently-selected product (${nominalLabel}). Historical cones carry no product attribution, so applying today's setpoint across the whole range is an approximation.`,
+    );
+  }
+
   const num = (v: unknown) => (v == null ? null : Math.round(Number(v) * 100) / 100);
   const cs = coneStat.recordset[0]!;
   const coneAvg = num(cs.avg);
-  const giveawayPerConeG = coneAvg == null ? null : Math.round((coneAvg - NOMINAL_CONE_SETPOINT_G) * 10) / 10;
+  const giveawayPerConeG = coneAvg == null ? null : Math.round((coneAvg - nominalSetpointG) * 10) / 10;
   const giveawayTotalKg = giveawayPerConeG == null ? null : Math.round((giveawayPerConeG * cs.n) / 100) / 10;
   const ss = sackStat.recordset[0]!;
 
@@ -127,7 +195,8 @@ export async function getWeights(
       unit: 'g', bucketSize: CONE_BUCKET,
       histogram: coneHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
       outliers: mapOut(coneOut.recordset),
-      nominalSetpointG: NOMINAL_CONE_SETPOINT_G, giveawayPerConeG, giveawayTotalKg,
+      nominalSetpointG, nominalSource, nominalLabel, provisionalReasons,
+      giveawayPerConeG, giveawayTotalKg,
     },
     sack: {
       count: ss.n, avg: num(ss.avg), min: num(ss.mn), max: num(ss.mx), stdev: num(ss.sd),

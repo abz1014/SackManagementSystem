@@ -71,7 +71,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
 
   const prodCache = new TtlCache<Envelope<unknown>>(cfg.cacheTtlSeconds * 1000);
   const loginLimiter = new LoginRateLimiter();
-  app.set('trust proxy', true); // so req.ip reflects the real client behind a reverse proxy
+  // Off unless explicitly enabled: X-Forwarded-For is client-supplied, so
+  // trusting it with no proxy in front makes req.ip attacker-controlled and the
+  // login lockout bypassable. Enable only behind a proxy you control (DEPLOY.md).
+  app.set('trust proxy', cfg.trustProxy);
 
   // health — no envelope, cheap liveness/DB check
   app.get('/api/health', async (_req: Request, res: Response, next: NextFunction) => {
@@ -91,20 +94,32 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'username and password required' });
         return;
       }
-      const clientKey = req.ip ?? 'unknown';
+      // Limit on BOTH axes. Keying on req.ip alone was bypassable by rotating
+      // X-Forwarded-For (proven: 12 failed logins with a rotating header all
+      // returned 401, vs 429 from the 9th on a fixed address). `trust proxy` is
+      // now off by default, which closes that — but keying on the account as
+      // well means IP rotation cannot grind a single account even when a real
+      // proxy is trusted, which is the protection that actually matters for the
+      // admin login. Accepted trade-off: a determined attacker can lock a known
+      // account out for LOCKOUT_MS. On a handful-of-users plant intranet that is
+      // strictly better than unlimited attempts against `admin`.
+      const ipKey = `ip:${req.ip ?? 'unknown'}`;
+      const userKey = `user:${body.data.username.toLowerCase()}`;
       const now = Date.now();
-      const wait = loginLimiter.retryAfter(clientKey, now);
+      const wait = Math.max(loginLimiter.retryAfter(ipKey, now), loginLimiter.retryAfter(userKey, now));
       if (wait > 0) {
         res.setHeader('Retry-After', String(wait)).status(429).json({ error: 'too many attempts, try again later' });
         return;
       }
       const user = await authenticate(pool, body.data.username, body.data.password);
       if (!user) {
-        loginLimiter.recordFailure(clientKey, now);
+        loginLimiter.recordFailure(ipKey, now);
+        loginLimiter.recordFailure(userKey, now);
         res.status(401).json({ error: 'invalid credentials' });
         return;
       }
-      loginLimiter.clear(clientKey);
+      loginLimiter.clear(ipKey);
+      loginLimiter.clear(userKey);
       const s = await createSession(pool, user.userId);
       setSessionCookie(res, s.id, s.expires, req);
       res.json({ user: { username: user.username, displayName: user.displayName, role: user.role } });

@@ -189,9 +189,18 @@ export interface WeightStats {
   count: number; avg: number | null; min: number | null; max: number | null; stdev: number | null;
   unit: 'g' | 'kg'; bucketSize: number; histogram: Bucket[]; outliers: Outlier[];
 }
+export type NominalSource = 'current_product' | 'fallback';
 export interface WeightsData {
   basis: Basis;
-  cone: WeightStats & { nominalSetpointG: number; giveawayPerConeG: number | null; giveawayTotalKg: number | null };
+  cone: WeightStats & {
+    nominalSetpointG: number;
+    nominalSource: NominalSource;
+    nominalLabel: string | null;
+    /** Non-empty = the giveaway figure is not safe to quote externally. */
+    provisionalReasons: string[];
+    giveawayPerConeG: number | null;
+    giveawayTotalKg: number | null;
+  };
   sack: WeightStats;
   note: string;
 }
