@@ -64,6 +64,7 @@ import {
   type OeeData,
   type OperationsData,
 } from './api';
+import { downloadCsv, csvName, type CsvRow } from './csv';
 import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmtDateTime, fmtTime } from './format';
 
 type Shift = 'all' | 'morning' | 'evening' | 'night';
@@ -695,7 +696,14 @@ function RejectStationView({
           <div className="panel">
             <div className="panel-head">
               <h2>Reject rate by station</h2>
-              <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+              <span>
+                <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+                <ExportCsv
+                  name={csvName('reject-rate-by-station', from, to)}
+                  headers={['station', 'n_total', 'reject_rate_pct', 'delta_vs_line_pt', 'statistically_distinguishable', 'flagged_actionable']}
+                  rows={() => analysis.stations.map((st) => [st.station, st.n, st.mean, st.delta, st.distinguishable, st.flagged])}
+                />
+              </span>
             </div>
             <div className="hint">
               Line baseline <b>{analysis.pooledRatePct}%</b>. Dashed lines are the ±{analysis.practicalPct}pt practical
@@ -2201,7 +2209,14 @@ function StoppagePatternView({
           <div className="panel">
             <div className="panel-head">
               <h2>How long do stoppages last?</h2>
-              <span className="sub">{from} to {to}</span>
+              <span>
+                <span className="sub">{from} to {to}</span>
+                <ExportCsv
+                  name={csvName('stoppage-durations', from, to)}
+                  headers={['bucket', 'min_seconds', 'max_seconds', 'count', 'total_down_seconds']}
+                  rows={() => analysis.buckets.map((b) => [b.label, b.min, b.max === Infinity ? '' : b.max, b.count, b.downSeconds])}
+                />
+              </span>
             </div>
             <div className="hint">
               Micro-stops an operator clears, versus breakdowns someone gets called out for. Bars are counts; the figure
@@ -2231,9 +2246,16 @@ function StoppagePatternView({
           <div className="panel">
             <div className="panel-head">
               <h2>When in the day do stoppages happen?</h2>
-              <span className="sub">
-                most days affected: {String(analysis.worstHour.hour).padStart(2, '0')}:00 · {analysis.worstHour.days} of{' '}
-                {analysis.dayCount}
+              <span>
+                <span className="sub">
+                  most days affected: {String(analysis.worstHour.hour).padStart(2, '0')}:00 · {analysis.worstHour.days} of{' '}
+                  {analysis.dayCount}
+                </span>
+                <ExportCsv
+                  name={csvName('stoppages-by-hour', from, to)}
+                  headers={['hour', 'stoppages', 'total_down_seconds', 'days_affected', 'days_in_range']}
+                  rows={() => analysis.byHour.map((h) => [h.hour, h.count, h.downSeconds, h.days, analysis.dayCount])}
+                />
               </span>
             </div>
             <div className="hint">
@@ -2610,7 +2632,17 @@ function DowntimeView({
           </div>
 
           <div className="panel">
-            <h2>Stoppage timeline</h2>
+            <div className="panel-head">
+              <h2>Stoppage timeline</h2>
+              <span>
+                <ExportCsv
+                  name={csvName('stoppages', date, date)}
+                  headers={['start', 'end', 'duration_seconds']}
+                  rows={() => data.stoppages.map((st) => [st.startTs, st.endTs, st.durationSeconds])}
+                />
+                <PrintButton />
+              </span>
+            </div>
             <div className="hint">
               {data.firstTs && data.lastTs
                 ? `${fmtDateTime(data.firstTs)} — ${fmtDateTime(data.lastTs)}. Bar height is the stoppage's duration, so a long breakdown reads differently from a cluster of micro-stops. Click one to open the cones either side of it.`
@@ -2630,7 +2662,14 @@ function DowntimeView({
               </ResizableChart>
             ) : null}
 
-            <h2>Throughput — cones per hour</h2>
+            <div className="panel-head" style={{ marginTop: 6 }}>
+              <h2>Throughput — cones per hour</h2>
+              <ExportCsv
+                name={csvName('throughput-hourly', date, date)}
+                headers={['hour_start', 'cones']}
+                rows={() => data.hourly.map((h) => [h.hourTs, h.count])}
+              />
+            </div>
             <div className="hint">Detected stoppages line up with the low bars below.</div>
             <div className="ratebars">
               {data.hourly.map((h) => (
@@ -2649,11 +2688,22 @@ function DowntimeView({
             <div className="panel" style={{ marginTop: 16 }}>
               <div className="panel-head">
                 <h2>Stoppages — longest first</h2>
-                {data.stoppages.length > STOPPAGE_PREVIEW_COUNT && (
-                  <button className="abtn" onClick={() => setStoppagesExpanded((v) => !v)}>
-                    {stoppagesExpanded ? 'Show less' : `Show all ${data.stoppages.length}`}
-                  </button>
-                )}
+                <span>
+                  {data.stoppages.length > STOPPAGE_PREVIEW_COUNT && (
+                    <button className="abtn" onClick={() => setStoppagesExpanded((v) => !v)}>
+                      {stoppagesExpanded ? 'Show less' : `Show all ${data.stoppages.length}`}
+                    </button>
+                  )}
+                  <ExportCsv
+                    name={csvName('stoppages-ranked', date, date)}
+                    headers={['rank', 'start', 'end', 'duration_seconds']}
+                    rows={() =>
+                      [...data.stoppages]
+                        .sort((a, b) => b.durationSeconds - a.durationSeconds)
+                        .map((st, i) => [i + 1, st.startTs, st.endTs, st.durationSeconds])
+                    }
+                  />
+                </span>
               </div>
               <div className="table-scroll">
                 <table className="dt-table">
@@ -2902,7 +2952,34 @@ function SpcView({
           )}
 
           <div className="panel" style={{ marginTop: 16 }}>
-            <h2>Process summary</h2>
+            <div className="panel-head">
+              <h2>Process summary</h2>
+              <span>
+                <ExportCsv
+                  name={csvName(`process-summary-${type}`, from, to)}
+                  headers={['metric', 'value', 'unit']}
+                  rows={() => [
+                    ['count', data.count, noun],
+                    ['mean', data.mean, unit],
+                    ['sigma_within', data.stdevWithin, unit],
+                    ['sigma_overall', data.stdevOverall, unit],
+                    ['subgroup_size', data.bucketLabel, ''],
+                    ['subgroups', data.subgroups.length, ''],
+                    ['subgroups_out_of_control', data.xbarOutOfControl, ''],
+                    ['practical_threshold', data.practicalThresholdG, unit],
+                    ['stations_flagged', data.flaggedStationCount, ''],
+                    ['spec_source', data.spec.source, ''],
+                    ['spec_lsl', data.spec.lsl, unit],
+                    ['spec_usl', data.spec.usl, unit],
+                    ['cp', data.capability.cp, ''],
+                    ['cpk', data.capability.cpk, ''],
+                    ['pp', data.capability.pp, ''],
+                    ['ppk', data.capability.ppk, ''],
+                  ]}
+                />
+                <PrintButton />
+              </span>
+            </div>
             <div className="hint">
               {/* Population is now every plausible reading, in-spec or not — SPC has to
                   include a station's out-of-spec output or it cannot detect that station
@@ -2951,6 +3028,11 @@ function SpcView({
             <div className="panel" style={{ marginTop: 16 }}>
               <div className="panel-head">
                 <h2>Per-station weight — where the real variation is</h2>
+                <ExportCsv
+                  name={csvName(`per-station-${type}`, from, to)}
+                  headers={['station', 'n', `mean_${unit}`, `stdev_${unit}`, `delta_vs_line_${unit}`, 'statistically_distinguishable', 'flagged_actionable']}
+                  rows={() => data.stations.map((st) => [st.station, st.n, st.mean, st.stdev, st.delta, st.distinguishable, st.flagged])}
+                />
               </div>
               <div className="hint">
                 Each winding station's mean weight vs the line average ({data.grandMean}{unit}). Bars run light (below) to heavy (above);
@@ -2974,7 +3056,14 @@ function SpcView({
           )}
 
           <div className="panel" style={{ marginTop: 16 }}>
-            <h2>X̄ chart — line mean over time</h2>
+            <div className="panel-head">
+              <h2>X̄ chart — line mean over time</h2>
+              <ExportCsv
+                name={csvName(`xbar-${type}`, from, to)}
+                headers={['subgroup_start', 'n', `mean_${unit}`, `ucl_${unit}`, `lcl_${unit}`, 'out_of_control']}
+                rows={() => data.subgroups.map((g) => [g.ts, g.n, g.mean, g.xUcl, g.xLcl, g.xViolates])}
+              />
+            </div>
             <div className="hint">
               Each point is the mean of one {data.bucketLabel} subgroup; the band is that subgroup's ±3σ control limit (narrower where more {noun} landed).
               A point outside the band means the line mean genuinely shifted. Click a point to inspect those {noun}.
@@ -3005,7 +3094,14 @@ function SpcView({
           </div>
 
           <div className="panel" style={{ marginTop: 16 }}>
-            <h2>S chart — within-subgroup spread over time</h2>
+            <div className="panel-head">
+              <h2>S chart — within-subgroup spread over time</h2>
+              <ExportCsv
+                name={csvName(`schart-${type}`, from, to)}
+                headers={['subgroup_start', 'n', `sigma_${unit}`, `ucl_${unit}`, `lcl_${unit}`, 'out_of_control']}
+                rows={() => data.subgroups.map((g) => [g.ts, g.n, g.s, g.sUcl, g.sLcl, g.sViolates])}
+              />
+            </div>
             <div className="hint">
               Each point is the spread (σ) inside one {data.bucketLabel} subgroup, centered on {data.sChartCenter}{unit}. A point above its band means the
               process got erratic in that window.
@@ -3032,7 +3128,14 @@ function SpcView({
           </div>
 
           <div className="panel" style={{ marginTop: 16 }}>
-            <h2>Weight distribution</h2>
+            <div className="panel-head">
+              <h2>Weight distribution</h2>
+              <ExportCsv
+                name={csvName(`distribution-${type}`, from, to)}
+                headers={[`bin_start_${unit}`, `bin_end_${unit}`, 'count']}
+                rows={() => data.histogram.map((b) => [b.start, b.end, b.count])}
+              />
+            </div>
             <div className="hint">
               Every {type === 'cone' ? 'cone' : 'sack'}, in-spec or not, binned. The green line is the mean;
               {data.spec.usl != null ? ' amber lines are the spec tolerance — bars near or past them are the capability risk.' : ' add a spec above to overlay the tolerance.'}
@@ -3549,7 +3652,23 @@ function RejectSpcView({
 
           {data.episodes.length > 0 ? (
             <div className="panel">
-              <h2>Detected episodes</h2>
+              <div className="panel-head">
+                <h2>Detected episodes</h2>
+                <ExportCsv
+                  name={csvName('reject-episodes', from, to)}
+                  headers={['start', 'end', 'buckets', 'total_rejects', 'total_produced', 'rate']}
+                  rows={() =>
+                    data.episodes.map((ep) => [
+                      ep.startTs,
+                      ep.endTs,
+                      ep.bucketCount,
+                      ep.totalRejects,
+                      ep.totalProduced,
+                      ep.totalProduced > 0 ? Math.round((10000 * ep.totalRejects) / ep.totalProduced) / 100 : null,
+                    ])
+                  }
+                />
+              </div>
               <div className="hint">Sorted by severity — longest run first.</div>
               {data.episodes.map((ep, i) => (
                 <div key={i} className={`episode-card${ep.bucketCount === 1 ? ' single' : ''}`}>
@@ -3570,7 +3689,14 @@ function RejectSpcView({
           )}
 
           <div className="panel" style={{ marginTop: 16 }}>
-            <h2>Reject rate control chart</h2>
+            <div className="panel-head">
+              <h2>Reject rate control chart</h2>
+              <ExportCsv
+                name={csvName('reject-control-chart', from, to)}
+                headers={['bucket_start', 'produced', 'rejects', 'rate', 'ucl', 'lcl', 'beyond_control_limit']}
+                rows={() => data.buckets.map((b) => [b.bucketTs, b.produced, b.rejects, b.rate, b.ucl, b.lcl, b.outOfControl])}
+              />
+            </div>
             <div className="hint">
               Dashed line is each bucket's own 3σ upper limit (based on its production volume); flat line is the overall baseline rate.
             </div>
@@ -3853,7 +3979,35 @@ function OeeView({
           </div>
 
           <div className="panel">
-            <h2>What went into this number</h2>
+            <div className="panel-head">
+              <h2>What went into this number</h2>
+              <span>
+                <ExportCsv
+                  name={csvName('oee-inputs', data.from, data.to)}
+                  headers={['input', 'value', 'unit']}
+                  rows={() => [
+                    ['oee_pct', data.oeePct, '%'],
+                    ['availability_pct', data.availabilityPct, '%'],
+                    ['performance_pct', data.performancePct, '%'],
+                    ['quality_pct', data.qualityPct, '%'],
+                    ['planned_seconds', data.plannedSeconds, 's'],
+                    ['run_seconds', data.runSeconds, 's'],
+                    ['down_seconds', data.downSeconds, 's'],
+                    ['stoppage_count', data.stoppageCount, ''],
+                    ['ideal_cycle_seconds', data.idealCycleSeconds, 's'],
+                    ['ideal_cycle_source', data.idealCycleSource, ''],
+                    ['produced_count', data.producedCount, 'cones'],
+                    ['rejected_count', data.rejectedCount, 'cones'],
+                    ['threshold_seconds', data.thresholdSeconds, 's'],
+                    ['planned_hours_per_day', data.plannedHoursPerDay, 'h'],
+                    ['first_event', data.firstTs, ''],
+                    ['last_event', data.lastTs, ''],
+                    ['possibly_partial', data.possiblyPartial, ''],
+                  ]}
+                />
+                <PrintButton />
+              </span>
+            </div>
             <div className="stat-row">
               <Stat label="Planned time" val={fmtDuration(data.plannedSeconds)} />
               <Stat label="Downtime" val={fmtDuration(data.downSeconds)} />
@@ -4054,7 +4208,15 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
           <div className="panel">
             <div className="panel-head">
               <h2>Shift scorecard</h2>
-              <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+              <span>
+                <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+                <ExportCsv
+                  name={csvName('shift-scorecard', from, to)}
+                  headers={['metric', 'unit', ...scores.map((sc) => sc.shift)]}
+                  rows={() => SHIFT_METRICS.map((m) => [m.label, m.unit, ...scores.map((sc) => m.value(sc))])}
+                />
+                <PrintButton />
+              </span>
             </div>
             <div className="hint">
               Best value in each row is emphasised; the worst is marked when being worst actually signals a problem.
@@ -4098,6 +4260,17 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
           <div className="panel">
             <div className="panel-head">
               <h2>Day over day, by shift</h2>
+              <span>
+                {trendSeries && (
+                  <ExportCsv
+                    name={csvName(`shift-trend-${trendMetric}`, from, to)}
+                    headers={['date', ...trendSeries.series.map((sr) => sr.name)]}
+                    rows={() =>
+                      trendSeries.days.map((d, i) => [d, ...trendSeries.series.map((sr) => sr.points[i] ?? null)])
+                    }
+                  />
+                )}
+              </span>
               <Segmented
                 value={trendMetric}
                 onChange={setTrendMetric}
@@ -4337,7 +4510,14 @@ function RejectView({ onMeta, rank }: { onMeta: (m: Meta) => void; rank: number 
       </div>
 
       <div className="panel">
-        <h2>Reject reasons — Pareto</h2>
+        <div className="panel-head">
+          <h2>Reject reasons — Pareto</h2>
+          <ExportCsv
+            name={csvName('reject-pareto')}
+            headers={['reject_type', 'tube_code', 'material_code', 'label', 'count', 'pct_of_total', 'cumulative_pct']}
+            rows={() => data.reasons.map((r) => [r.rejectType, r.tubeCode, r.materialCode, r.label ?? '', r.count, r.pct, r.cumulativePct])}
+          />
+        </div>
         <div className="hint">Ordered by frequency. Edit a label to record what a code means.</div>
         <div className="pareto">
           {data.reasons.map((r) => (
@@ -4644,6 +4824,57 @@ function RejectReasonCell({ row }: { row: RegisterRow }) {
   );
 }
 
+/**
+ * Export affordance for an analytics panel. Sits in the panel head, where the
+ * existing .abtn override already renders it correctly against the dark bezel.
+ *
+ * `rows` is a thunk so the (sometimes large) row array is only built when the
+ * user actually clicks, rather than on every render of every panel.
+ */
+function ExportCsv({
+  name,
+  headers,
+  rows,
+  label = 'CSV',
+}: {
+  name: string;
+  headers: string[];
+  rows: () => CsvRow[];
+  label?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="abtn"
+      disabled={busy}
+      title={`Download this panel's data as CSV (${name}.csv)`}
+      onClick={() => {
+        setBusy(true);
+        try {
+          const r = rows();
+          if (r.length === 0) return;
+          downloadCsv(name, headers, r);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Print affordance. The @media print rules already drop interactive chrome and
+ *  force collapsed notes open, so this is just the trigger. */
+function PrintButton({ label = 'Print' }: { label?: string }) {
+  return (
+    <button type="button" className="abtn" onClick={() => window.print()} title="Print or save as PDF">
+      {label}
+    </button>
+  );
+}
+
 function Stat({ label, val, u, accent }: { label: string; val: string; u?: string; accent?: boolean }) {
   return (
     <div className={`stat${accent ? ' accent' : ''}`}>
@@ -4837,7 +5068,15 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
       <div className="panel">
         <div className="panel-head">
           <h2>Ingestion by table</h2>
-          <span className="sub">{data.sync.length} source tables</span>
+          <span>
+            <span className="sub">{data.sync.length} source tables</span>
+            <ExportCsv
+              name={csvName('operations-ingestion')}
+              headers={['target_table', 'outcome', 'watermark', 'rows_read', 'rows_written', 'finished_at_utc', 'age_seconds']}
+              rows={() => data.sync.map((x) => [x.targetTable, x.outcome, x.watermark, x.rowsRead, x.rowsWritten, x.finishedAtUtc, x.ageSeconds])}
+            />
+            <PrintButton />
+          </span>
         </div>
         <div className="hint">
           Each table advances its own <b>watermark</b> — the highest source row id already ingested — so a
@@ -4914,8 +5153,17 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
       <div className="panel">
         <div className="panel-head">
           <h2>Data-quality findings</h2>
-          <span className="sub">
-            {data.dq.findings.length === 0 ? 'none open' : `${data.dq.findings.length} open`}
+          <span>
+            <span className="sub">
+              {data.dq.findings.length === 0 ? 'none open' : `${data.dq.findings.length} open`}
+            </span>
+            {data.dq.findings.length > 0 && (
+              <ExportCsv
+                name={csvName('operations-dq')}
+                headers={['severity', 'check_name', 'subject_table', 'detail', 'run_id']}
+                rows={() => data.dq.findings.map((f) => [f.severity, f.checkName, f.subjectTable, f.detail, data.dq.latestRunId])}
+              />
+            )}
           </span>
         </div>
         <div className="hint">

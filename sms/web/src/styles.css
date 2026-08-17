@@ -1186,3 +1186,13 @@ body {
 .reject-reason { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .reject-reason .rr-label { color: var(--ink); }
 .reject-reason .rr-codes { color: var(--graphite-dim); font-size: var(--fs-xs); }
+
+/* Panel heads can now carry several controls (a sub-label, an export, a print,
+   sometimes a toggle). Group them so they stay on one line, keep an even gap,
+   and wrap together rather than colliding with the title at narrow widths. */
+.panel-head > span { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.panel-head .abtn { white-space: nowrap; }
+@media print {
+  /* an export button is meaningless on paper */
+  .panel-head .abtn { display: none !important; }
+}
