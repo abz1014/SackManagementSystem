@@ -161,6 +161,39 @@ export async function getSpec(
 
 const HIST_BINS = 32;
 
+/**
+ * PLAUSIBILITY GUARD — physically-impossible readings only.
+ *
+ * This replaces what used to be an `in_range = 1` filter on the SPC population,
+ * which conflated two different jobs:
+ *
+ *   in_range is the PLC's SPEC verdict — "is this cone inside the tolerance
+ *   band" — and it is exactly the wrong thing to filter an SPC population by.
+ *   The purpose of per-station analysis is to find a station drifting off
+ *   target; filtering to in-spec cones first removes that station's worst
+ *   output from the very evidence used to judge it. The bias is small in
+ *   magnitude while the line runs well (0.29% out of range today; measured
+ *   station means move only 0.01-0.19g) but it is wrong in DIRECTION and it
+ *   grows precisely when a station is at its worst — i.e. it fails when it
+ *   matters. Out-of-spec cones are real production and must count.
+ *
+ *   A data-quality guard is still needed, and is a separate concern: the scale
+ *   emits occasional faults that are not light/heavy cones but non-readings.
+ *   Verified in the 18-day sample: one cone at 824g, and a fault population of
+ *   ~214 cones at 2200-2354g — far outside the widest real product tolerance
+ *   (the product master's envelope is 1910-2010g). Left in, those would move
+ *   the mean and inflate sigma. So we exclude on PLAUSIBILITY, not on spec.
+ *
+ * Bounds are deliberately generous — wide enough that no genuinely out-of-spec
+ * cone is ever discarded, tight enough to drop non-readings. The cone lower
+ * bound and the sack lower bound match the outlier rule already documented in
+ * CLAUDE.md ("sacks < 40 kg, cones < 1500 g").
+ */
+const PLAUSIBLE = {
+  cone: { lo: 1500, hi: 2100 }, // grams; real spec envelope is 1910-2010
+  sack: { lo: 40, hi: 60 }, // kg; real sacks run ~47
+} as const;
+
 export async function getWeightSpc(
   pool: ConnectionPool,
   lineId: number,
@@ -173,10 +206,12 @@ export async function getWeightSpc(
   const table = type === 'cone' ? 'sms.cone_event' : 'sms.sack_event';
   const col = type === 'cone' ? 'weight_g' : 'weight_kg';
   const unit: 'g' | 'kg' = type === 'cone' ? 'g' : 'kg';
+  const plaus = type === 'cone' ? PLAUSIBLE.cone : PLAUSIBLE.sack;
 
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
   const where =
-    `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL AND in_range = 1` +
+    `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL` +
+    ` AND ${col} BETWEEN @plausLo AND @plausHi` +
     (shift ? ' AND shift_code=@shift' : '');
 
   // 1. Overall summary — one pass, no row transfer. Drives the bucket sizing.
@@ -184,7 +219,9 @@ export async function getWeightSpc(
     .request()
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to);
+    .input('to', mssql.Date, to)
+    .input('plausLo', mssql.Float, plaus.lo)
+    .input('plausHi', mssql.Float, plaus.hi);
   if (shift) sumReq.input('shift', mssql.VarChar(10), shift);
   const sumRes = await sumReq
     .query<{ n: number; mean: number | null; sd: number | null }>(
@@ -206,7 +243,9 @@ export async function getWeightSpc(
       .input('line', mssql.Int, lineId)
       .input('from', mssql.Date, from)
       .input('to', mssql.Date, to)
-      .input('bucketMin', mssql.Int, bucketMinutes);
+      .input('bucketMin', mssql.Int, bucketMinutes)
+      .input('plausLo', mssql.Float, plaus.lo)
+      .input('plausHi', mssql.Float, plaus.hi);
     if (shift) r.input('shift', mssql.VarChar(10), shift);
     extra?.(r);
     return r;

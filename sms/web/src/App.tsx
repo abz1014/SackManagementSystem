@@ -2766,8 +2766,12 @@ function SpcView({
           <div className="panel" style={{ marginTop: 16 }}>
             <h2>Process summary</h2>
             <div className="hint">
-              {fmtInt(data.count)} in-range {type === 'cone' ? 'cones' : 'sacks'}, {from === to ? from : `${from} to ${to}`} ·
-              {' '}grouped into {data.subgroups.length} {data.bucketLabel} subgroups.
+              {/* Population is now every plausible reading, in-spec or not — SPC has to
+                  include a station's out-of-spec output or it cannot detect that station
+                  drifting. Only physically impossible readings (scale faults) are excluded. */}
+              {fmtInt(data.count)} {type === 'cone' ? 'cones' : 'sacks'}, {from === to ? from : `${from} to ${to}`} ·
+              {' '}grouped into {data.subgroups.length} {data.bucketLabel} subgroups. In-spec and
+              out-of-spec both count; implausible readings (scale faults) are excluded.
             </div>
             <div className="stat-row">
               <Stat label="Mean" val={`${data.mean}`} u={unit} accent />
@@ -2892,7 +2896,7 @@ function SpcView({
           <div className="panel" style={{ marginTop: 16 }}>
             <h2>Weight distribution</h2>
             <div className="hint">
-              Every in-range {type === 'cone' ? 'cone' : 'sack'}, binned. The green line is the mean;
+              Every {type === 'cone' ? 'cone' : 'sack'}, in-spec or not, binned. The green line is the mean;
               {data.spec.usl != null ? ' amber lines are the spec tolerance — bars near or past them are the capability risk.' : ' add a spec above to overlay the tolerance.'}
             </div>
             <ResizableChart initialHeight={300}>
