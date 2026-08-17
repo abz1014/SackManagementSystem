@@ -79,15 +79,29 @@
 
 ### 3.1 Adapter contract
 
-Every data source implements one interface. Phase 1 registers one adapter; Phase 2 adds a second with no change to the tables or the merge logic.
+> ### ⚠️ NOT IMPLEMENTED — this section is a design target, not a description of the code.
+>
+> Audited 17 Aug 2026: **`IngestionAdapter` does not exist.** Zero hits across the
+> monorepo. The runner instantiates a concrete `IflSqlAdapter`; `transform.ts`
+> hardcodes `source_system: 'ifl_sql'`; `persistRaw` is insert-only, not an
+> idempotent upsert. The claim below that "the sync runner is source-agnostic"
+> is **false today**.
+>
+> Extracting this interface for real — plus making transform source-agnostic and
+> adding a merge-and-enrich upsert — is roughly **1.5 weeks** and is a hard
+> prerequisite for any second source (PLC or otherwise). Budget it explicitly;
+> do not present it as already done, and do not cite this section as evidence of
+> pluggability in any customer-facing document.
+
+**Design intent (unbuilt).** Every data source implements one interface. Phase 1 would register one adapter; Phase 2 adds a second with no change to the tables or the merge logic.
 
 ```
-interface IngestionAdapter:
+interface IngestionAdapter:            // TARGET SHAPE — no such type exists yet
     source_id      -> str            # 'ifl_sql' | 'plc_direct'
     fetch(since)   -> Iterable[CanonicalConeEvent | CanonicalSackEvent]
 ```
 
-The sync runner is source-agnostic: it calls `fetch()`, maps to the canonical event shape, and hands off to a single **idempotent upsert** path. Adding Component B means registering a second adapter — no new tables, no altered columns, no changed merge code.
+The intended end state is a source-agnostic runner: it calls `fetch()`, maps to the canonical event shape, and hands off to a single **idempotent upsert** path, so adding Component B means registering a second adapter — no new tables, no altered columns, no changed merge code. **Reaching that state is future work.**
 
 ### 3.2 Merge key — the part that must be right today
 
@@ -202,23 +216,37 @@ Attribution results are **stored denormalised** on the event row *and* recomputa
 
 ---
 
-## 7. PLC reader stub — present, disabled
+## 7. PLC reader — documented re-entry point (NO stub exists)
 
-> **Status after Q22:** IFL confirmed **no PLC integration in scope**. The stub below is now **optionality-only** — it costs nothing and preserves a clean re-entry point if IFL revisits, but it is not on any current roadmap. If you'd prefer, we can drop even the stub; my recommendation is to keep it since it's inert and dependency-free.
+> **Status after Q22:** IFL confirmed **no PLC integration in scope**, so nothing
+> was built.
+>
+> ### ⚠️ Corrected 17 Aug 2026 — this section previously overstated what exists.
+>
+> There is **no stub, no adapter, and no config parsing.** The keys below live in
+> `.env.example` and **nothing reads them** — `PLC_READER_ENABLED` has zero hits
+> in any `.ts` file. There is no class that raises `NotImplementedError`, and
+> **no test asserts the flag defaults false or that no PLC library is importable**
+> (the three test files are `appConfig`, `fingerprint`, `transform`).
+>
+> What is genuinely true and safe to state: **no PLC library appears in any of the
+> five package manifests**, and IFL's own PLC addressing has been reverse-engineered
+> into `SCHEMA.md` §2.1 so the homework is done. Call this *a documented,
+> dependency-free re-entry point* — **never "PLC-ready" or "a stub"**.
 
-Committed in Phase 1, non-functional by design:
+The addressing below is real, taken from IFL's own `t_plcs` / `t_items` registry — it is reference material for whenever a PLC phase is actually commissioned, **not evidence of an implementation**:
 
 ```
-# .env.example
-PLC_READER_ENABLED=false      # Phase 2 — do not enable
+# .env.example — DECLARED ONLY; no code reads these
+PLC_READER_ENABLED=false      # never read by any .ts file
 PLC_HOST=10.1.1.11            # from t_plcs
 PLC_RACK=0
 PLC_SLOT=1
 PLC_CONE_ID_DB=DB7.DBD10      # P1_ConeID, from t_items
 ```
 
-- Config keys parsed and validated; adapter registered but **not started** when the flag is false.
-- **No PLC library is added to the dependency manifest in Phase 1.** The stub is an interface implementation that raises `NotImplementedError` if enabled.
+- Config keys are **declared, not parsed or validated**. No adapter is registered.
+- **No PLC library is in any dependency manifest.** Enforced by review convention, not by a test — adding that test is cheap and would make the guarantee real.
 - A test asserts the flag defaults to false and that no PLC dependency is importable — so Phase 1 cannot accidentally acquire PLC connectivity.
 
 ---

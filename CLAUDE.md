@@ -48,15 +48,21 @@ Commissioning is split by **component**, not just by activity. Phase 1 does **no
 3. **Do not write to IFL's databases, and do not alter them in any way** — no schema, **indexes**, tables, procs, or data (Q21, hard client constraint). Reads only. Writes (Current Product, users, notes) go to the **app-owned DB only**.
 4. **Web app queries the app-owned DB** (sidecar). *Pending D0:* IFL's Q19 says "connect directly"; do not finalise the data-access path until D0 is decided.
 
-### ✅ Phase 2 readiness required in Phase 1 (zero extra cost)
+### Phase 2 readiness — VERIFIED STATUS (audited 17 Aug 2026)
 
-These must be in place from day one so Phase 2 needs **no schema migration**:
+> **Read this section as a status report, not as a design intent.** Three of the
+> five items below were previously written here as accomplished fact and were
+> not true in the code. They were corrected only after an audit grepped for them
+> and found nothing — after they had already been repeated to the customer-facing
+> side of the project. **Anything in this file that claims a capability must be
+> greppable in the code, or must say plainly that it is a plan.**
+> Marked ✅ implemented / ⚠️ partial / ❌ designed only.
 
-1. **`cone_id` column exists and is nullable** on `sms.cone_event`, alongside **`cone_id_source`** (provenance: `plc_direct` \| `sql_sync` \| null). Both null in Phase 1.
-2. **Ingestion is adapter-based** (`IngestionAdapter` interface, `SPEC.md` §3). Component B ships as a second adapter writing to the same tables via the same idempotent upsert — no new tables, no altered columns.
-3. **Cross-source merge key** `(line_id, production_ts_utc_ms, hanger_num)` is stored on every row, using the *raw epoch-ms* PLC timestamp so both sources compute it identically. See `SPEC.md` §3.2 for the DQ-2 collision caveat.
-4. **PLC feature flag stub present and disabled** — `PLC_READER_ENABLED=false` plus host/rack/slot/DB-address config keys, parsed and validated but never started. A test asserts the flag defaults false and no PLC library is importable.
-5. **Product attribution behind `ProductAttributionStrategy`** (`SPEC.md` §5), so the implementation swaps when Q1 is answered and swaps again when Cone ID arrives in Phase 2. Phase 1 default is `NullAttribution`.
+1. ✅ **IMPLEMENTED — `cone_id` column exists and is nullable** on `sms.cone_event`, alongside **`cone_id_source`** (provenance: `plc_direct` \| `sql_sync` \| null). Both null in Phase 1. Verified: `sms/db/migrations/003_cone_event.sql:36`.
+2. ❌ **DESIGNED ONLY — ingestion is NOT adapter-based.** There is no `IngestionAdapter` interface anywhere in the codebase (zero hits in any `.ts`). `SPEC.md` §3 and `ARCHITECTURE.md` §10 describe an *intended* shape. In reality the runner news a concrete `IflSqlAdapter`, `transform.ts` bakes in `source_system: 'ifl_sql'`, and `persistRaw` is insert-only. Adding a second source is a refactor (~1.5 wk), not a drop-in. **Do not quote §3 as evidence of pluggability.**
+3. ✅ **IMPLEMENTED — cross-source merge key** `(line_id, production_ts_utc_ms, hanger_num)` is on every row and enforced by a unique index. Verified: `UX_cone_merge` on `(line_id, production_ts_utc_ms, hanger_num, ingest_seq)`, `003_cone_event.sql:55`. See `SPEC.md` §3.2 for the DQ-2 collision caveat. *Caveat:* a `plc_direct` row arriving on an existing merge key would **violate** this index, not enrich the row — Phase 2 needs a merge-and-enrich upsert, not `UPDATE ... SET cone_id`.
+4. ❌ **DESIGNED ONLY — there is no PLC stub and no test.** `PLC_READER_ENABLED` and the host/rack/slot keys appear **only** in `.env.example`; no TypeScript file reads them, nothing validates them, no stub class exists, and **no test asserts anything about them** (3 test files total: `appConfig`, `fingerprint`, `transform` — zero PLC references). What IS true, and is the only version safe to state externally: **no PLC library appears in any of the five package manifests.** That is a convention, enforced by review, not by a test. Describe this as *a documented, dependency-free re-entry point* — never as "PLC-ready" or "a stub".
+5. ⚠️ **PARTIAL — `NullAttribution` is a comment, not an abstraction.** There is no `ProductAttributionStrategy` type. `transform.ts:97` hardcodes `attribution_method: 'none'` with `NullAttribution` in a trailing comment, and all 142,511 rows carry it. The *effect* (no product attribution) is correct and honest; the *swappability* is not built. `/api/production?product=` is wired and dead.
 
 ### Consequence of unanswered Q1
 

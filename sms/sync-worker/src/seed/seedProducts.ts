@@ -6,20 +6,40 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 
+/**
+ * A database NAME is an object identifier, and T-SQL cannot bind identifiers as
+ * parameters — so "parameterise it" is not available here. The defensible
+ * equivalent is to validate it against a strict identifier pattern and bracket-
+ * quote it, which is what this does. The value comes from IFL_DB_NAME_PDAS in
+ * .env (operator-controlled, not user input), so this was not exploitable; it is
+ * fixed so that CLAUDE.md rule 3 / DEPLOY.md hard rule 3 hold without an
+ * unwritten exception, and so a bad .env fails loudly instead of injecting.
+ */
+function safeDbName(name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_$]{0,127}$/.test(name)) {
+    throw new Error(
+      `refusing to build SQL with an unsafe database name: ${JSON.stringify(name)} — ` +
+        `IFL_DB_NAME_PDAS must be a plain SQL Server identifier`,
+    );
+  }
+  return `[${name}]`;
+}
+
 export async function seedProducts(
   appPool: ConnectionPool,
   iflPool: ConnectionPool,
   pdasDb: string,
 ): Promise<void> {
+  const db = safeDbName(pdasDb);
   // read PDAS reference (read-only login)
-  const blends = (await iflPool.request().query(`SELECT BlendId, Blend FROM ${pdasDb}.dbo.Blends`)).recordset;
-  const counts = (await iflPool.request().query(`SELECT CountId, Count FROM ${pdasDb}.dbo.Counts`)).recordset;
-  const tubes = (await iflPool.request().query(`SELECT TubeTypeId, TubeType, TubeWeight FROM ${pdasDb}.dbo.TubeTypes`)).recordset;
+  const blends = (await iflPool.request().query(`SELECT BlendId, Blend FROM ${db}.dbo.Blends`)).recordset;
+  const counts = (await iflPool.request().query(`SELECT CountId, Count FROM ${db}.dbo.Counts`)).recordset;
+  const tubes = (await iflPool.request().query(`SELECT TubeTypeId, TubeType, TubeWeight FROM ${db}.dbo.TubeTypes`)).recordset;
   const mats = (
     await iflPool.request().query(
       `SELECT MaterialId, BlendId, CountId, TubeTypeId, MaterialSetpointWeight, MaterialActive, MaterialDesc1,
               MaterialWeightOffsetMinus, MaterialWeightOffsetPlus
-       FROM ${pdasDb}.dbo.Materials WHERE MaterialId > 10`,
+       FROM ${db}.dbo.Materials WHERE MaterialId > 10`,
     )
   ).recordset;
 

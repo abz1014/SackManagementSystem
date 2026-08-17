@@ -147,7 +147,7 @@ Dashboard < 300 ms · API < 100 ms · sync pass < 30 s. At the current data volu
 1. **IFL DB is read-only and unmodified** — no writes, no indexes, no DDL. Only `sync-worker` connects, via the read-only login.
 2. **No credentials in code** — `.env` only; never commit it. Dev password ≠ prod password.
 3. **Parameterised SQL only.**
-4. **No PLC dependency** (Phase 1). A test asserts none is importable.
+4. **No PLC dependency** (Phase 1). Verified by inspection of all five package manifests — `mssql`, `zod`, `express`, `argon2`, `react` and nothing protocol-related. **This is a review convention, not an automated guarantee: no test asserts it.** (An earlier version of this line claimed a test did. There isn't one — adding it is cheap and worth doing.)
 
 ---
 

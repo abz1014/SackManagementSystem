@@ -55,47 +55,59 @@ export async function getWeights(
     if (to) w.push(`${col} <= @to`);
     return w.join(' AND ');
   };
+  // --- cones (grams, outlier < 1500) / sacks (kg, outlier < 40) ---
+  const CONE_OUT = 1500;
+  const CONE_BUCKET = 20;
+  const SACK_OUT = 40;
+  const SACK_BUCKET = 1;
+
+  // Every value that varies at runtime is bound, not interpolated. The tare/tube
+  // adjustments come from sms.weight_rule (database-sourced, so not user input)
+  // and the thresholds are module constants — nothing here was exploitable. But
+  // DEPLOY.md hard rule 3 and CLAUDE.md rule 3 both state "parameterised queries
+  // only", and a rule with silent exceptions is worse than no rule: the next
+  // person to add a filter here copies the surrounding style. Make the claim true.
   const bind = (r: mssql.Request) => {
     r.input('line', mssql.Int, lineId);
     if (from) r.input('from', mssql.Date, from);
     if (to) r.input('to', mssql.Date, to);
+    r.input('coneAdj', mssql.Float, coneAdj);
+    r.input('sackAdj', mssql.Float, sackAdj);
+    r.input('coneOut', mssql.Int, CONE_OUT);
+    r.input('coneBucket', mssql.Int, CONE_BUCKET);
+    r.input('sackOut', mssql.Int, SACK_OUT);
+    r.input('sackBucket', mssql.Int, SACK_BUCKET);
     return r;
   };
 
-  // --- cones (grams, outlier < 1500) ---
-  const CONE_OUT = 1500;
-  const CONE_BUCKET = 20;
   const coneStat = await bind(pool.request()).query<{ n: number; avg: number; mn: number; mx: number; sd: number }>(
-    `SELECT COUNT(*) n, AVG(weight_g - ${coneAdj}) avg, MIN(weight_g - ${coneAdj}) mn,
-            MAX(weight_g - ${coneAdj}) mx, STDEV(weight_g - ${coneAdj}) sd
-     FROM sms.cone_event WHERE ${dateWhere()} AND weight_g >= ${CONE_OUT}`,
+    `SELECT COUNT(*) n, AVG(weight_g - @coneAdj) avg, MIN(weight_g - @coneAdj) mn,
+            MAX(weight_g - @coneAdj) mx, STDEV(weight_g - @coneAdj) sd
+     FROM sms.cone_event WHERE ${dateWhere()} AND weight_g >= @coneOut`,
   );
   const coneHist = await bind(pool.request()).query<{ bucket: number; count: number }>(
-    `SELECT FLOOR((weight_g - ${coneAdj})/${CONE_BUCKET})*${CONE_BUCKET} bucket, COUNT(*) count
-     FROM sms.cone_event WHERE ${dateWhere()} AND weight_g >= ${CONE_OUT}
-     GROUP BY FLOOR((weight_g - ${coneAdj})/${CONE_BUCKET})*${CONE_BUCKET} ORDER BY bucket`,
+    `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket bucket, COUNT(*) count
+     FROM sms.cone_event WHERE ${dateWhere()} AND weight_g >= @coneOut
+     GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket ORDER BY bucket`,
   );
   const coneOut = await bind(pool.request()).query<{ w: number; d: string; id: number }>(
-    `SELECT TOP 20 weight_g - ${coneAdj} w, CONVERT(varchar(10), shift_date, 120) d, source_row_id id
-     FROM sms.cone_event WHERE ${dateWhere()} AND (weight_g < ${CONE_OUT} OR weight_g <= 0) ORDER BY weight_g`,
+    `SELECT TOP 20 weight_g - @coneAdj w, CONVERT(varchar(10), shift_date, 120) d, source_row_id id
+     FROM sms.cone_event WHERE ${dateWhere()} AND (weight_g < @coneOut OR weight_g <= 0) ORDER BY weight_g`,
   );
 
-  // --- sacks (kg, outlier < 40) ---
-  const SACK_OUT = 40;
-  const SACK_BUCKET = 1;
   const sackStat = await bind(pool.request()).query<{ n: number; avg: number; mn: number; mx: number; sd: number }>(
-    `SELECT COUNT(*) n, AVG(weight_kg - ${sackAdj}) avg, MIN(weight_kg - ${sackAdj}) mn,
-            MAX(weight_kg - ${sackAdj}) mx, STDEV(weight_kg - ${sackAdj}) sd
-     FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg >= ${SACK_OUT}`,
+    `SELECT COUNT(*) n, AVG(weight_kg - @sackAdj) avg, MIN(weight_kg - @sackAdj) mn,
+            MAX(weight_kg - @sackAdj) mx, STDEV(weight_kg - @sackAdj) sd
+     FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg >= @sackOut`,
   );
   const sackHist = await bind(pool.request()).query<{ bucket: number; count: number }>(
-    `SELECT FLOOR((weight_kg - ${sackAdj})/${SACK_BUCKET})*${SACK_BUCKET} bucket, COUNT(*) count
-     FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg >= ${SACK_OUT}
-     GROUP BY FLOOR((weight_kg - ${sackAdj})/${SACK_BUCKET})*${SACK_BUCKET} ORDER BY bucket`,
+    `SELECT FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket bucket, COUNT(*) count
+     FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg >= @sackOut
+     GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket ORDER BY bucket`,
   );
   const sackOut = await bind(pool.request()).query<{ w: number; d: string; id: number }>(
-    `SELECT TOP 20 weight_kg - ${sackAdj} w, CONVERT(varchar(10), shift_date, 120) d, source_row_id id
-     FROM sms.sack_event WHERE ${dateWhere()} AND (weight_kg < ${SACK_OUT} OR weight_kg <= 0) ORDER BY weight_kg`,
+    `SELECT TOP 20 weight_kg - @sackAdj w, CONVERT(varchar(10), shift_date, 120) d, source_row_id id
+     FROM sms.sack_event WHERE ${dateWhere()} AND (weight_kg < @sackOut OR weight_kg <= 0) ORDER BY weight_kg`,
   );
 
   const num = (v: unknown) => (v == null ? null : Math.round(Number(v) * 100) / 100);

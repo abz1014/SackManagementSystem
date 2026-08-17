@@ -202,6 +202,26 @@ GET /api/operations         -- sync + DQ + schema + latency
 
 ## 10. Interfaces (coupling boundaries)
 
+> ### ⚠️ NEITHER INTERFACE EXISTS — corrected 17 Aug 2026
+>
+> Audited: **zero hits** for `IngestionAdapter` or `ProductAttributionStrategy`
+> anywhere in the monorepo. These are the intended coupling boundaries; the code
+> currently hardcodes both sides.
+>
+> - **Instead of `IngestionAdapter`:** a concrete `IflSqlAdapter` (which *does*
+>   implement `readSince` and `fingerprint` as methods, and the schema-drift
+>   fingerprint genuinely works and is good) but with no interface extracted, and
+>   `source_system: 'ifl_sql'` baked into `transform.ts`.
+> - **Instead of `ProductAttributionStrategy`:** `transform.ts:97` hardcodes
+>   `attribution_method: 'none'`. There is no strategy type and nothing to swap.
+>
+> The *effects* described elsewhere in this document are honest (one source; no
+> product attribution). The *swappability* is not built. Extracting these is
+> ~1.5 wk and is a prerequisite for a second source. **Do not cite this section
+> as evidence of pluggability to a customer.**
+
+**Target shape (design intent, unbuilt):**
+
 ```ts
 interface IngestionAdapter {           // the ONLY thing that knows IFL's schema
   readonly sourceId: 'ifl_sql' | 'plc_direct';
