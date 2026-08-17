@@ -359,12 +359,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
     .optional();
   const registerQuery = z.object({
-    type: z.enum(['cone', 'sack']),
+    type: z.enum(['cone', 'sack', 'reject']),
     from: dateStr,
     to: dateStr,
     shift: z.enum(['morning', 'evening', 'night']).optional(),
     station: z.coerce.number().int().positive().optional(),
     inRange: z.enum(['true', 'false']).optional(),
+    rejectType: z.enum(['quality', 'weight']).optional(),
     wMin: z.coerce.number().optional(),
     wMax: z.coerce.number().optional(),
     tsFrom: isoTs,
@@ -422,7 +423,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     try {
       const type = req.params.type;
       const id = Number(req.params.id);
-      if ((type !== 'cone' && type !== 'sack') || !Number.isInteger(id)) {
+      if ((type !== 'cone' && type !== 'sack' && type !== 'reject') || !Number.isInteger(id)) {
         res.status(400).json({ error: 'invalid type or id' });
         return;
       }

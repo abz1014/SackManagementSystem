@@ -1454,6 +1454,7 @@ function RegisterView({
   const [shift, setShift] = useState<'all' | 'morning' | 'evening' | 'night'>(() => (seed ? 'all' : 'night'));
   const [station, setStation] = useState<string>(() => (seed?.station != null ? String(seed.station) : ''));
   const [inRange, setInRange] = useState<'all' | 'true' | 'false'>('all');
+  const [rejectType, setRejectType] = useState<'all' | 'quality' | 'weight'>('all');
   const [wMin, setWMin] = useState(() => (seed?.wMin != null ? String(seed.wMin) : ''));
   const [wMax, setWMax] = useState(() => (seed?.wMax != null ? String(seed.wMax) : ''));
   const [tsWindow, setTsWindow] = useState(() => (seed ? { tsFrom: seed.tsFrom, tsTo: seed.tsTo } : null));
@@ -1495,7 +1496,7 @@ function RegisterView({
   // reset to page 1 whenever a filter (not page itself) changes
   useEffect(() => {
     setPage(1);
-  }, [type, from, to, shift, station, inRange, wMin, wMax, sort, dir]);
+  }, [type, from, to, shift, station, inRange, rejectType, wMin, wMax, sort, dir]);
 
   const query = useMemo(
     () => ({
@@ -1503,8 +1504,10 @@ function RegisterView({
       from: from || undefined,
       to: to || undefined,
       shift: shift === 'all' ? undefined : shift,
-      station: type === 'cone' && station ? Number(station) : undefined,
-      inRange: inRange === 'all' ? undefined : inRange === 'true',
+      station: type !== 'sack' && station ? Number(station) : undefined,
+      // reject_event has no in_range column; sending it would be meaningless
+      inRange: type === 'reject' || inRange === 'all' ? undefined : inRange === 'true',
+      rejectType: type === 'reject' && rejectType !== 'all' ? rejectType : undefined,
       wMin: wMin ? Number(wMin) : undefined,
       wMax: wMax ? Number(wMax) : undefined,
       tsFrom: tsWindow?.tsFrom,
@@ -1514,7 +1517,7 @@ function RegisterView({
       page,
       pageSize: PAGE_SIZE,
     }),
-    [type, from, to, shift, station, inRange, wMin, wMax, sort, dir, page],
+    [type, from, to, shift, station, inRange, rejectType, wMin, wMax, sort, dir, page],
   );
 
   useEffect(() => {
@@ -1536,7 +1539,7 @@ function RegisterView({
   }, [query, detail]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const weightUnit = type === 'cone' ? 'g' : 'kg';
+  const weightUnit = type === 'sack' ? 'kg' : 'g';
   const revealed = useRevealOnData(rows.map((r) => r.source_row_id).join(','));
 
   const toggleSort = (col: RegisterSort) => {
@@ -1582,6 +1585,7 @@ function RegisterView({
             options={[
               { key: 'cone', label: 'Cones' },
               { key: 'sack', label: 'Sacks' },
+              { key: 'reject', label: 'Rejects' },
             ]}
           />
         </div>
@@ -1602,7 +1606,7 @@ function RegisterView({
             <option value="night">Night</option>
           </select>
         </div>
-        {type === 'cone' && (
+        {type !== 'sack' && (
           <div className="field">
             <label>Station</label>
             <select value={station} onChange={(e) => setStation(e.target.value)}>
@@ -1613,14 +1617,27 @@ function RegisterView({
             </select>
           </div>
         )}
-        <div className="field">
-          <label>In range</label>
-          <select value={inRange} onChange={(e) => setInRange(e.target.value as typeof inRange)}>
-            <option value="all">All</option>
-            <option value="true">In range</option>
-            <option value="false">Out of range</option>
-          </select>
-        </div>
+        {type === 'reject' && (
+          <div className="field">
+            <label>Reject type</label>
+            <select value={rejectType} onChange={(e) => setRejectType(e.target.value as typeof rejectType)}>
+              <option value="all">All</option>
+              <option value="quality">Quality (coded)</option>
+              <option value="weight">Weight</option>
+            </select>
+          </div>
+        )}
+        {/* reject_event has no in_range column, so the control would be a lie */}
+        {type !== 'reject' && (
+          <div className="field">
+            <label>In range</label>
+            <select value={inRange} onChange={(e) => setInRange(e.target.value as typeof inRange)}>
+              <option value="all">All</option>
+              <option value="true">In range</option>
+              <option value="false">Out of range</option>
+            </select>
+          </div>
+        )}
         <div className="field">
           <label>Weight min ({weightUnit})</label>
           <input type="number" inputMode="decimal" value={wMin} placeholder="—" onChange={(e) => setWMin(e.target.value)} />
@@ -1641,9 +1658,16 @@ function RegisterView({
         <div className="error-card"><b>Couldn't load the register.</b> {error}</div>
       ) : (
         <div className="panel">
-          <h2>{type === 'cone' ? 'Cone' : 'Sack'} register</h2>
+          <h2>{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} register</h2>
           <div className="hint">
             {fmtInt(total)} matching record{total === 1 ? '' : 's'}. Click a row for full detail.
+            {type === 'reject' && (
+              <>
+                {' '}Quality rejects carry two raw inspection codes and <b>no weight</b> — the source
+                table has no weight column — so the weight column is blank for them and sorting by
+                weight groups them together. Codes show their meaning once labelled on the Rejects page.
+              </>
+            )}
           </div>
           <div className="table-scroll">
             <table className="reg-table">
@@ -1655,13 +1679,13 @@ function RegisterView({
                     </button>
                   </th>
                   <th>Shift</th>
-                  {type === 'cone' ? <th>Station</th> : <th>Sack #</th>}
+                  {type === 'sack' ? <th>Sack #</th> : <th>Station</th>}
                   <th className="sortable num" aria-sort={sort === 'weight' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
                     <button type="button" className="th-sort" onClick={() => toggleSort('weight')}>
                       Weight <span aria-hidden="true">{sort === 'weight' ? (dir === 'desc' ? '▾' : '▴') : ''}</span>
                     </button>
                   </th>
-                  <th>Status</th>
+                  {type === 'reject' ? <th>Reason</th> : <th>Status</th>}
                 </tr>
               </thead>
               <tbody style={{ opacity: revealed ? 1 : 0.4, transition: 'opacity 200ms' }}>
@@ -1676,17 +1700,28 @@ function RegisterView({
                       className="reg-row"
                       {...activatable(
                         () => onOpenDetail(type, r.source_row_id),
-                        `Open ${type} ${r.source_row_id}, ${fmtDateTime(r.production_ts_utc)}, ${type === 'cone' ? r.weight_g : r.weight_kg} ${weightUnit}`,
+                        `Open ${type} ${r.source_row_id}, ${fmtDateTime(r.production_ts_utc)}`,
                       )}
                     >
                       <td className="mono">{fmtDateTime(r.production_ts_utc)}</td>
                       <td className="cap">{r.shift_code}</td>
-                      <td className="mono">{type === 'cone' ? (r.source_station ?? '—') : (r.sack_num ?? '—')}</td>
+                      <td className="mono">{type === 'sack' ? (r.sack_num ?? '—') : (r.source_station ?? '—')}</td>
                       <td className="mono num">
-                        {type === 'cone' ? r.weight_g : r.weight_kg} {weightUnit}
+                        {/* Quality rejects carry no weight at source (rejectQCS1 has no
+                            weight column), so an em dash here is the honest answer
+                            rather than a zero that would read as "weighed nothing". */}
+                        {type === 'sack'
+                          ? `${r.weight_kg} ${weightUnit}`
+                          : r.weight_g == null
+                            ? '—'
+                            : `${r.weight_g} ${weightUnit}`}
                       </td>
                       <td>
-                        <span className={`pill ${r.in_range ? 'on' : 'off'}`}>{r.in_range ? 'in range' : 'out of range'}</span>
+                        {type === 'reject' ? (
+                          <RejectReasonCell row={r} />
+                        ) : (
+                          <span className={`pill ${r.in_range ? 'on' : 'off'}`}>{r.in_range ? 'in range' : 'out of range'}</span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -1751,18 +1786,25 @@ function RegisterDetailPage({
 
   const shiftDate = row ? String(row.shift_date).slice(0, 10) : null;
   const productionTs = row ? String(row.production_ts_utc) : null;
-  const sourceStation = row && type === 'cone' ? (row.source_station as number | null) : null;
+  // sack_event has no station; cone and reject both do.
+  const sourceStation = row && type !== 'sack' ? (row.source_station as number | null) : null;
+
+  // A reject IS a rejected cone, so its weight-statistics context lives in the
+  // cone stream — reject_event carries no subgroup or sigma of its own (and for
+  // quality rejects, no weight at all). The station context is the genuinely
+  // useful part: how the station this reject came from was running that day.
+  const spcType: SpcType = type === 'reject' ? 'cone' : type;
 
   useEffect(() => {
     if (!shiftDate) return;
     let cancelled = false;
-    getSpc({ type, from: shiftDate, to: shiftDate })
+    getSpc({ type: spcType, from: shiftDate, to: shiftDate })
       .then((r) => !cancelled && setSpc(r.data))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [type, shiftDate]);
+  }, [spcType, shiftDate]);
 
   useEffect(() => {
     if (!productionTs) return;
@@ -1805,7 +1847,7 @@ function RegisterDetailPage({
           <h2>Not found</h2>
         </div>
         <div style={{ padding: '4px 0' }}>
-          <p>{type === 'cone' ? 'Cone' : 'Sack'} #{id} doesn't exist, or doesn't match this line.</p>
+          <p>{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} #{id} doesn't exist, or doesn't match this line.</p>
           <button className="abtn primary" onClick={onBack}>← Back to register</button>
         </div>
       </div>
@@ -1815,8 +1857,9 @@ function RegisterDetailPage({
     return <div className="tile skeleton" style={{ height: 260 }} />;
   }
 
-  const weightUnit = type === 'cone' ? 'g' : 'kg';
-  const weight = type === 'cone' ? row.weight_g : row.weight_kg;
+  // rejects are rejected cones -> grams; only sacks are kg
+  const weightUnit = type === 'sack' ? 'kg' : 'g';
+  const weight = type === 'sack' ? row.weight_kg : row.weight_g;
 
   return (
     <>
@@ -1824,7 +1867,7 @@ function RegisterDetailPage({
 
       <div className="panel">
         <div className="panel-head">
-          <h2>{type === 'cone' ? 'Cone' : 'Sack'} #{String(row.source_row_id)}</h2>
+          <h2>{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} #{String(row.source_row_id)}</h2>
           <span className="sub">{fmtDateTime(String(row.production_ts_utc))}</span>
         </div>
         <DetailRow label="Production time" value={fmtDateTime(String(row.production_ts_utc))} />
@@ -1834,9 +1877,32 @@ function RegisterDetailPage({
           value={row.shift_code_legacy != null ? String(row.shift_code_legacy) : '—'}
           mismatch={row.shift_code_legacy != null && row.shift_code_legacy !== row.shift_code}
         />
-        <DetailRow label="Weight" value={`${weight ?? '—'} ${weightUnit}`} />
-        <DetailRow label="In range" value={row.in_range ? 'Yes' : 'No'} />
-        {type === 'cone' ? (
+        {type === 'reject' && (
+          <>
+            <DetailRow label="Reject type" value={String(row.reject_type ?? '—')} />
+            {row.reject_type === 'quality' ? (
+              <>
+                <DetailRow
+                  label="Tube inspect code"
+                  value={row.tube_inspect_code == null ? '—' : String(row.tube_inspect_code)}
+                />
+                <DetailRow
+                  label="Material inspect code"
+                  value={row.material_inspect_code == null ? '—' : String(row.material_inspect_code)}
+                />
+                <DetailRow
+                  label="Reason"
+                  value={row.reject_label != null ? String(row.reject_label) : 'Code meaning not yet supplied by IFL (Q10)'}
+                />
+              </>
+            ) : null}
+          </>
+        )}
+        {/* Quality rejects have no weight at source, so this reads "—" rather
+            than a fabricated 0. Sacks and cones always carry one. */}
+        <DetailRow label="Weight" value={weight == null ? '—' : `${weight} ${weightUnit}`} />
+        {type !== 'reject' && <DetailRow label="In range" value={row.in_range ? 'Yes' : 'No'} />}
+        {type !== 'sack' ? (
           <>
             <DetailRow label="Source station" value={String(row.source_station ?? '—')} />
             <DetailRow label="Lifter station" value={String(row.lifter_station ?? '—')} />
@@ -1845,12 +1911,16 @@ function RegisterDetailPage({
         ) : (
           <DetailRow label="Sack number" value={String(row.sack_num ?? '—')} />
         )}
-        <DetailRow label="Product" value={row.lot_code != null ? String(row.lot_code) : 'Not attributed (Q1)'} />
-        <DetailRow
-          label="Merge key"
-          value={row.merge_key_is_unique ? 'Unique' : 'Collision (DQ-2)'}
-          mismatch={!row.merge_key_is_unique}
-        />
+        {type !== 'reject' && (
+          <DetailRow label="Product" value={row.lot_code != null ? String(row.lot_code) : 'Not attributed (Q1)'} />
+        )}
+        {type !== 'reject' && (
+          <DetailRow
+            label="Merge key"
+            value={row.merge_key_is_unique ? 'Unique' : 'Collision (DQ-2)'}
+            mismatch={!row.merge_key_is_unique}
+          />
+        )}
         <DetailRow label="Source system" value={String(row.source_system ?? '—')} />
         <DetailRow label="Transform version" value={`v${row.transform_version ?? '—'}`} />
         {row.ingest_ts_utc != null && <DetailRow label="Synced at" value={fmtDateTime(String(row.ingest_ts_utc))} />}
@@ -1903,7 +1973,20 @@ function RegisterDetailPage({
           <h2>Time-neighbours</h2>
           <span className="sub">{sourceStation != null ? `station ${sourceStation}` : 'same stream'}</span>
         </div>
-        <div className="hint">The readings immediately before and after this one{sourceStation != null ? ' from the same station' : ''}. Click one to jump to it.</div>
+        <div className="hint">
+          {type === 'reject' ? (
+            <>
+              The rejects immediately before and after this one{sourceStation != null ? ' from the same station' : ''}.
+              Tightly-spaced neighbours mean a burst worth investigating as one event; widely-spaced ones
+              mean this was isolated. Click one to jump to it.
+            </>
+          ) : (
+            <>
+              The readings immediately before and after this one{sourceStation != null ? ' from the same station' : ''}.
+              Click one to jump to it.
+            </>
+          )}
+        </div>
         {!neighbors ? (
           <div className="tile skeleton" style={{ height: 120 }} />
         ) : (
@@ -1914,7 +1997,7 @@ function RegisterDetailPage({
                   <th>Production time</th>
                   <th>Shift</th>
                   <th className="num">Weight</th>
-                  <th>Status</th>
+                  {type === 'reject' ? <th>Reason</th> : <th>Status</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1935,8 +2018,20 @@ function RegisterDetailPage({
                     >
                       <td className="mono">{fmtDateTime(n.production_ts_utc)}{isCurrent ? ' (this one)' : ''}</td>
                       <td className="cap">{n.shift_code}</td>
-                      <td className="mono num">{type === 'cone' ? n.weight_g : n.weight_kg} {weightUnit}</td>
-                      <td><span className={`pill ${n.in_range ? 'on' : 'off'}`}>{n.in_range ? 'in range' : 'out of range'}</span></td>
+                      <td className="mono num">
+                        {type === 'sack'
+                          ? `${n.weight_kg} ${weightUnit}`
+                          : n.weight_g == null
+                            ? '—'
+                            : `${n.weight_g} ${weightUnit}`}
+                      </td>
+                      <td>
+                        {type === 'reject' ? (
+                          <RejectReasonCell row={n} />
+                        ) : (
+                          <span className={`pill ${n.in_range ? 'on' : 'off'}`}>{n.in_range ? 'in range' : 'out of range'}</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -4519,6 +4614,33 @@ function WeightPanel({ title, stats, suffix }: { title: string; stats: WeightSta
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A reject's reason. Weight rejects are self-describing; quality rejects carry
+ * two raw inspection codes whose meaning is still unanswered (Q10), so the codes
+ * themselves are shown rather than invented wording. The moment a code is
+ * labelled on the Rejects page, that label appears here retroactively for every
+ * matching reject, past and future — which is why the raw codes are always kept.
+ */
+function RejectReasonCell({ row }: { row: RegisterRow }) {
+  if (row.reject_type === 'weight') {
+    return <span className="pill off">weight</span>;
+  }
+  const t = row.tube_inspect_code;
+  const m = row.material_inspect_code;
+  return (
+    <span className="reject-reason">
+      <span className="pill off">quality</span>
+      {row.reject_label ? (
+        <span className="rr-label">{row.reject_label}</span>
+      ) : (
+        <span className="rr-codes mono" title="tube / material inspection codes — meaning pending IFL (Q10)">
+          {t ?? '—'}/{m ?? '—'}
+        </span>
+      )}
+    </span>
   );
 }
 

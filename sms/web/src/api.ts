@@ -230,11 +230,12 @@ export function getProduction(q: ProductionQuery): Promise<Envelope<ProductionDa
 }
 
 // ---- Sack & Cone Register ----
-export type RegisterType = 'cone' | 'sack';
+export type RegisterType = 'cone' | 'sack' | 'reject';
 export type RegisterSort = 'time' | 'weight';
 
 export interface RegisterQuery {
   type: RegisterType;
+  rejectType?: 'quality' | 'weight';
   from?: string;
   to?: string;
   shift?: string;
@@ -252,6 +253,13 @@ export interface RegisterQuery {
 
 export interface RegisterRow {
   source_row_id: string | number;
+  /** reject only — the real identity; source_row_id is aliased to it. */
+  reject_event_id?: string | number;
+  reject_type?: 'quality' | 'weight';
+  tube_inspect_code?: number | null;
+  material_inspect_code?: number | null;
+  reject_label?: string | null;
+  source_id?: string | number | null;
   production_ts_utc: string;
   shift_code: string;
   shift_date: string;
@@ -284,6 +292,7 @@ function registerParams(q: RegisterQuery): URLSearchParams {
   if (q.shift) p.set('shift', q.shift);
   if (q.station != null) p.set('station', String(q.station));
   if (q.inRange != null) p.set('inRange', String(q.inRange));
+  if (q.rejectType) p.set('rejectType', q.rejectType);
   if (q.wMin != null) p.set('wMin', String(q.wMin));
   if (q.wMax != null) p.set('wMax', String(q.wMax));
   if (q.tsFrom) p.set('tsFrom', q.tsFrom);
