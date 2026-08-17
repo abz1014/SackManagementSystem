@@ -1148,3 +1148,11 @@ body {
 .callout .provisional b { color: var(--amber); }
 .callout .provisional ul { margin: 6px 0 0; padding-left: 20px; }
 .callout .provisional li { margin: 3px 0; color: var(--graphite); line-height: 1.45; }
+
+/* PLC-vs-spec disagreement: a finding in the customer's own data, not a fault of
+   ours — amber (attention) rather than red (fault), since neither number is
+   wrong, they simply cannot both govern. */
+.panel.spec-disagree { border-left: 3px solid var(--amber); }
+.panel.spec-disagree > .panel-head:first-child { background: var(--amber); }
+.panel.spec-disagree > .panel-head:first-child h2,
+.panel.spec-disagree > .panel-head:first-child .sub { color: #fff; }

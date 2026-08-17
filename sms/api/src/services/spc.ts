@@ -72,7 +72,25 @@ export interface SpecLimits {
   productLabel?: string;
 }
 
+/**
+ * Agreement between the PLC's own pass/fail bit and IFL's product tolerance.
+ * Both judgements are IFL's; where they diverge, only IFL can say which governs.
+ */
+export interface SpecAgreement {
+  evaluated: number;
+  /** PLC said in-range, the product tolerance says out. */
+  plcPassedButOutOfTolerance: number;
+  /** PLC said out-of-range, the product tolerance says in. */
+  plcFailedButInTolerance: number;
+  disagreementCount: number;
+  disagreementPct: number;
+  toleranceLabel: string;
+  specSource: 'product' | 'manual' | 'none';
+}
+
 export interface SpcData {
+  /** null unless a real spec is selected (never fabricated). */
+  specAgreement: SpecAgreement | null;
   type: SpcType;
   unit: 'g' | 'kg';
   count: number;
@@ -385,7 +403,45 @@ export async function getWeightSpc(
     ppk = round(Math.min(spec.usl - mean, mean - spec.lsl) / (3 * stdevOverall), 3);
   }
 
+  // 6. Does the PLC's own pass/fail bit agree with IFL's own product tolerance?
+  //
+  // Two independent judgements exist on the same cone and nobody had compared
+  // them: `in_range` is set by the PLC against a band configured in the
+  // controller, while the tolerance in PDAS (setpoint ± offset) is what the
+  // product master says. Measured on the 18-day sample, they disagree: 1,007
+  // cones are simultaneously in-range per the PLC and outside product 14's own
+  // 1960 ± 30 g tolerance.
+  //
+  // Worth surfacing rather than smoothing over. Both numbers are IFL's, so this
+  // is a reconciliation question only they can settle — and it is far better
+  // raised by us up front than discovered by a UAT tester, at which point it
+  // looks like our defect instead of a finding.
+  let specAgreement: SpecAgreement | null = null;
+  if (spec.usl != null && spec.lsl != null && type === 'cone') {
+    const agRes = await req((r) => {
+      r.input('usl', mssql.Float, spec.usl);
+      r.input('lsl', mssql.Float, spec.lsl);
+    }).query<{ n: number; pass_out: number; fail_in: number }>(
+      `SELECT COUNT(*) n,
+              SUM(CASE WHEN in_range = 1 AND (${col} < @lsl OR ${col} > @usl) THEN 1 ELSE 0 END) pass_out,
+              SUM(CASE WHEN in_range = 0 AND ${col} BETWEEN @lsl AND @usl THEN 1 ELSE 0 END) fail_in
+       FROM ${table} WHERE ${where}`,
+    );
+    const a = agRes.recordset[0]!;
+    const disagree = Number(a.pass_out ?? 0) + Number(a.fail_in ?? 0);
+    specAgreement = {
+      evaluated: a.n,
+      plcPassedButOutOfTolerance: Number(a.pass_out ?? 0),
+      plcFailedButInTolerance: Number(a.fail_in ?? 0),
+      disagreementCount: disagree,
+      disagreementPct: a.n > 0 ? round((100 * disagree) / a.n, 2) : 0,
+      toleranceLabel: `${spec.nominal ?? round((spec.usl + spec.lsl) / 2, 1)} ±${round((spec.usl - spec.lsl) / 2, 1)}${unit}`,
+      specSource: spec.source,
+    };
+  }
+
   return {
+    specAgreement,
     type,
     unit,
     count,

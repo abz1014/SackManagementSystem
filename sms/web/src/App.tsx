@@ -2763,6 +2763,38 @@ function SpcView({
             </div>
           )}
 
+          {/* Two independent verdicts exist on every cone — the PLC's in-range bit
+              and the product tolerance in PDAS — and nobody had compared them.
+              Where they disagree, only IFL can say which governs, so this states
+              the finding and asks rather than silently picking a side. */}
+          {data.specAgreement && data.specAgreement.disagreementCount > 0 && (
+            <div className="panel spec-disagree" style={{ marginTop: 16 }}>
+              <div className="panel-head">
+                <h2>The PLC and your product spec disagree</h2>
+                <span className="sub">{data.specAgreement.disagreementPct}% of {fmtInt(data.specAgreement.evaluated)} cones</span>
+              </div>
+              <div className="hint">
+                Both judgements come from IFL systems. The line's <b>in-range</b> bit is set by the PLC
+                against a band configured in the controller; the tolerance <b>{data.specAgreement.toleranceLabel}</b> is
+                what the product master in PDAS says. They do not agree on{' '}
+                <b>{fmtInt(data.specAgreement.disagreementCount)}</b> cones in this range.
+              </div>
+              <div className="stat-row">
+                <Stat label="PLC passed, spec says out" val={fmtInt(data.specAgreement.plcPassedButOutOfTolerance)} accent />
+                <Stat label="PLC rejected, spec says in" val={fmtInt(data.specAgreement.plcFailedButInTolerance)} />
+              </div>
+              <div className="hint">
+                The first group passed the line as good while sitting outside the product tolerance;
+                the second was failed while inside it.
+              </div>
+              <div className="hint" style={{ marginTop: 10 }}>
+                Worth reconciling before it shows up in an audit: whichever limit governs, one of the two
+                is currently mis-set. We are not guessing which — that is a decision for your process
+                and quality engineers, and the app will follow whichever you confirm.
+              </div>
+            </div>
+          )}
+
           <div className="panel" style={{ marginTop: 16 }}>
             <h2>Process summary</h2>
             <div className="hint">

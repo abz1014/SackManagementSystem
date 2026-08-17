@@ -386,7 +386,17 @@ export interface SpecLimits {
   source: 'product' | 'manual' | 'none';
   productLabel?: string;
 }
+export interface SpecAgreement {
+  evaluated: number;
+  plcPassedButOutOfTolerance: number;
+  plcFailedButInTolerance: number;
+  disagreementCount: number;
+  disagreementPct: number;
+  toleranceLabel: string;
+  specSource: 'product' | 'manual' | 'none';
+}
 export interface SpcData {
+  specAgreement: SpecAgreement | null;
   type: SpcType;
   unit: 'g' | 'kg';
   count: number;
