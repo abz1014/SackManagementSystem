@@ -153,7 +153,12 @@ function parseRoute(): Route {
   const did = p.get('did');
   return {
     view,
-    detailType: dtype === 'cone' || dtype === 'sack' ? dtype : undefined,
+    // 'reject' was missing here, so a reject detail URL only worked when reached
+    // by CLICK (which sets route state directly) and silently fell back to the
+    // cone list on a cold load — i.e. it was not actually a permalink, which is
+    // the one thing a permalink has to be. Keep this list in step with
+    // RegisterType in api.ts.
+    detailType: dtype === 'cone' || dtype === 'sack' || dtype === 'reject' ? dtype : undefined,
     detailId: did ?? undefined,
   };
 }
