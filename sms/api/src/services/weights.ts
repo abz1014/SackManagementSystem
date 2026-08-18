@@ -52,10 +52,17 @@ export interface WeightsData {
  *  1. The real setpoint is per-product (the product master holds 1950 and 1960
  *     with ±30/40/50 offsets), so a single constant is wrong for some products
  *     by more than the giveaway it is trying to measure.
- *  2. Q4/Q5 (gross vs net) is still unanswered, and it does not merely shift the
- *     number — measured over the same 18 days it moves giveaway from +1.5 g/cone
- *     (+213.8 kg) to −68.5 g/cone (−9,761.9 kg). It REVERSES the conclusion from
- *     overfill to underfill.
+ *  2. Q4/Q5 (gross vs net) is still unanswered. Note that the basis TOGGLE no
+ *     longer moves the giveaway: since the nominal became basis-aware below
+ *     (nominalGross - coneAdj), switching to net shifts the measured average and
+ *     the target by the same tube weight, so avg - nominal is invariant. It was
+ *     not always so — against the old hardcoded 1950 g fallback the toggle did
+ *     swing +1.5 to -68.5 g/cone, and that stale figure survived in the
+ *     user-facing caveat long after the code stopped producing it.
+ *
+ *     The live risk is different and still real: if the product setpoint is
+ *     stated on the OPPOSITE basis to the recorded weight, the giveaway is out
+ *     by the full tube weight. That is what Q4/Q5 has to settle.
  *
  * Historical rows also carry no product attribution (attribution_method='none'),
  * so applying the currently-selected product's setpoint backwards over the range
@@ -163,11 +170,14 @@ export async function getWeights(
   // Everything that makes the giveaway figure unquotable, stated explicitly so
   // the UI cannot present it as settled and nobody can quote it by accident.
   const provisionalReasons: string[] = [];
-  if (basis === 'as_recorded') {
-    provisionalReasons.push(
-      'Weight basis is unconfirmed (Q4/Q5). On this range, switching to net moves giveaway from +1.5 g/cone to −68.5 g/cone — it reverses overfill to underfill.',
-    );
-  }
+  // Fires on EVERY basis. It used to fire only on 'as_recorded', so choosing
+  // Gross silently removed the warning while changing nothing at all — picking
+  // a basis is not the same as IFL confirming which one is right.
+  provisionalReasons.push(
+    basis === 'net'
+      ? `Weight basis is unconfirmed (Q4/Q5). Net subtracts the ${tube} g tube from both the measured cone and the ${nominalGross} g setpoint, so the giveaway is unchanged; what is unconfirmed is whether the setpoint itself is stated gross or net. If it is stated on the opposite basis to the recorded weight, this figure is out by ${tube} g/cone.`
+      : `Weight basis is unconfirmed (Q4/Q5). Recorded weights are treated as gross${basis === 'gross' ? ' — the Gross and As-recorded views are therefore identical until IFL confirms otherwise' : ''}. If the recorded weight is actually net, or the ${nominalGross} g setpoint is stated on the other basis, this figure is out by the ${tube} g tube weight.`,
+  );
   if (nominalSource === 'fallback') {
     provisionalReasons.push(
       `No product selected, so giveaway is measured against a fallback ${FALLBACK_CONE_SETPOINT_G} g. Real setpoints are per-product (1950 and 1960 g in the product master).`,
@@ -206,7 +216,9 @@ export async function getWeights(
     },
     note:
       basis === 'net'
-        ? `Net basis: cone tube ${tube} g and sack tare ${tare} kg subtracted. Pending IFL confirmation (Q5).`
-        : `Weights shown ${basis}. Toggle to Net to see the tube/tare-adjusted figures (Q4/Q5).`,
+        ? `Net basis: cone tube ${tube} g and sack tare ${tare} kg subtracted from both the readings and the setpoint.`
+        : basis === 'gross'
+          ? `Gross basis: readings as the PLC recorded them. Identical to As-recorded until IFL confirms the basis (Q4/Q5).`
+          : `Weights as the PLC recorded them.`,
   };
 }

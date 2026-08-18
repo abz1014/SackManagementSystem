@@ -44,7 +44,6 @@ import {
   type RejectData,
   type RejectReason,
   type WeightsData,
-  type WeightStats,
   type Basis,
   type Meta,
   type RegisterType,
@@ -274,8 +273,8 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
         eyebrow: 'Grams per cone',
         title: 'Weight',
         subTabs: [
-          { key: 'spread', label: 'Spread', note: 'cone and sack distribution' },
-          { key: 'stability', label: 'Stability', note: 'stations and control over time' },
+          { key: 'spread', label: 'Spread', note: 'distribution and stations' },
+          { key: 'stability', label: 'Stability', note: 'control through the day' },
         ],
       };
     case 'rejects':
@@ -547,12 +546,19 @@ function PerformanceHub({
   );
 }
 
+/**
+ * Weight screen. The hub owns the data layer because the design puts one
+ * verdict banner above BOTH sub-tabs, and because the Spread tab needs the SPC
+ * station data that only this fetch provides.
+ *
+ * The section column is the tab control now, so the hub renders no Segmented of
+ * its own — the old one duplicated the column and used different keys.
+ */
 function WeightHub({
   range,
   onMeta,
   onInspect,
   sub: routeSub,
-  onSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
@@ -561,25 +567,285 @@ function WeightHub({
   onSub: (k: string) => void;
 }) {
   const sub = WEIGHT_SUB[routeSub as keyof typeof WEIGHT_SUB] ?? 'distribution';
-  const setSub = (k: string) => onSub(routeKey(WEIGHT_SUB, k));
+
+  const [type, setType] = useState<SpcType>('cone');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [specMode, setSpecMode] = useState<SpcMode>('none');
+  const [productId, setProductId] = useState('');
+  const [manualUsl, setManualUsl] = useState('');
+  const [manualLsl, setManualLsl] = useState('');
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [spc, setSpc] = useState<SpcData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // Lifted out of the Spread tab: the verdict needs the setpoint this call
+  // carries. /api/spc's spec is null until the user picks a tolerance, but the
+  // current product always has a setpoint, and a banner that says "no setpoint"
+  // directly above a panel measuring against one is just wrong.
+  const [basis, setBasis] = useState<Basis>('as_recorded');
+  const [weights, setWeights] = useState<WeightsData | null>(null);
+  const [dailyCones, setDailyCones] = useState<number[] | null>(null);
+  const [wErr, setWErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    getProducts().then((r) => setProducts(r.products)).catch(() => {});
+  }, []);
+
+  // Product setpoints are cone grams; they cannot describe a sack. The API
+  // refuses them for sacks, so the picker must not keep claiming one is active.
+  useEffect(() => {
+    if (type === 'sack' && specMode === 'product') {
+      setSpecMode('none');
+      setProductId('');
+    }
+  }, [type, specMode]);
+
+  useEffect(() => {
+    if (range.max && !to) {
+      const prior = new Date(`${range.max}T12:00:00Z`);
+      prior.setUTCDate(prior.getUTCDate() - 1);
+      const priorStr = prior.toISOString().slice(0, 10);
+      const d = range.min && priorStr >= range.min ? priorStr : range.max;
+      setTo(d);
+      setFrom(d);
+    }
+  }, [range.max, range.min, to]);
+
+  useEffect(() => {
+    if (!from || !to) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const q: { type: SpcType; from: string; to: string; productId?: number; usl?: number; lsl?: number } = { type, from, to };
+    if (specMode === 'product' && productId) q.productId = Number(productId);
+    if (specMode === 'manual' && manualUsl && manualLsl) {
+      q.usl = Number(manualUsl);
+      q.lsl = Number(manualLsl);
+    }
+    getSpc(q)
+      .then((r) => {
+        if (cancelled) return;
+        setSpc(r.data);
+        onMeta(r.metadata);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [type, from, to, specMode, productId, manualUsl, manualLsl, onMeta]);
+
+  useEffect(() => {
+    if (!from || !to) return;
+    let cancelled = false;
+    setWErr(null);
+    Promise.all([getWeights(basis, from, to), getProduction({ from, to, groupBy: 'day' })])
+      .then(([r, p]) => {
+        if (cancelled) return;
+        setWeights(r.data);
+        setDailyCones(p.data.rows.filter((x) => x.group !== 'total').map((x) => x.cones));
+      })
+      .catch((e) => !cancelled && setWErr(String(e.message ?? e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [basis, from, to]);
+
+  const unit = type === 'cone' ? 'g' : 'kg';
+
   return (
     <>
-      <div className="filters" style={{ marginBottom: 6 }}>
-        <Segmented
-          value={sub}
-          onChange={setSub}
-          options={[
-            { key: 'spc', label: 'Process control' },
-            { key: 'distribution', label: 'Distribution' },
-          ]}
-        />
+      <div className="wt-controls">
+        <div className="field">
+          <label>Record type</label>
+          <Segmented
+            value={type}
+            onChange={setType}
+            options={[
+              { key: 'cone', label: 'Cones' },
+              { key: 'sack', label: 'Sacks' },
+            ]}
+          />
+        </div>
+        <div className="field">
+          <label>From</label>
+          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>To</label>
+          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Tolerance (for Cp/Cpk)</label>
+          <div className="spc-spec-picker">
+            <select
+              value={specMode === 'product' ? `p:${productId}` : specMode}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'none' || v === 'manual') {
+                  setSpecMode(v);
+                } else {
+                  setSpecMode('product');
+                  setProductId(v.replace('p:', ''));
+                }
+              }}
+            >
+              <option value="none">None — statistical control only</option>
+              <option value="manual">Manual entry</option>
+              {type === 'cone' &&
+                products.map((p) => (
+                  <option key={p.productId} value={`p:${p.productId}`}>
+                    {p.description || p.lotCode || `Product ${p.productId}`} ({p.setpointG}g)
+                  </option>
+                ))}
+            </select>
+            {specMode === 'manual' && (
+              <>
+                <input type="number" placeholder={`LSL (${unit})`} value={manualLsl} onChange={(e) => setManualLsl(e.target.value)} />
+                <input type="number" placeholder={`USL (${unit})`} value={manualUsl} onChange={(e) => setManualUsl(e.target.value)} />
+              </>
+            )}
+          </div>
+        </div>
       </div>
-      {sub === 'spc' ? (
-        <SpcView range={range} onMeta={onMeta} onInspect={onInspect} />
+
+      {error ? (
+        <div className="error-card" role="alert"><b>Couldn't load weight analysis.</b> {error}</div>
+      ) : loading || !spc ? (
+        <>
+          <div className="sk sk-verdict" />
+          <div className="sk sk-chart" style={{ marginTop: 14 }} />
+        </>
       ) : (
-        <WeightView range={range} onMeta={onMeta} />
+        <>
+          <WeightVerdict spc={spc} unit={unit} type={type} weights={weights} />
+          {sub === 'spc' ? (
+            <WeightStability spc={spc} unit={unit} type={type} from={from} to={to} onInspect={onInspect} />
+          ) : (
+            <WeightSpread
+              spc={spc}
+              unit={unit}
+              type={type}
+              from={from}
+              to={to}
+              onInspect={onInspect}
+              basis={basis}
+              onBasis={setBasis}
+              weights={weights}
+              dailyCones={dailyCones}
+              wErr={wErr}
+            />
+          )}
+        </>
       )}
     </>
+  );
+}
+
+/**
+ * The screen's verdict, above both tabs.
+ *
+ * Every figure is computed. The design's banner reads "Cones run 8.5 g light of
+ * the 1 960 g setpoint" with a Cpk of 0.57 beside it, and neither can be printed
+ * unconditionally here:
+ *
+ *  - Capability is null until someone picks a tolerance. The screen loads with
+ *    specMode 'none', so Cp/Cpk/Pp/Ppk are all null on first paint. A banner
+ *    that leads with Cpk would show a blank on the default view of the page.
+ *  - Without a tolerance there is no setpoint to be "light of" either, so the
+ *    sentence degrades to the mean alone rather than inventing a target.
+ *
+ * The mean and sigma come from /api/spc, which measures AS-RECORDED weights —
+ * it has no gross/net basis. The basis toggle on the Spread tab moves the
+ * histogram but not this banner, so the banner says which basis it is on.
+ */
+function WeightVerdict({
+  spc,
+  unit,
+  type,
+  weights,
+}: {
+  spc: SpcData;
+  unit: string;
+  type: SpcType;
+  weights: WeightsData | null;
+}) {
+  const noun = type === 'cone' ? 'Cones' : 'Sacks';
+  // Two setpoints exist and they are not the same mechanism. /api/spc's is the
+  // tolerance the user picked in the control above (null until they pick one);
+  // /api/weights' is the setpoint of the product the Process Engineer has
+  // currently set, which is always present. Prefer the explicit choice, fall
+  // back to the current product, and say which one is on screen — the screen
+  // used to claim "no setpoint" while the panel beneath it measured against one.
+  const productNominal = type === 'cone' ? weights?.cone.nominalSetpointG ?? null : null;
+  const nominal = spc.spec.nominal ?? productNominal;
+  const nominalIsChosen = spc.spec.nominal != null;
+  const productLabel = weights?.cone.nominalLabel ?? null;
+  const delta = nominal != null ? spc.mean - nominal : null;
+  const off = delta != null ? Math.abs(round1(delta)) : null;
+
+  // "light" vs "heavy" is the whole point of the sentence, so it is only ever
+  // printed when there is a real tolerance to be light or heavy OF.
+  const headline =
+    nominal != null && off != null
+      ? off < 0.05
+        ? `${noun} sit on the ${nominal}${unit} setpoint`
+        : `${noun} run ${off}${unit} ${delta! < 0 ? 'light' : 'heavy'} of the ${nominal}${unit} setpoint`
+      : `${noun} average ${spc.mean}${unit} across ${fmtInt(spc.count)} readings`;
+
+  const flagged = spc.flaggedStationCount;
+  const oocPct = spc.subgroups.length > 0 ? Math.round((100 * spc.xbarOutOfControl) / spc.subgroups.length) : 0;
+  const spread = `Spread is ${spc.stdevWithin}${unit} within subgroups.`;
+  const stationBit =
+    spc.stations.length === 0
+      ? ''
+      : flagged > 0
+        ? ` ${flagged} of ${spc.stations.length} stations ${flagged === 1 ? 'sits' : 'sit'} past the action threshold.`
+        : ' No station is past the action threshold.';
+  // Where the setpoint came from is load-bearing: measured against the current
+  // product, not a confirmed tolerance, means capability is still unavailable.
+  const sourceBit =
+    nominal == null
+      ? ' No setpoint is available, so there is nothing to measure against.'
+      : nominalIsChosen
+        ? ''
+        : ` Measured against the current product${productLabel ? ` (${productLabel})` : ''}; pick a tolerance above for capability.`;
+  const support = `${spread}${stationBit}${sourceBit}`;
+
+  return (
+    <section className="verdict-card">
+      <div className="vc-main">
+        <div className="vc-eyebrow">Verdict</div>
+        <h2 className="vc-headline">{headline}</h2>
+        <p className="vc-support">{support}</p>
+      </div>
+      <div className="vc-stats">
+        <div className="vc-stat">
+          <div className="vcs-val">{spc.mean}<span className="vcs-u">{unit}</span></div>
+          <div className="vcs-key">mean</div>
+        </div>
+        <div className="vc-stat">
+          <div className="vcs-val">{spc.stdevWithin}<span className="vcs-u">{unit}</span></div>
+          <div className="vcs-key">spread <span className="nocaps">σ</span></div>
+        </div>
+        {spc.capability.cpk != null ? (
+          <div className="vc-stat">
+            <div className={`vcs-val ${capClass(spc.capability.cpk)}`}>{spc.capability.cpk}</div>
+            <div className="vcs-key">cpk</div>
+          </div>
+        ) : (
+          <div className="vc-stat">
+            <div className="vcs-val muted">—</div>
+            <div className="vcs-key">cpk · no tolerance</div>
+          </div>
+        )}
+        <div className="vc-stat">
+          <div className={`vcs-val ${spc.xbarOutOfControl > 0 ? 'bad' : ''}`}>{oocPct}<span className="vcs-u">%</span></div>
+          <div className="vcs-key">groups out</div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1051,7 +1317,7 @@ function DashboardView({
             </>
           ),
           view: 'weight',
-          sub: 'stability', // SpcView renders the per-station ANOM chart
+          sub: 'spread', // the per-station chart lives on Spread
           because: `Station ${top.station} sits ${top.delta > 0 ? '+' : ''}${top.delta}${spc.unit} off the line average. The per-station chart below is where that shows up.`,
         });
       }
@@ -2850,395 +3116,264 @@ function capClass(v: number | null): string {
 
 type SpcMode = 'none' | 'product' | 'manual';
 
-function SpcView({
-  range,
-  onMeta,
+/**
+ * Weight → Stability. Control through the day.
+ *
+ * The design leads with a one-line verdict and hides the statistics behind a
+ * "Show the maths" toggle. The verdict is computed, not transcribed: the
+ * prototype's line is "The mean held steady all day", which is false here —
+ * 12 of 48 subgroups breach the band on the default day.
+ *
+ * The toggle hides the capability tiles and the S chart. It does NOT hide the
+ * PLC-vs-tolerance disagreement panel: that is a finding about the plant's own
+ * configuration, not a statistic, and burying it behind a toggle would defeat
+ * the point of surfacing it.
+ */
+function WeightStability({
+  spc,
+  unit,
+  type,
+  from,
+  to,
   onInspect,
 }: {
-  range: { min: string | null; max: string | null };
-  onMeta: (m: Meta) => void;
+  spc: SpcData;
+  unit: string;
+  type: SpcType;
+  from: string;
+  to: string;
   onInspect: (seed: RegisterSeed) => void;
 }) {
-  const [type, setType] = useState<SpcType>('cone');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [specMode, setSpecMode] = useState<SpcMode>('none');
-  const [productId, setProductId] = useState('');
-  const [manualUsl, setManualUsl] = useState('');
-  const [manualLsl, setManualLsl] = useState('');
-  const [products, setProducts] = useState<ProductOption[]>([]);
-  const [data, setData] = useState<SpcData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getProducts().then((r) => setProducts(r.products)).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (range.max && !to) {
-      const prior = new Date(`${range.max}T12:00:00Z`);
-      prior.setUTCDate(prior.getUTCDate() - 1);
-      const priorStr = prior.toISOString().slice(0, 10);
-      const d = range.min && priorStr >= range.min ? priorStr : range.max;
-      setTo(d);
-      setFrom(d);
-    }
-  }, [range.max, range.min, to]);
-
-  useEffect(() => {
-    if (!from || !to) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    const q: { type: SpcType; from: string; to: string; productId?: number; usl?: number; lsl?: number } = { type, from, to };
-    if (specMode === 'product' && productId) q.productId = Number(productId);
-    if (specMode === 'manual' && manualUsl && manualLsl) {
-      q.usl = Number(manualUsl);
-      q.lsl = Number(manualLsl);
-    }
-    getSpc(q)
-      .then((r) => {
-        if (cancelled) return;
-        setData(r.data);
-        onMeta(r.metadata);
-      })
-      .catch((e) => !cancelled && setError(String(e.message ?? e)))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [type, from, to, specMode, productId, manualUsl, manualLsl, onMeta]);
-
-  const unit = type === 'cone' ? 'g' : 'kg';
   const noun = type === 'cone' ? 'cones' : 'sacks';
+  const [showMaths, setShowMaths] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('sms.showMaths') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleMaths = () => {
+    setShowMaths((v) => {
+      try {
+        localStorage.setItem('sms.showMaths', v ? '0' : '1');
+      } catch {
+        /* private mode — the choice just will not persist */
+      }
+      return !v;
+    });
+  };
 
-  // click a subgroup → the register, filtered to that exact time bucket.
   const inspectSubgroup = (g: Subgroup) => {
-    if (!data) return;
     const startMs = new Date(g.ts).getTime();
-    const endMs = startMs + data.bucketMinutes * 60_000;
+    const endMs = startMs + spc.bucketMinutes * 60_000;
     onInspect({
       type,
       from: g.ts.slice(0, 10),
       to: new Date(endMs).toISOString().slice(0, 10),
       tsFrom: g.ts,
       tsTo: new Date(endMs).toISOString(),
-      label: `${data.bucketLabel} subgroup at ${fmtDateTime(g.ts)} (n=${g.n}, mean ${g.mean}${unit})`,
+      label: `${spc.bucketLabel} subgroup at ${fmtDateTime(g.ts)} (n=${g.n}, mean ${g.mean}${unit})`,
     });
   };
 
-  // click a station → the register, filtered to that station over the range.
-  const inspectStation = (s: StationStat) =>
-    onInspect({
-      type: 'cone',
-      from,
-      to,
-      station: s.station,
-      label: `station ${s.station} over ${from === to ? from : `${from}–${to}`} (mean ${s.mean}${unit}, ${s.delta > 0 ? '+' : ''}${s.delta}${unit} vs line)`,
-    });
+  const ooc = spc.xbarOutOfControl;
+  const total = spc.subgroups.length;
+  const oocPct = total > 0 ? Math.round((100 * ooc) / total) : 0;
+
+  // The control limits are ±3σ/√n, so they tighten as a subgroup gets bigger.
+  // At ~170 cones a subgroup that band is under ±2 g, which a real line will
+  // cross often without anything being wrong. Saying "out of control" without
+  // that context reads as an alarm; the band width is stated so the reader can
+  // judge it.
+  const meanN = total > 0 ? Math.round(spc.subgroups.reduce((s, g) => s + g.n, 0) / total) : 0;
+  const bandHalfWidth = meanN > 0 ? round1((3 * spc.stdevWithin) / Math.sqrt(meanN)) : null;
+
+  const headline =
+    ooc === 0
+      ? 'The mean held steady all day'
+      : oocPct >= 20
+        ? `The line mean moved around all day — ${ooc} of ${total} subgroups outside the band`
+        : `The mean mostly held — ${ooc} of ${total} subgroups stepped outside the band`;
 
   return (
     <>
-      <div className="filters">
-        <div className="field">
-          <label>Record type</label>
-          <Segmented
-            value={type}
-            onChange={setType}
-            options={[
-              { key: 'cone', label: 'Cones' },
-              { key: 'sack', label: 'Sacks' },
-            ]}
-          />
-        </div>
-        <div className="field">
-          <label>From</label>
-          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>To</label>
-          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Spec limits (for Cp/Cpk)</label>
-          <div className="spc-spec-picker">
-            <select
-              value={specMode === 'product' ? `p:${productId}` : specMode}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === 'none' || v === 'manual') {
-                  setSpecMode(v);
-                } else {
-                  setSpecMode('product');
-                  setProductId(v.replace('p:', ''));
-                }
-              }}
-            >
-              <option value="none">None — statistical control only</option>
-              <option value="manual">Manual entry</option>
-              {products.map((p) => (
-                <option key={p.productId} value={`p:${p.productId}`}>
-                  {p.description || p.lotCode || `Product ${p.productId}`} ({p.setpointG}g)
-                </option>
-              ))}
-            </select>
-            {specMode === 'manual' && (
-              <>
-                <input type="number" placeholder={`LSL (${unit})`} value={manualLsl} onChange={(e) => setManualLsl(e.target.value)} />
-                <input type="number" placeholder={`USL (${unit})`} value={manualUsl} onChange={(e) => setManualUsl(e.target.value)} />
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {error ? (
-        <div className="error-card"><b>Couldn't load SPC data.</b> {error}</div>
-      ) : loading || !data ? (
-        <div className="tile skeleton" style={{ height: 320 }} />
-      ) : (
-        <>
-          {data.spec.source !== 'none' ? (
-            <div className={`spc-spec-note ${data.spec.source === 'product' ? 'confirmed' : 'unconfirmed'}`}>
-              {data.spec.source === 'product' ? (
-                <>Spec limits from IFL's confirmed material tolerance — <b>{data.spec.productLabel}</b>: {data.spec.lsl}–{data.spec.usl} {unit} (nominal {data.spec.nominal}{unit}).</>
-              ) : (
-                <>Spec limits entered manually ({data.spec.lsl}–{data.spec.usl} {unit}) — <b>unconfirmed with IFL</b>, treat capability below as provisional.</>
+      <section className="panel light">
+        <div className="panel-head">
+          <div>
+            <h3 className="panel-sub-verdict">{headline}</h3>
+            <p className="panel-lede">
+              Each point is one {spc.bucketLabel} subgroup of about {fmtInt(meanN)} {noun}.
+              {bandHalfWidth != null && (
+                <> At that size the ±3σ band is only ±{bandHalfWidth}{unit} wide, so it is a sensitive test, not a fault light.</>
               )}
-            </div>
-          ) : (
-            <div className="spc-spec-note none">
-              No spec limits selected — the control chart below needs none (it's purely statistical), but Cp/Cpk require a real tolerance. Pick a product or enter limits manually above.
-            </div>
-          )}
-
-          {/* Two independent verdicts exist on every cone — the PLC's in-range bit
-              and the product tolerance in PDAS — and nobody had compared them.
-              Where they disagree, only IFL can say which governs, so this states
-              the finding and asks rather than silently picking a side. */}
-          {data.specAgreement && data.specAgreement.disagreementCount > 0 && (
-            <div className="panel spec-disagree" style={{ marginTop: 16 }}>
-              <div className="panel-head">
-                <h2>The PLC and your product spec disagree</h2>
-                <span className="sub">{data.specAgreement.disagreementPct}% of {fmtInt(data.specAgreement.evaluated)} cones</span>
-              </div>
-              <div className="hint">
-                Both judgements come from IFL systems. The line's <b>in-range</b> bit is set by the PLC
-                against a band configured in the controller; the tolerance <b>{data.specAgreement.toleranceLabel}</b> is
-                what the product master in PDAS says. They do not agree on{' '}
-                <b>{fmtInt(data.specAgreement.disagreementCount)}</b> cones in this range.
-              </div>
-              <div className="stat-row">
-                <Stat label="PLC passed, spec says out" val={fmtInt(data.specAgreement.plcPassedButOutOfTolerance)} accent />
-                <Stat label="PLC rejected, spec says in" val={fmtInt(data.specAgreement.plcFailedButInTolerance)} />
-              </div>
-              <div className="hint">
-                The first group passed the line as good while sitting outside the product tolerance;
-                the second was failed while inside it.
-              </div>
-              <div className="hint" style={{ marginTop: 10 }}>
-                Worth reconciling before it shows up in an audit: whichever limit governs, one of the two
-                is currently mis-set. We are not guessing which — that is a decision for your process
-                and quality engineers, and the app will follow whichever you confirm.
-              </div>
-            </div>
-          )}
-
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="panel-head">
-              <h2>Process summary</h2>
-              <span>
-                <ExportCsv
-                  name={csvName(`process-summary-${type}`, from, to)}
-                  headers={['metric', 'value', 'unit']}
-                  rows={() => [
-                    ['count', data.count, noun],
-                    ['mean', data.mean, unit],
-                    ['sigma_within', data.stdevWithin, unit],
-                    ['sigma_overall', data.stdevOverall, unit],
-                    ['subgroup_size', data.bucketLabel, ''],
-                    ['subgroups', data.subgroups.length, ''],
-                    ['subgroups_out_of_control', data.xbarOutOfControl, ''],
-                    ['practical_threshold', data.practicalThresholdG, unit],
-                    ['stations_flagged', data.flaggedStationCount, ''],
-                    ['spec_source', data.spec.source, ''],
-                    ['spec_lsl', data.spec.lsl, unit],
-                    ['spec_usl', data.spec.usl, unit],
-                    ['cp', data.capability.cp, ''],
-                    ['cpk', data.capability.cpk, ''],
-                    ['pp', data.capability.pp, ''],
-                    ['ppk', data.capability.ppk, ''],
-                  ]}
-                />
-                <PrintButton />
-              </span>
-            </div>
-            <div className="hint">
-              {/* Population is now every plausible reading, in-spec or not — SPC has to
-                  include a station's out-of-spec output or it cannot detect that station
-                  drifting. Only physically impossible readings (scale faults) are excluded. */}
-              {fmtInt(data.count)} {type === 'cone' ? 'cones' : 'sacks'}, {from === to ? from : `${from} to ${to}`} ·
-              {' '}grouped into {data.subgroups.length} {data.bucketLabel} subgroups. In-spec and
-              out-of-spec both count; implausible readings (scale faults) are excluded.
-            </div>
-            <div className="stat-row">
-              <Stat label="Mean" val={`${data.mean}`} u={unit} accent />
-              <Stat label="σ (within)" val={`${data.stdevWithin}`} u={unit} />
-              <Stat label="σ (overall)" val={`${data.stdevOverall}`} u={unit} />
-              <Stat label="Subgroups out of control" val={`${data.xbarOutOfControl}`} u={`of ${data.subgroups.length}`} accent={data.xbarOutOfControl > 0} />
-            </div>
-
-            <div className="cap-row">
-              <div className="cap-tile">
-                <span className="cap-label">Cp</span>
-                <span className={`cap-val ${capClass(data.capability.cp)}`}>{data.capability.cp ?? '—'}</span>
-                <span className="cap-hint">potential capability</span>
-              </div>
-              <div className="cap-tile">
-                <span className="cap-label">Cpk</span>
-                <span className={`cap-val ${capClass(data.capability.cpk)}`}>{data.capability.cpk ?? '—'}</span>
-                <span className="cap-hint">actual capability</span>
-              </div>
-              <div className="cap-tile">
-                <span className="cap-label">Pp</span>
-                <span className={`cap-val ${capClass(data.capability.pp)}`}>{data.capability.pp ?? '—'}</span>
-                <span className="cap-hint">overall performance</span>
-              </div>
-              <div className="cap-tile">
-                <span className="cap-label">Ppk</span>
-                <span className={`cap-val ${capClass(data.capability.ppk)}`}>{data.capability.ppk ?? '—'}</span>
-                <span className="cap-hint">overall performance</span>
-              </div>
-            </div>
-            {data.capability.cpk != null && (
-              <div className="hint" style={{ marginTop: 4 }}>
-                Cpk ≥ 1.33 is conventionally "capable", 1.00–1.33 "marginal", below 1.00 "not capable" for this tolerance.
-              </div>
-            )}
+              {' '}Click a point to see the {noun} behind it.
+            </p>
           </div>
+          <button type="button" className="ghost-btn" onClick={toggleMaths} aria-expanded={showMaths}>
+            {showMaths ? 'Hide the maths' : 'Show the maths'}
+          </button>
+        </div>
 
-          {type === 'cone' && data.stations.length > 0 && (
-            <div className="panel" style={{ marginTop: 16 }}>
+        <ResizableChart initialHeight={320}>
+          {(h) => (
+            <SubgroupChart
+              subgroups={spc.subgroups}
+              valueOf={(g) => g.mean}
+              uclOf={(g) => g.xUcl}
+              lclOf={(g) => g.xLcl}
+              violatesOf={(g) => g.xViolates}
+              centerline={spc.grandMean}
+              uslLine={spc.spec.usl}
+              lslLine={spc.spec.lsl}
+              unit={unit}
+              noun={noun}
+              height={h}
+              onPointClick={inspectSubgroup}
+            />
+          )}
+        </ResizableChart>
+        <div className="spc-legend">
+          <span><span className="dot limit" /> outside the band ({ooc})</span>
+          <span><span className="dot ctr" /> centreline {spc.grandMean}{unit}</span>
+          {spc.spec.usl != null && <span><span className="dot spec" /> tolerance {spc.spec.lsl}–{spc.spec.usl}{unit}</span>}
+        </div>
+
+        {showMaths && (
+          <div className="maths">
+            <div className="maths-eyebrow">
+              Capability · {spc.bucketLabel} subgroups of ~{fmtInt(meanN)} {noun}
+            </div>
+            <div className="maths-grid">
+              <div className="mstat">
+                <div className={`ms-val ${capClass(spc.capability.cp)}`}>{spc.capability.cp ?? '—'}</div>
+                <div className="ms-key">Cp</div>
+                <div className="ms-note">
+                  {spc.capability.cp == null ? 'Needs a tolerance — pick one above.' : 'What the spread could achieve if perfectly centred.'}
+                </div>
+              </div>
+              <div className="mstat">
+                <div className={`ms-val ${capClass(spc.capability.cpk)}`}>{spc.capability.cpk ?? '—'}</div>
+                <div className="ms-key">Cpk</div>
+                <div className="ms-note">
+                  {spc.capability.cpk == null ? 'Needs a tolerance.' : '1.33 is capable, 1.00–1.33 marginal, below 1.00 not capable.'}
+                </div>
+              </div>
+              <div className="mstat">
+                <div className="ms-val">{spc.stdevWithin}<span className="ms-u">{unit}</span></div>
+                <div className="ms-key">Sigma within</div>
+                <div className="ms-note">Short-term spread, pooled inside subgroups.</div>
+              </div>
+              <div className="mstat">
+                <div className="ms-val">{spc.stdevOverall}<span className="ms-u">{unit}</span></div>
+                <div className="ms-key">Sigma overall</div>
+                <div className="ms-note">Long-term spread, including drift between subgroups.</div>
+              </div>
+              <div className="mstat">
+                <div className={`ms-val ${ooc > 0 ? 'bad' : ''}`}>{ooc}<span className="ms-u">of {total}</span></div>
+                <div className="ms-key">Groups out</div>
+                <div className="ms-note">Subgroup means outside their own ±3σ band.</div>
+              </div>
+            </div>
+
+            <div className="maths-chart">
               <div className="panel-head">
-                <h2>Per-station weight — where the real variation is</h2>
+                <h3 className="panel-title">S chart — spread within each subgroup</h3>
                 <ExportCsv
-                  name={csvName(`per-station-${type}`, from, to)}
-                  headers={['station', 'n', `mean_${unit}`, `stdev_${unit}`, `delta_vs_line_${unit}`, 'statistically_distinguishable', 'flagged_actionable']}
-                  rows={() => data.stations.map((st) => [st.station, st.n, st.mean, st.stdev, st.delta, st.distinguishable, st.flagged])}
+                  name={csvName(`schart-${type}`, from, to)}
+                  headers={['subgroup_start', 'n', `sigma_${unit}`, `ucl_${unit}`, `lcl_${unit}`, 'out_of_control']}
+                  rows={() => spc.subgroups.map((g) => [g.ts, g.n, g.s, g.sUcl, g.sLcl, g.sViolates])}
                 />
               </div>
-              <div className="hint">
-                Each winding station's mean weight vs the line average ({data.grandMean}{unit}). Bars run light (below) to heavy (above);
-                click any station to see its cones. Dashed lines are the <b>±{data.practicalThresholdG}{unit} practical threshold</b>
-                {' '}({data.spec.source !== 'none' ? '10% of the spec tolerance' : '0.3σ of the spread'}) — only bars past it are flagged as worth acting on.{' '}
-                {data.flaggedStationCount > 0 ? (
-                  <>
-                    <b>{data.flaggedStationCount} of {data.stations.length}</b> cross it. ({data.distinguishableStationCount} are
-                    <i> statistically</i> distinguishable at ~{fmtInt(Math.round(data.count / data.stations.length))} cones each, but most of those offsets are too small to matter.)
-                  </>
-                ) : (
-                  <>No station crosses it — the {data.distinguishableStationCount} statistically-distinguishable stations are all within the practical band.</>
-                )}
-              </div>
-              <ResizableChart initialHeight={300}>
+              <p className="panel-lede">
+                Centred on {spc.sChartCenter}{unit}. A point above its band means the process got erratic in that window —
+                a different failure from the mean moving, which is what the chart above tracks.
+              </p>
+              <ResizableChart initialHeight={240}>
                 {(h) => (
-                  <StationChart stations={data.stations} grandMean={data.grandMean} threshold={data.practicalThresholdG} unit={unit} height={h} onStationClick={inspectStation} />
+                  <SubgroupChart
+                    subgroups={spc.subgroups.filter((g) => g.s != null)}
+                    valueOf={(g) => g.s}
+                    uclOf={(g) => g.sUcl}
+                    lclOf={(g) => g.sLcl}
+                    violatesOf={(g) => g.sViolates}
+                    centerline={spc.sChartCenter}
+                    unit={unit}
+                    noun={noun}
+                    height={h}
+                    onPointClick={inspectSubgroup}
+                  />
                 )}
               </ResizableChart>
             </div>
-          )}
 
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="panel-head">
-              <h2>X̄ chart — line mean over time</h2>
+            <div className="maths-foot">
               <ExportCsv
-                name={csvName(`xbar-${type}`, from, to)}
-                headers={['subgroup_start', 'n', `mean_${unit}`, `ucl_${unit}`, `lcl_${unit}`, 'out_of_control']}
-                rows={() => data.subgroups.map((g) => [g.ts, g.n, g.mean, g.xUcl, g.xLcl, g.xViolates])}
+                name={csvName(`process-summary-${type}`, from, to)}
+                headers={['metric', 'value', 'unit']}
+                rows={() => [
+                  ['count', spc.count, noun],
+                  ['mean', spc.mean, unit],
+                  ['sigma_within', spc.stdevWithin, unit],
+                  ['sigma_overall', spc.stdevOverall, unit],
+                  ['subgroup_size', spc.bucketLabel, ''],
+                  ['subgroups', spc.subgroups.length, ''],
+                  ['subgroups_out_of_control', spc.xbarOutOfControl, ''],
+                  ['practical_threshold', spc.practicalThresholdG, unit],
+                  ['stations_flagged', spc.flaggedStationCount, ''],
+                  ['spec_source', spc.spec.source, ''],
+                  ['spec_lsl', spc.spec.lsl, unit],
+                  ['spec_usl', spc.spec.usl, unit],
+                  ['cp', spc.capability.cp, ''],
+                  ['cpk', spc.capability.cpk, ''],
+                  ['pp', spc.capability.pp, ''],
+                  ['ppk', spc.capability.ppk, ''],
+                ]}
+                label="Export summary"
               />
-            </div>
-            <div className="hint">
-              Each point is the mean of one {data.bucketLabel} subgroup; the band is that subgroup's ±3σ control limit (narrower where more {noun} landed).
-              A point outside the band means the line mean genuinely shifted. Click a point to inspect those {noun}.
-              {data.spec.usl != null && ' Amber lines are the spec tolerance.'}
-            </div>
-            <ResizableChart initialHeight={320}>
-              {(h) => (
-                <SubgroupChart
-                  subgroups={data.subgroups}
-                  valueOf={(g) => g.mean}
-                  uclOf={(g) => g.xUcl}
-                  lclOf={(g) => g.xLcl}
-                  violatesOf={(g) => g.xViolates}
-                  centerline={data.grandMean}
-                  uslLine={data.spec.usl}
-                  lslLine={data.spec.lsl}
-                  unit={unit}
-                  noun={noun}
-                  height={h}
-                  onPointClick={inspectSubgroup}
-                />
-              )}
-            </ResizableChart>
-            <div className="spc-legend">
-              <span><span className="dot limit" /> out of control ({data.xbarOutOfControl})</span>
-              <span><span className="dot ctr" /> centerline {data.grandMean}{unit}</span>
+              <PrintButton />
+              <span className="mono-note">
+                {fmtInt(spc.count)} {noun}, {from === to ? from : `${from} to ${to}`}. In-spec and out-of-spec both count;
+                implausible readings (scale faults) are excluded.
+              </span>
             </div>
           </div>
+        )}
+      </section>
 
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="panel-head">
-              <h2>S chart — within-subgroup spread over time</h2>
-              <ExportCsv
-                name={csvName(`schart-${type}`, from, to)}
-                headers={['subgroup_start', 'n', `sigma_${unit}`, `ucl_${unit}`, `lcl_${unit}`, 'out_of_control']}
-                rows={() => data.subgroups.map((g) => [g.ts, g.n, g.s, g.sUcl, g.sLcl, g.sViolates])}
-              />
-            </div>
-            <div className="hint">
-              Each point is the spread (σ) inside one {data.bucketLabel} subgroup, centered on {data.sChartCenter}{unit}. A point above its band means the
-              process got erratic in that window.
-              {type === 'cone'
-                ? ' This is a valid consistency signal, unlike a raw cone-to-cone moving range across interleaved stations.'
-                : ''}
-            </div>
-            <ResizableChart initialHeight={260}>
-              {(h) => (
-                <SubgroupChart
-                  subgroups={data.subgroups.filter((g) => g.s != null)}
-                  valueOf={(g) => g.s}
-                  uclOf={(g) => g.sUcl}
-                  lclOf={(g) => g.sLcl}
-                  violatesOf={(g) => g.sViolates}
-                  centerline={data.sChartCenter}
-                  unit={unit}
-                  noun={noun}
-                  height={h}
-                  onPointClick={inspectSubgroup}
-                />
-              )}
-            </ResizableChart>
+      {/* Two independent verdicts exist on every cone — the PLC's in-range bit
+          and the product tolerance in PDAS — and nobody had compared them.
+          Where they disagree, only IFL can say which governs, so this states the
+          finding and asks rather than silently picking a side. Deliberately not
+          behind the maths toggle: it is a finding, not a statistic. */}
+      {spc.specAgreement && spc.specAgreement.disagreementCount > 0 && (
+        <section className="panel light spec-disagree">
+          <div className="panel-head">
+            <h3 className="panel-title">The PLC and your product spec disagree</h3>
+            <span className="mono-note">{spc.specAgreement.disagreementPct}% of {fmtInt(spc.specAgreement.evaluated)} cones</span>
           </div>
-
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="panel-head">
-              <h2>Weight distribution</h2>
-              <ExportCsv
-                name={csvName(`distribution-${type}`, from, to)}
-                headers={[`bin_start_${unit}`, `bin_end_${unit}`, 'count']}
-                rows={() => data.histogram.map((b) => [b.start, b.end, b.count])}
-              />
+          <p className="panel-lede">
+            Both judgements come from IFL systems. The line's <b>in-range</b> bit is set by the PLC against a band
+            configured in the controller; the tolerance <b>{spc.specAgreement.toleranceLabel}</b> is what the product
+            master in PDAS says. They do not agree on <b>{fmtInt(spc.specAgreement.disagreementCount)}</b> cones in this range.
+          </p>
+          <div className="sd-split">
+            <div className="sd-half">
+              <div className="sd-val">{fmtInt(spc.specAgreement.plcPassedButOutOfTolerance)}</div>
+              <div className="sd-key">PLC passed, spec says out</div>
+              <div className="sd-note">Passed the line as good while sitting outside the product tolerance.</div>
             </div>
-            <div className="hint">
-              Every {type === 'cone' ? 'cone' : 'sack'}, in-spec or not, binned. The green line is the mean;
-              {data.spec.usl != null ? ' amber lines are the spec tolerance — bars near or past them are the capability risk.' : ' add a spec above to overlay the tolerance.'}
+            <div className="sd-half">
+              <div className="sd-val">{fmtInt(spc.specAgreement.plcFailedButInTolerance)}</div>
+              <div className="sd-key">PLC rejected, spec says in</div>
+              <div className="sd-note">Failed while inside it.</div>
             </div>
-            <ResizableChart initialHeight={300}>
-              {(h) => <Histogram bins={data.histogram} mean={data.mean} usl={data.spec.usl} lsl={data.spec.lsl} unit={unit} height={h} />}
-            </ResizableChart>
           </div>
-        </>
+          <div className="panel-foot">
+            Worth reconciling before it shows up in an audit: whichever limit governs, one of the two is currently
+            mis-set. We are not guessing which — that is a decision for your process and quality engineers, and the
+            app will follow whichever you confirm.
+          </div>
+        </section>
       )}
     </>
   );
@@ -3567,6 +3702,10 @@ function Histogram({
   // bottom padding were fixed px (16/34/68) sized for the old ~12px axis
   // font — at 16px+ the two lines collided, and the unit label got squeezed
   // against the resize handle below the chart (reported: "G" overlapping it).
+  // A bin counts as out of tolerance when it lies wholly beyond a limit. Bins
+  // straddling a limit stay neutral rather than being coloured on a guess about
+  // where inside the bin the readings actually sat.
+  const outOfSpec = (b: HistBin) => (lsl != null && b.end <= lsl) || (usl != null && b.start >= usl);
   const axisFontPx = useTipFontPx();
   // viewBox starts at y=-28 (room for the top axis-title) — the total SVG
   // height has to cover that same 28 units again on top of whatever sits
@@ -3619,7 +3758,7 @@ function Histogram({
         {bins.map((b, i) => (
           <rect
             key={i}
-            className={`hist-bar${hover === i ? ' hi' : ''}`}
+            className={`hist-bar${hover === i ? ' hi' : ''}${outOfSpec(b) ? ' oos' : ''}`}
             x={LM + i * bw + 0.5}
             y={y(b.count)}
             width={bw - 1}
@@ -4689,48 +4828,47 @@ function ParetoRow({
 
 /* ---------------- Weight consistency (Q4/Q5) ---------------- */
 
-function WeightView({
-  range,
-  onMeta,
+/**
+ * Weight → Spread. Distribution and stations.
+ *
+ * Two populations meet on this tab and the design does not distinguish them, so
+ * the code has to:
+ *
+ *  - The histogram and the station chart come from /api/spc, which keeps every
+ *    plausible reading (1500–2100 g) whether in spec or not, because filtering
+ *    to in-range would delete a drifting station's worst output from the
+ *    evidence used to judge that station.
+ *  - The giveaway figure comes from /api/weights, which applies the gross/net
+ *    basis. That basis is the unanswered Q4/Q5 and it flips the SIGN of the
+ *    number, so the toggle lives inside that panel rather than in the page
+ *    controls — it governs that block and nothing else on the screen.
+ */
+function WeightSpread({
+  spc,
+  unit,
+  type,
+  from,
+  to,
+  onInspect,
+  basis,
+  onBasis,
+  weights,
+  dailyCones,
+  wErr,
 }: {
-  range: { min: string | null; max: string | null };
-  onMeta: (m: Meta) => void;
+  spc: SpcData;
+  unit: string;
+  type: SpcType;
+  from: string;
+  to: string;
+  onInspect: (seed: RegisterSeed) => void;
+  basis: Basis;
+  onBasis: (b: Basis) => void;
+  weights: WeightsData | null;
+  dailyCones: number[] | null;
+  wErr: string | null;
 }) {
-  const [basis, setBasis] = useState<Basis>('as_recorded');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [data, setData] = useState<WeightsData | null>(null);
-  const [dailyCones, setDailyCones] = useState<number[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    // default to the full available window — matches this page's original
-    // behaviour (no date filter at all) while now making the range visible
-    // and adjustable, since annualising needs a real, known day-count.
-    if (range.max && !to) {
-      setTo(range.max);
-      setFrom(range.min ?? range.max);
-    }
-  }, [range.max, range.min, to]);
-
-  useEffect(() => {
-    if (!from || !to) return;
-    let cancelled = false;
-    setLoading(true);
-    Promise.all([getWeights(basis, from, to), getProduction({ from, to, groupBy: 'day' })])
-      .then(([r, p]) => {
-        if (cancelled) return;
-        setData(r.data);
-        setDailyCones(p.data.rows.filter((x) => x.group !== 'total').map((x) => x.cones));
-        onMeta(r.metadata);
-      })
-      .catch((e) => !cancelled && setError(String(e.message ?? e)))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [basis, from, to, onMeta]);
+  const noun = type === 'cone' ? 'cones' : 'sacks';
 
   const days = from && to ? Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1 : null;
 
@@ -4741,153 +4879,231 @@ function WeightView({
   // window with two partial edges). The median daily count is used as the
   // "typical day" precisely so those partial days can't drag it.
   const giveaway = useMemo(() => {
-    const perCone = data?.cone.giveawayPerConeG;
+    const perCone = weights?.cone.giveawayPerConeG;
     if (perCone == null || !dailyCones || dailyCones.length === 0) return null;
     const sorted = [...dailyCones].sort((a, b) => a - b);
     const medianConesPerDay = sorted[Math.floor(sorted.length / 2)]!;
     const kgPerDay = (perCone * medianConesPerDay) / 1000;
     return {
       kgPerDay: round1(kgPerDay),
-      annualizedKg: Math.round(kgPerDay * 365),
       annualizedTonnes: round1((kgPerDay * 365) / 1000),
       medianConesPerDay,
       partialDays: dailyCones.filter((c) => c < medianConesPerDay * 0.5).length,
     };
-  }, [data, dailyCones]);
+  }, [weights, dailyCones]);
 
-  if (error) return <div className="error-card"><b>Couldn't load weight analysis.</b> {error}</div>;
+  // Sub-floor readings the SPC population never sees. weights.ts collects them
+  // per record type; both are shown because a sack-scale fault matters as much
+  // as a cone one and nothing else on this screen would reveal it.
+  const excluded = useMemo(() => {
+    if (!weights) return [] as { weight: number; unit: string; shiftDate: string | null }[];
+    return [
+      ...weights.cone.outliers.map((o) => ({ weight: o.weight, unit: 'g', shiftDate: o.shiftDate ?? null })),
+      ...weights.sack.outliers.map((o) => ({ weight: o.weight, unit: 'kg', shiftDate: o.shiftDate ?? null })),
+    ];
+  }, [weights]);
+
+  // The API bins over mean±4sigma, so a tolerance wider than that window falls
+  // entirely outside the chart and Histogram silently drops the line. Saying so
+  // is better than drawing a chart that looks like it has no limits.
+  const outOfSpecNote = useMemo(() => {
+    const { lsl, usl } = spc.spec;
+    if (usl == null || lsl == null || spc.histogram.length === 0) return null;
+    const lo = spc.histogram[0]!.start;
+    const hi = spc.histogram[spc.histogram.length - 1]!.end;
+    const n = spc.histogram.filter((b) => b.end <= lsl || b.start >= usl).reduce((t, b) => t + b.count, 0);
+    const clipped = lsl < lo || usl > hi;
+    if (clipped) {
+      return ` The ${lsl}–${usl}${unit} tolerance is wider than the spread shown, so its limits sit off this chart — every reading here is inside it.`;
+    }
+    return n > 0 ? ` ${fmtInt(n)} readings fall outside ${lsl}–${usl}${unit}.` : ' No reading falls outside the tolerance.';
+  }, [spc, unit]);
+
+  const inspectStation = (s: StationStat) =>
+    onInspect({
+      type: 'cone',
+      from,
+      to,
+      station: s.station,
+      label: `station ${s.station} over ${from === to ? from : `${from}–${to}`} (mean ${s.mean}${unit}, ${s.delta > 0 ? '+' : ''}${s.delta}${unit} vs line)`,
+    });
+
+  // The panel title IS the finding, per the design. It names the extremes only
+  // when they are past the action threshold — the prototype's "Station 5 is 24 g
+  // light. Station 10 is 19 g heavy." is a standing claim, and on this line the
+  // flagged station changes with the date range, so it has to be derived.
+  const stationVerdict = useMemo(() => {
+    const flagged = spc.stations.filter((s) => s.flagged).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    if (flagged.length === 0) {
+      return {
+        title: `No station is far enough off to act on`,
+        lede: `All ${spc.stations.length} sit inside the ±${spc.practicalThresholdG}${unit} action band. ${spc.distinguishableStationCount} of them differ from the line average by more than measurement noise, but not by enough to matter.`,
+      };
+    }
+    const phrase = (s: StationStat) => `Station ${s.station} is ${Math.abs(s.delta)}${unit} ${s.delta < 0 ? 'light' : 'heavy'}`;
+    const named = flagged.slice(0, 2).map(phrase).join('. ');
+    const rest = spc.stations.length - Math.min(2, flagged.length);
+    return {
+      title: `${named}.`,
+      lede:
+        flagged.length > 2
+          ? `${flagged.length - 2} more are also past the ±${spc.practicalThresholdG}${unit} action band; the rest sit inside it.`
+          : `The other ${rest} sit inside the ±${spc.practicalThresholdG}${unit} action band — leave them alone.`,
+    };
+  }, [spc, unit]);
 
   return (
     <>
-      <div className="filters">
-        <div className="field">
-          <label>From</label>
-          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+      <section className="panel light">
+        <div className="panel-head">
+          <h3 className="panel-title">Every {type} weighed{from === to ? `, ${from}` : ''}</h3>
+          <span className="mono-note">{fmtInt(spc.count)} readings · {spc.histogram.length} bins</span>
         </div>
-        <div className="field">
-          <label>To</label>
-          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Weight basis (Q4 / Q5)</label>
-          <Segmented
-            value={basis}
-            onChange={setBasis}
-            options={(['as_recorded', 'gross', 'net'] as Basis[]).map((b) => ({
-              key: b,
-              label: b === 'as_recorded' ? 'As recorded' : b[0]!.toUpperCase() + b.slice(1),
-            }))}
+        <p className="panel-lede">
+          {spc.spec.usl != null
+            ? 'Bars outside the tolerance are marked. Lines are the tolerance limits and the measured mean.'
+            : 'The line is the measured mean. Pick a tolerance above to mark the bars outside it.'}
+          {outOfSpecNote}
+        </p>
+        <ResizableChart initialHeight={300}>
+          {(h) => <Histogram bins={spc.histogram} mean={spc.mean} usl={spc.spec.usl} lsl={spc.spec.lsl} unit={unit} height={h} />}
+        </ResizableChart>
+        <div className="panel-foot">
+          {/* The histogram's population stops at the plausibility window, so the
+              readings it drops have to be named somewhere or a scale fault just
+              disappears from the screen. This is the only place they surface. */}
+          Physically implausible readings are excluded as scale faults, in spec or not.
+          {excluded.length > 0 && (
+            <>
+              {' '}
+              <b>{excluded.length} sub-floor reading{excluded.length === 1 ? '' : 's'}</b> in this range:{' '}
+              {excluded.slice(0, 4).map((o, i) => (
+                <span key={i} className="mono-note">
+                  {o.weight}{o.unit}{o.shiftDate ? ` on ${o.shiftDate}` : ''}{i < Math.min(4, excluded.length) - 1 ? ' · ' : ''}
+                </span>
+              ))}
+              {excluded.length > 4 && <span className="mono-note"> · +{excluded.length - 4} more</span>}.
+            </>
+          )}
+          <ExportCsv
+            name={csvName(`distribution-${type}`, from, to)}
+            headers={[`bin_start_${unit}`, `bin_end_${unit}`, 'count']}
+            rows={() => spc.histogram.map((b) => [b.start, b.end, b.count])}
           />
         </div>
-      </div>
+      </section>
 
-      {loading || !data ? (
-        <div className="tile skeleton" style={{ height: 280 }} />
-      ) : (
-        <>
-          {data.cone.giveawayPerConeG != null && (
-            <div className="callout">
-              <div className="big">
-                {giveaway ? (
-                  <>
-                    <span className="accent">{Math.abs(giveaway.kgPerDay)} kg/day</span> {data.cone.giveawayPerConeG >= 0 ? 'overfill' : 'underfill'}
-                    {' — '}<span className="accent">≈{Math.abs(giveaway.annualizedTonnes)} t/year</span> projected
-                  </>
-                ) : (
-                  <>
-                    {data.cone.giveawayPerConeG >= 0 ? 'Overfill' : 'Underfill'} vs {data.cone.nominalSetpointG}g nominal
-                  </>
-                )}
-              </div>
-
-              {/* This is the most quotable number in the app and its SIGN is not
-                  yet settled — on this range, net basis turns +1.5 g/cone into
-                  −68.5 g/cone. The caveat travels with the number so it cannot be
-                  screenshotted or quoted without it. */}
-              {data.cone.provisionalReasons.length > 0 && (
-                <div className="provisional" role="note">
-                  <b>Provisional — not for quoting yet.</b>
-                  <ul>
-                    {data.cone.provisionalReasons.map((r, i) => (
-                      <li key={i}>{r}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <p>
-                {data.note} Avg cone <b>{data.cone.avg}g</b> vs {data.cone.nominalSetpointG}g nominal
-                {data.cone.nominalSource === 'current_product'
-                  ? ` (${data.cone.nominalLabel}'s own setpoint)`
-                  : ' (fallback — no product selected)'}
-                {' — '}{data.cone.giveawayPerConeG > 0 ? '+' : ''}
-                {data.cone.giveawayPerConeG} g/cone. Across {fmtInt(data.cone.count)} cones over {days} day{days === 1 ? '' : 's'}
-                {data.cone.giveawayTotalKg != null && <> ≈ <b>{data.cone.giveawayTotalKg} kg</b> vs nominal</>}.
-                {giveaway && (
-                  <>
-                    {' '}The daily and yearly figures apply that per-cone rate to a typical day of{' '}
-                    <b>{fmtInt(giveaway.medianConesPerDay)} cones</b> (the median), so a partly-finished day can't drag
-                    them{giveaway.partialDays > 0 ? ` — ${giveaway.partialDays} in this range` : ''}. Straight-line
-                    extrapolation, not a forecast.
-                  </>
-                )}
-              </p>
+      {type === 'cone' && spc.stations.length > 0 && (
+        <section className="panel light" style={{ marginTop: 14 }}>
+          <div className="panel-head">
+            <div>
+              <h3 className="panel-sub-verdict">{stationVerdict.title}</h3>
+              <p className="panel-lede">{stationVerdict.lede}</p>
             </div>
-          )}
-
-          <WeightPanel title="Cone weight distribution" stats={data.cone} suffix="g" />
-          <div style={{ height: 16 }} />
-          <WeightPanel title="Sack weight distribution" stats={data.sack} suffix="kg" />
-        </>
+            <span className="mono-note">±{spc.practicalThresholdG}{unit} action threshold</span>
+          </div>
+          <ResizableChart initialHeight={300}>
+            {(h) => (
+              <StationChart
+                stations={spc.stations}
+                grandMean={spc.grandMean}
+                threshold={spc.practicalThresholdG}
+                unit={unit}
+                height={h}
+                onStationClick={inspectStation}
+              />
+            )}
+          </ResizableChart>
+          <div className="panel-foot">
+            Each bar is a station's mean against the line average of {spc.grandMean}{unit}; click one to see its {noun}.
+            The threshold is {spc.spec.source !== 'none' ? '10% of the selected tolerance' : '0.3σ of the measured spread'},
+            so it moves when you change the tolerance above.
+            <ExportCsv
+              name={csvName(`per-station-${type}`, from, to)}
+              headers={['station', 'n', `mean_${unit}`, `stdev_${unit}`, `delta_vs_line_${unit}`, 'statistically_distinguishable', 'flagged_actionable']}
+              rows={() => spc.stations.map((st) => [st.station, st.n, st.mean, st.stdev, st.delta, st.distinguishable, st.flagged])}
+            />
+          </div>
+        </section>
       )}
-    </>
-  );
-}
 
-function WeightPanel({ title, stats, suffix }: { title: string; stats: WeightStats; suffix: string }) {
-  const revealed = useRevealOnData(stats.histogram.map((b) => `${b.bucket}:${b.count}`).join('|'));
-  const max = Math.max(1, ...stats.histogram.map((b) => b.count));
-  const first = stats.histogram[0]?.bucket;
-  const last = stats.histogram[stats.histogram.length - 1];
-  return (
-    <div className="panel">
-      <h2>{title}</h2>
-      <div className="hint">In-range values only; outliers listed separately.</div>
-      <div className="stat-row">
-        <Stat label="Count" val={fmtInt(stats.count)} />
-        <Stat label="Average" val={`${stats.avg}`} u={suffix} accent />
-        <Stat label="Min" val={`${stats.min}`} u={suffix} />
-        <Stat label="Max" val={`${stats.max}`} u={suffix} />
-        <Stat label="Std dev" val={`${stats.stdev}`} u={suffix} />
-      </div>
-      <div className="histo">
-        {stats.histogram.map((b) => (
-          <div key={b.bucket} className="hbar" style={{ height: `${revealed ? (100 * b.count) / max : 0}%` }}>
-            <span className="tip">
-              {b.bucket}–{b.bucket + stats.bucketSize} {suffix}: {fmtInt(b.count)}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="histo-axis">
-        <span>{first} {suffix}</span>
-        <span>{last ? last.bucket + stats.bucketSize : ''} {suffix}</span>
-      </div>
-      {stats.outliers.length > 0 && (
-        <div className="outliers">
-          <div className="hint" style={{ marginTop: 16 }}>
-            {stats.outliers.length} anomalous reading{stats.outliers.length > 1 ? 's' : ''} (excluded from stats)
-          </div>
-          {stats.outliers.map((o, i) => (
-            <div className="o-item" key={i}>
-              <span className="w">{o.weight} {suffix}</span>
-              <span className="meta">
-                {o.shiftDate ?? '—'} · row #{o.sourceRowId ?? '—'}
-              </span>
-            </div>
-          ))}
+      {wErr ? (
+        <div className="error-card" role="alert" style={{ marginTop: 14 }}>
+          <b>Couldn't load the giveaway figure.</b> {wErr}
         </div>
-      )}
-    </div>
+      ) : weights && weights.cone.giveawayPerConeG != null ? (
+        <section className="panel light" style={{ marginTop: 14 }}>
+          <div className="panel-head">
+            <h3 className="panel-title">Material given away</h3>
+            <div className="field inline">
+              <label>Weight basis (Q4 / Q5)</label>
+              <Segmented
+                value={basis}
+                onChange={onBasis}
+                options={(['as_recorded', 'gross', 'net'] as Basis[]).map((b) => ({
+                  key: b,
+                  label: b === 'as_recorded' ? 'As recorded' : b[0]!.toUpperCase() + b.slice(1),
+                }))}
+              />
+            </div>
+          </div>
+
+          <div className="giveaway">
+            {giveaway ? (
+              <div className="gv-big">
+                <span className={weights.cone.giveawayPerConeG >= 0 ? 'accent' : ''}>
+                  {Math.abs(giveaway.kgPerDay)} kg/day
+                </span>{' '}
+                {weights.cone.giveawayPerConeG >= 0 ? 'overfill' : 'underfill'} · ≈{Math.abs(giveaway.annualizedTonnes)} t/year
+              </div>
+            ) : (
+              <div className="gv-big">
+                {weights.cone.giveawayPerConeG >= 0 ? 'Overfill' : 'Underfill'} vs {weights.cone.nominalSetpointG}{unit} nominal
+              </div>
+            )}
+
+            {/* The most quotable number in the app. The basis toggle no longer
+                moves it (weights.ts adjusts the nominal by the same tube
+                weight), but it is still unquotable: the setpoint's own basis is
+                unconfirmed, and if it is stated opposite to the recorded weight
+                this figure is out by the full tube weight. The caveat travels
+                with the number so it cannot be screenshotted without it. */}
+            {weights.cone.provisionalReasons.length > 0 && (
+              <div className="provisional" role="note">
+                <b>Provisional — not for quoting yet.</b>
+                <ul>
+                  {weights.cone.provisionalReasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="panel-lede">
+              {weights.note} Average cone <b>{weights.cone.avg}g</b> against {weights.cone.nominalSetpointG}g nominal
+              {weights.cone.nominalSource === 'current_product'
+                ? ` (${weights.cone.nominalLabel}'s own setpoint)`
+                : ' (fallback — no product selected)'}
+              {' — '}{weights.cone.giveawayPerConeG > 0 ? '+' : ''}
+              {weights.cone.giveawayPerConeG} g/cone across {fmtInt(weights.cone.count)} cones over {days} day{days === 1 ? '' : 's'}
+              {weights.cone.giveawayTotalKg != null && <> ≈ <b>{weights.cone.giveawayTotalKg} kg</b> against nominal</>}.
+              {giveaway && (
+                <>
+                  {' '}The daily and yearly figures apply that per-cone rate to a typical day of{' '}
+                  <b>{fmtInt(giveaway.medianConesPerDay)} cones</b> (the median), so a partly-finished day can't drag
+                  them{giveaway.partialDays > 0 ? ` — ${giveaway.partialDays} in this range` : ''}. Straight-line
+                  extrapolation, not a forecast.
+                </>
+              )}
+            </p>
+            <p className="panel-lede">
+              This block is the only thing on the screen that moves with the basis toggle. The verdict, the
+              histogram and the stations above are all measured on weights exactly as the PLC recorded them.
+            </p>
+          </div>
+        </section>
+      ) : null}
+    </>
   );
 }
 

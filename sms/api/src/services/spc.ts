@@ -151,9 +151,18 @@ export async function getSpec(
   productId: number | null,
   manualUsl: number | null,
   manualLsl: number | null,
+  type: SpcType = 'cone',
 ): Promise<SpecLimits> {
   if (manualUsl != null && manualLsl != null) {
     return { usl: manualUsl, lsl: manualLsl, nominal: round((manualUsl + manualLsl) / 2), source: 'manual' };
+  }
+  // sms.product.setpoint_weight_g is a CONE setpoint in GRAMS. Applied to sacks,
+  // whose weights are kilograms, it produced a 1960 kg "setpoint" against a
+  // 47 kg mean — a Cpk of -3734 and a verdict reading "Sacks run 1912.7 kg
+  // light". Manual limits are still honoured for sacks because the caller
+  // supplies those in the record's own unit.
+  if (type === 'sack') {
+    return { usl: null, lsl: null, nominal: null, source: 'none' };
   }
   if (productId != null) {
     const r = await pool

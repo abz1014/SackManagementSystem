@@ -921,8 +921,12 @@ body {
 .st-chart .x-tick.flagged { fill: var(--alert); font-weight: 700; }
 
 /* ---- Weight distribution histogram ---- */
-.histchart .hist-bar { fill: var(--neutral); opacity: 0.6; transition: opacity 120ms; }
+.histchart .hist-bar { fill: var(--slate-mark); opacity: 0.6; transition: opacity 120ms; }
 .histchart .hist-bar.hi { opacity: 1; }
+/* Readings wholly outside the tolerance. Colour is not the only channel — the
+   panel lede states the count in words as well. */
+.histchart .hist-bar.oos { fill: var(--alarm); opacity: 0.85; }
+.histchart .hist-bar.oos.hi { opacity: 1; }
 /* The panel's own caption says "the green line is the mean" — the line
    itself was still var(--ink) (black). Not part of this colour pass; it was
    simply wrong against its own copy the whole time. */
@@ -1694,4 +1698,143 @@ body {
   .kpis { grid-template-columns: repeat(2, 1fr); }
   .ov-grid { grid-template-columns: 1fr; }
   .ribbon-stats { gap: 20px; }
+}
+
+/* ==========================================================================
+   WEIGHT — reworked screen
+   Signature: the verdict banner with a 6px alarm edge, sitting above both tabs.
+   ========================================================================== */
+
+.wt-controls {
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end;
+  margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--hairline);
+}
+.wt-controls .field { display: flex; flex-direction: column; gap: 6px; }
+.wt-controls .field > label {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+.wt-controls input[type='date'],
+.wt-controls select,
+.wt-controls input[type='number'] {
+  font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--ink);
+  background: var(--card); border: 1px solid var(--field-border);
+  border-radius: var(--radius); padding: 8px 10px;
+}
+.field.inline { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.field.inline > label {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+
+/* ------------------------------------------------------------ verdict card */
+.verdict-card {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-left: 6px solid var(--alarm); border-radius: var(--radius);
+  padding: 24px 28px; margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 30px; flex-wrap: wrap;
+}
+.vc-main { min-width: 0; flex: 1 1 380px; }
+.vc-eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--alarm-ink);
+}
+.vc-headline {
+  margin: 3px 0 0; font-size: var(--fs-verdict); font-weight: var(--fw-semi);
+  letter-spacing: -0.025em; line-height: 1.15;
+}
+.vc-support { margin: 6px 0 0; color: var(--graphite); font-size: var(--fs-body); }
+
+.vc-stats { display: flex; gap: 32px; flex-wrap: wrap; }
+.vc-stat { display: flex; flex-direction: column; gap: 2px; }
+.vcs-val {
+  font-family: var(--font-mono); font-size: var(--fs-sub); font-weight: 500;
+  color: var(--ink); line-height: 1.1;
+}
+/* Capability colours: the value is 22px, under the 24px large-text threshold,
+   so these use the -ink variants that pass AA at body size. */
+.vcs-val.good { color: var(--ok-ink); }
+.vcs-val.warn { color: var(--warn-ink); }
+.vcs-val.bad { color: var(--alarm-ink); }
+.vcs-val.muted { color: var(--muted); }
+.vcs-u { font-size: var(--fs-cell); color: var(--muted); margin-left: 3px; }
+.vcs-key {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+}
+/* Greek letters must escape the uppercase rule: text-transform turned the
+   sigma of "spread σ" into Σ, which is the summation operator, not the
+   standard deviation. */
+.nocaps { text-transform: none; }
+
+/* --------------------------------------------------------- panel additions */
+.panel-sub-verdict {
+  margin: 0; font-size: var(--fs-sub); font-weight: var(--fw-semi); letter-spacing: -0.02em;
+}
+.panel-lede { margin: 4px 0 0; font-size: var(--fs-caption); color: var(--graphite); line-height: 1.45; }
+.panel.light > .panel-head:first-child { align-items: flex-start; }
+
+/* Outline button that inverts on hover — the design's "Show the maths" control. */
+.ghost-btn {
+  flex: none; font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-semi);
+  color: var(--ink); background: none; border: 1px solid var(--ink);
+  border-radius: var(--radius); padding: 10px 18px; cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.ghost-btn:hover { background: var(--ink); color: var(--on-ink); }
+
+/* ------------------------------------------------------------- maths strip */
+.maths { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--hairline-2); }
+.maths-eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 16px;
+}
+.maths-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; }
+.ms-val { font-family: var(--font-mono); font-size: var(--fs-card); color: var(--ink); line-height: 1.1; }
+.ms-val.good { color: var(--ok-ink); }
+.ms-val.warn { color: var(--warn-ink); }
+.ms-val.bad { color: var(--alarm-ink); }
+.ms-u { font-size: var(--fs-caption); color: var(--muted); margin-left: 3px; }
+.ms-key { font-size: var(--fs-caption); font-weight: var(--fw-semi); margin-top: 2px; }
+.ms-note { font-size: var(--fs-caption); color: var(--muted); margin-top: 2px; line-height: 1.4; }
+.maths-chart { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--hairline-2); }
+.maths-foot {
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--hairline-2);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+
+/* ----------------------------------------------------- spec disagreement */
+.sd-split { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 18px; }
+.sd-val { font-family: var(--font-mono); font-size: var(--fs-card); color: var(--alarm-ink); line-height: 1.1; }
+.sd-key { font-size: var(--fs-caption); font-weight: var(--fw-semi); margin-top: 3px; }
+.sd-note { font-size: var(--fs-caption); color: var(--muted); margin-top: 2px; }
+
+/* ---------------------------------------------------------------- giveaway */
+.giveaway { margin-top: 4px; }
+.gv-big {
+  font-family: var(--font-mono); font-size: var(--fs-card);
+  letter-spacing: -0.02em; color: var(--ink); line-height: 1.15;
+}
+.gv-big .accent { color: var(--alarm-ink); }
+
+/* The caveat is physically attached to the number it qualifies, because the
+   sign of that number flips with the unanswered Q4/Q5 basis question. */
+.provisional {
+  margin: 12px 0; padding: 12px 14px;
+  background: var(--warn-pale); border: 1px solid var(--warn-border);
+  border-radius: var(--radius); font-size: var(--fs-caption); color: var(--graphite);
+}
+.provisional b { color: var(--warn-ink); }
+.provisional ul { margin: 6px 0 0; padding-left: 18px; }
+.provisional li { margin-top: 3px; }
+
+/* --------------------------------------------------------------- skeletons */
+.sk-verdict { height: 128px; }
+.sk-chart { height: 340px; }
+
+@media (max-width: 1180px) {
+  .maths-grid { grid-template-columns: repeat(2, 1fr); }
+  .sd-split { grid-template-columns: 1fr; }
+  .verdict-card { gap: 18px; }
 }
