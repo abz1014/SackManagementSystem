@@ -64,80 +64,21 @@ import {
   type OeeData,
   type OperationsData,
 } from './api';
+import { AppShell, canOpen, VIEW_LABEL, type View, type SectionConfig } from './shell';
 import { downloadCsv, csvName, type CsvRow } from './csv';
 import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmtDateTime, fmtTime } from './format';
 
 type Shift = 'all' | 'morning' | 'evening' | 'night';
 const SHIFTS: Shift[] = ['all', 'morning', 'evening', 'night'];
-type View = 'dashboard' | 'register' | 'performance' | 'weight' | 'shift' | 'rejects' | 'operations' | 'admin';
-/**
- * Text size is an environment decision, not a design one. An operator reading a
- * wall-mounted screen across the shop floor and a supervisor at a desk need
- * genuinely different sizes, and plant staff skew older — so rather than us
- * guessing a single value and fielding "make it bigger" every review, the user
- * sets it. It scales the ENTIRE interface (one CSS variable feeding a rem
- * scale), so layout proportions hold instead of text outgrowing its boxes.
- *
- * Stored per browser, not per account: the right size follows the screen you
- * are sitting at, and the same operator at a different station wants different
- * settings.
- */
-const UI_SCALES = [
-  { key: '1', label: 'Normal', px: 18 },
-  { key: '1.125', label: 'Large', px: 20 },
-  { key: '1.25', label: 'Extra large', px: 22 },
-] as const;
 
-function DisplayScale() {
-  const [scale, setScale] = useState<string>(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('sms.uiScale') : null;
-    return UI_SCALES.some((s) => s.key === saved) ? saved! : '1';
-  });
-
-  useEffect(() => {
-    document.documentElement.style.setProperty('--ui-scale', scale);
-    try {
-      localStorage.setItem('sms.uiScale', scale);
-    } catch {
-      /* private mode — the setting just won't persist */
-    }
-  }, [scale]);
-
-  return (
-    <div className="uiscale" role="group" aria-label="Text size">
-      {UI_SCALES.map((s) => (
-        <button
-          key={s.key}
-          type="button"
-          className={scale === s.key ? 'active' : ''}
-          style={{ fontSize: `${11 + Number(s.key) * 3}px` }}
-          onClick={() => setScale(s.key)}
-          aria-pressed={scale === s.key}
-          title={`Text size: ${s.label}`}
-        >
-          A<span className="sr-only"> — {s.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const VIEW_LABEL: Record<View, string> = {
-  dashboard: 'Overview',
-  register: 'Register',
-  performance: 'Performance',
-  weight: 'Weight',
-  shift: 'Shifts',
-  rejects: 'Rejects',
-  operations: 'Operations',
-  admin: 'Admin',
-};
 
 /** The register detail page is a real URL, not modal state — permalink-able,
  * survives refresh, and cooperates with browser back/forward. No router
  * dependency: the native History API is enough for one addressable sub-page. */
 interface Route {
   view: View;
+  /** Section-column sub-view, so a finding can deep-link to the exact tab. */
+  sub?: string;
   detailType?: RegisterType;
   detailId?: string;
 }
@@ -151,8 +92,10 @@ function parseRoute(): Route {
     : 'dashboard';
   const dtype = p.get('dtype');
   const did = p.get('did');
+  const sub = p.get('sub');
   return {
     view,
+    sub: sub ?? undefined,
     // 'reject' was missing here, so a reject detail URL only worked when reached
     // by CLICK (which sets route state directly) and silently fell back to the
     // cone list on a cold load — i.e. it was not actually a permalink, which is
@@ -166,6 +109,7 @@ function parseRoute(): Route {
 function routeSearch(r: Route): string {
   const p = new URLSearchParams();
   p.set('v', r.view);
+  if (r.sub) p.set('sub', r.sub);
   if (r.detailType && r.detailId) {
     p.set('dtype', r.detailType);
     p.set('did', r.detailId);
@@ -279,6 +223,96 @@ function Segmented<T extends string>({
   );
 }
 
+
+/**
+ * Section-column contents per screen, from the handoff's table.
+ *
+ * Sub-tab keys are the values that appear in the URL as ?sub=, so they are part
+ * of the permalink contract — rename one and you break a bookmark. Notes that
+ * quote a figure take it from live data where we have it rather than the
+ * design's sample numbers, which are illustrative and in several cases wrong
+ * for this plant.
+ */
+function sectionFor(view: View, counts: { cones?: number; sacks?: number; rejects?: number }): SectionConfig {
+  const n = (v?: number) => (v == null ? '—' : fmtInt(v));
+  switch (view) {
+    case 'dashboard':
+      return {
+        eyebrow: 'Live picture',
+        title: 'The line',
+        subTabs: [
+          { key: 'today', label: 'Today', note: 'last complete day' },
+          { key: 'yesterday', label: 'Yesterday' },
+          { key: 'week', label: 'This week' },
+        ],
+      };
+    case 'register':
+      return {
+        eyebrow: 'Every reading',
+        title: 'Records',
+        subTabs: [
+          { key: 'cone', label: 'Cones', note: `${n(counts.cones)} rows` },
+          { key: 'sack', label: 'Sacks', note: `${n(counts.sacks)} rows` },
+          // Third tab: the design has only Cones and Sacks, but rejects are a
+          // different table shape (no weight, no in-range, coded reasons) and
+          // this is the only path from a named finding to the rows behind it.
+          { key: 'reject', label: 'Rejects', note: `${n(counts.rejects)} rows` },
+        ],
+      };
+    case 'performance':
+      return {
+        eyebrow: 'How the line ran',
+        title: 'Output',
+        subTabs: [
+          { key: 'oee', label: 'Effectiveness', note: 'OEE and its three parts' },
+          { key: 'stops', label: 'Stops', note: "one day's downtime" },
+          { key: 'patterns', label: 'Patterns', note: 'when stops repeat' },
+        ],
+      };
+    case 'weight':
+      return {
+        eyebrow: 'Grams per cone',
+        title: 'Weight',
+        subTabs: [
+          { key: 'spread', label: 'Spread', note: 'distribution and stations' },
+          { key: 'stability', label: 'Stability', note: 'control through the day' },
+        ],
+      };
+    case 'rejects':
+      return {
+        eyebrow: `${n(counts.rejects)} in 18 days`,
+        title: 'Rejects',
+        subTabs: [
+          { key: 'reasons', label: 'Reasons', note: 'inspection codes' },
+          { key: 'trend', label: 'Trend', note: 'bursts vs noise' },
+          { key: 'station', label: 'By station', note: 'where they happen' },
+        ],
+      };
+    case 'shift':
+      return {
+        eyebrow: 'Morning · evening · night',
+        title: 'Shifts',
+        subTabs: [
+          { key: 'week', label: 'This week' },
+          { key: 'all', label: 'Whole record' },
+        ],
+      };
+    case 'operations':
+      return { eyebrow: 'Plant connection', title: 'Sync', subTabs: [] };
+    case 'admin':
+      return {
+        eyebrow: 'Configuration',
+        title: 'Setup',
+        subTabs: [
+          { key: 'people', label: 'People' },
+          { key: 'stations', label: 'Stations', note: '14 positions' },
+          { key: 'rules', label: 'Rules', note: 'weight and shift' },
+          { key: 'sync', label: 'Sync', note: 'plant connection' },
+        ],
+      };
+  }
+}
+
 export function App() {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
 
@@ -324,7 +358,12 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   // here from a finding" context so it can't go stale on an unrelated page.
   const setView = (v: View) => {
     setNavContext(null);
-    navigate({ view: v, detailType: undefined, detailId: undefined });
+    // `sub` must be cleared with the view. navigate() merges into the current
+    // route, so without this a sub-tab key leaks across screens — going
+    // Records -> Weight produced ?v=weight&sub=reject, naming a tab that does
+    // not exist there. Clearing it lets the section column fall back to its
+    // own first tab.
+    navigate({ view: v, sub: undefined, detailType: undefined, detailId: undefined });
   };
 
   /** Follow a finding to the page that explains it, carrying the reason. */
@@ -359,55 +398,30 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     onLogout();
   };
 
-  return (
-    <div className="app">
-      <a className="skip-link" href="#main">Skip to content</a>
-      <header className="topbar">
-        <div className="brand">
-          <span className="mark">
-            SMS<span className="dot">.</span>
-          </span>
-          <span className="sub">TP1 Line 3 · Unit 2</span>
-          <nav className="segmented nav" aria-label="Views">
-            <button aria-current={view === 'dashboard' ? 'page' : undefined} className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Overview</button>
-            <button aria-current={view === 'register' ? 'page' : undefined} className={view === 'register' ? 'active' : ''} onClick={() => { setRegisterSeed(null); setView('register'); }}>Register</button>
-            <button aria-current={view === 'performance' ? 'page' : undefined} className={view === 'performance' ? 'active' : ''} onClick={() => setView('performance')}>Performance</button>
-            <button aria-current={view === 'weight' ? 'page' : undefined} className={view === 'weight' ? 'active' : ''} onClick={() => setView('weight')}>Weight</button>
-            <button aria-current={view === 'rejects' ? 'page' : undefined} className={view === 'rejects' ? 'active' : ''} onClick={() => setView('rejects')}>Rejects</button>
-            <button aria-current={view === 'shift' ? 'page' : undefined} className={view === 'shift' ? 'active' : ''} onClick={() => setView('shift')}>Shifts</button>
-            <button aria-current={view === 'operations' ? 'page' : undefined} className={view === 'operations' ? 'active' : ''} onClick={() => setView('operations')}>Operations</button>
-            {rank >= 4 && (
-              <button aria-current={view === 'admin' ? 'page' : undefined} className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>Admin</button>
-            )}
-          </nav>
-        </div>
-        <div className="topbar-tools">
-          <DisplayScale />
-          {freshness && (
-            <button
-              type="button"
-              className="freshness as-link"
-              title={`last sync ${freshness.lastSyncUtc ?? 'never'} — open Operations`}
-              onClick={() => setView('operations')}
-            >
-              <span className={`led ${freshnessLevel(freshness.sourceAgeSeconds)}`} />
-              synced {ageLabel(freshness.sourceAgeSeconds)}
-            </button>
-          )}
-          <span className="userchip">
-            <span className="who">
-              <div className="u">{user.displayName ?? user.username}</div>
-              <div className="r">{user.role}</div>
-            </span>
-            <button className="logout" onClick={doLogout}>Sign out</button>
-          </span>
-        </div>
-      </header>
+  // Route guard. Hiding a rail button is decluttering; this is what stops a
+  // typed ?v=weight rendering for an operator. The API enforces the same ranks
+  // server-side — this keeps a role out of a screen, it is not the data control.
+  const allowed = canOpen(view, rank);
+  const section = sectionFor(view, {
+    cones: 142511,
+    sacks: 5462,
+    rejects: 3146,
+  });
 
-      <main id="main" tabIndex={-1}>
-      {/* Announces the view change to a screen reader — without it, switching
-          tabs updates the page silently. */}
-      <p className="sr-only" aria-live="polite">{VIEW_LABEL[view]} view</p>
+  return (
+    <AppShell
+      view={view}
+      rank={rank}
+      user={user}
+      freshness={freshness}
+      productLabel={null}
+      section={section}
+      sub={route.sub ?? section.subTabs[0]?.key ?? ''}
+      onNavigate={(v) => setView(v)}
+      onSub={(k) => navigate({ sub: k })}
+      onSignOut={doLogout}
+      onOpenSync={() => setView('operations')}
+    >
       {navContext && (
         <div className="nav-context">
           <button
@@ -433,7 +447,12 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           </button>
         </div>
       )}
-      {rangeErr ? (
+      {!allowed ? (
+        <div className="error-card" role="alert">
+          <b>You don't have access to this view.</b> Your role ({user.role}) can't open{' '}
+          {VIEW_LABEL[view]}. Pick another section from the rail.
+        </div>
+      ) : rangeErr ? (
         <div className="error-card" role="alert"><b>Couldn't reach the API.</b> {rangeErr}</div>
       ) : view === 'dashboard' ? (
         <DashboardView range={range} onMeta={setFreshness} rank={rank} onNavigate={followException} />
@@ -458,8 +477,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       ) : (
         <AdminView />
       )}
-      </main>
-    </div>
+    </AppShell>
   );
 }
 
