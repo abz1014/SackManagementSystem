@@ -198,8 +198,8 @@ function Segmented<T extends string>({
  * design's sample numbers, which are illustrative and in several cases wrong
  * for this plant.
  */
-function sectionFor(view: View, counts: { cones?: number; sacks?: number; rejects?: number }): SectionConfig {
-  const n = (v?: number) => (v == null ? '—' : fmtInt(v));
+function sectionFor(view: View, counts: { cones?: number; sacks?: number; rejects?: number; stations?: number }): SectionConfig {
+  const n = (v?: number) => (v == null || v === 0 ? '—' : fmtInt(v));
   switch (view) {
     case 'dashboard':
       return {
@@ -245,7 +245,7 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
       };
     case 'rejects':
       return {
-        eyebrow: `${n(counts.rejects)} in 18 days`,
+        eyebrow: `${n(counts.rejects)} on record`,
         title: 'Rejects',
         subTabs: [
           { key: 'reasons', label: 'Reasons', note: 'inspection codes' },
@@ -270,7 +270,7 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
         title: 'Setup',
         subTabs: [
           { key: 'people', label: 'People' },
-          { key: 'stations', label: 'Stations', note: '14 positions' },
+          { key: 'stations', label: 'Stations', note: `${n(counts.stations)} positions` },
           { key: 'rules', label: 'Rules', note: 'weight and shift' },
           { key: 'sync', label: 'Sync', note: 'plant connection' },
         ],
@@ -301,6 +301,12 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [freshness, setFreshness] = useState<Meta | null>(null);
   const [registerSeed, setRegisterSeed] = useState<RegisterSeed | null>(null);
   const [navContext, setNavContext] = useState<NavContext | null>(null);
+  // Row counts for the section column. Fetched once rather than typed in: the
+  // literals here were correct for the supplied copy and would have quietly
+  // gone stale the first time the sync worker advanced.
+  const [counts, setCounts] = useState<{ cones: number; sacks: number; rejects: number; stations: number }>(
+    { cones: 0, sacks: 0, rejects: 0, stations: 0 },
+  );
   const rank = ROLE_RANK[user.role] ?? 1;
   const view = route.view;
 
@@ -352,6 +358,29 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   };
 
   useEffect(() => {
+    if (!range.min || !range.max) return;
+    let cancelled = false;
+    Promise.all([
+      getProduction({ from: range.min, to: range.max, groupBy: 'none' }),
+      getRejects(range.min, range.max),
+    ])
+      .then(([p, rj]) => {
+        if (cancelled) return;
+        const row = p.data.rows[0];
+        setCounts({
+          cones: row?.cones ?? 0,
+          sacks: row?.sacks ?? 0,
+          rejects: rj.data.total,
+          stations: 14,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [range.min, range.max]);
+
+  useEffect(() => {
     getRange()
       .then((r) => setRange({ min: r.minDate, max: r.maxDate }))
       .catch((e) => setRangeErr(String(e.message ?? e)));
@@ -366,11 +395,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   // typed ?v=weight rendering for an operator. The API enforces the same ranks
   // server-side — this keeps a role out of a screen, it is not the data control.
   const allowed = canOpen(view, rank);
-  const section = sectionFor(view, {
-    cones: 142511,
-    sacks: 5462,
-    rejects: 3146,
-  });
+  const section = sectionFor(view, counts);
   // One value drives the column highlight, the hub content and the URL.
   const activeSub = route.sub ?? section.subTabs[0]?.key ?? '';
   const goSub = (k: string) => navigate({ sub: k });
@@ -445,7 +470,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       ) : view === 'operations' ? (
         <OperationsView onMeta={setFreshness} />
       ) : (
-        <AdminView />
+        <AdminView sub={activeSub} onMeta={setFreshness} />
       )}
     </AppShell>
   );
@@ -995,7 +1020,7 @@ function RejectStationView({
             )}
           </section>
 
-          <div className="panel light">
+          <div className="panel">
             <div className="panel-head">
               <h3 className="panel-title">Reject rate by station</h3>
               <span>
@@ -1025,11 +1050,38 @@ function RejectStationView({
   );
 }
 
+/**
+ * Login. Two panes: the plant on --ink, the form on --paper.
+ *
+ * The design's left pane carries three live figures — "142,511 cones on record",
+ * "5,462 sacks packed", "14 stations". The first two are NOT built here, and
+ * deliberately: this page renders before authentication, /api is gated at
+ * operator+, and the app is tunnelled publicly for demos. Wiring live production
+ * volumes into an unauthenticated page would tell anyone who reaches the login
+ * screen how much the line makes. Hardcoding them instead would break this
+ * rework's one rule and go stale the moment the sync runs.
+ *
+ * What is shown instead is true without disclosing anything: fixed properties of
+ * the line, and a live plant-link state from /api/health, which is public by
+ * design and returns only {status, db}.
+ */
 function LoginScreen({ onLogin }: { onLogin: (u: AuthUser) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState<'checking' | 'up' | 'down'>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/health')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j) => !cancelled && setLink(j?.db === 'up' ? 'up' : 'down'))
+      .catch(() => !cancelled && setLink('down'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1046,37 +1098,74 @@ function LoginScreen({ onLogin }: { onLogin: (u: AuthUser) => void }) {
   };
 
   return (
-    <div className="app">
-      <div className="login-wrap">
-        <form className="login-card" onSubmit={submit}>
-          <h1>SMS<span className="dot">.</span></h1>
-          <div className="tag">Sack Management System · TP1 Line 3 · Unit 2</div>
-          <div className="field">
-            <input
-              id="login-user"
-              aria-label="Username"
-              autoComplete="username"
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
-            />
+    <div className="login">
+      <div className="login-plant">
+        <div className="lp-mark">
+          <span className="lpm-name">SMS</span>
+          <span className="lpm-line">TP1 · Line 3 · Unit 2</span>
+        </div>
+
+        <div>
+          <h1 className="lp-headline">Sack Management System</h1>
+          <p className="lp-lede">
+            Every cone and every sack weighed on the line, read straight from the plant server.
+          </p>
+          <div className="lp-facts">
+            <div className="lp-fact">
+              <div className="lpf-v">14</div>
+              <div className="lpf-k">winding stations</div>
+            </div>
+            <div className="lp-fact">
+              <div className="lpf-v">3</div>
+              <div className="lpf-k">shifts a day</div>
+            </div>
+            <div className="lp-fact">
+              <div className="lpf-v">60s</div>
+              <div className="lpf-k">sync interval</div>
+            </div>
           </div>
-          <div className="field">
-            <input
-              id="login-pass"
-              type="password"
-              aria-label="Password"
-              autoComplete="current-password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <button className="primary" type="submit" disabled={busy || !username || !password}>
+        </div>
+
+        <div className="lp-link">
+          <span className={`dot ${link === 'up' ? 'ok' : link === 'down' ? 'crit' : 'warn'}`} />
+          {link === 'up' ? 'plant link online' : link === 'down' ? 'plant link unreachable' : 'checking plant link…'}
+        </div>
+      </div>
+
+      <div className="login-form">
+        <form className="lf-card" onSubmit={submit}>
+          <div className="lf-eyebrow">Sign in</div>
+          <h2 className="lf-title">Plant account</h2>
+
+          <label className="lf-label" htmlFor="login-user">Username</label>
+          <input
+            id="login-user"
+            className="lf-input"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+          />
+
+          <label className="lf-label" htmlFor="login-pass">Password</label>
+          <input
+            id="login-pass"
+            className="lf-input"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          <button className="lf-submit" type="submit" disabled={busy || !username || !password}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
-          {err && <div className="err" role="alert">{err}</div>}
+
+          {err && <div className="lf-err" role="alert">{err}</div>}
+
+          <p className="lf-note">
+            Supervisors and above can set the running product. Operators get read-only screens.
+          </p>
         </form>
       </div>
     </div>
@@ -1177,7 +1266,7 @@ function useTipFontPx(): number {
     const read = () => {
       const root = getComputedStyle(document.documentElement);
       const rem = parseFloat(root.fontSize) || 16;
-      const xs = root.getPropertyValue('--fs-xs').trim();
+      const xs = root.getPropertyValue('--fs-caption').trim();
       setPx(xs.endsWith('rem') ? parseFloat(xs) * rem : parseFloat(xs) || rem);
     };
     read();
@@ -1597,7 +1686,7 @@ function DashboardView({
           </div>
 
           <div className="ov-grid">
-            <section className="panel light">
+            <section className="panel">
               <div className="panel-head">
                 <h3 className="panel-title">Needs a look</h3>
                 <span className="mono-note">
@@ -1631,7 +1720,7 @@ function DashboardView({
               <div className="panel-foot">Each one opens the page that explains it.</div>
             </section>
 
-            <section className="panel light">
+            <section className="panel">
               <div className="panel-head">
                 <h3 className="panel-title">Cones by shift</h3>
               </div>
@@ -2357,17 +2446,17 @@ function RegisterDetailPage({
     return (
       <div className="panel">
         <div className="panel-head">
-          <h2>Not found</h2>
+          <h3 className="panel-title">Not found</h3>
         </div>
         <div style={{ padding: '4px 0' }}>
           <p>{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} #{id} doesn't exist, or doesn't match this line.</p>
-          <button className="abtn primary" onClick={onBack}>← Back to register</button>
+          <button type="button" className="cta" onClick={onBack}>← Back to records</button>
         </div>
       </div>
     );
   }
   if (!row) {
-    return <div className="tile skeleton" style={{ height: 260 }} />;
+    return <div className="sk sk-chart" />;
   }
 
   // rejects are rejected cones -> grams; only sacks are kg
@@ -2376,12 +2465,12 @@ function RegisterDetailPage({
 
   return (
     <>
-      <button className="abtn" style={{ marginBottom: 14 }} onClick={onBack}>← Back to register</button>
+      <button type="button" className="ghost-btn" style={{ marginBottom: 14 }} onClick={onBack}>← Back to records</button>
 
       <div className="panel">
         <div className="panel-head">
-          <h2>{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} #{String(row.source_row_id)}</h2>
-          <span className="sub">{fmtDateTime(String(row.production_ts_utc))}</span>
+          <h3 className="panel-title">{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} #{String(row.source_row_id)}</h3>
+          <span className="mono-note">{fmtDateTime(String(row.production_ts_utc))}</span>
         </div>
         <DetailRow label="Production time" value={fmtDateTime(String(row.production_ts_utc))} />
         <DetailRow label="Shift (corrected)" value={String(row.shift_code)} />
@@ -2434,18 +2523,20 @@ function RegisterDetailPage({
             mismatch={!row.merge_key_is_unique}
           />
         )}
+        <div className="rr-provenance">
         <DetailRow label="Source system" value={String(row.source_system ?? '—')} />
         <DetailRow label="Transform version" value={`v${row.transform_version ?? '—'}`} />
         {row.ingest_ts_utc != null && <DetailRow label="Synced at" value={fmtDateTime(String(row.ingest_ts_utc))} />}
+        </div>
       </div>
 
       {subgroup && (
-        <div className="panel" style={{ marginTop: 16 }}>
+        <div className="panel" style={{ marginTop: 14 }}>
           <div className="panel-head">
-            <h2>Its subgroup</h2>
-            <span className="sub">{spc!.bucketLabel}</span>
+            <h3 className="panel-title">Its subgroup</h3>
+            <span className="mono-note">{spc!.bucketLabel}</span>
           </div>
-          <div className="hint">
+          <div className="panel-lede">
             The {spc!.bucketLabel} window this reading falls in — n = {subgroup.n}, mean {subgroup.mean}{spc!.unit}.
           </div>
           <div className="stat-row">
@@ -2460,12 +2551,12 @@ function RegisterDetailPage({
       )}
 
       {stationStat && (
-        <div className="panel" style={{ marginTop: 16 }}>
+        <div className="panel" style={{ marginTop: 14 }}>
           <div className="panel-head">
-            <h2>Its station</h2>
-            <span className="sub">station {stationStat.station}</span>
+            <h3 className="panel-title">Its station</h3>
+            <span className="mono-note">station {stationStat.station}</span>
           </div>
-          <div className="hint">
+          <div className="panel-lede">
             How station {stationStat.station} ran on {shiftDate}, across all {fmtInt(stationStat.n)} of its cones that day.
           </div>
           <div className="stat-row">
@@ -2481,12 +2572,12 @@ function RegisterDetailPage({
         </div>
       )}
 
-      <div className="panel" style={{ marginTop: 16 }}>
+      <div className="panel" style={{ marginTop: 14 }}>
         <div className="panel-head">
-          <h2>Time-neighbours</h2>
-          <span className="sub">{sourceStation != null ? `station ${sourceStation}` : 'same stream'}</span>
+          <h3 className="panel-title">Time-neighbours</h3>
+          <span className="mono-note">{sourceStation != null ? `station ${sourceStation}` : 'same stream'}</span>
         </div>
-        <div className="hint">
+        <div className="panel-lede">
           {type === 'reject' ? (
             <>
               The rejects immediately before and after this one{sourceStation != null ? ' from the same station' : ''}.
@@ -2501,10 +2592,10 @@ function RegisterDetailPage({
           )}
         </div>
         {!neighbors ? (
-          <div className="tile skeleton" style={{ height: 120 }} />
+          <div className="sk" style={{ height: 120 }} />
         ) : (
           <div className="table-scroll">
-            <table className="reg-table">
+            <table className="reg-table light">
               <thead>
                 <tr>
                   <th>Production time</th>
@@ -2559,9 +2650,9 @@ function RegisterDetailPage({
 
 function DetailRow({ label, value, mismatch }: { label: string; value: ReactNode; mismatch?: boolean }) {
   return (
-    <div className={`drow${mismatch ? ' mismatch' : ''}`}>
-      <span className="drow-label">{label}</span>
-      <span className="drow-val">{value}</span>
+    <div className="rr-row">
+      <span className="rrr-k">{label}</span>
+      <span className={`rrr-v${mismatch ? ' warn' : ''}`}>{value}</span>
     </div>
   );
 }
@@ -2706,10 +2797,10 @@ function StoppagePatternView({
       ) : loading || !analysis ? (
         <div className="tile skeleton" style={{ height: 340 }} />
       ) : analysis.all.length === 0 ? (
-        <div className="hint">No stoppages over {threshold}s in this range.</div>
+        <div className="panel-lede">No stoppages over {threshold}s in this range.</div>
       ) : (
         <>
-          <section className="panel light">
+          <section className="panel">
             <h2 className="sv-headline">
               {analysis.clusterHours.length >= 2
                 ? `Stops cluster at ${hh(analysis.clusterHours[0]!.hour)} and ${hh(analysis.clusterHours[1]!.hour)}`
@@ -2752,9 +2843,9 @@ function StoppagePatternView({
 
           <div className="panel">
             <div className="panel-head">
-              <h2>How long do stoppages last?</h2>
+              <h3 className="panel-title">How long do stoppages last?</h3>
               <span>
-                <span className="sub">{from} to {to}</span>
+                <span className="mono-note">{from} to {to}</span>
                 <ExportCsv
                   name={csvName('stoppage-durations', from, to)}
                   headers={['bucket', 'min_seconds', 'max_seconds', 'count', 'total_down_seconds']}
@@ -2762,7 +2853,7 @@ function StoppagePatternView({
                 />
               </span>
             </div>
-            <div className="hint">
+            <div className="panel-lede">
               Micro-stops an operator clears, versus breakdowns someone gets called out for. Bars are counts; the figure
               on the right is the downtime that bucket actually cost.
             </div>
@@ -2789,9 +2880,9 @@ function StoppagePatternView({
 
           <div className="panel">
             <div className="panel-head">
-              <h2>When in the day do stoppages happen?</h2>
+              <h3 className="panel-title">When in the day do stoppages happen?</h3>
               <span>
-                <span className="sub">
+                <span className="mono-note">
                   most days affected: {String(analysis.worstHour.hour).padStart(2, '0')}:00 · {analysis.worstHour.days} of{' '}
                   {analysis.dayCount}
                 </span>
@@ -2802,7 +2893,7 @@ function StoppagePatternView({
                 />
               </span>
             </div>
-            <div className="hint">
+            <div className="panel-lede">
               Downtime by hour of day, pooled over {analysis.dayCount} days and banded by shift. What makes an hour worth
               acting on is <b>recurrence</b> — how many separate days it goes down — not the total, which one long
               outage can dominate on its own.
@@ -3212,7 +3303,7 @@ function DowntimeView({
 
           <div className="panel">
             <div className="panel-head">
-              <h2>Stoppage timeline</h2>
+              <h3 className="panel-title">Stoppage timeline</h3>
               <span>
                 <ExportCsv
                   name={csvName('stoppages', date, date)}
@@ -3222,7 +3313,7 @@ function DowntimeView({
                 <PrintButton />
               </span>
             </div>
-            <div className="hint">
+            <div className="panel-lede">
               {data.firstTs && data.lastTs
                 ? `${fmtDateTime(data.firstTs)} — ${fmtDateTime(data.lastTs)}. Bar height is the stoppage's duration, so a long breakdown reads differently from a cluster of micro-stops. Click one to open the cones either side of it.`
                 : 'No data this day.'}
@@ -3242,14 +3333,14 @@ function DowntimeView({
             ) : null}
 
             <div className="panel-head" style={{ marginTop: 6 }}>
-              <h2>Throughput — cones per hour</h2>
+              <h3 className="panel-title">Throughput — cones per hour</h3>
               <ExportCsv
                 name={csvName('throughput-hourly', date, date)}
                 headers={['hour_start', 'cones']}
                 rows={() => data.hourly.map((h) => [h.hourTs, h.count])}
               />
             </div>
-            <div className="hint">Detected stoppages line up with the low bars below.</div>
+            <div className="panel-lede">Detected stoppages line up with the low bars below.</div>
             <div className="ratebars">
               {data.hourly.map((h) => (
                 <div key={h.hourTs} className="rbar" style={{ height: `${revealed ? (100 * h.count) / rateMax : 0}%` }}>
@@ -3264,9 +3355,9 @@ function DowntimeView({
           </div>
 
           {data.stoppages.length > 0 && (
-            <div className="panel" style={{ marginTop: 16 }}>
+            <div className="panel" style={{ marginTop: 14 }}>
               <div className="panel-head">
-                <h2>Stoppages — longest first</h2>
+                <h3 className="panel-title">Stoppages — longest first</h3>
                 <span>
                   {data.stoppages.length > STOPPAGE_PREVIEW_COUNT && (
                     <button className="abtn" onClick={() => setStoppagesExpanded((v) => !v)}>
@@ -3430,7 +3521,7 @@ function WeightStability({
 
   return (
     <>
-      <section className="panel light">
+      <section className="panel">
         <div className="panel-head">
           <div>
             <h3 className="panel-sub-verdict">{headline}</h3>
@@ -3579,7 +3670,7 @@ function WeightStability({
           finding and asks rather than silently picking a side. Deliberately not
           behind the maths toggle: it is a finding, not a statistic. */}
       {spc.specAgreement && spc.specAgreement.disagreementCount > 0 && (
-        <section className="panel light spec-disagree">
+        <section className="panel spec-disagree">
           <div className="panel-head">
             <h3 className="panel-title">The PLC and your product spec disagree</h3>
             <span className="mono-note">{spc.specAgreement.disagreementPct}% of {fmtInt(spc.specAgreement.evaluated)} cones</span>
@@ -4134,7 +4225,7 @@ function RejectSpcView({
         <div className="tile skeleton" style={{ height: 320 }} />
       ) : (
         <>
-          <section className="panel light">
+          <section className="panel">
             <h2 className="sv-headline">{trendVerdict.headline}</h2>
             <p className="sv-sub">{trendVerdict.sub}</p>
             <div className="panel-foot" style={{ marginTop: 14 }}>
@@ -4147,7 +4238,7 @@ function RejectSpcView({
           <div style={{ height: 14 }} />
 
           {data.episodes.length > 0 ? (
-            <div className="panel light">
+            <div className="panel">
               <div className="panel-head">
                 <h3 className="panel-title">Detected episodes</h3>
                 <ExportCsv
@@ -4179,12 +4270,12 @@ function RejectSpcView({
               ))}
             </div>
           ) : (
-            <div className="panel light">
+            <div className="panel">
               <div className="empty-note">No anomalous {data.bucketSize}s in this window — reject rate stayed within normal variation throughout.</div>
             </div>
           )}
 
-          <div className="panel light" style={{ marginTop: 14 }}>
+          <div className="panel" style={{ marginTop: 14 }}>
             <div className="panel-head">
               <h3 className="panel-title">Reject rate control chart</h3>
               <ExportCsv
@@ -4548,7 +4639,7 @@ function OeeView({
             </section>
 
             <div className="oee-right">
-              <section className="panel light">
+              <section className="panel">
                 <div className="panel-head">
                   <h3 className="panel-title">Last 7 days</h3>
                   <span className="mono-note">OEE %</span>
@@ -4560,7 +4651,7 @@ function OeeView({
                 )}
               </section>
 
-              <section className="panel light">
+              <section className="panel">
                 <div className="panel-head">
                   <h3 className="panel-title">Where the missing {round1(100 - data.oeePct)}% went</h3>
                 </div>
@@ -4592,7 +4683,7 @@ function OeeView({
               reachable. The design drops these controls; they stay, folded away,
               because an inferred number whose inputs cannot be inspected is
               exactly the kind of figure a plant engineer is right to distrust. */}
-          <section className="panel light" style={{ marginTop: 14 }}>
+          <section className="panel" style={{ marginTop: 14 }}>
             <div className="panel-head">
               <h3 className="panel-title">Assumptions behind this estimate</h3>
               <button type="button" className="ghost-btn" onClick={() => setShowInputs((v) => !v)} aria-expanded={showInputs}>
@@ -4929,7 +5020,7 @@ function ShiftView({
             })}
           </div>
 
-          <section className="panel light">
+          <section className="panel">
             <div className="panel-head">
               <div>
                 <h2 className="panel-sub-verdict">
@@ -5167,7 +5258,7 @@ function RejectView({ onMeta, rank }: { onMeta: (m: Meta) => void; rank: number 
         </section>
       </div>
 
-      <section className="panel light">
+      <section className="panel">
         <h2 className="sv-headline">{shape.headline}</h2>
         <p className="sv-sub">
           {shape.unlabelled > 0
@@ -5410,7 +5501,7 @@ function WeightSpread({
 
   return (
     <>
-      <section className="panel light">
+      <section className="panel">
         <div className="panel-head">
           <h3 className="panel-title">Every {type} weighed{from === to ? `, ${from}` : ''}</h3>
           <span className="mono-note">{fmtInt(spc.count)} readings · {spc.histogram.length} bins</span>
@@ -5450,7 +5541,7 @@ function WeightSpread({
       </section>
 
       {type === 'cone' && spc.stations.length > 0 && (
-        <section className="panel light" style={{ marginTop: 14 }}>
+        <section className="panel" style={{ marginTop: 14 }}>
           <div className="panel-head">
             <div>
               <h3 className="panel-sub-verdict">{stationVerdict.title}</h3>
@@ -5488,7 +5579,7 @@ function WeightSpread({
           <b>Couldn't load the giveaway figure.</b> {wErr}
         </div>
       ) : weights && weights.cone.giveawayPerConeG != null ? (
-        <section className="panel light" style={{ marginTop: 14 }}>
+        <section className="panel" style={{ marginTop: 14 }}>
           <div className="panel-head">
             <h3 className="panel-title">Material given away</h3>
             <div className="field inline">
@@ -5793,7 +5884,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
   }, [onMeta, reloadKey]);
 
   if (error) return <div className="error-card" role="alert"><b>Couldn't load operations status.</b> {error}</div>;
-  if (loading || !data) return <div className="tile skeleton" style={{ height: 260 }} />;
+  if (loading || !data) return <div className="sk sk-chart" />;
 
   // Freshness is judged on the OLDEST table, not an average: one stalled table
   // is a stalled pipeline, and averaging would hide it.
@@ -5806,36 +5897,58 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
 
   return (
     <>
-      <div className="callout" style={{ borderLeftColor: level === 'ok' ? 'var(--green)' : level === 'warn' ? 'var(--amber)' : 'var(--alert)' }}>
-        <div className="big">
-          {anyFailed ? (
-            <>Ingestion <span className="accent" style={{ color: 'var(--alert)' }}>reported a failure</span> on its last pass</>
-          ) : level === 'ok' ? (
-            <>Ingestion healthy — all {data.sync.length} tables current</>
-          ) : (
-            <>
-              Ingestion last completed <span className="accent" style={{ color: level === 'crit' ? 'var(--alert)' : 'var(--amber)' }}>{ageLabel(worstAge)}</span>
-            </>
-          )}
+      <section className="sync-verdict">
+        <div className="sv-main">
+          <div className="sync-live">
+            <span className={`dot ${anyFailed || level === 'crit' ? 'crit' : level === 'warn' ? 'warn' : 'ok'}`} />
+            <span className="mono-note">
+              {data.sync.length} table{data.sync.length === 1 ? '' : 's'} · read-only, never written to
+            </span>
+          </div>
+          <h2 className="sv-headline">
+            {anyFailed
+              ? 'Ingestion reported a failure on its last pass'
+              : level === 'ok'
+                ? `Sync is healthy — all ${data.sync.length} tables current`
+                : `Sync last completed ${ageLabel(worstAge)}`}
+          </h2>
+          <p className="sv-sub">
+            Everything the other pages show is derived from this pipeline, so this is the page to check first
+            if a figure looks wrong.
+            {level !== 'ok' && !anyFailed && (
+              <> A large age here does not mean data was lost — the raw layer is append-only and the sync resumes
+              from its stored watermark, so restarting the worker picks up exactly where it stopped. It means the
+              newest events on the line may not be in the app yet.</>
+            )}
+          </p>
         </div>
-        <p>
-          Everything the other pages show is derived from this pipeline, so this is the page to check
-          first if a figure looks wrong. {level !== 'ok' && !anyFailed && (
-            <>
-              A large age here does not mean data was lost — the raw layer is append-only and the sync
-              resumes from its stored watermark, so restarting the worker picks up exactly where it
-              stopped. It means the newest events on the line may not be in the app yet.
-            </>
-          )}
-        </p>
-        <button className="abtn" onClick={() => setReloadKey((k) => k + 1)}>Re-check now</button>
+        <button type="button" className="ghost-btn" onClick={() => setReloadKey((k) => k + 1)}>Re-check now</button>
+      </section>
+
+      <div className="loss-grid sync-tiles">
+        <div className="loss">
+          <div className={`loss-val ${anyFailed ? 'alarm' : ''}`}>{data.sync.filter((x) => x.outcome === 'success').length}/{data.sync.length}</div>
+          <div className="loss-key">tables succeeded on the last pass</div>
+        </div>
+        <div className="loss">
+          <div className={`loss-val ${level === 'crit' ? 'alarm' : level === 'warn' ? 'warn' : ''}`}>{ageLabel(worstAge)}</div>
+          <div className="loss-key">since the oldest table last ran</div>
+        </div>
+        <div className="loss">
+          <div className="loss-val">{fmtInt(data.sync.reduce((t, x) => t + (x.rowsWritten ?? 0), 0))}</div>
+          <div className="loss-key">rows written on the last pass</div>
+        </div>
+        <div className="loss">
+          <div className={`loss-val ${blocking > 0 ? 'alarm' : ''}`}>{blocking}</div>
+          <div className="loss-key">blocking data-quality findings</div>
+        </div>
       </div>
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Ingestion by table</h2>
+          <h3 className="panel-title">Ingestion by table</h3>
           <span>
-            <span className="sub">{data.sync.length} source tables</span>
+            <span className="mono-note">{data.sync.length} source tables</span>
             <ExportCsv
               name={csvName('operations-ingestion')}
               headers={['target_table', 'outcome', 'watermark', 'rows_read', 'rows_written', 'finished_at_utc', 'age_seconds']}
@@ -5844,7 +5957,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
             <PrintButton />
           </span>
         </div>
-        <div className="hint">
+        <div className="panel-lede">
           Each table advances its own <b>watermark</b> — the highest source row id already ingested — so a
           pass reads only what is new and a restart never re-reads from the beginning. Rows read exceeds
           rows written because a deliberate overlap window re-reads recent rows to catch late-arriving
@@ -5887,10 +6000,10 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Schema-drift guard</h2>
-          <span className="sub">{data.schema.length} source tables fingerprinted</span>
+          <h3 className="panel-title">Schema-drift guard</h3>
+          <span className="mono-note">{data.schema.length} source tables fingerprinted</span>
         </div>
-        <div className="hint">
+        <div className="panel-lede">
           Each source table's column names and types are hashed. If IFL changes a table we depend on,
           the fingerprint stops matching and <b>the sync halts with an explicit error instead of writing
           wrong data</b>. A silent corruption is far more expensive than a loud stop, so this is
@@ -5918,9 +6031,9 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
 
       <div className="panel">
         <div className="panel-head">
-          <h2>Data-quality findings</h2>
+          <h3 className="panel-title">Data-quality findings</h3>
           <span>
-            <span className="sub">
+            <span className="mono-note">
               {data.dq.findings.length === 0 ? 'none open' : `${data.dq.findings.length} open`}
             </span>
             {data.dq.findings.length > 0 && (
@@ -5932,7 +6045,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
             )}
           </span>
         </div>
-        <div className="hint">
+        <div className="panel-lede">
           Published, not suppressed. These are checks the pipeline runs on every pass against IFL's own
           data; a finding describes something about the source, not a defect in this app. Severity
           decides whether it merely annotates a figure or blocks a rebuild.
@@ -5985,20 +6098,27 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
   );
 }
 
-function AdminView() {
-  return (
-    <div className="admin-grid">
-      <UsersPanel />
-      <StationsPanel />
-      <RulesPanel />
-    </div>
-  );
+/**
+ * Setup. The section column declares four tabs — People, Stations, Rules, Sync —
+ * and this switches on them. It previously rendered all three panels stacked in
+ * one grid and ignored `sub`, so the tabs highlighted but did nothing: the fifth
+ * place in this app where the column was controlling nothing.
+ *
+ * Sync is the same OperationsView reachable at ?v=operations. One component, two
+ * routes, rather than a second copy that can drift.
+ */
+function AdminView({ sub, onMeta }: { sub: string; onMeta: (m: Meta) => void }) {
+  if (sub === 'stations') return <StationsPanel />;
+  if (sub === 'rules') return <RulesPanel />;
+  if (sub === 'sync') return <OperationsView onMeta={onMeta} />;
+  return <UsersPanel />;
 }
 
 function UsersPanel() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [nu, setNu] = useState({ username: '', password: '', role: 'operator', displayName: '' });
   const [err, setErr] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const load = () => adminListUsers().then((r) => setUsers(r.users)).catch((e) => setErr(String(e.message)));
   useEffect(() => { load(); }, []);
 
@@ -6007,56 +6127,111 @@ function UsersPanel() {
     try {
       await adminCreateUser(nu);
       setNu({ username: '', password: '', role: 'operator', displayName: '' });
+      setAdding(false);
       load();
     } catch (e) { setErr((e as Error).message); }
   };
 
   return (
-    <div className="panel">
-      <h2>Users</h2>
-      <div className="hint">Create accounts and manage roles. Passwords are argon2-hashed — IFL's plaintext Users table is never used.</div>
-      <div className="table-scroll">
-      <table className="atable">
-        <thead><tr><th>User</th><th>Role</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.userId}>
-              <td>{u.displayName ?? u.username} <span style={{ color: 'var(--graphite-dim)' }}>@{u.username}</span></td>
-              <td>
-                <select value={u.role} onChange={(e) => adminUpdateUser(u.userId, { role: e.target.value }).then(load)}>
-                  {['operator', 'supervisor', 'manager', 'admin'].map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </td>
-              <td><span className={`pill ${u.active ? 'on' : 'off'}`}>{u.active ? 'active' : 'disabled'}</span></td>
-              <td>
-                <button className="abtn" onClick={() => adminUpdateUser(u.userId, { active: !u.active }).then(load)}>
-                  {u.active ? 'Disable' : 'Enable'}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h3 className="panel-title">People</h3>
+          <p className="panel-lede">
+            {users.length} account{users.length === 1 ? '' : 's'}. Passwords are argon2-hashed — IFL's own
+            Users table, which stores them in plain text, is never read.
+          </p>
+        </div>
+        <button type="button" className="cta" onClick={() => setAdding((v) => !v)} aria-expanded={adding}>
+          {adding ? 'Cancel' : 'Add person'}
+        </button>
       </div>
-      <div className="inline-form">
-        <input placeholder="username" value={nu.username} onChange={(e) => setNu({ ...nu, username: e.target.value })} />
-        <input placeholder="display name" value={nu.displayName} onChange={(e) => setNu({ ...nu, displayName: e.target.value })} />
-        <input placeholder="password (min 6)" type="password" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
-        <select value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
-          {['operator', 'supervisor', 'manager', 'admin'].map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <button className="abtn primary" disabled={!nu.username || nu.password.length < 6} onClick={create}>Create user</button>
+
+      {adding && (
+        <div className="rec-filters" style={{ marginBottom: 14 }}>
+          <div className="field">
+            <label>Username</label>
+            <input value={nu.username} onChange={(e) => setNu({ ...nu, username: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Display name</label>
+            <input value={nu.displayName} onChange={(e) => setNu({ ...nu, displayName: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Password (min 6)</label>
+            <input type="password" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Role</label>
+            <select value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
+              {['operator', 'supervisor', 'manager', 'admin'].map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <button type="button" className="cta" disabled={!nu.username || nu.password.length < 6} onClick={create}>
+            Create account
+          </button>
+        </div>
+      )}
+
+      <div className="setup-table">
+        <div className="st-head">
+          <span>Name</span><span>Username</span><span>Role</span><span>Status</span><span />
+        </div>
+        {users.map((u) => (
+          <div className="st-row" key={u.userId}>
+            <span>{u.displayName ?? u.username}</span>
+            <span className="mono">@{u.username}</span>
+            <span>
+              <select
+                aria-label={`Role for ${u.username}`}
+                value={u.role}
+                onChange={(e) => adminUpdateUser(u.userId, { role: e.target.value }).then(load)}
+              >
+                {['operator', 'supervisor', 'manager', 'admin'].map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </span>
+            <span><span className={`pill ${u.active ? 'on' : 'off'}`}>{u.active ? 'active' : 'disabled'}</span></span>
+            <span className="num">
+              <button type="button" className="ghost-btn sm" onClick={() => adminUpdateUser(u.userId, { active: !u.active }).then(load)}>
+                {u.active ? 'Disable' : 'Enable'}
+              </button>
+            </span>
+          </div>
+        ))}
       </div>
-      {err && <div className="err" style={{ color: 'var(--alert)', marginTop: 8 }}>{err}</div>}
-    </div>
+
+      {err && <div className="error-card" role="alert" style={{ marginTop: 14 }}>{err}</div>}
+
+      <div className="panel-foot">
+        Operators read Line, Records and Shifts. Supervisors add Output, Weight, Rejects and can set the
+        running product. Managers can export and name reject codes. Admins can open Setup.
+      </div>
+    </section>
   );
 }
 
 function StationsPanel() {
   const [rows, setRows] = useState<StationRow[]>([]);
   const [edited, setEdited] = useState<Record<number, StationRow>>({});
+  const [flagged, setFlagged] = useState<number[]>([]);
   const load = () => adminListStations().then((r) => setRows(r.stations));
   useEffect(() => { load(); }, []);
+
+  // Which stations the weight SPC currently flags, so the ones worth naming
+  // first are obvious. Marked, never reordered — the list is a fixed physical
+  // layout and shuffling it would make positions hard to find.
+  useEffect(() => {
+    let cancelled = false;
+    getRange()
+      .then((r) => (r.minDate && r.maxDate ? getSpc({ type: 'cone', from: r.minDate, to: r.maxDate }) : null))
+      .then((sp) => {
+        if (cancelled || !sp) return;
+        setFlagged(sp.data.stations.filter((s) => s.flagged).map((s) => s.station));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const val = (s: StationRow) => edited[s.stationId] ?? s;
   const change = (id: number, patch: Partial<StationRow>) =>
     setEdited((e) => ({ ...e, [id]: { ...(e[id] ?? rows.find((r) => r.stationId === id)!), ...patch } }));
@@ -6067,27 +6242,51 @@ function StationsPanel() {
     load();
   };
 
+  const named = rows.filter((s) => (s.name ?? '').trim().length > 0).length;
+
   return (
-    <div className="panel">
-      <h2>Station labels <span style={{ color: 'var(--bezel-dim)', fontWeight: 400, fontSize: 12 }}>(Q11)</span></h2>
-      <div className="hint">Name the 14 source/lifter stations so station-wise reports read meaningfully.</div>
-      <div className="table-scroll">
-      <table className="atable">
-        <thead><tr><th>#</th><th>Name</th><th>Machine</th><th>Description</th><th></th></tr></thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.stationId}>
-              <td>{s.stationId}</td>
-              <td><input value={val(s).name ?? ''} placeholder="—" onChange={(e) => change(s.stationId, { name: e.target.value })} /></td>
-              <td><input value={val(s).machine ?? ''} placeholder="—" onChange={(e) => change(s.stationId, { machine: e.target.value })} /></td>
-              <td><input value={val(s).description ?? ''} placeholder="—" onChange={(e) => change(s.stationId, { description: e.target.value })} /></td>
-              <td>{edited[s.stationId] && <button className="abtn primary" onClick={() => save(s)}>Save</button>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h3 className="panel-title">Stations</h3>
+          <p className="panel-lede">
+            {named} of {rows.length} named. Naming a position makes every station-wise chart and drill-down
+            read in plant language instead of a bare number (Q11).
+            {flagged.length > 0 && (
+              <> Station{flagged.length > 1 ? 's' : ''} <b>{flagged.join(' and ')}</b> {flagged.length > 1 ? 'are' : 'is'} currently
+              flagged on weight — worth naming first.</>
+            )}
+          </p>
+        </div>
       </div>
-    </div>
+
+      <div className="station-grid">
+        {rows.map((s) => {
+          const isFlagged = flagged.includes(s.stationId);
+          const dirty = !!edited[s.stationId];
+          return (
+            <div className={`station-row${isFlagged ? ' flagged' : ''}`} key={s.stationId}>
+              <span className="sr-idx">{s.stationId}</span>
+              <input
+                className="sr-name"
+                aria-label={`Name for station ${s.stationId}`}
+                value={val(s).name ?? ''}
+                placeholder="unnamed"
+                onChange={(e) => change(s.stationId, { name: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && dirty && save(s)}
+              />
+              {dirty && (
+                <button type="button" className="cta sm" onClick={() => save(s)}>Save</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="panel-foot">
+        Machine and description are also stored per station; they appear in the CSV exports.
+      </div>
+    </section>
   );
 }
 
@@ -6096,7 +6295,8 @@ function RulesPanel() {
   const [note, setNote] = useState<string | null>(null);
   const load = () => adminGetRules().then(setRules);
   useEffect(() => { load(); }, []);
-  if (!rules) return <div className="panel"><h2>Interpretation rules</h2><div className="hint">Loading…</div></div>;
+
+  if (!rules) return <div className="sk sk-chart" />;
 
   const setWeight = async (basis: string) => {
     await adminSetWeightRule({ basis, coneTubeWeightG: rules.weight?.coneTubeWeightG ?? 70, sackTareKg: rules.weight?.sackTareKg ?? 0.5, reason: 'admin UI' });
@@ -6108,37 +6308,97 @@ function RulesPanel() {
     load();
   };
 
-  return (
-    <div className="panel">
-      <h2>Interpretation rules <span style={{ color: 'var(--bezel-dim)', fontWeight: 400, fontSize: 12 }}>(Q4/Q5 · Q7)</span></h2>
-      <div className="hint">Versioned — each change appends a new effective rule. When IFL answers, set it here once.</div>
+  const basis = (rules.weight?.basis ?? 'as_recorded') as 'as_recorded' | 'gross' | 'net';
+  const mode = (rules.shift?.mode ?? 'corrected') as 'corrected' | 'legacy';
 
-      <div style={{ marginTop: 14 }}>
-        <div className="s-label" style={{ marginBottom: 6 }}>Weight basis (applies immediately — read-time)</div>
-        {/* Was hand-rolled markup missing the sliding <span class="seg-indicator">
-            pill the real Segmented component renders. .segmented button.active
-            sets color:#fff with no background of its own — white text on
-            nothing behind it, i.e. invisible. Reported as an empty button. */}
+  return (
+    <>
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3 className="panel-title">Weight basis</h3>
+            <p className="panel-lede">
+              Whether a recorded weight is the cone plus its tube, or the yarn alone. This is IFL's open
+              question Q4/Q5, and it is set here once they answer — no redeploy.
+            </p>
+          </div>
+          <span className="mono-note">applies immediately · read-time</span>
+        </div>
         <Segmented
-          value={(rules.weight?.basis ?? 'as_recorded') as 'as_recorded' | 'gross' | 'net'}
+          value={basis}
           onChange={setWeight}
           options={(['as_recorded', 'gross', 'net'] as const).map((b) => ({
             key: b,
             label: b === 'as_recorded' ? 'As recorded' : b[0]!.toUpperCase() + b.slice(1),
           }))}
         />
-      </div>
+        <div className="panel-foot">
+          <b>Gross and As-recorded are the same number</b> — the tube is only subtracted on Net, so choosing
+          Gross moves nothing until IFL confirms which the PLC records. Net subtracts the{' '}
+          {rules.weight?.coneTubeWeightG ?? 70} g tube and {rules.weight?.sackTareKg ?? 0.5} kg sack tare from
+          readings <b>and</b> from the setpoint, so cone giveaway is unchanged by design; what moves is the
+          absolute weights, and the Overview's total sack kilograms. That tare is a seeded default, not a
+          measured value. Every giveaway figure carries a "provisional" caveat until Q4/Q5 is answered.
+          This applies at read time, immediately, for every user — unlike the shift rule below.
+        </div>
+      </section>
 
-      <div style={{ marginTop: 18 }}>
-        <div className="s-label" style={{ marginBottom: 6 }}>Shift basis (needs a canonical rebuild to apply to stored data)</div>
+      <section className="panel" style={{ marginTop: 14 }}>
+        <div className="panel-head">
+          <div>
+            <h3 className="panel-title">Shift basis</h3>
+            <p className="panel-lede">
+              Whether a reading's shift is recomputed from its production time, or taken from the value the
+              plant stored. The stored value is derived from insert time and disagrees on a measurable share
+              of rows (Q7).
+            </p>
+          </div>
+          <span className="mono-note">needs a rebuild to apply</span>
+        </div>
         <Segmented
-          value={(rules.shift?.mode ?? 'corrected') as 'corrected' | 'legacy'}
+          value={mode}
           onChange={setShift}
           options={(['corrected', 'legacy'] as const).map((m) => ({ key: m, label: m[0]!.toUpperCase() + m.slice(1) }))}
         />
-        {note && <div className="rule-note">⚠ {note}</div>}
-      </div>
-    </div>
+        {note && <div className="rule-note" style={{ marginTop: 12 }}>⚠ {note}</div>}
+        <div className="panel-foot">
+          Changing this appends a new versioned rule; it does not rewrite stored rows. Run the canonical
+          rebuild to apply it to history.
+        </div>
+      </section>
+
+      {/* The design's Rules panel shows four toggles. Only these two are real —
+          the other two thresholds it depicts are constants in the API, not
+          admin-settable, and rendering a switch that changes nothing would be
+          worse than saying so. */}
+      <section className="panel" style={{ marginTop: 14 }}>
+        <div className="panel-head">
+          <h3 className="panel-title">Fixed in code</h3>
+          <span className="mono-note">not settable here</span>
+        </div>
+        <div className="setup-table fixed">
+          <div className="st-row">
+            <span>Implausible cone readings</span>
+            <span className="mono">outside 1500–2100 g</span>
+            <span className="dim">excluded from SPC as scale faults</span>
+          </div>
+          <div className="st-row">
+            <span>Implausible sack readings</span>
+            <span className="mono">outside 40–60 kg</span>
+            <span className="dim">excluded from SPC as scale faults</span>
+          </div>
+          <div className="st-row">
+            <span>Stoppage threshold</span>
+            <span className="mono">120 s default</span>
+            <span className="dim">adjustable per-view on Output</span>
+          </div>
+        </div>
+        <div className="panel-foot">
+          These are review-enforced constants rather than settings. If IFL needs any of them configurable,
+          it is a small change — they are read in one place each.
+        </div>
+      </section>
+    </>
   );
 }
 
