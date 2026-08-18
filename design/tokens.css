@@ -1,0 +1,319 @@
+/* SMS — "Light Steel" rework token layer.
+   Drop-in replacement for styles.css lines 1–119 (header comment + :root).
+   Values are taken from `SMS Rework.dc.html`. Six colours are DELIBERATELY
+   darkened from the design file to hold WCAG AA; each is marked  [AA-FIX]
+   with the measured ratio it replaces. Nothing else is invented.
+
+   Rules that the token names encode:
+     · Orange = a number needs attention, or this is the active view. Never decoration.
+     · Amber  = not confirmed / watch it.
+     · Green  = target line, healthy dot, "in range" pill. Nothing else.
+     · Plain data marks are --neutral-mark / --slate-mark / --ink.
+     · No shadows anywhere. Depth is surface value + hairlines.
+     · --alarm / --warn / --ok are FILL colours. Their -ink variants are the
+       only ones allowed to carry small text on a light surface.
+*/
+
+:root {
+  /* ---- neutral ink ------------------------------------------------------ */
+  --ink:            #16191C;  /* primary text, dark rail, dark panels, primary marks */
+  --ink-2:          #2C3034;  /* hover on dark surfaces, rail hairline, dark bar track */
+  --ink-30:         rgba(22, 25, 28, 0.30);  /* shift dividers over the run/stop ribbon */
+  --graphite:       #4A5057;  /* secondary text ≤16px, table secondary cells        8.15:1 on card */
+  --muted:          #5F656C;  /* [AA-FIX] labels, captions, axis TICK TEXT.
+                                 design #6B7178 measured 3.93:1 on --column-bg,
+                                 4.28:1 on --paper, 4.40:1 on --paper-2 — all under 4.5.
+                                 #5F656C is ≥4.70:1 on every light surface in the set. */
+  --muted-2:        #8C9298;  /* GRAPHICS ONLY — zero line, centre line, gridline rules.
+                                 3.14:1: passes 1.4.11 (3:1) as a line, FAILS 1.4.3 as text.
+                                 Never set this as a fill on <text>. Use --muted. */
+  --disabled:       #9AA0A6;  /* genuinely inactive controls only (1.4.3 exempts these).
+                                 2.64:1 on --card — do NOT use it for the drill-down
+                                 chevron or any live glyph; those take --muted. */
+
+  /* ---- surfaces --------------------------------------------------------- */
+  --paper:          #EFEFEC;  /* page background */
+  --paper-2:        #F2F2EF;  /* table headers, chart shift bands, selected row */
+  --paper-3:        #F6F6F3;  /* row hover, stat tiles */
+  --paper-4:        #E9EAE5;  /* the darker middle shift band (evening) */
+  --card:           #FFFFFF;  /* panels, cards, inputs */
+  --input-bg:       #FBFBF9;  /* editable station-name fields */
+  --column-bg:      #E5E6E1;  /* section column */
+  --rail-bg:        var(--ink);            /* alias — the design uses one value */
+  --rail-active:    #22262A;  /* active nav button fill, inset 2px 8px */
+  --band-ctrl:      #F0F2EF;  /* X̄-chart control band */
+  --band-spec:      #EDF3EE;  /* histogram spec window */
+  --ribbon-track:   #DDE3DE;  /* 52px run/stop ribbon track */
+  --track:          #E4E7E3;  /* bar-chart track */
+
+  /* ---- lines and edges -------------------------------------------------- */
+  --hairline:       #D3D5D1;  /* panel borders, column divider */
+  --hairline-2:     #E7E8E4;  /* row dividers inside panels */
+  --field-border:   #C6C9C4;  /* input and button borders — 1.67:1, see notes */
+  --tab-border:     #CFD2CD;  /* active section-tab outline */
+  --column-hover:   #DBDCD7;  /* section-tab hover */
+  --dash-border:    #868B84;  /* [AA-FIX] dashed "+ filter" control boundary.
+                                 design #B4B8B3 measured 1.74:1 on --paper. */
+
+  /* ---- on-dark foregrounds --------------------------------------------- */
+  --on-ink:         #F2F2EF;  /* body text on --ink panels                 15.73:1 */
+  --on-ink-2:       #B6BBBE;  /* secondary body on --ink panels             9.11:1 */
+  --on-ink-3:       #A5ABB0;  /* rail idle glyph/label, dark-panel eyebrow  7.61:1 */
+  --on-ink-quiet:   #8A9096;  /* [AA-FIX] the rail "Out" button.
+                                 design #767C81 measured 4.18:1 on --ink. */
+
+  /* ---- data marks (non-text; target 3:1) ------------------------------- */
+  --neutral-mark:   #B9BEB8;  /* non-flagged bars — 1.89:1, see NOTE-BARS below */
+  --steel-mark:     #6E7B85;  /* secondary series line, dashed series       4.34:1 */
+  --slate-mark:     #3F4956;  /* histogram in-spec bars                    9.14:1 */
+
+  /* ---- alarm (safety orange) ------------------------------------------- */
+  --alarm:          #D8451B;  /* FILL: flagged bars, ribbon blocks, nav marker, rules.
+                                 3.37–4.39:1 on every surface it marks — passes 1.4.11.
+                                 As TEXT it is legal only at ≥24px (large, 3:1). */
+  --alarm-ink:      #A5330F;  /* ALL alarm text under 24px, and CTA hover    6.82:1 card
+                                 5.43:1 on --column-bg, 5.80:1 on --alarm-pale */
+  --alarm-pale:     #FBE9E4;  /* alarm chip / band fill */
+  --alarm-border:   #E9A895;  /* alarm chip border */
+  --alarm-soft:     #CC745A;  /* [AA-FIX] secondary alarm bars (short stops, minor
+                                 Pareto rows). design #E4A38F measured 2.11:1 on
+                                 --card; #CC745A is 3.38:1. */
+  --alarm-bright:   #FF7A4D;  /* alarm on --ink only                        6.84:1 */
+
+  /* ---- warn (amber) ---------------------------------------------------- */
+  --warn:           #AA730E;  /* [AA-FIX] FILL: amber bars, pending toggles, freshness
+                                 dot. design #C98A12 measured 2.36:1 on --track and
+                                 2.95:1 on --card — under 3:1 even as a graphic.
+                                 #AA730E is 3.26:1 on --track, 4.06:1 on --card. */
+  --warn-ink:       #8A5E0C;  /* all amber TEXT                             5.70:1 card
+                                 4.54:1 on --column-bg, 5.16:1 on --warn-pale */
+  --warn-pale:      #FBF3E1;  /* amber band fill */
+  --warn-border:    #E3C88A;  /* amber band border */
+
+  /* ---- ok (green) ------------------------------------------------------ */
+  --ok:             #157F4F;  /* target lines, healthy state                5.02:1 card */
+  --ok-ink:         #14663F;  /* "in range" pill text AND any green label sitting on a
+                                 tinted surface — --ok is only 4.46:1 over --band-spec */
+  --ok-pale:        #E8F2EB;  /* "in range" pill fill */
+  --ok-dot:         #1E8757;  /* [AA-FIX] live sync indicator. design #2FA36A measured
+                                 2.55:1 on --column-bg, where the dot actually lives.
+                                 #1E8757 is 3.59:1 there, 4.51:1 on card, 3.91:1 on ink. */
+  --ok-bright:      #4FBF87;  /* quality bar on the dark OEE panel     5.78:1 on --ink-2 */
+
+  /* ---- scrollbar chrome (undocumented in the README, present in the design) */
+  --scroll-track:       #E6E6E2;
+  --scroll-thumb:       #C2C6C1;
+  --scroll-thumb-hover: #A6ABA5;
+
+  /* ======================================================================
+     TYPE
+     ----------------------------------------------------------------------
+     Self-hosted. The plant PC is air-gapped: no Google Fonts at runtime.
+     Ship  web/public/fonts/archivo-var.woff2  (variable, wght 100–900, ~40KB)
+     and   web/public/fonts/dm-mono-400.woff2 / dm-mono-500.woff2.
+     DM Mono has NO variable axis and no weight above 500 — with
+     font-synthesis:none set below, asking for 600 on a mono run renders 500.
+     Never put font-weight ≥600 on a numeral.
+     ====================================================================== */
+  --font-sans: 'Archivo', 'Segoe UI Variable Text', 'Segoe UI', system-ui,
+               -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'DM Mono', 'Cascadia Mono', Consolas, ui-monospace,
+               'SFMono-Regular', 'Roboto Mono', monospace;
+
+  /* The one lever the Display-size control turns. Every size below is rem, so
+     one variable rescales all text — including SVG text, because the charts
+     render their viewBox 1:1 against the measured container width, so rem
+     resolves to real pixels inside them too. Spacing stays in px on purpose:
+     a scale bump should grow the TEXT inside stable panels, not inflate the
+     whole layout into a horizontal scrollbar. */
+  --ui-scale: 1;
+
+  /* Size scale. Comment shows the design-file value each step replaces; the
+     small end is raised because the client's standing complaint is that text
+     is too small, and 13px is the floor this app will hold. */
+  --fs-tick:    0.8125rem;  /* 13px  — design 11.5–12.5  SVG ticks, axis titles */
+  --fs-eyebrow: 0.8125rem;  /* 13px  — design 12         mono uppercase eyebrows, table caps */
+  --fs-rail:    0.8125rem;  /* 13px  — design 12.5       rail labels */
+  --fs-caption: 0.9375rem;  /* 15px  — design 14–14.5    captions, notes, status pills */
+  --fs-cell:    1rem;       /* 16px  — design 15         mono table cells, key/value values */
+  --fs-body:    1.0625rem;  /* 17px  — design 16         body / list text */
+  --fs-row:     1.125rem;   /* 18px  — design 17.5       finding row title */
+  --fs-panel:   1.25rem;    /* 20px  — design 19         panel title */
+  --fs-sub:     1.375rem;   /* 22px  — design 22         panel sub-verdict     (as designed) */
+  --fs-card:    1.5rem;     /* 24px  — design 24         shift-card title      (as designed) */
+  --fs-section: 1.75rem;    /* 28px  — design 28         section column title  (as designed) */
+  --fs-verdict: 1.875rem;   /* 30px  — design 28–30      screen verdict        (as designed) */
+  --fs-page:    2.125rem;   /* 34px  — design 34         page headline         (as designed) */
+  --fs-kpi:     2.625rem;   /* 42px  — design 42         KPI mono              (as designed) */
+  --fs-figure:  2.875rem;   /* 46px  — design 46         reject headline mono  (as designed) */
+  --fs-login:   3.625rem;   /* 58px  — design 58         login headline        (as designed) */
+  --fs-hero:    4.75rem;    /* 76px  — design 76         OEE hero mono         (as designed) */
+
+  /* Legacy aliases so the 131 existing var(--fs-*) call sites keep compiling
+     during the rework. Retire them screen by screen. */
+  --fs-xs:  var(--fs-caption);
+  --fs-sm:  var(--fs-body);
+  --fs-md:  var(--fs-panel);
+  --fs-lg:  var(--fs-card);
+  --fs-xl:  var(--fs-section);
+  --fs-2xl: var(--fs-kpi);
+  --fs-3xl: var(--fs-login);
+
+  /* Weights. Archivo 400/500/600/700; DM Mono 400/500 only. */
+  --fw-body: 400;
+  --fw-med:  500;
+  --fw-semi: 600;
+  --fw-bold: 700;
+
+  /* Tracking */
+  --tr-hero:    -0.05em;   /* 76px OEE hero */
+  --tr-figure:  -0.04em;   /* 46px reject headline */
+  --tr-kpi:     -0.035em;  /* 42px KPI value */
+  --tr-head:    -0.03em;   /* 58 / 38 / 34 / 28px headlines */
+  --tr-verdict: -0.025em;  /* 28–30px verdict sentences */
+  --tr-sub:     -0.02em;   /* 22 / 24px sub-verdicts and card titles */
+  --tr-title:   -0.01em;   /* 19 / 17.5 / 16.5px titles */
+  --tr-label:    0.04em;   /* rail label, field label */
+  --tr-caps-1:   0.14em;   /* table header caps, small mono eyebrows */
+  --tr-caps-2:   0.16em;   /* standard mono eyebrow */
+  --tr-caps-3:   0.18em;   /* section eyebrow, Verdict eyebrow */
+  --tr-caps-4:   0.20em;   /* login "Sign in" */
+  --tr-svg-caps: 1.8;      /* SVG letter-spacing is user units, not em */
+
+  /* Line height */
+  --lh-body:  1.5;    /* design says 1.45; 1.5 costs 0.8px a line and reads better
+                         at arm's length, which is the whole point of this app */
+  --lh-tight: 1.15;   /* headlines */
+  --lh-flush: 1.05;   /* stacked mono figures */
+  --lh-num:   1;      /* KPI / hero numerals */
+
+  /* ======================================================================
+     GEOMETRY — squared-off. No large radii, no shadows.
+     ====================================================================== */
+  --radius:      4px;   /* panels, cards, buttons, inputs, pills */
+  --radius-sm:   3px;   /* inner chips, bar tracks, segmented-control segments */
+  --radius-pill: 999px; /* toggle switches only */
+  --radius-dot:  50%;   /* status dots, initials-free circular marks */
+
+  --bw:           1px;  /* every ordinary border */
+  --rule-heavy:   2px;  /* the Overview header rule — the one heavy rule in the app */
+  --edge-nav:     4px;  /* active nav / active tab left marker */
+  --edge-card:    5px;  /* shift-card top border, finding-row severity bar */
+  --edge-verdict: 6px;  /* Weight verdict banner left border (design HTML = 6px) */
+
+  /* Spacing scale — px, not rem (see --ui-scale note) */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  14px;
+  --sp-5:  16px;
+  --sp-6:  18px;
+  --sp-7:  22px;
+  --sp-8:  24px;
+  --sp-9:  28px;
+  --sp-10: 34px;
+  --sp-11: 44px;
+
+  --gap-grid:  var(--sp-4);                          /* every grid gap in the design */
+  --pad-panel: var(--sp-7) var(--sp-9);              /* 22px 28px */
+  --pad-main:  var(--sp-9) var(--sp-10) var(--sp-11);/* 28px 34px 44px */
+
+  /* Shell metrics */
+  --w-rail:   92px;
+  --w-column: 250px;
+  --w-detail: 356px;
+
+  /* Motion — hover colour/border only, plus one data-load bar animation and
+     the sync-dot pulse. Everything is killed by prefers-reduced-motion. */
+  --t-hover: 140ms;                              /* README: 120–160ms */
+  --t-bar:   650ms;
+  --ease-bar: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-pulse: 2.4s;
+
+  /* NO SHADOW TOKEN EXISTS ON PURPOSE. styles.css currently carries 10
+     box-shadow declarations (lines 190, 210–211, 237, 335, 337, 601, 991,
+     1047, 1056) — all must go. The pulse keyframe at 210–211 animates a
+     box-shadow ring; replace it with an opacity pulse, which is what the
+     design does. */
+
+  font-synthesis: none;
+}
+
+/* Self-hosted faces. Files live in web/public/fonts/ and are served from the
+   same origin, so the app has no network dependency. */
+@font-face {
+  font-family: 'Archivo';
+  src: url('/fonts/archivo-var.woff2') format('woff2-variations'),
+       url('/fonts/archivo-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('/fonts/dm-mono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DM Mono';
+  src: url('/fonts/dm-mono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+html { font-size: calc(16px * var(--ui-scale)); }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background-color: var(--paper);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every numeral in the app is mono, and mono is tabular by construction.
+   Sans numerals (rare — they should not exist after the rework) get it too. */
+.mono, svg text { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Focus ring: --ink on light surfaces, --alarm-bright on dark ones.
+   --alarm as a ring is only 3.50:1 on --column-bg, so it is not the default. */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.on-ink :focus-visible { outline-color: var(--alarm-bright); }
+
+@keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--scroll-track); }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 7px;
+  border: 3px solid var(--scroll-track);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+
+/* NOTE-BARS — 1.4.11 and the quiet grey bars.
+   --neutral-mark is 1.89:1 on --card (the design file's value; the current
+   app's equivalent, --neutral-soft #c3cace, is 1.66:1, so this is not a
+   regression). Reaching 3:1 needs roughly #8E948C, which reads as a dark
+   bar and destroys the "flagged bars are the only loud ones" hierarchy.
+   Conformance instead rests on 1.4.11's "available in another form"
+   exception, which means this is a BUILD RULE, not a preference:
+   every --neutral-mark bar must print its value as mono text beside or
+   above it. Where a mark carries no text label — KPI sparklines, the
+   run/stop ribbon — the mark must be --ink (14.15:1) or --alarm (3.37:1
+   on --ribbon-track), never --neutral-mark. */

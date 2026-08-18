@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: #EFEFEC; color: #16191C;
+    font-family: Archivo, system-ui, sans-serif; font-size: 16px; line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; }
+  input { font: inherit; }
+  a { color: #D8451B; text-decoration: none; }
+  a:hover { color: #B03714; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-track { background: #E6E6E2; }
+  ::-webkit-scrollbar-thumb { background: #C2C6C1; border-radius: 7px; border: 3px solid #E6E6E2; }
+  ::-webkit-scrollbar-thumb:hover { background: #A6ABA5; }
+  @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</helmet>
+
+<sc-if value="{{ isLogin }}">
+<div style="height: 100vh; display: grid; grid-template-columns: 1.1fr 1fr;">
+  <div style="background: #16191C; color: #F2F2EF; padding: 52px 58px; display: flex; flex-direction: column; justify-content: space-between;">
+    <div style="display: flex; align-items: baseline; gap: 14px;">
+      <span style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em;">SMS</span>
+      <span style="font-family: 'DM Mono', monospace; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: #9AA0A6;">TP1 · Line 3 · Unit 2</span>
+    </div>
+    <div>
+      <div style="font-size: 58px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.02; max-width: 17ch;">Sack Management System</div>
+      <div style="margin-top: 20px; font-size: 19px; color: #B6BBBE; max-width: 44ch;">Every cone and every sack weighed on the line, read straight from the plant server.</div>
+      <div style="margin-top: 44px; display: flex; gap: 46px;">
+        <div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 30px;">142,511</div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #9AA0A6;">cones on record</div>
+        </div>
+        <div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 30px;">5,462</div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #9AA0A6;">sacks packed</div>
+        </div>
+        <div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 30px;">14</div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #9AA0A6;">stations</div>
+        </div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 11px; font-family: 'DM Mono', monospace; font-size: 13.5px; color: #9AA0A6;">
+      <span style="width: 9px; height: 9px; border-radius: 50%; background: #2FA36A; animation: livepulse 2.4s ease-in-out infinite;"></span>
+      plant link online · synced 42 s ago
+    </div>
+  </div>
+
+  <div style="display: grid; place-items: center; padding: 40px;">
+    <div style="width: 100%; max-width: 400px;">
+      <div style="font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.2em; text-transform: uppercase; color: #D8451B;">Sign in</div>
+      <div style="font-size: 38px; font-weight: 600; letter-spacing: -0.03em; margin: 4px 0 30px;">Plant account</div>
+
+      <label style="display: block; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #4A5057; margin-bottom: 8px;">Username</label>
+      <input value="s.farooq" style="width: 100%; background: #FFFFFF; border: 1px solid #C6C9C4; border-radius: 4px; color: #16191C; padding: 14px 16px; font-family: 'DM Mono', monospace; font-size: 17px; margin-bottom: 18px;" style-focus="border-color: #16191C; outline: none;" />
+
+      <label style="display: block; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #4A5057; margin-bottom: 8px;">Password</label>
+      <input type="password" value="············" style="width: 100%; background: #FFFFFF; border: 1px solid #C6C9C4; border-radius: 4px; color: #16191C; padding: 14px 16px; font-family: 'DM Mono', monospace; font-size: 17px; margin-bottom: 24px;" style-focus="border-color: #16191C; outline: none;" />
+
+      <button onClick="{{ goOverview }}" style="width: 100%; background: #D8451B; border: 0; border-radius: 4px; color: #FFFFFF; font-size: 18px; font-weight: 600; letter-spacing: 0.03em; padding: 16px;" style-hover="background: #B03714;">Sign in</button>
+
+      <div style="margin-top: 22px; padding-top: 20px; border-top: 1px solid #DCDED9; color: #4A5057; font-size: 15px;">Supervisors and above can set the running product. Operators get read-only screens.</div>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ notLogin }}" hint-placeholder-val="{{ true }}">
+<div style="height: 100vh; display: grid; grid-template-columns: 92px 250px 1fr; overflow: hidden;">
+
+  <!-- icon rail -->
+  <div style="background: #16191C; display: flex; flex-direction: column; padding: 16px 0 14px;">
+    <div style="text-align: center; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: #FFFFFF; padding-bottom: 16px; margin-bottom: 8px; border-bottom: 1px solid #2C3034;">SMS</div>
+
+    <button onClick="{{ goOverview }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isOverview }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><path d="M3 13a9 9 0 0 1 18 0" /><path d="M12 13l4.5-4" stroke-linecap="round" /><circle cx="12" cy="13" r="1.5" fill="currentColor" stroke="none" /><path d="M3 18h18" opacity="0.4" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Line</span>
+    </button>
+
+    <button onClick="{{ goRegister }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isRegister }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9.5h18M3 15h18M9.5 9.5V20" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Records</span>
+    </button>
+
+    <button onClick="{{ goPerformance }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isPerformance }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><path d="M4 20V11M9.3 20V5M14.7 20v-6M20 20V8" stroke-linecap="round" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Output</span>
+    </button>
+
+    <button onClick="{{ goWeight }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isWeight }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><path d="M3 18c3.6 0 3.2-11 9-11s5.4 11 9 11" stroke-linecap="round" /><path d="M12 4.5V7" opacity="0.5" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Weight</span>
+    </button>
+
+    <button onClick="{{ goRejects }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isRejects }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><path d="M12 4.5 21 19H3z" stroke-linejoin="round" /><path d="M12 10v4" stroke-linecap="round" /><circle cx="12" cy="16.6" r="1" fill="currentColor" stroke="none" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Rejects</span>
+    </button>
+
+    <button onClick="{{ goShifts }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isShifts }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3.4 2.1" stroke-linecap="round" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Shifts</span>
+    </button>
+
+    <button onClick="{{ goAdmin }}" style="position: relative; background: none; border: 0; padding: 13px 0 11px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #A5ABB0;" style-hover="color: #FFFFFF;">
+      <sc-if value="{{ isAdmin }}"><span style="position: absolute; inset: 2px 8px; background: #22262A; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; background: #D8451B;"></span></sc-if>
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position: relative;"><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="9" cy="7" r="2.2" fill="#16191C" /><circle cx="15" cy="12" r="2.2" fill="#16191C" /><circle cx="7.5" cy="17" r="2.2" fill="#16191C" /></svg>
+      <span style="position: relative; font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Setup</span>
+    </button>
+
+    <button onClick="{{ goLogin }}" style="margin-top: auto; background: none; border: 0; padding: 12px 0; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #767C81;" style-hover="color: #FFFFFF;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" /><path d="M10 8l-4 4 4 4M6 12h9" stroke-linecap="round" /></svg>
+      <span style="font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em;">Out</span>
+    </button>
+  </div>
+
+  <!-- section column -->
+  <div style="background: #E5E6E1; border-right: 1px solid #D3D5D1; display: flex; flex-direction: column; overflow: hidden;">
+    <div style="padding: 22px 20px 18px; border-bottom: 1px solid #D3D5D1;">
+      <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #D8451B;">{{ section.eyebrow }}</div>
+      <div style="font-size: 28px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; margin-top: 3px;">{{ section.title }}</div>
+    </div>
+
+    <div style="padding: 12px 10px; display: flex; flex-direction: column; gap: 2px;">
+      <sc-for list="{{ section.tabs }}" as="tab" hint-placeholder-count="3">
+        <button onClick="{{ tab.pick }}" style="position: relative; text-align: left; background: none; border: 0; border-radius: 4px; padding: 11px 14px; color: #333A40; display: flex; flex-direction: column; gap: 2px;" style-hover="background: #DBDCD7;">
+          <sc-if value="{{ tab.active }}"><span style="position: absolute; inset: 0; background: #FFFFFF; border: 1px solid #CFD2CD; border-radius: 4px;"></span><span style="position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px; background: #D8451B;"></span></sc-if>
+          <span style="position: relative; font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em;">{{ tab.label }}</span>
+          <span style="position: relative; font-size: 14px; color: #6B7178;">{{ tab.note }}</span>
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="margin-top: auto; padding: 18px 20px 20px; border-top: 1px solid #D3D5D1; display: flex; flex-direction: column; gap: 16px;">
+      <div>
+        <div style="font-family: 'DM Mono', monospace; font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #6B7178;">Running now</div>
+        <div style="font-family: 'DM Mono', monospace; font-size: 15px; margin-top: 4px;">PVT8020 · 30 · Khaki-2</div>
+        <div style="font-size: 14px; color: #6B7178;">lot 204-ILT-BR · setpoint 1 960 g</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; font-family: 'DM Mono', monospace; font-size: 13.5px; color: #4A5057;">
+        <span style="width: 9px; height: 9px; border-radius: 50%; background: #2FA36A; animation: livepulse 2.4s ease-in-out infinite;"></span>synced 42 s ago
+      </div>
+      <div style="display: flex; align-items: center; gap: 11px;">
+        <span style="width: 34px; height: 34px; border-radius: 4px; background: #16191C; color: #FFFFFF; display: grid; place-items: center; font-size: 14px; font-weight: 600;">SF</span>
+        <span style="line-height: 1.25;">
+          <span style="display: block; font-size: 15px; font-weight: 500;">S. Farooq</span>
+          <span style="display: block; font-family: 'DM Mono', monospace; font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">Supervisor</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- main -->
+  <div style="overflow-y: auto; padding: 28px 34px 44px;">
+
+    <!-- ============ OVERVIEW ============ -->
+    <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Overview">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 2px solid #16191C; margin-bottom: 22px;">
+        <div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.18em; text-transform: uppercase; color: #6B7178;">Production day · last complete</div>
+          <div style="font-size: 34px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1;">Thursday 9 July</div>
+        </div>
+        <div style="display: flex; gap: 4px; background: #FFFFFF; border: 1px solid #C6C9C4; border-radius: 4px; padding: 4px;">
+          <span style="padding: 9px 17px; border-radius: 3px; background: #16191C; color: #FFFFFF; font-size: 15px; font-weight: 600;">All shifts</span>
+          <span style="padding: 9px 17px; border-radius: 3px; color: #4A5057; font-size: 15px;">Morning</span>
+          <span style="padding: 9px 17px; border-radius: 3px; color: #4A5057; font-size: 15px;">Evening</span>
+          <span style="padding: 9px 17px; border-radius: 3px; color: #4A5057; font-size: 15px;">Night</span>
+        </div>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px 20px; margin-bottom: 14px;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 30px; flex-wrap: wrap; margin-bottom: 22px;">
+          <div>
+            <div style="font-size: 29px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15;">Line ran 21 h 32 m of 24 h</div>
+            <div style="color: #4A5057; font-size: 16px; margin-top: 4px;">7 stops · longest 1 h 14 m at 02:10</div>
+          </div>
+          <div style="display: flex; gap: 38px;">
+            <div><div style="font-family: 'DM Mono', monospace; font-size: 30px; color: #D8451B;">89.7<span style="font-size: 17px; color: #6B7178;">%</span></div><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">availability</div></div>
+            <div><div style="font-family: 'DM Mono', monospace; font-size: 30px;">3 h 05</div><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">between stops</div></div>
+            <div><div style="font-family: 'DM Mono', monospace; font-size: 30px;">21 m</div><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">to restart</div></div>
+          </div>
+        </div>
+
+        <div style="position: relative; height: 52px; border-radius: 3px; background: #DDE3DE; overflow: hidden;">
+          <sc-for list="{{ ribbon }}" as="s" hint-placeholder-count="7">
+            <span title="{{ s.title }}" style="position: absolute; top: 0; bottom: 0; background: #D8451B; left: {{ s.left }}; width: {{ s.w }};"></span>
+          </sc-for>
+          <span style="position: absolute; top: 0; bottom: 0; left: 33.33%; width: 1px; background: rgba(22,25,28,0.3);"></span>
+          <span style="position: absolute; top: 0; bottom: 0; left: 66.66%; width: 1px; background: rgba(22,25,28,0.3);"></span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 8px; font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.05em; color: #6B7178;">
+          <span>06:00 MORNING</span><span>14:00 EVENING</span><span>22:00 NIGHT</span><span>06:00</span>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px;">
+        <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 19px 21px 17px;">
+            <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #6B7178;">{{ k.label }}</div>
+            <div style="font-family: 'DM Mono', monospace; font-size: 42px; letter-spacing: -0.035em; margin: 9px 0 3px; line-height: 1;">{{ k.value }}<span style="font-size: 17px; color: #6B7178; margin-left: 7px;">{{ k.unit }}</span></div>
+            <div style="font-size: 14.5px; color: #4A5057;">{{ k.foot }}</div>
+            <svg viewBox="0 0 92 26" width="100%" height="26" preserveAspectRatio="none" style="margin-top: 14px;"><polyline points="{{ k.spark }}" fill="none" stroke="{{ k.stroke }}" stroke-width="1.5" stroke-linejoin="round" /><line x1="0" y1="25" x2="92" y2="25" stroke="#D3D5D1" /></svg>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px;">
+        <sc-if value="{{ attention }}" hint-placeholder-val="{{ true }}">
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; overflow: hidden;">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 22px; border-bottom: 1px solid #D3D5D1;">
+            <span style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Needs a look</span>
+            <span style="font-family: 'DM Mono', monospace; font-size: 13px; color: #6B7178;">3 open</span>
+          </div>
+          <sc-for list="{{ findings }}" as="f" hint-placeholder-count="3">
+            <button onClick="{{ f.go }}" style="width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #E7E8E4; padding: 16px 22px; display: grid; grid-template-columns: 5px 1fr auto; align-items: center; gap: 16px; color: inherit;" style-hover="background: #F6F6F3;">
+              <span style="height: 38px; background: {{ f.color }};"></span>
+              <span>
+                <span style="display: block; font-size: 17.5px; font-weight: 600; letter-spacing: -0.01em;">{{ f.title }}</span>
+                <span style="display: block; font-family: 'DM Mono', monospace; font-size: 13.5px; color: #4A5057; margin-top: 3px;">{{ f.detail }}</span>
+              </span>
+              <span style="color: #9AA0A6; font-size: 22px;">›</span>
+            </button>
+          </sc-for>
+          <div style="padding: 14px 22px; font-size: 14.5px; color: #6B7178;">Each one opens the page that explains it.</div>
+        </div>
+        </sc-if>
+
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 20px 22px;">
+          <div style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Cones by shift</div>
+          <div style="font-size: 14.5px; color: #6B7178; margin: 3px 0 20px;">Corrected from production time.</div>
+          <sc-for list="{{ shiftBars }}" as="b" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 82px 1fr 72px; align-items: center; gap: 12px; margin-bottom: 15px;">
+              <span style="font-family: 'DM Mono', monospace; font-size: 12.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #4A5057;">{{ b.name }}</span>
+              <span style="display: block; height: 14px; background: #E4E7E3;"><span style="display: block; height: 100%; background: {{ b.color }}; width: {{ b.w }};"></span></span>
+              <span style="text-align: right; font-family: 'DM Mono', monospace; font-size: 16px;">{{ b.value }}</span>
+            </div>
+          </sc-for>
+          <div style="margin-top: 22px; padding-top: 16px; border-top: 1px solid #E7E8E4; font-size: 15px; color: #4A5057;">Night runs 15 % behind the other two — same pattern every day this week.</div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ============ RECORDS ============ -->
+    <sc-if value="{{ isRegister }}">
+    <div data-screen-label="Records">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <span style="display: inline-flex; align-items: center; gap: 9px; background: #FFFFFF; border: 1px solid #C6C9C4; border-radius: 4px; padding: 10px 15px; font-family: 'DM Mono', monospace; font-size: 14px; color: #16191C;">9 Jul · night shift <span style="color: #9AA0A6;">×</span></span>
+          <span style="display: inline-flex; align-items: center; gap: 9px; background: #FBE9E4; border: 1px solid #E9A895; border-radius: 4px; padding: 10px 15px; font-family: 'DM Mono', monospace; font-size: 14px; color: #A5330F;">out of range only <span>×</span></span>
+          <button style="background: none; border: 1px dashed #B4B8B3; border-radius: 4px; padding: 10px 15px; color: #4A5057; font-size: 15px;" style-hover="border-color: #16191C; color: #16191C;">+ filter</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-family: 'DM Mono', monospace; font-size: 14px; color: #6B7178;">412 rows</span>
+          <button style="background: #16191C; border: 0; border-radius: 4px; padding: 11px 18px; color: #FFFFFF; font-size: 15px; font-weight: 600;" style-hover="background: #2C3034;">Export CSV</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 356px; gap: 14px; align-items: start;">
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; overflow: hidden;">
+          <div style="display: grid; grid-template-columns: 1.6fr 0.9fr 0.6fr 1fr 1.1fr; gap: 12px; padding: 14px 22px; background: #F2F2EF; border-bottom: 1px solid #D3D5D1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #4A5057;">
+            <span>Production time ↓</span><span>Shift</span><span>Stn</span><span style="text-align: right;">Weight</span><span style="text-align: right;">Status</span>
+          </div>
+          <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
+            <button onClick="{{ r.pick }}" style="width: 100%; text-align: left; background: {{ r.bg }}; border: 0; border-bottom: 1px solid #E7E8E4; padding: 13px 22px; display: grid; grid-template-columns: 1.6fr 0.9fr 0.6fr 1fr 1.1fr; gap: 12px; align-items: center; color: inherit; font-family: 'DM Mono', monospace; font-size: 15px;" style-hover="background: #F6F6F3;">
+              <span>{{ r.t }}</span>
+              <span style="color: #4A5057;">{{ r.shift }}</span>
+              <span style="color: #4A5057;">{{ r.st }}</span>
+              <span style="text-align: right;">{{ r.w }}</span>
+              <span style="text-align: right;"><span style="display: inline-block; padding: 3px 11px; border-radius: 3px; font-size: 13px; background: {{ r.pillBg }}; color: {{ r.pillFg }};">{{ r.status }}</span></span>
+            </button>
+          </sc-for>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 15px 22px; font-family: 'DM Mono', monospace; font-size: 13.5px; color: #6B7178;">
+            <span>rows 1–10 of 412</span>
+            <span style="display: flex; gap: 8px;">
+              <span style="padding: 7px 14px; border: 1px solid #C6C9C4; border-radius: 3px;">prev</span>
+              <span style="padding: 7px 14px; border: 1px solid #16191C; border-radius: 3px; color: #16191C;">next</span>
+            </span>
+          </div>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; overflow: hidden; position: sticky; top: 0;">
+          <div style="padding: 18px 22px; background: #16191C; color: #FFFFFF;">
+            <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #A5ABB0;">Selected cone</div>
+            <div style="font-family: 'DM Mono', monospace; font-size: 22px; margin-top: 3px;">#{{ sel.id }}</div>
+          </div>
+          <div style="padding: 6px 22px 18px;">
+            <sc-for list="{{ sel.fields }}" as="f" hint-placeholder-count="10">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid #E7E8E4;">
+                <span style="font-size: 14.5px; color: #6B7178;">{{ f.k }}</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 15px; color: {{ f.color }}; text-align: right;">{{ f.v }}</span>
+              </div>
+            </sc-for>
+            <div style="margin-top: 18px; display: flex; flex-direction: column; gap: 9px;">
+              <button onClick="{{ goWeight }}" style="background: #16191C; border: 0; border-radius: 4px; padding: 12px; color: #FFFFFF; font-size: 15px; font-weight: 600;" style-hover="background: #2C3034;">See its station</button>
+              <button style="background: none; border: 1px solid #C6C9C4; border-radius: 4px; padding: 12px; color: #16191C; font-size: 15px;" style-hover="border-color: #16191C;">Readings around it</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ============ OUTPUT ============ -->
+    <sc-if value="{{ isPerformance }}">
+    <div data-screen-label="Output">
+      <sc-if value="{{ perfOee }}">
+      <div style="display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start;">
+        <div style="background: #16191C; color: #F2F2EF; border-radius: 4px; padding: 26px 28px;">
+          <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #A5ABB0;">Overall equipment effectiveness</div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 76px; line-height: 1; letter-spacing: -0.05em; margin: 12px 0 4px; color: #FF7A4D;">76.5<span style="font-size: 26px; color: #A5ABB0;">%</span></div>
+          <div style="font-size: 16px; color: #B6BBBE; margin-bottom: 26px;">Typical for a line like this. 85 % is world-class.</div>
+          <sc-for list="{{ oeeFactors }}" as="f" hint-placeholder-count="3">
+            <div style="margin-bottom: 17px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span style="font-size: 15px; font-weight: 500;">{{ f.name }}</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 16px;">{{ f.value }}</span>
+              </div>
+              <span style="display: block; height: 10px; background: #2C3034; margin-top: 7px;"><span style="display: block; height: 100%; background: {{ f.color }}; width: {{ f.w }};"></span></span>
+              <div style="font-size: 14px; color: #9AA0A6; margin-top: 6px;">{{ f.note }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 22px 26px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px;">
+              <span style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Last 7 days</span>
+              <span style="font-family: 'DM Mono', monospace; font-size: 13px; color: #6B7178;">OEE %</span>
+            </div>
+            <svg viewBox="0 0 620 190" width="100%" height="190" style="overflow: visible;">
+              <line x1="0" y1="150" x2="620" y2="150" stroke="#C6C9C4" />
+              <line x1="0" y1="52" x2="620" y2="52" stroke="#157F4F" stroke-dasharray="5 4" />
+              <text x="624" y="56" font-family="DM Mono, monospace" font-size="12" fill="#157F4F">85 target</text>
+              <sc-for list="{{ oeeDays }}" as="d" hint-placeholder-count="7">
+                <g>
+                  <rect x="{{ d.x }}" y="{{ d.y }}" width="54" height="{{ d.h }}" fill="{{ d.fill }}"></rect>
+                  <text x="{{ d.cx }}" y="{{ d.ty }}" text-anchor="middle" font-family="DM Mono, monospace" font-size="13" fill="#16191C">{{ d.label }}</text>
+                  <text x="{{ d.cx }}" y="170" text-anchor="middle" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">{{ d.day }} Jul</text>
+                </g>
+              </sc-for>
+            </svg>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 22px 26px;">
+            <div style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Where the missing 23.5 % went</div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 18px;">
+              <div><div style="font-family: 'DM Mono', monospace; font-size: 26px; color: #D8451B;">2 h 28</div><div style="font-size: 14.5px; color: #4A5057;">stopped — 7 events</div></div>
+              <div><div style="font-family: 'DM Mono', monospace; font-size: 26px; color: #C98A12;">1 h 51</div><div style="font-size: 14.5px; color: #4A5057;">slow vs the best hour</div></div>
+              <div><div style="font-family: 'DM Mono', monospace; font-size: 26px;">176</div><div style="font-size: 14.5px; color: #4A5057;">cones rejected</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ perfDown }}">
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+          <div style="font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15;">One stop cost more than the other six together</div>
+          <div style="color: #4A5057; font-size: 16px; margin-top: 4px;">02:10 – 03:24 · 1 h 14 m · night shift</div>
+          <svg viewBox="0 0 900 210" width="100%" height="210" style="margin-top: 22px; overflow: visible;">
+            <rect x="0" y="0" width="300" height="160" fill="#F2F2EF"></rect>
+            <rect x="300" y="0" width="300" height="160" fill="#E9EAE5"></rect>
+            <rect x="600" y="0" width="300" height="160" fill="#F2F2EF"></rect>
+            <line x1="0" y1="160" x2="900" y2="160" stroke="#C6C9C4" />
+            <text x="8" y="20" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">MORNING</text>
+            <text x="308" y="20" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">EVENING</text>
+            <text x="608" y="20" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">NIGHT</text>
+            <sc-for list="{{ stopBars }}" as="s" hint-placeholder-count="7">
+              <g>
+                <rect x="{{ s.x }}" y="{{ s.y }}" width="{{ s.w }}" height="{{ s.h }}" fill="{{ s.fill }}"></rect>
+                <text x="{{ s.tx }}" y="{{ s.ty }}" font-family="DM Mono, monospace" font-size="12.5" fill="#16191C">{{ s.label }}</text>
+              </g>
+            </sc-for>
+            <text x="0" y="182" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">06:00</text>
+            <text x="428" y="182" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">18:00</text>
+            <text x="858" y="182" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">06:00</text>
+          </svg>
+        </div>
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; overflow: hidden;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.6fr; gap: 12px; padding: 14px 24px; background: #F2F2EF; border-bottom: 1px solid #D3D5D1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #4A5057;">
+            <span>Start</span><span>End</span><span style="text-align: right;">Down</span><span style="text-align: right;">Share of the day's downtime</span>
+          </div>
+          <sc-for list="{{ stopRows }}" as="s" hint-placeholder-count="7">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.6fr; gap: 12px; padding: 13px 24px; border-bottom: 1px solid #E7E8E4; font-family: 'DM Mono', monospace; font-size: 15px; align-items: center;">
+              <span>{{ s.start }}</span><span style="color: #4A5057;">{{ s.end }}</span><span style="text-align: right;">{{ s.dur }}</span>
+              <span style="display: flex; align-items: center; gap: 12px; justify-content: flex-end;"><span style="display: block; height: 12px; background: #D8451B; width: {{ s.w }};"></span><span style="color: #6B7178; width: 52px; text-align: right;">{{ s.pct }}</span></span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ perfPatterns }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="font-size: 28px; font-weight: 600; letter-spacing: -0.025em;">Stops cluster at 02:00 and 14:00</div>
+        <div style="color: #4A5057; font-size: 16px; margin-top: 4px;">The night low and the shift changeover — 18 days, 96 stops.</div>
+        <svg viewBox="0 0 900 230" width="100%" height="230" style="margin-top: 24px; overflow: visible;">
+          <rect x="225" y="0" width="300" height="180" fill="#F2F2EF"></rect>
+          <line x1="0" y1="180" x2="900" y2="180" stroke="#C6C9C4" />
+          <sc-for list="{{ hourBars }}" as="h" hint-placeholder-count="24">
+            <g>
+              <rect x="{{ h.x }}" y="{{ h.y }}" width="28" height="{{ h.h }}" fill="{{ h.fill }}"></rect>
+              <text x="{{ h.cx }}" y="198" text-anchor="middle" font-family="DM Mono, monospace" font-size="11.5" fill="#6B7178">{{ h.label }}</text>
+            </g>
+          </sc-for>
+          <text x="8" y="18" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">NIGHT</text>
+          <text x="233" y="18" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">MORNING</text>
+          <text x="533" y="18" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">EVENING</text>
+        </svg>
+        <div style="margin-top: 20px; padding-top: 18px; border-top: 1px solid #E7E8E4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;">
+          <div><div style="font-family: 'DM Mono', monospace; font-size: 24px;">96</div><div style="font-size: 14.5px; color: #4A5057;">stops in 18 days</div></div>
+          <div><div style="font-family: 'DM Mono', monospace; font-size: 24px;">68 %</div><div style="font-size: 14.5px; color: #4A5057;">under ten minutes</div></div>
+          <div><div style="font-family: 'DM Mono', monospace; font-size: 24px;">4</div><div style="font-size: 14.5px; color: #4A5057;">over an hour</div></div>
+        </div>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ============ WEIGHT ============ -->
+    <sc-if value="{{ isWeight }}">
+    <div data-screen-label="Weight">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-left: 6px solid #D8451B; border-radius: 4px; padding: 24px 28px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 30px; flex-wrap: wrap;">
+        <div>
+          <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #D8451B;">Verdict</div>
+          <div style="font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; margin-top: 3px;">Cones run 8.5 g light of the 1 960 g setpoint</div>
+          <div style="color: #4A5057; font-size: 16px; margin-top: 5px;">Spread is tight; the whole line just sits low. Two stations pull it there.</div>
+        </div>
+        <div style="display: flex; gap: 32px;">
+          <div><div style="font-family: 'DM Mono', monospace; font-size: 30px;">1 951.5<span style="font-size: 16px; color: #6B7178;"> g</span></div><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">mean</div></div>
+          <div><div style="font-family: 'DM Mono', monospace; font-size: 30px;">18.4<span style="font-size: 16px; color: #6B7178;"> g</span></div><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">spread σ</div></div>
+          <div><div style="font-family: 'DM Mono', monospace; font-size: 30px; color: #D8451B;">0.57</div><div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #6B7178;">cpk</div></div>
+        </div>
+      </div>
+
+      <sc-if value="{{ wtDist }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px; margin-bottom: 14px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px;">
+          <span style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Every cone weighed, 9 July</span>
+          <span style="font-family: 'DM Mono', monospace; font-size: 13px; color: #6B7178;">7,842 readings · 10 g bins</span>
+        </div>
+        <svg viewBox="0 0 900 250" width="100%" height="250" style="overflow: visible;">
+          <rect x="{{ specX }}" y="0" width="{{ specW }}" height="200" fill="#EDF3EE"></rect>
+          <line x1="{{ setX }}" y1="0" x2="{{ setX }}" y2="200" stroke="#157F4F" stroke-dasharray="5 4" />
+          <text x="{{ setLabelX }}" y="14" font-family="DM Mono, monospace" font-size="12.5" fill="#157F4F">setpoint 1 960</text>
+          <line x1="{{ meanX }}" y1="0" x2="{{ meanX }}" y2="200" stroke="#D8451B" stroke-width="1.8" />
+          <text x="{{ meanLabelX }}" y="14" text-anchor="end" font-family="DM Mono, monospace" font-size="12.5" fill="#D8451B">mean 1 951.5</text>
+          <line x1="0" y1="200" x2="900" y2="200" stroke="#C6C9C4" />
+          <sc-for list="{{ histo }}" as="b" hint-placeholder-count="12">
+            <g>
+              <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" fill="{{ b.fill }}"></rect>
+              <text x="{{ b.cx }}" y="220" text-anchor="middle" font-family="DM Mono, monospace" font-size="11.5" fill="#6B7178">{{ b.label }}</text>
+            </g>
+          </sc-for>
+          <text x="0" y="244" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">GRAMS PER CONE</text>
+        </svg>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
+          <span style="font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Station 5 is 24 g light. Station 10 is 19 g heavy.</span>
+          <span style="font-family: 'DM Mono', monospace; font-size: 13px; color: #6B7178;">±12 g action threshold</span>
+        </div>
+        <div style="font-size: 15px; color: #4A5057; margin: 4px 0 20px;">The other twelve sit inside the band — leave them alone.</div>
+        <svg viewBox="0 0 900 200" width="100%" height="200" style="overflow: visible;">
+          <line x1="0" y1="100" x2="900" y2="100" stroke="#8C9298" />
+          <line x1="0" y1="70" x2="900" y2="70" stroke="#C6C9C4" stroke-dasharray="5 4" />
+          <line x1="0" y1="130" x2="900" y2="130" stroke="#C6C9C4" stroke-dasharray="5 4" />
+          <text x="903" y="74" font-family="DM Mono, monospace" font-size="11.5" fill="#8C9298">+12</text>
+          <text x="903" y="134" font-family="DM Mono, monospace" font-size="11.5" fill="#8C9298">−12</text>
+          <sc-for list="{{ stationBars }}" as="s" hint-placeholder-count="14">
+            <g>
+              <rect x="{{ s.x }}" y="{{ s.y }}" width="38" height="{{ s.h }}" fill="{{ s.fill }}"></rect>
+              <text x="{{ s.cx }}" y="{{ s.labelY }}" text-anchor="middle" font-family="DM Mono, monospace" font-size="12.5" fill="{{ s.labelFill }}">{{ s.label }}</text>
+              <text x="{{ s.cx }}" y="176" text-anchor="middle" font-family="DM Mono, monospace" font-size="12.5" fill="{{ s.tickFill }}">{{ s.station }}</text>
+            </g>
+          </sc-for>
+          <text x="0" y="196" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">STATION · GRAMS FROM LINE AVERAGE</text>
+        </svg>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ wtSpc }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
+          <div>
+            <div style="font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">The mean held steady all day</div>
+            <div style="font-size: 15px; color: #4A5057; margin-top: 4px;">2 of 24 hourly groups stepped outside the control band — both right after a stop.</div>
+          </div>
+          <button onClick="{{ toggleMaths }}" style="background: none; border: 1px solid #16191C; border-radius: 4px; padding: 11px 18px; color: #16191C; font-size: 15px; font-weight: 600;" style-hover="background: #16191C; color: #FFFFFF;">{{ mathsLabel }}</button>
+        </div>
+
+        <svg viewBox="0 0 900 220" width="100%" height="220" style="margin-top: 22px; overflow: visible;">
+          <rect x="0" y="{{ bandY }}" width="900" height="{{ bandH }}" fill="#F0F2EF"></rect>
+          <line x1="0" y1="{{ centerY }}" x2="900" y2="{{ centerY }}" stroke="#8C9298" stroke-dasharray="3 3" />
+          <polyline points="{{ xbar }}" fill="none" stroke="#6E7B85" stroke-width="1.8" />
+          <sc-for list="{{ xbarPts }}" as="p" hint-placeholder-count="24">
+            <circle cx="{{ p.x }}" cy="{{ p.y }}" r="{{ p.r }}" fill="{{ p.fill }}"></circle>
+          </sc-for>
+          <line x1="0" y1="200" x2="900" y2="200" stroke="#C6C9C4" />
+          <text x="0" y="216" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">06:00</text>
+          <text x="428" y="216" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">18:00</text>
+          <text x="858" y="216" font-family="DM Mono, monospace" font-size="12.5" fill="#6B7178">06:00</text>
+        </svg>
+
+        <sc-if value="{{ maths }}">
+        <div style="margin-top: 22px; padding-top: 20px; border-top: 1px solid #E7E8E4;">
+          <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #6B7178; margin-bottom: 16px;">Capability · hourly subgroups of ~330 cones</div>
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px;">
+            <sc-for list="{{ mathsStats }}" as="m" hint-placeholder-count="5">
+              <div>
+                <div style="font-family: 'DM Mono', monospace; font-size: 24px; color: {{ m.color }};">{{ m.v }}</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ m.k }}</div>
+                <div style="font-size: 14px; color: #6B7178; margin-top: 2px;">{{ m.note }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ============ REJECTS ============ -->
+    <sc-if value="{{ isRejects }}">
+    <div data-screen-label="Rejects">
+      <sc-if value="{{ rejReasons }}">
+      <div style="display: grid; grid-template-columns: 306px 1fr; gap: 14px; align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 22px 24px;">
+            <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #6B7178;">quality rejects</div>
+            <div style="font-family: 'DM Mono', monospace; font-size: 46px; letter-spacing: -0.04em; line-height: 1.05; margin: 6px 0 3px;">2,900</div>
+            <div style="font-size: 15px; color: #4A5057;">92 % of all rejects · 18 days</div>
+            <span style="display: block; height: 12px; background: #E4E7E3; margin-top: 16px;"><span style="display: block; height: 100%; width: 92%; background: #D8451B;"></span></span>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 22px 24px;">
+            <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #6B7178;">weight rejects</div>
+            <div style="font-family: 'DM Mono', monospace; font-size: 46px; letter-spacing: -0.04em; line-height: 1.05; margin: 6px 0 3px;">246</div>
+            <div style="font-size: 15px; color: #4A5057;">8 % · average 2 010 g</div>
+            <span style="display: block; height: 12px; background: #E4E7E3; margin-top: 16px;"><span style="display: block; height: 100%; width: 8%; background: #C98A12;"></span></span>
+          </div>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+          <div style="font-size: 28px; font-weight: 600; letter-spacing: -0.025em;">Two inspection codes cause 3 in 4 rejects</div>
+          <div style="color: #4A5057; font-size: 16px; margin-top: 4px;">Codes stay unlabelled until IFL confirms what they mean.</div>
+          <div style="margin-top: 22px;">
+            <sc-for list="{{ pareto }}" as="p" hint-placeholder-count="5">
+              <div style="display: grid; grid-template-columns: 210px 1fr 150px; gap: 18px; align-items: center; padding: 12px 0; border-bottom: 1px solid #E7E8E4;">
+                <span>
+                  <span style="display: block; font-family: 'DM Mono', monospace; font-size: 15px;">{{ p.code }}</span>
+                  <span style="display: block; font-size: 14px; color: #6B7178;">{{ p.hint }}</span>
+                </span>
+                <span style="display: block; height: 24px; background: #E4E7E3;"><span style="display: block; height: 100%; background: {{ p.color }}; width: {{ p.w }};"></span></span>
+                <span style="text-align: right; font-family: 'DM Mono', monospace; font-size: 15px;">{{ p.count }}<span style="color: #6B7178; margin-left: 12px;">{{ p.pct }}</span></span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top: 20px; display: flex; align-items: center; gap: 14px; background: #FBF3E1; border: 1px solid #E3C88A; border-radius: 4px; padding: 14px 18px; flex-wrap: wrap;">
+            <span style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #8A5E0C;">Waiting on IFL</span>
+            <span style="font-size: 15px; color: #4A3A16;">Name these five codes and this page becomes an action list.</span>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ rejTrend }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="font-size: 28px; font-weight: 600; letter-spacing: -0.025em;">A 3-day burst, not a bad day</div>
+        <div style="color: #4A5057; font-size: 16px; margin-top: 4px;">1 – 3 July ran 412 rejects — well above the 2.19 % baseline for three days straight.</div>
+        <svg viewBox="0 0 900 230" width="100%" height="230" style="margin-top: 24px; overflow: visible;">
+          <rect x="{{ burstX }}" y="0" width="{{ burstW }}" height="180" fill="#FBE9E4"></rect>
+          <line x1="0" y1="{{ pBarY }}" x2="900" y2="{{ pBarY }}" stroke="#8C9298" stroke-dasharray="3 3" />
+          <text x="903" y="{{ pBarLabelY }}" font-family="DM Mono, monospace" font-size="11.5" fill="#6B7178">2.19</text>
+          <line x1="0" y1="{{ uclY }}" x2="900" y2="{{ uclY }}" stroke="#C6C9C4" stroke-dasharray="5 4" />
+          <polyline points="{{ pLine }}" fill="none" stroke="#6E7B85" stroke-width="2" />
+          <sc-for list="{{ pPts }}" as="p" hint-placeholder-count="18">
+            <g>
+              <circle cx="{{ p.x }}" cy="{{ p.y }}" r="{{ p.r }}" fill="{{ p.fill }}"></circle>
+              <text x="{{ p.x }}" y="200" text-anchor="middle" font-family="DM Mono, monospace" font-size="11.5" fill="#6B7178">{{ p.label }}</text>
+            </g>
+          </sc-for>
+          <line x1="0" y1="180" x2="900" y2="180" stroke="#C6C9C4" />
+          <text x="0" y="222" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">REJECT RATE % BY DAY · 22 JUNE → 10 JULY</text>
+        </svg>
+        <div style="margin-top: 20px; display: flex; gap: 14px; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 260px; background: #FBE9E4; border: 1px solid #E9A895; border-radius: 4px; padding: 16px 20px;">
+            <div style="font-size: 17px; font-weight: 600;">1 – 3 July burst</div>
+            <div style="font-family: 'DM Mono', monospace; font-size: 14.5px; color: #7A2A11; margin-top: 4px;">412 rejects / 21,908 cones · 1.88× baseline</div>
+          </div>
+          <div style="flex: 1; min-width: 260px; background: #F2F2EF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 16px 20px;">
+            <div style="font-size: 17px; font-weight: 600;">28 June spike</div>
+            <div style="font-family: 'DM Mono', monospace; font-size: 14.5px; color: #4A5057; margin-top: 4px;">single day · inside the control band</div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ rejStation }}">
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="background: #16191C; color: #F2F2EF; border-radius: 4px; padding: 24px 28px;">
+          <div style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #FF7A4D;">The one to fix first</div>
+          <div style="font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; margin-top: 4px;">Station 5 is both 24 g light and rejecting 1.9× the line</div>
+          <div style="color: #B6BBBE; font-size: 16.5px; margin-top: 6px; max-width: 70ch;">Weight bias and reject rate on the same station is a machine problem, not measurement noise.</div>
+        </div>
+        <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px;">
+            <span style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Reject rate by station</span>
+            <span style="font-family: 'DM Mono', monospace; font-size: 13px; color: #6B7178;">line baseline 2.19 %</span>
+          </div>
+          <svg viewBox="0 0 900 200" width="100%" height="200" style="overflow: visible;">
+            <line x1="0" y1="160" x2="900" y2="160" stroke="#C6C9C4" />
+            <line x1="0" y1="{{ rejBaseY }}" x2="900" y2="{{ rejBaseY }}" stroke="#8C9298" stroke-dasharray="3 3" />
+            <sc-for list="{{ rejStations }}" as="s" hint-placeholder-count="14">
+              <g>
+                <rect x="{{ s.x }}" y="{{ s.y }}" width="38" height="{{ s.h }}" fill="{{ s.fill }}"></rect>
+                <text x="{{ s.cx }}" y="{{ s.ty }}" text-anchor="middle" font-family="DM Mono, monospace" font-size="12" fill="{{ s.labelFill }}">{{ s.label }}</text>
+                <text x="{{ s.cx }}" y="178" text-anchor="middle" font-family="DM Mono, monospace" font-size="12.5" fill="{{ s.tickFill }}">{{ s.station }}</text>
+              </g>
+            </sc-for>
+            <text x="0" y="196" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">STATION 1 – 14</text>
+          </svg>
+        </div>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ============ SHIFTS ============ -->
+    <sc-if value="{{ isShifts }}">
+    <div data-screen-label="Shifts">
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px;">
+        <sc-for list="{{ shiftCards }}" as="s" hint-placeholder-count="3">
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-top: 5px solid {{ s.rule }}; border-radius: 4px; overflow: hidden;">
+            <div style="padding: 18px 22px 15px; border-bottom: 1px solid #E7E8E4;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                <span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em;">{{ s.name }}</span>
+                <span style="font-family: 'DM Mono', monospace; font-size: 13.5px; color: #6B7178;">{{ s.hours }}</span>
+              </div>
+              <div style="font-size: 15px; color: {{ s.verdictColor }}; margin-top: 3px; font-weight: 500;">{{ s.verdict }}</div>
+            </div>
+            <div style="padding: 6px 22px 18px;">
+              <sc-for list="{{ s.stats }}" as="st" hint-placeholder-count="5">
+                <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #E7E8E4;">
+                  <span style="font-size: 15px; color: #4A5057;">{{ st.k }}</span>
+                  <span style="font-family: 'DM Mono', monospace; font-size: 16.5px; color: {{ st.color }};">{{ st.v }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap;">
+          <span style="font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Night has trailed for 18 days straight</span>
+          <span style="font-family: 'DM Mono', monospace; font-size: 13px; color: #6B7178;">cones per shift</span>
+        </div>
+        <div style="font-size: 15px; color: #4A5057; margin-top: 4px;">Not a one-off: the gap holds across the whole record.</div>
+        <svg viewBox="0 0 900 240" width="100%" height="240" style="margin-top: 22px; overflow: visible;">
+          <line x1="0" y1="200" x2="900" y2="200" stroke="#C6C9C4" />
+          <sc-for list="{{ shiftGrid }}" as="g" hint-placeholder-count="4">
+            <g><line x1="0" y1="{{ g.y }}" x2="900" y2="{{ g.y }}" stroke="#E7E8E4" /><text x="903" y="{{ g.ty }}" font-family="DM Mono, monospace" font-size="11.5" fill="#8C9298">{{ g.label }}</text></g>
+          </sc-for>
+          <polyline points="{{ shiftLineM }}" fill="none" stroke="#16191C" stroke-width="2.4" />
+          <polyline points="{{ shiftLineE }}" fill="none" stroke="#6E7B85" stroke-width="2.4" stroke-dasharray="8 4" />
+          <polyline points="{{ shiftLineN }}" fill="none" stroke="#D8451B" stroke-width="2.4" stroke-dasharray="2 4" />
+          <text x="0" y="228" font-family="DM Mono, monospace" font-size="12" letter-spacing="1.8" fill="#8C9298">22 JUNE → 10 JULY</text>
+        </svg>
+        <div style="display: flex; gap: 26px; margin-top: 16px; flex-wrap: wrap;">
+          <span style="display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: #4A5057;"><span style="width: 22px; height: 0; border-top: 3px solid #16191C;"></span>Morning</span>
+          <span style="display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: #4A5057;"><span style="width: 22px; height: 0; border-top: 3px dashed #6E7B85;"></span>Evening</span>
+          <span style="display: inline-flex; align-items: center; gap: 9px; font-size: 15px; color: #4A5057;"><span style="width: 22px; height: 0; border-top: 3px dotted #D8451B;"></span>Night</span>
+        </div>
+        <div style="margin-top: 22px; padding-top: 18px; border-top: 1px solid #E7E8E4; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+          <span style="font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #8A5E0C;">Data note</span>
+          <span style="font-size: 15px; color: #4A5057;">Shift is recomputed from production time. The plant's stored value is wrong on 31 % of rows.</span>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ============ SETUP ============ -->
+    <sc-if value="{{ isAdmin }}">
+    <div data-screen-label="Setup">
+      <sc-if value="{{ admUsers }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid #D3D5D1;">
+          <span style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">People with access</span>
+          <button style="background: #16191C; border: 0; border-radius: 4px; padding: 11px 18px; color: #FFFFFF; font-size: 15px; font-weight: 600;" style-hover="background: #2C3034;">Add person</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.9fr auto; gap: 12px; padding: 13px 24px; background: #F2F2EF; border-bottom: 1px solid #D3D5D1; font-family: 'DM Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #4A5057;">
+          <span>Name</span><span>Username</span><span>Role</span><span>Status</span><span></span>
+        </div>
+        <sc-for list="{{ users }}" as="u" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.9fr auto; gap: 12px; padding: 15px 24px; border-bottom: 1px solid #E7E8E4; align-items: center;">
+            <span style="font-size: 16.5px;">{{ u.name }}</span>
+            <span style="font-family: 'DM Mono', monospace; font-size: 15px; color: #4A5057;">{{ u.username }}</span>
+            <span style="font-size: 15px;">{{ u.role }}</span>
+            <span><span style="display: inline-block; padding: 4px 12px; border-radius: 3px; font-size: 13.5px; background: {{ u.pillBg }}; color: {{ u.pillFg }};">{{ u.status }}</span></span>
+            <button style="background: none; border: 1px solid #C6C9C4; border-radius: 3px; padding: 8px 15px; color: #4A5057; font-size: 14.5px;" style-hover="border-color: #16191C; color: #16191C;">Edit</button>
+          </div>
+        </sc-for>
+        <div style="padding: 15px 24px; font-size: 15px; color: #6B7178;">Operators see the line, records and shifts. Supervisors set the running product. Managers get exports.</div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ admStations }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="font-size: 19px; font-weight: 600; letter-spacing: -0.01em;">Station names</div>
+        <div style="font-size: 15px; color: #4A5057; margin: 4px 0 22px;">The PLC only sends 1 – 14. Give them the names the floor uses.</div>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 24px;">
+          <sc-for list="{{ stations }}" as="s" hint-placeholder-count="14">
+            <div style="display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: center;">
+              <span style="font-family: 'DM Mono', monospace; font-size: 15px; color: #6B7178; text-align: right;">{{ s.n }}</span>
+              <span style="display: block; background: #FBFBF9; border: 1px solid #C6C9C4; border-radius: 3px; padding: 11px 15px; font-size: 15.5px; color: {{ s.color }};">{{ s.label }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ admRules }}">
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;">
+        <sc-for list="{{ rules }}" as="r" hint-placeholder-count="4">
+          <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 22px 24px;">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;">
+              <div>
+                <div style="font-size: 18px; font-weight: 600; letter-spacing: -0.01em;">{{ r.title }}</div>
+                <div style="font-size: 15px; color: #4A5057; margin-top: 5px; max-width: 42ch;">{{ r.note }}</div>
+              </div>
+              <span style="flex: none; width: 50px; height: 28px; border-radius: 999px; background: {{ r.knobBg }}; position: relative;"><span style="position: absolute; top: 3px; left: {{ r.knobX }}; width: 22px; height: 22px; border-radius: 50%; background: #FFFFFF;"></span></span>
+            </div>
+            <div style="margin-top: 18px; font-family: 'DM Mono', monospace; font-size: 15px; color: #16191C;">{{ r.value }}</div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ admSync }}">
+      <div style="background: #FFFFFF; border: 1px solid #D3D5D1; border-radius: 4px; padding: 24px 28px;">
+        <div style="display: flex; align-items: center; gap: 13px;">
+          <span style="width: 11px; height: 11px; border-radius: 50%; background: #2FA36A; animation: livepulse 2.4s ease-in-out infinite;"></span>
+          <span style="font-size: 28px; font-weight: 600; letter-spacing: -0.025em;">Sync is healthy — 1 214 runs, no failures</span>
+        </div>
+        <div style="color: #4A5057; font-size: 16px; margin-top: 5px;">Reads IFL's server every 60 s. Never writes to it.</div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 24px;">
+          <sc-for list="{{ syncStats }}" as="s" hint-placeholder-count="4">
+            <div style="background: #F6F6F3; border: 1px solid #D3D5D1; border-radius: 4px; padding: 17px 19px;">
+              <div style="font-family: 'DM Mono', monospace; font-size: 26px;">{{ s.v }}</div>
+              <div style="font-size: 14.5px; color: #4A5057; margin-top: 2px;">{{ s.k }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #E7E8E4; display: flex; gap: 10px; flex-wrap: wrap;">
+          <span style="font-family: 'DM Mono', monospace; font-size: 13.5px; color: #4A5057; background: #F6F6F3; border: 1px solid #D3D5D1; border-radius: 3px; padding: 9px 13px;">source · DATA_TP1U2 @ plant-sql\SQLEXPRESS</span>
+          <span style="font-family: 'DM Mono', monospace; font-size: 13.5px; color: #4A5057; background: #F6F6F3; border: 1px solid #D3D5D1; border-radius: 3px; padding: 9px 13px;">watermark · pack1 id 142 511</span>
+          <span style="font-family: 'DM Mono', monospace; font-size: 13.5px; color: #4A5057; background: #F6F6F3; border: 1px solid #D3D5D1; border-radius: 3px; padding: 9px 13px;">read-only login</span>
+        </div>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+  </div>
+</div>
+</sc-if>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;login&quot;,&quot;overview&quot;,&quot;register&quot;,&quot;performance&quot;,&quot;weight&quot;,&quot;rejects&quot;,&quot;shifts&quot;,&quot;admin&quot;],&quot;default&quot;:&quot;overview&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;showMaths&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;attentionFeed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { screen: null, perf: 'oee', wt: 'dist', rej: 'reasons', adm: 'users', maths: false, sel: 3 };
+
+  componentDidMount() {
+    if (this.props.showMaths) this.setState({ maths: true });
+  }
+
+  get screen() {
+    return this.state.screen ?? this.props.startScreen ?? 'overview';
+  }
+
+  go(screen) {
+    return () => this.setState({ screen });
+  }
+
+  put(key, value) {
+    return () => this.setState({ [key]: value });
+  }
+
+  spark(v) {
+    const w = 92;
+    const h = 26;
+    const max = Math.max.apply(null, v);
+    const min = Math.min.apply(null, v);
+    const sp = Math.max(0.0001, max - min);
+    return v
+      .map((n, i) => `${((i * w) / (v.length - 1)).toFixed(1)},${(h - 4 - ((n - min) / sp) * (h - 9)).toFixed(1)}`)
+      .join(' ');
+  }
+
+  sections() {
+    const s = this.screen;
+    if (s === 'register')
+      return {
+        eyebrow: 'Every reading',
+        title: 'Records',
+        tabs: [
+          { label: 'Cones', note: '142,511 rows', active: this.state.reg !== 'sack', pick: this.put('reg', 'cone') },
+          { label: 'Sacks', note: '5,462 rows', active: this.state.reg === 'sack', pick: this.put('reg', 'sack') },
+        ],
+      };
+    if (s === 'performance')
+      return {
+        eyebrow: 'How the line ran',
+        title: 'Output',
+        tabs: [
+          { label: 'Effectiveness', note: 'OEE and its three parts', active: this.state.perf === 'oee', pick: this.put('perf', 'oee') },
+          { label: 'Stops', note: "one day's downtime", active: this.state.perf === 'down', pick: this.put('perf', 'down') },
+          { label: 'Patterns', note: 'when stops repeat', active: this.state.perf === 'patterns', pick: this.put('perf', 'patterns') },
+        ],
+      };
+    if (s === 'weight')
+      return {
+        eyebrow: 'Grams per cone',
+        title: 'Weight',
+        tabs: [
+          { label: 'Spread', note: 'distribution and stations', active: this.state.wt === 'dist', pick: this.put('wt', 'dist') },
+          { label: 'Stability', note: 'control through the day', active: this.state.wt === 'spc', pick: this.put('wt', 'spc') },
+        ],
+      };
+    if (s === 'rejects')
+      return {
+        eyebrow: '3,146 in 18 days',
+        title: 'Rejects',
+        tabs: [
+          { label: 'Reasons', note: 'inspection codes', active: this.state.rej === 'reasons', pick: this.put('rej', 'reasons') },
+          { label: 'Trend', note: 'bursts vs noise', active: this.state.rej === 'trend', pick: this.put('rej', 'trend') },
+          { label: 'By station', note: 'where they happen', active: this.state.rej === 'station', pick: this.put('rej', 'station') },
+        ],
+      };
+    if (s === 'shifts')
+      return {
+        eyebrow: 'Morning · evening · night',
+        title: 'Shifts',
+        tabs: [
+          { label: 'This week', note: '3 – 9 July', active: true, pick: this.go('shifts') },
+          { label: 'Whole record', note: '22 Jun – 10 Jul', active: false, pick: this.go('shifts') },
+        ],
+      };
+    if (s === 'admin')
+      return {
+        eyebrow: 'Configuration',
+        title: 'Setup',
+        tabs: [
+          { label: 'People', note: '4 accounts', active: this.state.adm === 'users', pick: this.put('adm', 'users') },
+          { label: 'Stations', note: '14 positions', active: this.state.adm === 'stations', pick: this.put('adm', 'stations') },
+          { label: 'Rules', note: 'weight and shift', active: this.state.adm === 'rules', pick: this.put('adm', 'rules') },
+          { label: 'Sync', note: 'plant connection', active: this.state.adm === 'sync', pick: this.put('adm', 'sync') },
+        ],
+      };
+    return {
+      eyebrow: 'Live picture',
+      title: 'The line',
+      tabs: [
+        { label: 'Today', note: '9 July · all shifts', active: true, pick: this.go('overview') },
+        { label: 'Yesterday', note: '8 July', active: false, pick: this.go('overview') },
+        { label: 'This week', note: '3 – 9 July', active: false, pick: this.go('overview') },
+      ],
+    };
+  }
+
+  registerRows() {
+    const raw = [
+      ['2026-07-09 23:58:12', 'Night', 11, '1 954.2', true],
+      ['2026-07-09 23:56:40', 'Night', 4, '1 949.8', true],
+      ['2026-07-09 23:55:03', 'Night', 5, '1 926.4', false],
+      ['2026-07-09 23:53:31', 'Night', 9, '1 958.1', true],
+      ['2026-07-09 23:51:58', 'Night', 2, '1 951.0', true],
+      ['2026-07-09 23:50:22', 'Night', 10, '1 981.6', false],
+      ['2026-07-09 23:48:47', 'Night', 7, '1 947.3', true],
+      ['2026-07-09 23:47:11', 'Night', 13, '1 953.9', true],
+      ['2026-07-09 23:45:36', 'Night', 5, '1 929.7', false],
+      ['2026-07-09 23:44:02', 'Night', 1, '1 950.4', true],
+    ];
+    return raw.map((r, i) => ({
+      t: r[0],
+      shift: r[1],
+      st: r[2],
+      w: `${r[3]} g`,
+      ok: r[4],
+      status: r[4] ? 'in range' : 'out of range',
+      pillBg: r[4] ? '#E8F2EB' : '#FBE9E4',
+      pillFg: r[4] ? '#14663F' : '#A5330F',
+      bg: i === this.state.sel ? '#F2F2EF' : 'transparent',
+      id: 142511 - i,
+      pick: this.put('sel', i),
+    }));
+  }
+
+  renderVals() {
+    const s = this.screen;
+    const rows = this.registerRows();
+    const selRow = rows[this.state.sel] ?? rows[0];
+
+    const stops = [
+      { from: 20.17, dur: 1.233, label: '1 h 14 m' },
+      { from: 22.2, dur: 0.483, label: '29 m' },
+      { from: 1.92, dur: 0.133, label: '8 m' },
+      { from: 5.33, dur: 0.1, label: '6 m' },
+      { from: 8.03, dur: 0.283, label: '17 m' },
+      { from: 12.78, dur: 0.083, label: '5 m' },
+      { from: 15.5, dur: 0.15, label: '9 m' },
+    ];
+
+    const oeeVals = [72.4, 75.1, 78.2, 69.8, 79.4, 77.1, 76.5];
+    const oeeDays = oeeVals.map((v, i) => {
+      const h = (v / 100) * 130;
+      return {
+        x: 14 + i * 86,
+        cx: 41 + i * 86,
+        y: 150 - h,
+        h,
+        ty: 150 - h - 9,
+        label: v.toFixed(1),
+        day: ['3', '4', '5', '6', '7', '8', '9'][i],
+        fill: i === 6 ? '#D8451B' : '#B9BEB8',
+      };
+    });
+
+    const stopBars = stops
+      .slice()
+      .sort((a, b) => a.from - b.from)
+      .map((v) => {
+        const h = Math.max(8, Math.min(124, v.dur * 96));
+        const x = (v.from / 24) * 900;
+        return {
+          x,
+          tx: Math.max(0, x - 8),
+          w: Math.max(5, (v.dur / 24) * 900),
+          y: 160 - h,
+          h,
+          ty: 160 - h - 8,
+          label: v.label,
+          fill: v.dur > 0.75 ? '#D8451B' : '#E4A38F',
+        };
+      });
+
+    const stopRows = [
+      ['02:10', '03:24', '1 h 14 m', 50],
+      ['04:12', '04:41', '29 m', 19.6],
+      ['14:02', '14:19', '17 m', 11.5],
+      ['21:30', '21:39', '9 m', 6.1],
+      ['07:55', '08:03', '8 m', 5.4],
+      ['11:20', '11:26', '6 m', 4.1],
+      ['18:47', '18:52', '5 m', 3.4],
+    ].map((r) => ({ start: r[0], end: r[1], dur: r[2], w: `${r[3]}%`, pct: `${r[3]} %` }));
+
+    const hourVals = [3, 5, 9, 11, 6, 3, 4, 2, 3, 2, 2, 3, 4, 3, 8, 6, 3, 2, 2, 3, 4, 3, 5, 4];
+    const hourMax = Math.max.apply(null, hourVals);
+    const hourBars = hourVals.map((v, i) => {
+      const h = (v / hourMax) * 150;
+      return {
+        x: 4 + i * 37.4,
+        cx: 18 + i * 37.4,
+        y: 180 - h,
+        h,
+        label: String(i).padStart(2, '0'),
+        fill: v >= 8 ? '#D8451B' : '#B9BEB8',
+      };
+    });
+
+    const bins = [90, 260, 720, 1680, 2340, 1560, 720, 290, 120, 42, 14, 6];
+    const binMax = Math.max.apply(null, bins);
+    const binW = 900 / bins.length;
+    const histo = bins.map((c, i) => {
+      const h = (c / binMax) * 180;
+      const from = 1900 + i * 10;
+      return {
+        x: i * binW + 4,
+        cx: i * binW + binW / 2,
+        w: binW - 8,
+        y: 200 - h,
+        h,
+        label: String(from),
+        fill: from >= 1920 && from < 2000 ? '#3F4956' : '#D8451B',
+      };
+    });
+    const gToX = (g) => ((g - 1900) / 120) * 900;
+
+    const devs = [-3, 5, -8, 2, -24, 6, -2, 9, -5, 19, -7, 4, -11, 1];
+    const stationBars = devs.map((d, i) => {
+      const h = Math.abs(d) * 2.1;
+      const flagged = Math.abs(d) > 12;
+      return {
+        station: i + 1,
+        x: 12 + i * 63,
+        cx: 31 + i * 63,
+        y: d >= 0 ? 100 - h : 100,
+        h,
+        fill: flagged ? '#D8451B' : '#B9BEB8',
+        label: `${d > 0 ? '+' : ''}${d}`,
+        labelY: d >= 0 ? 100 - h - 8 : 100 + h + 16,
+        labelFill: flagged ? '#A5330F' : '#4A5057',
+        tickFill: flagged ? '#A5330F' : '#6B7178',
+      };
+    });
+
+    const xbarVals = [1949, 1953, 1951, 1947, 1955, 1952, 1950, 1946, 1943, 1958, 1961, 1953, 1950, 1948, 1952, 1955, 1949, 1946, 1951, 1954, 1950, 1947, 1952, 1949];
+    const wToY = (v) => 200 - ((v - 1935) / 35) * 170;
+    const xbarPts = xbarVals.map((v, i) => ({
+      x: 10 + (i * 880) / 23,
+      y: wToY(v),
+      r: v > 1959 || v < 1944 ? 5 : 3.4,
+      fill: v > 1959 || v < 1944 ? '#D8451B' : '#16191C',
+    }));
+
+    const rates = [2.1, 2.3, 1.9, 2.0, 2.4, 2.2, 3.1, 2.0, 1.8, 2.1, 3.7, 4.1, 3.9, 2.2, 2.0, 1.9, 2.3, 2.1];
+    const rToY = (v) => 180 - ((v - 1.2) / 3.4) * 150;
+    const dayLabels = [22, 23, 24, 25, 26, 27, 28, 29, 30, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const pPts = rates.map((v, i) => ({
+      x: 14 + (i * 872) / 17,
+      y: rToY(v),
+      r: v > 3.4 ? 5 : 3.4,
+      fill: v > 3.4 ? '#D8451B' : '#16191C',
+      label: dayLabels[i],
+    }));
+
+    const rejRates = [1.9, 2.4, 2.0, 1.8, 4.2, 2.1, 2.3, 1.7, 2.0, 3.4, 2.2, 1.9, 2.6, 2.1];
+    const rejStations = rejRates.map((v, i) => {
+      const h = (v / 4.6) * 130;
+      const flagged = v > 3.2;
+      return {
+        station: i + 1,
+        x: 12 + i * 63,
+        cx: 31 + i * 63,
+        y: 160 - h,
+        h,
+        fill: flagged ? '#D8451B' : '#B9BEB8',
+        label: `${v} %`,
+        ty: 160 - h - 8,
+        labelFill: flagged ? '#A5330F' : '#4A5057',
+        tickFill: flagged ? '#A5330F' : '#6B7178',
+      };
+    });
+
+    const dayX = (i) => 14 + (i * 872) / 17;
+    const cToY = (v) => 200 - ((v - 1800) / 1400) * 170;
+    const line = (a) => a.map((v, i) => `${dayX(i).toFixed(1)},${cToY(v).toFixed(1)}`).join(' ');
+    const seriesM = [2610, 2680, 2704, 2590, 2740, 2712, 2698, 2660, 2705, 2688, 2730, 2620, 2701, 2744, 2690, 2712, 2680, 2704];
+    const seriesE = [2700, 2760, 2812, 2688, 2830, 2790, 2764, 2740, 2802, 2778, 2840, 2712, 2796, 2851, 2790, 2818, 2760, 2838];
+    const seriesN = [2280, 2340, 2310, 2190, 2380, 2320, 2260, 2240, 2330, 2288, 2360, 2160, 2312, 2374, 2300, 2340, 2270, 2300];
+
+    const stationNames = [
+      'Winder A1', 'Winder A2', 'Winder A3', 'Winder A4', 'Winder B1', 'Winder B2', 'Winder B3',
+      'Winder B4', 'Winder C1', 'Winder C2', 'Winder C3', 'Winder C4', 'Doffer 1', 'Doffer 2',
+    ];
+
+    return {
+      isLogin: s === 'login',
+      notLogin: s !== 'login',
+      isOverview: s === 'overview',
+      isRegister: s === 'register',
+      isPerformance: s === 'performance',
+      isWeight: s === 'weight',
+      isRejects: s === 'rejects',
+      isShifts: s === 'shifts',
+      isAdmin: s === 'admin',
+      goOverview: this.go('overview'),
+      goRegister: this.go('register'),
+      goPerformance: this.go('performance'),
+      goWeight: this.go('weight'),
+      goRejects: this.go('rejects'),
+      goShifts: this.go('shifts'),
+      goAdmin: this.go('admin'),
+      goLogin: this.go('login'),
+      section: this.sections(),
+
+      perfOee: this.state.perf === 'oee',
+      perfDown: this.state.perf === 'down',
+      perfPatterns: this.state.perf === 'patterns',
+      wtDist: this.state.wt === 'dist',
+      wtSpc: this.state.wt === 'spc',
+      rejReasons: this.state.rej === 'reasons',
+      rejTrend: this.state.rej === 'trend',
+      rejStation: this.state.rej === 'station',
+      admUsers: this.state.adm === 'users',
+      admStations: this.state.adm === 'stations',
+      admRules: this.state.adm === 'rules',
+      admSync: this.state.adm === 'sync',
+
+      attention: this.props.attentionFeed !== false,
+      maths: this.state.maths,
+      mathsLabel: this.state.maths ? 'Hide the maths' : 'Show the maths',
+      toggleMaths: () => this.setState((st) => ({ maths: !st.maths })),
+
+      ribbon: stops.map((v) => ({
+        title: v.label,
+        left: `${((v.from / 24) * 100).toFixed(2)}%`,
+        w: `${Math.max(0.45, (v.dur / 24) * 100).toFixed(2)}%`,
+      })),
+
+      kpis: [
+        { label: 'cones packed', value: '7,842', unit: '', foot: '99.7 % in weight range', stroke: '#16191C', spark: this.spark([7412, 7690, 7955, 7218, 8042, 7930, 7842]) },
+        { label: 'rejected cones', value: '176', unit: '', foot: '2.19 % of all weighed', stroke: '#D8451B', spark: this.spark([2.4, 2.1, 1.9, 2.6, 2.0, 2.2, 2.19]) },
+        { label: 'sacks packed', value: '318', unit: '', foot: '24.7 cones per sack', stroke: '#16191C', spark: this.spark([302, 314, 325, 296, 330, 323, 318]) },
+        { label: 'sack weight', value: '15,015', unit: 'kg', foot: '47.2 kg average · gross', stroke: '#16191C', spark: this.spark([14262, 14830, 15342, 13975, 15584, 15251, 15015]) },
+      ],
+
+      findings: [
+        { title: 'Station 5 runs 24 g light', detail: 'past the ±12 g threshold · 1.9× the reject rate', color: '#D8451B', go: this.go('weight') },
+        { title: 'Line stopped 2 h 28 m', detail: '89.7 % up vs 94.1 % normal · 7 stops', color: '#C98A12', go: this.go('performance') },
+        { title: 'Reject burst, 3 days running', detail: '412 rejects · 1.88× baseline · 1–3 July', color: '#C98A12', go: this.go('rejects') },
+      ],
+
+      shiftBars: [
+        { name: 'Morning', value: '2,704', w: '95%', color: '#16191C' },
+        { name: 'Evening', value: '2,838', w: '100%', color: '#16191C' },
+        { name: 'Night', value: '2,300', w: '81%', color: '#D8451B' },
+      ],
+
+      rows,
+      sel: {
+        id: selRow.id,
+        fields: [
+          { k: 'Production time', v: selRow.t, color: '#16191C' },
+          { k: 'Shift (corrected)', v: selRow.shift, color: '#16191C' },
+          { k: 'Shift as stored', v: 'Morning', color: '#8A5E0C' },
+          { k: 'Station', v: `${selRow.st} source · ${selRow.st} lifter`, color: '#16191C' },
+          { k: 'Weight', v: selRow.w, color: selRow.ok ? '#16191C' : '#A5330F' },
+          { k: 'Against setpoint', v: selRow.ok ? '−8 g' : '−33 g', color: selRow.ok ? '#4A5057' : '#A5330F' },
+          { k: 'Hanger', v: '42', color: '#4A5057' },
+          { k: 'Product', v: 'not attributed', color: '#6B7178' },
+          { k: 'Merge key', v: 'unique', color: '#14663F' },
+          { k: 'Source', v: 'ifl_sql · pack1', color: '#4A5057' },
+        ],
+      },
+
+      oeeFactors: [
+        { name: 'Availability', value: '89.7 %', w: '89.7%', color: '#FF7A4D', note: '7 stops cost 2 h 28 m' },
+        { name: 'Performance', value: '87.2 %', w: '87.2%', color: '#B6BBBE', note: 'against the best hour on record' },
+        { name: 'Quality', value: '97.8 %', w: '97.8%', color: '#4FBF87', note: '176 cones rejected' },
+      ],
+      oeeDays,
+      stopBars,
+      stopRows,
+      hourBars,
+
+      histo,
+      specX: gToX(1920),
+      specW: gToX(2000) - gToX(1920),
+      setX: gToX(1960),
+      setLabelX: gToX(1960) + 7,
+      meanX: gToX(1951.5),
+      meanLabelX: gToX(1951.5) - 7,
+      stationBars,
+
+      bandY: wToY(1966),
+      bandH: wToY(1938) - wToY(1966),
+      centerY: wToY(1951.5),
+      xbar: xbarPts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '),
+      xbarPts,
+      mathsStats: [
+        { k: 'Cp', v: '0.72', color: '#C98A12', note: 'spread against tolerance' },
+        { k: 'Cpk', v: '0.57', color: '#D8451B', note: 'off-centre, low side' },
+        { k: 'σ within', v: '18.4 g', color: '#16191C', note: 'pooled subgroup' },
+        { k: 'Groups out', v: '2 / 24', color: '#C98A12', note: 'X̄ beyond ±3σ' },
+        { k: 'Out of range', v: '0.29 %', color: '#14663F', note: '419 of 142,511' },
+      ],
+
+      pareto: [
+        { code: 'tube 1 · material 0', hint: 'most common pairing', count: '1,412', pct: '48.7 %', w: '100%', color: '#D8451B' },
+        { code: 'tube 0 · material 1', hint: 'second reason', count: '786', pct: '27.1 %', w: '56%', color: '#D8451B' },
+        { code: 'tube 1 · material 1', hint: 'both flags set', count: '402', pct: '13.9 %', w: '28%', color: '#E4A38F' },
+        { code: 'tube 2 · material 0', hint: 'rare', count: '218', pct: '7.5 %', w: '15%', color: '#E4A38F' },
+        { code: 'everything else', hint: '11 further pairings', count: '82', pct: '2.8 %', w: '6%', color: '#B9BEB8' },
+      ],
+      burstX: dayX(9) - 20,
+      burstW: dayX(11) - dayX(9) + 40,
+      pBarY: rToY(2.19),
+      pBarLabelY: rToY(2.19) + 4,
+      uclY: rToY(3.4),
+      pLine: pPts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '),
+      pPts,
+      rejBaseY: 160 - (2.19 / 4.6) * 130,
+      rejStations,
+
+      shiftCards: [
+        {
+          name: 'Morning',
+          hours: '06:00 – 14:00',
+          verdict: 'Steady, on the line average',
+          verdictColor: '#14663F',
+          rule: '#16191C',
+          stats: [
+            { k: 'Cones', v: '2,704', color: '#16191C' },
+            { k: 'Reject rate', v: '2.1 %', color: '#16191C' },
+            { k: 'Mean weight', v: '1 952 g', color: '#16191C' },
+            { k: 'Uptime', v: '93.4 %', color: '#16191C' },
+            { k: 'Stops', v: '2', color: '#4A5057' },
+          ],
+        },
+        {
+          name: 'Evening',
+          hours: '14:00 – 22:00',
+          verdict: 'Best output of the three',
+          verdictColor: '#14663F',
+          rule: '#6E7B85',
+          stats: [
+            { k: 'Cones', v: '2,838', color: '#16191C' },
+            { k: 'Reject rate', v: '2.0 %', color: '#16191C' },
+            { k: 'Mean weight', v: '1 954 g', color: '#16191C' },
+            { k: 'Uptime', v: '95.1 %', color: '#16191C' },
+            { k: 'Stops', v: '2', color: '#4A5057' },
+          ],
+        },
+        {
+          name: 'Night',
+          hours: '22:00 – 06:00',
+          verdict: '15 % behind, every day',
+          verdictColor: '#A5330F',
+          rule: '#D8451B',
+          stats: [
+            { k: 'Cones', v: '2,300', color: '#A5330F' },
+            { k: 'Reject rate', v: '2.5 %', color: '#A5330F' },
+            { k: 'Mean weight', v: '1 948 g', color: '#16191C' },
+            { k: 'Uptime', v: '80.6 %', color: '#A5330F' },
+            { k: 'Stops', v: '3', color: '#4A5057' },
+          ],
+        },
+      ],
+      shiftGrid: [
+        { y: cToY(3200), ty: cToY(3200) + 4, label: '3 200' },
+        { y: cToY(2800), ty: cToY(2800) + 4, label: '2 800' },
+        { y: cToY(2400), ty: cToY(2400) + 4, label: '2 400' },
+        { y: cToY(2000), ty: cToY(2000) + 4, label: '2 000' },
+      ],
+      shiftLineM: line(seriesM),
+      shiftLineE: line(seriesE),
+      shiftLineN: line(seriesN),
+
+      users: [
+        { name: 'S. Farooq', username: 's.farooq', role: 'Supervisor', status: 'active', pillBg: '#E8F2EB', pillFg: '#14663F' },
+        { name: 'A. Rehman', username: 'a.rehman', role: 'Manager', status: 'active', pillBg: '#E8F2EB', pillFg: '#14663F' },
+        { name: 'M. Iqbal', username: 'm.iqbal', role: 'Operator', status: 'active', pillBg: '#E8F2EB', pillFg: '#14663F' },
+        { name: 'Plant IT', username: 'admin', role: 'Admin', status: 'locked', pillBg: '#FBE9E4', pillFg: '#A5330F' },
+      ],
+      stations: stationNames.map((label, i) => ({
+        n: i + 1,
+        label,
+        color: i === 4 || i === 9 ? '#A5330F' : '#16191C',
+      })),
+      rules: [
+        { title: 'Recompute shift from production time', note: "The plant's stored shift comes from insert time and is wrong on 31 % of rows.", value: 'morning 06:00 · evening 14:00 · night 22:00', knobBg: '#16191C', knobX: '25px' },
+        { title: 'Flag cones outside ±12 g', note: 'The action threshold behind every "off-target" call in the app.', value: 'setpoint 1 960 g · band ±12 g', knobBg: '#16191C', knobX: '25px' },
+        { title: 'Drop sacks under 40 kg', note: 'Three known bad reads. Excluded from averages, still visible in Records.', value: '3 rows excluded', knobBg: '#16191C', knobX: '25px' },
+        { title: 'Treat sack weight as gross', note: 'Includes the 0.5 kg sack. Unconfirmed by IFL — switch when they answer.', value: 'gross · pending confirmation', knobBg: '#C6C9C4', knobX: '3px' },
+      ],
+      syncStats: [
+        { v: '1 214', k: 'runs since install' },
+        { v: '42 s', k: 'since last run' },
+        { v: '0', k: 'failures' },
+        { v: '13 ms', k: 'median query' },
+      ],
+    };
+  }
+}
+
+</script>
+</body>
+</html>
