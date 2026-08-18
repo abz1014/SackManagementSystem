@@ -1838,3 +1838,93 @@ body {
   .sd-split { grid-template-columns: 1fr; }
   .verdict-card { gap: 18px; }
 }
+
+/* ==========================================================================
+   OUTPUT — reworked screen
+   Signature: the dark OEE block, the only --ink surface in the content area.
+   ========================================================================== */
+
+.oee-grid { display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start; }
+.oee-right { display: flex; flex-direction: column; gap: 14px; }
+
+.oee-block {
+  background: var(--ink); color: var(--on-ink);
+  border-radius: var(--radius); padding: 26px 28px;
+}
+.ob-eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--on-ink-3);
+}
+.ob-hero {
+  font-family: var(--font-mono); font-size: var(--fs-hero); line-height: 1;
+  letter-spacing: -0.05em; margin: 12px 0 4px; color: var(--alarm-bright);
+}
+.ob-pct { font-size: var(--fs-card); color: var(--on-ink-3); margin-left: 2px; }
+.ob-lede { margin: 0; font-size: var(--fs-body); color: var(--on-ink-2); }
+.ob-estimated {
+  margin: 10px 0 26px; font-size: var(--fs-caption); color: var(--on-ink-3);
+  padding-top: 10px; border-top: 1px solid var(--ink-2);
+}
+
+.ob-factor { margin-bottom: 17px; }
+.obf-head { display: flex; justify-content: space-between; align-items: baseline; }
+.obf-name { font-size: var(--fs-caption); font-weight: var(--fw-med); }
+.obf-val { font-family: var(--font-mono); font-size: var(--fs-cell); }
+.obf-track { display: block; height: 10px; background: var(--ink-2); margin-top: 7px; border-radius: 2px; overflow: hidden; }
+.obf-fill { display: block; height: 100%; border-radius: 2px; }
+/* Each factor keeps its own colour so the bars are readable side by side; all
+   three are checked against --ink, not against a light card. */
+.obf-fill.avail { background: var(--alarm-bright); }
+.obf-fill.perf { background: var(--on-ink-2); }
+.obf-fill.qual { background: var(--ok-bright); }
+.obf-note { font-size: var(--fs-caption); color: var(--on-ink-quiet); margin-top: 6px; }
+
+/* ------------------------------------------------------- 7-day OEE columns */
+.oeedays .bar { fill: var(--neutral-mark); }
+.oeedays .bar.latest { fill: var(--alarm); }
+.oeedays .val { font-family: var(--font-mono); fill: var(--ink); }
+.oeedays .tick { font-family: var(--font-mono); fill: var(--muted); }
+.oeedays .ax { stroke: var(--field-border); }
+.oeedays .target { stroke: var(--ok); stroke-dasharray: 5 4; }
+.oeedays .target-label { font-family: var(--font-mono); fill: var(--ok-ink); }
+
+/* -------------------------------------------------------- loss / stat trio */
+.loss-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 18px; }
+.loss-val { font-family: var(--font-mono); font-size: var(--fs-card); color: var(--ink); line-height: 1.1; }
+.loss-val.alarm { color: var(--alarm-ink); }
+.loss-val.warn { color: var(--warn-ink); }
+.loss-key { font-size: var(--fs-caption); color: var(--graphite); margin-top: 3px; }
+
+/* ------------------------------------------------------------ stops verdict */
+.stops-verdict {
+  background: var(--card); border: 1px solid var(--hairline); border-radius: var(--radius);
+  padding: 24px 28px; margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 30px; flex-wrap: wrap;
+}
+.sv-main { flex: 1 1 380px; min-width: 0; }
+.sv-headline {
+  margin: 0; font-size: var(--fs-verdict); font-weight: var(--fw-semi);
+  letter-spacing: -0.025em; line-height: 1.15;
+}
+.sv-sub { margin: 5px 0 0; color: var(--graphite); font-size: var(--fs-body); }
+
+/* ------------------------------------------------ share-of-downtime column */
+.share { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.share-track { display: block; flex: 1; max-width: 160px; height: 12px; background: var(--track); border-radius: 2px; overflow: hidden; }
+.share-fill { display: block; height: 100%; background: var(--alarm); }
+.share-pct { font-family: var(--font-mono); color: var(--muted); width: 46px; text-align: right; }
+
+.sk-oee { height: 380px; }
+
+@media (max-width: 1180px) {
+  .oee-grid { grid-template-columns: 1fr; }
+  .loss-grid { grid-template-columns: 1fr; gap: 14px; }
+}
+
+/* Below the design's stated responsive floor the two-column KPI row still wants
+   ~390px and starts a horizontal scroll. Nothing on this app is meant to be read
+   at phone width, but the page must never scroll sideways. */
+@media (max-width: 760px) {
+  .kpis, .loss-grid, .maths-grid, .sd-split { grid-template-columns: 1fr; }
+  .vc-stats, .ribbon-stats { gap: 16px; }
+}

@@ -134,40 +134,6 @@ interface RegisterSeed {
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** Tween a displayed number toward `target` — the KPI "settling on a reading"
- *  motion. No dependency: requestAnimationFrame + easeOutCubic. Skips the
- *  animation entirely under prefers-reduced-motion. */
-function useTweenedNumber(target: number, durationMs = 550): number {
-  const [display, setDisplay] = useState(target);
-  const fromRef = useRef(target);
-  const rafRef = useRef<number>();
-  useEffect(() => {
-    if (prefersReducedMotion()) {
-      setDisplay(target);
-      fromRef.current = target;
-      return;
-    }
-    const from = fromRef.current;
-    if (from === target) return;
-    const start = performance.now();
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(from + (target - from) * eased);
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(step);
-      } else {
-        fromRef.current = target;
-      }
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target, durationMs]);
-  return display;
-}
 
 /** Flips true one animation frame after `depKey` changes — used to trigger a
  *  0-to-target CSS width/height transition ("a reading being taken") each
@@ -521,20 +487,8 @@ function PerformanceHub({
   onSub: (k: string) => void;
 }) {
   const sub = PERF_SUB[routeSub as keyof typeof PERF_SUB] ?? 'oee';
-  const setSub = (k: string) => onSub(routeKey(PERF_SUB, k));
   return (
     <>
-      <div className="filters" style={{ marginBottom: 6 }}>
-        <Segmented
-          value={sub}
-          onChange={setSub}
-          options={[
-            { key: 'oee', label: 'OEE' },
-            { key: 'downtime', label: 'Downtime & Throughput' },
-            { key: 'patterns', label: 'Stoppage patterns' },
-          ]}
-        />
-      </div>
       {sub === 'oee' ? (
         <OeeView range={range} onMeta={onMeta} />
       ) : sub === 'downtime' ? (
@@ -1693,42 +1647,6 @@ function DashboardView({
 
 
 
-function Tile({
-  label,
-  value,
-  format,
-  unit,
-  foot,
-  trend,
-  delta,
-}: {
-  label: string;
-  value: number | null;
-  format: (n: number) => string;
-  unit?: string;
-  foot: ReactNode;
-  trend?: number[];
-  delta?: { text: string; tone: 'good' | 'bad' | 'neutral' } | null;
-}) {
-  // the KPI "settling on a reading" motion — tweens toward the new value
-  // whenever the filtered date/shift changes.
-  const shown = useTweenedNumber(value ?? 0);
-  return (
-    <div className="tile">
-      <div className="k-label">
-        {label}
-        <span className="k-tick" title="7-day trend below" />
-      </div>
-      <div className="k-value">
-        {value == null ? '—' : format(shown)}
-        {unit && value != null && <span className="unit">{unit}</span>}
-      </div>
-      {delta && <div className={`k-delta ${delta.tone === 'good' ? 'up' : delta.tone === 'bad' ? 'down' : 'flat'}`}>{delta.text}</div>}
-      {trend && trend.length > 1 && <Spark points={trend} />}
-      <div className="k-foot">{foot}</div>
-    </div>
-  );
-}
 
 /** 7-day instrument trace — the signature readout element. Pure data, no chart
  *  library: a thin green polyline over the tile's own history. Draws itself in
@@ -2515,6 +2433,17 @@ function StoppagePatternView({
       skewed,
       handoverElevated: handover.filter((h) => h.days > medianDays),
       dayCount: data.dayCount,
+      // The design asserts "Stops cluster at 02:00 and 14:00". Whether stops
+      // cluster at all is a property of the data, so it is tested: an hour only
+      // counts as a cluster if it recurs on more days than the median hour.
+      clusterHours: [...byHour]
+        .filter((h) => h.days > medianDays && h.count > 0)
+        .sort((a, b) => b.days - a.days || b.count - a.count)
+        .slice(0, 2),
+      medianDays,
+      underTenPct:
+        all.length > 0 ? (100 * all.filter((x) => x.durationSeconds < 600).length) / all.length : 0,
+      overHourCount: all.filter((x) => x.durationSeconds >= 3600).length,
     };
   }, [data]);
 
@@ -2553,18 +2482,46 @@ function StoppagePatternView({
         <div className="hint">No stoppages over {threshold}s in this range.</div>
       ) : (
         <>
-          <div className="callout">
-            <div className="big">
-              <span className="accent">{Math.round(analysis.microPct)}%</span> of stoppages are under 5 minutes —
-              but they are only <span className="accent">{Math.round(analysis.microDownPct)}%</span> of lost time
-            </div>
-            <p>
-              {fmtInt(analysis.all.length)} stoppages across {analysis.dayCount} days, {fmtDuration(analysis.totalDown)} down
-              in total. The <b>{analysis.longCount}</b> stoppages over 15 minutes account for{' '}
-              <b>{Math.round(analysis.longDownPct)}%</b> of it. Chasing the count and chasing the lost hours are two
-              different jobs — this is which one you're looking at.
+          <section className="panel light">
+            <h2 className="sv-headline">
+              {analysis.clusterHours.length >= 2
+                ? `Stops cluster at ${hh(analysis.clusterHours[0]!.hour)} and ${hh(analysis.clusterHours[1]!.hour)}`
+                : analysis.clusterHours.length === 1
+                  ? `Stops cluster at ${hh(analysis.clusterHours[0]!.hour)}`
+                  : 'Stops are spread evenly through the day'}
+            </h2>
+            <p className="sv-sub">
+              {analysis.clusterHours.length > 0 ? (
+                <>
+                  {analysis.clusterHours.map((h) => `${hh(h.hour)} goes down on ${h.days} of ${analysis.dayCount} days`).join('; ')}.
+                  The median hour goes down on {analysis.medianDays}.
+                </>
+              ) : (
+                <>No hour of the clock recurs more than the median of {analysis.medianDays} days — there is no time-of-day pattern to chase.</>
+              )}
             </p>
-          </div>
+            <div className="loss-grid" style={{ marginTop: 20 }}>
+              <div className="loss">
+                <div className="loss-val">{fmtInt(analysis.all.length)}</div>
+                <div className="loss-key">stops in {analysis.dayCount} days</div>
+              </div>
+              <div className="loss">
+                <div className="loss-val">{Math.round(analysis.underTenPct)}%</div>
+                <div className="loss-key">under ten minutes</div>
+              </div>
+              <div className="loss">
+                <div className="loss-val">{fmtInt(analysis.overHourCount)}</div>
+                <div className="loss-key">over an hour</div>
+              </div>
+            </div>
+            <div className="panel-foot">
+              {Math.round(analysis.microPct)}% of stops are under 5 minutes but only {Math.round(analysis.microDownPct)}% of
+              the lost time; the {analysis.longCount} over 15 minutes account for {Math.round(analysis.longDownPct)}% of
+              it. Chasing the count and chasing the lost hours are two different jobs.
+            </div>
+          </section>
+
+          <div style={{ height: 14 }} />
 
           <div className="panel">
             <div className="panel-head">
@@ -2750,6 +2707,8 @@ function HourClusterChart({
 /** Stoppage duration buckets. The split that matters operationally is
  * micro-stop (an operator clears it) vs breakdown (someone is called out) —
  * so the buckets are chosen around that, not on an even numeric scale. */
+const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
+
 const DURATION_BUCKETS: { label: string; short: string; min: number; max: number }[] = [
   { label: 'under 5 min', short: '<5m', min: 0, max: 300 },
   { label: '5–15 min', short: '5–15m', min: 300, max: 900 },
@@ -2925,6 +2884,39 @@ function DowntimeView({
   const revealed = useRevealOnData(data ? `${data.date}:${data.thresholdSeconds}:${data.stoppageCount}` : null);
   const rateMax = Math.max(1, ...(data?.hourly.map((h) => h.count) ?? [1]));
 
+  // The design's headline is "One stop cost more than the other six together".
+  // That is a claim about this day's distribution, so it is tested rather than
+  // printed: it only holds when the longest stop really does exceed the sum of
+  // the rest, which is not true on every day in this data set.
+  const stopVerdict = useMemo(() => {
+    const stops = data?.stoppages ?? [];
+    if (!data || stops.length === 0) {
+      return { headline: 'No stops detected this day', sub: 'The line produced continuously above the detection threshold.' };
+    }
+    const sorted = [...stops].sort((a, b) => b.durationSeconds - a.durationSeconds);
+    const longest = sorted[0]!;
+    const rest = sorted.slice(1).reduce((t, x) => t + x.durationSeconds, 0);
+    const shiftOf = (iso: string) => {
+      const h = new Date(iso).getUTCHours();
+      return h >= 6 && h < 14 ? 'morning' : h >= 14 && h < 22 ? 'evening' : 'night';
+    };
+    const sub = `${fmtTime(longest.startTs)} – ${fmtTime(longest.endTs)} · ${fmtDuration(longest.durationSeconds)} · ${shiftOf(longest.startTs)} shift`;
+    if (stops.length === 1) {
+      return { headline: `A single stop cost ${fmtDuration(longest.durationSeconds)}`, sub };
+    }
+    if (longest.durationSeconds > rest) {
+      return {
+        headline: `One stop cost more than the other ${stops.length - 1} together`,
+        sub,
+      };
+    }
+    const share = data.totalDownSeconds > 0 ? Math.round((100 * longest.durationSeconds) / data.totalDownSeconds) : 0;
+    return {
+      headline: `${fmtInt(stops.length)} stops cost ${fmtDuration(data.totalDownSeconds)} between them`,
+      sub: `The longest was ${sub} — ${share}% of the day's downtime.`,
+    };
+  }, [data]);
+
   const inspectStoppage = (s: Stoppage) =>
     onInspect({
       type: 'cone',
@@ -2964,31 +2956,31 @@ function DowntimeView({
         <div className="tile skeleton" style={{ height: 280 }} />
       ) : (
         <>
-          <div className="callout">
-            <div className="big">
-              <span className="accent">{data.stoppageCount}</span> stoppage{data.stoppageCount === 1 ? '' : 's'} detected
-              {' · '}
-              <span className="accent">{fmtDuration(data.totalDownSeconds)}</span> total downtime
-              {' · '}
-              <span className="accent">{data.availabilityPct ?? '—'}%</span> availability
+          <section className="stops-verdict">
+            <div className="sv-main">
+              <h2 className="sv-headline">{stopVerdict.headline}</h2>
+              <p className="sv-sub">{stopVerdict.sub}</p>
             </div>
-            <p>
-              A stoppage here means the whole line produced <b>zero cones for {threshold}+ seconds</b> — inferred purely
-              from gaps between cone weighings. There is no PLC status feed and no planned-downtime schedule, so this
-              cannot distinguish a scheduled break or changeover from an unplanned fault. Typical running gap this day
-              was ~{data.typicalGapSeconds ?? '—'}s between cones, for reference.
-            </p>
-          </div>
+            <div className="vc-stats">
+              <div className="vc-stat">
+                <div className="vcs-val">{data.availabilityPct ?? '—'}<span className="vcs-u">%</span></div>
+                <div className="vcs-key">availability</div>
+              </div>
+              <div className="vc-stat">
+                <div className="vcs-val">{fmtDuration(data.mtbfSeconds)}</div>
+                <div className="vcs-key">between stops</div>
+              </div>
+              <div className="vc-stat">
+                <div className="vcs-val">{fmtDuration(data.mttrSeconds)}</div>
+                <div className="vcs-key">to restart</div>
+              </div>
+            </div>
+          </section>
 
-          <div className="kpis">
-            <Tile label="Availability" value={data.availabilityPct} format={(n) => n.toFixed(1)} unit="%"
-              foot={<>{fmtInt(data.coneCount)} cones this day</>} />
-            <Tile label="Total Downtime" value={data.totalDownSeconds} format={(n) => fmtDuration(n)}
-              foot={<>across {data.stoppageCount} stoppage{data.stoppageCount === 1 ? '' : 's'}</>} />
-            <Tile label="MTBF" value={data.mtbfSeconds} format={(n) => fmtDuration(n)}
-              foot={<>mean time between failures</>} />
-            <Tile label="MTTR" value={data.mttrSeconds} format={(n) => fmtDuration(n)}
-              foot={<>mean time to recover</>} />
+          <div className="rule-note" style={{ marginBottom: 14 }}>
+            A stoppage here means the line produced <b>zero cones for {threshold}+ seconds</b>, inferred from gaps
+            between weighings. With no PLC status feed and no planned-downtime schedule, this cannot tell a scheduled
+            break or changeover from a fault. Typical running gap this day was ~{data.typicalGapSeconds ?? '—'}s.
           </div>
 
           <div className="panel">
@@ -3071,7 +3063,8 @@ function DowntimeView({
                     <tr>
                       <th>Start</th>
                       <th>End</th>
-                      <th className="num">Duration</th>
+                      <th className="num">Down</th>
+                      <th className="num">Share of the day's downtime</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3087,6 +3080,19 @@ function DowntimeView({
                         <td>{fmtDateTime(s.startTs)}</td>
                         <td>{fmtDateTime(s.endTs)}</td>
                         <td className="num">{fmtDuration(s.durationSeconds)}</td>
+                        <td className="num">
+                          <span className="share">
+                            <span className="share-track">
+                              <span
+                                className="share-fill"
+                                style={{ width: `${data.totalDownSeconds > 0 ? (100 * s.durationSeconds) / data.totalDownSeconds : 0}%` }}
+                              />
+                            </span>
+                            <span className="share-pct">
+                              {data.totalDownSeconds > 0 ? Math.round((100 * s.durationSeconds) / data.totalDownSeconds) : 0}%
+                            </span>
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -4071,10 +4077,63 @@ function PChart({
 
 /* ---------------- Inferred OEE ---------------- */
 
-function oeeClass(pct: number): string {
-  if (pct >= 85) return 'good'; // world-class benchmark
-  if (pct >= 60) return 'warn'; // typical/acceptable
-  return 'bad';
+
+/**
+ * Last-7-days OEE columns.
+ *
+ * Measured-width viewBox, like every other chart here that renders text — the
+ * design specifies a fixed 620x190 box, but scaling that to the container
+ * stretches the mono labels horizontally. The geometry below keeps the design's
+ * proportions (54px bars, dashed target line) at 1:1.
+ */
+function OeeDaysChart({ days, target = 85 }: { days: { date: string; oeePct: number | null }[]; target?: number }) {
+  const [wrapRef, measuredW] = useMeasuredWidth();
+  const W = Math.max(420, measuredW - 64);
+  const H = 190;
+  const BASE = 150;
+  const RM = 62; // room for the "85 target" label at the right edge
+  const plotW = Math.max(120, W - RM);
+  const axisFontPx = useTipFontPx();
+
+  const max = Math.max(100, ...days.map((d) => d.oeePct ?? 0));
+  const y = (pct: number) => BASE - (pct / max) * (BASE - 26);
+  const slot = plotW / Math.max(1, days.length);
+  const barW = Math.min(54, slot * 0.62);
+
+  return (
+    <div ref={wrapRef} className="chart-wrap">
+      <svg className="oeedays" viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+           aria-label={`OEE for the last ${days.length} days`}>
+        <line className="ax" x1={0} y1={BASE} x2={plotW} y2={BASE} />
+        <line className="target" x1={0} y1={y(target)} x2={plotW} y2={y(target)} />
+        <text className="target-label" x={plotW + 6} y={y(target) + 4} fontSize={axisFontPx}>{target} target</text>
+        {days.map((d, i) => {
+          const cx = slot * i + slot / 2;
+          const pct = d.oeePct;
+          if (pct == null) {
+            return (
+              <text key={d.date} className="tick" x={cx} y={BASE - 8} textAnchor="middle" fontSize={axisFontPx}>—</text>
+            );
+          }
+          const top = y(pct);
+          return (
+            <g key={d.date}>
+              <rect className={`bar${i === days.length - 1 ? ' latest' : ''}`} x={cx - barW / 2} y={top} width={barW} height={Math.max(1, BASE - top)}>
+                <title>{d.date}: {pct}% OEE</title>
+              </rect>
+              <text className="val" x={cx} y={top - 7} textAnchor="middle" fontSize={axisFontPx}>{pct}</text>
+            </g>
+          );
+        })}
+        {days.map((d, i) => (
+          <text key={`t${d.date}`} className="tick" x={slot * i + slot / 2} y={BASE + axisFontPx + 6}
+                textAnchor="middle" fontSize={axisFontPx}>
+            {d.date.slice(8)}
+          </text>
+        ))}
+      </svg>
+    </div>
+  );
 }
 
 function OeeView({
@@ -4090,6 +4149,8 @@ function OeeView({
   const [plannedHoursPerDay, setPlannedHoursPerDay] = useState(24);
   const [idealOverride, setIdealOverride] = useState('');
   const [data, setData] = useState<OeeData | null>(null);
+  const [days, setDays] = useState<{ date: string; oeePct: number | null }[]>([]);
+  const [showInputs, setShowInputs] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -4128,45 +4189,59 @@ function OeeView({
     };
   }, [from, to, thresholdSeconds, plannedHoursPerDay, idealOverride, onMeta]);
 
+  // The 7-day strip. /api/oee has no day-grouped mode, so this is one call per
+  // day — deliberately the same parameters as the headline figure, or the strip
+  // would be measuring a different thing from the number above it.
+  useEffect(() => {
+    if (!to) return;
+    let cancelled = false;
+    const wanted: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(`${to}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - i);
+      const s = d.toISOString().slice(0, 10);
+      if (!range.min || s >= range.min) wanted.push(s);
+    }
+    Promise.all(
+      wanted.map((d) =>
+        getOee({
+          from: d,
+          to: d,
+          thresholdSeconds,
+          plannedHoursPerDay,
+          idealCycleSeconds: idealOverride ? Number(idealOverride) : undefined,
+        })
+          .then((r) => ({ date: d, oeePct: r.data.oeePct as number | null }))
+          .catch(() => ({ date: d, oeePct: null })),
+      ),
+    ).then((rows) => !cancelled && setDays(rows));
+    return () => {
+      cancelled = true;
+    };
+  }, [to, range.min, thresholdSeconds, plannedHoursPerDay, idealOverride]);
+
+  // The three loss buckets, in their own units. Deliberately NOT presented as an
+  // arithmetic split of the missing percentage: OEE multiplies its three factors,
+  // so the losses do not sum to 100 - OEE and claiming they do would be wrong.
+  const losses = useMemo(() => {
+    if (!data) return null;
+    const slowSeconds = Math.max(0, data.runSeconds - data.idealCycleSeconds * data.producedCount);
+    return { stopped: data.downSeconds, slow: slowSeconds, rejected: data.rejectedCount };
+  }, [data]);
+
+  const verdict = (pct: number) =>
+    pct >= 85
+      ? 'At or above the 85% mark usually called world-class.'
+      : pct >= 60
+        ? 'A typical band for a line like this. 85% is world-class.'
+        : 'Below the usual band for a line like this. 85% is world-class.';
+
   return (
     <>
-      <div className="callout">
-        <div className="big">Estimated OEE — not a certified figure</div>
-        <p>
-          There is no PLC status feed and no planned-downtime schedule for this line, so Availability, Performance and
-          Quality below are all <b>inferred from event timestamps</b>. Every input that shapes the estimate — the
-          stoppage threshold, planned hours/day, and the ideal cycle time — is shown and editable below, so you can see
-          exactly what produced this number and correct it if it doesn't match how the plant actually runs.
-        </p>
-      </div>
-
-      <div className="oee-inputs filters">
-        <div className="field">
-          <label>From</label>
-          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>To</label>
-          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Stoppage threshold (s)</label>
-          <input type="number" min={30} max={3600} step={30} value={thresholdSeconds} onChange={(e) => setThresholdSeconds(Math.max(30, Math.min(3600, Number(e.target.value) || 120)))} />
-        </div>
-        <div className="field">
-          <label>Planned hours/day</label>
-          <input type="number" min={1} max={24} step={0.5} value={plannedHoursPerDay} onChange={(e) => setPlannedHoursPerDay(Math.max(1, Math.min(24, Number(e.target.value) || 24)))} />
-        </div>
-        <div className="field">
-          <label>Ideal cycle (s) — override</label>
-          <input type="number" min={0.1} step={0.1} placeholder="auto" value={idealOverride} onChange={(e) => setIdealOverride(e.target.value)} />
-        </div>
-      </div>
-
       {error ? (
-        <div className="error-card"><b>Couldn't load OEE.</b> {error}</div>
+        <div className="error-card" role="alert"><b>Couldn't load OEE.</b> {error}</div>
       ) : loading || !data ? (
-        <div className="tile skeleton" style={{ height: 260 }} />
+        <div className="sk sk-oee" />
       ) : (
         <>
           {data.possiblyPartial && (
@@ -4182,89 +4257,154 @@ function OeeView({
               likely isn't over yet, or data hasn't synced past this point.
             </div>
           )}
-          <div className="oee-headline">
-            <div>
-              <div className="oee-label">Estimated OEE</div>
-              <div className={`oee-big ${oeeClass(data.oeePct)}`}>{data.oeePct}%</div>
-              <div className="oee-badge">estimated, not certified</div>
-            </div>
-            <div className="oee-formula">
-              <div className="oee-term">
-                <span className="t-val">{data.availabilityPct}%</span>
-                <span className="t-label">Availability</span>
+
+          <div className="oee-grid">
+            {/* Signature: the one dark surface in the app. */}
+            <section className="oee-block">
+              <div className="ob-eyebrow">Overall equipment effectiveness</div>
+              <div className="ob-hero">
+                {data.oeePct}<span className="ob-pct">%</span>
               </div>
-              <span className="op">×</span>
-              <div className="oee-term">
-                <span className="t-val">{data.performancePct}%</span>
-                <span className="t-label">Performance</span>
-              </div>
-              <span className="op">×</span>
-              <div className="oee-term">
-                <span className="t-val">{data.qualityPct}%</span>
-                <span className="t-label">Quality</span>
-              </div>
-              <span className="op">=</span>
-              <div className="oee-term">
-                <span className="t-val">{data.oeePct}%</span>
-                <span className="t-label">OEE</span>
-              </div>
+              <p className="ob-lede">{verdict(data.oeePct)}</p>
+              <p className="ob-estimated">
+                Inferred from event timestamps — there is no PLC status feed and no planned-downtime schedule for this
+                line. It is an estimate, not a certified figure.
+              </p>
+
+              {[
+                { name: 'Availability', v: data.availabilityPct, cls: 'avail', note: `Run time ÷ planned time. ${fmtDuration(data.downSeconds)} stopped across ${fmtInt(data.stoppageCount)} events.` },
+                { name: 'Performance', v: data.performancePct, cls: 'perf', note: data.idealCycleSource === 'inferred' ? `Ideal cycle ${data.idealCycleSeconds}s/cone, inferred from the best observed hour.` : `Ideal cycle ${data.idealCycleSeconds}s/cone, from your override.` },
+                { name: 'Quality', v: data.qualityPct, cls: 'qual', note: `${fmtInt(data.producedCount)} good, ${fmtInt(data.rejectedCount)} rejected.` },
+              ].map((f) => (
+                <div className="ob-factor" key={f.name}>
+                  <div className="obf-head">
+                    <span className="obf-name">{f.name}</span>
+                    <span className="obf-val">{f.v}%</span>
+                  </div>
+                  <span className="obf-track">
+                    <span className={`obf-fill ${f.cls}`} style={{ width: `${Math.max(0, Math.min(100, f.v))}%` }} />
+                  </span>
+                  <div className="obf-note">{f.note}</div>
+                </div>
+              ))}
+            </section>
+
+            <div className="oee-right">
+              <section className="panel light">
+                <div className="panel-head">
+                  <h3 className="panel-title">Last 7 days</h3>
+                  <span className="mono-note">OEE %</span>
+                </div>
+                {days.length > 0 ? (
+                  <OeeDaysChart days={days} />
+                ) : (
+                  <div className="empty-note">No daily figures for this window.</div>
+                )}
+              </section>
+
+              <section className="panel light">
+                <div className="panel-head">
+                  <h3 className="panel-title">Where the missing {round1(100 - data.oeePct)}% went</h3>
+                </div>
+                {losses && (
+                  <div className="loss-grid">
+                    <div className="loss">
+                      <div className="loss-val alarm">{fmtDuration(losses.stopped)}</div>
+                      <div className="loss-key">stopped — {fmtInt(data.stoppageCount)} event{data.stoppageCount === 1 ? '' : 's'}</div>
+                    </div>
+                    <div className="loss">
+                      <div className="loss-val warn">{fmtDuration(losses.slow)}</div>
+                      <div className="loss-key">slow vs the best hour observed</div>
+                    </div>
+                    <div className="loss">
+                      <div className="loss-val">{fmtInt(losses.rejected)}</div>
+                      <div className="loss-key">cones rejected</div>
+                    </div>
+                  </div>
+                )}
+                <div className="panel-foot">
+                  Three separate losses in their own units. OEE multiplies its factors rather than adding them, so
+                  these do not sum to {round1(100 - data.oeePct)}% — they are where the loss came from, not a split of it.
+                </div>
+              </section>
             </div>
           </div>
 
-          <div className="panel">
+          {/* The estimate is only defensible if the assumptions behind it are
+              reachable. The design drops these controls; they stay, folded away,
+              because an inferred number whose inputs cannot be inspected is
+              exactly the kind of figure a plant engineer is right to distrust. */}
+          <section className="panel light" style={{ marginTop: 14 }}>
             <div className="panel-head">
-              <h2>What went into this number</h2>
-              <span>
-                <ExportCsv
-                  name={csvName('oee-inputs', data.from, data.to)}
-                  headers={['input', 'value', 'unit']}
-                  rows={() => [
-                    ['oee_pct', data.oeePct, '%'],
-                    ['availability_pct', data.availabilityPct, '%'],
-                    ['performance_pct', data.performancePct, '%'],
-                    ['quality_pct', data.qualityPct, '%'],
-                    ['planned_seconds', data.plannedSeconds, 's'],
-                    ['run_seconds', data.runSeconds, 's'],
-                    ['down_seconds', data.downSeconds, 's'],
-                    ['stoppage_count', data.stoppageCount, ''],
-                    ['ideal_cycle_seconds', data.idealCycleSeconds, 's'],
-                    ['ideal_cycle_source', data.idealCycleSource, ''],
-                    ['produced_count', data.producedCount, 'cones'],
-                    ['rejected_count', data.rejectedCount, 'cones'],
-                    ['threshold_seconds', data.thresholdSeconds, 's'],
-                    ['planned_hours_per_day', data.plannedHoursPerDay, 'h'],
-                    ['first_event', data.firstTs, ''],
-                    ['last_event', data.lastTs, ''],
-                    ['possibly_partial', data.possiblyPartial, ''],
-                  ]}
-                />
-                <PrintButton />
-              </span>
+              <h3 className="panel-title">Assumptions behind this estimate</h3>
+              <button type="button" className="ghost-btn" onClick={() => setShowInputs((v) => !v)} aria-expanded={showInputs}>
+                {showInputs ? 'Hide inputs' : 'Show inputs'}
+              </button>
             </div>
-            <div className="stat-row">
-              <Stat label="Planned time" val={fmtDuration(data.plannedSeconds)} />
-              <Stat label="Downtime" val={fmtDuration(data.downSeconds)} />
-              <Stat label="Run time" val={fmtDuration(data.runSeconds)} />
-              <Stat label="Stoppages" val={fmtInt(data.stoppageCount)} />
-            </div>
-            <div className="stat-row">
-              <Stat label="Produced" val={fmtInt(data.producedCount)} />
-              <Stat label="Rejected" val={fmtInt(data.rejectedCount)} />
-              <Stat
-                label="Ideal cycle time"
-                val={`${data.idealCycleSeconds}`}
-                u={`s/cone (${data.idealCycleSource})`}
-                accent={data.idealCycleSource === 'inferred'}
-              />
-            </div>
-            <div className="oee-note">
-              Availability = Run time ÷ Planned time. Performance = (Ideal cycle × Produced) ÷ Run time — ideal cycle is{' '}
+            <p className="panel-lede">
+              Availability = run ÷ planned. Performance = (ideal cycle × produced) ÷ run, ideal cycle{' '}
               {data.idealCycleSource === 'inferred'
-                ? 'inferred from the best-observed hourly throughput rate (95th percentile), since no cycle-time spec exists yet.'
-                : 'the manual override you entered above.'}{' '}
-              Quality = Produced ÷ (Produced + Rejected), matching the reject-rate convention used on the Dashboard.
-            </div>
-          </div>
+                ? 'inferred from the 95th-percentile hourly throughput, since no cycle-time spec exists yet'
+                : 'taken from your override'}
+              . Quality = produced ÷ (produced + rejected).
+            </p>
+            {showInputs && (
+              <>
+                <div className="wt-controls" style={{ marginTop: 16, borderBottom: 0, paddingBottom: 0 }}>
+                  <div className="field">
+                    <label>From</label>
+                    <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>To</label>
+                    <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Stoppage threshold (s)</label>
+                    <input type="number" min={30} max={3600} step={30} value={thresholdSeconds} onChange={(e) => setThresholdSeconds(Math.max(30, Math.min(3600, Number(e.target.value) || 120)))} />
+                  </div>
+                  <div className="field">
+                    <label>Planned hours/day</label>
+                    <input type="number" min={1} max={24} step={0.5} value={plannedHoursPerDay} onChange={(e) => setPlannedHoursPerDay(Math.max(1, Math.min(24, Number(e.target.value) || 24)))} />
+                  </div>
+                  <div className="field">
+                    <label>Ideal cycle (s) — override</label>
+                    <input type="number" min={0.1} step={0.1} placeholder="auto" value={idealOverride} onChange={(e) => setIdealOverride(e.target.value)} />
+                  </div>
+                </div>
+                <div className="maths-foot">
+                  <ExportCsv
+                    name={csvName('oee-inputs', data.from, data.to)}
+                    headers={['input', 'value', 'unit']}
+                    rows={() => [
+                      ['oee_pct', data.oeePct, '%'],
+                      ['availability_pct', data.availabilityPct, '%'],
+                      ['performance_pct', data.performancePct, '%'],
+                      ['quality_pct', data.qualityPct, '%'],
+                      ['planned_seconds', data.plannedSeconds, 's'],
+                      ['run_seconds', data.runSeconds, 's'],
+                      ['down_seconds', data.downSeconds, 's'],
+                      ['stoppage_count', data.stoppageCount, ''],
+                      ['ideal_cycle_seconds', data.idealCycleSeconds, 's'],
+                      ['ideal_cycle_source', data.idealCycleSource, ''],
+                      ['produced_count', data.producedCount, 'cones'],
+                      ['rejected_count', data.rejectedCount, 'cones'],
+                      ['threshold_seconds', data.thresholdSeconds, 's'],
+                      ['planned_hours_per_day', data.plannedHoursPerDay, 'h'],
+                      ['first_event', data.firstTs, ''],
+                      ['last_event', data.lastTs, ''],
+                      ['possibly_partial', data.possiblyPartial, ''],
+                    ]}
+                    label="Export inputs"
+                  />
+                  <PrintButton />
+                  <span className="mono-note">
+                    planned {fmtDuration(data.plannedSeconds)} · run {fmtDuration(data.runSeconds)} · down {fmtDuration(data.downSeconds)}
+                  </span>
+                </div>
+              </>
+            )}
+          </section>
         </>
       )}
     </>
