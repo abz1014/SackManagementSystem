@@ -122,7 +122,9 @@ Request a **dedicated read-only SQL login** from IFL — do not use `sa` or the 
 - **The two databases cannot be joined** — there is no product/lot key on the weighing data (OQ-1, blocking).
 - **No dispatch data exists** anywhere (OQ-15). If dispatch is in scope it is a new module.
 - Wide tables have only a clustered PK on `id`; date-range queries will scan. Index additions need client approval.
-- Only **18 days** of data (2026-06-22 → 2026-07-10).
+- Only **19 production days** of data (2026-06-22 → 2026-07-10). Two further
+  dates appear in the raw data and are excluded as clock faults: 1969-12-31 and
+  2026-06-21, holding 1 and 2 readings.
 
 ## Security
 
@@ -139,7 +141,7 @@ Request a **dedicated read-only SQL login** from IFL — do not use `sa` or the 
 | **D1** app/sidecar DB engine | **SQL Server Express** | Already on the plant PC; same driver as source; free. |
 | **D2** stack | **React + Node + TypeScript** | Frontend: React + TypeScript. Backend API + Component A sync worker: Node + TypeScript. |
 | **D3** sync cadence | 60 s incremental on `MAX(id)` watermark | Per table. |
-| **D4** backfill | One-off 18-day load, then incremental | |
+| **D4** backfill | One-off full-history load, then incremental | |
 | **D5** auth | Session cookies (not JWT) | Single-server intranet. AD vs app-local pending Q18. |
 
 **Provisional library choices (ask before adding anything beyond these):**

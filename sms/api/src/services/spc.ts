@@ -206,7 +206,7 @@ const HIST_BINS = 32;
  *
  *   A data-quality guard is still needed, and is a separate concern: the scale
  *   emits occasional faults that are not light/heavy cones but non-readings.
- *   Verified in the 18-day sample: one cone at 824g, and a fault population of
+ *   Verified in the supplied copy: one cone at 824g, and a fault population of
  *   ~214 cones at 2200-2354g — far outside the widest real product tolerance
  *   (the product master's envelope is 1910-2010g). Left in, those would move
  *   the mean and inflate sigma. So we exclude on PLAUSIBILITY, not on spec.
@@ -417,7 +417,8 @@ export async function getWeightSpc(
   // Two independent judgements exist on the same cone and nobody had compared
   // them: `in_range` is set by the PLC against a band configured in the
   // controller, while the tolerance in PDAS (setpoint ± offset) is what the
-  // product master says. Measured on the 18-day sample, they disagree: 1,007
+  // product master says. Measured over the 19 production days, they disagree:
+  // 1,007
   // cones are simultaneously in-range per the PLC and outside product 14's own
   // 1960 ± 30 g tolerance.
   //
