@@ -843,7 +843,7 @@ function RejectsHub({
   return (
     <>
       {sub === 'pareto' ? (
-        <RejectView onMeta={onMeta} rank={rank} />
+        <RejectView onMeta={onMeta} rank={rank} range={range} />
       ) : sub === 'trend' ? (
         <RejectSpcView range={range} onMeta={onMeta} />
       ) : (
@@ -5175,7 +5175,15 @@ function ShiftTrendChart({
 
 /* ---------------- Reject Analysis (Q10) ---------------- */
 
-function RejectView({ onMeta, rank }: { onMeta: (m: Meta) => void; rank: number }) {
+function RejectView({
+  onMeta,
+  rank,
+  range,
+}: {
+  onMeta: (m: Meta) => void;
+  rank: number;
+  range: { min: string | null; max: string | null };
+}) {
   const canEdit = rank >= 3; // manager+
   const [data, setData] = useState<RejectData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -5185,7 +5193,11 @@ function RejectView({ onMeta, rank }: { onMeta: (m: Meta) => void; rank: number 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getRejects()
+    // Bounded to the production window like every other view. Unbounded, this
+    // counted the three epoch-clock-fault rows and the panel reported 3,146
+    // against the 3,144 in its own section-column tab — the same screen
+    // disagreeing with its own navigation.
+    getRejects(range.min ?? undefined, range.max ?? undefined)
       .then((r) => {
         if (cancelled) return;
         setData(r.data);
@@ -5196,7 +5208,7 @@ function RejectView({ onMeta, rank }: { onMeta: (m: Meta) => void; rank: number 
     return () => {
       cancelled = true;
     };
-  }, [onMeta, reloadKey]);
+  }, [onMeta, reloadKey, range.min, range.max]);
 
   const revealed = useRevealOnData(data ? data.reasons.map((r) => `${r.tubeCode}:${r.materialCode}:${r.count}`).join('|') : null);
 

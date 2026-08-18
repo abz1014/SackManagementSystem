@@ -4,10 +4,11 @@ import { computeFindings } from './dq.js';
 const ms = (iso: string) => new Date(iso + 'Z').getTime();
 
 /** A cone as the transform hands it to the DQ pass: source-id order, wall clock stamped as UTC. */
-const cone = (iso: string, weight: number | null = 1950) => ({
+const cone = (iso: string, weight: number | null = 1950, source_station: number | null = 7) => ({
   production_ts_utc_ms: ms(iso),
   merge_key_is_unique: true,
   weight_g: weight,
+  source_station,
 });
 const run = (rows: ReturnType<typeof cone>[]) =>
   computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g);
@@ -71,6 +72,27 @@ describe('stale_timestamp (station clock faults)', () => {
       cone('2026-06-22T11:00:41'),
     ];
     expect(run(rows).map((f) => f.check_name)).not.toContain('stale_timestamp');
+  });
+});
+
+describe('no_station (unattributable readings)', () => {
+  it('counts rows the transform could not attribute to a position', () => {
+    // the source sends 0 for "no station"; the transform normalises it to null,
+    // and all three such rows in the copy are the epoch-clock faults
+    const rows = [
+      cone('2026-06-22T11:00:00', 1950, 7),
+      cone('2026-06-22T11:00:20', 1950, null),
+      cone('2026-06-22T11:00:40', 1950, 14),
+    ];
+    const f = find(rows, 'no_station');
+    expect(f).toBeDefined();
+    expect(f!.count).toBe(1);
+    expect(f!.severity).toBe('WARNING');
+  });
+
+  it('stays silent when every reading has a position', () => {
+    const rows = [cone('2026-06-22T11:00:00', 1950, 1), cone('2026-06-22T11:00:20', 1950, 14)];
+    expect(find(rows, 'no_station')).toBeUndefined();
   });
 });
 

@@ -19,6 +19,7 @@ export interface Finding {
 interface Weighted {
   production_ts_utc_ms: number;
   merge_key_is_unique?: boolean;
+  source_station?: number | null;
 }
 
 /**
@@ -42,6 +43,7 @@ export function computeFindings<T extends Weighted>(
   const nowMs = Date.now();
   let future = 0;
   let stale = 0;
+  let noStation = 0;
   let runningMaxMs = -Infinity;
   let worstLagMs = 0;
   let nonPositive = 0;
@@ -59,6 +61,10 @@ export function computeFindings<T extends Weighted>(
     }
     if (r.production_ts_utc_ms > runningMaxMs) runningMaxMs = r.production_ts_utc_ms;
     if (r.merge_key_is_unique === false) collision++;
+    // normalised to null upstream when the source sent 0 or negative; counted
+    // so a run of unattributable readings is visible rather than just absent
+    // from every station chart
+    if ('source_station' in r && r.source_station == null) noStation++;
     const w = weightOf(r);
     if (w != null) {
       if (w <= 0) nonPositive++;
@@ -81,6 +87,12 @@ export function computeFindings<T extends Weighted>(
   );
   add('nonpositive_weight', 'ERROR', nonPositive, `${nonPositive} rows with weight <= 0`);
   add('outlier_weight', 'WARNING', outlier, `${outlier} rows below ${outlierThreshold}${kind === 'sack' ? 'kg' : 'g'}`);
+  add(
+    'no_station',
+    'WARNING',
+    noStation,
+    `${noStation} rows carry no usable station id — they cannot appear in any station-wise view`,
+  );
   add('merge_key_collision', 'INFO', collision, `${collision} rows share a non-unique merge key (DQ-2)`);
   return findings;
 }

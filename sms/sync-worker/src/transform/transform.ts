@@ -14,7 +14,24 @@ import {
 
 type Raw = Record<string, unknown>;
 const num = (v: unknown): number | null => (v == null ? null : Number(v));
+/**
+ * Station ids, where 0 is not a station.
+ *
+ * The line numbers its winding positions 1-14; `sms.station` holds exactly
+ * those. A 0 in the source is the PLC's zero-value, not position zero, and it
+ * only ever appears on rows that zeroed out entirely — all three in the
+ * supplied copy carry an epoch timestamp (1970-01-01) as well. Storing it as 0
+ * created a fifteenth station that no screen could label and no lookup could
+ * resolve; null says what is actually known, which is nothing.
+ */
+const station = (v: unknown): number | null => {
+  const n = num(v);
+  return n == null || n <= 0 ? null : n;
+};
 const bit = (v: unknown): boolean | null => (v == null ? null : Boolean(v));
+
+/** Exposed for tests: 0 is the PLC's zero-value, never a winding position. */
+export const __stationForTest = station;
 
 export interface ConeRow {
   line_id: number;
@@ -112,8 +129,8 @@ export function mapCone(raw: Raw, cfg: SyncConfig, runId: string): ConeRow {
     shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
     hanger_num: num(raw.src_HangerNum),
-    source_station: num(raw.src_Source),
-    lifter_station: num(raw.src_Lifter),
+    source_station: station(raw.src_Source),
+    lifter_station: station(raw.src_Lifter),
     weight_g: num(raw.src_Weight),
     in_range: bit(raw.src_inRange),
     cone_id: null,
@@ -172,8 +189,8 @@ export function mapReject(
     shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
     hanger_num: num(raw.src_HangerNum),
-    source_station: num(raw.src_Source),
-    lifter_station: num(raw.src_Lifter),
+    source_station: station(raw.src_Source),
+    lifter_station: station(raw.src_Lifter),
     tube_inspect_code: kind === 'quality' ? num(raw.src_TubeInspectResult) : null,
     material_inspect_code: kind === 'quality' ? num(raw.src_MaterialInspectResult) : null,
     weight_g: kind === 'weight' ? num(raw.src_Weight) : null,

@@ -50,3 +50,14 @@ describe('assignMergeKeys (DQ-2 collision handling)', () => {
     expect(rows.find((r) => r.k === 'B')!.merge_key_is_unique).toBe(true);
   });
 });
+
+describe('station normalisation', () => {
+  it('treats 0 and negatives as no station, not as position zero', async () => {
+    const { __stationForTest } = await import('./transform.js');
+    expect(__stationForTest(0)).toBeNull();
+    expect(__stationForTest(-1)).toBeNull();
+    expect(__stationForTest(null)).toBeNull();
+    expect(__stationForTest(1)).toBe(1);
+    expect(__stationForTest(14)).toBe(14);
+  });
+});

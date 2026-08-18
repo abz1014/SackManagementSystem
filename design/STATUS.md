@@ -72,11 +72,14 @@ reachable in the code.
   window of days holding a real production run, reports what it held back, and
   the transform raises a `stale_timestamp` finding naming the station clock
   behind it. Two station-7 readings were 27 h and 7.5 h behind their neighbours.
+- `source_station = 0` is handled. It was never a fifteenth position — all three
+  station-0 rows are the epoch-clock faults. The transform normalises 0 to null
+  and a `no_station` finding counts unattributable readings. Fixing it also
+  corrected the Rejects screen, which had been counting unbounded (3,146) while
+  its own nav counted bounded (3,144).
 
 ## Known, unresolved
 
-- `sms.cone_event.source_station` contains a `0`, but `sms.station` holds only
-  1–14, so that row has no configurable label.
 - Sync totals (runs, failures, median duration) exist in `sms.sync_run` but
   `/api/operations` returns only the latest run per table.
 - Bulk CSV export was tightened to manager+ during the Records rework. Reversible.
