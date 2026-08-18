@@ -150,21 +150,51 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // ---- everything below requires an authenticated user (operator+) ----
   app.use('/api', requireRole(1));
 
-  // available date range (dashboard defaults to the latest day)
+  /**
+   * The production window every date picker offers.
+   *
+   * A day only counts if it holds a real production run. Two kinds of bad row
+   * would otherwise invent a day at the front of the range:
+   *   - epoch-near-zero timestamps (DQ-2 clock faults) landing in 1969/1970;
+   *   - a station clock briefly reporting the wrong day, which put 2 readings
+   *     on 2026-06-21 while their neighbours in ingest order sat on 06-22.
+   * Both made the picker open on a day with no production, and made every
+   * "N days" count in the app read one day long.
+   *
+   * MIN_PRODUCTION_ROWS is not tuned. The measured separation is 2 rows on a
+   * fault day against 1,671 on the smallest REAL day (2026-07-10, a genuine
+   * part-day where the copy ends mid-morning), so anything from 3 to ~1,600
+   * yields the same window. It is deliberately far below 1,671 so a short
+   * changeover day or a half-finished today is never mistaken for a fault.
+   *
+   * Excluded days are returned, not swallowed: the app states them rather than
+   * quietly narrowing the range, and the transform raises a `stale_timestamp`
+   * finding so the underlying clock fault is visible on Sync.
+   */
+  const MIN_PRODUCTION_ROWS = 20;
   app.get('/api/range', async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      // Floor to plausible production dates: exclude the DQ-2 clock-fault rows
-      // (epoch-near-zero timestamps land in 1969/1970) so the date picker offers
-      // only the real production window.
       const r = await pool
         .request()
         .input('line', mssql.Int, cfg.lineId)
-        .query<{ minDate: string | null; maxDate: string | null }>(
-          `SELECT CONVERT(varchar(10), MIN(shift_date), 120) AS minDate,
-                  CONVERT(varchar(10), MAX(shift_date), 120) AS maxDate
-           FROM sms.cone_event WHERE line_id = @line AND shift_date >= '2020-01-01'`,
+        .input('minRows', mssql.Int, MIN_PRODUCTION_ROWS)
+        .query<{ shiftDate: string; n: number }>(
+          `SELECT CONVERT(varchar(10), shift_date, 120) AS shiftDate, COUNT(*) AS n
+             FROM sms.cone_event
+            WHERE line_id = @line AND shift_date >= '2020-01-01'
+            GROUP BY shift_date
+            ORDER BY shift_date`,
         );
-      res.json(r.recordset[0] ?? { minDate: null, maxDate: null });
+      const kept = r.recordset.filter((d) => d.n >= MIN_PRODUCTION_ROWS);
+      const excluded = r.recordset
+        .filter((d) => d.n < MIN_PRODUCTION_ROWS)
+        .map((d) => ({ date: d.shiftDate, rows: d.n }));
+      res.json({
+        minDate: kept.length ? kept[0]!.shiftDate : null,
+        maxDate: kept.length ? kept[kept.length - 1]!.shiftDate : null,
+        excludedDays: excluded,
+        minProductionRows: MIN_PRODUCTION_ROWS,
+      });
     } catch (err) {
       next(err);
     }

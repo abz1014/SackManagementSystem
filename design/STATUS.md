@@ -66,11 +66,15 @@ reachable in the code.
 6. **OEE inputs are kept behind a toggle.** An inferred number whose
    assumptions cannot be inspected is one a plant engineer should distrust.
 
+## Resolved since
+
+- The phantom `2026-06-21` production day is fixed. `/api/range` now returns the
+  window of days holding a real production run, reports what it held back, and
+  the transform raises a `stale_timestamp` finding naming the station clock
+  behind it. Two station-7 readings were 27 h and 7.5 h behind their neighbours.
+
 ## Known, unresolved
 
-- `/api/range` returns `minDate 2026-06-21`, a junk day holding 2 cones against
-  6,000–8,600 on real days. Every date picker opens there and range counts read
-  one day long. Needs a definition of a real production day.
 - `sms.cone_event.source_station` contains a `0`, but `sms.station` holds only
   1–14, so that row has no configurable label.
 - Sync totals (runs, failures, median duration) exist in `sms.sync_run` but

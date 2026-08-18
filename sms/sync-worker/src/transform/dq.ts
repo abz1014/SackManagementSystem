@@ -21,6 +21,18 @@ interface Weighted {
   merge_key_is_unique?: boolean;
 }
 
+/**
+ * How far a reading may sit behind the newest one already seen, in ingest
+ * order, before its clock is treated as faulty.
+ *
+ * Rows legitimately arrive slightly out of order — stations buffer at different
+ * rates — so some backwards lag is normal. Measured over the 142,511-row copy:
+ * median 1 min, p99 5 min, p99.99 33 min. Three hours is ~5.5x p99.99 and
+ * catches 4 rows, the worst 27 hours early, which is what put a phantom
+ * two-row production day in front of every date picker in the app.
+ */
+const STALE_TS_LAG_MS = 3 * 60 * 60 * 1000;
+
 export function computeFindings<T extends Weighted>(
   rows: T[],
   kind: 'cone' | 'sack' | 'reject',
@@ -29,6 +41,9 @@ export function computeFindings<T extends Weighted>(
 ): Finding[] {
   const nowMs = Date.now();
   let future = 0;
+  let stale = 0;
+  let runningMaxMs = -Infinity;
+  let worstLagMs = 0;
   let nonPositive = 0;
   let outlier = 0;
   let collision = 0;
@@ -36,6 +51,13 @@ export function computeFindings<T extends Weighted>(
 
   for (const r of rows) {
     if (r.production_ts_utc_ms > nowMs) future++;
+    // rows arrive in source-id order, so a reading far behind the running
+    // maximum is a clock fault rather than ordinary buffering jitter
+    if (runningMaxMs > -Infinity && runningMaxMs - r.production_ts_utc_ms > STALE_TS_LAG_MS) {
+      stale++;
+      worstLagMs = Math.max(worstLagMs, runningMaxMs - r.production_ts_utc_ms);
+    }
+    if (r.production_ts_utc_ms > runningMaxMs) runningMaxMs = r.production_ts_utc_ms;
     if (r.merge_key_is_unique === false) collision++;
     const w = weightOf(r);
     if (w != null) {
@@ -49,6 +71,14 @@ export function computeFindings<T extends Weighted>(
     if (count > 0) findings.push({ check_name: check, severity: sev, subject_table: table, count, detail });
   };
   add('future_timestamp', 'ERROR', future, `${future} rows with production time in the future`);
+  add(
+    'stale_timestamp',
+    'WARNING',
+    stale,
+    `${stale} rows timestamped more than ${Math.round(STALE_TS_LAG_MS / 3_600_000)}h behind the readings around them` +
+      (worstLagMs > 0 ? ` (worst ${Math.round(worstLagMs / 3_600_000)}h)` : '') +
+      ' — a station clock fault, not a production gap',
+  );
   add('nonpositive_weight', 'ERROR', nonPositive, `${nonPositive} rows with weight <= 0`);
   add('outlier_weight', 'WARNING', outlier, `${outlier} rows below ${outlierThreshold}${kind === 'sack' ? 'kg' : 'g'}`);
   add('merge_key_collision', 'INFO', collision, `${collision} rows share a non-unique merge key (DQ-2)`);

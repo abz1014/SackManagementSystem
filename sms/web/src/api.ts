@@ -132,7 +132,16 @@ export function setCurrentProduct(productId: number, reason?: string): Promise<{
   return post('/api/current-product', { productId, reason });
 }
 
-export function getRange(): Promise<{ minDate: string | null; maxDate: string | null }> {
+export interface ExcludedDay { date: string; rows: number; }
+export interface RangeData {
+  minDate: string | null;
+  maxDate: string | null;
+  /** Days held back because they carry too few readings to be production —
+   *  reported rather than silently dropped. */
+  excludedDays?: ExcludedDay[];
+  minProductionRows?: number;
+}
+export function getRange(): Promise<RangeData> {
   return get('/api/range');
 }
 

@@ -46,6 +46,7 @@ import {
   type WeightsData,
   type Basis,
   type Meta,
+  type ExcludedDay,
   type RegisterType,
   type RegisterSort,
   type RegisterRow,
@@ -5866,6 +5867,18 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [excluded, setExcluded] = useState<ExcludedDay[]>([]);
+
+  // What the date pickers are NOT offering, and why. Stated here rather than
+  // left implicit: narrowing the window silently is the kind of thing that
+  // makes a user distrust every other figure on the screen.
+  useEffect(() => {
+    let cancelled = false;
+    getRange()
+      .then((r) => !cancelled && setExcluded(r.excludedDays ?? []))
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5924,6 +5937,16 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
         </div>
         <button type="button" className="ghost-btn" onClick={() => setReloadKey((k) => k + 1)}>Re-check now</button>
       </section>
+
+      {excluded.length > 0 && (
+        <div className="rule-note" style={{ marginBottom: 14 }}>
+          <b>{excluded.length} day{excluded.length === 1 ? '' : 's'} held out of the date range.</b>{' '}
+          {excluded.map((d) => `${d.date} (${d.rows} reading${d.rows === 1 ? '' : 's'})`).join(', ')} —
+          too few readings to be a production day. The readings themselves are kept and still count in
+          totals; only the day is not offered as a date. See the <b>stale_timestamp</b> finding below for
+          the station clock behind it.
+        </div>
+      )}
 
       <div className="loss-grid sync-tiles">
         <div className="loss">
