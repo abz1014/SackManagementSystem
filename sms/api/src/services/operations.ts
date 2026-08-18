@@ -12,8 +12,32 @@ export interface SyncStatus {
   ageSeconds: number | null;
 }
 
+/**
+ * Lifetime sync figures, from every row `sms.sync_run` holds.
+ *
+ * `sync_run` records one row PER TABLE PER PASS, so the row count is not the
+ * number of times the worker has run — on the supplied copy it is 65 rows
+ * across 17 passes of 4 tables. Reporting the row count as "runs" would
+ * overstate the work by ~4x, so both are returned and the screen says which
+ * it is showing.
+ *
+ * Durations are per table-run, not per query, and are held as milliseconds.
+ */
+export interface SyncLifetime {
+  passes: number;
+  tableRuns: number;
+  failures: number;
+  firstRunUtc: string | null;
+  lastRunUtc: string | null;
+  medianMs: number | null;
+  p95Ms: number | null;
+  slowestMs: number | null;
+  lastFailure: { targetTable: string; startedAtUtc: string; error: string | null } | null;
+}
+
 export interface OperationsData {
   sync: SyncStatus[];
+  lifetime: SyncLifetime;
   schema: { table: string; fingerprint: string; status: string }[];
   dq: {
     latestRunId: string | null;
@@ -41,6 +65,64 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
            DATEDIFF(SECOND, finished_at_utc, SYSUTCDATETIME()) AS age_seconds
     FROM latest WHERE rn=1 ORDER BY target_table
   `);
+
+  // lifetime roll-up: one pass writes one row per table, so passes and
+  // table-runs are counted separately rather than conflated
+  const life = await pool.request().input('line', mssql.Int, lineId).query<{
+    passes: number;
+    table_runs: number;
+    failures: number;
+    first_run: Date | null;
+    last_run: Date | null;
+    median_ms: number | null;
+    p95_ms: number | null;
+    slowest_ms: number | null;
+  }>(`
+    SELECT COUNT(DISTINCT run_id) AS passes,
+           COUNT(*) AS table_runs,
+           SUM(CASE WHEN outcome <> 'success' THEN 1 ELSE 0 END) AS failures,
+           MIN(started_at_utc) AS first_run,
+           MAX(started_at_utc) AS last_run,
+           MAX(median_ms) AS median_ms,
+           MAX(p95_ms) AS p95_ms,
+           MAX(dur_ms) AS slowest_ms
+    FROM (
+      SELECT run_id, outcome, started_at_utc,
+             DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc) AS dur_ms,
+             PERCENTILE_CONT(0.50) WITHIN GROUP (
+               ORDER BY DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc)) OVER () AS median_ms,
+             PERCENTILE_CONT(0.95) WITHIN GROUP (
+               ORDER BY DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc)) OVER () AS p95_ms
+      FROM sms.sync_run WHERE line_id = @line
+    ) x
+  `);
+  const lr = life.recordset[0];
+
+  // the most recent failure, so "1 failure" is actionable rather than a bare count
+  const fail = await pool.request().input('line', mssql.Int, lineId).query<{
+    target_table: string;
+    started_at_utc: Date;
+    error_text: string | null;
+  }>(`
+    SELECT TOP 1 target_table, started_at_utc, error_text
+    FROM sms.sync_run WHERE line_id = @line AND outcome <> 'success'
+    ORDER BY sync_run_id DESC
+  `);
+  const f0 = fail.recordset[0];
+
+  const lifetime: SyncLifetime = {
+    passes: Number(lr?.passes ?? 0),
+    tableRuns: Number(lr?.table_runs ?? 0),
+    failures: Number(lr?.failures ?? 0),
+    firstRunUtc: lr?.first_run ? lr.first_run.toISOString() : null,
+    lastRunUtc: lr?.last_run ? lr.last_run.toISOString() : null,
+    medianMs: lr?.median_ms != null ? Math.round(Number(lr.median_ms)) : null,
+    p95Ms: lr?.p95_ms != null ? Math.round(Number(lr.p95_ms)) : null,
+    slowestMs: lr?.slowest_ms != null ? Math.round(Number(lr.slowest_ms)) : null,
+    lastFailure: f0
+      ? { targetTable: f0.target_table, startedAtUtc: f0.started_at_utc.toISOString(), error: f0.error_text }
+      : null,
+  };
 
   // schema fingerprints (baselined => ok; drift would have halted sync)
   const fp = await pool.request().query<{ config_key: string; config_value: string }>(
@@ -74,6 +156,7 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
   }
 
   return {
+    lifetime,
     sync: sync.recordset.map((r) => ({
       targetTable: r.target_table,
       outcome: r.outcome,

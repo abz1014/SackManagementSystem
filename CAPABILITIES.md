@@ -364,7 +364,11 @@ in its own database:
 ## 8. Operations and data quality
 
 **Sync health.** Every pass records outcome, watermark, rows read, rows
-written and duration in `sync_run`.
+written and duration in `sync_run`, one row per source table per pass. The
+screen reports both lifetime and last-pass figures: passes since install,
+table-runs and how many failed, duration median and 95th percentile, time since
+the oldest table last ran, and the most recent failure with its table, time,
+error and whether that table has succeeded since.
 
 **Schema-drift guard.** A fingerprint of each source table's shape is stored
 and compared, so a column added or retyped on IFL's side is detected rather

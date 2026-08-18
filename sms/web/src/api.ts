@@ -541,8 +541,20 @@ export interface SyncStatus {
 }
 export interface SchemaFingerprint { table: string; fingerprint: string; status: string; }
 export interface DqFinding { checkName: string; severity: string; subjectTable: string | null; detail: string | null; }
+export interface SyncLifetime {
+  passes: number;
+  tableRuns: number;
+  failures: number;
+  firstRunUtc: string | null;
+  lastRunUtc: string | null;
+  medianMs: number | null;
+  p95Ms: number | null;
+  slowestMs: number | null;
+  lastFailure: { targetTable: string; startedAtUtc: string; error: string | null } | null;
+}
 export interface OperationsData {
   sync: SyncStatus[];
+  lifetime: SyncLifetime;
   schema: SchemaFingerprint[];
   dq: {
     latestRunId: string | null;

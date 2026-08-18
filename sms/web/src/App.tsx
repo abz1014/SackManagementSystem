@@ -5919,6 +5919,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
   const anyFailed = data.sync.some((s) => s.outcome !== 'success');
   const sev = data.dq.bySeverity;
   const blocking = (sev.CRITICAL ?? 0) + (sev.ERROR ?? 0);
+  const life = data.lifetime;
 
   return (
     <>
@@ -5960,24 +5961,47 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
         </div>
       )}
 
+      {/* Lifetime figures, not just the last pass. sync_run holds one row per
+          table per pass, so passes and table-runs are shown as the different
+          things they are — calling 65 rows "65 runs" would overstate the work
+          by the number of source tables. */}
       <div className="loss-grid sync-tiles">
         <div className="loss">
-          <div className={`loss-val ${anyFailed ? 'alarm' : ''}`}>{data.sync.filter((x) => x.outcome === 'success').length}/{data.sync.length}</div>
-          <div className="loss-key">tables succeeded on the last pass</div>
+          <div className="loss-val">{fmtInt(life.passes)}</div>
+          <div className="loss-key">
+            passes since install
+            {life.firstRunUtc && <> · first {fmtDateTime(life.firstRunUtc)}</>}
+          </div>
         </div>
         <div className="loss">
           <div className={`loss-val ${level === 'crit' ? 'alarm' : level === 'warn' ? 'warn' : ''}`}>{ageLabel(worstAge)}</div>
           <div className="loss-key">since the oldest table last ran</div>
         </div>
         <div className="loss">
-          <div className="loss-val">{fmtInt(data.sync.reduce((t, x) => t + (x.rowsWritten ?? 0), 0))}</div>
-          <div className="loss-key">rows written on the last pass</div>
+          <div className={`loss-val ${life.failures > 0 ? 'alarm' : ''}`}>{fmtInt(life.failures)}</div>
+          <div className="loss-key">failed of {fmtInt(life.tableRuns)} table-runs</div>
         </div>
         <div className="loss">
-          <div className={`loss-val ${blocking > 0 ? 'alarm' : ''}`}>{blocking}</div>
-          <div className="loss-key">blocking data-quality findings</div>
+          <div className="loss-val">{life.medianMs == null ? '—' : `${fmtInt(life.medianMs)}ms`}</div>
+          <div className="loss-key">
+            median table sync
+            {life.p95Ms != null && <> · p95 {fmtInt(life.p95Ms)}ms</>}
+          </div>
         </div>
       </div>
+
+      {/* A bare failure count is not actionable: it does not say what broke,
+          when, or whether it is still broken. */}
+      {life.lastFailure && (
+        <div className="rule-note" style={{ marginBottom: 14 }}>
+          <b>Last failure:</b> <span className="mono">{life.lastFailure.targetTable}</span>{' '}
+          at {fmtDateTime(life.lastFailure.startedAtUtc)}
+          {life.lastFailure.error && <> — <span className="mono">{life.lastFailure.error}</span></>}.{' '}
+          {data.sync.find((x) => x.targetTable === life.lastFailure!.targetTable)?.outcome === 'success'
+            ? 'That table has completed successfully since, so this is history rather than an open fault.'
+            : 'That table has not completed successfully since — this one is still open.'}
+        </div>
+      )}
 
       <div className="panel">
         <div className="panel-head">

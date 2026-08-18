@@ -77,11 +77,12 @@ reachable in the code.
   and a `no_station` finding counts unattributable readings. Fixing it also
   corrected the Rejects screen, which had been counting unbounded (3,146) while
   its own nav counted bounded (3,144).
+- Sync lifetime figures are exposed. `/api/operations` now returns passes,
+  table-runs, failures, first/last run and duration percentiles, and the Sync
+  screen shows them alongside the last failure and whether it is still open.
 
 ## Known, unresolved
 
-- Sync totals (runs, failures, median duration) exist in `sms.sync_run` but
-  `/api/operations` returns only the latest run per table.
 - Bulk CSV export was tightened to manager+ during the Records rework. Reversible.
 
 ## Verification standard
