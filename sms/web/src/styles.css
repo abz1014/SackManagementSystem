@@ -1557,6 +1557,23 @@ body {
   border-radius: 0;
 }
 .panel-title { margin: 0; font-size: var(--fs-panel); font-weight: var(--fw-semi); letter-spacing: -0.01em; }
+
+/* The legacy dark-bezel header styles its descendants for white-on-ink: `.sub`
+   takes --bezel-dim and `.abtn` takes white text on a translucent white fill.
+   Both leak into a light panel and become unreadable — the export button was
+   rendering white-on-white, i.e. invisible. These restate them for the light
+   surface, so converting any remaining panel to `.light` stays safe. */
+.panel.light > .panel-head:first-child .sub { color: var(--muted); }
+.panel.light > .panel-head:first-child .abtn {
+  color: var(--ink);
+  background: var(--card);
+  border-color: var(--field-border);
+}
+.panel.light > .panel-head:first-child .abtn:hover {
+  color: var(--ink);
+  background: var(--paper-3);
+  border-color: var(--ink);
+}
 .mono-note { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--muted); }
 .panel-foot {
   margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline-2);
@@ -1927,4 +1944,110 @@ body {
 @media (max-width: 760px) {
   .kpis, .loss-grid, .maths-grid, .sd-split { grid-template-columns: 1fr; }
   .vc-stats, .ribbon-stats { gap: 16px; }
+}
+
+/* ==========================================================================
+   REJECTS — reworked screen
+   Signature: the fix-this-first card on --ink.
+   ========================================================================== */
+
+.rej-grid { display: grid; grid-template-columns: 306px 1fr; gap: 14px; align-items: start; }
+.rej-cards { display: flex; flex-direction: column; gap: 14px; }
+
+.rej-card {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: var(--radius); padding: 22px 24px;
+}
+.rc-eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+}
+.rc-figure {
+  font-family: var(--font-mono); font-size: var(--fs-figure);
+  letter-spacing: -0.04em; line-height: 1.05; margin: 6px 0 3px; color: var(--ink);
+}
+.rc-sub { font-size: var(--fs-caption); color: var(--graphite); }
+.rc-track { display: block; height: 12px; background: var(--track); margin-top: 16px; border-radius: 2px; overflow: hidden; }
+.rc-fill { display: block; height: 100%; }
+.rc-fill.alarm { background: var(--alarm); }
+.rc-fill.warn { background: var(--warn); }
+
+/* ------------------------------------------------------------------ pareto */
+.pareto-row {
+  display: grid; grid-template-columns: 210px 1fr 150px; gap: 18px; align-items: center;
+  padding: 12px 0; border-bottom: 1px solid var(--hairline-2);
+}
+.pareto-row:last-child { border-bottom: 0; }
+.pareto-row .reason { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pareto-row .reason input {
+  font: inherit; font-family: var(--font-mono); font-size: var(--fs-cell);
+  background: var(--input-bg); border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm); padding: 5px 8px; color: var(--ink); width: 100%;
+}
+.pareto-row .reason .lbl { font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--ink); }
+.pareto-row .reason .code { font-size: var(--fs-caption); color: var(--muted); }
+.pareto-row .savebtn {
+  margin-top: 4px; align-self: flex-start; font: inherit; font-size: var(--fs-caption);
+  font-weight: var(--fw-semi); background: var(--ink); color: var(--on-ink);
+  border: 0; border-radius: var(--radius-sm); padding: 5px 12px; cursor: pointer;
+}
+.pareto-track { display: block; height: 24px; background: var(--track); border-radius: 2px; overflow: hidden; }
+.pareto-fill { display: block; height: 100%; transition: width 650ms cubic-bezier(0.16, 1, 0.3, 1); }
+/* Emphasis follows Pareto position. Colour is never the only channel — the rows
+   are ordered by count and every row prints its count and percentage. */
+.pareto-fill.top { background: var(--alarm); }
+.pareto-fill.mid { background: var(--alarm-soft); }
+.pareto-fill.tail { background: var(--neutral-mark); }
+.pareto-row .nums {
+  text-align: right; font-family: var(--font-mono); font-size: var(--fs-cell);
+  display: flex; align-items: baseline; justify-content: flex-end; gap: 12px;
+}
+.pareto-row .nums .pct { color: var(--muted); }
+
+/* "Waiting on IFL" — Q10 made visible rather than footnoted. */
+.waiting {
+  margin-top: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--warn-pale); border: 1px solid var(--warn-border);
+  border-radius: var(--radius); padding: 14px 18px;
+}
+.w-tag {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--warn-ink); flex: none;
+}
+.w-text { font-size: var(--fs-caption); color: var(--graphite); }
+
+/* --------------------------------------------------------- fix-first card */
+.fixfirst {
+  background: var(--ink); color: var(--on-ink);
+  border-radius: var(--radius); padding: 24px 28px; margin-bottom: 14px;
+}
+.ff-eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--alarm-bright);
+}
+.ff-headline {
+  margin: 4px 0 0; font-size: var(--fs-verdict); font-weight: var(--fw-semi);
+  letter-spacing: -0.025em; line-height: 1.15;
+}
+.ff-sub { margin: 6px 0 0; color: var(--on-ink-2); font-size: var(--fs-body); max-width: 78ch; }
+
+/* --------------------------------------------------------- episode cards */
+.episode-card {
+  background: var(--alarm-pale); border: 1px solid var(--alarm-border);
+  border-radius: var(--radius); padding: 16px 20px; margin-top: 12px;
+}
+.episode-card.single { background: var(--paper-2); border-color: var(--hairline); }
+.ep-title { font-size: var(--fs-row); font-weight: var(--fw-semi); color: var(--ink); }
+.ep-detail { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--alarm-ink); margin-top: 4px; }
+.episode-card.single .ep-detail { color: var(--graphite); }
+
+@media (max-width: 1180px) {
+  .rej-grid { grid-template-columns: 1fr; }
+  .rej-cards { flex-direction: row; }
+  .rej-cards .rej-card { flex: 1; }
+}
+@media (max-width: 760px) {
+  .pareto-row { grid-template-columns: 1fr; gap: 8px; }
+  .pareto-row .nums { justify-content: flex-start; }
+  .rej-cards { flex-direction: column; }
 }

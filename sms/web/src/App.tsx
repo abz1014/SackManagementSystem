@@ -432,13 +432,13 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           onCloseDetail={closeRegisterDetail}
         />
       ) : view === 'performance' ? (
-        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} onSub={goSub} />
+        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} />
       ) : view === 'weight' ? (
-        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} onSub={goSub} />
+        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} />
       ) : view === 'shift' ? (
         <ShiftView range={range} onMeta={setFreshness} />
       ) : view === 'rejects' ? (
-        <RejectsHub range={range} onMeta={setFreshness} rank={rank} sub={activeSub} onSub={goSub} />
+        <RejectsHub range={range} onMeta={setFreshness} rank={rank} sub={activeSub} />
       ) : view === 'operations' ? (
         <OperationsView onMeta={setFreshness} />
       ) : (
@@ -463,28 +463,25 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
  * but never the content, because the hub seeded its state once and ignored the
  * route afterwards.
  *
- * The route key is now the single source of truth — it is what a permalink
- * carries, so it uses the design's user-facing names. Each hub maps it onto its
- * own internal union rather than being renamed throughout.
+ * The route key is the single source of truth — it is what a permalink carries,
+ * so it uses the design's user-facing names. Each hub maps it onto its own
+ * internal union rather than being renamed throughout. The hubs are read-only
+ * consumers: the section column is the only control that writes `sub`.
  */
 const PERF_SUB = { oee: 'oee', stops: 'downtime', patterns: 'patterns' } as const;
 const WEIGHT_SUB = { spread: 'distribution', stability: 'spc' } as const;
 const REJECT_SUB = { reasons: 'pareto', trend: 'trend', station: 'station' } as const;
-const routeKey = <T extends Record<string, string>>(map: T, hubKey: string): string =>
-  Object.keys(map).find((k) => map[k as keyof T] === hubKey) ?? Object.keys(map)[0]!;
 
 function PerformanceHub({
   range,
   onMeta,
   onInspect,
   sub: routeSub,
-  onSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
   sub: string;
-  onSub: (k: string) => void;
 }) {
   const sub = PERF_SUB[routeSub as keyof typeof PERF_SUB] ?? 'oee';
   return (
@@ -518,7 +515,6 @@ function WeightHub({
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
   sub: string;
-  onSub: (k: string) => void;
 }) {
   const sub = WEIGHT_SUB[routeSub as keyof typeof WEIGHT_SUB] ?? 'distribution';
 
@@ -808,29 +804,15 @@ function RejectsHub({
   onMeta,
   rank,
   sub: routeSub,
-  onSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
   sub: string;
-  onSub: (k: string) => void;
 }) {
   const sub = REJECT_SUB[routeSub as keyof typeof REJECT_SUB] ?? 'pareto';
-  const setSub = (k: string) => onSub(routeKey(REJECT_SUB, k));
   return (
     <>
-      <div className="filters" style={{ marginBottom: 6 }}>
-        <Segmented
-          value={sub}
-          onChange={setSub}
-          options={[
-            { key: 'pareto', label: 'Reasons' },
-            { key: 'trend', label: 'Trend' },
-            { key: 'station', label: 'By station' },
-          ]}
-        />
-      </div>
       {sub === 'pareto' ? (
         <RejectView onMeta={onMeta} rank={rank} />
       ) : sub === 'trend' ? (
@@ -927,7 +909,20 @@ function RejectStationView({
     const flagged = stations.filter((s) => s.flagged).sort((a, b) => b.delta - a.delta);
     const weightFlaggedNums = new Set(weightStations.filter((s) => s.flagged).map((s) => s.station));
     const crossRef = flagged.filter((s) => weightFlaggedNums.has(s.station));
-    return { stations, pooledRatePct: round1(pooledRate * 100), practicalPct: round1(practicalPct), flagged, crossRef };
+    const weightById = new Map(weightStations.map((w) => [w.station, w]));
+    const worst = flagged[0] ?? null;
+    const ratio = worst && pooledRate > 0 ? worst.mean / (pooledRate * 100) : null;
+    return {
+      stations,
+      pooledRatePct: round1(pooledRate * 100),
+      practicalPct: round1(practicalPct),
+      flagged,
+      crossRef,
+      worst,
+      worstRatio: ratio != null ? Math.round(ratio * 10) / 10 : null,
+      worstWeight: worst ? weightById.get(worst.station) ?? null : null,
+      weightFlagged: weightStations.filter((s) => s.flagged).map((s) => s.station),
+    };
   }, [rows, weightStations]);
 
   return (
@@ -949,23 +944,57 @@ function RejectStationView({
         <div className="tile skeleton" style={{ height: 320 }} />
       ) : (
         <>
-          {analysis.crossRef.length > 0 && (
-            <div className="callout" style={{ borderLeftColor: 'var(--alert)' }}>
-              <div className="big">
-                <span className="accent" style={{ color: 'var(--alert)' }}>{analysis.crossRef.length}</span> station
-                {analysis.crossRef.length === 1 ? '' : 's'} both off-target on weight <b>and</b> rejecting more
-              </div>
-              <p>
-                {analysis.crossRef.map((s) => `Station ${s.station}`).join(', ')} — the same station showing up in both
-                the weight-bias chart and the reject-rate chart is the actionable pattern: it's not measurement noise, it's
-                that station's process.
-              </p>
-            </div>
-          )}
+          {/* The design's signature card reads "Station 5 is both 24 g light and
+              rejecting 1.9x the line" — a station that is flagged on weight AND
+              on rejects. That cross-reference is empty on this data (rejects
+              flag stations 4 and 5; weight flags 10 and 13), so the card states
+              which of the three cases actually holds. The empty case is the
+              useful one: knowing the worst rejecter's weight is NORMAL rules
+              out a calibration cause and points at threading or tube handling. */}
+          <section className="fixfirst">
+            <div className="ff-eyebrow">The one to fix first</div>
+            {analysis.crossRef.length > 0 ? (
+              <>
+                <h2 className="ff-headline">
+                  Station {analysis.crossRef[0]!.station} is both off-target on weight and rejecting{' '}
+                  {analysis.crossRef[0]!.mean}% against the line's {analysis.pooledRatePct}%
+                </h2>
+                <p className="ff-sub">
+                  Weight bias and reject rate on the same station is a machine problem, not measurement noise.
+                  {analysis.crossRef.length > 1 && ` ${analysis.crossRef.length - 1} other station also shows both.`}
+                </p>
+              </>
+            ) : analysis.worst ? (
+              <>
+                <h2 className="ff-headline">
+                  Station {analysis.worst.station} rejects {analysis.worstRatio}× the line —{' '}
+                  {analysis.worst.mean}% against {analysis.pooledRatePct}%
+                </h2>
+                <p className="ff-sub">
+                  Its weight is not off:{' '}
+                  {analysis.worstWeight
+                    ? `station ${analysis.worst.station} sits ${analysis.worstWeight.delta > 0 ? '+' : ''}${analysis.worstWeight.delta}g from the line average, inside the action band`
+                    : 'no weight bias is flagged for it'}
+                  . No station is flagged on both weight and rejects
+                  {analysis.weightFlagged.length > 0 && `, and the weight-flagged ones are ${analysis.weightFlagged.join(' and ')}`}
+                  {' '}— so this is not a scale or calibration fault, and the cause is somewhere in how that position
+                  threads or handles tubes.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="ff-headline">No station rejects meaningfully more than the line</h2>
+                <p className="ff-sub">
+                  All {analysis.stations.length} sit inside the ±{analysis.practicalPct}pt band around the{' '}
+                  {analysis.pooledRatePct}% line baseline. Rejects on this line are not a station problem.
+                </p>
+              </>
+            )}
+          </section>
 
-          <div className="panel">
+          <div className="panel light">
             <div className="panel-head">
-              <h2>Reject rate by station</h2>
+              <h3 className="panel-title">Reject rate by station</h3>
               <span>
                 <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
                 <ExportCsv
@@ -975,7 +1004,7 @@ function RejectStationView({
                 />
               </span>
             </div>
-            <div className="hint">
+            <div className="panel-lede">
               Line baseline <b>{analysis.pooledRatePct}%</b>. Dashed lines are the ±{analysis.practicalPct}pt practical
               threshold — {analysis.flagged.length > 0 ? (
                 <>only <b>{analysis.flagged.length}</b> station{analysis.flagged.length === 1 ? '' : 's'} cross it and reject meaningfully more than the line.</>
@@ -3844,6 +3873,38 @@ function RejectSpcView({
 
   const revealed = useRevealOnData(data ? `${data.bucketSize}:${data.buckets.length}:${data.outOfControlCount}` : null);
 
+  // "A 3-day burst, not a bad day" in the design. Whether the rejects arrived as
+  // a sustained run or as isolated spikes is exactly what the episode detector
+  // answers, so the sentence is built from it: a multi-bucket episode is a
+  // burst, a single bucket is a spike, and neither is asserted when the chart
+  // is in control throughout.
+  const trendVerdict = useMemo(() => {
+    const unit = data?.bucketSize === 'hour' ? 'hour' : 'day';
+    const basePct = data?.pBar != null ? (data.pBar * 100).toFixed(2) : '—';
+    if (!data || data.episodes.length === 0) {
+      return {
+        headline: 'Reject rate stayed in control',
+        sub: `No ${unit} in this window went beyond its own control limit. The baseline is ${basePct}%.`,
+      };
+    }
+    const runs = data.episodes.filter((e) => e.bucketCount > 1);
+    const spikes = data.episodes.length - runs.length;
+    const worst = [...data.episodes].sort((a, b) => b.bucketCount - a.bucketCount || b.totalRejects - a.totalRejects)[0]!;
+    const worstRate = worst.totalProduced > 0 ? (100 * worst.totalRejects) / worst.totalProduced : 0;
+    const ratio = data.pBar && data.pBar > 0 ? Math.round((worstRate / (data.pBar * 100)) * 100) / 100 : null;
+    const when = `${worst.startTs.slice(0, 10)}${worst.bucketCount > 1 ? ` to ${worst.endTs.slice(0, 10)}` : ''}`;
+    if (runs.length > 0) {
+      return {
+        headline: `A ${worst.bucketCount}-${unit} burst, not a bad ${unit}`,
+        sub: `${when} ran ${fmtInt(worst.totalRejects)} rejects of ${fmtInt(worst.totalProduced)} cones — ${worstRate.toFixed(2)}%${ratio ? `, ${ratio}× the ${basePct}% baseline` : ''}${spikes > 0 ? `. ${spikes} isolated spike${spikes === 1 ? '' : 's'} elsewhere` : ''}.`,
+      };
+    }
+    return {
+      headline: spikes === 1 ? `One ${unit} broke the pattern` : `${spikes} isolated spikes, no sustained run`,
+      sub: `The worst was ${when} at ${worstRate.toFixed(2)}% against a ${basePct}% baseline. Nothing ran beyond its limit for two consecutive ${unit}s.`,
+    };
+  }, [data]);
+
   return (
     <>
       <div className="filters">
@@ -3875,24 +3936,22 @@ function RejectSpcView({
         <div className="tile skeleton" style={{ height: 320 }} />
       ) : (
         <>
-          <div className="callout">
-            <div className="big">
-              <span className="accent">{data.outOfControlCount}</span> of {fmtInt(data.buckets.length)} {data.bucketSize === 'hour' ? 'hours' : 'days'}{' '}
-              show a reject rate beyond normal variation
-              {' · '}
-              baseline <span className="accent">{data.pBar != null ? (data.pBar * 100).toFixed(2) : '—'}%</span>
+          <section className="panel light">
+            <h2 className="sv-headline">{trendVerdict.headline}</h2>
+            <p className="sv-sub">{trendVerdict.sub}</p>
+            <div className="panel-foot" style={{ marginTop: 14 }}>
+              Each {data.bucketSize} gets its own control limit, scaled to how many cones it actually produced, so a
+              quiet {data.bucketSize} and a busy one are judged fairly rather than against one flat threshold. A run of
+              two or more flagged buckets is an event; a single one is a spike.
             </div>
-            <p>
-              Each {data.bucketSize} gets its own control limit, scaled to how many cones it actually produced — a quiet
-              hour and a busy hour are judged fairly, not against one flat threshold. A run of 2+ flagged buckets in a
-              row is a genuine event (bad batch, mis-calibration); a single flagged bucket is an isolated spike.
-            </p>
-          </div>
+          </section>
+
+          <div style={{ height: 14 }} />
 
           {data.episodes.length > 0 ? (
-            <div className="panel">
+            <div className="panel light">
               <div className="panel-head">
-                <h2>Detected episodes</h2>
+                <h3 className="panel-title">Detected episodes</h3>
                 <ExportCsv
                   name={csvName('reject-episodes', from, to)}
                   headers={['start', 'end', 'buckets', 'total_rejects', 'total_produced', 'rate']}
@@ -3908,7 +3967,7 @@ function RejectSpcView({
                   }
                 />
               </div>
-              <div className="hint">Sorted by severity — longest run first.</div>
+              <div className="panel-lede">Sorted by severity — longest run first.</div>
               {data.episodes.map((ep, i) => (
                 <div key={i} className={`episode-card${ep.bucketCount === 1 ? ' single' : ''}`}>
                   <div className="ep-title">
@@ -3922,22 +3981,23 @@ function RejectSpcView({
               ))}
             </div>
           ) : (
-            <div className="panel">
+            <div className="panel light">
               <div className="empty-note">No anomalous {data.bucketSize}s in this window — reject rate stayed within normal variation throughout.</div>
             </div>
           )}
 
-          <div className="panel" style={{ marginTop: 16 }}>
+          <div className="panel light" style={{ marginTop: 14 }}>
             <div className="panel-head">
-              <h2>Reject rate control chart</h2>
+              <h3 className="panel-title">Reject rate control chart</h3>
               <ExportCsv
                 name={csvName('reject-control-chart', from, to)}
                 headers={['bucket_start', 'produced', 'rejects', 'rate', 'ucl', 'lcl', 'beyond_control_limit']}
                 rows={() => data.buckets.map((b) => [b.bucketTs, b.produced, b.rejects, b.rate, b.ucl, b.lcl, b.outOfControl])}
               />
             </div>
-            <div className="hint">
-              Dashed line is each bucket's own 3σ upper limit (based on its production volume); flat line is the overall baseline rate.
+            <div className="panel-lede">
+              Dashed line is each bucket's own 3σ upper limit, scaled to its production volume; the flat line is the
+              overall baseline rate.
             </div>
             <ResizableChart initialHeight={320}>
               {(h) => <PChart buckets={data.buckets} pBar={data.pBar} bucketSize={data.bucketSize} revealed={revealed} height={h} />}
@@ -4862,55 +4922,122 @@ function RejectView({ onMeta, rank }: { onMeta: (m: Meta) => void; rank: number 
 
   const revealed = useRevealOnData(data ? data.reasons.map((r) => `${r.tubeCode}:${r.materialCode}:${r.count}`).join('|') : null);
 
-  if (error) return <div className="error-card"><b>Couldn't load reject analysis.</b> {error}</div>;
-  if (loading || !data) return <div className="tile skeleton" style={{ height: 260 }} />;
+  // How concentrated the Pareto actually is. The design states "Two inspection
+  // codes cause 3 in 4 rejects" as a fixed headline; how many codes it takes to
+  // reach three quarters is a property of the data, so it is derived — and on
+  // this line two codes reach 79%, not 75%.
+  const shape = useMemo(() => {
+    if (!data || data.reasons.length === 0) return null;
+    const quality = data.reasons.filter((r) => r.rejectType === 'quality');
+    const weight = data.reasons.filter((r) => r.rejectType !== 'quality');
+    const sum = (rs: RejectReason[]) => rs.reduce((t, r) => t + r.count, 0);
+    const qCount = sum(quality);
+    const wCount = sum(weight);
+    let k = 0;
+    for (const r of data.reasons) {
+      k += 1;
+      if (r.cumulativePct >= 75) break;
+    }
+    const topPct = data.reasons[k - 1]?.cumulativePct ?? 0;
+    const word = ['', 'One', 'Two', 'Three', 'Four', 'Five'][k] ?? String(k);
+    return {
+      quality: { count: qCount, pct: data.total > 0 ? Math.round((100 * qCount) / data.total) : 0, codes: quality.length },
+      weight: { count: wCount, pct: data.total > 0 ? Math.round((100 * wCount) / data.total) : 0, codes: weight.length },
+      k,
+      topPct: Math.round(topPct),
+      headline:
+        k === 1
+          ? `One inspection code causes ${Math.round(topPct)}% of all rejects`
+          : `${word} inspection code${k === 1 ? '' : 's'} cause ${Math.round(topPct)}% of all rejects`,
+      unlabelled: data.reasons.filter((r) => !r.label && r.rejectType === 'quality').length,
+    };
+  }, [data]);
 
-  const labelled = data.reasons.filter((r) => r.label).length;
+  if (error) return <div className="error-card" role="alert"><b>Couldn't load reject analysis.</b> {error}</div>;
+  if (loading || !data || !shape) return <div className="sk sk-chart" />;
+
   const max = Math.max(1, ...data.reasons.map((r) => r.count));
 
   return (
-    <>
-      <div className="callout">
-        <div className="big">
-          <span className="accent">{fmtInt(data.total)}</span> rejected cones across{' '}
-          <span className="accent">{data.reasons.length}</span> reason codes.
-        </div>
-        <p>
-          The line records two numeric inspection codes per reject, but their meaning isn't in the database (Q10).
-          Counts and the Pareto below are correct now — <b>enter a label against any code and it applies to every
-          matching reject, past and future.</b> {labelled} of {data.reasons.length} labelled so far.
-        </p>
+    <div className="rej-grid">
+      <div className="rej-cards">
+        <section className="rej-card">
+          <div className="rc-eyebrow">quality rejects</div>
+          <div className="rc-figure">{fmtInt(shape.quality.count)}</div>
+          <div className="rc-sub">
+            {shape.quality.pct}% of all rejects · {shape.quality.codes} code{shape.quality.codes === 1 ? '' : 's'}
+          </div>
+          <span className="rc-track">
+            <span className="rc-fill alarm" style={{ width: `${shape.quality.pct}%` }} />
+          </span>
+        </section>
+        <section className="rej-card">
+          <div className="rc-eyebrow">weight rejects</div>
+          <div className="rc-figure">{fmtInt(shape.weight.count)}</div>
+          <div className="rc-sub">{shape.weight.pct}% · the PLC's own in-range bit</div>
+          <span className="rc-track">
+            <span className="rc-fill warn" style={{ width: `${shape.weight.pct}%` }} />
+          </span>
+        </section>
       </div>
 
-      <div className="panel">
-        <div className="panel-head">
-          <h2>Reject reasons — Pareto</h2>
+      <section className="panel light">
+        <h2 className="sv-headline">{shape.headline}</h2>
+        <p className="sv-sub">
+          {shape.unlabelled > 0
+            ? 'Codes stay unlabelled until IFL confirms what they mean.'
+            : 'Every code on this line has been named.'}
+        </p>
+
+        <div className="pareto" style={{ marginTop: 22 }}>
+          {data.reasons.map((r, i) => (
+            <ParetoRow
+              key={`${r.rejectType}-${r.tubeCode}-${r.materialCode}`}
+              r={r}
+              max={max}
+              rank={i}
+              revealed={revealed}
+              canEdit={canEdit}
+              onSaved={() => setReloadKey((k) => k + 1)}
+            />
+          ))}
+        </div>
+
+        {shape.unlabelled > 0 && (
+          <div className="waiting" role="note">
+            <span className="w-tag">Waiting on IFL</span>
+            <span className="w-text">
+              Name {shape.unlabelled === 1 ? 'this code' : `these ${shape.unlabelled} codes`} and this page becomes an
+              action list. {canEdit ? 'Type a name into any row above to record it.' : 'A manager or admin can record the names.'}
+            </span>
+          </div>
+        )}
+
+        <div className="panel-foot">
+          {fmtInt(data.total)} rejected cones across {data.reasons.length} codes. A label applies to every matching
+          reject, past and future — the raw codes are always kept underneath.
           <ExportCsv
             name={csvName('reject-pareto')}
             headers={['reject_type', 'tube_code', 'material_code', 'label', 'count', 'pct_of_total', 'cumulative_pct']}
             rows={() => data.reasons.map((r) => [r.rejectType, r.tubeCode, r.materialCode, r.label ?? '', r.count, r.pct, r.cumulativePct])}
           />
         </div>
-        <div className="hint">Ordered by frequency. Edit a label to record what a code means.</div>
-        <div className="pareto">
-          {data.reasons.map((r) => (
-            <ParetoRow key={`${r.rejectType}-${r.tubeCode}-${r.materialCode}`} r={r} max={max} revealed={revealed} canEdit={canEdit} onSaved={() => setReloadKey((k) => k + 1)} />
-          ))}
-        </div>
-      </div>
-    </>
+      </section>
+    </div>
   );
 }
 
 function ParetoRow({
   r,
   max,
+  rank,
   revealed,
   canEdit,
   onSaved,
 }: {
   r: RejectReason;
   max: number;
+  rank: number;
   revealed: boolean;
   canEdit: boolean;
   onSaved: () => void;
@@ -4930,6 +5057,11 @@ function ParetoRow({
     }
   };
 
+  // Emphasis follows position in the Pareto: the two that matter, then the
+  // tail. Rank is a second channel alongside colour — the rows are already
+  // ordered, and the count and percentage are printed on every row.
+  const tone = rank < 2 ? 'top' : rank < 4 ? 'mid' : 'tail';
+
   return (
     <div className="pareto-row">
       <div className="reason">
@@ -4937,6 +5069,7 @@ function ParetoRow({
           <input
             value={label}
             placeholder={r.displayLabel}
+            aria-label={`Name for code ${r.displayLabel}`}
             onChange={(e) => setLabel(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && dirty && save()}
           />
@@ -4953,14 +5086,11 @@ function ParetoRow({
         )}
       </div>
       <div className="pareto-track">
-        <div className="pareto-fill" style={{ width: `${(100 * r.count) / max}%` }} />
+        <div className={`pareto-fill ${tone}`} style={{ width: revealed ? `${(100 * r.count) / max}%` : 0 }} />
       </div>
       <div className="nums">
-        <div>
-          <span className="cnt">{fmtInt(r.count)}</span>
-          <span className="pc">{r.pct}%</span>
-        </div>
-        <div className="cum">cum {r.cumulativePct}%</div>
+        <span className="cnt">{fmtInt(r.count)}</span>
+        <span className="pct">{r.pct}%</span>
       </div>
     </div>
   );
