@@ -1563,6 +1563,11 @@ body {
    Both leak into a light panel and become unreadable — the export button was
    rendering white-on-white, i.e. invisible. These restate them for the light
    surface, so converting any remaining panel to `.light` stays safe. */
+/* `.panel > .panel-head:first-child h2` targets the heading directly, so it
+   beats the colour inherited from the light-panel override and rendered the
+   Shifts trend headline white-on-white. Same leak as .sub and .abtn below. */
+.panel.light > .panel-head:first-child h2,
+.panel.light > .panel-head:first-child h3 { color: var(--ink); }
 .panel.light > .panel-head:first-child .sub { color: var(--muted); }
 .panel.light > .panel-head:first-child .abtn {
   color: var(--ink);
@@ -2051,3 +2056,63 @@ body {
   .pareto-row .nums { justify-content: flex-start; }
   .rej-cards { flex-direction: column; }
 }
+
+/* ==========================================================================
+   SHIFTS — reworked screen
+   Signature: three cards, one per shift.
+   ========================================================================== */
+
+.shift-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+.shift-card {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: var(--radius); overflow: hidden;
+}
+/* The 5px rule matches this shift's line on the chart below, and the alarm
+   attaches to the computed worst shift — not to a fixed shift name. */
+.shift-card { border-top: 5px solid var(--neutral-mark); }
+.shift-card.ink { border-top-color: var(--ink); }
+.shift-card.steel { border-top-color: var(--steel-mark); }
+.shift-card.alarm { border-top-color: var(--alarm); }
+
+.sc-head { padding: 18px 22px 15px; border-bottom: 1px solid var(--hairline-2); }
+.sc-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sc-name { font-size: var(--fs-card); font-weight: var(--fw-semi); letter-spacing: -0.02em; text-transform: capitalize; }
+.sc-hours { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--muted); }
+.sc-verdict { font-size: var(--fs-caption); color: var(--graphite); margin-top: 3px; font-weight: var(--fw-med); }
+.sc-verdict.bad { color: var(--alarm-ink); }
+
+.sc-body { padding: 6px 22px 18px; }
+.sc-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--hairline-2);
+}
+.sc-row:last-child { border-bottom: 0; }
+.scr-k { font-size: var(--fs-caption); color: var(--graphite); }
+.scr-v { font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--ink); }
+.scr-v.bad { color: var(--alarm-ink); }
+
+/* ------------------------------------------------------------ trend chart */
+.shifttrend .grid { stroke: var(--hairline-2); }
+.shifttrend .ax { stroke: var(--field-border); }
+.shifttrend .tick { font-family: var(--font-mono); fill: var(--muted); }
+.shifttrend .sline { fill: none; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+/* Dash pattern is fixed per shift and is a redundant channel: the chart stays
+   readable in greyscale and under any colour-vision deficiency (1.4.1). */
+.shifttrend .sline.morning { stroke-dasharray: none; }
+.shifttrend .sline.evening { stroke-dasharray: 8 4; }
+.shifttrend .sline.night { stroke-dasharray: 2 4; }
+.shifttrend .sline.ink { stroke: var(--ink); }
+.shifttrend .sline.steel { stroke: var(--steel-mark); }
+.shifttrend .sline.alarm { stroke: var(--alarm); }
+
+.shift-legend { display: flex; gap: 26px; margin-top: 16px; flex-wrap: wrap; }
+.sl-item { display: inline-flex; align-items: center; gap: 9px; font-size: var(--fs-caption); color: var(--graphite); }
+.sl-rule { width: 22px; height: 0; border-top-width: 3px; border-top-color: var(--neutral-mark); }
+.sl-rule.morning { border-top-style: solid; }
+.sl-rule.evening { border-top-style: dashed; }
+.sl-rule.night { border-top-style: dotted; }
+.sl-rule.ink { border-top-color: var(--ink); }
+.sl-rule.steel { border-top-color: var(--steel-mark); }
+.sl-rule.alarm { border-top-color: var(--alarm); }
+
+@media (max-width: 1180px) { .shift-cards { grid-template-columns: 1fr; } }

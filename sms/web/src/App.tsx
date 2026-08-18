@@ -436,7 +436,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       ) : view === 'weight' ? (
         <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} />
       ) : view === 'shift' ? (
-        <ShiftView range={range} onMeta={setFreshness} />
+        <ShiftView range={range} onMeta={setFreshness} sub={activeSub} />
       ) : view === 'rejects' ? (
         <RejectsHub range={range} onMeta={setFreshness} rank={rank} sub={activeSub} />
       ) : view === 'operations' ? (
@@ -4510,7 +4510,15 @@ const SHIFT_METRICS: ShiftMetric[] = [
   { key: 'sd', label: 'Weight consistency (σ)', unit: 'g', higherIsBetter: false, value: (s) => s.weightSd, format: (n) => `${n.toFixed(2)} g`, note: 'Spread of cone weight. Lower = tighter control.' },
 ];
 
-function ShiftView({ range, onMeta }: { range: { min: string | null; max: string | null }; onMeta: (m: Meta) => void }) {
+function ShiftView({
+  range,
+  onMeta,
+  sub,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+  sub: string;
+}) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [scores, setScores] = useState<ShiftScore[] | null>(null);
@@ -4520,12 +4528,21 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // The section column's two tabs choose the window. They were declared but
+  // never wired, so both rendered the whole record.
   useEffect(() => {
-    if (range.min && range.max && !from && !to) {
+    if (!range.min || !range.max) return;
+    if (sub === 'week') {
+      const start = new Date(`${range.max}T12:00:00Z`);
+      start.setUTCDate(start.getUTCDate() - 6);
+      const s = start.toISOString().slice(0, 10);
+      setFrom(s >= range.min ? s : range.min);
+      setTo(range.max);
+    } else {
       setFrom(range.min);
       setTo(range.max);
     }
-  }, [range.min, range.max, from, to]);
+  }, [range.min, range.max, sub]);
 
   useEffect(() => {
     if (!from || !to) return;
@@ -4606,294 +4623,265 @@ function ShiftView({ range, onMeta }: { range: { min: string | null; max: string
     };
   }, [trend, trendMetric]);
 
-  if (error) return <div className="error-card"><b>Couldn't load shift performance.</b> {error}</div>;
+  // Which shift trails, on how many days, and in the longest unbroken run.
+  // The design states "Night has trailed for 18 days straight" and colours night
+  // as the alarm. On this line night is the STRONGEST shift on cones,
+  // availability, stops and OEE, and morning is the weakest on all four — so
+  // both the sentence and the colour follow the computed answer.
+  const trailing = useMemo(() => {
+    if (!trendSeries || !verdict) return null;
+    const byShift = new Map(trendSeries.series.map((s) => [s.name as ShiftKey, s.points]));
+    let days = 0;
+    let run = 0;
+    let bestRun = 0;
+    trendSeries.days.forEach((_, i) => {
+      const vals = WORK_SHIFTS.map((s) => ({ s, v: byShift.get(s)?.[i] ?? null })).filter((x) => x.v != null);
+      if (vals.length < WORK_SHIFTS.length) {
+        run = 0;
+        return;
+      }
+      const low = vals.reduce((a, b) => (b.v! < a.v! ? b : a));
+      if (low.s === verdict.shift) {
+        days += 1;
+        run += 1;
+        bestRun = Math.max(bestRun, run);
+      } else {
+        run = 0;
+      }
+    });
+    return { days, longestRun: bestRun, total: trendSeries.days.length };
+  }, [trendSeries, verdict]);
+
+  // Cards carry the same colour as their line on the chart below, so the two
+  // read as one statement. The alarm attaches to the computed worst shift
+  // rather than to a fixed shift name, and the remaining two always take the
+  // other two tones — keying off the shift NAME instead collapsed both of them
+  // onto one colour whenever morning was the weak shift.
+  const tones = useMemo(() => {
+    const m = new Map<ShiftKey, string>();
+    if (!scores || !verdict) return m;
+    m.set(verdict.shift, 'alarm');
+    const rest = [...scores].filter((x) => x.shift !== verdict.shift).sort((a, b) => b.cones - a.cones);
+    rest.forEach((x, i) => m.set(x.shift, i === 0 ? 'ink' : 'steel'));
+    return m;
+  }, [scores, verdict]);
+  const toneOf = (s: ShiftKey) => tones.get(s) ?? 'steel';
+
+  if (error) return <div className="error-card" role="alert"><b>Couldn't load shift performance.</b> {error}</div>;
 
   return (
     <>
-      <div className="filters">
-        <div className="field">
-          <label>From</label>
-          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>To</label>
-          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
-        </div>
-      </div>
-
       {loading || !scores || !verdict ? (
-        <div className="tile skeleton" style={{ height: 360 }} />
+        <div className="sk sk-chart" />
       ) : (
         <>
-          <div className="callout" style={verdict.metrics.length >= 3 ? { borderLeftColor: 'var(--alert)' } : undefined}>
-            <div className="big">
-              <span className="accent" style={{ textTransform: 'capitalize' }}>{verdict.shift}</span> is the weakest shift —
-              worst on <span className="accent">{verdict.metrics.length}</span> of {SHIFT_METRICS.length} measures
-            </div>
-            <p>
-              {verdict.metrics.length > 0 ? <>It ranks last on {verdict.metrics.join(', ')}. </> : null}
-              OEE spans <b>{verdict.spreadPp.toFixed(1)} points</b> between the best and worst shift over{' '}
-              {from === to ? from : `${from} to ${to}`}. Same line, same machines — a gap this size is a crewing,
-              handover, or maintenance-timing question, not an equipment one.
-            </p>
+          <div className="shift-cards">
+            {scores.map((sc) => {
+              const isWorst = sc.shift === verdict.shift;
+              const mostCones = Math.max(...scores.map((x) => x.cones));
+              const behind = mostCones > 0 ? Math.round((100 * (mostCones - sc.cones)) / mostCones) : 0;
+              // Rank on cones explicitly. Inferring it from "is it the max?"
+              // called the lowest-output shift "between the other two", and the
+              // worst-overall shift "0% behind" on a week where it happened to
+              // wind the most cones while trailing on everything else.
+              const coneRank = [...scores].sort((a, b) => b.cones - a.cones).findIndex((x) => x.shift === sc.shift);
+              const lastOn = `last on ${verdict.metrics.length} of ${SHIFT_METRICS.length} measures`;
+              const line = isWorst
+                ? behind >= 1
+                  ? `${behind}% behind on cones, and ${lastOn}`
+                  : `Highest output, but ${lastOn}`
+                : coneRank === 0
+                  ? 'Best output of the three'
+                  : coneRank === 1
+                    ? 'Steady, between the other two'
+                    : 'Lowest output of the three';
+              // A value is marked only when being worst on that measure is
+              // actually a problem — a shift with the fewest stoppages is not a
+              // finding, it is the good outcome.
+              const mark = (m: ShiftMetric) => {
+                const vals = scores.map(m.value);
+                const worst = m.higherIsBetter ? Math.min(...vals) : Math.max(...vals);
+                return m.value(sc) === worst && scores.length > 1 ? 'bad' : '';
+              };
+              return (
+                <section className={`shift-card ${toneOf(sc.shift)}`} key={sc.shift}>
+                  <div className="sc-head">
+                    <div className="sc-title">
+                      <span className="sc-name">{sc.shift}</span>
+                      <span className="sc-hours">{SHIFT_HOURS[sc.shift]}</span>
+                    </div>
+                    <div className={`sc-verdict${isWorst ? ' bad' : ''}`}>{line}</div>
+                  </div>
+                  <div className="sc-body">
+                    {SHIFT_METRICS.filter((m) => m.key !== 'oee').map((m) => (
+                      <div className="sc-row" key={m.key}>
+                        <span className="scr-k" title={m.note}>{m.label}</span>
+                        <span className={`scr-v ${mark(m)}`}>{m.format(m.value(sc))}</span>
+                      </div>
+                    ))}
+                    <div className="sc-row oee">
+                      <span className="scr-k">OEE (estimated)</span>
+                      <span className={`scr-v ${mark(SHIFT_METRICS.find((m) => m.key === 'oee')!)}`}>
+                        {sc.oeePct.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
           </div>
 
-          <div className="panel">
+          <section className="panel light">
             <div className="panel-head">
-              <h2>Shift scorecard</h2>
-              <span>
-                <span className="sub">{from === to ? from : `${from} to ${to}`}</span>
+              <div>
+                <h2 className="panel-sub-verdict">
+                  {trailing && trailing.days > 0 ? (
+                    <>
+                      <span className="cap">{verdict.shift}</span> has trailed on {trailing.days} of {trailing.total} days
+                      {trailing.longestRun > 1 && `, ${trailing.longestRun} of them in a row`}
+                    </>
+                  ) : (
+                    <>No shift trails consistently</>
+                  )}
+                </h2>
+                <p className="panel-lede">
+                  {trailing && trailing.days > trailing.total / 2
+                    ? 'Not a one-off: the gap holds across the record. Same line, same machines — a gap this size is a crewing, handover or maintenance-timing question, not an equipment one.'
+                    : `OEE spans ${verdict.spreadPp.toFixed(1)} points between the best and worst shift. No shift is consistently behind, so the differences look like day-to-day variation rather than a crew pattern.`}
+                </p>
+              </div>
+              <span className="mono-note">
+                {trendMetric === 'cones' ? 'cones per shift' : 'reject rate %'}
+              </span>
+            </div>
+
+            <div className="seg" role="group" aria-label="Trend measure" style={{ marginBottom: 4 }}>
+              {(['cones', 'reject'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={trendMetric === k ? 'active' : ''}
+                  aria-pressed={trendMetric === k}
+                  onClick={() => setTrendMetric(k)}
+                >
+                  {k === 'cones' ? 'Cones' : 'Reject rate'}
+                </button>
+              ))}
+            </div>
+
+            {trendSeries && (
+              <ResizableChart initialHeight={260}>
+                {(h) => (
+                  <ShiftTrendChart
+                    days={trendSeries.days}
+                    series={trendSeries.series.map((s) => ({ ...s, tone: toneOf(s.name as ShiftKey) }))}
+                    metric={trendMetric}
+                    height={h}
+                  />
+                )}
+              </ResizableChart>
+            )}
+
+            <div className="shift-legend">
+              {WORK_SHIFTS.map((s) => (
+                <span className="sl-item" key={s}>
+                  <span className={`sl-rule ${s} ${toneOf(s)}`} />
+                  <span className="cap">{s}</span>
+                </span>
+              ))}
+            </div>
+
+            <div className="panel-foot">
+              <span className="w-tag">Data note</span>{' '}
+              Shift is recomputed from production time.{' '}
+              {legacy && (
+                <>
+                  The plant's stored value disagrees on <b>{legacy.mismatch.pct}%</b> of rows
+                  ({fmtInt(legacy.mismatch.differing)} of {fmtInt(legacy.mismatch.total)}), because it is derived from
+                  insert time rather than production time.
+                </>
+              )}
+              {scores && (
                 <ExportCsv
                   name={csvName('shift-scorecard', from, to)}
                   headers={['metric', 'unit', ...scores.map((sc) => sc.shift)]}
                   rows={() => SHIFT_METRICS.map((m) => [m.label, m.unit, ...scores.map((sc) => m.value(sc))])}
                 />
-                <PrintButton />
-              </span>
+              )}
+              <PrintButton />
             </div>
-            <div className="hint">
-              Best value in each row is emphasised; the worst is marked when being worst actually signals a problem.
-            </div>
-            <div className="table-scroll">
-              <table className="compare shift-scorecard">
-                <thead>
-                  <tr>
-                    <th className="name">Measure</th>
-                    {scores.map((s) => (
-                      <th key={s.shift}>
-                        <span className="sh-name">{s.shift}</span>
-                        <span className="sh-hours">{SHIFT_HOURS[s.shift]}</span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {SHIFT_METRICS.map((m) => {
-                    const vals = scores.map(m.value);
-                    const best = m.higherIsBetter ? Math.max(...vals) : Math.min(...vals);
-                    const worst = m.higherIsBetter ? Math.min(...vals) : Math.max(...vals);
-                    return (
-                      <tr key={m.key}>
-                        <td className="name" title={m.note}>{m.label}</td>
-                        {scores.map((s) => {
-                          const v = m.value(s);
-                          const cls = v === best ? 'col-active' : v === worst ? 'is-worst' : '';
-                          return <td key={s.shift} className={cls}>{m.format(v)}</td>;
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div style={{ height: 16 }} />
-
-          <div className="panel">
-            <div className="panel-head">
-              <h2>Day over day, by shift</h2>
-              <span>
-                {trendSeries && (
-                  <ExportCsv
-                    name={csvName(`shift-trend-${trendMetric}`, from, to)}
-                    headers={['date', ...trendSeries.series.map((sr) => sr.name)]}
-                    rows={() =>
-                      trendSeries.days.map((d, i) => [d, ...trendSeries.series.map((sr) => sr.points[i] ?? null)])
-                    }
-                  />
-                )}
-              </span>
-              <Segmented
-                value={trendMetric}
-                onChange={setTrendMetric}
-                options={[
-                  { key: 'cones', label: 'Cones' },
-                  { key: 'reject', label: 'Reject rate' },
-                ]}
-              />
-            </div>
-            <div className="hint">
-              Whether a shift's gap is a persistent pattern or a bad day. Three lines that stay separated day after day
-              point at the crew or the schedule; lines that cross around point at the process.
-            </div>
-            {trendSeries && trendSeries.days.length > 0 ? (
-              <ResizableChart initialHeight={300}>
-                {(h) => (
-                  <ShiftTrendChart
-                    days={trendSeries.days}
-                    series={trendSeries.series}
-                    unit={trendMetric === 'cones' ? 'cones' : '%'}
-                    height={h}
-                  />
-                )}
-              </ResizableChart>
-            ) : (
-              <div className="hint">No daily data in this range.</div>
-            )}
-          </div>
-
-          {legacy && (
-            <>
-              <div style={{ height: 16 }} />
-              <details className="data-note">
-                <summary>
-                  Data integrity: {legacy.mismatch.pct}% of cones sat in the wrong shift before SMS
-                </summary>
-                <p>
-                  IFL's existing system stamps each cone's shift from the time the record was <em>saved</em> to the
-                  database, not when it was produced — a ~3.8h lag. SMS recomputes the shift from the real production
-                  time, which moves <b>{fmtInt(legacy.mismatch.differing)}</b> of {fmtInt(legacy.mismatch.total)} cones.
-                  Every figure on this page uses the corrected assignment.
-                </p>
-                <div className="table-scroll">
-                  <table className="compare">
-                    <thead>
-                      <tr>
-                        <th className="name">Shift</th>
-                        <th>Corrected</th>
-                        <th>Legacy</th>
-                        <th>Δ</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {WORK_SHIFTS.map((s) => {
-                        const c = legacy.corrected.find((r) => r.shift === s)?.cones ?? 0;
-                        const l = legacy.legacy.find((r) => r.shift === s)?.cones ?? 0;
-                        const d = c - l;
-                        return (
-                          <tr key={s}>
-                            <td className="name">{s}</td>
-                            <td className="col-active">{fmtInt(c)}</td>
-                            <td className="col-idle">{fmtInt(l)}</td>
-                            <td className={`delta ${d > 0 ? 'up' : d < 0 ? 'down' : ''}`}>
-                              {d > 0 ? '+' : ''}{fmtInt(d)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            </>
-          )}
+          </section>
         </>
       )}
     </>
   );
 }
 
-/** Three shift series over the same day axis. Distinguished by dash pattern as
- * well as tone, so the lines stay separable without spending status colours. */
+/**
+ * Three shifts on one day axis. Each shift keeps a fixed dash pattern — solid,
+ * dashed, dotted — so the chart still reads in greyscale and with any colour
+ * vision; colour only carries which shift is the weak one.
+ */
 function ShiftTrendChart({
   days,
   series,
-  unit,
-  height = 300,
+  metric,
+  height = 260,
 }: {
   days: string[];
-  series: { name: string; points: (number | null)[] }[];
-  unit: string;
+  series: { name: string; points: (number | null)[]; tone: string }[];
+  metric: 'cones' | 'reject';
   height?: number;
 }) {
   const [wrapRef, measuredW] = useMeasuredWidth();
-  const W = Math.max(560, measuredW - 96);
-  const LM = 62;
-  const H = height;
-  const [hover, setHover] = useState<number | null>(null);
-  // Top-left y-axis unit label ("cones" or "reject %") right-anchors at
-  // LM-6 — the fixed 80px left viewBox margin fit "cones" (5 chars) but not
-  // the wider "reject %" (8 chars) once toggled, clipping it against the
-  // chart's own edge at larger font sizes.
   const axisFontPx = useTipFontPx();
-  const unitLabel = unit === '%' ? 'reject %' : 'cones';
-  const leftPad = Math.max(80, Math.ceil(unitLabel.length * axisFontPx * TIP_CHAR_W) + 16);
+  const RM = 54;
+  const W = Math.max(420, measuredW - 40);
+  const plotW = Math.max(120, W - RM);
+  const H = height;
+  const BASE = H - Math.ceil(axisFontPx * 2.4);
 
   const all = series.flatMap((s) => s.points).filter((v): v is number => v != null);
-  const lo = all.length ? Math.min(...all) : 0;
-  const hi = all.length ? Math.max(...all) : 1;
-  const pad = (hi - lo) * 0.15 || Math.max(1, hi * 0.1);
-  const yMin = Math.max(0, lo - pad);
-  const yMax = hi + pad;
-  const y = (v: number) => H - ((v - yMin) / (yMax - yMin || 1)) * H;
-  const x = (i: number) => (days.length === 1 ? LM + W / 2 : LM + (i / (days.length - 1)) * W);
+  const max = all.length ? Math.max(...all) : 1;
+  const min = metric === 'cones' ? 0 : Math.min(0, ...all);
+  const span = max - min || 1;
+  const y = (v: number) => BASE - ((v - min) / span) * (BASE - 14);
+  const x = (i: number) => (days.length <= 1 ? plotW / 2 : (i / (days.length - 1)) * plotW);
 
-  const fmtV = (v: number) => (unit === '%' ? `${v.toFixed(2)}%` : fmtInt(Math.round(v)));
-  const ticks = [yMin, yMin + (yMax - yMin) / 2, yMax];
-  const xStep = Math.max(1, Math.ceil(days.length / 9));
-  const tipFont = useTipFontPx();
-  const tipLines: TipLine[] =
-    hover != null
-      ? [
-          { t: days[hover] ?? '', cls: 'strong' },
-          ...series.map((sr) => ({
-            t: `${sr.name}: ${sr.points[hover] != null ? fmtV(sr.points[hover]!) : '—'}`,
-          })),
-        ]
-      : [];
-  const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;
-  const tipX = hover != null ? Math.min(Math.max(x(hover) + 10, LM), LM + W - tipW) : 0;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => min + f * span);
+  const fmtV = (v: number) => (metric === 'cones' ? fmtInt(Math.round(v)) : `${v.toFixed(1)}%`);
 
   return (
-    <div className="spc-chart-wrap" ref={wrapRef}>
-      <svg className="spc-chart trend-chart" viewBox={`${LM - leftPad} -28 ${W + leftPad + 16} ${H + 60}`} width="100%" height={H + 60}>
-        <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">{unit === '%' ? 'reject %' : 'cones'}</text>
+    <div ref={wrapRef} className="chart-wrap">
+      <svg className="shifttrend" viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+           aria-label={`${metric === 'cones' ? 'Cones' : 'Reject rate'} per shift across ${days.length} days`}>
         {ticks.map((t, i) => (
           <g key={i}>
-            <line className="grid-line" x1={LM} y1={y(t)} x2={LM + W} y2={y(t)} />
-            <text className="axis-label" x={LM - 6} y={y(t) + 4} textAnchor="end">{fmtV(t)}</text>
+            <line className="grid" x1={0} y1={y(t)} x2={plotW} y2={y(t)} />
+            <text className="tick" x={plotW + 6} y={y(t) + 4} fontSize={axisFontPx}>{fmtV(t)}</text>
           </g>
         ))}
-        {series.map((s, si) => {
+        <line className="ax" x1={0} y1={BASE} x2={plotW} y2={BASE} />
+        {series.map((s) => {
           const d = s.points
-            .map((v, i) => (v == null ? null : `${x(i)},${y(v)}`))
+            .map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`))
             .filter(Boolean)
-            .map((p, i) => `${i === 0 ? 'M' : 'L'}${p}`)
             .join(' ');
-          return <path key={s.name} className={`trend-line s${si}`} d={d} />;
+          return <polyline key={s.name} className={`sline ${s.name} ${s.tone}`} points={d} />;
         })}
-        {series.map((s, si) =>
-          s.points.map((v, i) =>
-            v == null ? null : <circle key={`${s.name}-${i}`} className={`trend-dot s${si}`} cx={x(i)} cy={y(v)} r={2.6} />,
-          ),
-        )}
-        {days.map((d, i) =>
-          i % xStep === 0 ? (
-            <text key={d} className="x-tick" x={x(i)} y={H + 18} textAnchor="middle">{d.slice(5)}</text>
-          ) : null,
-        )}
-        {hover != null && (
+        {days.length > 0 && (
           <>
-            <line className="crosshair" x1={x(hover)} y1={0} x2={x(hover)} y2={H} />
-            <ChartTip x={tipX} lines={tipLines} fontPx={tipFont} />
+            <text className="tick" x={0} y={BASE + axisFontPx + 6} fontSize={axisFontPx}>{days[0]!.slice(5)}</text>
+            <text className="tick" x={plotW} y={BASE + axisFontPx + 6} textAnchor="end" fontSize={axisFontPx}>
+              {days[days.length - 1]!.slice(5)}
+            </text>
           </>
         )}
-        {days.map((d, i) => (
-          <rect
-            key={d}
-            x={x(i) - W / (2 * Math.max(1, days.length - 1))}
-            y={0}
-            width={W / Math.max(1, days.length - 1)}
-            height={H}
-            fill="transparent"
-            style={{ pointerEvents: 'all' }}
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover(null)}
-          />
-        ))}
       </svg>
-      <div className="trend-legend">
-        {series.map((s, si) => (
-          <span key={s.name} className="tl-item">
-            <span className={`tl-swatch s${si}`} />
-            {s.name}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
+
 
 /* ---------------- Reject Analysis (Q10) ---------------- */
 
