@@ -534,7 +534,7 @@ body {
 .tile.skeleton { height: 130px; }
 
 .error-card {
-  border: 1px solid var(--alarm); background: var(--alarm-pale); color: #7a2418;
+  border: 1px solid var(--alarm); background: var(--alarm-pale); color: var(--alarm-ink);
   padding: 16px 20px; border-radius: var(--radius); font-size: var(--fs-body);
 }
 .error-card b { color: var(--ink); }
@@ -1131,8 +1131,8 @@ body {
 }
 @keyframes nc-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .nav-context .nc-back {
-  flex: none; background: rgba(255,255,255,0.12); color: #fff;
-  border: 1px solid rgba(255,255,255,0.28); border-radius: var(--radius-sm);
+  flex: none; background: none; color: #fff;
+  border: 1px solid var(--on-ink-quiet); border-radius: var(--radius-sm);
   padding: 8px 14px; font: inherit; font-size: var(--fs-caption); font-weight: 600; cursor: pointer;
   transition: background 120ms, border-color 120ms;
 }
@@ -1143,7 +1143,7 @@ body {
   color: var(--on-ink-2); font-family: var(--font-mono);
 }
 .nav-context .nc-title { font-size: var(--fs-body); font-weight: 650; }
-.nav-context .nc-detail { font-size: var(--fs-caption); color: #d6dde2; }
+.nav-context .nc-detail { font-size: var(--fs-caption); color: var(--on-ink-2); }
 .nav-context .nc-dismiss {
   margin-left: auto; flex: none; background: none; border: 0; color: var(--on-ink-2);
   font-size: var(--fs-card); line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 4px;
@@ -1165,7 +1165,7 @@ body {
   box-shadow: 0 6px 18px rgba(20,24,27,0.22);
 }
 .status-tip b { font-family: var(--font-mono); font-size: var(--fs-caption); }
-.status-tip span { font-size: var(--fs-caption); color: #cfd6db; font-family: var(--font-mono); }
+.status-tip span { font-size: var(--fs-caption); color: var(--on-ink-2); font-family: var(--font-mono); }
 .status-tip .tip-rank { color: var(--on-ink-2); font-size: var(--fs-caption); font-family: var(--font-sans); }
 /* anchor by edge so the panel's overflow:hidden can never clip it */
 .status-tip.mid { transform: translateX(-50%); }
@@ -2342,3 +2342,5 @@ body {
    set apart from the reading itself. */
 .rr-provenance { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 .rr-provenance .rrr-k, .rr-provenance .rrr-v { color: var(--muted); }
+
+.reg-table td.dim, .reg-table .dim { color: var(--muted); }

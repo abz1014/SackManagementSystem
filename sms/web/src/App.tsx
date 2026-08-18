@@ -969,7 +969,7 @@ function RejectStationView({
       {error ? (
         <div className="error-card"><b>Couldn't load per-station rejects.</b> {error}</div>
       ) : loading ? (
-        <div className="tile skeleton" style={{ height: 320 }} />
+        <div className="sk sk-chart" />
       ) : (
         <>
           {/* The design's signature card reads "Station 5 is both 24 g light and
@@ -2611,7 +2611,7 @@ function RegisterDetailPage({
                     <tr
                       key={String(n.source_row_id)}
                       className="reg-row"
-                      style={isCurrent ? { background: 'var(--green-pale)', fontWeight: 650 } : undefined}
+                      style={isCurrent ? { background: 'var(--ok-pale)', fontWeight: 650 } : undefined}
                       aria-current={isCurrent ? 'true' : undefined}
                       {...(isCurrent
                         ? {}
@@ -2795,7 +2795,7 @@ function StoppagePatternView({
       {error ? (
         <div className="error-card"><b>Couldn't load stoppage patterns.</b> {error}</div>
       ) : loading || !analysis ? (
-        <div className="tile skeleton" style={{ height: 340 }} />
+        <div className="sk sk-chart" />
       ) : analysis.all.length === 0 ? (
         <div className="panel-lede">No stoppages over {threshold}s in this range.</div>
       ) : (
@@ -2908,7 +2908,7 @@ function StoppagePatternView({
               )}
             </div>
             {analysis.skewed && (
-              <div className="hint" style={{ color: 'var(--amber)' }}>
+              <div className="panel-lede" style={{ color: 'var(--warn-ink)' }}>
                 Note: {String(analysis.biggestByTime.hour).padStart(2, '0')}:00 has the tallest bar
                 ({fmtDuration(analysis.biggestByTime.downSeconds)}), but a single{' '}
                 {fmtDuration(analysis.biggestByTime.maxSingle)} stoppage is most of it — one incident, not a daily habit.
@@ -3271,7 +3271,7 @@ function DowntimeView({
       {error ? (
         <div className="error-card"><b>Couldn't load downtime analysis.</b> {error}</div>
       ) : loading || !data ? (
-        <div className="tile skeleton" style={{ height: 280 }} />
+        <div className="sk sk-chart" />
       ) : (
         <>
           <section className="stops-verdict">
@@ -3417,7 +3417,7 @@ function DowntimeView({
                 </table>
               </div>
               {!stoppagesExpanded && data.stoppages.length > STOPPAGE_PREVIEW_COUNT && (
-                <div className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
+                <div className="panel-foot" style={{ marginTop: 10 }}>
                   {data.stoppages.length - STOPPAGE_PREVIEW_COUNT} more not shown.
                 </div>
               )}
@@ -4222,7 +4222,7 @@ function RejectSpcView({
       {error ? (
         <div className="error-card"><b>Couldn't load the reject control chart.</b> {error}</div>
       ) : loading || !data ? (
-        <div className="tile skeleton" style={{ height: 320 }} />
+        <div className="sk sk-chart" />
       ) : (
         <>
           <section className="panel">
@@ -4292,8 +4292,8 @@ function RejectSpcView({
               {(h) => <PChart buckets={data.buckets} pBar={data.pBar} bucketSize={data.bucketSize} revealed={revealed} height={h} />}
             </ResizableChart>
             <div className="spc-legend">
-              <span><span className="dot" style={{ background: 'var(--alert)' }} /> beyond control limit ({data.outOfControlCount})</span>
-              <span><span className="dot" style={{ background: 'var(--green)' }} /> normal variation</span>
+              <span><span className="dot limit" /> beyond control limit ({data.outOfControlCount})</span>
+              <span><span className="dot ctr" /> normal variation</span>
             </div>
           </div>
         </>
@@ -5964,7 +5964,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
           edits; re-ingesting an unchanged row writes nothing.
         </div>
         <div className="table-scroll">
-          <table className="atable">
+          <table className="reg-table light">
             <thead>
               <tr>
                 <th>Target table</th>
@@ -6010,7 +6010,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
           deliberately fail-closed.
         </div>
         <div className="table-scroll">
-          <table className="atable">
+          <table className="reg-table light">
             <thead>
               <tr><th>Source table</th><th>Status</th><th>Fingerprint</th></tr>
             </thead>
@@ -6019,7 +6019,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
                 <tr key={f.table}>
                   <td className="mono">{f.table}</td>
                   <td><span className="pill on">{f.status === 'ok' ? 'matching' : f.status}</span></td>
-                  <td className="mono" style={{ color: 'var(--graphite-dim)' }}>{f.fingerprint}</td>
+                  <td className="mono dim">{f.fingerprint}</td>
                 </tr>
               ))}
             </tbody>
@@ -6058,7 +6058,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
         </div>
         {data.dq.findings.length > 0 && (
           <div className="table-scroll" style={{ marginTop: 14 }}>
-            <table className="atable">
+            <table className="reg-table light">
               <thead>
                 <tr><th>Severity</th><th>Check</th><th>Subject</th><th>Detail</th></tr>
               </thead>
@@ -6079,7 +6079,7 @@ function OperationsView({ onMeta }: { onMeta: (m: Meta) => void }) {
             </table>
           </div>
         )}
-        <div className="hint" style={{ marginTop: 12 }}>
+        <div className="panel-foot" style={{ marginTop: 12 }}>
           {blocking > 0 ? (
             <>
               <b>{blocking}</b> finding{blocking === 1 ? '' : 's'} at error or above. These are real
