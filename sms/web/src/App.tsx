@@ -430,6 +430,9 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           detail={route.detailType && route.detailId ? { type: route.detailType, id: route.detailId } : null}
           onOpenDetail={openRegisterDetail}
           onCloseDetail={closeRegisterDetail}
+          onSeeStation={() => navigate({ view: 'weight', sub: 'spread', detailType: undefined, detailId: undefined })}
+          sub={activeSub}
+          rank={rank}
         />
       ) : view === 'performance' ? (
         <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} />
@@ -1745,7 +1748,6 @@ function activatable(onActivate: () => void, label?: string) {
 
 /* ---------------- Sack & Cone Register ---------------- */
 
-const STATIONS = Array.from({ length: 14 }, (_, i) => i + 1);
 const PAGE_SIZE = 25;
 
 function RegisterView({
@@ -1754,14 +1756,25 @@ function RegisterView({
   detail,
   onOpenDetail,
   onCloseDetail,
+  onSeeStation,
+  sub,
+  rank,
 }: {
   range: { min: string | null; max: string | null };
   seed: RegisterSeed | null;
   detail: { type: RegisterType; id: string } | null;
   onOpenDetail: (type: RegisterType, id: string | number) => void;
   onCloseDetail: () => void;
+  onSeeStation: () => void;
+  sub: string;
+  rank: number;
 }) {
   const [type, setType] = useState<RegisterType>(() => seed?.type ?? 'cone');
+  // The section column declares Cones / Sacks / Rejects; without this they were
+  // highlighted but inert, exactly as the hub tabs were before they were wired.
+  useEffect(() => {
+    if (sub === 'cone' || sub === 'sack' || sub === 'reject') setType(sub);
+  }, [sub]);
   const [from, setFrom] = useState(() => seed?.from ?? '');
   const [to, setTo] = useState(() => seed?.to ?? '');
   // default scope: latest FULL day + its last (most recently completed)
@@ -1855,7 +1868,6 @@ function RegisterView({
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const weightUnit = type === 'sack' ? 'kg' : 'g';
-  const revealed = useRevealOnData(rows.map((r) => r.source_row_id).join(','));
 
   const toggleSort = (col: RegisterSort) => {
     if (sort === col) setDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -1865,194 +1877,380 @@ function RegisterView({
     }
   };
 
+  // Selection drives the rail. It reads straight out of the page already in
+  // memory — RegisterRow carries every field the rail shows — so picking a row
+  // costs no request. The full detail page stays a real URL for permalinks.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [setpointG, setSetpointG] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getCurrentProduct(), getProducts()])
+      .then(([c, p]) => {
+        if (cancelled || !c.current) return;
+        const match = p.products.find((x) => x.productId === c.current!.productId);
+        setSetpointG(match?.setpointG ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Keep a selection that exists: when the page changes under it, fall back to
+  // the first row rather than leaving the rail showing a row that is no longer
+  // in the table.
+  const selected = rows.find((r) => String(r.source_row_id) === selectedId) ?? rows[0] ?? null;
+
+  // Active filters, as the chips that replace the old nine-field grid. Each one
+  // knows how to remove itself, so the chip row is the filter state rather than
+  // a display of it.
+  const chips = useMemo(() => {
+    const out: { key: string; label: string; tone?: string; clear: () => void }[] = [];
+    if (context) out.push({ key: 'ctx', label: context, clear: () => { setContext(null); setTsWindow(null); } });
+    if (from || to) {
+      out.push({
+        key: 'date',
+        label: from === to ? from : `${from || '…'} → ${to || '…'}`,
+        clear: () => { setFrom(''); setTo(''); },
+      });
+    }
+    if (shift !== 'all') out.push({ key: 'shift', label: `${shift} shift`, clear: () => setShift('all') });
+    if (station) out.push({ key: 'station', label: `station ${station}`, clear: () => setStation('') });
+    if (inRange !== 'all') {
+      out.push({
+        key: 'inRange',
+        label: inRange === 'false' ? 'out of range only' : 'in range only',
+        tone: inRange === 'false' ? 'alarm' : undefined,
+        clear: () => setInRange('all'),
+      });
+    }
+    if (type === 'reject' && rejectType !== 'all') {
+      out.push({ key: 'rt', label: `${rejectType} rejects`, clear: () => setRejectType('all') });
+    }
+    if (wMin || wMax) {
+      out.push({
+        key: 'w',
+        label: `${wMin || '…'}–${wMax || '…'} ${weightUnit}`,
+        clear: () => { setWMin(''); setWMax(''); },
+      });
+    }
+    // Only when nothing else already describes the window — otherwise this
+    // repeated the context chip verbatim.
+    if (tsWindow && !context) out.push({ key: 'ts', label: 'around one reading', clear: () => setTsWindow(null) });
+    return out;
+  }, [context, from, to, shift, station, inRange, rejectType, wMin, wMax, tsWindow, type, weightUnit]);
+
+  // "Readings around it" — a +/-10 minute window on the selected row, which is
+  // the same tsWindow the SPC and downtime drill-downs already use.
+  const readingsAround = (r: RegisterRow) => {
+    const t = new Date(r.production_ts_utc).getTime();
+    setTsWindow({
+      tsFrom: new Date(t - 10 * 60_000).toISOString(),
+      tsTo: new Date(t + 10 * 60_000).toISOString(),
+    });
+    setContext(`readings within 10 minutes of ${fmtDateTime(r.production_ts_utc)}`);
+  };
+
   if (detail) {
     return <RegisterDetailPage type={detail.type} id={detail.id} onBack={onCloseDetail} onOpenDetail={onOpenDetail} />;
   }
 
   return (
     <>
-      {context && (
-        <div className="callout register-context">
-          <div className="big">Filtered: {context}</div>
-          <button className="abtn" onClick={clearFilters}>Clear filter</button>
+      <div className="rec-bar">
+        <div className="rec-chips">
+          {chips.map((c) => (
+            <span className={`chip${c.tone ? ` ${c.tone}` : ''}`} key={c.key}>
+              {c.label}
+              <button type="button" className="chip-x" onClick={c.clear} aria-label={`Remove filter: ${c.label}`}>×</button>
+            </span>
+          ))}
+          <button type="button" className="chip-add" onClick={() => setFiltersOpen((v) => !v)} aria-expanded={filtersOpen}>
+            + filter
+          </button>
+          {chips.length > 0 && (
+            <button type="button" className="chip-clear" onClick={clearFilters}>clear all</button>
+          )}
+        </div>
+        <div className="rec-actions">
+          <span className="mono-note">{fmtInt(total)} row{total === 1 ? '' : 's'}</span>
+          {/* Manager+, matching the API guard. Hidden rather than disabled: a
+              role that cannot export has no use for the control. */}
+          {rank >= 3 && (
+            <a className="cta" href={eventsExportUrl(query)}>Export CSV</a>
+          )}
+        </div>
+      </div>
+
+      {filtersOpen && (
+        <div className="rec-filters">
+          <div className="field">
+            <label>Record type</label>
+            <Segmented
+              value={type}
+              onChange={setType}
+              options={[
+                { key: 'cone', label: 'Cones' },
+                { key: 'sack', label: 'Sacks' },
+                { key: 'reject', label: 'Rejects' },
+              ]}
+            />
+          </div>
+          <div className="field">
+            <label>From</label>
+            <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>To</label>
+            <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Shift</label>
+            <select value={shift} onChange={(e) => setShift(e.target.value as typeof shift)}>
+              <option value="all">All shifts</option>
+              <option value="morning">Morning</option>
+              <option value="evening">Evening</option>
+              <option value="night">Night</option>
+            </select>
+          </div>
+          {type !== 'sack' && (
+            <div className="field">
+              <label>Station</label>
+              <input type="number" min={1} max={14} placeholder="any" value={station} onChange={(e) => setStation(e.target.value)} />
+            </div>
+          )}
+          {type !== 'reject' && (
+            <div className="field">
+              <label>Status</label>
+              <select value={inRange} onChange={(e) => setInRange(e.target.value as typeof inRange)}>
+                <option value="all">Any</option>
+                <option value="true">In range</option>
+                <option value="false">Out of range</option>
+              </select>
+            </div>
+          )}
+          {type === 'reject' && (
+            <div className="field">
+              <label>Reject type</label>
+              <select value={rejectType} onChange={(e) => setRejectType(e.target.value as typeof rejectType)}>
+                <option value="all">All</option>
+                <option value="quality">Quality</option>
+                <option value="weight">Weight</option>
+              </select>
+            </div>
+          )}
+          <div className="field">
+            <label>Weight min ({weightUnit})</label>
+            <input type="number" value={wMin} placeholder="any" onChange={(e) => setWMin(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Weight max ({weightUnit})</label>
+            <input type="number" value={wMax} placeholder="any" onChange={(e) => setWMax(e.target.value)} />
+          </div>
         </div>
       )}
 
-      <div className="quick-filters">
-        <span className="qf-label">Quick filters:</span>
-        <button className="abtn" onClick={() => { setInRange('false'); setContext(null); setTsWindow(null); }}>Out of range only</button>
-        <button
-          className="abtn"
-          disabled={!range.max}
-          onClick={() => { if (range.max) { setFrom(range.max); setTo(range.max); } setContext(null); setTsWindow(null); }}
-        >
-          Latest day
-        </button>
-        <button className="abtn" onClick={clearFilters}>Clear all</button>
-      </div>
-
-      <div className="filters register-filters">
-        <div className="field">
-          <label>Record type</label>
-          <Segmented
-            value={type}
-            onChange={setType}
-            options={[
-              { key: 'cone', label: 'Cones' },
-              { key: 'sack', label: 'Sacks' },
-              { key: 'reject', label: 'Rejects' },
-            ]}
-          />
-        </div>
-        <div className="field">
-          <label>From</label>
-          <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>To</label>
-          <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Shift</label>
-          <select value={shift} onChange={(e) => setShift(e.target.value as typeof shift)}>
-            <option value="all">All</option>
-            <option value="morning">Morning</option>
-            <option value="evening">Evening</option>
-            <option value="night">Night</option>
-          </select>
-        </div>
-        {type !== 'sack' && (
-          <div className="field">
-            <label>Station</label>
-            <select value={station} onChange={(e) => setStation(e.target.value)}>
-              <option value="">All</option>
-              {STATIONS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        {type === 'reject' && (
-          <div className="field">
-            <label>Reject type</label>
-            <select value={rejectType} onChange={(e) => setRejectType(e.target.value as typeof rejectType)}>
-              <option value="all">All</option>
-              <option value="quality">Quality (coded)</option>
-              <option value="weight">Weight</option>
-            </select>
-          </div>
-        )}
-        {/* reject_event has no in_range column, so the control would be a lie */}
-        {type !== 'reject' && (
-          <div className="field">
-            <label>In range</label>
-            <select value={inRange} onChange={(e) => setInRange(e.target.value as typeof inRange)}>
-              <option value="all">All</option>
-              <option value="true">In range</option>
-              <option value="false">Out of range</option>
-            </select>
-          </div>
-        )}
-        <div className="field">
-          <label>Weight min ({weightUnit})</label>
-          <input type="number" inputMode="decimal" value={wMin} placeholder="—" onChange={(e) => setWMin(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Weight max ({weightUnit})</label>
-          <input type="number" inputMode="decimal" value={wMax} placeholder="—" onChange={(e) => setWMax(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>&nbsp;</label>
-          <a className="abtn primary" href={eventsExportUrl(query)} download>
-            Export CSV
-          </a>
-        </div>
-      </div>
-
       {error ? (
-        <div className="error-card"><b>Couldn't load the register.</b> {error}</div>
+        <div className="error-card" role="alert"><b>Couldn't load records.</b> {error}</div>
       ) : (
-        <div className="panel">
-          <h2>{type === 'cone' ? 'Cone' : type === 'sack' ? 'Sack' : 'Reject'} register</h2>
-          <div className="hint">
-            {fmtInt(total)} matching record{total === 1 ? '' : 's'}. Click a row for full detail.
-            {type === 'reject' && (
-              <>
-                {' '}Quality rejects carry two raw inspection codes and <b>no weight</b> — the source
-                table has no weight column — so the weight column is blank for them and sorting by
-                weight groups them together. Codes show their meaning once labelled on the Rejects page.
-              </>
-            )}
-          </div>
-          <div className="table-scroll">
-            <table className="reg-table">
-              <thead>
-                <tr>
-                  <th className="sortable" aria-sort={sort === 'time' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
-                    <button type="button" className="th-sort" onClick={() => toggleSort('time')}>
-                      Production time <span aria-hidden="true">{sort === 'time' ? (dir === 'desc' ? '▾' : '▴') : ''}</span>
-                    </button>
-                  </th>
-                  <th>Shift</th>
-                  {type === 'sack' ? <th>Sack #</th> : <th>Station</th>}
-                  <th className="sortable num" aria-sort={sort === 'weight' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
-                    <button type="button" className="th-sort" onClick={() => toggleSort('weight')}>
-                      Weight <span aria-hidden="true">{sort === 'weight' ? (dir === 'desc' ? '▾' : '▴') : ''}</span>
-                    </button>
-                  </th>
-                  {type === 'reject' ? <th>Reason</th> : <th>Status</th>}
-                </tr>
-              </thead>
-              <tbody style={{ opacity: revealed ? 1 : 0.4, transition: 'opacity 200ms' }}>
-                {loading && rows.length === 0 ? (
-                  <tr><td colSpan={5} className="reg-empty">Loading…</td></tr>
-                ) : rows.length === 0 ? (
-                  <tr><td colSpan={5} className="reg-empty">No records match these filters.</td></tr>
-                ) : (
-                  rows.map((r) => (
-                    <tr
-                      key={String(r.source_row_id)}
-                      className="reg-row"
-                      {...activatable(
-                        () => onOpenDetail(type, r.source_row_id),
-                        `Open ${type} ${r.source_row_id}, ${fmtDateTime(r.production_ts_utc)}`,
+        <div className="rec-grid">
+          <div className="rec-table">
+            <div className="rt-head" role="row">
+              <button type="button" className="rth sortable" onClick={() => toggleSort('time')}
+                      aria-sort={sort === 'time' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+                Production time <span aria-hidden="true">{sort === 'time' ? (dir === 'desc' ? '↓' : '↑') : ''}</span>
+              </button>
+              <span className="rth">Shift</span>
+              <span className="rth">{type === 'sack' ? 'Sack' : 'Stn'}</span>
+              <button type="button" className="rth sortable num" onClick={() => toggleSort('weight')}
+                      aria-sort={sort === 'weight' ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+                Weight <span aria-hidden="true">{sort === 'weight' ? (dir === 'desc' ? '↓' : '↑') : ''}</span>
+              </button>
+              <span className="rth num">{type === 'reject' ? 'Reason' : 'Status'}</span>
+            </div>
+
+            {loading && rows.length === 0 ? (
+              <div className="rt-empty">Loading…</div>
+            ) : rows.length === 0 ? (
+              <div className="rt-empty">No records match these filters.</div>
+            ) : (
+              rows.map((r) => {
+                const id = String(r.source_row_id);
+                const isSel = selected != null && String(selected.source_row_id) === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`rt-row${isSel ? ' sel' : ''}`}
+                    aria-current={isSel ? 'true' : undefined}
+                    onClick={() => setSelectedId(id)}
+                    onDoubleClick={() => onOpenDetail(type, r.source_row_id)}
+                  >
+                    <span>{fmtDateTime(r.production_ts_utc)}</span>
+                    <span className="dim cap">{r.shift_code}</span>
+                    <span className="dim">{type === 'sack' ? (r.sack_num ?? '—') : (r.source_station ?? '—')}</span>
+                    <span className="num">
+                      {/* Quality rejects carry no weight at source (rejectQCS1 has no
+                          weight column), so an em dash is the honest answer rather
+                          than a zero that would read as "weighed nothing". */}
+                      {type === 'sack'
+                        ? `${r.weight_kg} ${weightUnit}`
+                        : r.weight_g == null
+                          ? '—'
+                          : `${r.weight_g} ${weightUnit}`}
+                    </span>
+                    <span className="num">
+                      {type === 'reject' ? (
+                        <RejectReasonCell row={r} />
+                      ) : (
+                        <span className={`pill ${r.in_range ? 'on' : 'off'}`}>{r.in_range ? 'in range' : 'out of range'}</span>
                       )}
-                    >
-                      <td className="mono">{fmtDateTime(r.production_ts_utc)}</td>
-                      <td className="cap">{r.shift_code}</td>
-                      <td className="mono">{type === 'sack' ? (r.sack_num ?? '—') : (r.source_station ?? '—')}</td>
-                      <td className="mono num">
-                        {/* Quality rejects carry no weight at source (rejectQCS1 has no
-                            weight column), so an em dash here is the honest answer
-                            rather than a zero that would read as "weighed nothing". */}
-                        {type === 'sack'
-                          ? `${r.weight_kg} ${weightUnit}`
-                          : r.weight_g == null
-                            ? '—'
-                            : `${r.weight_g} ${weightUnit}`}
-                      </td>
-                      <td>
-                        {type === 'reject' ? (
-                          <RejectReasonCell row={r} />
-                        ) : (
-                          <span className={`pill ${r.in_range ? 'on' : 'off'}`}>{r.in_range ? 'in range' : 'out of range'}</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+
+            <div className="rt-pager">
+              <span>
+                {total === 0
+                  ? 'no rows'
+                  : `rows ${fmtInt((page - 1) * PAGE_SIZE + 1)}–${fmtInt(Math.min(page * PAGE_SIZE, total))} of ${fmtInt(total)}`}
+              </span>
+              <span className="rtp-btns">
+                <button type="button" className="pgbtn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>prev</button>
+                <button type="button" className="pgbtn next" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>next</button>
+              </span>
+            </div>
           </div>
 
-          <div className="reg-pager">
-            <button className="abtn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
-            <span className="reg-pageinfo">Page {page} of {totalPages}</span>
-            <button className="abtn" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
-          </div>
+          <RecordRail
+            row={selected}
+            type={type}
+            weightUnit={weightUnit}
+            setpointG={setpointG}
+            onOpenDetail={onOpenDetail}
+            onSeeStation={onSeeStation}
+            onReadingsAround={readingsAround}
+          />
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The sticky detail rail. Everything here comes from the row already loaded in
+ * the table, so selection is instant and costs no request.
+ *
+ * Three fields are judgements rather than raw values, and each is marked when it
+ * disagrees with the plant's own record: the stored shift (wrong on 4.45% of
+ * rows because it is derived from insert time), the merge key (unique or
+ * colliding — DQ-2), and the weight against the current product's setpoint,
+ * which is an approximation because historical rows carry no product.
+ */
+function RecordRail({
+  row,
+  type,
+  weightUnit,
+  setpointG,
+  onOpenDetail,
+  onSeeStation,
+  onReadingsAround,
+}: {
+  row: RegisterRow | null;
+  type: RegisterType;
+  weightUnit: string;
+  setpointG: number | null;
+  onOpenDetail: (type: RegisterType, id: string | number) => void;
+  onSeeStation: () => void;
+  onReadingsAround: (r: RegisterRow) => void;
+}) {
+  if (!row) {
+    return (
+      <aside className="rec-rail">
+        <div className="rr-head">
+          <div className="rr-eyebrow">Nothing selected</div>
+          <div className="rr-id">—</div>
+        </div>
+        <div className="rr-body">
+          <p className="empty-note">Pick a row to see everything recorded about it.</p>
+        </div>
+      </aside>
+    );
+  }
+
+  const noun = type === 'cone' ? 'cone' : type === 'sack' ? 'sack' : 'reject';
+  const weight = type === 'sack' ? row.weight_kg : row.weight_g;
+  const shiftDisagrees = row.shift_code_legacy != null && row.shift_code_legacy !== row.shift_code;
+  const vsSetpoint =
+    type === 'cone' && setpointG != null && row.weight_g != null ? round1(row.weight_g - setpointG) : null;
+
+  const fields: { k: string; v: ReactNode; tone?: string }[] = [
+    { k: 'Production time', v: fmtDateTime(row.production_ts_utc) },
+    { k: 'Shift (corrected)', v: <span className="cap">{row.shift_code}</span> },
+    {
+      k: 'Shift as stored',
+      v: row.shift_code_legacy ? <span className="cap">{row.shift_code_legacy}</span> : '—',
+      tone: shiftDisagrees ? 'warn' : undefined,
+    },
+  ];
+  if (type === 'sack') {
+    fields.push({ k: 'Sack number', v: row.sack_num ?? '—' });
+  } else {
+    fields.push({ k: 'Station', v: row.source_station ?? '—' });
+  }
+  if (type === 'reject') {
+    fields.push({ k: 'Reject type', v: row.reject_type ?? '—' });
+    fields.push({ k: 'Tube code', v: row.tube_inspect_code ?? '—' });
+    fields.push({ k: 'Material code', v: row.material_inspect_code ?? '—' });
+    fields.push({ k: 'Meaning', v: row.reject_label ?? 'not yet named (Q10)', tone: row.reject_label ? undefined : 'warn' });
+  }
+  if (weight != null) {
+    fields.push({
+      k: 'Weight',
+      v: `${weight} ${weightUnit}`,
+      tone: row.in_range === false ? 'alarm' : undefined,
+    });
+  }
+  if (vsSetpoint != null) {
+    fields.push({ k: 'Against setpoint', v: `${vsSetpoint > 0 ? '+' : ''}${vsSetpoint} g` });
+  }
+  if (type === 'cone') fields.push({ k: 'Hanger', v: row.hanger_num ?? '—' });
+  fields.push({ k: 'Product', v: row.lot_code ?? 'not attributed', tone: row.lot_code ? undefined : 'muted' });
+  fields.push({
+    k: 'Merge key',
+    v: row.merge_key_is_unique ? 'unique' : 'collides',
+    tone: row.merge_key_is_unique ? 'ok' : 'warn',
+  });
+  fields.push({ k: 'Source row', v: String(row.source_id ?? row.source_row_id) });
+
+  return (
+    <aside className="rec-rail">
+      <div className="rr-head">
+        <div className="rr-eyebrow">Selected {noun}</div>
+        <div className="rr-id">#{String(row.source_row_id)}</div>
+      </div>
+      <div className="rr-body">
+        {fields.map((f, i) => (
+          <div className="rr-row" key={i}>
+            <span className="rrr-k">{f.k}</span>
+            <span className={`rrr-v${f.tone ? ` ${f.tone}` : ''}`}>{f.v}</span>
+          </div>
+        ))}
+        <div className="rr-actions">
+          {type !== 'sack' && (
+            <button type="button" className="cta" onClick={onSeeStation}>See its station</button>
+          )}
+          <button type="button" className="ghost-btn" onClick={() => onReadingsAround(row)}>Readings around it</button>
+          <button type="button" className="rr-link" onClick={() => onOpenDetail(type, row.source_row_id)}>
+            Open the full record →
+          </button>
+        </div>
+      </div>
+    </aside>
   );
 }
 

@@ -402,7 +402,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  app.get('/api/events/export', async (req: Request, res: Response, next: NextFunction) => {
+  // Bulk export is manager+ per the interface spec's role table. Paged reads
+  // stay at the blanket requireRole(1): looking at a page of records is not the
+  // same act as walking off with all 142k rows.
+  app.get('/api/events/export', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const q = parseRegisterQuery(req.query);
       if (!q) {
