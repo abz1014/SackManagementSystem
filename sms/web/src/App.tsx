@@ -1588,19 +1588,14 @@ function DashboardView({
             max={range.max ?? undefined}
             onChange={(e) => setDate(e.target.value)}
           />
-          <div className="seg" role="group" aria-label="Shift">
-            {SHIFTS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={shift === s ? 'active' : ''}
-                aria-pressed={shift === s}
-                onClick={() => setShift(s)}
-              >
-                {s === 'all' ? 'All shifts' : s[0]!.toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            value={shift}
+            onChange={setShift}
+            options={SHIFTS.map((s) => ({
+              key: s,
+              label: s === 'all' ? 'All shifts' : s[0]!.toUpperCase() + s.slice(1),
+            }))}
+          />
         </div>
       </header>
 
@@ -1770,10 +1765,6 @@ function DashboardView({
 
 
 
-/** 7-day instrument trace — the signature readout element. Pure data, no chart
- *  library: a thin green polyline over the tile's own history. Draws itself in
- *  once per data set via the stroke-dasharray/dashoffset technique, like an
- *  oscilloscope trace sweeping across, then fades the reading dot in. */
 /**
  * KPI sparkline — 7 days of one measure, to the design's geometry
  * (viewBox 0 0 92 26, 1.5px stroke, baseline hairline at y=25).
@@ -5045,18 +5036,15 @@ function ShiftView({
               </span>
             </div>
 
-            <div className="seg" role="group" aria-label="Trend measure" style={{ marginBottom: 4 }}>
-              {(['cones', 'reject'] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  className={trendMetric === k ? 'active' : ''}
-                  aria-pressed={trendMetric === k}
-                  onClick={() => setTrendMetric(k)}
-                >
-                  {k === 'cones' ? 'Cones' : 'Reject rate'}
-                </button>
-              ))}
+            <div style={{ marginBottom: 4 }}>
+              <Segmented
+                value={trendMetric}
+                onChange={setTrendMetric}
+                options={[
+                  { key: 'cones' as const, label: 'Cones' },
+                  { key: 'reject' as const, label: 'Reject rate' },
+                ]}
+              />
             </div>
 
             {trendSeries && (
