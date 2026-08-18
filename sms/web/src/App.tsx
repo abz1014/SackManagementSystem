@@ -66,7 +66,7 @@ import {
 } from './api';
 import { AppShell, canOpen, VIEW_LABEL, type View, type SectionConfig } from './shell';
 import { downloadCsv, csvName, type CsvRow } from './csv';
-import { fmtInt, fmtKg, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmtDateTime, fmtTime } from './format';
+import { fmtInt, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmtDateTime, fmtTime } from './format';
 
 type Shift = 'all' | 'morning' | 'evening' | 'night';
 const SHIFTS: Shift[] = ['all', 'morning', 'evening', 'night'];
@@ -265,7 +265,7 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
         title: 'Output',
         subTabs: [
           { key: 'oee', label: 'Effectiveness', note: 'OEE and its three parts' },
-          { key: 'stops', label: 'Stops', note: "one day's downtime" },
+          { key: 'stops', label: 'Stops', note: 'downtime and throughput' },
           { key: 'patterns', label: 'Patterns', note: 'when stops repeat' },
         ],
       };
@@ -274,8 +274,8 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
         eyebrow: 'Grams per cone',
         title: 'Weight',
         subTabs: [
-          { key: 'spread', label: 'Spread', note: 'distribution and stations' },
-          { key: 'stability', label: 'Stability', note: 'control through the day' },
+          { key: 'spread', label: 'Spread', note: 'cone and sack distribution' },
+          { key: 'stability', label: 'Stability', note: 'stations and control over time' },
         ],
       };
     case 'rejects':
@@ -373,9 +373,8 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       fromLabel: VIEW_LABEL[view],
       title: e.title,
       detail: e.because,
-      sub: e.sub,
     });
-    navigate({ view: e.view, detailType: undefined, detailId: undefined });
+    navigate({ view: e.view, sub: e.sub, detailType: undefined, detailId: undefined });
   };
 
   const openRegisterDetail = (detailType: RegisterType, detailId: string | number) =>
@@ -407,6 +406,9 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     sacks: 5462,
     rejects: 3146,
   });
+  // One value drives the column highlight, the hub content and the URL.
+  const activeSub = route.sub ?? section.subTabs[0]?.key ?? '';
+  const goSub = (k: string) => navigate({ sub: k });
 
   return (
     <AppShell
@@ -416,9 +418,9 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       freshness={freshness}
       productLabel={null}
       section={section}
-      sub={route.sub ?? section.subTabs[0]?.key ?? ''}
+      sub={activeSub}
       onNavigate={(v) => setView(v)}
-      onSub={(k) => navigate({ sub: k })}
+      onSub={goSub}
       onSignOut={doLogout}
       onOpenSync={() => setView('operations')}
     >
@@ -465,13 +467,13 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           onCloseDetail={closeRegisterDetail}
         />
       ) : view === 'performance' ? (
-        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} initialSub={navContext?.sub} />
+        <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} onSub={goSub} />
       ) : view === 'weight' ? (
-        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} initialSub={navContext?.sub} />
+        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} onSub={goSub} />
       ) : view === 'shift' ? (
         <ShiftView range={range} onMeta={setFreshness} />
       ) : view === 'rejects' ? (
-        <RejectsHub range={range} onMeta={setFreshness} rank={rank} initialSub={navContext?.sub} />
+        <RejectsHub range={range} onMeta={setFreshness} rank={rank} sub={activeSub} onSub={goSub} />
       ) : view === 'operations' ? (
         <OperationsView onMeta={setFreshness} />
       ) : (
@@ -486,20 +488,41 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
  * pages that answered the same underlying question. No page logic changed —
  * only where it lives in the nav. */
 
+/**
+ * Route key <-> hub key maps.
+ *
+ * The section column and these hubs were built at different times and named the
+ * same tabs differently ('stops' vs 'downtime', 'spread' vs 'distribution',
+ * 'reasons' vs 'pareto'). While each hub kept its own useState the mismatch was
+ * invisible AND fatal: clicking a column tab changed the URL and the highlight
+ * but never the content, because the hub seeded its state once and ignored the
+ * route afterwards.
+ *
+ * The route key is now the single source of truth — it is what a permalink
+ * carries, so it uses the design's user-facing names. Each hub maps it onto its
+ * own internal union rather than being renamed throughout.
+ */
+const PERF_SUB = { oee: 'oee', stops: 'downtime', patterns: 'patterns' } as const;
+const WEIGHT_SUB = { spread: 'distribution', stability: 'spc' } as const;
+const REJECT_SUB = { reasons: 'pareto', trend: 'trend', station: 'station' } as const;
+const routeKey = <T extends Record<string, string>>(map: T, hubKey: string): string =>
+  Object.keys(map).find((k) => map[k as keyof T] === hubKey) ?? Object.keys(map)[0]!;
+
 function PerformanceHub({
   range,
   onMeta,
   onInspect,
-  initialSub,
+  sub: routeSub,
+  onSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
-  initialSub?: string;
+  sub: string;
+  onSub: (k: string) => void;
 }) {
-  const [sub, setSub] = useState<'oee' | 'downtime' | 'patterns'>(
-    (initialSub as 'oee' | 'downtime' | 'patterns') ?? 'oee',
-  );
+  const sub = PERF_SUB[routeSub as keyof typeof PERF_SUB] ?? 'oee';
+  const setSub = (k: string) => onSub(routeKey(PERF_SUB, k));
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -528,14 +551,17 @@ function WeightHub({
   range,
   onMeta,
   onInspect,
-  initialSub,
+  sub: routeSub,
+  onSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
-  initialSub?: string;
+  sub: string;
+  onSub: (k: string) => void;
 }) {
-  const [sub, setSub] = useState<'spc' | 'distribution'>((initialSub as 'spc' | 'distribution') ?? 'spc');
+  const sub = WEIGHT_SUB[routeSub as keyof typeof WEIGHT_SUB] ?? 'distribution';
+  const setSub = (k: string) => onSub(routeKey(WEIGHT_SUB, k));
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -561,16 +587,17 @@ function RejectsHub({
   range,
   onMeta,
   rank,
-  initialSub,
+  sub: routeSub,
+  onSub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
-  initialSub?: string;
+  sub: string;
+  onSub: (k: string) => void;
 }) {
-  const [sub, setSub] = useState<'pareto' | 'trend' | 'station'>(
-    (initialSub as 'pareto' | 'trend' | 'station') ?? 'pareto',
-  );
+  const sub = REJECT_SUB[routeSub as keyof typeof REJECT_SUB] ?? 'pareto';
+  const setSub = (k: string) => onSub(routeKey(REJECT_SUB, k));
   return (
     <>
       <div className="filters" style={{ marginBottom: 6 }}>
@@ -831,7 +858,6 @@ interface NavContext {
   fromLabel: string;
   title: string;
   detail?: string;
-  sub?: string;
 }
 
 function round1(n: number): number {
@@ -930,34 +956,6 @@ function ChartTip({ x, y = 4, lines, fontPx }: { x: number; y?: number; lines: T
   );
 }
 
-/** Props that make a non-button element (a table row, mostly) behave like one
- * for keyboard users: focusable, and activated by Enter or Space. Rows are the
- * primary drill-down in this app, so leaving them mouse-only put the main
- * navigation out of reach on a plant terminal without a working mouse. */
-function activatable(onActivate: () => void, label?: string) {
-  return {
-    tabIndex: 0,
-    role: 'button' as const,
-    'aria-label': label,
-    onClick: onActivate,
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onActivate();
-      }
-    },
-  };
-}
-
-function computeDelta(current: number, priorValues: number[]): { pct: number; dir: 'up' | 'down' | 'flat'; text: string } | null {
-  const valid = priorValues.filter((v) => Number.isFinite(v));
-  if (valid.length === 0) return null;
-  const avg = valid.reduce((s, v) => s + v, 0) / valid.length;
-  if (avg === 0) return null;
-  const pct = ((current - avg) / avg) * 100;
-  const dir: 'up' | 'down' | 'flat' = Math.abs(pct) < 2 ? 'flat' : pct > 0 ? 'up' : 'down';
-  return { pct, dir, text: `${pct > 0 ? '+' : ''}${pct.toFixed(1)}% vs ${valid.length}-day avg` };
-}
 
 function DashboardView({
   range,
@@ -1034,28 +1032,7 @@ function DashboardView({
     };
   }, [date, shift, onMeta]);
 
-  const total: ProductionRow | null = kpi?.data.rows[0] ?? null;
-  const meta = kpi?.metadata;
-  const rejectRate = useMemo(() => {
-    if (!total) return null;
-    const denom = total.cones + total.rejectedCones;
-    return denom > 0 ? (100 * total.rejectedCones) / denom : 0;
-  }, [total]);
 
-  const priorTrend = trend.length > 1 ? trend.slice(0, -1) : [];
-  const conesDelta = total ? computeDelta(total.cones, priorTrend.map((r) => r.cones)) : null;
-  const sacksDelta = total?.sacks != null ? computeDelta(total.sacks, priorTrend.map((r) => r.sacks ?? 0)) : null;
-  const weightDelta = total?.sackWeightKg != null ? computeDelta(total.sackWeightKg, priorTrend.map((r) => r.sackWeightKg ?? 0)) : null;
-  const rejectRateDelta = useMemo(() => {
-    if (!total) return null;
-    const priorRates = priorTrend
-      .map((r) => {
-        const denom = r.cones + r.rejectedCones;
-        return denom > 0 ? (100 * r.rejectedCones) / denom : NaN;
-      })
-      .filter((v) => Number.isFinite(v));
-    return rejectRate != null ? computeDelta(rejectRate, priorRates) : null;
-  }, [total, priorTrend, rejectRate]);
 
   const exceptions = useMemo<Exception[]>(() => {
     const out: Exception[] = [];
@@ -1074,7 +1051,7 @@ function DashboardView({
             </>
           ),
           view: 'weight',
-          sub: 'spc',
+          sub: 'stability', // SpcView renders the per-station ANOM chart
           because: `Station ${top.station} sits ${top.delta > 0 ? '+' : ''}${top.delta}${spc.unit} off the line average. The per-station chart below is where that shows up.`,
         });
       }
@@ -1091,7 +1068,7 @@ function DashboardView({
             </>
           ),
           view: 'weight',
-          sub: 'spc',
+          sub: 'stability', // the control chart is on Stability
           because: `${spc.xbarOutOfControl} subgroups breached the control band. Look at the X-bar chart for when the mean moved.`,
         });
       }
@@ -1109,7 +1086,7 @@ function DashboardView({
             </>
           ),
           view: 'performance',
-          sub: 'downtime',
+          sub: 'stops',
           because: `${downtime.stoppageCount} stoppages cost ${fmtDuration(downtime.totalDownSeconds)} today. The timeline shows when the line was down.`,
         });
       }
@@ -1136,198 +1113,319 @@ function DashboardView({
     const order = { fault: 0, warn: 1, info: 2 };
     return out.sort((a, b) => order[a.severity] - order[b.severity]);
   }, [spc, downtime, baselineAvailability, rejectSpc, date]);
+  // ---- derived presentation values -------------------------------------
+  // The design's copy quotes fixed numbers ("7 stops", "Night runs 15% behind").
+  // Every one of them is computed here instead: several are simply false for
+  // this plant, and the emphasis (alarm colour, which shift is called out)
+  // follows the computed answer rather than the prototype's assumption.
+  const dayLabel = date
+    ? new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, {
+        weekday: 'long', day: 'numeric', month: 'long',
+      })
+    : '';
+
+  const ribbon = useMemo(() => {
+    if (!downtime?.firstTs || !downtime.lastTs) return null;
+    const t0 = new Date(downtime.firstTs).getTime();
+    const span = Math.max(1, new Date(downtime.lastTs).getTime() - t0);
+    const blocks = downtime.stoppages.map((s) => ({
+      left: ((new Date(s.startTs).getTime() - t0) / span) * 100,
+      // a 2-minute stop on a 24-hour axis is 0.14% wide and would vanish; the
+      // design floors it so every stop stays visible and hoverable
+      width: Math.max(0.45, ((s.durationSeconds * 1000) / span) * 100),
+      seconds: s.durationSeconds,
+      startTs: s.startTs,
+    }));
+    const longest = [...downtime.stoppages].sort((a, b) => b.durationSeconds - a.durationSeconds)[0] ?? null;
+
+    // Shift bands are placed from the real 14:00 and 22:00 boundaries, not by
+    // cutting the ribbon into thirds. They only coincide on a full 24h day that
+    // starts at 06:00; on a short day (line down at start of shift, or today
+    // still running) thirds would put the dividers — and the shift labels —
+    // over the wrong stretch of the ribbon and quietly misattribute stoppages.
+    const pctAt = (d: Date) => ((d.getTime() - t0) / span) * 100;
+    // Built in UTC, like every other timestamp on this screen: the plant's wall
+    // clock is stamped as UTC in the source data, which is why format.ts renders
+    // with timeZone 'UTC'. Constructing these boundaries in the browser's local
+    // zone instead put them five hours out on a UTC+5 machine.
+    const bounds = [14, 22].map((h) => pctAt(new Date(`${date}T${String(h).padStart(2, '0')}:00:00Z`)));
+    const edges = [0, ...bounds, 100];
+    const bands = ['Morning', 'Evening', 'Night']
+      .map((name, i) => ({
+        name,
+        // clamp so a band that is only partly on screen still labels its
+        // visible portion rather than drifting off the end
+        centre: (Math.max(0, edges[i]!) + Math.min(100, edges[i + 1]!)) / 2,
+        visible: Math.min(100, edges[i + 1]!) - Math.max(0, edges[i]!) > 6,
+      }))
+      .filter((b) => b.visible);
+
+    return {
+      blocks,
+      longest,
+      dividers: bounds.filter((p) => p > 0 && p < 100),
+      bands,
+      runSeconds: downtime.totalRunSeconds,
+      downSeconds: downtime.totalDownSeconds,
+    };
+  }, [downtime, date]);
+
+  const kpiCards = useMemo(() => {
+    const row = kpi?.data.rows[0];
+    if (!row) return [];
+    const cones = row.cones ?? 0;
+    const rejected = row.rejectedCones ?? 0;
+    const sacks = row.sacks ?? 0;
+    const kg = row.sackWeightKg ?? 0;
+    const weighed = cones + rejected;
+    const series = (pick: (r: ProductionRow) => number) => trend.map(pick);
+    return [
+      {
+        key: 'cones', label: 'Total cones', value: fmtInt(cones), unit: '', alarm: false,
+        foot: row.conesInRangePct != null ? `${row.conesInRangePct}% in weight range` : '—',
+        series: series((r) => r.cones ?? 0),
+      },
+      {
+        key: 'rejected', label: 'Rejected cones', value: fmtInt(rejected), unit: '', alarm: true,
+        foot: weighed > 0 ? `${((100 * rejected) / weighed).toFixed(2)}% of all weighed` : '—',
+        series: series((r) => r.rejectedCones ?? 0),
+      },
+      {
+        key: 'sacks', label: 'Total sacks', value: fmtInt(sacks), unit: '', alarm: false,
+        foot: sacks > 0 ? `${(cones / sacks).toFixed(1)} cones per sack` : '—',
+        series: series((r) => r.sacks ?? 0),
+      },
+      {
+        key: 'kg', label: 'Sack weight', value: fmtInt(Math.round(kg)), unit: 'kg', alarm: false,
+        foot: sacks > 0 ? `${(kg / sacks).toFixed(1)} kg average` : '—',
+        series: series((r) => r.sackWeightKg ?? 0),
+      },
+    ];
+  }, [kpi, trend]);
+
+  // Which shift actually trails, and by how much. The design hardcodes night;
+  // on this line night is the strongest and morning the weakest, so the callout
+  // and the alarm bar are driven by the data.
+  const shiftBars = useMemo(() => {
+    const rows = (byShift?.rows ?? []).filter((r) => r.group !== 'total');
+    if (rows.length === 0) return null;
+    const order: readonly string[] = SHIFT_ORDER;
+    const sorted = [...rows].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+    const max = Math.max(1, ...sorted.map((r) => r.cones ?? 0));
+    const worst = [...sorted].sort((a, b) => (a.cones ?? 0) - (b.cones ?? 0))[0]!;
+    const others = sorted.filter((r) => r.group !== worst.group);
+    const otherAvg = others.length ? others.reduce((s, r) => s + (r.cones ?? 0), 0) / others.length : 0;
+    const behindPct = otherAvg > 0 ? Math.round((100 * (otherAvg - (worst.cones ?? 0))) / otherAvg) : 0;
+    // Comparing shifts needs at least two of them. The last day in the data set
+    // is a part-day with only a morning shift, and the three-shift sentence read
+    // as a finding about shifts that never ran.
+    return {
+      rows: sorted,
+      max,
+      worst: worst.group,
+      behindPct,
+      comparable: sorted.length > 1,
+      others: others.map((r) => r.group),
+    };
+  }, [byShift]);
 
   return (
     <>
-      <CurrentProductBar rank={rank} />
-      <div className="filters">
-        <div className="field">
-          <label htmlFor="d">Production date</label>
+      <header className="ov-head">
+        <div>
+          <div className="eyebrow">Production day · last complete</div>
+          <h2 className="ov-day">{dayLabel || '—'}</h2>
+        </div>
+        <div className="ov-head-controls">
           <input
-            id="d"
             type="date"
+            className="ov-date"
+            aria-label="Production date"
             value={date}
             min={range.min ?? undefined}
             max={range.max ?? undefined}
             onChange={(e) => setDate(e.target.value)}
           />
-        </div>
-        <div className="field">
-          <label>Shift</label>
-          <Segmented
-            value={shift}
-            onChange={setShift}
-            options={SHIFTS.map((s) => ({ key: s, label: s === 'all' ? 'All' : s[0]!.toUpperCase() + s.slice(1) }))}
-          />
-        </div>
-      </div>
-
-      {error ? (
-        <div className="error-card">
-          <b>Couldn't load production data.</b> {error}
-        </div>
-      ) : loading || !total ? (
-        <>
-          <div className="tile skeleton" style={{ height: 100, marginBottom: 22 }} />
-          <div className="kpis">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="tile skeleton" />
+          <div className="seg" role="group" aria-label="Shift">
+            {SHIFTS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={shift === s ? 'active' : ''}
+                aria-pressed={shift === s}
+                onClick={() => setShift(s)}
+              >
+                {s === 'all' ? 'All shifts' : s[0]!.toUpperCase() + s.slice(1)}
+              </button>
             ))}
           </div>
-        </>
+        </div>
+      </header>
+
+      {error ? (
+        <div className="error-card" role="alert"><b>Couldn't load production data.</b> {error}</div>
+      ) : loading || !downtime ? (
+        <div className="sk sk-ribbon" />
       ) : (
         <>
-          {downtime && <LineStatusPanel downtime={downtime} />}
+          <CurrentProductBar rank={rank} />
 
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="panel-head">
-              <h2>Needs attention</h2>
-              <span className="sub">{exceptions.length} open</span>
-            </div>
-            {exceptions.length === 0 ? (
-              <div className="exc-empty">✓ Nothing flagged — weight, rejects, and availability are all within normal range today.</div>
-            ) : (
-              <div className="exc-list">
-                {exceptions.map((e, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    className="exc-item"
-                    onClick={() => onNavigate(e)}
-                    aria-label={`${e.severity}: ${e.title}. ${e.message}. Open ${e.view}.`}
-                  >
-                    <div className={`exc-sev ${e.severity}`}>{e.severity}</div>
-                    <div className="exc-body">
-                      <div className="exc-title">{e.title}</div>
-                      <div className="exc-msg">{e.message}</div>
-                    </div>
-                    <div className="exc-go" aria-hidden="true">›</div>
-                  </button>
-                ))}
+          {/* Signature: the day as one 24-hour band of running and stopped. */}
+          <section className="panel ribbon-panel">
+            <div className="ribbon-head">
+              <div>
+                <div className="verdict">
+                  Line ran {fmtDuration(ribbon?.runSeconds ?? 0)} of {fmtDuration((ribbon?.runSeconds ?? 0) + (ribbon?.downSeconds ?? 0))}
+                </div>
+                <div className="verdict-sub">
+                  {downtime.stoppageCount === 0 ? (
+                    'No stops detected on this day.'
+                  ) : (
+                    <>
+                      {fmtInt(downtime.stoppageCount)} stop{downtime.stoppageCount === 1 ? '' : 's'}
+                      {ribbon?.longest && (
+                        <> · longest {fmtDuration(ribbon.longest.durationSeconds)} at {fmtTime(ribbon.longest.startTs)}</>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-            )}
+              <div className="ribbon-stats">
+                <div className="rs">
+                  <span className="rs-label">Availability</span>
+                  <span className={`rs-val${(downtime.availabilityPct ?? 100) < (baselineAvailability ?? 100) - 5 ? ' alarm' : ''}`}>
+                    {downtime.availabilityPct ?? '—'}%
+                  </span>
+                </div>
+                <div className="rs">
+                  <span className="rs-label">Between stops</span>
+                  <span className="rs-val">{fmtDuration(downtime.mtbfSeconds)}</span>
+                </div>
+                <div className="rs">
+                  <span className="rs-label">To restart</span>
+                  <span className="rs-val">{fmtDuration(downtime.mttrSeconds)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="ribbon">
+              {ribbon?.blocks.map((b, i) => (
+                <span
+                  key={i}
+                  className="ribbon-stop"
+                  style={{ left: `${b.left}%`, width: `${b.width}%` }}
+                  title={`${fmtDuration(b.seconds)} from ${fmtTime(b.startTs)}`}
+                />
+              ))}
+              {ribbon?.dividers.map((p, i) => (
+                <span key={i} className="ribbon-div" style={{ left: `${p}%` }} />
+              ))}
+            </div>
+            <div className="ribbon-axis">
+              <span className="ra-end start">{downtime.firstTs ? fmtTime(downtime.firstTs) : '—'}</span>
+              {ribbon?.bands.map((b) => (
+                <span key={b.name} className="ra-band" style={{ left: `${b.centre}%` }}>{b.name}</span>
+              ))}
+              <span className="ra-end finish">{downtime.lastTs ? fmtTime(downtime.lastTs) : '—'}</span>
+            </div>
+          </section>
+
+          <div className="kpis">
+            {kpiCards.map((c) => (
+              <section className="kpi" key={c.key}>
+                <div className="kpi-label">{c.label}</div>
+                <div className={`kpi-value${c.alarm ? ' alarm' : ''}`}>
+                  {c.value}
+                  {c.unit && <span className="kpi-unit">{c.unit}</span>}
+                </div>
+                <div className="kpi-foot">{c.foot}</div>
+                <Spark points={c.series} alarm={c.alarm} />
+              </section>
+            ))}
           </div>
 
-          <div className="kpis" style={{ marginTop: 16 }}>
-            <Tile label="Total Cones" value={total.cones} format={fmtInt}
-              trend={trend.map((r) => r.cones)}
-              delta={conesDelta ? { text: conesDelta.text, tone: 'neutral' } : null}
-              foot={<><span className="em">{total.conesInRangePct ?? '—'}%</span> in weight range</>} />
-            <Tile label="Rejected Cones" value={total.rejectedCones} format={fmtInt}
-              trend={trend.map((r) => r.rejectedCones)}
-              delta={rejectRateDelta ? { text: rejectRateDelta.text, tone: rejectRateDelta.dir === 'flat' ? 'neutral' : rejectRateDelta.dir === 'up' ? 'bad' : 'good' } : null}
-              foot={<>reject rate <span className="em">{rejectRate?.toFixed(2)}%</span></>} />
-            <Tile label="Total Sacks" value={total.sacks} format={fmtInt}
-              trend={trend.map((r) => r.sacks ?? 0)}
-              delta={sacksDelta ? { text: sacksDelta.text, tone: 'neutral' } : null}
-              foot={total.sacks && total.cones ? <>~<span className="em">{(total.cones / total.sacks).toFixed(1)}</span> cones/sack</> : <>&nbsp;</>} />
-            <Tile label="Sack Weight" value={total.sackWeightKg} format={fmtKg} unit="kg"
-              trend={trend.map((r) => r.sackWeightKg ?? 0)}
-              delta={weightDelta ? { text: weightDelta.text, tone: 'neutral' } : null}
-              foot={<>basis <span className="em">{meta?.weightBasis}</span></>} />
+          <div className="ov-grid">
+            <section className="panel light">
+              <div className="panel-head">
+                <h3 className="panel-title">Needs a look</h3>
+                <span className="mono-note">
+                  {exceptions.length} open
+                </span>
+              </div>
+              {exceptions.length === 0 ? (
+                <div className="empty-note">
+                  Nothing flagged — weight, rejects and availability are all inside their normal range today.
+                </div>
+              ) : (
+                <div className="findings">
+                  {exceptions.map((e, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className="finding"
+                      onClick={() => onNavigate(e)}
+                      aria-label={`${e.severity}: ${e.title}. Opens ${VIEW_LABEL[e.view]}.`}
+                    >
+                      <span className={`f-sev ${e.severity}`} aria-hidden="true" />
+                      <span className="f-body">
+                        <span className="f-title">{e.title}</span>
+                        <span className="f-detail">{e.message}</span>
+                      </span>
+                      <span className="f-go" aria-hidden="true">›</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="panel-foot">Each one opens the page that explains it.</div>
+            </section>
+
+            <section className="panel light">
+              <div className="panel-head">
+                <h3 className="panel-title">Cones by shift</h3>
+              </div>
+              {!shiftBars ? (
+                <div className="empty-note">No shift data for this day.</div>
+              ) : (
+                <>
+                  <div className="shiftbars">
+                    {shiftBars.rows.map((r) => (
+                      <div className="sb-row" key={r.group}>
+                        <span className="sb-name">{r.group}</span>
+                        <span className="sb-track">
+                          <span
+                            className={`sb-fill${r.group === shiftBars.worst ? ' alarm' : ''}`}
+                            style={{ width: `${(100 * (r.cones ?? 0)) / shiftBars.max}%` }}
+                          />
+                        </span>
+                        <span className="sb-val">{fmtInt(r.cones ?? 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="panel-foot">
+                    {!shiftBars.comparable ? (
+                      <>Only the <b className="cap">{shiftBars.worst}</b> shift ran on this day — nothing to compare it against.</>
+                    ) : shiftBars.behindPct > 0 ? (
+                      <>
+                        <b className="cap">{shiftBars.worst}</b> runs {shiftBars.behindPct}% behind{' '}
+                        {shiftBars.others.length > 1 ? 'the other two' : <span className="cap">{shiftBars.others[0]}</span>} on this day.
+                      </>
+                    ) : (
+                      <>
+                        All {shiftBars.rows.length === 2 ? 'both' : 'three'} shifts ran within a percent of each other on this day.
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
           </div>
-          <ShiftBreakdown data={byShift} />
-          {meta && <MetaStrip meta={meta} />}
         </>
       )}
     </>
   );
 }
 
-/** The line status strip — the Overview signature element. A real 24h
- * run/stop timeline (from the same gap-detection data Downtime uses) with
- * shift boundaries marked, so "how did the line do" is a glance, not a
- * multi-page investigation. */
-function LineStatusPanel({ downtime }: { downtime: DowntimeData }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const hasData = !!(downtime.firstTs && downtime.lastTs);
-  const t0 = hasData ? new Date(downtime.firstTs!).getTime() : 0;
-  const t1 = hasData ? new Date(downtime.lastTs!).getTime() : 0;
-  const span = Math.max(1, t1 - t0);
 
-  // shift boundaries at 14:00 and 22:00 local-labelled wall clock, expressed
-  // as a fraction of the observed [firstTs,lastTs] window for this date.
-  const dayStart = hasData ? new Date(downtime.firstTs!) : null;
-  const shiftFracs =
-    dayStart != null
-      ? [14, 22].map((h) => {
-          const t = Date.UTC(dayStart.getUTCFullYear(), dayStart.getUTCMonth(), dayStart.getUTCDate(), h, 0, 0);
-          const tAdj = t < t0 ? t + 86_400_000 : t;
-          return (tAdj - t0) / span;
-        })
-      : [];
-
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <h2>Line status — {downtime.date}</h2>
-        <span className="sub">{downtime.stoppageCount} stoppages · {fmtDuration(downtime.totalDownSeconds)} down</span>
-      </div>
-      <div className="status-strip-wrap">
-        <div className="status-strip">
-          {hasData &&
-            downtime.stoppages.map((s, i) => {
-              const l = ((new Date(s.startTs).getTime() - t0) / span) * 100;
-              const w = Math.max(0.25, (s.durationSeconds * 1000 / span) * 100);
-              return (
-                <div
-                  key={i}
-                  className={`status-seg${hover === i ? ' hot' : ''}`}
-                  style={{ left: `${l}%`, width: `${w}%` }}
-                  onMouseEnter={() => setHover(i)}
-                  onMouseLeave={() => setHover(null)}
-                >
-                  {/* segments can be 2px wide, so widen the hover target
-                      beyond the visible bar or thin stops are unhittable */}
-                  <span className="status-seg-hit" />
-                </div>
-              );
-            })}
-          {hover != null && downtime.stoppages[hover] && (() => {
-            const s = downtime.stoppages[hover]!;
-            const pct = ((new Date(s.startTs).getTime() - t0) / span) * 100;
-            // The panel clips overflow, so a centred tooltip on a stoppage near
-            // either edge gets its outer half cut off. Anchor by which third of
-            // the strip the stoppage sits in instead of always centring.
-            const edge = pct < 18 ? 'left' : pct > 82 ? 'right' : 'mid';
-            return (
-              <div
-                className={`status-tip ${edge}`}
-                style={edge === 'right' ? { right: `${100 - pct}%` } : { left: `${pct}%` }}
-              >
-                <b>{fmtDuration(s.durationSeconds)} down</b>
-                <span>{fmtTime(s.startTs)} – {fmtTime(s.endTs)}</span>
-                <span className="tip-rank">
-                  stoppage {hover + 1} of {downtime.stoppages.length} · longest first
-                </span>
-              </div>
-            );
-          })()}
-          {shiftFracs.map((f, i) => (
-            <div key={i} className="status-shiftline" style={{ left: `${f * 100}%` }} />
-          ))}
-        </div>
-        <div className="status-labels">
-          <span style={{ left: '0%' }}>{hasData ? fmtTime(downtime.firstTs!) : '—'}</span>
-          <span style={{ left: '100%' }}>{hasData ? fmtTime(downtime.lastTs!) : '—'}</span>
-        </div>
-        <div className="status-shiftband">
-          <div>Morning</div>
-          <div>Evening</div>
-          <div>Night</div>
-        </div>
-        <div className="status-legend">
-          <span><span className="dot ok" /> running — {downtime.availabilityPct ?? '—'}%</span>
-          <span><span className="dot stop" /> stopped ≥120s</span>
-          <span style={{ color: 'var(--graphite-dim)' }}>
-            MTBF <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>{fmtDuration(downtime.mtbfSeconds)}</b>
-            {' · '}MTTR <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>{fmtDuration(downtime.mttrSeconds)}</b>
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function Tile({
   label,
@@ -1360,7 +1458,7 @@ function Tile({
         {unit && value != null && <span className="unit">{unit}</span>}
       </div>
       {delta && <div className={`k-delta ${delta.tone === 'good' ? 'up' : delta.tone === 'bad' ? 'down' : 'flat'}`}>{delta.text}</div>}
-      {trend && trend.length > 1 && <Sparkline values={trend} />}
+      {trend && trend.length > 1 && <Spark points={trend} />}
       <div className="k-foot">{foot}</div>
     </div>
   );
@@ -1370,94 +1468,67 @@ function Tile({
  *  library: a thin green polyline over the tile's own history. Draws itself in
  *  once per data set via the stroke-dasharray/dashoffset technique, like an
  *  oscilloscope trace sweeping across, then fades the reading dot in. */
-function Sparkline({ values }: { values: number[] }) {
-  const w = 100;
+/**
+ * KPI sparkline — 7 days of one measure, to the design's geometry
+ * (viewBox 0 0 92 26, 1.5px stroke, baseline hairline at y=25).
+ *
+ * preserveAspectRatio="none" is correct HERE and nowhere else in the app: a
+ * sparkline carries no <text>, so non-uniform scaling distorts nothing. Every
+ * chart that does render text keeps its measured-width 1:1 viewBox, because
+ * stretching those squashed the type — a bug this codebase has already had once.
+ */
+function Spark({ points, alarm }: { points: number[]; alarm?: boolean }) {
+  const w = 92;
   const h = 26;
-  const lineRef = useRef<SVGPolylineElement>(null);
-  const revealed = useRevealOnData(values.join(','));
-
-  const max = Math.max(1, ...values);
-  const min = Math.min(0, ...values);
-  const span = Math.max(1, max - min);
-  const step = w / (values.length - 1);
-  const points = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / span) * (h - 4) - 2).toFixed(1)}`)
+  const base = 25;
+  if (points.length < 2) return <svg className="spark" viewBox={`0 0 ${w} ${h}`} width="100%" height={h} aria-hidden="true" />;
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = max - min || 1;
+  const d = points
+    .map((v, i) => {
+      const x = (i / (points.length - 1)) * w;
+      const y = base - ((v - min) / span) * (base - 2);
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
     .join(' ');
-  const lastX = (values.length - 1) * step;
-  const lastY = h - ((values[values.length - 1]! - min) / span) * (h - 4) - 2;
-
-  useLayoutEffect(() => {
-    const el = lineRef.current;
-    if (!el) return;
-    if (prefersReducedMotion()) {
-      el.style.strokeDasharray = 'none';
-      el.style.strokeDashoffset = '0';
-      return;
-    }
-    const len = el.getTotalLength();
-    el.style.transition = 'none';
-    el.style.strokeDasharray = `${len}`;
-    el.style.strokeDashoffset = `${len}`;
-    // force layout, then release the transition so it animates to 0
-    void el.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      el.style.transition = '';
-      el.style.strokeDashoffset = '0';
-    });
-  }, [points]);
-
   return (
-    <svg className="k-spark" viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none">
-      <line className="baseline" x1="0" y1={h - 1} x2={w} y2={h - 1} />
-      <polyline ref={lineRef} points={points} />
-      <circle cx={lastX} cy={lastY} r="1.8" style={{ opacity: revealed ? 1 : 0 }} />
+    <svg
+      className={`spark${alarm ? ' alarm' : ''}`}
+      viewBox={`0 0 ${w} ${h}`}
+      width="100%"
+      height={h}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <line className="spark-base" x1={0} y1={base} x2={w} y2={base} />
+      <path className="spark-line" d={d} />
     </svg>
   );
 }
 
+
 const SHIFT_ORDER = ['morning', 'evening', 'night'] as const;
 
-function ShiftBreakdown({ data }: { data: ProductionData | null }) {
-  // grow-in ("a reading being taken") retriggers whenever this day's data changes
-  const revealed = useRevealOnData(data ? data.rows.map((r) => `${r.group}:${r.cones}`).join('|') : null);
-  if (!data) return null;
-  // Always show all three shifts in their real running order, zero-filled —
-  // a day with only one shift recorded should never look like a broken
-  // panel with two rows missing.
-  const byName = new Map(data.rows.map((r) => [r.group, r.cones]));
-  const total = data.rows.reduce((s, r) => s + r.cones, 0);
-  const max = Math.max(1, ...SHIFT_ORDER.map((s) => byName.get(s) ?? 0));
-
-  return (
-    <div className="panel">
-      <h2>Cones by shift</h2>
-      <div className="hint">Corrected shift, derived from production time — this day.</div>
-      {total === 0 ? (
-        <div className="empty-note">No production recorded this day.</div>
-      ) : (
-        <div className="bars">
-          {SHIFT_ORDER.map((s) => {
-            const v = byName.get(s) ?? 0;
-            const pct = total > 0 ? Math.round((100 * v) / total) : 0;
-            const w = revealed ? (100 * v) / max : 0;
-            return (
-              <div className="bar-row" key={s}>
-                <span className="name">{s}</span>
-                <span className="bar-track">
-                  <span className="bar-fill" style={{ width: `${w}%` }} />
-                </span>
-                <span className="val">
-                  {fmtInt(v)}
-                  <span className="val-pct">{v > 0 ? `${pct}%` : '—'}</span>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+/** Props that make a non-button element (a table row, mostly) behave like one
+ * for keyboard users: focusable, and activated by Enter or Space. Rows are the
+ * primary drill-down in this app, so leaving them mouse-only put the main
+ * navigation out of reach on a plant terminal without a working mouse. */
+function activatable(onActivate: () => void, label?: string) {
+  return {
+    tabIndex: 0,
+    role: 'button' as const,
+    'aria-label': label,
+    onClick: onActivate,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
 }
+
 
 /* ---------------- Sack & Cone Register ---------------- */
 
@@ -5399,13 +5470,3 @@ function RulesPanel() {
   );
 }
 
-function MetaStrip({ meta }: { meta: Meta }) {
-  return (
-    <div className="meta-strip">
-      <span className="chip"><b>shift basis</b> {meta.shiftMode}</span>
-      <span className="chip"><b>weight basis</b> {meta.weightBasis}</span>
-      <span className="chip"><b>transform</b> v{meta.transformVersion}</span>
-      <span className="chip"><b>generated</b> {new Date(meta.generatedAtUtc).toLocaleTimeString()}</span>
-    </div>
-  );
-}

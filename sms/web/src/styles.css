@@ -169,6 +169,49 @@
   --fs-2xl: var(--fs-kpi);
   --fs-3xl: var(--fs-login);
 
+  /* Colour aliases, same deal: the design's token layer renames every colour,
+     and 288 call sites across the not-yet-reworked screens still use the old
+     names. Without these the unmigrated screens render with invalid var()
+     lookups — borders vanish, text inherits — so the app would be unusable
+     between the first reworked screen and the last.
+
+     Each one points at the nearest token in the new palette, so the old screens
+     pick up the AA contrast fixes for free. Delete an alias when its last call
+     site is gone; the block should be empty when the rework lands. */
+  --graphite-dim: var(--muted);        /* secondary text */
+  --mist-strong:  var(--hairline);     /* panel + control borders */
+  --mist:         var(--hairline-2);   /* row dividers */
+  --bezel:        var(--ink);          /* dark surfaces */
+  --bezel-dim:    var(--on-ink-2);     /* secondary text on dark */
+
+  --green:        var(--ok);
+  --green-deep:   var(--ok-ink);
+  --green-pale:   var(--ok-pale);
+  --alert:        var(--alarm);
+  --alert-ink:    var(--alarm-ink);
+  --alert-pale:   var(--alarm-pale);
+  --amber:        var(--warn);
+  --amber-pale:   var(--warn-pale);
+
+  --neutral:      var(--neutral-mark);  /* bars + sparklines — graphics only */
+  --neutral-soft: var(--track);
+  --neutral-pale: var(--paper-3);       /* row hover, tile fills */
+
+  /* The old brand ramp collapses onto the green pair: fills take --ok, anything
+     that renders as text takes --ok-ink, which is the AA-safe one. */
+  --brand-100: var(--ok-pale);
+  --brand-500: var(--ok);
+  --brand-600: var(--ok);
+  --brand-700: var(--ok-ink);
+  --brand-900: var(--ok-ink);
+
+  /* Multi-series charts only — never used to encode a single series, which the
+     design reserves green for. All three are also dash-differentiated, so
+     colour is never the only channel (1.4.1). */
+  --series-1: var(--ok);
+  --series-2: var(--steel-mark);
+  --series-3: var(--slate-mark);
+
   /* Weights. Archivo 400/500/600/700; DM Mono 400/500 only. */
   --fw-body: 400;
   --fw-med:  500;
@@ -1487,4 +1530,168 @@ body {
   .col-tab.active::before { top: auto; bottom: 0; left: 8px; right: 8px; width: auto; height: 3px; }
   .col-foot { margin: 0 0 0 auto; flex-direction: row; align-items: center; border-top: 0; padding: 0; }
   .col-textsize { display: none; }
+}
+
+/* ==========================================================================
+   OVERVIEW ("Line") — reworked screen
+   The signature element is the ribbon: the whole production day as one 52px
+   band, running vs stopped, with shift dividers. Everything else on the screen
+   is deliberately quiet so the ribbon is what you look at first.
+   ========================================================================== */
+
+/* Light panel. The legacy `.panel > .panel-head:first-child` rule paints a dark
+   bezel header with negative margins; the reworked screens use a light panel
+   with a hairline instead. Scoped as a modifier rather than by editing the
+   legacy rule, because the unmigrated screens still depend on it — this class
+   disappears (and the legacy rule with it) once the last screen is reworked. */
+.panel.light > .panel-head:first-child {
+  margin: 0 0 16px;
+  padding: 0 0 12px;
+  background: none;
+  color: var(--ink);
+  border-bottom: 1px solid var(--hairline-2);
+  border-radius: 0;
+}
+.panel-title { margin: 0; font-size: var(--fs-panel); font-weight: var(--fw-semi); letter-spacing: -0.01em; }
+.mono-note { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--muted); }
+.panel-foot {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline-2);
+  font-size: var(--fs-caption); color: var(--muted);
+}
+.panel-foot b { color: var(--ink); font-weight: var(--fw-semi); }
+.cap::first-letter { text-transform: uppercase; }
+
+/* ---------------------------------------------------------------- page head */
+.ov-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+}
+.ov-day { margin: 4px 0 0; font-size: var(--fs-page); font-weight: var(--fw-semi); letter-spacing: -0.02em; }
+.ov-head-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ov-date {
+  font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--ink);
+  background: var(--card); border: 1px solid var(--field-border);
+  border-radius: var(--radius); padding: 8px 10px;
+}
+
+/* Segmented control. One track, one active segment — no sliding indicator,
+   which on a filter that can change under you reads as motion for its own sake. */
+.seg { display: inline-flex; background: var(--paper-2); border: 1px solid var(--field-border); border-radius: var(--radius); padding: 2px; }
+.seg button {
+  font: inherit; font-size: var(--fs-caption); font-weight: var(--fw-med);
+  color: var(--graphite); background: none; border: 0; cursor: pointer;
+  padding: 7px 14px; border-radius: var(--radius-sm);
+}
+.seg button:hover { color: var(--ink); background: var(--paper-3); }
+.seg button.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(22, 25, 28, 0.10); }
+
+/* ------------------------------------------------------------- the ribbon */
+.ribbon-panel { margin-bottom: 18px; }
+.ribbon-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 18px; }
+.verdict { font-size: var(--fs-verdict); font-weight: var(--fw-semi); letter-spacing: -0.02em; line-height: 1.15; }
+.verdict-sub { margin-top: 6px; font-size: var(--fs-body); color: var(--graphite); }
+.ribbon-stats { display: flex; gap: 30px; }
+.rs { display: flex; flex-direction: column; gap: 3px; }
+.rs-label {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+.rs-val { font-family: var(--font-mono); font-size: var(--fs-sub); font-weight: 500; color: var(--ink); }
+.rs-val.alarm { color: var(--alarm-ink); }
+
+.ribbon {
+  position: relative; height: 52px; background: var(--ribbon-track);
+  border-radius: var(--radius-sm); overflow: hidden;
+}
+.ribbon-stop { position: absolute; top: 0; bottom: 0; background: var(--alarm); }
+.ribbon-div { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-30); }
+/* Absolutely positioned rather than space-between: the shift labels have to sit
+   over the band they name, and flexbox would spread them evenly regardless of
+   where the 14:00/22:00 boundaries actually fall. */
+.ribbon-axis {
+  position: relative; height: 1.5em; margin-top: 7px;
+  font-family: var(--font-mono); font-size: var(--fs-tick); color: var(--muted);
+}
+.ra-band { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.ra-end { position: absolute; }
+.ra-end.start { left: 0; }
+.ra-end.finish { right: 0; }
+
+/* ---------------------------------------------------------------- KPI row */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+.kpi {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: var(--radius); padding: 16px 18px 12px;
+}
+.kpi-label {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+.kpi-value {
+  margin-top: 6px; font-family: var(--font-mono); font-size: var(--fs-kpi);
+  font-weight: var(--fw-semi); letter-spacing: -0.02em; line-height: 1; color: var(--ink);
+}
+/* 42px clears the 24px large-text threshold, so --alarm passes AA here as
+   large text. Anything smaller must use --alarm-ink. */
+.kpi-value.alarm { color: var(--alarm); }
+.kpi-value { white-space: nowrap; }
+/* The unit rides as a smaller suffix so a five-figure kilogram total cannot
+   push the card onto a second line and break the row's shared baseline. */
+.kpi-unit { margin-left: 5px; font-size: var(--fs-sub); font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.kpi-foot { margin-top: 7px; font-size: var(--fs-caption); color: var(--muted); }
+
+.spark { display: block; margin-top: 10px; overflow: visible; }
+.spark-line { fill: none; stroke: var(--ok); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.spark.alarm .spark-line { stroke: var(--alarm); }
+.spark-base { stroke: var(--hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+/* ------------------------------------------------------------ bottom grid */
+.ov-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; align-items: start; }
+
+.findings { display: flex; flex-direction: column; }
+.finding {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%;
+  font: inherit; text-align: left; background: none; border: 0; cursor: pointer;
+  padding: 13px 8px; margin: 0 -8px; border-radius: var(--radius);
+  border-bottom: 1px solid var(--hairline-2);
+}
+.finding:last-child { border-bottom: 0; }
+.finding:hover { background: var(--paper-3); }
+/* Severity rail. Matches the Exception union exactly — fault | warn | info.
+   The colour is a second channel only: every finding also states its severity
+   in the accessible name, so this is never the sole carrier (1.4.1). */
+.f-sev { flex: none; width: 3px; align-self: stretch; border-radius: 2px; background: var(--muted-2); }
+.f-sev.fault { background: var(--alarm); }
+.f-sev.warn { background: var(--warn); }
+.f-sev.info { background: var(--steel-mark); }
+.f-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.f-title { font-size: var(--fs-row); font-weight: var(--fw-med); color: var(--ink); }
+.f-detail { font-size: var(--fs-caption); color: var(--graphite); }
+.f-go { flex: none; color: var(--muted); font-size: var(--fs-panel); line-height: 1.2; }
+.finding:hover .f-go { color: var(--ink); }
+
+.shiftbars { display: flex; flex-direction: column; gap: 14px; }
+.sb-row { display: grid; grid-template-columns: 76px 1fr auto; align-items: center; gap: 12px; }
+.sb-name { font-size: var(--fs-caption); color: var(--graphite); text-transform: capitalize; }
+.sb-track { height: 12px; background: var(--track); border-radius: var(--radius-sm); overflow: hidden; }
+.sb-fill { display: block; height: 100%; background: var(--neutral-mark); border-radius: var(--radius-sm); }
+.sb-fill.alarm { background: var(--alarm); }
+.sb-val { font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--ink); }
+
+/* ------------------------------------------------------------- skeletons */
+.sk { background: var(--paper-2); border-radius: var(--radius); border: 1px solid var(--hairline-2); }
+.sk-ribbon { height: 210px; }
+@media (prefers-reduced-motion: no-preference) {
+  .sk { animation: sk-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+@media (max-width: 1180px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .ov-grid { grid-template-columns: 1fr; }
+  .ribbon-stats { gap: 20px; }
 }
