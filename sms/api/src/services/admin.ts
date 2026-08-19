@@ -75,7 +75,7 @@ export async function listStations(pool: ConnectionPool, lineId: number): Promis
 export async function setStation(
   pool: ConnectionPool, lineId: number, stationId: number,
   name: string | null, machine: string | null, description: string | null,
-): Promise<{ oldName: string | null }> {
+): Promise<{ updated: boolean; oldName: string | null }> {
   const r = await pool.request().input('line', mssql.Int, lineId).input('id', mssql.Int, stationId)
     .input('n', mssql.NVarChar(64), name).input('m', mssql.NVarChar(64), machine).input('d', mssql.NVarChar(255), description)
     .query<{ old_name: string | null }>(
@@ -83,7 +83,7 @@ export async function setStation(
        OUTPUT deleted.name AS old_name
        WHERE line_id=@line AND station_id=@id`,
     );
-  return { oldName: r.recordset[0]?.old_name ?? null };
+  return { updated: (r.rowsAffected[0] ?? 0) > 0, oldName: r.recordset[0]?.old_name ?? null };
 }
 
 // ---- versioned rules ----

@@ -129,31 +129,35 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     `SELECT config_key, config_value FROM sms.app_config WHERE config_key LIKE 'fingerprint.%'`,
   );
 
-  // DQ roll-up for the most recent run
-  const latest = await pool.request().query<{ run_id: string }>(
-    `SELECT TOP 1 run_id FROM sms.dq_finding ORDER BY finding_id DESC`,
-  );
-  const latestRunId = latest.recordset[0]?.run_id ?? null;
-
+  // DQ roll-up — ALL standing findings, not just the most recent run's.
+  // Findings are batch-scoped since the Aug 2026 audit: each is recorded once,
+  // when its rows are ingested, so a pass with nothing new records nothing.
+  // "Latest run" would therefore usually be empty and HIDE the standing
+  // faults; the full list is now the truthful standing state, bounded by real
+  // faults (each row is one distinct ingest-time finding, deduplicated by
+  // migration 016). TOP 200 is a display guard, not a pagination scheme.
   const bySeverity: Record<string, number> = { CRITICAL: 0, ERROR: 0, WARNING: 0, INFO: 0 };
-  let findings: OperationsData['dq']['findings'] = [];
-  if (latestRunId) {
-    const f = await pool.request().input('run', mssql.UniqueIdentifier, latestRunId).query<{
-      check_name: string;
-      severity: string;
-      subject_table: string | null;
-      detail: string | null;
-    }>(
-      `SELECT check_name, severity, subject_table, detail FROM sms.dq_finding WHERE run_id=@run ORDER BY severity`,
-    );
-    for (const r of f.recordset) bySeverity[r.severity] = (bySeverity[r.severity] ?? 0) + 1;
-    findings = f.recordset.map((r) => ({
-      checkName: r.check_name,
-      severity: r.severity,
-      subjectTable: r.subject_table,
-      detail: r.detail,
-    }));
-  }
+  const f = await pool.request().query<{
+    run_id: string;
+    check_name: string;
+    severity: string;
+    subject_table: string | null;
+    detail: string | null;
+  }>(
+    `SELECT TOP 200 run_id, check_name, severity, subject_table, detail
+     FROM sms.dq_finding
+     ORDER BY CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'ERROR' THEN 1 WHEN 'WARNING' THEN 2 ELSE 3 END,
+              finding_id DESC`,
+  );
+  for (const r of f.recordset) bySeverity[r.severity] = (bySeverity[r.severity] ?? 0) + 1;
+  const findings: OperationsData['dq']['findings'] = f.recordset.map((r) => ({
+    checkName: r.check_name,
+    severity: r.severity,
+    subjectTable: r.subject_table,
+    detail: r.detail,
+  }));
+  // kept for API-shape stability: the run that recorded the newest finding
+  const latestRunId = f.recordset[0]?.run_id ?? null;
 
   return {
     lifetime,

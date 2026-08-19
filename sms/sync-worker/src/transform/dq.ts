@@ -34,17 +34,32 @@ interface Weighted {
  */
 const STALE_TS_LAG_MS = 3 * 60 * 60 * 1000;
 
+/** Clock-skew allowance for the future-timestamp check: a source clock a few
+ *  minutes ahead of the plant PC is ordinary drift, not a data fault. */
+const FUTURE_SKEW_MS = 60 * 60 * 1000;
+
 export function computeFindings<T extends Weighted>(
   rows: T[],
   kind: 'cone' | 'sack' | 'reject',
   table: string,
   weightOf: (r: T) => number | null,
+  /** Newest production_ts_utc_ms already in canonical for this stream. Seeds
+   *  the stale-clock running maximum so a lagging row at the START of an
+   *  incremental batch is still caught against history, not just against
+   *  rows that happen to share its batch. -Infinity = no history (backfill). */
+  initialMaxMs = -Infinity,
 ): Finding[] {
-  const nowMs = Date.now();
+  // production_ts_utc_ms is the PLANT'S WALL CLOCK labelled as UTC (see
+  // wallClock.ts / format.ts) — comparing it against real UTC Date.now()
+  // would flag EVERY live reading as "future" on a UTC+5 plant, an error
+  // that never fires in dev against weeks-old data and floods findings from
+  // the first live pass. Compare wall clock against wall clock: this
+  // process runs on the plant PC, so its own local wall time IS the plant's.
+  const nowMs = Date.now() - new Date().getTimezoneOffset() * 60_000 + FUTURE_SKEW_MS;
   let future = 0;
   let stale = 0;
   let noStation = 0;
-  let runningMaxMs = -Infinity;
+  let runningMaxMs = initialMaxMs;
   let worstLagMs = 0;
   let nonPositive = 0;
   let outlier = 0;

@@ -604,6 +604,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid request' });
         return;
       }
+      // same class of gate as product changeover: no FK backs station_id, so
+      // an unknown station would land in the ledger unchallenged
+      if (body.data.stationId != null) {
+        const known = await pool.request().input('line', mssql.Int, cfg.lineId).input('id', mssql.Int, body.data.stationId)
+          .query<{ n: number }>(`SELECT COUNT(*) n FROM sms.station WHERE line_id=@line AND station_id=@id`);
+        if (!known.recordset[0]?.n) {
+          res.status(400).json({ error: `no station ${body.data.stationId} on this line` });
+          return;
+        }
+      }
       const user = (req as AuthedRequest).user!;
       const adjustedAt = body.data.adjustedAt ? new Date(body.data.adjustedAt) : new Date();
       const id = await recordCalibrationAdjustment(
@@ -661,6 +671,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'productId required' });
         return;
       }
+      // The timeline has no FK to sms.product (append-only design), so this is
+      // the only gate — without it a typo'd id becomes the line's "current
+      // product", with a broken label and no setpoint (proven live in the Aug
+      // 2026 audit: productId 4242 was accepted and displayed as "Product 4242").
+      const known = await pool.request().input('id', mssql.Int, body.data.productId)
+        .query<{ n: number }>(`SELECT COUNT(*) n FROM sms.product WHERE product_id=@id`);
+      if (!known.recordset[0]?.n) {
+        res.status(400).json({ error: `unknown productId ${body.data.productId}` });
+        return;
+      }
       const user = (req as AuthedRequest).user!;
       const eff = body.data.effectiveFrom ? new Date(body.data.effectiveFrom) : new Date();
       const id = await setCurrent(pool, cfg.lineId, body.data.productId, eff, user.userId, body.data.reason ?? null);
@@ -681,7 +701,17 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     try {
       const b = z.object({ username: z.string().min(1).max(64), password: z.string().min(6), role: ROLE_NAMES, displayName: z.string().max(128).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid user' }); return; }
-      await createUser(pool, b.data.username, b.data.password, b.data.role, b.data.displayName ?? null);
+      try {
+        await createUser(pool, b.data.username, b.data.password, b.data.role, b.data.displayName ?? null);
+      } catch (e) {
+        // unique-key violation on username → a clear 409, not a generic 500
+        const n = (e as { number?: number }).number;
+        if (n === 2627 || n === 2601) {
+          res.status(409).json({ error: `username "${b.data.username}" already exists` });
+          return;
+        }
+        throw e;
+      }
       audit(req, 'user.create', 'user', b.data.username, `role ${b.data.role}`);
       res.json({ ok: true });
     } catch (e) { next(e); }
@@ -709,7 +739,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const b = z.object({ name: z.string().max(64).nullable(), machine: z.string().max(64).nullable(), description: z.string().max(255).nullable() }).safeParse(req.body);
       if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid' }); return; }
       const newName = b.data.name || null;
-      const { oldName } = await setStation(pool, cfg.lineId, id, newName, b.data.machine || null, b.data.description || null);
+      const { updated, oldName } = await setStation(pool, cfg.lineId, id, newName, b.data.machine || null, b.data.description || null);
+      // a nonexistent station used to return ok:true AND write a phantom
+      // audit entry — found live in the Aug 2026 audit (PUT /stations/999)
+      if (!updated) {
+        res.status(404).json({ error: `no station ${id} on this line` });
+        return;
+      }
       audit(req, 'station.rename', 'station', id, `name "${oldName ?? '(none)'}" -> "${newName ?? '(none)'}"`);
       res.json({ ok: true });
     } catch (e) { next(e); }

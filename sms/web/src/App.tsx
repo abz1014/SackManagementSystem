@@ -4147,7 +4147,13 @@ function WeightCalibration({
   const [stationSel, setStationSel] = useState('');
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
-  const [adjustedAt, setAdjustedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  // datetime-local inputs take LOCAL wall time; toISOString() alone would
+  // pre-fill UTC — 5h in the past on the plant floor — and an untouched
+  // default would silently record every adjustment 5h early (caught in the
+  // Aug 2026 audit: an adjustment logged at 13:32 displayed as 08:31).
+  const [adjustedAt, setAdjustedAt] = useState(() =>
+    new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16),
+  );
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 

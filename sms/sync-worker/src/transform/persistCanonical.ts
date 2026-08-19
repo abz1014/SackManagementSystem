@@ -12,16 +12,25 @@ export interface ColSpec {
   nullable?: boolean;
 }
 
-async function existingSourceIds(
+export async function existingSourceIds(
   pool: ConnectionPool,
   table: string,
   extraFilter = '',
+  minSourceRowId?: number,
 ): Promise<Set<number>> {
-  const r = await pool
-    .request()
-    .query<{ source_row_id: number }>(
-      `SELECT source_row_id FROM ${table} WHERE source_system = 'ifl_sql' ${extraFilter}`,
-    );
+  const req = pool.request();
+  // Bound the scan to ids the batch could actually collide with — source ids
+  // are monotone, so nothing below the batch minimum can match. Without this
+  // the id scan is O(total history) per pass, the same unbounded-growth shape
+  // the transform watermark was added to remove.
+  let bound = '';
+  if (minSourceRowId != null) {
+    req.input('minId', mssql.BigInt, minSourceRowId);
+    bound = 'AND source_row_id >= @minId';
+  }
+  const r = await req.query<{ source_row_id: number }>(
+    `SELECT source_row_id FROM ${table} WHERE source_system = 'ifl_sql' ${bound} ${extraFilter}`,
+  );
   // NB: source_row_id is BIGINT — mssql returns it as a STRING. Normalise to
   // Number so the has(Number(...)) lookup in the caller matches (idempotency).
   return new Set(r.recordset.map((x) => Number(x.source_row_id)));
@@ -32,10 +41,10 @@ export async function persistCanonical<T extends { source_row_id: number }>(
   table: string,
   cols: ColSpec[],
   rows: T[],
-  opts: { extraExistingFilter?: string } = {},
+  opts: { extraExistingFilter?: string; minSourceRowId?: number } = {},
 ): Promise<{ read: number; written: number }> {
   if (rows.length === 0) return { read: 0, written: 0 };
-  const seen = await existingSourceIds(pool, table, opts.extraExistingFilter ?? '');
+  const seen = await existingSourceIds(pool, table, opts.extraExistingFilter ?? '', opts.minSourceRowId);
   const fresh = rows.filter((r) => !seen.has(Number(r.source_row_id)));
   if (fresh.length === 0) return { read: rows.length, written: 0 };
 

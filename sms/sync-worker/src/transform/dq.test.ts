@@ -107,3 +107,40 @@ describe('existing checks still hold', () => {
     expect(run([cone('2026-06-22T11:00:00')]).every((f) => f.count > 0)).toBe(true);
   });
 });
+
+describe('future_timestamp measures against the plant WALL clock, not real UTC (Aug 2026 audit)', () => {
+  // production_ts_utc_ms is the plant's wall clock labelled as UTC. On a UTC+5
+  // plant, a cone produced RIGHT NOW carries a ms value 5h ahead of Date.now()
+  // — the old real-UTC comparison flagged every live reading as "future",
+  // an error invisible in dev against weeks-old data.
+  const wallNow = () => Date.now() - new Date().getTimezoneOffset() * 60_000;
+
+  it('does not flag a reading stamped at the current wall clock', () => {
+    const rows = [{ production_ts_utc_ms: wallNow(), merge_key_is_unique: true, weight_g: 1950, source_station: 7 }];
+    expect(computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g).find((f) => f.check_name === 'future_timestamp')).toBeUndefined();
+  });
+
+  it('does not flag ordinary source-clock skew (30 minutes ahead)', () => {
+    const rows = [{ production_ts_utc_ms: wallNow() + 30 * 60_000, merge_key_is_unique: true, weight_g: 1950, source_station: 7 }];
+    expect(computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g).find((f) => f.check_name === 'future_timestamp')).toBeUndefined();
+  });
+
+  it('still flags a reading stamped two days ahead', () => {
+    const rows = [{ production_ts_utc_ms: wallNow() + 2 * 86_400_000, merge_key_is_unique: true, weight_g: 1950, source_station: 7 }];
+    const f = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g).find((x) => x.check_name === 'future_timestamp');
+    expect(f).toBeDefined();
+    expect(f!.severity).toBe('ERROR');
+  });
+});
+
+describe('stale_timestamp across an incremental batch boundary (initialMaxMs)', () => {
+  it('catches a lagging row at the START of a batch when seeded with canonical history', () => {
+    // one row, 27h behind the newest row already in canonical — with no seed
+    // it has nothing to lag behind and would pass silently
+    const rows = [cone('2026-06-21T08:06:54')];
+    const seeded = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, ms('2026-06-22T11:10:38'));
+    expect(seeded.find((f) => f.check_name === 'stale_timestamp')).toBeDefined();
+    const unseeded = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g);
+    expect(unseeded.find((f) => f.check_name === 'stale_timestamp')).toBeUndefined();
+  });
+});

@@ -6,7 +6,7 @@
  */
 import mssql from 'mssql';
 import { TRANSFORM_VERSION } from '@sms/shared';
-import { runTransform } from '@sms/sync-worker';
+import { runTransform, resetTransformWatermarks } from '@sms/sync-worker';
 import { openContext, parseArgs } from '../context.js';
 
 const ALLOWED = new Set(['cone_event', 'sack_event', 'reject_event']);
@@ -49,6 +49,13 @@ export async function rebuild(argv: string[]): Promise<number> {
 
     console.log(`rebuild ${table}: snapshot ${snapshotId}, transform v${from} → v${TRANSFORM_VERSION}`);
     await ctx.app.request().query(`DELETE FROM sms.${table} WHERE source_system='ifl_sql'`);
+    // The transform is incremental (raw watermark) — reset this stream's
+    // watermark or the re-run sees an empty batch and rebuilds nothing. The
+    // re-run also re-records this table's ingest-time DQ findings, so clear
+    // the old ones first or every rebuild would duplicate the standing set.
+    await ctx.app.request().input('tbl2', mssql.VarChar(40), table)
+      .query(`DELETE FROM sms.dq_finding WHERE subject_table=@tbl2`);
+    await resetTransformWatermarks(ctx.app, table);
     const out = await runTransform(ctx.app, ctx.cfg);
     const rebuilt = out.find((o) => o.table === table)?.written ?? 0;
 
