@@ -24,6 +24,7 @@ export type View =
   | 'rejects'
   | 'shift'
   | 'operations'
+  | 'exceptions'
   | 'admin';
 
 /**
@@ -47,6 +48,11 @@ export const VIEW_MIN_RANK: Record<View, number> = {
   weight: 2,
   rejects: 2,
   operations: 1, // reachable by anyone; no rail item (see RAIL below)
+  // Same rank as Overview: an operator already sees every one of these
+  // findings embedded in Overview's "Needs a look" panel today, so a
+  // dedicated page showing the identical class of finding — filterable, and
+  // for a chosen day instead of only yesterday — discloses nothing new.
+  exceptions: 1, // reachable by anyone; no rail item (see RAIL below)
   admin: 4, // Setup — admin only
 };
 
@@ -61,6 +67,7 @@ export const VIEW_LABEL: Record<View, string> = {
   rejects: 'Rejects',
   shift: 'Shifts',
   operations: 'Sync',
+  exceptions: 'Exceptions',
   admin: 'Setup',
 };
 
@@ -115,6 +122,17 @@ const GLYPH: Record<View, ReactNode> = {
     <>
       <path d="M12 3a9 9 0 1 1-9 9" strokeLinecap="round" />
       <path d="M12 3l3.2 2.6L12 8.2" strokeLinejoin="round" />
+    </>
+  ),
+  // Never rendered — like operations, exceptions has no RAIL entry (reachable
+  // via the "See all" link on Overview's findings panel instead). Reuses the
+  // rejects triangle-alert shape rather than inventing a new glyph outside
+  // the design file, since GLYPH is a Record<View,...> and every key needs one.
+  exceptions: (
+    <>
+      <path d="M12 4.5 21 19H3z" strokeLinejoin="round" />
+      <path d="M12 10v4" strokeLinecap="round" />
+      <circle cx="12" cy="16.6" r="1" fill="currentColor" stroke="none" />
     </>
   ),
   admin: (

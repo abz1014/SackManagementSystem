@@ -88,7 +88,7 @@ function parseRoute(): Route {
   if (typeof window === 'undefined') return { view: 'dashboard' };
   const p = new URLSearchParams(window.location.search);
   const v = p.get('v');
-  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'admin'] as const).includes(v as View)
+  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'admin'] as const).includes(v as View)
     ? (v as View)
     : 'dashboard';
   const dtype = p.get('dtype');
@@ -266,6 +266,8 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
       };
     case 'operations':
       return { eyebrow: 'Plant connection', title: 'Sync', subTabs: [] };
+    case 'exceptions':
+      return { eyebrow: 'One day, filtered', title: 'Exceptions', subTabs: [] };
     case 'admin':
       return {
         eyebrow: 'Configuration',
@@ -449,7 +451,13 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       ) : rangeErr ? (
         <div className="error-card" role="alert"><b>Couldn't reach the API.</b> {rangeErr}</div>
       ) : view === 'dashboard' ? (
-        <DashboardView range={range} onMeta={setFreshness} rank={rank} onNavigate={followException} />
+        <DashboardView
+          range={range}
+          onMeta={setFreshness}
+          rank={rank}
+          onNavigate={followException}
+          onSeeAllExceptions={() => navigate({ view: 'exceptions', sub: undefined, detailType: undefined, detailId: undefined })}
+        />
       ) : view === 'register' ? (
         <RegisterView
           range={range}
@@ -471,6 +479,8 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         <RejectsHub range={range} onMeta={setFreshness} rank={rank} sub={activeSub} />
       ) : view === 'operations' ? (
         <OperationsView onMeta={setFreshness} />
+      ) : view === 'exceptions' ? (
+        <ExceptionsView range={range} onMeta={setFreshness} onNavigate={followException} />
       ) : (
         <AdminView sub={activeSub} onMeta={setFreshness} />
       )}
@@ -1192,6 +1202,101 @@ interface Exception {
   because?: string;
 }
 
+/**
+ * Synthesises the day's findings from data every hub already fetches — no new
+ * endpoint, just reading across SPC, downtime and reject-episode results that
+ * were already loaded for that day's charts. Pulled out of DashboardView as a
+ * pure function (was a useMemo body there) so the Overview's "Needs a look"
+ * panel and the standalone Exceptions view compute identically off the same
+ * inputs — one finding can never disagree with itself between the two places
+ * it is shown, because there is only one implementation of "what counts".
+ */
+function computeExceptions(
+  spc: SpcData | null,
+  downtime: DowntimeData | null,
+  baselineAvailability: number | null,
+  rejectSpc: RejectSpcData | null,
+  date: string,
+): Exception[] {
+  const out: Exception[] = [];
+  if (spc && spc.stations.length > 0) {
+    const flagged = spc.stations.filter((s) => s.flagged).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    if (flagged.length > 0) {
+      const top = flagged[0]!;
+      out.push({
+        severity: 'fault',
+        title: flagged.length === 1 ? `Station ${top.station} off-target` : `${flagged.length} stations off-target`,
+        message: (
+          <>
+            Station <b>{top.station}</b> is <b>{top.delta > 0 ? '+' : ''}{top.delta}{spc.unit}</b> vs the line average — past the{' '}
+            <b>±{spc.practicalThresholdG}{spc.unit}</b> action threshold.
+            {flagged.length > 1 && <> {flagged.length - 1} other station{flagged.length > 2 ? 's' : ''} also flagged.</>}
+          </>
+        ),
+        view: 'weight',
+        sub: 'spread', // the per-station chart lives on Spread
+        because: `Station ${top.station} sits ${top.delta > 0 ? '+' : ''}${top.delta}${spc.unit} off the line average. The per-station chart below is where that shows up.`,
+      });
+    }
+  }
+  if (spc && spc.subgroups.length > 0) {
+    const oocFrac = spc.xbarOutOfControl / spc.subgroups.length;
+    if (spc.xbarOutOfControl >= 3 && oocFrac >= 0.15) {
+      out.push({
+        severity: 'warn',
+        title: 'Weight mean drifted out of control',
+        message: (
+          <>
+            <b>{spc.xbarOutOfControl} of {spc.subgroups.length}</b> {spc.bucketLabel} subgroups breached the ±3σ control band today.
+          </>
+        ),
+        view: 'weight',
+        sub: 'stability', // the control chart is on Stability
+        because: `${spc.xbarOutOfControl} subgroups breached the control band. Look at the X-bar chart for when the mean moved.`,
+      });
+    }
+  }
+  if (downtime && baselineAvailability != null && downtime.availabilityPct != null) {
+    const gap = baselineAvailability - downtime.availabilityPct;
+    if (gap >= 5) {
+      out.push({
+        severity: gap >= 15 ? 'fault' : 'warn',
+        title: 'Availability below normal',
+        message: (
+          <>
+            <b>{downtime.availabilityPct.toFixed(1)}%</b> today vs a <b>{baselineAvailability.toFixed(1)}%</b> 6-day baseline —{' '}
+            <b>{downtime.stoppageCount}</b> stoppages cost <b>{fmtDuration(downtime.totalDownSeconds)}</b>.
+          </>
+        ),
+        view: 'performance',
+        sub: 'stops',
+        because: `${downtime.stoppageCount} stoppages cost ${fmtDuration(downtime.totalDownSeconds)} today. The timeline shows when the line was down.`,
+      });
+    }
+  }
+  if (rejectSpc) {
+    const activeEpisode = rejectSpc.episodes.find((e) => e.startTs.slice(0, 10) <= date && date <= e.endTs.slice(0, 10));
+    if (activeEpisode) {
+      const pct = activeEpisode.totalProduced > 0 ? (100 * activeEpisode.totalRejects) / activeEpisode.totalProduced : 0;
+      out.push({
+        severity: 'fault',
+        title: `Reject burst — ${activeEpisode.bucketCount}-day run`,
+        message: (
+          <>
+            <b>{fmtInt(activeEpisode.totalRejects)}</b> rejects of <b>{fmtInt(activeEpisode.totalProduced)}</b> produced
+            (<b>{pct.toFixed(2)}%</b>) across this burst — a genuine event, not an isolated spike.
+          </>
+        ),
+        view: 'rejects',
+        sub: 'trend',
+        because: `A ${activeEpisode.bucketCount}-day burst, not an isolated spike. The control chart shows the run.`,
+      });
+    }
+  }
+  const order = { fault: 0, warn: 1, info: 2 };
+  return out.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
 /** Why the user is on this page, when they didn't pick it from the nav.
  * Jumping between views used to carry nothing: you clicked "2 stations
  * off-target" and landed on a generic Weight page with no statement of what
@@ -1305,11 +1410,13 @@ function DashboardView({
   onMeta,
   rank,
   onNavigate,
+  onSeeAllExceptions,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
   onNavigate: (e: Exception) => void;
+  onSeeAllExceptions: () => void;
 }) {
   const [date, setDate] = useState<string>('');
   const [shift, setShift] = useState<Shift>('all');
@@ -1377,85 +1484,10 @@ function DashboardView({
 
 
 
-  const exceptions = useMemo<Exception[]>(() => {
-    const out: Exception[] = [];
-    if (spc && spc.stations.length > 0) {
-      const flagged = spc.stations.filter((s) => s.flagged).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-      if (flagged.length > 0) {
-        const top = flagged[0]!;
-        out.push({
-          severity: 'fault',
-          title: flagged.length === 1 ? `Station ${top.station} off-target` : `${flagged.length} stations off-target`,
-          message: (
-            <>
-              Station <b>{top.station}</b> is <b>{top.delta > 0 ? '+' : ''}{top.delta}{spc.unit}</b> vs the line average — past the{' '}
-              <b>±{spc.practicalThresholdG}{spc.unit}</b> action threshold.
-              {flagged.length > 1 && <> {flagged.length - 1} other station{flagged.length > 2 ? 's' : ''} also flagged.</>}
-            </>
-          ),
-          view: 'weight',
-          sub: 'spread', // the per-station chart lives on Spread
-          because: `Station ${top.station} sits ${top.delta > 0 ? '+' : ''}${top.delta}${spc.unit} off the line average. The per-station chart below is where that shows up.`,
-        });
-      }
-    }
-    if (spc && spc.subgroups.length > 0) {
-      const oocFrac = spc.xbarOutOfControl / spc.subgroups.length;
-      if (spc.xbarOutOfControl >= 3 && oocFrac >= 0.15) {
-        out.push({
-          severity: 'warn',
-          title: 'Weight mean drifted out of control',
-          message: (
-            <>
-              <b>{spc.xbarOutOfControl} of {spc.subgroups.length}</b> {spc.bucketLabel} subgroups breached the ±3σ control band today.
-            </>
-          ),
-          view: 'weight',
-          sub: 'stability', // the control chart is on Stability
-          because: `${spc.xbarOutOfControl} subgroups breached the control band. Look at the X-bar chart for when the mean moved.`,
-        });
-      }
-    }
-    if (downtime && baselineAvailability != null && downtime.availabilityPct != null) {
-      const gap = baselineAvailability - downtime.availabilityPct;
-      if (gap >= 5) {
-        out.push({
-          severity: gap >= 15 ? 'fault' : 'warn',
-          title: 'Availability below normal',
-          message: (
-            <>
-              <b>{downtime.availabilityPct.toFixed(1)}%</b> today vs a <b>{baselineAvailability.toFixed(1)}%</b> 6-day baseline —{' '}
-              <b>{downtime.stoppageCount}</b> stoppages cost <b>{fmtDuration(downtime.totalDownSeconds)}</b>.
-            </>
-          ),
-          view: 'performance',
-          sub: 'stops',
-          because: `${downtime.stoppageCount} stoppages cost ${fmtDuration(downtime.totalDownSeconds)} today. The timeline shows when the line was down.`,
-        });
-      }
-    }
-    if (rejectSpc) {
-      const activeEpisode = rejectSpc.episodes.find((e) => e.startTs.slice(0, 10) <= date && date <= e.endTs.slice(0, 10));
-      if (activeEpisode) {
-        const pct = activeEpisode.totalProduced > 0 ? (100 * activeEpisode.totalRejects) / activeEpisode.totalProduced : 0;
-        out.push({
-          severity: 'fault',
-          title: `Reject burst — ${activeEpisode.bucketCount}-day run`,
-          message: (
-            <>
-              <b>{fmtInt(activeEpisode.totalRejects)}</b> rejects of <b>{fmtInt(activeEpisode.totalProduced)}</b> produced
-              (<b>{pct.toFixed(2)}%</b>) across this burst — a genuine event, not an isolated spike.
-            </>
-          ),
-          view: 'rejects',
-          sub: 'trend',
-          because: `A ${activeEpisode.bucketCount}-day burst, not an isolated spike. The control chart shows the run.`,
-        });
-      }
-    }
-    const order = { fault: 0, warn: 1, info: 2 };
-    return out.sort((a, b) => order[a.severity] - order[b.severity]);
-  }, [spc, downtime, baselineAvailability, rejectSpc, date]);
+  const exceptions = useMemo(
+    () => computeExceptions(spc, downtime, baselineAvailability, rejectSpc, date),
+    [spc, downtime, baselineAvailability, rejectSpc, date],
+  );
   // ---- derived presentation values -------------------------------------
   // The design's copy quotes fixed numbers ("7 stops", "Night runs 15% behind").
   // Every one of them is computed here instead: several are simply false for
@@ -1686,8 +1718,11 @@ function DashboardView({
             <section className="panel">
               <div className="panel-head">
                 <h3 className="panel-title">Needs a look</h3>
-                <span className="mono-note">
-                  {exceptions.length} open
+                <span className="ov-findings-actions">
+                  <span className="mono-note">{exceptions.length} open</span>
+                  <button type="button" className="rr-link" onClick={onSeeAllExceptions}>
+                    See all · change date →
+                  </button>
                 </span>
               </div>
               {exceptions.length === 0 ? (
@@ -1757,6 +1792,232 @@ function DashboardView({
               )}
             </section>
           </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Exceptions — the standalone version of Overview's "Needs a look" panel.
+ *
+ * Reachable via the "See all · change date" link on Overview, not a rail icon
+ * (same precedent as Sync/`operations`, which also has no rail item). What it
+ * adds over the embedded panel: any day, not just yesterday, and severity /
+ * screen filters. What it does NOT add: persistence. Findings are recomputed
+ * live from the same four already-existing endpoints computeExceptions always
+ * read — there is nothing to persist, because the underlying event data
+ * (cone_event, downtime, reject episodes) is itself permanent, so any past
+ * day's exceptions can always be recomputed exactly, not just recalled.
+ */
+const EXCEPTION_SEVERITIES = ['fault', 'warn', 'info'] as const;
+type ExceptionSeverity = (typeof EXCEPTION_SEVERITIES)[number];
+
+function ExceptionsView({
+  range,
+  onMeta,
+  onNavigate,
+}: {
+  range: { min: string | null; max: string | null };
+  onMeta: (m: Meta) => void;
+  onNavigate: (e: Exception) => void;
+}) {
+  const [date, setDate] = useState('');
+  const [spc, setSpc] = useState<SpcData | null>(null);
+  const [downtime, setDowntime] = useState<DowntimeData | null>(null);
+  const [baselineAvailability, setBaselineAvailability] = useState<number | null>(null);
+  const [rejectSpc, setRejectSpc] = useState<RejectSpcData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [severities, setSeverities] = useState<Set<ExceptionSeverity>>(new Set(EXCEPTION_SEVERITIES));
+  const [screens, setScreens] = useState<Set<View> | null>(null); // null = all
+
+  // Same default as Overview: the most recent day guaranteed complete, not
+  // "today" mid-accumulation.
+  useEffect(() => {
+    if (range.max && !date) {
+      const prior = new Date(`${range.max}T12:00:00Z`);
+      prior.setUTCDate(prior.getUTCDate() - 1);
+      const priorStr = prior.toISOString().slice(0, 10);
+      setDate(range.min && priorStr >= range.min ? priorStr : range.max);
+    }
+  }, [range.max, range.min, date]);
+
+  useEffect(() => {
+    if (!date) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const from7 = new Date(date);
+    from7.setDate(from7.getDate() - 6);
+    const trendFrom = from7.toISOString().slice(0, 10);
+    const dayBefore = new Date(date);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const baselineTo = dayBefore.toISOString().slice(0, 10);
+    Promise.all([
+      getSpc({ type: 'cone', from: date, to: date }),
+      getDowntime(date, 120),
+      baselineTo >= trendFrom ? getOee({ from: trendFrom, to: baselineTo }) : Promise.resolve(null),
+      getRejectSpc(trendFrom, date, 'all', 'day'),
+    ])
+      .then(([sp, d, base, rj]) => {
+        if (cancelled) return;
+        setSpc(sp.data);
+        setDowntime(d.data);
+        setBaselineAvailability(base?.data.availabilityPct ?? null);
+        setRejectSpc(rj.data);
+        onMeta(sp.metadata);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [date, onMeta]);
+
+  const all = useMemo(
+    () => computeExceptions(spc, downtime, baselineAvailability, rejectSpc, date),
+    [spc, downtime, baselineAvailability, rejectSpc, date],
+  );
+
+  // Which screens actually appear as a target today, in the order they're
+  // first seen — the filter only ever offers choices that could do something.
+  const availableScreens = useMemo(() => {
+    const seen: View[] = [];
+    for (const e of all) if (!seen.includes(e.view)) seen.push(e.view);
+    return seen;
+  }, [all]);
+
+  const filtered = all.filter((e) => severities.has(e.severity) && (screens == null || screens.has(e.view)));
+
+  const toggleSeverity = (s: ExceptionSeverity) =>
+    setSeverities((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  const toggleScreen = (v: View) =>
+    setScreens((prev) => {
+      const base = prev ?? new Set(availableScreens);
+      const next = new Set(base);
+      if (next.has(v)) next.delete(v);
+      else next.add(v);
+      // If toggling landed back on "every screen available today", collapse to
+      // null rather than keep an explicit set that happens to match today's
+      // full list. Without this, off-then-on did not round-trip: it left an
+      // explicit {'weight'} behind that then wrongly filtered tomorrow's
+      // findings on a screen 'weight' never restricted, the moment a different
+      // day surfaced a Rejects or Output finding this set didn't contain.
+      if (availableScreens.length > 0 && availableScreens.every((s) => next.has(s))) return null;
+      return next;
+    });
+
+  const bySeverity = useMemo(() => {
+    const counts: Record<ExceptionSeverity, number> = { fault: 0, warn: 0, info: 0 };
+    for (const e of all) counts[e.severity]++;
+    return counts;
+  }, [all]);
+
+  return (
+    <>
+      <div className="ov-head">
+        <div>
+          <div className="eyebrow">Findings for</div>
+          <h2 className="ov-day">
+            {date
+              ? new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+              : '—'}
+          </h2>
+        </div>
+        <input
+          type="date"
+          className="ov-date"
+          aria-label="Findings date"
+          value={date}
+          min={range.min ?? undefined}
+          max={range.max ?? undefined}
+          onChange={(e) => setDate(e.target.value)}
+        />
+      </div>
+
+      {error ? (
+        <div className="error-card" role="alert"><b>Couldn't load findings.</b> {error}</div>
+      ) : loading ? (
+        <div className="sk sk-chart" />
+      ) : (
+        <>
+          <section className="panel">
+            <div className="panel-head">
+              <h3 className="panel-title">Filter</h3>
+              <span className="mono-note">
+                {filtered.length} of {all.length} shown
+              </span>
+            </div>
+            <div className="exc-filter-row">
+              <span className="exc-filter-label">Severity</span>
+              {EXCEPTION_SEVERITIES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`chip exc-chip ${s}${severities.has(s) ? ' active' : ''}`}
+                  aria-pressed={severities.has(s)}
+                  onClick={() => toggleSeverity(s)}
+                >
+                  {s} <span className="mono-note">{bySeverity[s]}</span>
+                </button>
+              ))}
+            </div>
+            {availableScreens.length > 0 && (
+              <div className="exc-filter-row">
+                <span className="exc-filter-label">Screen</span>
+                {availableScreens.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`chip exc-chip${(screens ?? new Set(availableScreens)).has(v) ? ' active' : ''}`}
+                    aria-pressed={(screens ?? new Set(availableScreens)).has(v)}
+                    onClick={() => toggleScreen(v)}
+                  >
+                    {VIEW_LABEL[v]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel" style={{ marginTop: 14 }}>
+            <div className="panel-head">
+              <h3 className="panel-title">Findings</h3>
+            </div>
+            {all.length === 0 ? (
+              <div className="empty-note">
+                Nothing flagged — weight, rejects and availability were all inside their normal range this day.
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="empty-note">{all.length} finding{all.length === 1 ? '' : 's'} this day, none matching the current filter.</div>
+            ) : (
+              <div className="findings">
+                {filtered.map((e, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    className="finding"
+                    onClick={() => onNavigate(e)}
+                    aria-label={`${e.severity}: ${e.title}. Opens ${VIEW_LABEL[e.view]}.`}
+                  >
+                    <span className={`f-sev ${e.severity}`} aria-hidden="true" />
+                    <span className="f-body">
+                      <span className="f-title">{e.title}</span>
+                      <span className="f-detail">{e.message}</span>
+                    </span>
+                    <span className="f-go" aria-hidden="true">›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="panel-foot">Each one opens the page that explains it.</div>
+          </section>
         </>
       )}
     </>

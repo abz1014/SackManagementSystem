@@ -2335,3 +2335,36 @@ body {
 .rr-provenance .rrr-k, .rr-provenance .rrr-v { color: var(--muted); }
 
 .reg-table td.dim, .reg-table .dim { color: var(--muted); }
+
+/* ==========================================================================
+   EXCEPTIONS — standalone findings view
+   ========================================================================== */
+
+/* Overview's findings-panel header: count + "See all" link side by side. */
+.ov-findings-actions { display: flex; align-items: center; gap: 14px; }
+
+.exc-filter-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 0; border-bottom: 1px solid var(--hairline-2);
+}
+.exc-filter-row:last-child { border-bottom: 0; padding-bottom: 2px; }
+.exc-filter-label {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow);
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+  flex: none; width: 68px;
+}
+
+/* Toggle chips: unlike .chip's default removable-filter role, these ARE the
+   whole clickable control, so they need their own interactive states. Severity
+   chips carry the same colour as the .f-sev bar they filter, so the control
+   and the thing it filters read as one system rather than two palettes. */
+.exc-chip {
+  cursor: pointer; text-transform: capitalize; opacity: 0.55;
+  transition: opacity 120ms ease, border-color 120ms ease;
+}
+.exc-chip:hover { opacity: 0.85; }
+.exc-chip.active { opacity: 1; border-color: var(--ink); }
+.exc-chip .mono-note { font-family: inherit; }
+.exc-chip.fault.active { border-color: var(--alarm); color: var(--alarm-ink); }
+.exc-chip.warn.active { border-color: var(--warn); color: var(--warn-ink); }
+.exc-chip.info.active { border-color: var(--steel-mark); }
