@@ -12,6 +12,7 @@ import {
   logout as apiLogout,
   getProducts,
   getCurrentProduct,
+  getProductTimeline,
   setCurrentProduct,
   adminListUsers,
   adminCreateUser,
@@ -88,7 +89,7 @@ function parseRoute(): Route {
   if (typeof window === 'undefined') return { view: 'dashboard' };
   const p = new URLSearchParams(window.location.search);
   const v = p.get('v');
-  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'admin'] as const).includes(v as View)
+  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'timeline', 'admin'] as const).includes(v as View)
     ? (v as View)
     : 'dashboard';
   const dtype = p.get('dtype');
@@ -268,6 +269,8 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
       return { eyebrow: 'Plant connection', title: 'Sync', subTabs: [] };
     case 'exceptions':
       return { eyebrow: 'One day, filtered', title: 'Exceptions', subTabs: [] };
+    case 'timeline':
+      return { eyebrow: 'Every changeover', title: 'Product history', subTabs: [] };
     case 'admin':
       return {
         eyebrow: 'Configuration',
@@ -311,6 +314,22 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [counts, setCounts] = useState<{ cones: number; sacks: number; rejects: number; stations: number }>(
     { cones: 0, sacks: 0, rejects: 0, stations: 0 },
   );
+  // The section column's "Running now" footer (shell.tsx) has rendered its
+  // slot on every screen since the shell rework, but nothing ever populated
+  // it — the call site below passed a literal `null`. Fetched once here,
+  // independent of CurrentProductBar's own copy of the same read, and
+  // refreshed by that component's onProductChanged callback rather than
+  // polled, matching how every other mutation in this app triggers an
+  // explicit reload instead of an interval.
+  const [productLabel, setProductLabel] = useState<string | null>(null);
+  const refreshProductLabel = () => {
+    getCurrentProduct()
+      .then((r) => setProductLabel(r.current?.productLabel ?? null))
+      .catch(() => {});
+  };
+  useEffect(() => {
+    refreshProductLabel();
+  }, []);
   const rank = ROLE_RANK[user.role] ?? 1;
   const view = route.view;
 
@@ -410,7 +429,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       rank={rank}
       user={user}
       freshness={freshness}
-      productLabel={null}
+      productLabel={productLabel}
       section={section}
       sub={activeSub}
       onNavigate={(v) => setView(v)}
@@ -457,6 +476,8 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           rank={rank}
           onNavigate={followException}
           onSeeAllExceptions={() => navigate({ view: 'exceptions', sub: undefined, detailType: undefined, detailId: undefined })}
+          onOpenTimeline={() => navigate({ view: 'timeline', sub: undefined, detailType: undefined, detailId: undefined })}
+          onProductChanged={refreshProductLabel}
         />
       ) : view === 'register' ? (
         <RegisterView
@@ -481,6 +502,8 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         <OperationsView onMeta={setFreshness} />
       ) : view === 'exceptions' ? (
         <ExceptionsView range={range} onMeta={setFreshness} onNavigate={followException} />
+      ) : view === 'timeline' ? (
+        <TimelineView />
       ) : (
         <AdminView sub={activeSub} onMeta={setFreshness} />
       )}
@@ -1411,12 +1434,16 @@ function DashboardView({
   rank,
   onNavigate,
   onSeeAllExceptions,
+  onOpenTimeline,
+  onProductChanged,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   rank: number;
   onNavigate: (e: Exception) => void;
   onSeeAllExceptions: () => void;
+  onOpenTimeline: () => void;
+  onProductChanged: () => void;
 }) {
   const [date, setDate] = useState<string>('');
   const [shift, setShift] = useState<Shift>('all');
@@ -1638,7 +1665,7 @@ function DashboardView({
         <div className="sk sk-ribbon" />
       ) : (
         <>
-          <CurrentProductBar rank={rank} />
+          <CurrentProductBar rank={rank} onOpenTimeline={onOpenTimeline} onProductChanged={onProductChanged} />
 
           {/* Signature: the day as one 24-hour band of running and stopped. */}
           <section className="panel ribbon-panel">
@@ -2019,6 +2046,88 @@ function ExceptionsView({
             <div className="panel-foot">Each one opens the page that explains it.</div>
           </section>
         </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Every changeover ever recorded, newest first — the history that the
+ * current-product bar's "since …" line only ever hints was there. No date
+ * filter: the table is a handful of rows a day, so "history" means the whole
+ * thing, not a windowed report.
+ */
+function TimelineView() {
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([getProductTimeline(), getProducts()])
+      .then(([t, p]) => {
+        if (cancelled) return;
+        setTimeline(t.timeline);
+        setProducts(p.products);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const detailFor = (productId: number) => products.find((p) => p.productId === productId) ?? null;
+
+  return (
+    <>
+      <div className="ov-head">
+        <div>
+          <div className="eyebrow">Every recorded changeover</div>
+          <h2 className="ov-day">Product history</h2>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="error-card" role="alert"><b>Couldn't load product history.</b> {error}</div>
+      ) : loading ? (
+        <div className="sk sk-chart" />
+      ) : (
+        <section className="panel">
+          <div className="panel-head">
+            <h3 className="panel-title">Changeovers</h3>
+            <span className="mono-note">{timeline.length} recorded</span>
+          </div>
+          {timeline.length === 0 ? (
+            <div className="empty-note">No product has been set yet — production is unattributed (Q1).</div>
+          ) : (
+            <div className="tl-list">
+              {timeline.map((t) => {
+                const detail = detailFor(t.productId);
+                return (
+                  <div className="tl-row" key={t.timelineId}>
+                    <span className="tl-when">
+                      {new Date(t.effectiveFrom).toLocaleString()}
+                    </span>
+                    <span className="tl-body">
+                      <span className="tl-product">
+                        {t.productLabel} <span className="cp-id">#{t.productId}</span>
+                      </span>
+                      {detail && <ProductDetailLine p={detail} />}
+                      <span className="tl-meta">
+                        set by {t.changedBy ?? '—'}
+                        {t.reason ? ` · ${t.reason}` : ''}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
       )}
     </>
   );
@@ -6020,7 +6129,34 @@ function productLabel(p: ProductOption): string {
   return `${base}${wt} · #${p.productId}`;
 }
 
-function CurrentProductBar({ rank }: { rank: number }) {
+function ProductDetailLine({ p }: { p: ProductOption }) {
+  const parts: string[] = [];
+  if (p.blend) parts.push(`Blend ${p.blend}`);
+  if (p.countText) parts.push(`Count ${p.countText}`);
+  if (p.tubeType) parts.push(`Tube ${p.tubeType}${p.tubeWeightG != null ? ` (${p.tubeWeightG}g)` : ''}`);
+  if (p.setpointG != null && (p.weightOffsetMinusG != null || p.weightOffsetPlusG != null)) {
+    parts.push(`Tolerance ${p.setpointG}g −${p.weightOffsetMinusG ?? 0}/+${p.weightOffsetPlusG ?? 0}g`);
+  }
+  if (!parts.length && p.activeFlag !== false) return null;
+  return (
+    <span className="cp-detail">
+      {parts.join(' · ')}
+      {p.activeFlag === false && (
+        <span className="cp-inactive-warn"> ⚠ marked inactive in PDAS</span>
+      )}
+    </span>
+  );
+}
+
+function CurrentProductBar({
+  rank,
+  onOpenTimeline,
+  onProductChanged,
+}: {
+  rank: number;
+  onOpenTimeline: () => void;
+  onProductChanged: () => void;
+}) {
   const [current, setCurrent] = useState<TimelineEntry | null>(null);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [sel, setSel] = useState<number | ''>('');
@@ -6053,6 +6189,9 @@ function CurrentProductBar({ rank }: { rank: number }) {
     [products],
   );
 
+  const currentDetail = current ? products.find((p) => p.productId === current.productId) ?? null : null;
+  const selectedProduct = sel === '' ? null : products.find((p) => p.productId === Number(sel)) ?? null;
+
   const apply = async () => {
     if (sel === '') return;
     setSaving(true);
@@ -6062,6 +6201,7 @@ function CurrentProductBar({ rank }: { rank: number }) {
       setCurrent(r.current);
       setSel('');
       setJustChanged(chosen);
+      onProductChanged();
     } finally {
       setSaving(false);
     }
@@ -6079,6 +6219,7 @@ function CurrentProductBar({ rank }: { rank: number }) {
             <span className="meta">
               since {new Date(current.effectiveFrom).toLocaleString()} · set by {current.changedBy ?? '—'}
             </span>
+            {currentDetail && <ProductDetailLine p={currentDetail} />}
           </>
         ) : (
           <span className="val none">Not set — production is unattributed (Q1)</span>
@@ -6086,20 +6227,26 @@ function CurrentProductBar({ rank }: { rank: number }) {
         {justChanged && (
           <span className="cp-confirm">✓ Changed to {productLabel(justChanged)}</span>
         )}
+        <button type="button" className="rr-link cp-history-link" onClick={onOpenTimeline}>
+          View history →
+        </button>
       </div>
       {canSet && (
         <div className="cp-set">
-          <select value={sel} onChange={(e) => setSel(e.target.value === '' ? '' : Number(e.target.value))}>
-            <option value="">Change product…</option>
-            {sortedProducts.map((p) => (
-              <option key={p.productId} value={p.productId}>
-                {productLabel(p)}
-              </option>
-            ))}
-          </select>
-          <button disabled={sel === '' || saving} onClick={apply}>
-            {saving ? 'setting…' : 'Set'}
-          </button>
+          <div className="cp-set-row">
+            <select value={sel} onChange={(e) => setSel(e.target.value === '' ? '' : Number(e.target.value))}>
+              <option value="">Change product…</option>
+              {sortedProducts.map((p) => (
+                <option key={p.productId} value={p.productId}>
+                  {productLabel(p)}
+                </option>
+              ))}
+            </select>
+            <button disabled={sel === '' || saving} onClick={apply}>
+              {saving ? 'setting…' : 'Set'}
+            </button>
+          </div>
+          {selectedProduct && <ProductDetailLine p={selectedProduct} />}
         </div>
       )}
     </div>

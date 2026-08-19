@@ -12,7 +12,7 @@ import { getProduction, type GroupBy } from './services/production.js';
 import { getShiftAnalysis } from './services/shiftAnalysis.js';
 import { getRejectPareto, setRejectLabel } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
-import { listProducts, getCurrent, setCurrent } from './services/currentProduct.js';
+import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
 import { listEvents, getEventDetail, exportEventsCsv, type EventType } from './services/register.js';
 import { getDowntime, getStoppagePatterns } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
@@ -553,6 +553,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.get('/api/current-product', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       res.json({ current: await getCurrent(pool, cfg.lineId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // full changeover history — same rank as reading "current", since seeing
+  // what ran when is a read, not a decision; setting it stays supervisor+ below
+  app.get('/api/product-timeline', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ timeline: await listTimeline(pool, cfg.lineId) });
     } catch (err) {
       next(err);
     }

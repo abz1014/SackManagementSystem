@@ -25,6 +25,7 @@ export type View =
   | 'shift'
   | 'operations'
   | 'exceptions'
+  | 'timeline'
   | 'admin';
 
 /**
@@ -53,6 +54,10 @@ export const VIEW_MIN_RANK: Record<View, number> = {
   // dedicated page showing the identical class of finding — filterable, and
   // for a chosen day instead of only yesterday — discloses nothing new.
   exceptions: 1, // reachable by anyone; no rail item (see RAIL below)
+  // Same reasoning as exceptions: the current product and its changeover
+  // history are already shown to every role on Overview's product bar (once
+  // Phase 1b lands); a dedicated history page discloses nothing new.
+  timeline: 1, // reachable by anyone; no rail item (see RAIL below)
   admin: 4, // Setup — admin only
 };
 
@@ -68,6 +73,7 @@ export const VIEW_LABEL: Record<View, string> = {
   shift: 'Shifts',
   operations: 'Sync',
   exceptions: 'Exceptions',
+  timeline: 'Product history',
   admin: 'Setup',
 };
 
@@ -133,6 +139,15 @@ const GLYPH: Record<View, ReactNode> = {
       <path d="M12 4.5 21 19H3z" strokeLinejoin="round" />
       <path d="M12 10v4" strokeLinecap="round" />
       <circle cx="12" cy="16.6" r="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  // Never rendered — no RAIL entry (reachable via the "View history →" link
+  // on the current-product bar instead). Reuses the shift clock-face shape:
+  // a changeover history is a sequence of points in time, same as a shift.
+  timeline: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3.4 2.1" strokeLinecap="round" />
     </>
   ),
   admin: (

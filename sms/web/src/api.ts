@@ -119,10 +119,20 @@ export function adminSetShiftRule(r: { mode: string; nightBelongsTo: string; rea
 export function adminSetPlausibilityRule(r: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/plausibility', r); }
 
 // ---- current product (Q1) ----
-export interface ProductOption { productId: number; description: string | null; lotCode: string | null; setpointG: number | null; }
+export interface ProductOption {
+  productId: number; description: string | null; lotCode: string | null; setpointG: number | null;
+  blend: string | null; countText: string | null; tubeType: string | null; tubeWeightG: number | null;
+  weightOffsetMinusG: number | null; weightOffsetPlusG: number | null;
+  /** PDAS MaterialActive — informational only, shown so a supervisor sees it
+   *  before confirming a changeover, not to block the choice. */
+  activeFlag: boolean | null;
+}
 export interface TimelineEntry {
   timelineId: number; productId: number; productLabel: string;
   effectiveFrom: string; changedAt: string; changedBy: string | null; reason: string | null;
+}
+export function getProductTimeline(): Promise<{ timeline: TimelineEntry[] }> {
+  return get('/api/product-timeline');
 }
 export function getProducts(): Promise<{ products: ProductOption[] }> {
   return get('/api/products');

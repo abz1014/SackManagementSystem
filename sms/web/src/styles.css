@@ -401,23 +401,31 @@ body {
   font-weight: 600; animation: cp-confirm-in 200ms ease both;
 }
 @keyframes cp-confirm-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
-.cpbar .cp-set { display: flex; gap: 8px; align-items: center; }
+/* Shared by ProductDetailLine wherever it renders — the current-product bar
+   and the product-history table both show the same blend/tube/tolerance line. */
+.cp-detail { font-size: var(--fs-caption); color: var(--muted); margin-top: 2px; display: block; }
+.cp-inactive-warn { color: var(--warn-ink); font-weight: 600; }
+.cpbar .cp-history-link { align-self: flex-start; margin-top: 4px; padding: 0; }
+.cpbar .cp-set { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.cpbar .cp-set .cp-detail { align-self: stretch; text-align: right; }
+.cpbar .cp-set-row { display: flex; gap: 8px; align-items: center; }
 .cpbar select {
   background: var(--paper); border: 1px solid var(--hairline); color: var(--ink);
   padding: 10px 12px; border-radius: var(--radius-sm); font-size: var(--fs-caption); max-width: 300px;
   font-family: var(--font-sans);
 }
-.cpbar button {
+.cpbar button:not(.rr-link) {
   border: 1px solid var(--ok); background: transparent; color: var(--ok-ink);
   border-radius: var(--radius-sm); padding: 10px 16px; font-size: var(--fs-caption); cursor: pointer; font-weight: 600;
   transition: background 120ms, color 120ms;
 }
-.cpbar button:hover:not(:disabled) { background: var(--ink-2); color: #fff; }
-.cpbar button:disabled { opacity: 0.35; cursor: default; border-color: var(--hairline); color: var(--muted); }
+.cpbar button:not(.rr-link):hover:not(:disabled) { background: var(--ink-2); color: #fff; }
+.cpbar button:not(.rr-link):disabled { opacity: 0.35; cursor: default; border-color: var(--hairline); color: var(--muted); }
 @media (max-width: 560px) {
   .cpbar { flex-direction: column; align-items: stretch; }
   .cpbar .cp-info .val { word-break: normal; overflow-wrap: normal; }
-  .cpbar .cp-set { width: 100%; }
+  .cpbar .cp-set { width: 100%; align-items: stretch; }
+  .cpbar .cp-set .cp-detail { text-align: left; }
   .cpbar select { max-width: none; flex: 1; }
 }
 
@@ -1605,6 +1613,25 @@ body {
 .f-detail { font-size: var(--fs-caption); color: var(--graphite); }
 .f-go { flex: none; color: var(--muted); font-size: var(--fs-panel); line-height: 1.2; }
 .finding:hover .f-go { color: var(--ink); }
+
+/* ---- product history (changeover timeline) ---- */
+.tl-list { display: flex; flex-direction: column; }
+.tl-row {
+  display: flex; align-items: flex-start; gap: 14px; width: 100%;
+  padding: 13px 8px; border-bottom: 1px solid var(--hairline-2);
+}
+.tl-row:last-child { border-bottom: 0; }
+.tl-when {
+  flex: none; width: 168px; font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--muted);
+  padding-top: 1px;
+}
+.tl-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.tl-product { font-size: var(--fs-row); font-weight: var(--fw-med); color: var(--ink); }
+.tl-meta { font-size: var(--fs-caption); color: var(--muted); }
+@media (max-width: 640px) {
+  .tl-row { flex-direction: column; gap: 3px; }
+  .tl-when { width: auto; }
+}
 
 .shiftbars { display: flex; flex-direction: column; gap: 14px; }
 .sb-row { display: grid; grid-template-columns: 76px 1fr auto; align-items: center; gap: 12px; }
