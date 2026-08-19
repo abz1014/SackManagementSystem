@@ -2331,6 +2331,8 @@ body {
 }
 .setup-table.fixed .st-row { grid-template-columns: 1.2fr 1fr 1.4fr; }
 .setup-table.audit .st-head, .setup-table.audit .st-row { grid-template-columns: 1.3fr 1fr 1fr 1fr 2fr; }
+.setup-table.calibration .st-head, .setup-table.calibration .st-row { grid-template-columns: 0.7fr 1fr 1fr 1.4fr 1.2fr; align-items: center; }
+.setup-table.calibration .st-row .pill { cursor: default; }
 
 .ghost-btn.sm, .cta.sm { padding: 7px 13px; font-size: var(--fs-caption); }
 

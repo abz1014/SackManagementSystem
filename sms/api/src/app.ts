@@ -16,6 +16,7 @@ import { listProducts, getCurrent, setCurrent, listTimeline } from './services/c
 import { listEvents, getEventDetail, exportEventsCsv, type EventType } from './services/register.js';
 import { getDowntime, getStoppagePatterns } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
+import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getOee } from './services/oee.js';
 import {
@@ -554,6 +555,66 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const data = await getWeights(pool, cfg.lineId, q.data.basis as Basis, q.data.from, q.data.to);
       res.json(await envelope(pool, cfg.lineId, data));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Calibration advisory (Phase 5) — cone only, same restriction as per-station SPC ----
+  app.get('/api/calibration', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = z.object({ from: dateStr, to: dateStr }).safeParse(req.query);
+      if (!q.success || !q.data.from || !q.data.to) {
+        res.status(400).json({ error: 'from and to are required' });
+        return;
+      }
+      const rangeErr = validateRange(q.data.from, q.data.to);
+      if (rangeErr) {
+        res.status(400).json({ error: rangeErr });
+        return;
+      }
+      const plausibility = await getPlausibilityRule(pool, cfg.lineId);
+      const data = await getStationDrift(pool, cfg.lineId, q.data.from, q.data.to, plausibility);
+      res.json(await envelope(pool, cfg.lineId, data));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/calibration/adjustments', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ adjustments: await listCalibrationAdjustments(pool, cfg.lineId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // logging an adjustment is a decision, same rank as setting the current product (Q1)
+  app.post('/api/calibration/adjustments', requireRole(2), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = z
+        .object({
+          stationId: z.coerce.number().int().positive().optional(),
+          adjustedAt: z.string().datetime().optional(),
+          reason: z.string().max(255).optional(),
+          note: z.string().max(500).optional(),
+        })
+        .safeParse(req.body);
+      if (!body.success) {
+        res.status(400).json({ error: 'invalid request' });
+        return;
+      }
+      const user = (req as AuthedRequest).user!;
+      const adjustedAt = body.data.adjustedAt ? new Date(body.data.adjustedAt) : new Date();
+      const id = await recordCalibrationAdjustment(
+        pool, cfg.lineId, body.data.stationId ?? null, adjustedAt, user.userId,
+        body.data.reason ?? null, body.data.note ?? null,
+      );
+      audit(
+        req, 'calibration.adjustment', 'station', body.data.stationId ?? 'line-wide',
+        body.data.reason ?? body.data.note ?? null,
+      );
+      res.json({ adjustmentId: id, adjustments: await listCalibrationAdjustments(pool, cfg.lineId) });
     } catch (err) {
       next(err);
     }

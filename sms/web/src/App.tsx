@@ -24,6 +24,10 @@ import {
   adminSetShiftRule,
   adminSetPlausibilityRule,
   adminGetAudit,
+  getCalibration,
+  getCalibrationAdjustments,
+  recordCalibrationAdjustment,
+  NELSON_RULE_LABEL,
   getEvents,
   getEventDetail,
   eventsExportUrl,
@@ -39,6 +43,9 @@ import {
   type StationRow,
   type Rules,
   type AuditEntry,
+  type CalibrationData,
+  type CalibrationAdjustment,
+  type StationDrift,
   type ProductOption,
   type TimelineEntry,
   type Envelope,
@@ -246,6 +253,7 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
         subTabs: [
           { key: 'spread', label: 'Spread', note: 'distribution and stations' },
           { key: 'stability', label: 'Stability', note: 'control through the day' },
+          { key: 'calibration', label: 'Calibration', note: 'drift and adjustments' },
         ],
       };
     case 'rejects':
@@ -496,7 +504,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       ) : view === 'performance' ? (
         <PerformanceHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} />
       ) : view === 'weight' ? (
-        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} />
+        <WeightHub range={range} onMeta={setFreshness} onInspect={navigateToRegister} sub={activeSub} rank={rank} />
       ) : view === 'shift' ? (
         <ShiftView range={range} onMeta={setFreshness} sub={activeSub} />
       ) : view === 'rejects' ? (
@@ -535,7 +543,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
  * consumers: the section column is the only control that writes `sub`.
  */
 const PERF_SUB = { oee: 'oee', stops: 'downtime', patterns: 'patterns' } as const;
-const WEIGHT_SUB = { spread: 'distribution', stability: 'spc' } as const;
+const WEIGHT_SUB = { spread: 'distribution', stability: 'spc', calibration: 'calibration' } as const;
 const REJECT_SUB = { reasons: 'pareto', trend: 'trend', station: 'station' } as const;
 
 function PerformanceHub({
@@ -576,11 +584,13 @@ function WeightHub({
   onMeta,
   onInspect,
   sub: routeSub,
+  rank,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
   onInspect: (seed: RegisterSeed) => void;
   sub: string;
+  rank: number;
 }) {
   const sub = WEIGHT_SUB[routeSub as keyof typeof WEIGHT_SUB] ?? 'distribution';
 
@@ -624,9 +634,13 @@ function WeightHub({
       const priorStr = prior.toISOString().slice(0, 10);
       const d = range.min && priorStr >= range.min ? priorStr : range.max;
       setTo(d);
-      setFrom(d);
+      // A single day tells you nothing about drift — Calibration's whole
+      // point is a trend over time — so a direct landing there (permalink or
+      // first tab visited) defaults to the full available history instead of
+      // Spread/Stability's single "yesterday" default.
+      setFrom(sub === 'calibration' && range.min ? range.min : d);
     }
-  }, [range.max, range.min, to]);
+  }, [range.max, range.min, to, sub]);
 
   useEffect(() => {
     if (!from || !to) return;
@@ -673,17 +687,19 @@ function WeightHub({
   return (
     <>
       <div className="wt-controls">
-        <div className="field">
-          <label>Record type</label>
-          <Segmented
-            value={type}
-            onChange={setType}
-            options={[
-              { key: 'cone', label: 'Cones' },
-              { key: 'sack', label: 'Sacks' },
-            ]}
-          />
-        </div>
+        {sub !== 'calibration' && (
+          <div className="field">
+            <label>Record type</label>
+            <Segmented
+              value={type}
+              onChange={setType}
+              options={[
+                { key: 'cone', label: 'Cones' },
+                { key: 'sack', label: 'Sacks' },
+              ]}
+            />
+          </div>
+        )}
         <div className="field">
           <label>From</label>
           <input type="date" value={from} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setFrom(e.target.value)} />
@@ -692,41 +708,45 @@ function WeightHub({
           <label>To</label>
           <input type="date" value={to} min={range.min ?? undefined} max={range.max ?? undefined} onChange={(e) => setTo(e.target.value)} />
         </div>
-        <div className="field">
-          <label>Tolerance (for Cp/Cpk)</label>
-          <div className="spc-spec-picker">
-            <select
-              value={specMode === 'product' ? `p:${productId}` : specMode}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === 'none' || v === 'manual') {
-                  setSpecMode(v);
-                } else {
-                  setSpecMode('product');
-                  setProductId(v.replace('p:', ''));
-                }
-              }}
-            >
-              <option value="none">None — statistical control only</option>
-              <option value="manual">Manual entry</option>
-              {type === 'cone' &&
-                products.map((p) => (
-                  <option key={p.productId} value={`p:${p.productId}`}>
-                    {p.description || p.lotCode || `Product ${p.productId}`} ({p.setpointG}g)
-                  </option>
-                ))}
-            </select>
-            {specMode === 'manual' && (
-              <>
-                <input type="number" placeholder={`LSL (${unit})`} value={manualLsl} onChange={(e) => setManualLsl(e.target.value)} />
-                <input type="number" placeholder={`USL (${unit})`} value={manualUsl} onChange={(e) => setManualUsl(e.target.value)} />
-              </>
-            )}
+        {sub !== 'calibration' && (
+          <div className="field">
+            <label>Tolerance (for Cp/Cpk)</label>
+            <div className="spc-spec-picker">
+              <select
+                value={specMode === 'product' ? `p:${productId}` : specMode}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'none' || v === 'manual') {
+                    setSpecMode(v);
+                  } else {
+                    setSpecMode('product');
+                    setProductId(v.replace('p:', ''));
+                  }
+                }}
+              >
+                <option value="none">None — statistical control only</option>
+                <option value="manual">Manual entry</option>
+                {type === 'cone' &&
+                  products.map((p) => (
+                    <option key={p.productId} value={`p:${p.productId}`}>
+                      {p.description || p.lotCode || `Product ${p.productId}`} ({p.setpointG}g)
+                    </option>
+                  ))}
+              </select>
+              {specMode === 'manual' && (
+                <>
+                  <input type="number" placeholder={`LSL (${unit})`} value={manualLsl} onChange={(e) => setManualLsl(e.target.value)} />
+                  <input type="number" placeholder={`USL (${unit})`} value={manualUsl} onChange={(e) => setManualUsl(e.target.value)} />
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {error ? (
+      {sub === 'calibration' ? (
+        <WeightCalibration from={from} to={to} onMeta={onMeta} rank={rank} />
+      ) : error ? (
         <div className="error-card" role="alert"><b>Couldn't load weight analysis.</b> {error}</div>
       ) : loading || !spc ? (
         <>
@@ -3869,6 +3889,7 @@ function WeightStability({
   const ooc = spc.xbarOutOfControl;
   const total = spc.subgroups.length;
   const oocPct = total > 0 ? Math.round((100 * ooc) / total) : 0;
+  const nelsonFlagged = spc.nelsonFlagged;
 
   // The control limits are ±3σ/√n, so they tighten as a subgroup gets bigger.
   // At ~170 cones a subgroup that band is under ±2 g, which a real line will
@@ -3880,10 +3901,15 @@ function WeightStability({
 
   const headline =
     ooc === 0
-      ? 'The mean held steady all day'
+      ? nelsonFlagged > 0
+        ? `No point crossed the band, but ${nelsonFlagged} of ${total} subgroups form a non-random pattern`
+        : 'The mean held steady all day'
       : oocPct >= 20
         ? `The line mean moved around all day — ${ooc} of ${total} subgroups outside the band`
         : `The mean mostly held — ${ooc} of ${total} subgroups stepped outside the band`;
+
+  const nelsonNote = (g: Subgroup): string | null =>
+    g.nelson.length > 0 ? `pattern: ${g.nelson.map((r) => NELSON_RULE_LABEL[r]).join(', ')}` : null;
 
   return (
     <>
@@ -3911,7 +3937,8 @@ function WeightStability({
               valueOf={(g) => g.mean}
               uclOf={(g) => g.xUcl}
               lclOf={(g) => g.xLcl}
-              violatesOf={(g) => g.xViolates}
+              violatesOf={(g) => g.xViolates || g.nelson.length > 0}
+              noteOf={nelsonNote}
               centerline={spc.grandMean}
               uslLine={spc.spec.usl}
               lslLine={spc.spec.lsl}
@@ -3924,6 +3951,7 @@ function WeightStability({
         </ResizableChart>
         <div className="spc-legend">
           <span><span className="dot limit" /> outside the band ({ooc})</span>
+          {nelsonFlagged > 0 && <span><span className="dot limit" /> non-random pattern ({nelsonFlagged}) — hover a marked point for which rule</span>}
           <span><span className="dot ctr" /> centreline {spc.grandMean}{unit}</span>
           {spc.spec.usl != null && <span><span className="dot spec" /> tolerance {spc.spec.lsl}–{spc.spec.usl}{unit}</span>}
         </div>
@@ -4069,6 +4097,205 @@ function WeightStability({
   );
 }
 
+/**
+ * Calibration advisory (Phase 5 — roadmap table). Cone-only, same restriction
+ * as spc.ts's per-station analysis (sacks carry no station column).
+ *
+ * Two questions the Spread/Stability tabs cannot answer: is any ONE station
+ * drifting even while the line-wide mean looks fine (Spread's per-station
+ * view is a single number over the whole range — it erases a trend by
+ * averaging it away), and has anyone actually done anything about it. The
+ * first is computed fresh on every request; the second is the one thing here
+ * that needed a table (sms.calibration_adjustment).
+ */
+function WeightCalibration({
+  from,
+  to,
+  onMeta,
+  rank,
+}: {
+  from: string;
+  to: string;
+  onMeta: (m: Meta) => void;
+  rank: number;
+}) {
+  const [data, setData] = useState<CalibrationData | null>(null);
+  const [adjustments, setAdjustments] = useState<CalibrationAdjustment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const canLog = rank >= 2; // supervisor+, same tier as setting the current product
+
+  const loadAdjustments = () => getCalibrationAdjustments().then((r) => setAdjustments(r.adjustments)).catch(() => {});
+
+  useEffect(() => {
+    if (!from || !to) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([getCalibration(from, to), getCalibrationAdjustments()])
+      .then(([c, a]) => {
+        if (cancelled) return;
+        setData(c.data);
+        onMeta(c.metadata);
+        setAdjustments(a.adjustments);
+      })
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [from, to, onMeta]);
+
+  const [stationSel, setStationSel] = useState('');
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [adjustedAt, setAdjustedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      await recordCalibrationAdjustment({
+        stationId: stationSel ? Number(stationSel) : undefined,
+        adjustedAt: new Date(adjustedAt).toISOString(),
+        reason: reason || undefined,
+        note: note || undefined,
+      });
+      setReason('');
+      setNote('');
+      await loadAdjustments();
+    } catch (e) {
+      setSaveErr((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (error) return <div className="error-card" role="alert"><b>Couldn't load calibration data.</b> {error}</div>;
+  if (loading || !data) return <div className="sk sk-chart" />;
+
+  const flaggedDayCount = (s: StationDrift) => s.days.filter((d) => d.nelson.length > 0).length;
+  const sorted = [...data.stations].sort((a, b) => flaggedDayCount(b) - flaggedDayCount(a) || a.station - b.station);
+  const headline =
+    data.flaggedStationCount === 0
+      ? `No station shows a drift pattern over the ${data.days}-day window`
+      : `${data.flaggedStationCount} of ${data.stations.length} stations show a drift pattern over the ${data.days}-day window`;
+
+  return (
+    <>
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3 className="panel-sub-verdict">{headline}</h3>
+            <p className="panel-lede">
+              Each station's own daily mean, tested against its own history for a Nelson-rule pattern — a sign
+              worth a look, not proof the scale is wrong; a station can drift for reasons other than calibration.
+              {data.days < 15 && (
+                <> With only {data.days} production days recorded, only the sharper rules (one extreme day, or six
+                days trending one direction) can realistically fire yet — the rules needing 14-15 points in a row
+                will only become meaningful as more history accumulates.</>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {sorted.length === 0 ? (
+          <div className="empty-note">No station-attributed cone readings in this range.</div>
+        ) : (
+          <div className="setup-table calibration">
+            <div className="st-head">
+              <span>Station</span><span>Readings</span><span>Mean</span><span>Trend</span><span>Status</span>
+            </div>
+            {sorted.map((s) => {
+              const flaggedDays = s.days.filter((d) => d.nelson.length > 0);
+              return (
+                <div className="st-row" key={s.station}>
+                  <span className="mono">{s.station}</span>
+                  <span className="mono dim">{fmtInt(s.n)}</span>
+                  <span className="mono">{s.grandMean}{data.unit}</span>
+                  <span><Spark points={s.days.map((d) => d.mean)} alarm={s.flagged} /></span>
+                  <span>
+                    {s.flagged ? (
+                      <span className="pill off" title={flaggedDays.map((d) => `${d.date}: ${d.nelson.map((r) => NELSON_RULE_LABEL[r]).join(', ')}`).join(' · ')}>
+                        pattern · {flaggedDays.length} of {s.days.length} days
+                      </span>
+                    ) : (
+                      <span className="pill on">steady</span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="panel-foot">Sorted flagged stations first, most-flagged-days first. Hover a pattern pill for which rule and on which day.</div>
+      </section>
+
+      <section className="panel" style={{ marginTop: 14 }}>
+        <div className="panel-head">
+          <div>
+            <h3 className="panel-title">Adjustment log</h3>
+            <p className="panel-lede">
+              {adjustments.length} recorded adjustment{adjustments.length === 1 ? '' : 's'}. Every scale correction
+              made through this app, so a flagged station here can be checked against what was actually done about it.
+            </p>
+          </div>
+        </div>
+
+        {canLog && (
+          <div className="rec-filters" style={{ marginBottom: 14 }}>
+            <div className="field">
+              <label>Station</label>
+              <select value={stationSel} onChange={(e) => setStationSel(e.target.value)}>
+                <option value="">Whole line</option>
+                {data.stations.map((s) => (
+                  <option key={s.station} value={s.station}>Station {s.station}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>When adjusted</label>
+              <input type="datetime-local" value={adjustedAt} onChange={(e) => setAdjustedAt(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Reason</label>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. scheduled recalibration" />
+            </div>
+            <div className="field">
+              <label>Note</label>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="optional detail" />
+            </div>
+            <button type="button" className="cta" disabled={saving} onClick={submit}>
+              {saving ? 'Logging…' : 'Log adjustment'}
+            </button>
+          </div>
+        )}
+        {saveErr && <div className="error-card" role="alert" style={{ marginBottom: 14 }}>{saveErr}</div>}
+
+        {adjustments.length === 0 ? (
+          <div className="empty-note">No adjustments recorded yet.</div>
+        ) : (
+          <div className="tl-list">
+            {adjustments.map((a) => (
+              <div className="tl-row" key={a.adjustmentId}>
+                <span className="tl-when">{new Date(a.adjustedAtUtc).toLocaleString()}</span>
+                <span className="tl-body">
+                  <span className="tl-product">{a.stationId != null ? `Station ${a.stationId}` : 'Whole line'}</span>
+                  <span className="tl-meta">
+                    logged by {a.recordedBy ?? '—'}
+                    {a.reason ? ` · ${a.reason}` : ''}
+                    {a.note ? ` · ${a.note}` : ''}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 /** Wraps a chart in a vertically drag-resizable frame so the user can enlarge
  * it for closer visual inspection. Passes the live height to the child so the
  * chart re-lays-out crisply (no SVG stretching / distorted text). */
@@ -4142,6 +4369,7 @@ function SubgroupChart({
   uclOf,
   lclOf,
   violatesOf,
+  noteOf,
   centerline,
   uslLine,
   lslLine,
@@ -4155,6 +4383,10 @@ function SubgroupChart({
   uclOf: (g: Subgroup) => number | null;
   lclOf: (g: Subgroup) => number | null;
   violatesOf: (g: Subgroup) => boolean;
+  /** Optional extra tooltip line — e.g. which Nelson rules fired at this point.
+   *  Kept separate from violatesOf: a rule 1 (single point beyond 3σ) is
+   *  already what violatesOf marks; this is for callers with more to say. */
+  noteOf?: (g: Subgroup) => string | null;
   centerline: number;
   uslLine?: number | null;
   lslLine?: number | null;
@@ -4212,6 +4444,7 @@ function SubgroupChart({
   const hg = hover != null ? valid[hover] : null;
   const hVal = hg ? valueOf(hg) : null;
   const tipFont = useTipFontPx();
+  const note = hg ? noteOf?.(hg) ?? null : null;
   const tipLines: TipLine[] =
     hg && hVal != null
       ? [
@@ -4219,6 +4452,7 @@ function SubgroupChart({
           { t: `${hVal.toFixed(2)} ${unit}`, cls: 'strong' },
           { t: `n = ${hg.n} ${noun}` },
           ...(violatesOf(hg) ? [{ t: 'out of control', cls: 'warn' }] : []),
+          ...(note ? [{ t: note, cls: 'warn' }] : []),
         ]
       : [];
   const tipW = tipLines.length ? tipMetrics(tipLines.map((l) => l.t), tipFont).w : 0;

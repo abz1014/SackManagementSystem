@@ -389,6 +389,18 @@ export function getStoppagePatterns(from: string, to: string, thresholdSeconds: 
 
 // ---- Weight SPC ----
 export type SpcType = 'cone' | 'sack';
+/** Nelson rules 2-8 — see api/src/services/nelson.ts. Rule 1 is xViolates. */
+export type NelsonRuleId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export const NELSON_RULE_LABEL: Record<NelsonRuleId, string> = {
+  1: 'Point beyond 3σ',
+  2: '9 in a row on one side',
+  3: '6 in a row trending',
+  4: '14 in a row alternating',
+  5: '2 of 3 beyond 2σ, one side',
+  6: '4 of 5 beyond 1σ, one side',
+  7: '15 in a row within 1σ',
+  8: '8 in a row beyond 1σ, both sides',
+};
 export interface Subgroup {
   ts: string;
   n: number;
@@ -400,6 +412,7 @@ export interface Subgroup {
   sLcl: number | null;
   xViolates: boolean;
   sViolates: boolean;
+  nelson: NelsonRuleId[];
 }
 export interface StationStat {
   station: number;
@@ -444,6 +457,7 @@ export interface SpcData {
   grandMean: number;
   sChartCenter: number;
   xbarOutOfControl: number;
+  nelsonFlagged: number;
   subgroups: Subgroup[];
   stations: StationStat[];
   practicalThresholdG: number;
@@ -469,6 +483,51 @@ export function getSpc(q: SpcQuery): Promise<Envelope<SpcData>> {
   if (q.lsl != null) p.set('lsl', String(q.lsl));
   if (q.shift) p.set('shift', q.shift);
   return get(`/api/spc?${p.toString()}`);
+}
+
+// ---- Calibration advisory (Phase 5) ----
+export interface StationDriftDay {
+  date: string;
+  n: number;
+  mean: number;
+  nelson: NelsonRuleId[];
+}
+export interface StationDrift {
+  station: number;
+  n: number;
+  grandMean: number;
+  stdevWithin: number;
+  sigmaDayToDay: number;
+  days: StationDriftDay[];
+  flagged: boolean;
+}
+export interface CalibrationData {
+  unit: 'g';
+  from: string;
+  to: string;
+  days: number;
+  stations: StationDrift[];
+  flaggedStationCount: number;
+}
+export interface CalibrationAdjustment {
+  adjustmentId: number;
+  stationId: number | null;
+  adjustedAtUtc: string;
+  recordedAtUtc: string;
+  recordedBy: string | null;
+  reason: string | null;
+  note: string | null;
+}
+export function getCalibration(from: string, to: string): Promise<Envelope<CalibrationData>> {
+  return get(`/api/calibration?${new URLSearchParams({ from, to }).toString()}`);
+}
+export function getCalibrationAdjustments(): Promise<{ adjustments: CalibrationAdjustment[] }> {
+  return get('/api/calibration/adjustments');
+}
+export function recordCalibrationAdjustment(a: {
+  stationId?: number; adjustedAt?: string; reason?: string; note?: string;
+}): Promise<{ adjustmentId: number; adjustments: CalibrationAdjustment[] }> {
+  return post('/api/calibration/adjustments', a);
 }
 
 // ---- Reject control chart (p-chart) ----

@@ -33,6 +33,7 @@
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { PlausibilityRule } from './admin.js';
+import { nelsonViolations, type NelsonRuleId } from './nelson.js';
 
 export type SpcType = 'cone' | 'sack';
 
@@ -45,8 +46,12 @@ export interface Subgroup {
   xLcl: number;
   sUcl: number | null;
   sLcl: number | null;
-  xViolates: boolean;
+  xViolates: boolean; // rule 1 alone — kept for the existing "N of M outside the band" verdict
   sViolates: boolean;
+  /** Rules 2-8 (rule 1 is xViolates above): non-random patterns a single-point
+   *  3σ check misses entirely — see nelson.ts. Empty when the subgroup mean
+   *  looks like ordinary process noise. */
+  nelson: NelsonRuleId[];
 }
 
 export interface StationStat {
@@ -103,6 +108,10 @@ export interface SpcData {
   grandMean: number;
   sChartCenter: number; // = stdevWithin
   xbarOutOfControl: number;
+  /** Subgroups with at least one Nelson rule 2-8 violation (rule 1 is
+   *  xbarOutOfControl above) — a non-random pattern with no single point ever
+   *  crossing the 3σ band. */
+  nelsonFlagged: number;
   subgroups: Subgroup[];
   stations: StationStat[]; // cone only; [] for sack (no station column)
   practicalThresholdG: number; // |delta| beyond which a station is worth acting on
@@ -308,8 +317,10 @@ export async function getWeightSpc(
   // X̄ limits are per-subgroup (variable n): X̿ ± 3σ_within/√n_i.
   // S limits use the large-sample normal approx σ_within·(1 ± 3/√(2n_i)),
   // valid here since n_i is large (c4 ≈ 1); avoids per-n B3/B4 table lookups.
+  const ses: number[] = [];
   const subgroups: Subgroup[] = rawSg.map((g) => {
     const se = g.n > 0 ? stdevWithin / Math.sqrt(g.n) : 0;
+    ses.push(se);
     const xUcl = grandMean + 3 * se;
     const xLcl = grandMean - 3 * se;
     let sUcl: number | null = null;
@@ -332,9 +343,20 @@ export async function getWeightSpc(
       sLcl: sLcl != null ? round(sLcl, 2) : null,
       xViolates: g.mean > xUcl || g.mean < xLcl,
       sViolates,
+      nelson: [], // filled below — needs the whole series, not just this one subgroup
     };
   });
   const xbarOutOfControl = subgroups.filter((g) => g.xViolates).length;
+
+  // Rule 1 is exactly xViolates above (same centerline, same per-subgroup se) —
+  // kept out of `nelson` so the two never say the same thing under different names.
+  const nelsonPerPoint = nelsonViolations(
+    rawSg.map((g, i) => ({ value: g.mean, se: ses[i]! })),
+    grandMean,
+  );
+  subgroups.forEach((g, i) => {
+    g.nelson = nelsonPerPoint[i]!.filter((r) => r !== 1);
+  });
 
   // 3. Per-station analysis (cone only — sacks have no station column).
   //
@@ -465,6 +487,7 @@ export async function getWeightSpc(
     grandMean: round(grandMean, 2),
     sChartCenter: round(stdevWithin, 3),
     xbarOutOfControl,
+    nelsonFlagged: subgroups.filter((g) => g.nelson.length > 0).length,
     subgroups,
     stations,
     practicalThresholdG,

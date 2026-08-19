@@ -200,10 +200,13 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/products', minRank: 1 },
   { method: 'GET', path: '/api/current-product', minRank: 1 },
   { method: 'GET', path: '/api/product-timeline', minRank: 1 },
+  { method: 'GET', path: '/api/calibration?from=2026-07-09&to=2026-07-09', minRank: 1 },
+  { method: 'GET', path: '/api/calibration/adjustments', minRank: 1 },
   // route-specific gates
   { method: 'GET', path: '/api/events/export?type=cone', minRank: 3 },
   { method: 'PUT', path: '/api/reject-codes/1', minRank: 3, body: { label: 'x' } },
   { method: 'POST', path: '/api/current-product', minRank: 2, body: { productId: 1 } },
+  { method: 'POST', path: '/api/calibration/adjustments', minRank: 2, body: { reason: 'test' } },
   { method: 'GET', path: '/api/admin/users', minRank: 4 },
   { method: 'POST', path: '/api/admin/users', minRank: 4, body: { username: 'x', password: 'abcdef', role: 'operator' } },
   { method: 'PATCH', path: '/api/admin/users/1', minRank: 4, body: { active: true } },
