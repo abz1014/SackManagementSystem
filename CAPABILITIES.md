@@ -157,11 +157,11 @@ tested rather than asserted: an hour counts as a cluster only if it recurs on
 more days than the median hour. Duration distribution, hour-of-day
 distribution, and three summary figures.
 
-### 3.6 Weight (`?v=weight&sub=spread|stability`)
+### 3.6 Weight (`?v=weight&sub=spread|stability|calibration`)
 
-A verdict banner above both tabs: mean, spread, capability, and the share of
-subgroups outside control, with the sentence stating how far the line sits from
-the setpoint and which setpoint that is.
+A verdict banner above Spread and Stability: mean, spread, capability, and the
+share of subgroups outside control, with the sentence stating how far the line
+sits from the setpoint and which setpoint that is.
 
 **Spread.** Weight distribution histogram with the tolerance window and mean
 marked and out-of-tolerance bars flagged; per-station deviation chart against
@@ -172,6 +172,22 @@ figure in kg/day and tonnes/year, with its provisional caveat attached.
 a *Show the maths* toggle revealing Cp, Cpk, σ-within, σ-overall, groups out of
 control, and the S chart. Also the PLC-versus-product-tolerance comparison
 (§4.6), which stays visible because it is a finding rather than a statistic.
+Points are now also checked against Nelson rules 2-8 (§4.9) — a non-random
+pattern with no single point ever crossing the 3σ band — shown as an
+additional marked-point category on the same chart, with the specific rule(s)
+in the hover tooltip.
+
+**Calibration** (Phase 5 — roadmap table). Cone-only (sacks carry no station
+column). Each of the 14 stations' own daily mean, tested against its own
+history for a Nelson-rule pattern using an I-MR sigma estimated from how much
+that station's daily mean normally moves day to day — not the sampling error
+of one day's ~650 readings, which would flag ordinary noise as an extreme
+pattern (§4.9 has the worked example). Sorted worst-first by days flagged, so
+a station with a sustained 6-8-day pattern is visually distinct from one with
+a single unusual day. A sparkline per station, and an adjustment log
+(supervisor+ to write) recording every scale correction made through the app —
+station, when, by whom, why — so a flagged station can be checked against
+what was actually done about it.
 
 ### 3.7 Rejects (`?v=rejects&sub=reasons|trend|station`)
 
@@ -334,6 +350,42 @@ finished day cannot drag the figure. Presented as kg/day and tonnes/year,
 labelled straight-line extrapolation, and carrying a provisional caveat until
 Q4/Q5 is settled.
 
+### 4.9 Nelson rules and calibration drift
+
+The eight classic control-chart pattern tests (Nelson, 1984), computed by one
+shared, unit-tested engine (`api/src/services/nelson.ts`) and applied at two
+different grains:
+
+- **Line-wide (Weight → Stability).** Applied to the same subgroups the X̄
+  chart already shows. Rule 1 (a point beyond 3σ) is exactly what the chart's
+  existing `xViolates` already meant; rules 2-8 catch a non-random pattern
+  that never crosses that band — 9 in a row on one side, 6 trending, 2-of-3
+  beyond 2σ, and so on.
+- **Per-station (Weight → Calibration).** Applied to each station's own
+  sequence of DAILY means, not individual cones. The sigma used for the
+  Nelson zones here is deliberately **not** the within-day sampling error
+  (σ/√n) — with ~650 cones/station/day that shrinks to a fraction of a gram
+  and flags ordinary day-to-day noise as an extreme pattern (measured: it
+  flagged all 14 of 14 stations, which cannot be right). Instead it is an
+  **I-MR sigma** — mean moving range between consecutive daily means ÷ 1.128
+  — the standard estimator for a sequence of individual aggregated points.
+  Verified on the supplied data: station 1's day-to-day swings are 1-8g;
+  σ/√n would have called anything past ~0.8g extreme, while the I-MR sigma
+  (≈2.7g) does not. With this fix, 9 of 14 stations show at least one flagged
+  day over the full 18-19 day history, clearly differentiated by count — three
+  stations with 6-8 flagged days (a real sustained pattern) versus six with
+  just 1-3 (an isolated day, far less concerning).
+
+At the 18-19 production days this app has ever had, rules needing 14 or 15
+points in a row (4, 7) are close to the length of the entire available
+history and can realistically never fire yet at the per-station grain; the
+Calibration screen says this rather than implying every rule is equally live.
+
+The adjustment ledger (`sms.calibration_adjustment`) is the one piece of this
+that needed storage — append-only, same convention as every other config
+table here — recording who corrected a station's scale, when, and why, so a
+flagged pattern can be checked against what was actually done about it.
+
 ---
 
 ## 5. Data model
@@ -346,12 +398,12 @@ the rows and no extra information.
 **Raw layer (`sms_raw`).** `cone_raw`, `sack_raw`, `reject_qcs_raw`,
 `reject_weight_raw`. Append-only, verbatim.
 
-**Canonical layer (`sms`).** 22 tables. The event tables are `cone_event`,
+**Canonical layer (`sms`).** 23 tables. The event tables are `cone_event`,
 `sack_event`, `reject_event`. Reference data: `station`, `product`,
 `product_timeline`, `reject_code`, `blend`, `yarn_count`, `tube_type`, `unit`.
 Configuration and audit: `app_user`, `role`, `session`, `app_config`,
 `weight_rule`, `shift_rule`, `plausibility_rule`, `sync_run`, `dq_finding`,
-`rebuild_audit`, `audit_log`.
+`rebuild_audit`, `audit_log`, `calibration_adjustment`.
 
 **Volumes on the supplied copy.** 142,511 cone readings, 5,462 sacks, 3,146
 rejects (2,900 quality, 246 weight), 14 winding stations. 19 production days,
@@ -370,7 +422,7 @@ role cannot open rather than showing it and failing.
 |---|:--:|:--:|:--:|:--:|
 | Line, Records, Shifts, Sync, Product history | ✓ | ✓ | ✓ | ✓ |
 | Output, Weight, Rejects | | ✓ | ✓ | ✓ |
-| Set the running product | | ✓ | ✓ | ✓ |
+| Set the running product, log a calibration adjustment | | ✓ | ✓ | ✓ |
 | CSV export, name reject codes | | | ✓ | ✓ |
 | Setup (people, stations, rules, audit log) | | | | ✓ |
 
@@ -512,8 +564,12 @@ The section to read first when comparing against a requirement list.
    database. Counts and Pareto are correct; the labels are blank until IFL
    supplies them, at which point they apply retroactively (Q10).
 
-10. **It does not do sack-side SPC, predictive maintenance, energy monitoring,
-    order or scheduling integration, or mobile-native applications.**
+10. **It does not do sack-side SPC, energy monitoring, order or scheduling
+    integration, or mobile-native applications.** It does now do a narrower
+    thing adjacent to predictive maintenance — statistical drift detection
+    per station plus a manual adjustment ledger (§3.6, §4.9) — but that is
+    pattern detection on existing weight data, not failure forecasting,
+    remaining-useful-life estimation, or automated maintenance scheduling.
 
 11. **It has not been tested against live plant data.** Everything stated here
     was verified against the supplied 19-day copy.
@@ -544,13 +600,23 @@ Every screen was checked against the live database rather than only compiled.
 The browser pass covers 21 routes at three viewport widths, asserting WCAG AA
 contrast on every text/background pair (1,465 at the last full run), no
 horizontal overflow, and no console errors. Configuration write paths were
-exercised end to end and reverted. 86 automated tests cover shift derivation,
+exercised end to end and reverted. 119 automated tests cover shift derivation,
 merge keys, configuration parsing, schema fingerprinting, the data-quality
-checks, and — against the real Express app, not a reimplementation of its
-routing — every RBAC boundary in the API: every `requireRole`-gated route
-checked at every rank tier, confirmed to actually catch a regression (a
-deliberately broken gate was shown to fail the suite, then reverted) rather
-than trivially passing regardless of what the code does.
+checks, all eight Nelson rules (positive and negative cases for each), the
+I-MR sigma estimator behind the Calibration screen, and — against the real
+Express app, not a reimplementation of its routing — every RBAC boundary in
+the API: every `requireRole`-gated route checked at every rank tier,
+confirmed to actually catch a regression (a deliberately broken gate was
+shown to fail the suite, then reverted) rather than trivially passing
+regardless of what the code does.
+
+The Calibration screen's per-station sigma choice is itself a caught mistake,
+not a first-try design: the initial version used the within-day sampling
+error and flagged all 14 of 14 stations as drifting, which was obviously
+wrong on inspection against real numbers (§4.9) — fixed to an I-MR sigma
+before this was ever shown as a capability, the same "verify against the
+live database, not just against the code being internally consistent"
+standard applied everywhere else in this document.
 
 The backup/restore procedure was rehearsed against this exact database, not
 merely documented: a real backup, a real restore into a scratch database, and

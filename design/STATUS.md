@@ -91,6 +91,20 @@ reachable in the code.
   section column's "Running now" footer has rendered conditionally since this
   rework but was always fed `productLabel={null}`, so it never once showed
   real data.
+- Stability's X̄ chart only ever flagged a single point past 3σ. It now also
+  runs Nelson rules 2-8 (non-random patterns — 9 in a row on one side, 6
+  trending, and so on) through the same marked-point/tooltip mechanism, and
+  Weight gains a third tab, Calibration, doing the same per station on daily
+  means. That per-station version needed its own sigma, not the line-wide
+  chart's σ/√n: with ~650 cones/station/day that sampling error shrinks to a
+  fraction of a gram and an early version of this flagged all 14 of 14
+  stations as drifting — caught on inspection against real day-to-day swings
+  (1-8g) before shipping, and fixed to an I-MR sigma (mean moving range
+  between daily means ÷ 1.128), the standard estimator for a sequence of
+  individual aggregated points. Same "verify against real numbers, not just
+  against the code being internally consistent" discipline as everywhere else
+  in this rework — this is the one place in it where that step caught a
+  wrong statistical design, not a wrong figure.
 
 ## Known, unresolved
 
