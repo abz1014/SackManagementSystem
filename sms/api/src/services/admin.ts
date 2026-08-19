@@ -58,6 +58,7 @@ export async function setStation(pool: ConnectionPool, lineId: number, stationId
 export interface Rules {
   weight: { basis: string; coneTubeWeightG: number; sackTareKg: number } | null;
   shift: { morningStart: string; eveningStart: string; nightStart: string; mode: string; nightBelongsTo: string } | null;
+  plausibility: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number } | null;
 }
 export async function getRules(pool: ConnectionPool, lineId: number): Promise<Rules> {
   const w = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tube: number; tare: number }>(
@@ -67,10 +68,50 @@ export async function getRules(pool: ConnectionPool, lineId: number): Promise<Ru
     `SELECT TOP 1 CONVERT(varchar(5),morning_start,108) ms, CONVERT(varchar(5),evening_start,108) es,
             CONVERT(varchar(5),night_start,108) ns, mode, night_belongs_to nb FROM sms.shift_rule WHERE line_id=@line ORDER BY effective_from DESC`,
   );
+  const p = await getPlausibilityRule(pool, lineId);
   return {
     weight: w.recordset[0] ? { basis: w.recordset[0].basis, coneTubeWeightG: Number(w.recordset[0].tube), sackTareKg: Number(w.recordset[0].tare) } : null,
     shift: s.recordset[0] ? { morningStart: s.recordset[0].ms, eveningStart: s.recordset[0].es, nightStart: s.recordset[0].ns, mode: s.recordset[0].mode, nightBelongsTo: s.recordset[0].nb } : null,
+    plausibility: p ? { coneLoG: p.coneLoG, coneHiG: p.coneHiG, sackLoKg: p.sackLoKg, sackHiKg: p.sackHiKg } : null,
   };
+}
+
+/**
+ * The scale-fault window — the bounds below (and, for cones, above) which a
+ * reading is physically impossible rather than a real measurement. Was
+ * hardcoded (spc.ts's PLAUSIBLE object, weights.ts's CONE_OUT/SACK_OUT); now
+ * one app-owned versioned rule both services read fresh per request, same as
+ * weight_rule and shift_rule. Falls back to the pre-existing hardcoded values
+ * only if the table is somehow empty (should not happen post-seed), so a
+ * missing row degrades to old behaviour rather than to no filtering at all.
+ */
+export interface PlausibilityRule { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number }
+const PLAUSIBILITY_FALLBACK: PlausibilityRule = { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 };
+export async function getPlausibilityRule(pool: ConnectionPool, lineId: number): Promise<PlausibilityRule> {
+  const r = await pool.request().input('line', mssql.Int, lineId).query<{ cl: number; ch: number; sl: number; sh: number }>(
+    `SELECT TOP 1 cone_lo_g cl, cone_hi_g ch, sack_lo_kg sl, sack_hi_kg sh
+     FROM sms.plausibility_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+  );
+  const row = r.recordset[0];
+  if (!row) return PLAUSIBILITY_FALLBACK;
+  return { coneLoG: Number(row.cl), coneHiG: Number(row.ch), sackLoKg: Number(row.sl), sackHiKg: Number(row.sh) };
+}
+export async function setPlausibilityRule(
+  pool: ConnectionPool,
+  lineId: number,
+  coneLoG: number,
+  coneHiG: number,
+  sackLoKg: number,
+  sackHiKg: number,
+  by: number,
+  reason: string | null,
+): Promise<void> {
+  await pool.request().input('line', mssql.Int, lineId)
+    .input('cl', mssql.Decimal(10, 2), coneLoG).input('ch', mssql.Decimal(10, 2), coneHiG)
+    .input('sl', mssql.Decimal(10, 3), sackLoKg).input('sh', mssql.Decimal(10, 3), sackHiKg)
+    .input('by', mssql.Int, by).input('reason', mssql.NVarChar(255), reason)
+    .query(`INSERT INTO sms.plausibility_rule (line_id, cone_lo_g, cone_hi_g, sack_lo_kg, sack_hi_kg, effective_from, changed_by, reason)
+            VALUES (@line, @cl, @ch, @sl, @sh, SYSUTCDATETIME(), @by, @reason)`);
 }
 export async function setWeightRule(pool: ConnectionPool, lineId: number, basis: string, tube: number, tare: number, by: number, reason: string | null): Promise<void> {
   await pool.request().input('line', mssql.Int, lineId).input('b', mssql.VarChar(12), basis)

@@ -32,6 +32,7 @@
  */
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
+import type { PlausibilityRule } from './admin.js';
 
 export type SpcType = 'cone' | 'sack';
 
@@ -212,15 +213,12 @@ const HIST_BINS = 32;
  *   the mean and inflate sigma. So we exclude on PLAUSIBILITY, not on spec.
  *
  * Bounds are deliberately generous — wide enough that no genuinely out-of-spec
- * cone is ever discarded, tight enough to drop non-readings. The cone lower
- * bound and the sack lower bound match the outlier rule already documented in
- * CLAUDE.md ("sacks < 40 kg, cones < 1500 g").
+ * cone is ever discarded, tight enough to drop non-readings. Was a code
+ * constant (module-level PLAUSIBLE object); now sms.plausibility_rule, an
+ * app-owned versioned rule the caller fetches and passes in — same pattern as
+ * `spec` below. Default 1500-2100g cone / 40-60kg sack, matching what was
+ * hardcoded before ("sacks < 40 kg, cones < 1500 g" in CLAUDE.md).
  */
-const PLAUSIBLE = {
-  cone: { lo: 1500, hi: 2100 }, // grams; real spec envelope is 1910-2010
-  sack: { lo: 40, hi: 60 }, // kg; real sacks run ~47
-} as const;
-
 export async function getWeightSpc(
   pool: ConnectionPool,
   lineId: number,
@@ -228,12 +226,16 @@ export async function getWeightSpc(
   from: string,
   to: string,
   spec: SpecLimits,
+  plausibility: PlausibilityRule,
   shift: string | null = null,
 ): Promise<SpcData> {
   const table = type === 'cone' ? 'sms.cone_event' : 'sms.sack_event';
   const col = type === 'cone' ? 'weight_g' : 'weight_kg';
   const unit: 'g' | 'kg' = type === 'cone' ? 'g' : 'kg';
-  const plaus = type === 'cone' ? PLAUSIBLE.cone : PLAUSIBLE.sack;
+  const plaus =
+    type === 'cone'
+      ? { lo: plausibility.coneLoG, hi: plausibility.coneHiG }
+      : { lo: plausibility.sackLoKg, hi: plausibility.sackHiKg };
 
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
   const where =

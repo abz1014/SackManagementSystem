@@ -21,6 +21,7 @@ import {
   adminGetRules,
   adminSetWeightRule,
   adminSetShiftRule,
+  adminSetPlausibilityRule,
   getEvents,
   getEventDetail,
   eventsExportUrl,
@@ -6340,10 +6341,24 @@ function StationsPanel() {
 function RulesPanel() {
   const [rules, setRules] = useState<Rules | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const load = () => adminGetRules().then(setRules);
+  const [plausErr, setPlausErr] = useState<string | null>(null);
+  const [plausSaving, setPlausSaving] = useState(false);
+  // Draft fields for the plausibility form, seeded from the loaded rule and
+  // re-seeded whenever it reloads — same "edit a copy, Save when dirty"
+  // shape as the Stations panel's per-row inputs.
+  const [plausDraft, setPlausDraft] = useState<{ coneLoG: string; coneHiG: string; sackLoKg: string; sackHiKg: string } | null>(null);
+  const load = () => adminGetRules().then((r) => {
+    setRules(r);
+    setPlausDraft({
+      coneLoG: String(r.plausibility?.coneLoG ?? 1500),
+      coneHiG: String(r.plausibility?.coneHiG ?? 2100),
+      sackLoKg: String(r.plausibility?.sackLoKg ?? 40),
+      sackHiKg: String(r.plausibility?.sackHiKg ?? 60),
+    });
+  });
   useEffect(() => { load(); }, []);
 
-  if (!rules) return <div className="sk sk-chart" />;
+  if (!rules || !plausDraft) return <div className="sk sk-chart" />;
 
   const setWeight = async (basis: string) => {
     await adminSetWeightRule({ basis, coneTubeWeightG: rules.weight?.coneTubeWeightG ?? 70, sackTareKg: rules.weight?.sackTareKg ?? 0.5, reason: 'admin UI' });
@@ -6357,6 +6372,34 @@ function RulesPanel() {
 
   const basis = (rules.weight?.basis ?? 'as_recorded') as 'as_recorded' | 'gross' | 'net';
   const mode = (rules.shift?.mode ?? 'corrected') as 'corrected' | 'legacy';
+
+  const plausDirty =
+    !!rules.plausibility &&
+    (plausDraft.coneLoG !== String(rules.plausibility.coneLoG) ||
+      plausDraft.coneHiG !== String(rules.plausibility.coneHiG) ||
+      plausDraft.sackLoKg !== String(rules.plausibility.sackLoKg) ||
+      plausDraft.sackHiKg !== String(rules.plausibility.sackHiKg));
+  const plausParsed = {
+    coneLoG: Number(plausDraft.coneLoG), coneHiG: Number(plausDraft.coneHiG),
+    sackLoKg: Number(plausDraft.sackLoKg), sackHiKg: Number(plausDraft.sackHiKg),
+  };
+  const plausValid =
+    Object.values(plausParsed).every((n) => Number.isFinite(n) && n > 0) &&
+    plausParsed.coneLoG < plausParsed.coneHiG &&
+    plausParsed.sackLoKg < plausParsed.sackHiKg;
+  const savePlausibility = async () => {
+    if (!plausValid) return;
+    setPlausSaving(true);
+    setPlausErr(null);
+    try {
+      await adminSetPlausibilityRule({ ...plausParsed, reason: 'admin UI' });
+      await load();
+    } catch (e) {
+      setPlausErr((e as Error).message ?? 'save failed');
+    } finally {
+      setPlausSaving(false);
+    }
+  };
 
   return (
     <>
@@ -6414,10 +6457,69 @@ function RulesPanel() {
         </div>
       </section>
 
-      {/* The design's Rules panel shows four toggles. Only these two are real —
-          the other two thresholds it depicts are constants in the API, not
-          admin-settable, and rendering a switch that changes nothing would be
-          worse than saying so. */}
+      <section className="panel" style={{ marginTop: 14 }}>
+        <div className="panel-head">
+          <div>
+            <h3 className="panel-title">Plausibility window</h3>
+            <p className="panel-lede">
+              Below (or, for cones, above) these bounds a reading is a scale fault, not a light or heavy cone
+              — excluded from SPC and from the giveaway stats rather than skewing them. Was fixed in code;
+              now a versioned rule like the two above it.
+            </p>
+          </div>
+          <span className="mono-note">applies immediately · read-time</span>
+        </div>
+        <div className="rec-filters" style={{ marginBottom: 0 }}>
+          <div className="field">
+            <label>Cone min (g)</label>
+            <input
+              type="number" min={0} step={1} value={plausDraft.coneLoG}
+              onChange={(e) => setPlausDraft({ ...plausDraft, coneLoG: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Cone max (g)</label>
+            <input
+              type="number" min={0} step={1} value={plausDraft.coneHiG}
+              onChange={(e) => setPlausDraft({ ...plausDraft, coneHiG: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Sack min (kg)</label>
+            <input
+              type="number" min={0} step={0.1} value={plausDraft.sackLoKg}
+              onChange={(e) => setPlausDraft({ ...plausDraft, sackLoKg: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Sack max (kg)</label>
+            <input
+              type="number" min={0} step={0.1} value={plausDraft.sackHiKg}
+              onChange={(e) => setPlausDraft({ ...plausDraft, sackHiKg: e.target.value })}
+            />
+          </div>
+          {plausDirty && (
+            <button type="button" className="cta" disabled={!plausValid || plausSaving} onClick={savePlausibility}>
+              {plausSaving ? 'Saving…' : 'Save'}
+            </button>
+          )}
+        </div>
+        {plausDirty && !plausValid && (
+          <div className="rule-note" style={{ marginTop: 12 }}>⚠ Each min must be less than its max, and every value positive.</div>
+        )}
+        {plausErr && <div className="error-card" role="alert" style={{ marginTop: 12 }}>{plausErr}</div>}
+        <div className="panel-foot">
+          Bounds are deliberately generous — wide enough that no genuinely out-of-tolerance cone is ever
+          discarded, tight enough to drop non-readings. Real sacks run ~47 kg; the widest real product
+          tolerance sits inside 1910–2010 g. Widening these does not relax any product tolerance — it only
+          changes which readings count as measurements at all.
+        </div>
+      </section>
+
+      {/* The design's Rules panel shows four toggles. Three are now real; the
+          stoppage threshold is genuinely per-view rather than a standing rule
+          (it already varies by what a user is looking at on Output), so it
+          stays a stated fact rather than a fourth control here. */}
       <section className="panel" style={{ marginTop: 14 }}>
         <div className="panel-head">
           <h3 className="panel-title">Fixed in code</h3>
@@ -6425,24 +6527,13 @@ function RulesPanel() {
         </div>
         <div className="setup-table fixed">
           <div className="st-row">
-            <span>Implausible cone readings</span>
-            <span className="mono">outside 1500–2100 g</span>
-            <span className="dim">excluded from SPC as scale faults</span>
-          </div>
-          <div className="st-row">
-            <span>Implausible sack readings</span>
-            <span className="mono">outside 40–60 kg</span>
-            <span className="dim">excluded from SPC as scale faults</span>
-          </div>
-          <div className="st-row">
             <span>Stoppage threshold</span>
             <span className="mono">120 s default</span>
             <span className="dim">adjustable per-view on Output</span>
           </div>
         </div>
         <div className="panel-foot">
-          These are review-enforced constants rather than settings. If IFL needs any of them configurable,
-          it is a small change — they are read in one place each.
+          Per-view rather than a standing rule — each Output chart already lets you change it there.
         </div>
       </section>
     </>

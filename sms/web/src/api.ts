@@ -106,6 +106,7 @@ export interface StationRow { stationId: number; name: string | null; machine: s
 export interface Rules {
   weight: { basis: string; coneTubeWeightG: number; sackTareKg: number } | null;
   shift: { morningStart: string; eveningStart: string; nightStart: string; mode: string; nightBelongsTo: string } | null;
+  plausibility: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number } | null;
 }
 export function adminListUsers(): Promise<{ users: AdminUser[] }> { return get('/api/admin/users'); }
 export function adminCreateUser(u: { username: string; password: string; role: string; displayName?: string }): Promise<{ ok: boolean }> { return post('/api/admin/users', u); }
@@ -115,6 +116,7 @@ export function adminSetStation(id: number, s: { name: string | null; machine: s
 export function adminGetRules(): Promise<Rules> { return get('/api/admin/rules'); }
 export function adminSetWeightRule(r: { basis: string; coneTubeWeightG: number; sackTareKg: number; reason?: string }): Promise<{ ok: boolean }> { return post('/api/admin/rules/weight', r); }
 export function adminSetShiftRule(r: { mode: string; nightBelongsTo: string; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/shift', r); }
+export function adminSetPlausibilityRule(r: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/plausibility', r); }
 
 // ---- current product (Q1) ----
 export interface ProductOption { productId: number; description: string | null; lotCode: string | null; setpointG: number | null; }

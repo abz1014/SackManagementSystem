@@ -27,6 +27,7 @@ async function main() {
   loadEnv();
   const config = {
     server: process.env.APP_DB_SERVER ?? '.\\SQLEXPRESS',
+    port: process.env.APP_DB_PORT ? Number(process.env.APP_DB_PORT) : undefined,
     database: process.env.APP_DB_NAME ?? 'sms',
     user: process.env.APP_DB_USER,
     password: process.env.APP_DB_PASSWORD,

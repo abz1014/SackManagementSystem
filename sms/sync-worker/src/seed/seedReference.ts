@@ -40,6 +40,19 @@ export async function seedReference(
        VALUES (@line, @basis, @tube, @tare, '2000-01-01', 'baseline seed (pending Q4/Q5)');`,
     );
 
+  // plausibility_rule — the scale-fault window, was hardcoded in spc.ts/weights.ts
+  // as {cone: 1500-2100g, sack: 40-60kg}. Seeded at those exact values so this
+  // table starting to exist changes nothing until an admin edits it.
+  await pool
+    .request()
+    .input('line', mssql.Int, line)
+    .query(
+      `IF NOT EXISTS (SELECT 1 FROM sms.plausibility_rule WHERE line_id = @line)
+       INSERT INTO sms.plausibility_rule
+         (line_id, cone_lo_g, cone_hi_g, sack_lo_kg, sack_hi_kg, effective_from, reason)
+       VALUES (@line, 1500, 2100, 40, 60, '2000-01-01', 'baseline seed (was a code constant)');`,
+    );
+
   // stations 1..14 (labels pending Q11)
   await pool
     .request()

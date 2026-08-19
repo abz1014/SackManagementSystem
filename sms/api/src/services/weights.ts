@@ -6,6 +6,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { getPlausibilityRule } from './admin.js';
 
 export type Basis = 'as_recorded' | 'gross' | 'net';
 
@@ -92,10 +93,18 @@ export async function getWeights(
     if (to) w.push(`${col} <= @to`);
     return w.join(' AND ');
   };
-  // --- cones (grams, outlier < 1500) / sacks (kg, outlier < 40) ---
-  const CONE_OUT = 1500;
+  // --- cones (grams) / sacks (kg): outlier floor is the SAME app-owned
+  // plausibility rule spc.ts reads (sms.plausibility_rule) — was a hardcoded
+  // CONE_OUT/SACK_OUT constant here. Only the LOWER bound is used, deliberately:
+  // unlike spc.ts, this has never excluded a high outlier, so the giveaway
+  // stats keep the ~2200-2354g scale-fault population spc.ts drops. That
+  // asymmetry is a pre-existing, documented choice (see the module comment
+  // above) and is preserved exactly — this change only relocates the numbers
+  // into a table an admin can edit, it does not add a new ceiling.
+  const plausibility = await getPlausibilityRule(pool, lineId);
+  const CONE_OUT = plausibility.coneLoG;
   const CONE_BUCKET = 20;
-  const SACK_OUT = 40;
+  const SACK_OUT = plausibility.sackLoKg;
   const SACK_BUCKET = 1;
 
   // Every value that varies at runtime is bound, not interpolated. The tare/tube

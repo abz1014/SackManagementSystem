@@ -22,6 +22,7 @@ import {
   listUsers, createUser, updateUser,
   listStations, setStation,
   getRules, setWeightRule, setShiftRule,
+  getPlausibilityRule, setPlausibilityRule,
 } from './services/admin.js';
 import {
   authMiddleware,
@@ -310,7 +311,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type);
-      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, q.data.shift ?? null);
+      const plausibility = await getPlausibilityRule(pool, cfg.lineId);
+      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -633,6 +635,27 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       if (!b.success) { res.status(400).json({ error: 'invalid' }); return; }
       await setShiftRule(pool, cfg.lineId, b.data.mode, b.data.nightBelongsTo, (req as AuthedRequest).user!.userId, b.data.reason ?? null);
       res.json({ ok: true, note: 'shift rule stored; rebuild canonical to apply to stored shift_code/shift_date' });
+    } catch (e) { next(e); }
+  });
+  app.post('/api/admin/rules/plausibility', requireRole(4), async (req, res, next) => {
+    try {
+      const b = z
+        .object({
+          coneLoG: z.coerce.number().positive(),
+          coneHiG: z.coerce.number().positive(),
+          sackLoKg: z.coerce.number().positive(),
+          sackHiKg: z.coerce.number().positive(),
+          reason: z.string().max(255).optional(),
+        })
+        .refine((v) => v.coneLoG < v.coneHiG, { message: 'coneLoG must be less than coneHiG' })
+        .refine((v) => v.sackLoKg < v.sackHiKg, { message: 'sackLoKg must be less than sackHiKg' })
+        .safeParse(req.body);
+      if (!b.success) { res.status(400).json({ error: 'invalid', detail: b.error.issues.map((i) => i.message) }); return; }
+      await setPlausibilityRule(
+        pool, cfg.lineId, b.data.coneLoG, b.data.coneHiG, b.data.sackLoKg, b.data.sackHiKg,
+        (req as AuthedRequest).user!.userId, b.data.reason ?? null,
+      );
+      res.json({ ok: true, note: 'applies immediately to every SPC/weight query — read-time, not a rebuild' });
     } catch (e) { next(e); }
   });
 
