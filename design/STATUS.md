@@ -106,6 +106,26 @@ reachable in the code.
   in this rework — this is the one place in it where that step caught a
   wrong statistical design, not a wrong figure.
 
+- The 19 Aug 2026 stress audit found and fixed seven bugs across the stack —
+  the three that mattered most were invisible in dev and would only have
+  surfaced after live cutover: the transform re-read the ENTIRE raw history
+  every 60s pass (2.5s at 151k rows, growing linearly forever — now
+  watermarked, a no-change pass is ~0.3s at any volume); the future-timestamp
+  DQ check compared plant wall-clock stamps against real UTC, which on this
+  UTC+5 plant would have flagged every fresh reading as an ERROR from the
+  first minute of live operation; and the finding log grew by 8 duplicate
+  rows per pass forever (verify reported 26 ERRORs where the real standing
+  faults were 2 — deduped by migration 016, batch-scoped from now on). The
+  other four: the calibration form's default timestamp was UTC in a
+  local-time input (untouched, it recorded adjustments 5h early — proven
+  live); a changeover to a nonexistent product id was accepted and became the
+  line's "current product" (proven live with id 4242); a rename of a
+  nonexistent station returned ok and wrote a phantom audit entry; and a
+  duplicate username surfaced as a raw 500 instead of a 409. Everything else
+  held: reconciliation exact, SPC/OEE/downtime/p-chart figures matched
+  independent SQL recomputation to the last decimal, shift boundaries exact,
+  all injection/fuzz probes rejected, all 23 routes console-clean.
+
 ## Known, unresolved
 
 - Bulk CSV export was tightened to manager+ during the Records rework. Reversible.

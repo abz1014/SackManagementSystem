@@ -55,7 +55,13 @@ always be traced back to the bytes that produced it.
 
 **Transform.** Converts raw to canonical: derives the shift from production
 time, normalises station ids, computes a merge key, stamps a transform version.
-Runs data-quality checks as it goes (§8).
+Runs data-quality checks as it goes (§8). Incremental on its own watermark
+(highest raw row already transformed, self-seeding on upgrade): a pass with
+nothing new does nothing. Until the Aug 2026 stress audit it re-read and
+re-mapped the entire history every pass — measured 2.5 s at 151k rows and
+growing linearly forever, which would eventually have blown the 60-second
+cadence on live; a no-change pass now completes in ~0.3 s regardless of how
+much history has accumulated.
 
 **API and web.** A single Express service reads only the canonical layer and
 serves a React application. The browser never talks to IFL's database.
@@ -475,16 +481,22 @@ error and whether that table has succeeded since.
 and compared, so a column added or retyped on IFL's side is detected rather
 than silently changing a number.
 
-**Data-quality checks**, run by the transform and surfaced with severity:
+**Data-quality checks**, run by the transform on newly ingested rows and
+surfaced with severity. Each finding is recorded once, at ingest; the
+Operations screen and `verify` show the full standing set. (Until the Aug
+2026 stress audit the checks re-ran over the entire dataset every pass and
+re-recorded the same standing faults each time — the finding log grew by 8
+rows per pass forever and `verify` reported 26 ERRORs where the real standing
+faults were 2.)
 
 | Check | Severity | What it catches |
 |---|---|---|
-| `future_timestamp` | ERROR | readings dated ahead of now |
+| `future_timestamp` | ERROR | readings dated more than an hour ahead of the plant wall clock. Until the audit this compared the plant's wall-clock timestamps against real UTC — on this UTC+5 plant, every fresh live reading would have been flagged from the first minute after cutover, invisible in dev against weeks-old data |
 | `nonpositive_weight` | ERROR | weight ≤ 0 |
 | `outlier_weight` | WARNING | below the plausibility floor |
-| `stale_timestamp` | WARNING | station clock faults — a reading stamped hours behind the readings around it |
+| `stale_timestamp` | WARNING | station clock faults — a reading stamped hours behind the readings around it, checked across ingest batches, not just within one |
 | `no_station` | WARNING | readings with no usable station id |
-| `merge_key_collision` | INFO | rows sharing a non-unique merge key |
+| `merge_key_collision` | INFO | rows sharing a non-unique merge key, checked against already-ingested history as well as within the batch |
 
 **Verification tool.** A CLI (`sync`, `verify`, `summary`, `rebuild`,
 `user:create`) that re-checks canonical against raw independently of the API.
@@ -600,7 +612,7 @@ Every screen was checked against the live database rather than only compiled.
 The browser pass covers 21 routes at three viewport widths, asserting WCAG AA
 contrast on every text/background pair (1,465 at the last full run), no
 horizontal overflow, and no console errors. Configuration write paths were
-exercised end to end and reverted. 119 automated tests cover shift derivation,
+exercised end to end and reverted. 123 automated tests cover shift derivation,
 merge keys, configuration parsing, schema fingerprinting, the data-quality
 checks, all eight Nelson rules (positive and negative cases for each), the
 I-MR sigma estimator behind the Calibration screen, and — against the real
@@ -625,6 +637,21 @@ The rehearsal found and fixed three defects the script had carried since it
 was written — including an option unsupported on the SQL Server edition this
 project is built on, which would have made every backup fail, silently,
 every night, on the real deployment target.
+
+A full-system stress audit (19 Aug 2026) re-verified the whole stack against
+the live database: source⇄raw⇄canonical reconciliation exact on all four
+streams; sync idempotency proven by repeated live passes (zero duplicate
+rows); every SPC, downtime, OEE and p-chart figure recomputed independently
+in SQL and matched to the API's output to the last decimal; shift derivation
+checked at all four boundaries including night-across-midnight; API fuzzing
+(invalid dates, inverted ranges, oversized ranges, SQL-injection probes,
+nonexistent references, duplicate keys); and a console-clean sweep of all 23
+routes. It found and fixed seven bugs, three of which would only have
+surfaced after live cutover: the transform re-reading the entire history
+every pass, the future-timestamp check flagging every live reading on a UTC+5
+plant, and the finding log growing without bound. Each fix was then verified
+live — including a watermark-rewind test and a full `rebuild` rehearsal — and
+regression-tested.
 
 Figures printed on screen are computed from the data, never transcribed from a
 design or a specification. This was not merely a principle: the interface
