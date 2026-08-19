@@ -18,10 +18,10 @@ open questions (§11) and the go-live cutover (§9).
 The plant's Siemens S7-1500 PLCs weigh every cone and every sack and write the
 readings into IFL's SQL Server. SMS copies those readings into its own database
 once a minute, never writing to IFL's, converts them into a clean canonical
-form, and presents it as eleven screens: sign-in, line status, production
+form, and presents it as twelve screens: sign-in, line status, production
 records, a full record page, equipment effectiveness, weight process control,
-reject analysis, shift comparison, a standalone findings view, configuration,
-and pipeline health. It computes availability,
+reject analysis, shift comparison, a standalone findings view, a product
+changeover history, configuration, and pipeline health. It computes availability,
 throughput, OEE, statistical process control on cone weight, per-station bias,
 reject Pareto and control charts, and shift-versus-shift performance. It is a
 read-only reporting system over the plant's own data, plus a small amount of
@@ -68,7 +68,7 @@ resumes exactly where it stopped.
 
 ## 3. The screens
 
-Eleven routes. Every screen states a plain-language finding first and puts the
+Twelve routes. Every screen states a plain-language finding first and puts the
 statistics behind it, not the other way round.
 
 ### 3.1 Line (`?v=dashboard`)
@@ -92,7 +92,13 @@ The production day at a glance, defaulting to the last complete day.
   day, pre-filtered to nothing — same findings, same synthesis, just a page of
   its own.
 - **Cones by shift** with the weakest shift computed and marked.
-- **Current product** selector (supervisor and above).
+- **Current product bar** — blend, count, tube type and weight, and tolerance
+  (nominal ± offsets) for whichever product is running, plus a PDAS
+  active-flag warning if that product is marked inactive there (informational
+  only; never enforced). A supervisor changing product sees the same detail as
+  a *live preview* of the pending selection before confirming — a changeover
+  is a decision made against the new product's own tolerance, not a bare name
+  picked from a list. A "View history →" link opens §3.3.
 
 ### 3.2 Exceptions (`?v=exceptions`)
 
@@ -103,7 +109,18 @@ day's exceptions are recomputed live from the same permanent event data
 Overview already reads, rather than cached or persisted. Reachable via the
 link on Overview; no rail icon, same as Sync below.
 
-### 3.3 Records (`?v=register&sub=cone|sack|reject`)
+### 3.3 Product history (`?v=timeline`)
+
+Every changeover ever recorded, newest first, each with the same blend/tube/
+tolerance detail line as the current-product bar and who set it and why.
+`product_timeline` has been append-only since Phase 1 shipped, but nothing
+before this had ever read more than its single latest row — the "since …"
+line on Overview was the only trace a change had happened. No date filter:
+on this plant's changeover rate the whole table is a handful of screens, not
+a windowed report. Reachable via the link on the current-product bar; no rail
+icon, same as Exceptions and Sync.
+
+### 3.4 Records (`?v=register&sub=cone|sack|reject`)
 
 Every individual reading, filterable and exportable.
 
@@ -123,7 +140,7 @@ Every individual reading, filterable and exportable.
   ingest time).
 - **CSV export** of the current filter (manager and above).
 
-### 3.4 Output (`?v=performance&sub=oee|stops|patterns`)
+### 3.5 Output (`?v=performance&sub=oee|stops|patterns`)
 
 **Effectiveness.** Inferred OEE with its three factors, each with a
 plain-language note naming what produced it; a 7-day OEE strip against an 85%
@@ -140,7 +157,7 @@ tested rather than asserted: an hour counts as a cluster only if it recurs on
 more days than the median hour. Duration distribution, hour-of-day
 distribution, and three summary figures.
 
-### 3.5 Weight (`?v=weight&sub=spread|stability`)
+### 3.6 Weight (`?v=weight&sub=spread|stability`)
 
 A verdict banner above both tabs: mean, spread, capability, and the share of
 subgroups outside control, with the sentence stating how far the line sits from
@@ -156,7 +173,7 @@ a *Show the maths* toggle revealing Cp, Cpk, σ-within, σ-overall, groups out o
 control, and the S chart. Also the PLC-versus-product-tolerance comparison
 (§4.6), which stays visible because it is a finding rather than a statistic.
 
-### 3.6 Rejects (`?v=rejects&sub=reasons|trend|station`)
+### 3.7 Rejects (`?v=rejects&sub=reasons|trend|station`)
 
 **Reasons.** Quality and weight reject counts, a Pareto of reject codes with
 the concentration computed, and inline code labelling (manager and above) that
@@ -169,7 +186,7 @@ a verdict naming which occurred.
 **By station.** A "fix this first" card cross-referencing reject rate against
 weight bias, and reject rate by station against the line baseline.
 
-### 3.7 Shifts (`?v=shift&sub=week|all`)
+### 3.8 Shifts (`?v=shift&sub=week|all`)
 
 Three cards, one per shift, each with hours, a computed verdict, and five
 measures (cones, reject rate, availability, stoppages, weight consistency, OEE)
@@ -177,7 +194,7 @@ with poor values marked. Below, a three-series day-by-day trend chart, and a
 data note stating how far the plant's stored shift value disagrees with the
 recomputed one.
 
-### 3.8 Setup (`?v=admin&sub=people|stations|rules|sync`) — admin only
+### 3.9 Setup (`?v=admin&sub=people|stations|rules|sync`) — admin only
 
 **People** — accounts, roles, enable/disable, creation.
 **Stations** — naming the 14 winding positions, with the currently flagged
@@ -186,9 +203,9 @@ positions marked.
 window — see §7) plus the one threshold still fixed in code (stoppage
 detection, adjustable per-view on Output instead), stated as a read-only fact
 rather than a control that would do nothing.
-**Sync** — as §3.9.
+**Sync** — as §3.10.
 
-### 3.9 Sync (`?v=operations`) — reachable by every role
+### 3.10 Sync (`?v=operations`) — reachable by every role
 
 Pipeline health: a verdict with a live indicator, tables succeeded on the last
 pass, time since the oldest table ran, rows written, blocking data-quality
@@ -197,7 +214,7 @@ and the data-quality findings list by severity. Reachable at operator rank
 deliberately — the wall-screen user is the one who notices the numbers stopped
 moving.
 
-### 3.10 Login
+### 3.11 Login
 
 Two-pane sign-in with a live plant-link indicator.
 
@@ -344,7 +361,7 @@ role cannot open rather than showing it and failing.
 
 | Capability | operator | supervisor | manager | admin |
 |---|:--:|:--:|:--:|:--:|
-| Line, Records, Shifts, Sync | ✓ | ✓ | ✓ | ✓ |
+| Line, Records, Shifts, Sync, Product history | ✓ | ✓ | ✓ | ✓ |
 | Output, Weight, Rejects | | ✓ | ✓ | ✓ |
 | Set the running product | | ✓ | ✓ | ✓ |
 | CSV export, name reject codes | | | ✓ | ✓ |

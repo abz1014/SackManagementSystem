@@ -80,6 +80,17 @@ reachable in the code.
 - Sync lifetime figures are exposed. `/api/operations` now returns passes,
   table-runs, failures, first/last run and duration percentiles, and the Sync
   screen shows them alongside the last failure and whether it is still open.
+- The current-product bar showed only description/lot/setpoint, though PDAS
+  already holds blend, count, tube type, tolerance and an active-flag for
+  every product. `listProducts()` now joins that in; a shared detail line
+  renders it both as a live preview of a pending selection and against the
+  confirmed current product. A new `GET /api/product-timeline` plus a
+  `?v=timeline` screen (link-reachable, no rail slot, same as Sync/Exceptions)
+  expose the full changeover history that `product_timeline` has held since
+  Phase 1 but nothing had ever read past the latest row. Also fixed: the
+  section column's "Running now" footer has rendered conditionally since this
+  rework but was always fed `productLabel={null}`, so it never once showed
+  real data.
 
 ## Known, unresolved
 
