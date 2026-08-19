@@ -79,6 +79,88 @@ SQL Server and the build output are the only prerequisites, all installed locall
 
 ---
 
+## TLS (optional)
+
+Plain HTTP with `COOKIE_SECURE=false` (above) is the documented default for a
+plant-intranet deployment, and is what most sites should ship with — the
+network is a closed LAN, not the open internet. Put real TLS in front only if
+plant policy requires encrypted traffic even on the intranet.
+
+**A publicly-trusted certificate (Let's Encrypt or similar) is not obtainable
+here** — issuance requires a domain reachable from the public internet, which
+directly contradicts the air-gapped deployment this app is built for (§
+"Internet access is not required" above). The realistic options on a plant PC
+are a self-signed certificate, or an internal CA if the plant already runs
+one (uncommon; ask IT before assuming it exists). Either way, every client
+browser will show a trust warning until that certificate is installed in its
+trusted root store — a one-time step per PC, or an accepted click-through on
+a small, known set of plant machines.
+
+### Option A — the API terminates TLS itself (no extra software)
+
+The API can listen with TLS directly; `api/src/index.ts` picks this up
+automatically from two possible env var pairs — set one pair, not both:
+
+**PFX, Windows-native (no OpenSSL install needed):**
+```powershell
+$cert = New-SelfSignedCertificate -DnsName "<plant-host-or-ip>" `
+  -CertStoreLocation Cert:\LocalMachine\My -NotAfter (Get-Date).AddYears(5) -KeyExportPolicy Exportable
+$pwd = ConvertTo-SecureString -String "<a-real-passphrase>" -Force -AsPlainText
+Export-PfxCertificate -Cert $cert -FilePath C:\sms\certs\sms.pfx -Password $pwd
+```
+Then in `.env`:
+```
+TLS_PFX_PATH=C:\sms\certs\sms.pfx
+TLS_PFX_PASSPHRASE=<the same passphrase>
+COOKIE_SECURE=true
+```
+
+**PEM, if OpenSSL is already on the box:**
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout sms.key -out sms.crt -days 1825 -nodes -subj "/CN=<plant-host-or-ip>"
+```
+Then in `.env`:
+```
+TLS_CERT_PATH=C:\sms\certs\sms.crt
+TLS_KEY_PATH=C:\sms\certs\sms.key
+COOKIE_SECURE=true
+```
+
+Restart `SMS-Api`. The startup log line changes from `http://` to `https://`;
+`GET /api/health` should now answer on `https://<host>:4000` and the
+`Strict-Transport-Security` response header appears (it is deliberately
+absent over plain HTTP — see `security.ts`). Browse to `https://<host>:4000`.
+Leave `TRUST_PROXY=false` — nothing is proxying in this option, Node sees the
+TLS connection directly.
+
+*Verified 19 Aug 2026 against this exact code, both forms: a self-signed PFX
+and a self-signed PEM pair each started the API on `https://`, served
+`/api/health` over real TLS, correctly refused a plain-HTTP request to the
+same port, and correctly showed `Strict-Transport-Security` only on the TLS
+response and never on a plain-HTTP one.*
+
+### Option B — a reverse proxy terminates TLS (IIS)
+
+If the plant's IT team already manages certificates centrally through IIS,
+put IIS in front instead: install the **URL Rewrite** and **Application
+Request Routing (ARR)** modules, bind the plant's certificate to an IIS site
+on 443, and add a reverse-proxy rule forwarding to `http://localhost:4000`.
+The API itself stays on plain HTTP behind it — set:
+```
+TRUST_PROXY=true
+COOKIE_SECURE=true
+```
+`TRUST_PROXY=true` is only as safe as its precondition: IIS must be the
+**only** path to the API. The API still binds `0.0.0.0:4000` regardless of
+this option (nothing in the code changes that) — so also remove or restrict
+the `:4000` firewall rule from "Reaching it from other machines" above, or
+scope it to loopback, once IIS is fronting it. Leaving `:4000` open to the
+LAN while `TRUST_PROXY=true` re-opens exactly the `X-Forwarded-For` bypass
+documented on `TRUST_PROXY` in `.env.example`: anyone who can reach `:4000`
+directly, bypassing IIS, could forge that header.
+
+---
+
 ## Windows Services (NSSM)
 
 Node has no native service manager; use **NSSM** (or `node-windows`). Example with NSSM:
@@ -122,11 +204,67 @@ The **schema-fingerprint gate** halts sync with a clear error if the live schema
 
 The app DB is the only irreplaceable data (product timeline, reject labels, users, config, rules).
 
+### One-time setup: a login the script can actually use
+
+`scripts/backup-appdb.ps1` defaults to `sms_app` (the app's own runtime
+login), but that login should **not** be given backup rights — it has no
+operational reason to ever take a backup of itself, and least-privilege means
+not handing it permissions it will never use. Create a dedicated login instead:
+
+```sql
+CREATE LOGIN sms_backup WITH PASSWORD = '<a-real-password>', CHECK_POLICY = ON;
+-- in the app DB:
+CREATE USER sms_backup FOR LOGIN sms_backup;
+ALTER ROLE db_backupoperator ADD MEMBER sms_backup;
+```
+
+Pass it explicitly: `-User sms_backup -Pass <that password>`.
+
+### Running it
+
 - **Nightly:** schedule `scripts/backup-appdb.ps1` via Task Scheduler (keeps 30 days).
+- **`-OutDir` must be writable by the SQL Server *service account*, not just
+  whoever runs the script** — `BACKUP DATABASE` executes on the server
+  process, not the client. An arbitrary user-profile folder is often not
+  writable by the service account even though your own login can write there
+  fine; a path under the instance's own data directory always is. Find it:
+  `EXEC master.dbo.xp_instance_regread N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'BackupDirectory';`
 - **Monthly:** test a restore into a scratch DB — an untested backup is not a backup.
 - **Before any canonical rebuild:** the `sms rebuild` command **requires** a point-in-time snapshot id and refuses without it (`ARCHITECTURE §18`). This is separate from and more precise than the nightly backup.
 
-Restore: `RESTORE DATABASE sms FROM DISK='...bak' WITH REPLACE;`
+Restore into a scratch DB first, never straight over `sms`:
+```sql
+RESTORE FILELISTONLY FROM DISK = N'...bak';   -- get the logical file names first
+RESTORE DATABASE sms_restore_test FROM DISK = N'...bak'
+  WITH MOVE 'sms' TO N'<data dir>\sms_restore_test.mdf',
+       MOVE 'sms_log' TO N'<data dir>\sms_restore_test_log.ldf';
+```
+Restoring over the live `sms` database directly is `WITH REPLACE`, no `MOVE`
+needed — but do that only once the scratch restore above has already proven
+the backup file is good.
+
+> **Rehearsed 19 Aug 2026 against this exact script and this exact database**
+> (142,511 cone events, 5,462 sack events, 3,146 reject events, 20 product
+> changeovers). Backup: 75.7 MB, 9,226 pages, 5.6 s. Restore into a scratch DB:
+> 9.4 s. Every table's row count matched exactly; `product_timeline`'s three
+> newest rows matched the source down to the millisecond. Three real defects
+> surfaced by actually running it, all now fixed in `scripts/backup-appdb.ps1`
+> (previously this recommendation had never been executed):
+> 1. `sms_app` has no backup rights — `BACKUP DATABASE` needs a login with
+>    `db_backupoperator`, which the app's own runtime login correctly doesn't
+>    have (see setup above).
+> 2. `-OutDir` needs to be writable by the SQL Server *service* account, not
+>    the account running the script — a user-profile temp folder failed with
+>    `Access is denied` even though the invoking account could write there.
+> 3. **`WITH COMPRESSION` is not supported on SQL Server Express** (Msg 1844)
+>    — the edition this project is built on (CLAUDE.md D1). The script had
+>    carried that option since it was written; every backup it would ever
+>    have taken against the real deployment target would have failed. Worse,
+>    the script printed `backup written: ...` regardless of whether `sqlcmd`
+>    actually succeeded, so this would have failed silently, every night,
+>    forever. Both are fixed: `COMPRESSION` is removed, and the script now
+>    checks `sqlcmd`'s exit code and the resulting file's existence before
+>    ever reporting success.
 
 ---
 

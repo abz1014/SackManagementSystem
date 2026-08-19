@@ -201,9 +201,17 @@ export interface AuthedRequest extends Request {
   user?: AuthUser | null;
 }
 
+export interface RoleGate {
+  (req: Request, res: Response, next: NextFunction): void;
+  /** The rank this gate enforces — tagged on the closure so a test can walk
+   *  app._router.stack and discover every route's real minRank without
+   *  hand-maintaining a second copy of the list (auth.test.ts does this). */
+  minRank: number;
+}
+
 /** Gate: require an authenticated user with at least `minRank`. */
-export function requireRole(minRank: number) {
-  return (req: Request, res: Response, next: NextFunction) => {
+export function requireRole(minRank: number): RoleGate {
+  const gate = ((req: Request, res: Response, next: NextFunction) => {
     const user = (req as AuthedRequest).user;
     if (!user) {
       res.status(401).json({ error: 'authentication required' });
@@ -214,5 +222,7 @@ export function requireRole(minRank: number) {
       return;
     }
     next();
-  };
+  }) as RoleGate;
+  gate.minRank = minRank;
+  return gate;
 }

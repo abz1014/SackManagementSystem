@@ -77,18 +77,35 @@ export async function getRejectPareto(
   return { total, reasons };
 }
 
-/** Set a reject-reason label (Q10 answer entry). Returns rows affected. */
+/**
+ * Set a reject-reason label (Q10 answer entry). The only write in this
+ * codebase that overwrites rather than versions — reject_code is a small
+ * lookup table, not an event stream, so a full history table would be
+ * over-engineering. What it must not do is lose the old value silently:
+ * OUTPUT deleted.* captures it in the same statement so the caller can put it
+ * in the audit log, which is where this row's history now lives instead of
+ * nowhere.
+ */
 export async function setRejectLabel(
   pool: ConnectionPool,
   rejectCodeId: number,
   label: string | null,
   isPass: boolean | null,
-): Promise<number> {
+): Promise<{ rowsAffected: number; oldLabel: string | null; oldIsPass: boolean | null }> {
   const r = await pool
     .request()
     .input('id', mssql.BigInt, rejectCodeId)
     .input('label', mssql.NVarChar(128), label)
     .input('pass', mssql.Bit, isPass)
-    .query(`UPDATE sms.reject_code SET label=@label, is_pass=@pass WHERE reject_code_id=@id`);
-  return r.rowsAffected[0] ?? 0;
+    .query<{ old_label: string | null; old_is_pass: boolean | null }>(
+      `UPDATE sms.reject_code SET label=@label, is_pass=@pass
+       OUTPUT deleted.label AS old_label, deleted.is_pass AS old_is_pass
+       WHERE reject_code_id=@id`,
+    );
+  const row = r.recordset[0];
+  return {
+    rowsAffected: r.rowsAffected[0] ?? 0,
+    oldLabel: row?.old_label ?? null,
+    oldIsPass: row?.old_is_pass ?? null,
+  };
 }

@@ -29,15 +29,39 @@ export async function createUser(pool: ConnectionPool, username: string, passwor
     .query(`INSERT INTO sms.app_user (username, password_hash, display_name, role_id)
             SELECT @u, @h, @d, role_id FROM sms.role WHERE name=@r`);
 }
-export async function updateUser(pool: ConnectionPool, userId: number, active?: boolean, role?: string): Promise<void> {
+/** Returns the pre-update active/role so the caller can log a plain-language
+ *  "old -> new" — this table has no version history of its own, unlike the
+ *  rule tables below, so the audit log is the only place that trail exists. */
+export async function updateUser(
+  pool: ConnectionPool,
+  userId: number,
+  active?: boolean,
+  role?: string,
+): Promise<{ oldActive: boolean | null; oldRole: string | null }> {
+  let oldActive: boolean | null = null;
+  let oldRole: string | null = null;
   if (active != null) {
-    await pool.request().input('id', mssql.Int, userId).input('a', mssql.Bit, active)
-      .query(`UPDATE sms.app_user SET active=@a WHERE user_id=@id`);
+    const r = await pool.request().input('id', mssql.Int, userId).input('a', mssql.Bit, active)
+      .query<{ old_active: boolean }>(
+        `UPDATE sms.app_user SET active=@a OUTPUT deleted.active AS old_active WHERE user_id=@id`,
+      );
+    oldActive = r.recordset[0]?.old_active ?? null;
   }
   if (role) {
-    await pool.request().input('id', mssql.Int, userId).input('r', mssql.VarChar(20), role)
-      .query(`UPDATE sms.app_user SET role_id=(SELECT role_id FROM sms.role WHERE name=@r) WHERE user_id=@id`);
+    const r = await pool.request().input('id', mssql.Int, userId).input('r', mssql.VarChar(20), role)
+      .query<{ old_role: number }>(
+        `UPDATE sms.app_user SET role_id=(SELECT role_id FROM sms.role WHERE name=@r)
+         OUTPUT deleted.role_id AS old_role WHERE user_id=@id`,
+      );
+    const oldRoleId = r.recordset[0]?.old_role;
+    if (oldRoleId != null) {
+      const rr = await pool.request().input('id', mssql.Int, oldRoleId).query<{ name: string }>(
+        `SELECT name FROM sms.role WHERE role_id=@id`,
+      );
+      oldRole = rr.recordset[0]?.name ?? null;
+    }
   }
+  return { oldActive, oldRole };
 }
 
 // ---- stations (Q11) ----
@@ -48,10 +72,18 @@ export async function listStations(pool: ConnectionPool, lineId: number): Promis
   );
   return r.recordset.map((x) => ({ stationId: x.station_id, name: x.name, machine: x.machine, description: x.description }));
 }
-export async function setStation(pool: ConnectionPool, lineId: number, stationId: number, name: string | null, machine: string | null, description: string | null): Promise<void> {
-  await pool.request().input('line', mssql.Int, lineId).input('id', mssql.Int, stationId)
+export async function setStation(
+  pool: ConnectionPool, lineId: number, stationId: number,
+  name: string | null, machine: string | null, description: string | null,
+): Promise<{ oldName: string | null }> {
+  const r = await pool.request().input('line', mssql.Int, lineId).input('id', mssql.Int, stationId)
     .input('n', mssql.NVarChar(64), name).input('m', mssql.NVarChar(64), machine).input('d', mssql.NVarChar(255), description)
-    .query(`UPDATE sms.station SET name=@n, machine=@m, description=@d WHERE line_id=@line AND station_id=@id`);
+    .query<{ old_name: string | null }>(
+      `UPDATE sms.station SET name=@n, machine=@m, description=@d
+       OUTPUT deleted.name AS old_name
+       WHERE line_id=@line AND station_id=@id`,
+    );
+  return { oldName: r.recordset[0]?.old_name ?? null };
 }
 
 // ---- versioned rules ----

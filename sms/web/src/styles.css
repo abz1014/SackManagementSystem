@@ -2330,6 +2330,7 @@ body {
   border-radius: var(--radius-sm); padding: 6px 8px;
 }
 .setup-table.fixed .st-row { grid-template-columns: 1.2fr 1fr 1.4fr; }
+.setup-table.audit .st-head, .setup-table.audit .st-row { grid-template-columns: 1.3fr 1fr 1fr 1fr 2fr; }
 
 .ghost-btn.sm, .cta.sm { padding: 7px 13px; font-size: var(--fs-caption); }
 

@@ -23,6 +23,7 @@ import {
   adminSetWeightRule,
   adminSetShiftRule,
   adminSetPlausibilityRule,
+  adminGetAudit,
   getEvents,
   getEventDetail,
   eventsExportUrl,
@@ -37,6 +38,7 @@ import {
   type AdminUser,
   type StationRow,
   type Rules,
+  type AuditEntry,
   type ProductOption,
   type TimelineEntry,
   type Envelope,
@@ -280,6 +282,7 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
           { key: 'stations', label: 'Stations', note: `${n(counts.stations)} positions` },
           { key: 'rules', label: 'Rules', note: 'weight and shift' },
           { key: 'sync', label: 'Sync', note: 'plant connection' },
+          { key: 'audit', label: 'Audit log', note: 'every write' },
         ],
       };
   }
@@ -6567,6 +6570,7 @@ function AdminView({ sub, onMeta }: { sub: string; onMeta: (m: Meta) => void }) 
   if (sub === 'stations') return <StationsPanel />;
   if (sub === 'rules') return <RulesPanel />;
   if (sub === 'sync') return <OperationsView onMeta={onMeta} />;
+  if (sub === 'audit') return <AuditPanel />;
   return <UsersPanel />;
 }
 
@@ -6945,6 +6949,68 @@ function RulesPanel() {
         </div>
       </section>
     </>
+  );
+}
+
+/**
+ * Every admin/config write, in one place. Independent of the versioned rule
+ * tables (Rules above) and the product timeline, both of which already carry
+ * their own history — this answers "what has this person done," not "what is
+ * the history of this one setting," which nothing else on Setup can answer.
+ */
+function AuditPanel() {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminGetAudit()
+      .then((r) => !cancelled && setEntries(r.entries))
+      .catch((e) => !cancelled && setError(String(e.message ?? e)))
+      .finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h3 className="panel-title">Audit log</h3>
+          <p className="panel-lede">
+            {entries.length} recorded write{entries.length === 1 ? '' : 's'} — every account, station, rule and
+            product change made through this app, newest first.
+          </p>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="error-card" role="alert"><b>Couldn't load the audit log.</b> {error}</div>
+      ) : loading ? (
+        <div className="sk sk-chart" />
+      ) : entries.length === 0 ? (
+        <div className="empty-note">No writes recorded yet.</div>
+      ) : (
+        <div className="setup-table audit">
+          <div className="st-head">
+            <span>When</span><span>Who</span><span>Action</span><span>Target</span><span>Detail</span>
+          </div>
+          {entries.map((e) => (
+            <div className="st-row" key={e.auditId}>
+              <span className="mono">{new Date(e.atUtc).toLocaleString()}</span>
+              <span>{e.actorName ?? <span className="dim">unknown</span>}</span>
+              <span className="mono">{e.action}</span>
+              <span className="mono dim">{e.targetType}{e.targetId != null ? ` #${e.targetId}` : ''}</span>
+              <span className="dim">{e.detail ?? '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="panel-foot">
+        Capped at the 500 most recent writes. Nothing here is ever edited or deleted.
+      </div>
+    </section>
   );
 }
 

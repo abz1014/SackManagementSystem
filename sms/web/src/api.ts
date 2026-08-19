@@ -118,6 +118,12 @@ export function adminSetWeightRule(r: { basis: string; coneTubeWeightG: number; 
 export function adminSetShiftRule(r: { mode: string; nightBelongsTo: string; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/shift', r); }
 export function adminSetPlausibilityRule(r: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/plausibility', r); }
 
+export interface AuditEntry {
+  auditId: number; atUtc: string; actorId: number | null; actorName: string | null;
+  action: string; targetType: string; targetId: string | null; detail: string | null;
+}
+export function adminGetAudit(): Promise<{ entries: AuditEntry[] }> { return get('/api/admin/audit'); }
+
 // ---- current product (Q1) ----
 export interface ProductOption {
   productId: number; description: string | null; lotCode: string | null; setpointG: number | null;

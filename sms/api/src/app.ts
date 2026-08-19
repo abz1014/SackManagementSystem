@@ -24,6 +24,7 @@ import {
   getRules, setWeightRule, setShiftRule,
   getPlausibilityRule, setPlausibilityRule,
 } from './services/admin.js';
+import { recordAudit, listAudit } from './services/audit.js';
 import {
   authMiddleware,
   authenticate,
@@ -38,6 +39,7 @@ import {
   type AuthedRequest,
 } from './auth.js';
 import { TtlCache } from './cache.js';
+import { securityHeaders } from './security.js';
 
 const dateStr = z
   .string()
@@ -67,11 +69,25 @@ const productionQuery = z.object({
 
 export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   const app = express();
+  app.use(securityHeaders());
   app.use(express.json());
   app.use(authMiddleware(pool)); // attaches req.user (or null) from session cookie
 
   const prodCache = new TtlCache<Envelope<unknown>>(cfg.cacheTtlSeconds * 1000);
   const loginLimiter = new LoginRateLimiter();
+
+  // Fire-and-forget audit write: the primary action has already succeeded by
+  // the time this is called, and there is no transaction spanning both, so a
+  // logging failure must never fail the request that triggered it. It must
+  // also never vanish silently — a broken audit trail is itself a finding —
+  // so failures go to stderr instead of a swallowed catch.
+  function audit(req: Request, action: string, targetType: string, targetId: string | number | null, detail: string | null): void {
+    const actorId = (req as AuthedRequest).user?.userId;
+    if (actorId == null) return;
+    void recordAudit(pool, actorId, action, targetType, targetId, detail).catch((e) =>
+      console.error(`[audit] failed to record ${action}:`, e),
+    );
+  }
   // Off unless explicitly enabled: X-Forwarded-For is client-supplied, so
   // trusting it with no proxy in front makes req.ip attacker-controlled and the
   // login lockout bypassable. Enable only behind a proxy you control (DEPLOY.md).
@@ -517,8 +533,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid request' });
         return;
       }
-      const n = await setRejectLabel(pool, id, body.data.label || null, body.data.isPass ?? null);
-      res.json({ updated: n });
+      const newLabel = body.data.label || null;
+      const { rowsAffected, oldLabel } = await setRejectLabel(pool, id, newLabel, body.data.isPass ?? null);
+      if (rowsAffected > 0) audit(req, 'reject_code.label', 'reject_code', id, `label "${oldLabel ?? '(none)'}" -> "${newLabel ?? '(none)'}"`);
+      res.json({ updated: rowsAffected });
     } catch (err) {
       next(err);
     }
@@ -585,6 +603,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const user = (req as AuthedRequest).user!;
       const eff = body.data.effectiveFrom ? new Date(body.data.effectiveFrom) : new Date();
       const id = await setCurrent(pool, cfg.lineId, body.data.productId, eff, user.userId, body.data.reason ?? null);
+      audit(req, 'product.changeover', 'product', body.data.productId, body.data.reason ?? null);
       res.json({ timelineId: id, current: await getCurrent(pool, cfg.lineId) });
     } catch (err) {
       next(err);
@@ -602,6 +621,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const b = z.object({ username: z.string().min(1).max(64), password: z.string().min(6), role: ROLE_NAMES, displayName: z.string().max(128).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid user' }); return; }
       await createUser(pool, b.data.username, b.data.password, b.data.role, b.data.displayName ?? null);
+      audit(req, 'user.create', 'user', b.data.username, `role ${b.data.role}`);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -610,7 +630,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = Number(req.params.id);
       const b = z.object({ active: z.boolean().optional(), role: ROLE_NAMES.optional() }).safeParse(req.body);
       if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid' }); return; }
-      await updateUser(pool, id, b.data.active, b.data.role);
+      const { oldActive, oldRole } = await updateUser(pool, id, b.data.active, b.data.role);
+      const changes: string[] = [];
+      if (b.data.active != null) changes.push(`active ${oldActive ?? '?'} -> ${b.data.active}`);
+      if (b.data.role) changes.push(`role ${oldRole ?? '?'} -> ${b.data.role}`);
+      audit(req, 'user.update', 'user', id, changes.join('; ') || null);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -623,7 +647,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = Number(req.params.id);
       const b = z.object({ name: z.string().max(64).nullable(), machine: z.string().max(64).nullable(), description: z.string().max(255).nullable() }).safeParse(req.body);
       if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid' }); return; }
-      await setStation(pool, cfg.lineId, id, b.data.name || null, b.data.machine || null, b.data.description || null);
+      const newName = b.data.name || null;
+      const { oldName } = await setStation(pool, cfg.lineId, id, newName, b.data.machine || null, b.data.description || null);
+      audit(req, 'station.rename', 'station', id, `name "${oldName ?? '(none)'}" -> "${newName ?? '(none)'}"`);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -636,6 +662,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const b = z.object({ basis: z.enum(['as_recorded', 'gross', 'net']), coneTubeWeightG: z.coerce.number().nonnegative(), sackTareKg: z.coerce.number().nonnegative(), reason: z.string().max(255).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid' }); return; }
       await setWeightRule(pool, cfg.lineId, b.data.basis, b.data.coneTubeWeightG, b.data.sackTareKg, (req as AuthedRequest).user!.userId, b.data.reason ?? null);
+      audit(req, 'rule.weight', 'weight_rule', cfg.lineId, `basis ${b.data.basis}, tube ${b.data.coneTubeWeightG}g, tare ${b.data.sackTareKg}kg`);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -644,6 +671,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const b = z.object({ mode: z.enum(['corrected', 'legacy']), nightBelongsTo: z.enum(['start_day', 'calendar_day']), reason: z.string().max(255).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid' }); return; }
       await setShiftRule(pool, cfg.lineId, b.data.mode, b.data.nightBelongsTo, (req as AuthedRequest).user!.userId, b.data.reason ?? null);
+      audit(req, 'rule.shift', 'shift_rule', cfg.lineId, `mode ${b.data.mode}, night belongs to ${b.data.nightBelongsTo}`);
       res.json({ ok: true, note: 'shift rule stored; rebuild canonical to apply to stored shift_code/shift_date' });
     } catch (e) { next(e); }
   });
@@ -665,8 +693,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         pool, cfg.lineId, b.data.coneLoG, b.data.coneHiG, b.data.sackLoKg, b.data.sackHiKg,
         (req as AuthedRequest).user!.userId, b.data.reason ?? null,
       );
+      audit(req, 'rule.plausibility', 'plausibility_rule', cfg.lineId, `cone ${b.data.coneLoG}-${b.data.coneHiG}g, sack ${b.data.sackLoKg}-${b.data.sackHiKg}kg`);
       res.json({ ok: true, note: 'applies immediately to every SPC/weight query — read-time, not a rebuild' });
     } catch (e) { next(e); }
+  });
+
+  // audit log — admin only, read-only view of every write above
+  app.get('/api/admin/audit', requireRole(4), async (_req, res, next) => {
+    try { res.json({ entries: await listAudit(pool) }); } catch (e) { next(e); }
   });
 
   // JSON 404 for unmatched API routes

@@ -27,6 +27,20 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Direct Node TLS termination (DEPLOY.md's TLS section) — an alternative to
+   * fronting the service with a reverse proxy. Two forms, matching the two
+   * tools a plant PC actually has without installing anything: PEM cert+key
+   * (openssl, or any CA-issued pair) or PFX (Windows' own PowerShell
+   * `New-SelfSignedCertificate` + `Export-PfxCertificate`, no OpenSSL needed).
+   * Within a form both fields must be set together — a cert with no key (or a
+   * PFX with no passphrase) is always a misconfiguration, never a partial-TLS
+   * mode. Unset by default, which keeps today's plain-HTTP deployment unchanged.
+   */
+  tlsCertPath: z.string().optional(),
+  tlsKeyPath: z.string().optional(),
+  tlsPfxPath: z.string().optional(),
+  tlsPfxPassphrase: z.string().optional(),
   appDb: z.object({
     server: z.string().min(1),
     port: z.coerce.number().int().positive(),
@@ -43,6 +57,10 @@ export interface ApiConfig {
   lineId: number;
   cacheTtlSeconds: number;
   trustProxy: boolean;
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
+  tlsPfxPath?: string;
+  tlsPfxPassphrase?: string;
   appDb: DbConfig;
 }
 
@@ -52,6 +70,10 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     lineId: env.LINE_ID,
     cacheTtlSeconds: env.CACHE_TTL_SECONDS,
     trustProxy: env.TRUST_PROXY,
+    tlsCertPath: env.TLS_CERT_PATH,
+    tlsKeyPath: env.TLS_KEY_PATH,
+    tlsPfxPath: env.TLS_PFX_PATH,
+    tlsPfxPassphrase: env.TLS_PFX_PASSPHRASE,
     appDb: {
       server: env.APP_DB_SERVER,
       port: env.APP_DB_PORT,
