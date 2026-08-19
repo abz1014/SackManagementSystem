@@ -194,7 +194,7 @@ with poor values marked. Below, a three-series day-by-day trend chart, and a
 data note stating how far the plant's stored shift value disagrees with the
 recomputed one.
 
-### 3.9 Setup (`?v=admin&sub=people|stations|rules|sync`) — admin only
+### 3.9 Setup (`?v=admin&sub=people|stations|rules|sync|audit`) — admin only
 
 **People** — accounts, roles, enable/disable, creation.
 **Stations** — naming the 14 winding positions, with the currently flagged
@@ -203,6 +203,13 @@ positions marked.
 window — see §7) plus the one threshold still fixed in code (stoppage
 detection, adjustable per-view on Output instead), stated as a read-only fact
 rather than a control that would do nothing.
+**Audit log** — every account, station, rule and product-changeover write
+made through the app, one place, newest first: who, when, what, and for the
+writes that overwrite rather than version (user role/active, station names,
+reject-code labels) the old value alongside the new. Independent of the
+versioned rule tables' own `changed_by`/`changed_at`, which already answer
+"what is the history of this one setting" — this answers "what has this
+person done," which nothing else on Setup could (§8).
 **Sync** — as §3.10.
 
 ### 3.10 Sync (`?v=operations`) — reachable by every role
@@ -339,12 +346,12 @@ the rows and no extra information.
 **Raw layer (`sms_raw`).** `cone_raw`, `sack_raw`, `reject_qcs_raw`,
 `reject_weight_raw`. Append-only, verbatim.
 
-**Canonical layer (`sms`).** 21 tables. The event tables are `cone_event`,
+**Canonical layer (`sms`).** 22 tables. The event tables are `cone_event`,
 `sack_event`, `reject_event`. Reference data: `station`, `product`,
 `product_timeline`, `reject_code`, `blend`, `yarn_count`, `tube_type`, `unit`.
 Configuration and audit: `app_user`, `role`, `session`, `app_config`,
 `weight_rule`, `shift_rule`, `plausibility_rule`, `sync_run`, `dq_finding`,
-`rebuild_audit`.
+`rebuild_audit`, `audit_log`.
 
 **Volumes on the supplied copy.** 142,511 cone readings, 5,462 sacks, 3,146
 rejects (2,900 quality, 246 weight), 14 winding stations. 19 production days,
@@ -365,11 +372,17 @@ role cannot open rather than showing it and failing.
 | Output, Weight, Rejects | | ✓ | ✓ | ✓ |
 | Set the running product | | ✓ | ✓ | ✓ |
 | CSV export, name reject codes | | | ✓ | ✓ |
-| Setup (people, stations, rules) | | | | ✓ |
+| Setup (people, stations, rules, audit log) | | | | ✓ |
 
 Passwords are argon2-hashed. Sessions are server-side cookies, not JWTs.
 IFL's own `Users` table — three accounts whose passwords equal their usernames,
 stored in plain text — is never read.
+
+Every response carries a same-origin CSP, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and a scoped
+`Permissions-Policy`; `Strict-Transport-Security` is added automatically once
+a request actually arrives over TLS (never sent over plain HTTP, where it
+would do harm rather than good — see `api/src/security.ts`).
 
 Login is rate-limited per IP **and** per username, so rotating either does not
 bypass it.
@@ -443,6 +456,12 @@ runtime.
 Go-live is a connection-string change: the sync worker is repointed from the
 supplied copy to IFL's live server. The API and interface are unchanged,
 because they only ever read the app's own database.
+
+Plain HTTP is the documented default for the intranet deployment (§ below);
+TLS is optional, not required, and two forms of it are built and rehearsed —
+the API can terminate TLS itself (a Windows-native PFX or a PEM pair, no
+extra software required for the PFX form) or sit behind a reverse proxy that
+does. See `DEPLOY.md`'s TLS section for both, including a dated rehearsal log.
 
 Tested at 1440×900, 1920×1080 (wall display) and down to 900px. A text-size
 control (Desk / Floor / Wall) scales the whole interface including chart
@@ -525,9 +544,21 @@ Every screen was checked against the live database rather than only compiled.
 The browser pass covers 21 routes at three viewport widths, asserting WCAG AA
 contrast on every text/background pair (1,465 at the last full run), no
 horizontal overflow, and no console errors. Configuration write paths were
-exercised end to end and reverted. 27 automated tests cover shift derivation,
-merge keys, configuration parsing, schema fingerprinting and the data-quality
-checks.
+exercised end to end and reverted. 86 automated tests cover shift derivation,
+merge keys, configuration parsing, schema fingerprinting, the data-quality
+checks, and — against the real Express app, not a reimplementation of its
+routing — every RBAC boundary in the API: every `requireRole`-gated route
+checked at every rank tier, confirmed to actually catch a regression (a
+deliberately broken gate was shown to fail the suite, then reverted) rather
+than trivially passing regardless of what the code does.
+
+The backup/restore procedure was rehearsed against this exact database, not
+merely documented: a real backup, a real restore into a scratch database, and
+an exact row-count and content match against the source (`DEPLOY.md`, dated).
+The rehearsal found and fixed three defects the script had carried since it
+was written — including an option unsupported on the SQL Server edition this
+project is built on, which would have made every backup fail, silently,
+every night, on the real deployment target.
 
 Figures printed on screen are computed from the data, never transcribed from a
 design or a specification. This was not merely a principle: the interface
