@@ -1713,29 +1713,37 @@ function DashboardView({
     const kg = row.sackWeightKg ?? 0;
     const weighed = cones + rejected;
     const series = (pick: (r: ProductionRow) => number) => trend.map(pick);
+    // Each card says how to read its own trace, so the caption under the
+    // sparkline carries the right unit rather than a bare number.
+    const count = (n: number) => fmtInt(Math.round(n));
+    const kilos = (n: number) => `${fmtInt(Math.round(n))} kg`;
     return [
       {
         key: 'cones', label: 'Total cones', value: fmtInt(cones), unit: '', alarm: false,
         foot: row.conesInRangePct != null ? `${row.conesInRangePct}% in weight range` : '—',
-        series: series((r) => r.cones ?? 0),
+        series: series((r) => r.cones ?? 0), format: count,
       },
       {
         key: 'rejected', label: 'Rejected cones', value: fmtInt(rejected), unit: '', alarm: true,
         foot: weighed > 0 ? `${((100 * rejected) / weighed).toFixed(2)}% of all weighed` : '—',
-        series: series((r) => r.rejectedCones ?? 0),
+        series: series((r) => r.rejectedCones ?? 0), format: count,
       },
       {
         key: 'sacks', label: 'Total sacks', value: fmtInt(sacks), unit: '', alarm: false,
         foot: sacks > 0 ? `${(cones / sacks).toFixed(1)} cones per sack` : '—',
-        series: series((r) => r.sacks ?? 0),
+        series: series((r) => r.sacks ?? 0), format: count,
       },
       {
         key: 'kg', label: 'Sack weight', value: fmtInt(Math.round(kg)), unit: 'kg', alarm: false,
         foot: sacks > 0 ? `${(kg / sacks).toFixed(1)} kg average` : '—',
-        series: series((r) => r.sackWeightKg ?? 0),
+        series: series((r) => r.sackWeightKg ?? 0), format: kilos,
       },
     ];
   }, [kpi, trend]);
+
+  /** The production day behind each sparkline point, so a hovered value can
+   *  name its day rather than leaving the reader to count along the trace. */
+  const trendDays = useMemo(() => trend.map((r) => r.group), [trend]);
 
   // Which shift actually trails, and by how much. The design hardcodes night;
   // on this line night is the strongest and morning the weakest, so the callout
@@ -1938,7 +1946,7 @@ function DashboardView({
                   {c.unit && <span className="kpi-unit">{c.unit}</span>}
                 </div>
                 <div className="kpi-foot">{c.foot}</div>
-                <Spark points={c.series} alarm={c.alarm} />
+                <Spark points={c.series} days={trendDays} format={c.format} alarm={c.alarm} />
               </section>
             ))}
           </div>
@@ -2335,33 +2343,86 @@ function TimelineView() {
  * chart that does render text keeps its measured-width 1:1 viewBox, because
  * stretching those squashed the type — a bug this codebase has already had once.
  */
-function Spark({ points, alarm }: { points: number[]; alarm?: boolean }) {
+/** "Tue 1 Sep" — short enough for a card's caption line. */
+const fmtSparkDay = (day: string) =>
+  new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', {
+    timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short',
+  });
+
+/**
+ * The trend trace on a KPI card.
+ *
+ * It used to be a bare line: no axis, no labels, no hover, `aria-hidden`. It
+ * showed that something moved and refused to say what, when, or by how much,
+ * which makes it decoration rather than information.
+ *
+ * It keeps its size — a card is not the place for a full chart — and earns its
+ * space with a caption instead. At rest the caption states the period and the
+ * range the trace spans, so the shape has a scale. Pointing at a day names
+ * that day and its value, and a crosshair marks which point is being read.
+ * The caption is real text, so it is also what a screen reader gets; the trace
+ * itself stays `aria-hidden` because it now adds nothing the text lacks.
+ */
+function Spark({
+  points,
+  days,
+  format,
+  alarm,
+}: {
+  points: number[];
+  /** Production day per point, so a hovered value can name its day. */
+  days: string[];
+  format: (n: number) => string;
+  alarm?: boolean;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
   const w = 92;
   const h = 26;
   const base = 25;
-  if (points.length < 2) return <svg className="spark" viewBox={`0 0 ${w} ${h}`} width="100%" height={h} aria-hidden="true" />;
+  if (points.length < 2) return <div className="spark-wrap" />;
   const max = Math.max(...points);
   const min = Math.min(...points);
   const span = max - min || 1;
-  const d = points
-    .map((v, i) => {
-      const x = (i / (points.length - 1)) * w;
-      const y = base - ((v - min) / span) * (base - 2);
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
+  const px = (i: number) => (i / (points.length - 1)) * w;
+  const py = (v: number) => base - ((v - min) / span) * (base - 2);
+  const d = points.map((v, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+  const bandW = w / (points.length - 1);
+
   return (
-    <svg
-      className={`spark${alarm ? ' alarm' : ''}`}
-      viewBox={`0 0 ${w} ${h}`}
-      width="100%"
-      height={h}
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <line className="spark-base" x1={0} y1={base} x2={w} y2={base} />
-      <path className="spark-line" d={d} />
-    </svg>
+    <div className="spark-wrap">
+      <svg
+        className={`spark${alarm ? ' alarm' : ''}`}
+        viewBox={`0 0 ${w} ${h}`}
+        width="100%"
+        height={h}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        onMouseLeave={() => setHover(null)}
+      >
+        <line className="spark-base" x1={0} y1={base} x2={w} y2={base} />
+        <path className="spark-line" d={d} />
+        {hover != null && <line className="spark-cross" x1={px(hover)} y1={0} x2={px(hover)} y2={base} />}
+        {/* One hit band per day. The trace is drawn with a non-uniform aspect
+            ratio, so a circular marker would render as an ellipse; a vertical
+            rule reads correctly at any card width. */}
+        {points.map((_, i) => (
+          <rect
+            key={i}
+            className="spark-hit"
+            x={Math.max(0, px(i) - bandW / 2)}
+            y={0}
+            width={bandW}
+            height={h}
+            onMouseEnter={() => setHover(i)}
+          />
+        ))}
+      </svg>
+      <div className="spark-note">
+        {hover == null
+          ? `${points.length} days · ${format(min)} to ${format(max)}`
+          : `${days[hover] ? fmtSparkDay(days[hover]!) : `day ${hover + 1}`} · ${format(points[hover]!)}`}
+      </div>
+    </div>
   );
 }
 
@@ -4386,7 +4447,14 @@ function WeightCalibration({
                   <span className="mono">{s.station}</span>
                   <span className="mono dim">{fmtInt(s.n)}</span>
                   <span className="mono">{s.grandMean}{data.unit}</span>
-                  <span><Spark points={s.days.map((d) => d.mean)} alarm={s.flagged} /></span>
+                  <span>
+                    <Spark
+                      points={s.days.map((d) => d.mean)}
+                      days={s.days.map((d) => d.date)}
+                      format={(n) => `${n.toFixed(1)}${data.unit}`}
+                      alarm={s.flagged}
+                    />
+                  </span>
                   <span>
                     {s.flagged ? (
                       <span className="pill off" title={flaggedDays.map((d) => `${d.date}: ${d.nelson.map((r) => NELSON_RULE_LABEL[r]).join(', ')}`).join(' · ')}>

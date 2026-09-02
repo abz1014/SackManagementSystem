@@ -1632,10 +1632,20 @@ body {
 .kpi-unit { margin-left: 5px; font-size: var(--fs-sub); font-weight: 500; color: var(--muted); letter-spacing: 0; }
 .kpi-foot { margin-top: 7px; font-size: var(--fs-caption); color: var(--muted); }
 
-.spark { display: block; margin-top: 10px; overflow: visible; }
+.spark-wrap { margin-top: 10px; }
+.spark { display: block; overflow: visible; }
 .spark-line { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .spark.alarm .spark-line { stroke: var(--alarm); }
 .spark-base { stroke: var(--hairline); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark-cross { stroke: var(--muted-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark-hit { fill: transparent; cursor: crosshair; }
+/* Fixed height so a card does not jump between the resting caption and the
+   hovered one. */
+.spark-note {
+  margin-top: 5px; min-height: 1.35em; font-size: var(--fs-caption);
+  color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ------------------------------------------------------------ bottom grid */
 .ov-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; align-items: start; }

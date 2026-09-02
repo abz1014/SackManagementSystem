@@ -201,9 +201,13 @@ The production day at a glance, defaulting to the last complete day.
 - **Availability, mean time between stops, mean time to restart.** Availability
   to one decimal: it is inferred from event timestamps, and two decimals would
   claim a precision it does not have.
-- **Four KPI cards** with 7-day sparklines: total cones, rejected cones, total
-  sacks, total sack weight, each with a derived sub-figure (in-range
-  percentage, reject share, cones per sack, average sack weight).
+- **Four KPI cards** with 7-day trend traces: total cones, rejected cones,
+  total sacks, total sack weight, each with a derived sub-figure (in-range
+  percentage, reject share, cones per sack, average sack weight). Each trace
+  carries a caption: at rest the period and the range it spans, so the shape
+  has a scale; pointing at a day names that day and its value, with a
+  crosshair marking which point is being read. The caption is real text, so it
+  is what a screen reader gets too.
 - **"Needs a look"** — a findings feed synthesised from the weight SPC,
   downtime and reject control charts. Each finding is a button that opens the
   exact sub-tab that explains it, carrying the reason with it. A "See all ·
