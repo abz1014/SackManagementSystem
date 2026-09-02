@@ -1495,6 +1495,19 @@ interface TipLine {
 }
 
 /** A chart tooltip that fits its own content. */
+/**
+ * How many x-axis labels actually fit, given the plot width and how wide one
+ * label is at the current text size.
+ *
+ * A fixed tick count is the reason axis labels collide: it is chosen for one
+ * window width and every narrower window overlaps them. Two is the floor —
+ * an axis that names only its ends still says what range it covers.
+ */
+function fittingTicks(plotW: number, labelChars: number, fontPx: number, dataLen: number, max: number): number {
+  const labelPx = labelChars * fontPx * TIP_CHAR_W + 22; // 22px of breathing room
+  return Math.max(2, Math.min(max, dataLen, Math.floor(plotW / labelPx)));
+}
+
 function ChartTip({ x, y = 4, lines, fontPx }: { x: number; y?: number; lines: TipLine[]; fontPx: number }) {
   const m = tipMetrics(lines.map((l) => l.t), fontPx);
   return (
@@ -4592,7 +4605,9 @@ function SubgroupChart({
 
   const gridN = 4;
   const gridVals = Array.from({ length: gridN + 1 }, (_, i) => yMin + (i / gridN) * (yMax - yMin));
-  const tickCount = Math.min(7, valid.length);
+  // Tick count follows the WIDTH, not a constant. Seven "6:00:00 AM" labels
+  // need about 700px; on a narrower panel they print over one another.
+  const tickCount = fittingTicks(W, 10, rmFontPx, valid.length, 7);
   const tickIdxs =
     valid.length <= 1 ? [0] : Array.from({ length: tickCount }, (_, i) => Math.round((i * (valid.length - 1)) / (tickCount - 1)));
 
@@ -4637,8 +4652,20 @@ function SubgroupChart({
           <text key={`gl${i}`} className="axis-label" x={LM - 6} y={y(gv) + 3} textAnchor="end">{gv.toFixed(0)}</text>
         ))}
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">{unit}</text>
-        {tickIdxs.map((i) => (
-          <text key={i} className="x-tick" x={x(i)} y={height + 16} textAnchor="middle">{fmtTime(valid[i]!.ts)}</text>
+        {/* Edge ticks anchor inward. Centred on the plot's left edge, the first
+            tick hangs half its width into the y-axis gutter and lands on the
+            bottom y label — measured overlap of "1947" and "6:00:00 AM". Same
+            treatment the stoppage timeline already used. */}
+        {tickIdxs.map((i, n) => (
+          <text
+            key={i}
+            className="x-tick"
+            x={x(i)}
+            y={height + 16}
+            textAnchor={n === 0 ? 'start' : n === tickIdxs.length - 1 ? 'end' : 'middle'}
+          >
+            {fmtTime(valid[i]!.ts)}
+          </text>
         ))}
         {hover != null && hg && hVal != null && (
           <>
@@ -5105,12 +5132,18 @@ function PChart({
 
   const gridN = 4;
   const gridVals = Array.from({ length: gridN + 1 }, (_, i) => (i / gridN) * yMax);
-  const tickCount = Math.min(bucketSize === 'hour' ? 8 : 6, withRate.length);
+  /** "22 Jun", not "2026-06-22". Six ISO dates need ~660px of axis and were
+   *  printing over one another on any ordinary panel; the year is already in
+   *  the panel's own date range and does not need repeating six times. */
+  const tickLabel = (ts: string) =>
+    bucketSize === 'hour'
+      ? fmtTime(ts)
+      : new Date(ts).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+  const tickCount = fittingTicks(W, bucketSize === 'hour' ? 10 : 6, rmFontPx, withRate.length, bucketSize === 'hour' ? 8 : 6);
   const tickIdxs =
     withRate.length <= 1
       ? [0]
       : Array.from({ length: tickCount }, (_, i) => Math.round((i * (withRate.length - 1)) / (tickCount - 1)));
-  const tickLabel = (ts: string) => (bucketSize === 'hour' ? fmtTime(ts) : ts.slice(0, 10));
 
   const handleMove = (e: React.MouseEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -5156,8 +5189,16 @@ function PChart({
         ))}
         <text className="axis-title" x={LM - 6} y={-15} textAnchor="end">rate %</text>
 
-        {tickIdxs.map((i) => (
-          <text key={i} className="x-tick" x={x(i)} y={H + 16} textAnchor="middle">
+        {/* Edge ticks anchor inward — see the note in SubgroupChart. Here the
+            first tick's date ran under the bottom "0.0" of the rate axis. */}
+        {tickIdxs.map((i, n) => (
+          <text
+            key={i}
+            className="x-tick"
+            x={x(i)}
+            y={H + 16}
+            textAnchor={n === 0 ? 'start' : n === tickIdxs.length - 1 ? 'end' : 'middle'}
+          >
             {tickLabel(withRate[i]!.bucketTs)}
           </text>
         ))}
