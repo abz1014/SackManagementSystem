@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;display=swap">
+  <style>
+body{margin:0;background:#fff;color:#16191C;font-family:'Archivo','Segoe UI',system-ui,Arial,sans-serif;font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+a{color:#16191C;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#B7BAB5}
+a:hover{color:#A5330F;text-decoration-color:#A5330F}
+.bar{height:56px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;padding:0 32px;background:#fff}
+.nav{display:flex;align-items:center;gap:26px;height:56px}
+.brand{font-weight:600;letter-spacing:0.04em;margin-right:6px}
+.nav a{text-decoration:none;color:#4A5057;height:56px;box-sizing:border-box;display:flex;align-items:center;border-bottom:2px solid transparent;padding-top:2px}
+.nav a.on{color:#16191C;border-bottom-color:#16191C}
+.period{display:flex;gap:2px;background:#F2F2EF;border-radius:4px;padding:2px}
+.period span{padding:4px 11px;border-radius:3px;font-size:15px;color:#4A5057;white-space:nowrap}
+.period span.on{background:#fff;color:#16191C;box-shadow:0 0 0 1px #E7E8E4}
+.right{display:flex;align-items:center;gap:16px;font-size:15px;color:#4A5057;white-space:nowrap}
+.strip{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;font-size:15px;color:#4A5057;background:#F6F6F3}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#1E8757;margin-right:8px;vertical-align:1px}
+.dot.bad{background:#A5330F}
+.btn{display:inline-block;border:1px solid #D3D5D1;border-radius:4px;padding:4px 12px;font-size:15px;color:#16191C;background:#fff;text-decoration:none;white-space:nowrap;line-height:1.4}
+.btn.primary{background:#16191C;color:#fff;border-color:#16191C}
+.page{max-width:1100px;margin:0 auto;padding:34px 32px 44px;box-sizing:border-box}
+.q{font-size:15px;color:#5F656C;margin:0 0 6px}
+h1{font-size:30px;line-height:1.3;font-weight:500;margin:0;letter-spacing:-0.01em;text-wrap:pretty}
+.block{padding:28px 0;border-top:1px solid #E7E8E4}
+.block.first{border-top:0;padding-top:26px}
+.figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}
+.figs.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.figs.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fig b{display:block;font-size:40px;line-height:1.1;font-weight:600;letter-spacing:-0.02em;white-space:nowrap}
+.fig b small{font-size:22px;font-weight:500;color:#4A5057;margin-left:6px;letter-spacing:0}
+.fig span{display:block;color:#4A5057;margin-top:6px}
+.acc{color:#A5330F}
+.h2{font-size:15px;color:#5F656C;margin:0 0 14px;font-weight:500;display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.attn{margin:0;padding:0;list-style:none}
+.attn li{margin:0 0 10px;padding-left:18px;position:relative}
+.attn li::before{content:'';position:absolute;left:0;top:10px;width:8px;height:8px;border-radius:50%;background:#A5330F}
+.stations{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:8px}
+.st{border:1px solid #E7E8E4;border-radius:4px;padding:9px 4px 8px;text-align:center}
+.st i{display:block;font-style:normal;font-size:13px;color:#5F656C;white-space:nowrap}
+.st b{display:block;font-weight:500;font-size:18px;margin-top:1px}
+.st.dim{border-style:dashed}
+.st.dim b,.st.dim i{color:#8C9298}
+.st.flag{border-color:#A5330F;box-shadow:inset 0 0 0 1px #A5330F}
+.st.flag b{color:#A5330F}
+table{border-collapse:collapse;width:100%}
+th{font-weight:500;font-size:15px;color:#5F656C;text-align:left;padding:0 12px 8px 0;border-bottom:1px solid #D3D5D1;white-space:nowrap}
+td{padding:9px 12px 9px 0;border-bottom:1px solid #E7E8E4;vertical-align:top}
+td.n,th.n{text-align:right;padding-right:0;padding-left:18px;white-space:nowrap}
+tr.hl td{background:#F6F6F3}
+.mut{color:#5F656C} .g{color:#4A5057} .sm{font-size:15px}
+.details{color:#4A5057;font-size:15px;padding-top:22px;border-top:1px solid #E7E8E4}
+.chev{color:#8C9298;margin-left:8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 28px}
+.kv div:nth-child(odd){color:#5F656C}
+.chip{display:inline-block;border:1px solid #D3D5D1;border-radius:999px;padding:3px 12px;font-size:15px;color:#16191C;white-space:nowrap;line-height:1.4}
+.chip.on{background:#16191C;color:#fff;border-color:#16191C}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle{display:inline-flex;border:1px solid #D3D5D1;border-radius:4px;overflow:hidden}
+.toggle span{padding:5px 14px;font-size:15px;color:#4A5057;border-right:1px solid #D3D5D1;white-space:nowrap}
+.toggle span:last-child{border-right:0}
+.toggle span.on{background:#16191C;color:#fff}
+.readout{font-size:15px;color:#4A5057}
+svg text{font-family:inherit}
+.sheet{position:absolute;top:88px;right:0;bottom:0;width:440px;box-sizing:border-box;background:#fff;border-left:1px solid #D3D5D1;padding:28px 32px}
+.sheet .x{position:absolute;top:24px;right:28px;color:#4A5057;font-size:15px}
+.big{font-size:40px;font-weight:600;letter-spacing:-0.02em;line-height:1.1}
+.bars div{display:grid;grid-template-columns:290px 1fr 120px 70px;gap:16px;align-items:center;padding:7px 0;border-bottom:1px solid #E7E8E4}
+.bars i{display:block;height:12px;background:#4A5057;border-radius:2px;font-style:normal}
+.bars em{font-style:normal;text-align:right;color:#4A5057;white-space:nowrap}
+.cap{font-size:15px;color:#5F656C;padding:8px 32px 14px}
+
+.page.shifted{margin:0;max-width:1000px;padding-left:64px}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; min-height: 1080px; background: #ffffff; overflow: hidden;">
+<div class="bar">
+  <div class="nav"><span class="brand">SMS</span><a href="#">Line</a><a href="#" class="on">Readings</a><a href="#">Weight</a><a href="#">Rejects</a><a href="#">Report</a></div>
+  <div class="row"><div class="period"><span>This shift</span><span class="on">Today</span><span>Yesterday</span><span>This week</span><span>This month</span><span>Pick dates</span></div></div>
+  <div class="right"><a class="btn" href="#">Wall</a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4A5057" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-label="Setup"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></div>
+</div><div class="strip"><span>TP1 · Line 3 · Unit 2</span><span><span class="dot"></span>Readings to 16:39 · they reach this system about 16 min after weighing. <a href="#">details</a></span></div>
+<div class="page shifted">
+  <p class="q">Every cone and every sack that was weighed, with the rejected ones flagged.</p>
+  <h1>Today, 06:00 to 16:39 so far: 3,408 cones weighed, 11 rejected by the scale (0.3%).</h1>
+  <div class="block first" style="padding-top: 22px; padding-bottom: 18px;">
+    <div class="row" style="justify-content: space-between;">
+      <div class="row">
+        <div class="toggle"><span class="on">Cones</span><span>Sacks</span><span>Rejected cones</span></div>
+        <span class="chip">Station ›</span><span class="chip">Rejected only</span><span class="chip">Shift ›</span><a class="sm" href="#">More filters</a>
+      </div>
+      <div class="row"><a class="btn" href="#">Export CSV</a><a class="btn" href="#">Print</a></div>
+    </div>
+  </div>
+  <table>
+    <tr><th style="width: 110px;">Time</th><th style="width: 120px;">Station</th><th class="n" style="width: 90px;">Weight</th><th style="padding-left: 32px;">Status</th><th></th></tr>
+    <tr><td>16:39:02</td><td>Station 9</td><td class="n">1,949 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:51</td><td>Station 3</td><td class="n">1,956 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr class="hl"><td>16:38:47</td><td>Station 11</td><td class="n">1,912 g</td><td style="padding-left: 32px;"><span class="acc">Rejected by the scale</span> · <span class="acc">outside product limits</span></td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:40</td><td>Station 7</td><td class="n">1,963 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:33</td><td>Station 1</td><td class="n">1,947 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:29</td><td>Station 14</td><td class="n">1,953 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:20</td><td>Station 5</td><td class="n">1,944 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:12</td><td>Station 8</td><td class="n">1,958 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:38:04</td><td>Station 2</td><td class="n">1,950 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:37:58</td><td>Station 10</td><td class="n">1,918 g</td><td style="padding-left: 32px;">Passed · <span class="acc">outside product limits</span></td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:37:51</td><td>Station 6</td><td class="n">1,952 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+    <tr><td>16:37:45</td><td>Station 13</td><td class="n">1,948 g</td><td style="padding-left: 32px;">Passed</td><td class="n"><span class="chev">›</span></td></tr>
+  </table>
+  <p class="mut sm" style="margin: 14px 0 0;">Showing 12 of 3,408 · newest first · new readings appear every 15 seconds &nbsp;·&nbsp; <a href="#">Next 25 ›</a></p>
+</div>
+<div class="sheet">
+  <a class="x" href="#">Close · Esc</a>
+  <p class="q">Cone · Station 11 · Evening shift</p>
+  <div class="big">1,912 g</div>
+  <div class="acc" style="margin-top: 8px; font-weight: 500;">Rejected by the scale</div>
+  <div class="g" style="margin-top: 4px;">Also outside the product's limits: 1,960 ± 40 g at this time, so 8 g under the lower limit.</div>
+  <div class="kv" style="margin-top: 24px;">
+    <div>Weighed</div><div>Tue 2 Sep, 16:38:47</div>
+    <div>Shift</div><div>Evening (14:00 to 22:00)</div>
+    <div>Station</div><div>Station 11</div>
+    <div>Record</div><div>C-2,147,483</div>
+    <div>Product then</div><div>201-IH0-SD, recorded 2 Sep 07:03</div>
+  </div>
+  <div class="details" style="margin-top: 28px;"><a href="#">Provenance</a> · source row, ingest time, plant-stored shift, transform version</div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>

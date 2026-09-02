@@ -19,6 +19,22 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 **Phase 0 (Database Discovery) — COMPLETE.** → `SCHEMA.md`, `QUESTIONS.md`
 **Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 25 app tables, session-cookie auth (argon2), 17 tests, perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover (repoint `IFL_DB_SERVER`).**
 
+### UI redesign proposal (2 Sep 2026) — AWAITING SIGN-OFF, nothing built
+
+The floor-first rework below did not cure the interface; the owner's verdict
+after a day of point fixes was "unusable". A three-agent audit plus two
+adversarial critics (IFL's representative, a process engineer) produced
+**[`REDESIGN.md`](REDESIGN.md)** — the corrected brief: principles, one top
+bar with one period control, five screens + Wall + Setup, the removed list,
+the requirement-by-requirement gap/plan table, the questions to send IFL, the
+build order and its gates — and a **mockup for sign-off**:
+https://claude.ai/code/artifact/abc93e4f-009f-418f-b0fa-a88be73abaae
+(source: `design/sms-redesign/build.mjs` writes the `.dc.html` boards; the
+numbers are sample values shaped from the simulator's last complete day).
+**Do not build any of it before the owner signs off**, then build in the
+order `REDESIGN.md` §12 gives. Until then `CAPABILITIES.md` §3 describes what
+exists, and the floor-first screens below are what runs.
+
 ### Floor-first rework (2 Sep 2026) — response to IFL's first review
 
 IFL's reaction to the demo was **very poor**: too complicated for a

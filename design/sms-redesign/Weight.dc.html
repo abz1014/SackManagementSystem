@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;display=swap">
+  <style>
+body{margin:0;background:#fff;color:#16191C;font-family:'Archivo','Segoe UI',system-ui,Arial,sans-serif;font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+a{color:#16191C;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#B7BAB5}
+a:hover{color:#A5330F;text-decoration-color:#A5330F}
+.bar{height:56px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;padding:0 32px;background:#fff}
+.nav{display:flex;align-items:center;gap:26px;height:56px}
+.brand{font-weight:600;letter-spacing:0.04em;margin-right:6px}
+.nav a{text-decoration:none;color:#4A5057;height:56px;box-sizing:border-box;display:flex;align-items:center;border-bottom:2px solid transparent;padding-top:2px}
+.nav a.on{color:#16191C;border-bottom-color:#16191C}
+.period{display:flex;gap:2px;background:#F2F2EF;border-radius:4px;padding:2px}
+.period span{padding:4px 11px;border-radius:3px;font-size:15px;color:#4A5057;white-space:nowrap}
+.period span.on{background:#fff;color:#16191C;box-shadow:0 0 0 1px #E7E8E4}
+.right{display:flex;align-items:center;gap:16px;font-size:15px;color:#4A5057;white-space:nowrap}
+.strip{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;font-size:15px;color:#4A5057;background:#F6F6F3}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#1E8757;margin-right:8px;vertical-align:1px}
+.dot.bad{background:#A5330F}
+.btn{display:inline-block;border:1px solid #D3D5D1;border-radius:4px;padding:4px 12px;font-size:15px;color:#16191C;background:#fff;text-decoration:none;white-space:nowrap;line-height:1.4}
+.btn.primary{background:#16191C;color:#fff;border-color:#16191C}
+.page{max-width:1100px;margin:0 auto;padding:34px 32px 44px;box-sizing:border-box}
+.q{font-size:15px;color:#5F656C;margin:0 0 6px}
+h1{font-size:30px;line-height:1.3;font-weight:500;margin:0;letter-spacing:-0.01em;text-wrap:pretty}
+.block{padding:28px 0;border-top:1px solid #E7E8E4}
+.block.first{border-top:0;padding-top:26px}
+.figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}
+.figs.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.figs.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fig b{display:block;font-size:40px;line-height:1.1;font-weight:600;letter-spacing:-0.02em;white-space:nowrap}
+.fig b small{font-size:22px;font-weight:500;color:#4A5057;margin-left:6px;letter-spacing:0}
+.fig span{display:block;color:#4A5057;margin-top:6px}
+.acc{color:#A5330F}
+.h2{font-size:15px;color:#5F656C;margin:0 0 14px;font-weight:500;display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.attn{margin:0;padding:0;list-style:none}
+.attn li{margin:0 0 10px;padding-left:18px;position:relative}
+.attn li::before{content:'';position:absolute;left:0;top:10px;width:8px;height:8px;border-radius:50%;background:#A5330F}
+.stations{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:8px}
+.st{border:1px solid #E7E8E4;border-radius:4px;padding:9px 4px 8px;text-align:center}
+.st i{display:block;font-style:normal;font-size:13px;color:#5F656C;white-space:nowrap}
+.st b{display:block;font-weight:500;font-size:18px;margin-top:1px}
+.st.dim{border-style:dashed}
+.st.dim b,.st.dim i{color:#8C9298}
+.st.flag{border-color:#A5330F;box-shadow:inset 0 0 0 1px #A5330F}
+.st.flag b{color:#A5330F}
+table{border-collapse:collapse;width:100%}
+th{font-weight:500;font-size:15px;color:#5F656C;text-align:left;padding:0 12px 8px 0;border-bottom:1px solid #D3D5D1;white-space:nowrap}
+td{padding:9px 12px 9px 0;border-bottom:1px solid #E7E8E4;vertical-align:top}
+td.n,th.n{text-align:right;padding-right:0;padding-left:18px;white-space:nowrap}
+tr.hl td{background:#F6F6F3}
+.mut{color:#5F656C} .g{color:#4A5057} .sm{font-size:15px}
+.details{color:#4A5057;font-size:15px;padding-top:22px;border-top:1px solid #E7E8E4}
+.chev{color:#8C9298;margin-left:8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 28px}
+.kv div:nth-child(odd){color:#5F656C}
+.chip{display:inline-block;border:1px solid #D3D5D1;border-radius:999px;padding:3px 12px;font-size:15px;color:#16191C;white-space:nowrap;line-height:1.4}
+.chip.on{background:#16191C;color:#fff;border-color:#16191C}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle{display:inline-flex;border:1px solid #D3D5D1;border-radius:4px;overflow:hidden}
+.toggle span{padding:5px 14px;font-size:15px;color:#4A5057;border-right:1px solid #D3D5D1;white-space:nowrap}
+.toggle span:last-child{border-right:0}
+.toggle span.on{background:#16191C;color:#fff}
+.readout{font-size:15px;color:#4A5057}
+svg text{font-family:inherit}
+.sheet{position:absolute;top:88px;right:0;bottom:0;width:440px;box-sizing:border-box;background:#fff;border-left:1px solid #D3D5D1;padding:28px 32px}
+.sheet .x{position:absolute;top:24px;right:28px;color:#4A5057;font-size:15px}
+.big{font-size:40px;font-weight:600;letter-spacing:-0.02em;line-height:1.1}
+.bars div{display:grid;grid-template-columns:290px 1fr 120px 70px;gap:16px;align-items:center;padding:7px 0;border-bottom:1px solid #E7E8E4}
+.bars i{display:block;height:12px;background:#4A5057;border-radius:2px;font-style:normal}
+.bars em{font-style:normal;text-align:right;color:#4A5057;white-space:nowrap}
+.cap{font-size:15px;color:#5F656C;padding:8px 32px 14px}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; min-height: 1460px; background: #ffffff; overflow: hidden;">
+<div class="bar">
+  <div class="nav"><span class="brand">SMS</span><a href="#">Line</a><a href="#">Readings</a><a href="#" class="on">Weight</a><a href="#">Rejects</a><a href="#">Report</a></div>
+  <div class="row"><div class="period"><span>This shift</span><span class="on">Today</span><span>Yesterday</span><span>This week</span><span>This month</span><span>Pick dates</span></div></div>
+  <div class="right"><a class="btn" href="#">Wall</a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4A5057" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-label="Setup"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></div>
+</div><div class="strip"><span>TP1 · Line 3 · Unit 2</span><span><span class="dot"></span>Readings to 16:39 · they reach this system about 16 min after weighing. <a href="#">details</a></span></div>
+<div class="page">
+  <p class="q">Are the cones at the right weight, and does any station's scale need attention?</p>
+  <h1>Average recorded weight today is 1,951 g; the product target is 1,960 g (weight basis not yet confirmed). Two stations need a look.</h1>
+  <div class="block first figs">
+    <div class="fig"><b>1,951<small>g average</small></b><span>product target 1,960 g</span></div>
+    <div class="fig"><b>0.3%<small>rejected by the scale</small></b><span>11 of 3,408 cones</span></div>
+    <div class="fig"><b>1,934 to 1,967<small>g</small></b><span>95 of every 100 cones fall in this range</span></div>
+  </div>
+  <div class="block" style="padding-top: 18px; padding-bottom: 18px; border-top: 0;">
+    <span class="acc">6 cones today were passed by the scale but sit outside the product's limits.</span> <a href="#">See them</a>
+  </div>
+  <div class="block">
+    <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+      <div class="toggle"><span class="on">Over time</span><span>Distribution</span></div>
+      <div class="readout">09:30 · 1,958 g, the average of 187 cones · rising for 6 groups <span class="mut">(the readout follows the pointer)</span></div>
+    </div>
+    <svg width="1036" height="230" viewBox="0 0 1036 230" role="img" aria-label="Average cone weight per half hour today">
+<line x1="8" x2="894" y1="46.7" y2="46.7" stroke="#8C9298" stroke-width="1" stroke-dasharray="3 3"></line><text x="900" y="50.7" font-size="13" fill="#4A5057">upper limit 2,000 g</text>
+<line x1="8" x2="894" y1="108.0" y2="108.0" stroke="#4A5057" stroke-width="1"></line><text x="900" y="112.0" font-size="13" fill="#4A5057">target 1,960 g</text>
+<line x1="8" x2="894" y1="169.3" y2="169.3" stroke="#8C9298" stroke-width="1" stroke-dasharray="3 3"></line><text x="900" y="173.3" font-size="13" fill="#4A5057">lower limit 1,920 g</text>
+<line x1="300.7" x2="300.7" y1="16" y2="200" stroke="#D3D5D1" stroke-width="1"></line>
+<path d="M8.0,123.3 L49.8,120.3 L91.6,124.9 L133.4,121.8 L175.2,120.3 L217.0,117.2 L258.9,115.7 L300.7,112.6 L342.5,111.1 L384.3,109.5 L426.1,118.7 L467.9,121.8 L509.7,123.3 L551.5,120.3 L593.3,124.9 L635.1,121.8 L677.0,123.3 L718.8,120.3 L760.6,121.8 L802.4,124.9 L844.2,121.8 L886.0,123.3" fill="none" stroke="#16191C" stroke-width="2" stroke-linejoin="round"></path>
+<circle cx="175.2" cy="120.3" r="4" fill="#A5330F"></circle><circle cx="217.0" cy="117.2" r="4" fill="#A5330F"></circle><circle cx="258.9" cy="115.7" r="4" fill="#A5330F"></circle><circle cx="300.7" cy="112.6" r="4" fill="#A5330F"></circle><circle cx="342.5" cy="111.1" r="4" fill="#A5330F"></circle><circle cx="384.3" cy="109.5" r="4" fill="#A5330F"></circle>
+<circle cx="300.7" cy="112.6" r="7" fill="none" stroke="#16191C" stroke-width="1.5"></circle>
+<text x="279.8" y="134.1" font-size="13" fill="#A5330F" text-anchor="middle">rising for 6 groups</text>
+<text x="8.0" y="222" font-size="13" fill="#5F656C" text-anchor="start">06:00</text><text x="175.2" y="222" font-size="13" fill="#5F656C" text-anchor="middle">08:00</text><text x="342.5" y="222" font-size="13" fill="#5F656C" text-anchor="middle">10:00</text><text x="509.7" y="222" font-size="13" fill="#5F656C" text-anchor="middle">12:00</text><text x="677.0" y="222" font-size="13" fill="#5F656C" text-anchor="middle">14:00</text><text x="844.2" y="222" font-size="13" fill="#5F656C" text-anchor="middle">16:00</text>
+</svg>
+  </div>
+  <div class="block">
+    <p class="h2"><span>Stations, judged over the last 14 production days</span><span>flagged first, then by distance from target</span></p>
+    <table>
+      <tr><th>Station</th><th class="n">Average</th><th class="n">vs line</th><th class="n">vs target</th><th style="padding-left: 28px;">Pattern</th><th class="n">Rejects</th><th style="padding-left: 28px;">What the data shows</th></tr>
+      <tr><td class="acc" style="font-weight: 500; white-space: nowrap;">Station 4<span class="chev">›</span></td><td class="n">1,942 g</td><td class="n">−9 g</td><td class="n">−18 g</td><td style="padding-left: 28px; white-space: nowrap;" class="acc">low 6 of 14 days</td><td class="n">2.6%</td><td style="padding-left: 28px;">Has read about 9 g lighter than the line for 6 days — check its scale first. <a href="#" style="white-space: nowrap;">Log an adjustment</a></td></tr>
+      <tr><td class="acc" style="font-weight: 500; white-space: nowrap;">Station 7<span class="chev">›</span></td><td class="n">1,963 g</td><td class="n">+12 g</td><td class="n">+3 g</td><td style="padding-left: 28px; white-space: nowrap;" class="acc">rising 4 days</td><td class="n">2.1%</td><td style="padding-left: 28px;">Has read about 12 g heavier than the line for 4 days — check its scale first. <a href="#" style="white-space: nowrap;">Log an adjustment</a></td></tr>
+      <tr><td style="font-weight: 500; white-space: nowrap;">Station 11<span class="chev">›</span></td><td class="n">1,946 g</td><td class="n">−5 g</td><td class="n">−14 g</td><td style="padding-left: 28px; white-space: nowrap;">—</td><td class="n">3.4%</td><td style="padding-left: 28px;">Steady. Highest reject rate on the line, mostly quality codes — look at tubes before scales.</td></tr>
+      <tr><td style="font-weight: 500; white-space: nowrap;">Station 13<span class="chev">›</span></td><td class="n">1,950 g</td><td class="n">−1 g</td><td class="n">−10 g</td><td style="padding-left: 28px; white-space: nowrap;">—</td><td class="n">2.2%</td><td style="padding-left: 28px;">Steady.</td></tr>
+      <tr><td style="font-weight: 500; white-space: nowrap;">Station 1<span class="chev">›</span></td><td class="n">1,952 g</td><td class="n">+1 g</td><td class="n">−8 g</td><td style="padding-left: 28px; white-space: nowrap;">—</td><td class="n">2.2%</td><td style="padding-left: 28px;">Steady.</td></tr>
+      <tr><td style="font-weight: 500; white-space: nowrap;">Station 5<span class="chev">›</span></td><td class="n">1,952 g</td><td class="n">+1 g</td><td class="n">−8 g</td><td style="padding-left: 28px; white-space: nowrap;">—</td><td class="n">2.3%</td><td style="padding-left: 28px;">Adjusted 2 days ago by A. Sajid, steady since.</td></tr>
+      <tr><td style="font-weight: 500; white-space: nowrap;">Station 10<span class="chev">›</span></td><td class="n">1,953 g</td><td class="n">+2 g</td><td class="n">−7 g</td><td style="padding-left: 28px; white-space: nowrap;">—</td><td class="n">2.4%</td><td style="padding-left: 28px;">Steady.</td></tr>
+      <tr><td colspan="7" class="g">and 7 more stations, all steady<span class="chev">›</span></td></tr>
+    </table>
+    <p class="sm g" style="margin: 16px 0 0;"><a href="#">Adjustment log</a> · 3 adjustments in the last 14 days. A logged adjustment restarts that station's pattern from that moment.</p>
+  </div>
+  <div class="details"><a href="#">Show the working</a> · control limits · Cp and Cpk · sigma within and overall · scale verdict versus product limits · the drift rules</div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;display=swap">
+  <style>
+body{margin:0;background:#fff;color:#16191C;font-family:'Archivo','Segoe UI',system-ui,Arial,sans-serif;font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+a{color:#16191C;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#B7BAB5}
+a:hover{color:#A5330F;text-decoration-color:#A5330F}
+.bar{height:56px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;padding:0 32px;background:#fff}
+.nav{display:flex;align-items:center;gap:26px;height:56px}
+.brand{font-weight:600;letter-spacing:0.04em;margin-right:6px}
+.nav a{text-decoration:none;color:#4A5057;height:56px;box-sizing:border-box;display:flex;align-items:center;border-bottom:2px solid transparent;padding-top:2px}
+.nav a.on{color:#16191C;border-bottom-color:#16191C}
+.period{display:flex;gap:2px;background:#F2F2EF;border-radius:4px;padding:2px}
+.period span{padding:4px 11px;border-radius:3px;font-size:15px;color:#4A5057;white-space:nowrap}
+.period span.on{background:#fff;color:#16191C;box-shadow:0 0 0 1px #E7E8E4}
+.right{display:flex;align-items:center;gap:16px;font-size:15px;color:#4A5057;white-space:nowrap}
+.strip{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;font-size:15px;color:#4A5057;background:#F6F6F3}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#1E8757;margin-right:8px;vertical-align:1px}
+.dot.bad{background:#A5330F}
+.btn{display:inline-block;border:1px solid #D3D5D1;border-radius:4px;padding:4px 12px;font-size:15px;color:#16191C;background:#fff;text-decoration:none;white-space:nowrap;line-height:1.4}
+.btn.primary{background:#16191C;color:#fff;border-color:#16191C}
+.page{max-width:1100px;margin:0 auto;padding:34px 32px 44px;box-sizing:border-box}
+.q{font-size:15px;color:#5F656C;margin:0 0 6px}
+h1{font-size:30px;line-height:1.3;font-weight:500;margin:0;letter-spacing:-0.01em;text-wrap:pretty}
+.block{padding:28px 0;border-top:1px solid #E7E8E4}
+.block.first{border-top:0;padding-top:26px}
+.figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}
+.figs.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.figs.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fig b{display:block;font-size:40px;line-height:1.1;font-weight:600;letter-spacing:-0.02em;white-space:nowrap}
+.fig b small{font-size:22px;font-weight:500;color:#4A5057;margin-left:6px;letter-spacing:0}
+.fig span{display:block;color:#4A5057;margin-top:6px}
+.acc{color:#A5330F}
+.h2{font-size:15px;color:#5F656C;margin:0 0 14px;font-weight:500;display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.attn{margin:0;padding:0;list-style:none}
+.attn li{margin:0 0 10px;padding-left:18px;position:relative}
+.attn li::before{content:'';position:absolute;left:0;top:10px;width:8px;height:8px;border-radius:50%;background:#A5330F}
+.stations{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:8px}
+.st{border:1px solid #E7E8E4;border-radius:4px;padding:9px 4px 8px;text-align:center}
+.st i{display:block;font-style:normal;font-size:13px;color:#5F656C;white-space:nowrap}
+.st b{display:block;font-weight:500;font-size:18px;margin-top:1px}
+.st.dim{border-style:dashed}
+.st.dim b,.st.dim i{color:#8C9298}
+.st.flag{border-color:#A5330F;box-shadow:inset 0 0 0 1px #A5330F}
+.st.flag b{color:#A5330F}
+table{border-collapse:collapse;width:100%}
+th{font-weight:500;font-size:15px;color:#5F656C;text-align:left;padding:0 12px 8px 0;border-bottom:1px solid #D3D5D1;white-space:nowrap}
+td{padding:9px 12px 9px 0;border-bottom:1px solid #E7E8E4;vertical-align:top}
+td.n,th.n{text-align:right;padding-right:0;padding-left:18px;white-space:nowrap}
+tr.hl td{background:#F6F6F3}
+.mut{color:#5F656C} .g{color:#4A5057} .sm{font-size:15px}
+.details{color:#4A5057;font-size:15px;padding-top:22px;border-top:1px solid #E7E8E4}
+.chev{color:#8C9298;margin-left:8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 28px}
+.kv div:nth-child(odd){color:#5F656C}
+.chip{display:inline-block;border:1px solid #D3D5D1;border-radius:999px;padding:3px 12px;font-size:15px;color:#16191C;white-space:nowrap;line-height:1.4}
+.chip.on{background:#16191C;color:#fff;border-color:#16191C}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle{display:inline-flex;border:1px solid #D3D5D1;border-radius:4px;overflow:hidden}
+.toggle span{padding:5px 14px;font-size:15px;color:#4A5057;border-right:1px solid #D3D5D1;white-space:nowrap}
+.toggle span:last-child{border-right:0}
+.toggle span.on{background:#16191C;color:#fff}
+.readout{font-size:15px;color:#4A5057}
+svg text{font-family:inherit}
+.sheet{position:absolute;top:88px;right:0;bottom:0;width:440px;box-sizing:border-box;background:#fff;border-left:1px solid #D3D5D1;padding:28px 32px}
+.sheet .x{position:absolute;top:24px;right:28px;color:#4A5057;font-size:15px}
+.big{font-size:40px;font-weight:600;letter-spacing:-0.02em;line-height:1.1}
+.bars div{display:grid;grid-template-columns:290px 1fr 120px 70px;gap:16px;align-items:center;padding:7px 0;border-bottom:1px solid #E7E8E4}
+.bars i{display:block;height:12px;background:#4A5057;border-radius:2px;font-style:normal}
+.bars em{font-style:normal;text-align:right;color:#4A5057;white-space:nowrap}
+.cap{font-size:15px;color:#5F656C;padding:8px 32px 14px}
+
+.wall{padding:44px 56px 40px;box-sizing:border-box;height:810px;display:flex;flex-direction:column;justify-content:space-between}
+.w-head{display:flex;justify-content:space-between;align-items:baseline}
+.w-state{font-size:60px;font-weight:600;letter-spacing:-0.02em;line-height:1.1}
+.w-shift{font-size:28px;color:#4A5057}
+.w-figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:48px}
+.w-fig b{display:block;font-size:112px;line-height:1;font-weight:600;letter-spacing:-0.03em}
+.w-fig span{display:block;font-size:28px;color:#4A5057;margin-top:10px}
+.w-sub{font-size:26px;color:#4A5057;margin-bottom:16px}
+.w-st{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:10px}
+.w-st div{border:2px solid #E7E8E4;border-radius:6px;text-align:center;padding:10px 4px 8px}
+.w-st i{display:block;font-style:normal;font-size:18px;color:#5F656C}
+.w-st b{display:block;font-size:30px;font-weight:500;line-height:1.2}
+.w-st .flag{border-color:#A5330F} .w-st .flag b{color:#A5330F}
+.w-st .dim{border-style:dashed} .w-st .dim b,.w-st .dim i{color:#8C9298}
+.w-foot{display:flex;justify-content:space-between;font-size:24px;color:#4A5057}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; min-height: 810px; background: #ffffff; overflow: hidden;">
+<div class="wall">
+  <div class="w-head">
+    <div class="w-state">Line 3 is running</div>
+    <div class="w-shift">Evening shift 14:00 to 22:00 &nbsp;·&nbsp; 16:55</div>
+  </div>
+  <div class="w-figs">
+    <div class="w-fig"><b>874</b><span>cones this shift · 99.7% passed</span></div>
+    <div class="w-fig"><b>37</b><span>sacks · 1,747 kg</span></div>
+    <div class="w-fig"><b>21</b><span>rejected · 2.3%</span></div>
+  </div>
+  <div>
+    <div class="w-sub">Last sack 47.3 kg at 16:38 &nbsp;·&nbsp; last cone 1,949 g at 16:39, Station 9</div>
+    <div class="w-st"><div><i>1</i><b>63</b></div><div><i>2</i><b>58</b></div><div><i>3</i><b>60</b></div><div><i>4</i><b>61</b></div><div><i>5</i><b>62</b></div><div><i>6</i><b>64</b></div><div class="flag"><i>7</i><b>62</b></div><div><i>8</i><b>63</b></div><div><i>9</i><b>65</b></div><div><i>10</i><b>58</b></div><div><i>11</i><b>64</b></div><div class="dim"><i>12</i><b>—</b></div><div><i>13</i><b>65</b></div><div><i>14</i><b>61</b></div></div>
+  </div>
+  <div class="w-foot">
+    <span><span class="dot" style="width: 12px; height: 12px; margin-right: 12px;"></span>Readings to 16:39 · they reach this screen about 16 min after weighing</span>
+    <span>Station 7: check its scale &nbsp;·&nbsp; Station 12 quiet 22 min</span>
+  </div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>

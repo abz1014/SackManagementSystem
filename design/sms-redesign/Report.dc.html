@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;display=swap">
+  <style>
+body{margin:0;background:#fff;color:#16191C;font-family:'Archivo','Segoe UI',system-ui,Arial,sans-serif;font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+a{color:#16191C;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#B7BAB5}
+a:hover{color:#A5330F;text-decoration-color:#A5330F}
+.bar{height:56px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;padding:0 32px;background:#fff}
+.nav{display:flex;align-items:center;gap:26px;height:56px}
+.brand{font-weight:600;letter-spacing:0.04em;margin-right:6px}
+.nav a{text-decoration:none;color:#4A5057;height:56px;box-sizing:border-box;display:flex;align-items:center;border-bottom:2px solid transparent;padding-top:2px}
+.nav a.on{color:#16191C;border-bottom-color:#16191C}
+.period{display:flex;gap:2px;background:#F2F2EF;border-radius:4px;padding:2px}
+.period span{padding:4px 11px;border-radius:3px;font-size:15px;color:#4A5057;white-space:nowrap}
+.period span.on{background:#fff;color:#16191C;box-shadow:0 0 0 1px #E7E8E4}
+.right{display:flex;align-items:center;gap:16px;font-size:15px;color:#4A5057;white-space:nowrap}
+.strip{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;font-size:15px;color:#4A5057;background:#F6F6F3}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#1E8757;margin-right:8px;vertical-align:1px}
+.dot.bad{background:#A5330F}
+.btn{display:inline-block;border:1px solid #D3D5D1;border-radius:4px;padding:4px 12px;font-size:15px;color:#16191C;background:#fff;text-decoration:none;white-space:nowrap;line-height:1.4}
+.btn.primary{background:#16191C;color:#fff;border-color:#16191C}
+.page{max-width:1100px;margin:0 auto;padding:34px 32px 44px;box-sizing:border-box}
+.q{font-size:15px;color:#5F656C;margin:0 0 6px}
+h1{font-size:30px;line-height:1.3;font-weight:500;margin:0;letter-spacing:-0.01em;text-wrap:pretty}
+.block{padding:28px 0;border-top:1px solid #E7E8E4}
+.block.first{border-top:0;padding-top:26px}
+.figs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px}
+.figs.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.figs.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fig b{display:block;font-size:40px;line-height:1.1;font-weight:600;letter-spacing:-0.02em;white-space:nowrap}
+.fig b small{font-size:22px;font-weight:500;color:#4A5057;margin-left:6px;letter-spacing:0}
+.fig span{display:block;color:#4A5057;margin-top:6px}
+.acc{color:#A5330F}
+.h2{font-size:15px;color:#5F656C;margin:0 0 14px;font-weight:500;display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.attn{margin:0;padding:0;list-style:none}
+.attn li{margin:0 0 10px;padding-left:18px;position:relative}
+.attn li::before{content:'';position:absolute;left:0;top:10px;width:8px;height:8px;border-radius:50%;background:#A5330F}
+.stations{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:8px}
+.st{border:1px solid #E7E8E4;border-radius:4px;padding:9px 4px 8px;text-align:center}
+.st i{display:block;font-style:normal;font-size:13px;color:#5F656C;white-space:nowrap}
+.st b{display:block;font-weight:500;font-size:18px;margin-top:1px}
+.st.dim{border-style:dashed}
+.st.dim b,.st.dim i{color:#8C9298}
+.st.flag{border-color:#A5330F;box-shadow:inset 0 0 0 1px #A5330F}
+.st.flag b{color:#A5330F}
+table{border-collapse:collapse;width:100%}
+th{font-weight:500;font-size:15px;color:#5F656C;text-align:left;padding:0 12px 8px 0;border-bottom:1px solid #D3D5D1;white-space:nowrap}
+td{padding:9px 12px 9px 0;border-bottom:1px solid #E7E8E4;vertical-align:top}
+td.n,th.n{text-align:right;padding-right:0;padding-left:18px;white-space:nowrap}
+tr.hl td{background:#F6F6F3}
+.mut{color:#5F656C} .g{color:#4A5057} .sm{font-size:15px}
+.details{color:#4A5057;font-size:15px;padding-top:22px;border-top:1px solid #E7E8E4}
+.chev{color:#8C9298;margin-left:8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 28px}
+.kv div:nth-child(odd){color:#5F656C}
+.chip{display:inline-block;border:1px solid #D3D5D1;border-radius:999px;padding:3px 12px;font-size:15px;color:#16191C;white-space:nowrap;line-height:1.4}
+.chip.on{background:#16191C;color:#fff;border-color:#16191C}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle{display:inline-flex;border:1px solid #D3D5D1;border-radius:4px;overflow:hidden}
+.toggle span{padding:5px 14px;font-size:15px;color:#4A5057;border-right:1px solid #D3D5D1;white-space:nowrap}
+.toggle span:last-child{border-right:0}
+.toggle span.on{background:#16191C;color:#fff}
+.readout{font-size:15px;color:#4A5057}
+svg text{font-family:inherit}
+.sheet{position:absolute;top:88px;right:0;bottom:0;width:440px;box-sizing:border-box;background:#fff;border-left:1px solid #D3D5D1;padding:28px 32px}
+.sheet .x{position:absolute;top:24px;right:28px;color:#4A5057;font-size:15px}
+.big{font-size:40px;font-weight:600;letter-spacing:-0.02em;line-height:1.1}
+.bars div{display:grid;grid-template-columns:290px 1fr 120px 70px;gap:16px;align-items:center;padding:7px 0;border-bottom:1px solid #E7E8E4}
+.bars i{display:block;height:12px;background:#4A5057;border-radius:2px;font-style:normal}
+.bars em{font-style:normal;text-align:right;color:#4A5057;white-space:nowrap}
+.cap{font-size:15px;color:#5F656C;padding:8px 32px 14px}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; min-height: 1220px; background: #ffffff; overflow: hidden;">
+<div class="bar">
+  <div class="nav"><span class="brand">SMS</span><a href="#">Line</a><a href="#">Readings</a><a href="#">Weight</a><a href="#">Rejects</a><a href="#" class="on">Report</a></div>
+  <div class="row"><div class="period"><span>This shift</span><span>Today</span><span>Yesterday</span><span>This week</span><span>This month</span><span class="on">Pick dates</span></div><span class="chip">26 Aug – 1 Sep</span></div>
+  <div class="right"><a class="btn" href="#">Wall</a><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4A5057" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-label="Setup"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></div>
+</div><div class="strip"><span>TP1 · Line 3 · Unit 2</span><span><span class="dot"></span>Readings to 16:39 · they reach this system about 16 min after weighing. <a href="#">details</a></span></div>
+<div class="page">
+  <div class="row" style="justify-content: space-between; align-items: flex-start;">
+    <div>
+      <p class="q">What did the line make over this period, on paper.</p>
+      <h1>26 Aug to 1 Sep: all 7 days hold production data.</h1>
+    </div>
+    <div class="row" style="padding-top: 26px;"><a class="btn" href="#">Print</a><a class="btn" href="#">Export CSV</a></div>
+  </div>
+  <div class="block first figs four">
+    <div class="fig"><b>51,305<small>cones</small></b><span>99.6% passed by the scale</span></div>
+    <div class="fig"><b>2,327<small>sacks</small></b><span>22 cones per sack</span></div>
+    <div class="fig"><b>109,800<small>kg</small></b><span>47.2 kg average sack</span></div>
+    <div class="fig"><b>1,189<small>rejected</small></b><span>2.3% of everything weighed</span></div>
+  </div>
+  <div class="block">
+    <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+      <p class="h2" style="margin: 0;"><span>Cones per day</span></p>
+      <div class="readout">Sat 29 Aug · 7,888 cones · 367 sacks</div>
+    </div>
+    <svg width="1036" height="240" viewBox="0 0 1036 240" role="img" aria-label="Cones per day">
+<line x1="56" x2="1028" y1="165.7" y2="165.7" stroke="#E7E8E4"></line><text x="48" y="169.7" font-size="13" fill="#5F656C" text-anchor="end">2,000</text>
+<line x1="56" x2="1028" y1="121.4" y2="121.4" stroke="#E7E8E4"></line><text x="48" y="125.4" font-size="13" fill="#5F656C" text-anchor="end">4,000</text>
+<line x1="56" x2="1028" y1="77.1" y2="77.1" stroke="#E7E8E4"></line><text x="48" y="81.1" font-size="13" fill="#5F656C" text-anchor="end">6,000</text>
+<rect x="82.4" y="98.5" width="86.1" height="111.5" fill="#4A5057"></rect><text x="125.4" y="92.5" font-size="13" fill="#4A5057" text-anchor="middle">5,034</text><text x="125.4" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Wed 26 Aug</text>
+<rect x="221.2" y="41.3" width="86.1" height="168.7" fill="#4A5057"></rect><text x="264.3" y="35.3" font-size="13" fill="#4A5057" text-anchor="middle">7,620</text><text x="264.3" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Thu 27 Aug</text>
+<rect x="360.1" y="43.2" width="86.1" height="166.8" fill="#4A5057"></rect><text x="403.1" y="37.2" font-size="13" fill="#4A5057" text-anchor="middle">7,532</text><text x="403.1" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Fri 28 Aug</text>
+<rect x="499.0" y="35.3" width="86.1" height="174.7" fill="#16191C"></rect><text x="542.0" y="29.3" font-size="13" fill="#4A5057" text-anchor="middle">7,888</text><text x="542.0" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Sat 29 Aug</text>
+<rect x="637.8" y="40.7" width="86.1" height="169.3" fill="#4A5057"></rect><text x="680.9" y="34.7" font-size="13" fill="#4A5057" text-anchor="middle">7,645</text><text x="680.9" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Sun 30 Aug</text>
+<rect x="776.7" y="36.3" width="86.1" height="173.7" fill="#4A5057"></rect><text x="819.7" y="30.3" font-size="13" fill="#4A5057" text-anchor="middle">7,844</text><text x="819.7" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Mon 31 Aug</text>
+<rect x="915.5" y="38.6" width="86.1" height="171.4" fill="#4A5057"></rect><text x="958.6" y="32.6" font-size="13" fill="#4A5057" text-anchor="middle">7,742</text><text x="958.6" y="232" font-size="13" fill="#5F656C" text-anchor="middle">Tue 1 Sep</text>
+<line x1="56" x2="1028" y1="210" y2="210" stroke="#D3D5D1"></line>
+</svg>
+    <p class="g" style="margin: 18px 0 0;">Time lost 3 h 40 min in 12 stops <span class="mut sm">(planned breaks and faults cannot be told apart in the data)</span>.</p>
+    <p class="mut sm" style="margin: 10px 0 0;">Sack stock per machine is not shown: the plant's sack records carry no machine and no record of a sack leaving. IFL has been asked how sacks are linked to machines and how they leave stock.</p>
+  </div>
+  <div class="block" style="display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 40px;">
+    <div>
+      <p class="h2"><span>By shift, 1 Sep</span></p>
+      <table>
+        <tr><th>Shift</th><th class="n">Cones</th><th class="n">Passed</th><th class="n">Sacks</th><th class="n">Sack weight</th><th class="n">Rejected</th><th class="n">Rate</th></tr>
+        <tr><td>Morning</td><td class="n">2,534</td><td class="n">99.6%</td><td class="n">103</td><td class="n">4,867 kg</td><td class="n">61</td><td class="n">2.4%</td></tr>
+        <tr><td>Evening</td><td class="n">2,633</td><td class="n">99.7%</td><td class="n">112</td><td class="n">5,291 kg</td><td class="n">66</td><td class="n">2.4%</td></tr>
+        <tr><td>Night</td><td class="n">2,570</td><td class="n">99.7%</td><td class="n">110</td><td class="n">5,198 kg</td><td class="n">59</td><td class="n">2.2%</td></tr>
+      </table>
+    </div>
+    <div>
+      <p class="h2"><span>By day</span></p>
+      <table>
+        <tr><th>Day</th><th class="n">Cones</th><th class="n">Sacks</th><th class="n">Sack weight</th><th class="n">Rejected</th></tr>
+        <tr><td>Wed 26 Aug</td><td class="n">5,034</td><td class="n">241</td><td class="n">11,375 kg</td><td class="n">106</td></tr>
+        <tr><td>Thu 27 Aug</td><td class="n">7,620</td><td class="n">319</td><td class="n">15,057 kg</td><td class="n">167</td></tr>
+        <tr><td>Fri 28 Aug</td><td class="n">7,532</td><td class="n">370</td><td class="n">17,464 kg</td><td class="n">181</td></tr>
+        <tr><td>Sat 29 Aug</td><td class="n">7,888</td><td class="n">367</td><td class="n">17,322 kg</td><td class="n">193</td></tr>
+        <tr><td>Sun 30 Aug</td><td class="n">7,645</td><td class="n">330</td><td class="n">15,576 kg</td><td class="n">167</td></tr>
+        <tr><td>Mon 31 Aug</td><td class="n">7,844</td><td class="n">375</td><td class="n">17,700 kg</td><td class="n">189</td></tr>
+        <tr><td>Tue 1 Sep</td><td class="n">7,742</td><td class="n">325</td><td class="n">15,340 kg</td><td class="n">186</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+</x-dc>
+</body>
+</html>
