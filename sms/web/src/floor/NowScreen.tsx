@@ -90,6 +90,11 @@ export function NowScreen({
     { length: Math.max(STATION_COUNT, ...line.stations.map((s) => s.station)) },
     (_, i) => i + 1,
   );
+  // Station activity is measured against the newest reading, not the wall
+  // clock. Against the clock every station is permanently more than five
+  // minutes quiet, because the plant's readings arrive about eighteen minutes
+  // late — which dimmed all fourteen at once and made the panel meaningless.
+  const stationAnchor = line.dataAsOfUtc ?? nowIso;
 
   return (
     <div className="now">
@@ -208,7 +213,7 @@ export function NowScreen({
         <div className="stations">
           {stationIds.map((id) => {
             const s = byStation.get(id);
-            const quiet = !s || secondsBetween(s.lastTs, nowIso) > STATION_DIM_SECONDS;
+            const quiet = !s || secondsBetween(s.lastTs, stationAnchor) > STATION_DIM_SECONDS;
             const off = !s && line.state.status === 'running';
             return (
               <div

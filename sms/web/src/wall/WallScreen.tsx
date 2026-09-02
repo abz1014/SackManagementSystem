@@ -28,6 +28,9 @@ function WallLine({ line, nowIso }: { line: LiveLine; nowIso: string }) {
     { length: Math.max(STATION_COUNT, ...line.stations.map((s) => s.station)) },
     (_, i) => i + 1,
   );
+  // Measured from the newest reading rather than the wall clock: see the same
+  // note in NowScreen. Against the clock all fourteen stations read as quiet.
+  const stationAnchor = line.dataAsOfUtc ?? nowIso;
   return (
     <section className="wline" aria-label={line.lineName}>
       <div className="wl-head">
@@ -90,7 +93,7 @@ function WallLine({ line, nowIso }: { line: LiveLine; nowIso: string }) {
       <div className="wall-stations" aria-label={S.stations}>
         {stationIds.map((id) => {
           const s = byStation.get(id);
-          const quiet = !s || secondsBetween(s.lastTs, nowIso) > STATION_DIM_SECONDS;
+          const quiet = !s || secondsBetween(s.lastTs, stationAnchor) > STATION_DIM_SECONDS;
           const off = !s && line.state.status === 'running';
           return (
             <div key={id} className={`wst${quiet ? ' dim' : ''}${off ? ' off' : ''}`}>

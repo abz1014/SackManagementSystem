@@ -63,7 +63,8 @@ export const S = {
   cone: 'Cone',
   station: 'Station',
   stations: 'Winding stations',
-  stationsNote: 'Cones per station this shift. A dim station has not produced in the last 5 minutes.',
+  stationsNote:
+    'Cones per station this shift. A dim station had not produced in the 5 minutes before the newest reading.',
   hanger: 'Hanger',
   weight: 'Weight',
   time: 'Time',

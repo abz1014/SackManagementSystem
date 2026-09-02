@@ -219,7 +219,15 @@ export function ReportScreen({
     if (!data) return null;
     const c = data.coverage;
     if (c.daysWithData === 0) return { level: 'none' as const, text: S.noProduction };
-    if (c.complete) return { level: 'ok' as const, text: `All ${c.daysInPeriod} days in this period have production data.` };
+    if (c.complete) {
+      return {
+        level: 'ok' as const,
+        text:
+          c.daysInPeriod === 1
+            ? 'This day has production data.'
+            : `All ${c.daysInPeriod} days in this period have production data.`,
+      };
+    }
     return {
       level: 'part' as const,
       text: `${c.daysWithData} of ${c.daysInPeriod} days in this period have production data, from ${fmtDayLong(c.firstDayWithData!)} to ${fmtDayLong(c.lastDayWithData!)}. The totals below cover those ${c.daysWithData} days only.`,
