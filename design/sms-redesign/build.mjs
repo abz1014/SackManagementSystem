@@ -124,12 +124,12 @@ ${body}
 }
 
 // ---------- shared pieces ----------
-const shiftCounts = [63, 58, 60, 61, 62, 64, 62, 63, 65, 58, 64, 0, 65, 61];
-function stationRow(counts, { flag = [7], dim = [12] } = {}) {
+const shiftCounts = [65, 61, 63, 63, 64, 64, 62, 63, 65, 58, 64, 55, 65, 62]; // sums to 874
+function stationRow(counts, { flag = [4, 7], dim = [12] } = {}) {
   return `<div class="stations">${counts.map((c, i) => {
     const n = i + 1;
     const cls = flag.includes(n) ? ' flag' : dim.includes(n) ? ' dim' : '';
-    const val = dim.includes(n) ? '<b>—</b><i>quiet</i>' : `<b>${c}</b>`;
+    const val = dim.includes(n) ? `<b>${c}</b><i>quiet</i>` : `<b>${c}</b>`;
     return `<div class="st${cls}"><i>Station ${n}</i>${val}</div>`;
   }).join('')}</div>`;
 }
@@ -144,6 +144,7 @@ const productBlock = `<div style="display: flex; justify-content: space-between;
 </div>`;
 
 const attentionList = `<ul class="attn">
+  <li><span class="acc">Station 4 has read about 9 g lighter than the line for 6 days — check its scale first.</span> <a href="#">Weight</a></li>
   <li><span class="acc">Station 7 has read about 12 g heavier than the line for 4 days — check its scale first.</span> <a href="#">Weight</a></li>
   <li><span class="acc">Quality rejects have been rising since Tue 22:00 — 3.1% in the last four hours against a usual 2.0%.</span> <a href="#">Rejects</a></li>
 </ul>`;
@@ -241,16 +242,16 @@ ${[10, 11, 12, 13].map((i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(vals[i]).
 }
 
 // ---------- boards ----------
-const H = { main: 1120, optb: 1120, readings: 1080, weight: 1460, rejects: 1240, report: 1220, wall: 810, sheet: 980, states: 330 };
+const H = { main: 1180, optb: 1180, readings: 1080, weight: 1460, rejects: 1280, report: 1220, wall: 810, sheet: 980, states: 330 };
 
 const Main = doc(`${header({ active: 'Line', period: 'This shift' })}
 <div class="page">
   <p class="q">Is the line running, what has it made this shift, and does anything need attention?</p>
-  <h1>Line 3 is running. Evening shift, 14:00 to 22:00 — 2 h 39 min in.</h1>
+  <h1>Line 3 is running — 2 h 55 min into the evening shift, 14:00 to 22:00.</h1>
   <div class="block first figs">
-    <div class="fig"><b>874<small>cones</small></b><span>99.7% passed by the scale</span></div>
+    <div class="fig"><b>874<small>cones</small></b><span>99.7% within weight limits</span></div>
     <div class="fig"><b>37<small>sacks</small></b><span>1,747 kg</span></div>
-    <div class="fig"><b>21<small>rejected</small></b><span>2.3% of everything weighed</span></div>
+    <div class="fig"><b>28<small>rejected</small></b><span>25 quality, 3 weight · 3.1% of everything weighed</span></div>
   </div>
   <div class="block">
     <p class="h2"><span>Attention</span><span>judged over the last 14 production days</span></p>
@@ -274,12 +275,12 @@ const Main = doc(`${header({ active: 'Line', period: 'This shift' })}
 const LineOptionB = doc(`${header({ active: 'Line', period: 'This shift' })}
 <div class="page">
   <div class="figs" style="margin-top: 2px;">
-    <div class="fig panel"><b>874<small>cones</small></b><span>99.7% passed by the scale</span></div>
+    <div class="fig panel"><b>874<small>cones</small></b><span>99.7% within weight limits</span></div>
     <div class="fig panel"><b>37<small>sacks</small></b><span>1,747 kg</span></div>
-    <div class="fig panel"><b>21<small>rejected</small></b><span>2.3% of everything weighed</span></div>
+    <div class="fig panel"><b>28<small>rejected</small></b><span>25 quality, 3 weight · 3.1% of everything weighed</span></div>
   </div>
   <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 24px; margin: 26px 0 22px;">
-    <div style="font-size: 22px; font-weight: 500;">Running · Evening shift 14:00 to 22:00 · 2 h 39 min in</div>
+    <div style="font-size: 22px; font-weight: 500;">Running · 2 h 55 min into the evening shift, 14:00 to 22:00</div>
     <div class="mut sm">Is the line running, what has it made, does anything need attention?</div>
   </div>
   <div class="two">
@@ -339,7 +340,7 @@ const Readings = doc(`${header({ active: 'Readings', period: 'Today' })}
     <tr><th style="width: 110px;">Time</th><th style="width: 120px;">Station</th><th class="n" style="width: 90px;">Weight</th><th style="padding-left: 32px;">Status</th><th></th></tr>
     ${readingRows.map(([t, s, w, st, hl]) => `<tr${hl ? ' class="hl"' : ''}><td>${t}</td><td>${s}</td><td class="n">${w}</td><td style="padding-left: 32px;">${st}</td><td class="n"><span class="chev">›</span></td></tr>`).join('\n    ')}
   </table>
-  <p class="mut sm" style="margin: 14px 0 0;">Showing 12 of 3,408 · newest first · new readings appear every 15 seconds &nbsp;·&nbsp; <a href="#">Next 25 ›</a></p>
+  <p class="mut sm" style="margin: 14px 0 0;">25 a page, newest first · 3,408 today · new readings appear every 15 seconds &nbsp;·&nbsp; <a href="#">Next 25 ›</a></p>
 </div>
 <div class="sheet">
   <a class="x" href="#">Close · Esc</a>
@@ -348,13 +349,13 @@ const Readings = doc(`${header({ active: 'Readings', period: 'Today' })}
   <div class="acc" style="margin-top: 8px; font-weight: 500;">Rejected by the scale</div>
   <div class="g" style="margin-top: 4px;">Also outside the product's limits: 1,960 ± 40 g at this time, so 8 g under the lower limit.</div>
   <div class="kv" style="margin-top: 24px;">
-    <div>Weighed</div><div>Tue 2 Sep, 16:38:47</div>
+    <div>Weighed</div><div>Wed 2 Sep, 16:38:47</div>
     <div>Shift</div><div>Evening (14:00 to 22:00)</div>
     <div>Station</div><div>Station 11</div>
-    <div>Record</div><div>C-2,147,483</div>
+    <div>Record</div><div>C-2147483</div>
     <div>Product then</div><div>201-IH0-SD, recorded 2 Sep 07:03</div>
   </div>
-  <div class="details" style="margin-top: 28px;"><a href="#">Provenance</a> · source row, ingest time, plant-stored shift, transform version</div>
+  <div class="details" style="margin-top: 28px;"><a href="#">Provenance</a> · where this reading came from and when it arrived</div>
 </div>`, H.readings, `
 .page.shifted{margin:0;max-width:1000px;padding-left:64px}
 `);
@@ -396,29 +397,29 @@ const Weight = doc(`${header({ active: 'Weight', period: 'Today' })}
     </table>
     <p class="sm g" style="margin: 16px 0 0;"><a href="#">Adjustment log</a> · 3 adjustments in the last 14 days. A logged adjustment restarts that station's pattern from that moment.</p>
   </div>
-  <div class="details"><a href="#">Show the working</a> · control limits · Cp and Cpk · sigma within and overall · scale verdict versus product limits · the drift rules</div>
+  <div class="details"><a href="#">Show the working</a> · the statistics behind this screen, the scale verdict against the product limits, and the drift rules</div>
 </div>`, H.weight);
 
-const reasons = [['Code 10/1 — not yet named', 654, 56], ['Code 2/1 — not yet named', 288, 25], ['No code recorded', 104, 9], ['Code 1/2 — not yet named', 58, 5], ['Code 1/1 — not yet named', 39, 3], ['Code 2/2 — not yet named', 13, 1]];
+const reasons = [['Code 10/1 — not yet named', 1412, 56], ['Code 2/1 — not yet named', 630, 25], ['No code recorded', 227, 9], ['Code 1/2 — not yet named', 126, 5], ['Code 1/1 — not yet named', 76, 3], ['Code 2/2 — not yet named', 49, 2]]; // sums to 2,520
 const Rejects = doc(`${header({ active: 'Rejects', period: 'Today' })}
 <div class="page">
   <p class="q">How many cones are being rejected, why, is it getting worse, and where?</p>
-  <h1>96 cones rejected today, 2.7% of everything weighed — 84 for quality, 12 for weight. Quality rejects have been rising since Tue 22:00.</h1>
+  <h1>89 cones rejected today, 2.6% of everything weighed — 78 for quality, 11 for weight — and quality rejects have been rising since Tue 22:00.</h1>
   <div class="block first figs two">
-    <div class="fig"><b>96<small>rejected</small></b><span>2.7% of everything weighed today</span></div>
+    <div class="fig"><b>89<small>rejected</small></b><span>2.6% of everything weighed today</span></div>
     <div class="fig"><b>56%<small>Code 10/1</small></b><span>the top reason over the last 14 days — not yet named</span></div>
   </div>
   <div class="block">
     <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
       <p class="h2" style="margin: 0;"><span>Reject rate per four hours, last 14 days · today shaded</span></p>
-      <div class="readout">Tue 1 Sep, 20:00 to 24:00 · quality 2.5% · weight 0.4% · 1,412 cones weighed</div>
+      <div class="readout">Tue 1 Sep, 20:00 to 24:00 · quality 2.5% · weight 0.4% · 1,398 cones weighed</div>
     </div>
     ${rejectChart()}
   </div>
   <div class="block">
     <p class="h2"><span>Reasons, last 14 days</span><span>Reason names are awaiting IFL. A manager can name a code here; the name applies to history.</span></p>
     <div class="bars">
-      ${reasons.map(([l, n, pct], i) => `<div><span${i === 0 ? '' : ' class="g"'}>${l}<span class="chev">›</span></span><i style="width: ${Math.round((n / 654) * 100)}%;${i === 0 ? '' : ` background: ${C.grid};`}"></i><em>${fmt(n)} · ${pct}%</em><a class="sm" href="#">Name it</a></div>`).join('\n      ')}
+      ${reasons.map(([l, n, pct], i) => `<div><span${i === 0 ? '' : ' class="g"'}>${l}<span class="chev">›</span></span><i style="width: ${Math.round((n / 1412) * 100)}%;${i === 0 ? '' : ` background: ${C.grid};`}"></i><em>${fmt(n)} · ${pct}%</em>${l === 'No code recorded' ? '<span></span>' : '<a class="sm" href="#">Name it</a>'}</div>`).join('\n      ')}
     </div>
   </div>
   <div class="block" style="padding-top: 22px; padding-bottom: 22px;">
@@ -428,7 +429,7 @@ const Rejects = doc(`${header({ active: 'Rejects', period: 'Today' })}
   <div class="details"><a href="#">Details</a> · how a sustained rise is detected · the usual range per four-hour bucket · the code table</div>
 </div>`, H.rejects);
 
-const byShift = [['Morning', '2,534', '99.6%', '103', '4,867 kg', '61', '2.4%'], ['Evening', '2,633', '99.7%', '112', '5,291 kg', '66', '2.4%'], ['Night', '2,570', '99.7%', '110', '5,198 kg', '59', '2.2%']];
+const byShift = [['Morning', '2,534', '99.6%', '103', '4,867 kg', '61', '2.4%'], ['Evening', '2,638', '99.7%', '112', '5,275 kg', '66', '2.4%'], ['Night', '2,570', '99.7%', '110', '5,198 kg', '59', '2.2%']];
 const byDay = [['Wed 26 Aug', '5,034', '241', '11,375 kg', '106'], ['Thu 27 Aug', '7,620', '319', '15,057 kg', '167'], ['Fri 28 Aug', '7,532', '370', '17,464 kg', '181'], ['Sat 29 Aug', '7,888', '367', '17,322 kg', '193'], ['Sun 30 Aug', '7,645', '330', '15,576 kg', '167'], ['Mon 31 Aug', '7,844', '375', '17,700 kg', '189'], ['Tue 1 Sep', '7,742', '325', '15,340 kg', '186']];
 const Report = doc(`${header({ active: 'Report', period: 'Pick dates', range: '26 Aug – 1 Sep' })}
 <div class="page">
@@ -440,9 +441,9 @@ const Report = doc(`${header({ active: 'Report', period: 'Pick dates', range: '2
     <div class="row" style="padding-top: 26px;"><a class="btn" href="#">Print</a><a class="btn" href="#">Export CSV</a></div>
   </div>
   <div class="block first figs four">
-    <div class="fig"><b>51,305<small>cones</small></b><span>99.6% passed by the scale</span></div>
+    <div class="fig"><b>51,305<small>cones</small></b><span>99.6% within weight limits</span></div>
     <div class="fig"><b>2,327<small>sacks</small></b><span>22 cones per sack</span></div>
-    <div class="fig"><b>109,800<small>kg</small></b><span>47.2 kg average sack</span></div>
+    <div class="fig"><b>109,834<small>kg</small></b><span>47.2 kg average sack</span></div>
     <div class="fig"><b>1,189<small>rejected</small></b><span>2.3% of everything weighed</span></div>
   </div>
   <div class="block">
@@ -458,7 +459,7 @@ const Report = doc(`${header({ active: 'Report', period: 'Pick dates', range: '2
     <div>
       <p class="h2"><span>By shift, 1 Sep</span></p>
       <table>
-        <tr><th>Shift</th><th class="n">Cones</th><th class="n">Passed</th><th class="n">Sacks</th><th class="n">Sack weight</th><th class="n">Rejected</th><th class="n">Rate</th></tr>
+        <tr><th>Shift</th><th class="n">Cones</th><th class="n">In limits</th><th class="n">Sacks</th><th class="n">Sack weight</th><th class="n">Rejected</th><th class="n">Rate</th></tr>
         ${byShift.map((r) => `<tr><td>${r[0]}</td>${r.slice(1).map((c) => `<td class="n">${c}</td>`).join('')}</tr>`).join('\n        ')}
       </table>
     </div>
@@ -478,17 +479,17 @@ const Wall = doc(`<div class="wall">
     <div class="w-shift">Evening shift 14:00 to 22:00 &nbsp;·&nbsp; 16:55</div>
   </div>
   <div class="w-figs">
-    <div class="w-fig"><b>874</b><span>cones this shift · 99.7% passed</span></div>
+    <div class="w-fig"><b>874</b><span>cones this shift · 99.7% within limits</span></div>
     <div class="w-fig"><b>37</b><span>sacks · 1,747 kg</span></div>
-    <div class="w-fig"><b>21</b><span>rejected · 2.3%</span></div>
+    <div class="w-fig"><b>28</b><span>rejected · 3.1%</span></div>
   </div>
   <div>
     <div class="w-sub">Last sack 47.3 kg at 16:38 &nbsp;·&nbsp; last cone 1,949 g at 16:39, Station 9</div>
-    <div class="w-st">${shiftCounts.map((c, i) => { const n = i + 1; const cls = n === 7 ? ' class="flag"' : n === 12 ? ' class="dim"' : ''; return `<div${cls}><i>${n}</i><b>${n === 12 ? '—' : c}</b></div>`; }).join('')}</div>
+    <div class="w-st">${shiftCounts.map((c, i) => { const n = i + 1; const cls = (n === 4 || n === 7) ? ' class="flag"' : n === 12 ? ' class="dim"' : ''; return `<div${cls}><i>${n}</i><b>${c}</b></div>`; }).join('')}</div>
   </div>
   <div class="w-foot">
     <span><span class="dot" style="width: 12px; height: 12px; margin-right: 12px;"></span>Readings to 16:39 · they reach this screen about 16 min after weighing</span>
-    <span>Station 7: check its scale &nbsp;·&nbsp; Station 12 quiet 22 min</span>
+    <span>Stations 4 and 7: check their scales &nbsp;·&nbsp; Station 12 quiet 22 min</span>
   </div>
 </div>`, H.wall, `
 .wall{padding:44px 56px 40px;box-sizing:border-box;height:810px;display:flex;flex-direction:column;justify-content:space-between}
@@ -513,7 +514,7 @@ const StationSheet = doc(`<div class="sp">
   <p class="q">Station 7 · today</p>
   <h1 style="font-size: 26px;">Reads 12 g above the line and 3 g above the target today.</h1>
   <div class="kv" style="margin-top: 20px;">
-    <div>Average today</div><div>1,963 g · 552 cones</div>
+    <div>Average today</div><div>1,963 g · 243 cones</div>
     <div>vs line</div><div>+12 g</div>
     <div>vs target</div><div>+3 g (target 1,960 g)</div>
     <div>Rejects</div><div>2.1% · line 2.7%</div>

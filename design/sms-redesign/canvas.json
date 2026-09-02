@@ -6,7 +6,7 @@
       "x": 0,
       "y": 0,
       "w": 1440,
-      "h": 1120
+      "h": 1180
     },
     {
       "file": "LineOptionB.dc.html",
@@ -14,13 +14,13 @@
       "x": 1520,
       "y": 0,
       "w": 1440,
-      "h": 1120
+      "h": 1180
     },
     {
       "file": "Readings.dc.html",
       "title": "Readings, with a reading sheet open",
       "x": 0,
-      "y": 1240,
+      "y": 1300,
       "w": 1440,
       "h": 1080
     },
@@ -28,7 +28,7 @@
       "file": "Weight.dc.html",
       "title": "Weight",
       "x": 1520,
-      "y": 1240,
+      "y": 1300,
       "w": 1440,
       "h": 1460
     },
@@ -36,15 +36,15 @@
       "file": "Rejects.dc.html",
       "title": "Rejects",
       "x": 0,
-      "y": 2820,
+      "y": 2880,
       "w": 1440,
-      "h": 1240
+      "h": 1280
     },
     {
       "file": "Report.dc.html",
       "title": "Report",
       "x": 1520,
-      "y": 2820,
+      "y": 2880,
       "w": 1440,
       "h": 1220
     },
@@ -52,7 +52,7 @@
       "file": "Wall.dc.html",
       "title": "Wall (TV, 1080p at 0.75)",
       "x": 0,
-      "y": 4180,
+      "y": 4280,
       "w": 1440,
       "h": 810
     },
@@ -60,7 +60,7 @@
       "file": "StationSheet.dc.html",
       "title": "Station sheet",
       "x": 1520,
-      "y": 4180,
+      "y": 4280,
       "w": 560,
       "h": 980
     },
@@ -68,7 +68,7 @@
       "file": "HeaderStates.dc.html",
       "title": "Header - the three states",
       "x": 2160,
-      "y": 4180,
+      "y": 4280,
       "w": 1440,
       "h": 330
     }
@@ -84,21 +84,21 @@
     {
       "id": "weight-note",
       "x": 3040,
-      "y": 1240,
+      "y": 1300,
       "w": 440,
       "text": "Weight, after both critics' corrections: the over-time chart is primary (distribution is a toggle); every station shows bias vs target AND vs line; the recommendation states what the data shows and stops; drift is judged over a fixed 14-day window, never the selected period; the headline does not state a difference from target until the weight basis is confirmed."
     },
     {
       "id": "header-note",
       "x": 3680,
-      "y": 4180,
+      "y": 4280,
       "w": 440,
       "text": "The lag sentence has three states, all measured from the live endpoint. Never a hard-coded \"about 18 minutes\". When the sync is stale, no screen asserts Running or Stopped."
     },
     {
       "id": "sheet-note",
       "x": 1520,
-      "y": 5200,
+      "y": 5300,
       "w": 560,
       "text": "The station sheet opens from Line's station row, the Weight table and the Rejects link. It is where the evidence behind any recommendation lives, one tap away."
     }
