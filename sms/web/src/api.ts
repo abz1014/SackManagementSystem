@@ -687,3 +687,46 @@ export interface LiveData {
 export function getLive(asOf?: string | null): Promise<Envelope<LiveData>> {
   return get(asOf ? `/api/live?asOf=${encodeURIComponent(asOf)}` : '/api/live');
 }
+
+// ---- production report — the period summary (IFL requirement: reporting) ----
+export type ReportPeriod = 'day' | 'week' | 'month' | 'quarter' | 'custom';
+export interface ReportLine {
+  /** Day (YYYY-MM-DD), shift code, or 'total'. */
+  group: string;
+  cones: number;
+  rejectedCones: number;
+  rejectRatePct: number | null;
+  conesInRangePct: number | null;
+  sacks: number;
+  sackWeightKg: number;
+  avgSackKg: number | null;
+  conesPerSack: number | null;
+}
+export interface ReportData {
+  period: { period: ReportPeriod; from: string; to: string };
+  /** How much of the period actually holds readings. Always stated on screen. */
+  coverage: {
+    daysInPeriod: number;
+    daysWithData: number;
+    firstDayWithData: string | null;
+    lastDayWithData: string | null;
+    complete: boolean;
+  };
+  totals: ReportLine;
+  byShift: ReportLine[];
+  byDay: ReportLine[];
+  downtime: { stoppageCount: number; stoppedSeconds: number; thresholdSeconds: number };
+}
+export function getReport(q: {
+  period: ReportPeriod;
+  anchor?: string;
+  from?: string;
+  to?: string;
+}): Promise<Envelope<ReportData>> {
+  const p = new URLSearchParams();
+  p.set('period', q.period);
+  if (q.anchor) p.set('anchor', q.anchor);
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  return get(`/api/report?${p.toString()}`);
+}

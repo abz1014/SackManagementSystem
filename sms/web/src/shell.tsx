@@ -20,6 +20,7 @@ export type View =
   | 'now'
   | 'sacks'
   | 'cones'
+  | 'report'
   | 'wall'
   | 'dashboard'
   | 'register'
@@ -57,6 +58,10 @@ export const VIEW_MIN_RANK: Record<View, number> = {
   now: 1,
   sacks: 1,
   cones: 1,
+  // Everyone. "How much did we make today" is as much a floor question as a
+  // management one, and the report shows only figures the floor screens
+  // already display, aggregated.
+  report: 1,
   wall: 1,
   dashboard: ANALYSIS_MIN_RANK, // Line
   register: ANALYSIS_MIN_RANK, // Records
@@ -79,6 +84,7 @@ export const VIEW_LABEL: Record<View, string> = {
   now: 'Now',
   sacks: 'Sacks',
   cones: 'Cones',
+  report: 'Report',
   wall: 'Wall',
   dashboard: 'Line',
   register: 'Records',
@@ -117,6 +123,13 @@ const GLYPH: Record<View, ReactNode> = {
     <>
       <path d="M9.5 4h5l2 15h-9z" strokeLinejoin="round" />
       <path d="M8.3 12.5h7.4" opacity="0.5" />
+    </>
+  ),
+  report: (
+    <>
+      <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" strokeLinejoin="round" />
+      <path d="M14 3v4h4" strokeLinejoin="round" />
+      <path d="M9 17v-3M12 17v-6M15 17v-4" strokeLinecap="round" />
     </>
   ),
   wall: (
@@ -231,7 +244,7 @@ function Glyph({ children }: { children: ReactNode }) {
  * Line's findings and the product bar.
  */
 const RAIL_GROUPS: { label: string | null; views: View[] }[] = [
-  { label: null, views: ['now', 'sacks', 'cones', 'wall'] },
+  { label: null, views: ['now', 'sacks', 'cones', 'report', 'wall'] },
   { label: 'Analysis', views: ['dashboard', 'register', 'weight', 'rejects'] },
   { label: null, views: ['admin'] },
 ];

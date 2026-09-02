@@ -13,19 +13,50 @@ open questions (§11) and the go-live cutover (§9).
 
 ---
 
+## 0. Against IFL's requirement list
+
+The ten lines of IFL's original request, and where each one stands. This is the
+section to read first; everything below is detail behind it.
+
+| # | IFL asked for | State |
+|---|---|---|
+| 1 | Connectivity with PLCs, HMIs, machines and structured/unstructured databases | **Partial.** SQL Server, read-only, in production use. No PLC or HMI path — IFL placed PLC integration out of scope in a later clarification (Q22). Re-openable; see §10.1 |
+| 2 | Collect all cone weight data, flag weights outside defined limits | **Done.** Every cone, with the plant's own in-range bit and an app-owned plausibility window |
+| 3 | Interactive screens to view and update product details on machines | **Partial.** The running product is viewed and set in the app, versioned and attributed. It is **not written to a machine**, which needs the PLC path above |
+| 4 | Complete history logs and trend graphs for all rejected cones | **Done.** Full reject register, Pareto by inspection code, control chart, per-station rate |
+| 5 | AI-based analytics recommending calibration adjustments from weight-performance trends | **Partial.** Built as statistics, not AI: per-station drift, Nelson-rule detection and an adjustment ledger. See §10.12 for what is honest to claim |
+| 6 | Collection and logging of data for all sacks | **Done.** Every sack, with weight, in-range and shift |
+| 7 | Complete tracking and maintenance of sack stock **per machine** | **Not built, and blocked on the source data.** IFL's sack table carries no machine or station column, and nothing anywhere records a sack leaving. See §10.13 |
+| 8 | Comprehensive reporting, analytics and graphical dashboards | **Done.** Analytics and dashboards were built first; the reporting half — day, week, month, quarter or a chosen range, printable and exportable — is §3.8 |
+| 9 | User-friendly interface with access control and data security | **Done**, and reworked in Sep 2026 after IFL found the first version too complex for floor staff. Four roles enforced server-side; argon2 passwords; audit log |
+| 10 | Scalable architecture for more machines and data points | **Partial.** `line_id` runs through every table, query and API response. A second line is configuration plus testing, not a rewrite. Not yet exercised against a real second line |
+
+**Nothing in that list asks for OEE**, availability, performance, quality,
+downtime analysis, stoppage clustering, mean time between failures, or
+shift-versus-shift comparison. Screens covering those were built and have been
+**withdrawn from the product** (§3.10, §3.13). They are not claimed here and are
+not part of the delivery.
+
+---
+
 ## 1. In one paragraph
 
 The plant's Siemens S7-1500 PLCs weigh every cone and every sack and write the
 readings into IFL's SQL Server. SMS copies those readings into its own database
-once a minute, never writing to IFL's, converts them into a clean canonical
-form, and presents it as twelve screens: sign-in, line status, production
-records, a full record page, equipment effectiveness, weight process control,
-reject analysis, shift comparison, a standalone findings view, a product
-changeover history, configuration, and pipeline health. It computes availability,
-throughput, OEE, statistical process control on cone weight, per-station bias,
-reject Pareto and control charts, and shift-versus-shift performance. It is a
-read-only reporting system over the plant's own data, plus a small amount of
-configuration it owns itself.
+once a minute, never writing to IFL's, and converts them into a clean canonical
+form.
+
+It presents that in two tiers. **The floor tier** is what a person at the line
+or in the warehouse sees: a live status screen refreshing every ten seconds, the
+running register of sacks and of cones, a detail card for any single one, a
+production report over any period, and a fullscreen wall display for a
+monitor. Plain words, large type, one time selector, no statistics. **The
+analysis tier**, for managers and above, adds the production record with its
+full provenance, weight process control with per-station bias and calibration
+drift, and reject analysis by code, by trend and by station.
+
+It is a read-only reporting system over the plant's own data, plus a small
+amount of configuration it owns itself.
 
 ---
 
@@ -74,10 +105,77 @@ resumes exactly where it stopped.
 
 ## 3. The screens
 
-Twelve routes. Every screen states a plain-language finding first and puts the
-statistics behind it, not the other way round.
+Every screen states a plain-language finding first and puts the statistics
+behind it, not the other way round. The floor screens carry no statistics at
+all.
 
-### 3.1 Line (`?v=dashboard`)
+**Floor tier, every role:** Now, Sacks, Cones, Report, Wall, plus the record
+card and sign-in.
+**Analysis tier, manager and above:** Line, Records, Weight, Rejects, plus
+Exceptions and Product history.
+**Admin only:** Setup. **Every role, no rail item:** Sync.
+
+Two screens described in earlier versions of this document — Output and Shifts —
+were **withdrawn from the product** in Sep 2026 because nothing in IFL's
+requirement list asked for them. Their entries below say so rather than being
+deleted, so a scope comparison against an older copy of this document still
+lines up.
+
+### 3.1 Now (`?v=now`) — the floor's home screen
+
+What a person standing at the line needs, and nothing else. Refreshes itself
+every ten seconds.
+
+- **Line state in one word** — Running, Stopped, No readings — with how long it
+  has been running, or how long it has been stopped, or when the last reading
+  arrived. Derived from the gap since the newest cone: under two minutes is
+  running, longer is stopped, longer than a whole shift is reported as no
+  readings rather than as a stoppage.
+- **The shift in progress**, its start and end times, and the plant clock
+  ticking in seconds.
+- **This shift so far**: cones with the in-range share and a rate per hour,
+  sacks with the total weight, rejected cones with the last reject's time and
+  station.
+- **The last sack and the last cone**, each with its weight, a pass or fail
+  mark, its time and how long ago. Either opens its own record card.
+- **Recent activity**: cones in the last ten minutes, cones and sacks in the
+  last hour.
+- **The fourteen winding stations**, cones each has produced this shift, dimmed
+  where a station has been quiet for five minutes and marked where one has
+  produced nothing at all while the line runs.
+- **The running product**, with blend, count, tube type and tolerance. A
+  supervisor can change it here, seeing the new product's own tolerance as a
+  preview before confirming.
+
+### 3.2 Sacks and Cones (`?v=sacks`, `?v=cones`)
+
+Every reading, newest first, in large type. While the chosen period is still
+open the newest page is re-read every fifteen seconds and new rows appear at the
+top as they are weighed.
+
+- **One time selector**, the same four scopes on both screens: This shift,
+  Today, Yesterday, or a chosen day. The resolved period is stated in words
+  above the list, and it is anchored on the plant's clock as reported by the
+  server, never the browser's.
+- Each row carries the sack number or the cone's station, the weight, a pass or
+  fail mark, and the time with its shift.
+- Tapping a row opens its record card.
+
+### 3.3 The record card
+
+One sack or one cone in plain words: what it weighed, whether it passed, when,
+on which shift, at which station, and its record number. Deliberately free of
+merge keys, transform versions and source-system fields, which live in the
+analysis tier for the people who need them.
+
+Each card also shows what was weighed around it. For a sack, the cones weighed
+between the previous sack and this one. For a cone, the next sack weighed after
+it. **Both are labelled as approximate on the card itself**, because the plant
+records no link from a cone to a sack: cones falling between two sack
+timestamps range from none to over two hundred, so this is a time window, not a
+packing list, and the screen says so.
+
+### 3.4 Line (`?v=dashboard`)
 
 The production day at a glance, defaulting to the last complete day.
 
@@ -94,7 +192,7 @@ The production day at a glance, defaulting to the last complete day.
 - **"Needs a look"** — a findings feed synthesised from the weight SPC,
   downtime and reject control charts. Each finding is a button that opens the
   exact sub-tab that explains it, carrying the reason with it. A "See all ·
-  change date" link opens the standalone Exceptions view (§3.2) for the same
+  change date" link opens the standalone Exceptions view (§3.5) for the same
   day, pre-filtered to nothing — same findings, same synthesis, just a page of
   its own.
 - **Cones by shift** with the weakest shift computed and marked.
@@ -104,9 +202,9 @@ The production day at a glance, defaulting to the last complete day.
   only; never enforced). A supervisor changing product sees the same detail as
   a *live preview* of the pending selection before confirming — a changeover
   is a decision made against the new product's own tolerance, not a bare name
-  picked from a list. A "View history →" link opens §3.3.
+  picked from a list. A "View history →" link opens §3.6.
 
-### 3.2 Exceptions (`?v=exceptions`)
+### 3.5 Exceptions (`?v=exceptions`)
 
 The standalone version of "Needs a look" above — same finding synthesis
 (there is exactly one implementation; both call it), but for any day, not only
@@ -115,7 +213,7 @@ day's exceptions are recomputed live from the same permanent event data
 Overview already reads, rather than cached or persisted. Reachable via the
 link on Overview; no rail icon, same as Sync below.
 
-### 3.3 Product history (`?v=timeline`)
+### 3.6 Product history (`?v=timeline`)
 
 Every changeover ever recorded, newest first, each with the same blend/tube/
 tolerance detail line as the current-product bar and who set it and why.
@@ -126,7 +224,7 @@ on this plant's changeover rate the whole table is a handful of screens, not
 a windowed report. Reachable via the link on the current-product bar; no rail
 icon, same as Exceptions and Sync.
 
-### 3.4 Records (`?v=register&sub=cone|sack|reject`)
+### 3.7 Records (`?v=register&sub=cone|sack|reject`)
 
 Every individual reading, filterable and exportable.
 
@@ -146,24 +244,56 @@ Every individual reading, filterable and exportable.
   ingest time).
 - **CSV export** of the current filter (manager and above).
 
-### 3.5 Output (`?v=performance&sub=oee|stops|patterns`)
+### 3.8 Report (`?v=report&sub=day|week|month|quarter|custom`) — the period summary
 
-**Effectiveness.** Inferred OEE with its three factors, each with a
-plain-language note naming what produced it; a 7-day OEE strip against an 85%
-reference line; and the three loss buckets (time stopped, time slow, cones
-rejected). The inputs that shape the estimate — stoppage threshold, planned
-hours per day, ideal cycle time override — are inspectable and editable.
+The reporting half of requirement 8. Pick a period and read what the line made.
+No statistics on this screen at all.
 
-**Stops.** A computed verdict on the day's downtime shape, the stoppage
-timeline with shift bands, a throughput curve in cones per hour, and a stops
-table with each stop's share of the day's downtime.
+- **One period control**, the same words and the same place as everywhere else:
+  Day, Week (Monday to Sunday), Month, Quarter, or a range you choose. Week,
+  month and quarter are calendar periods, not trailing windows, and one date
+  picker selects whichever period contains it.
+- **Coverage is stated before any figure.** A period says how many of its days
+  actually hold production data and which days those are. On the supplied copy
+  "this quarter" is 19 days of 92, and a total printed without that sentence
+  reads as a quarter's output. A period with nothing in it names the most
+  recent day that does have data, which distinguishes a quiet Sunday from a
+  sync that stopped weeks ago.
+- **Totals:** cones with in-range share, sacks with cones per sack, sack weight
+  with average sack, rejected cones with reject rate.
+- **Time lost and stop count** for the period, with the caveat that a planned
+  break is counted the same as a fault, because nothing in the data separates
+  them.
+- **One chart**, cones per day, with a labelled vertical axis and a readout
+  that names the day and its figures when you point at a bar.
+- **By shift and by day tables**, printable, with a CSV export of all three
+  levels.
 
-**Patterns.** Whether stoppages cluster at particular hours of the clock,
-tested rather than asserted: an hour counts as a cluster only if it recurs on
-more days than the median hour. Duration distribution, hour-of-day
-distribution, and three summary figures.
+### 3.9 Wall (`?v=wall`) — a monitor in the warehouse or beside the line
 
-### 3.6 Weight (`?v=weight&sub=spread|stability|calibration`)
+Fullscreen, no navigation, no scrolling, sized in viewport units so it reads
+from across a room on any screen from 1024x768 upward. Line state as the
+headline, the shift and plant clock, cones, sacks, rejects and the last sack,
+and the fourteen stations. Refreshes every ten seconds and states when it last
+succeeded; a network drop leaves the last good figures on screen with a warning
+rather than blanking.
+
+Sessions renew while they are in use, so a display left on this page does not
+return itself to the login screen. Escape, or a small button in the corner,
+returns to Now. Setting one up is documented in `DEPLOY.md`.
+
+### 3.10 Output (`?v=performance`) — **WITHDRAWN FROM THE PRODUCT, Sep 2026**
+
+Inferred OEE and its three factors, stoppage timeline, throughput curve, and
+hour-of-day stoppage clustering. Built, tested and working. **Not part of the
+delivery**: no entry in the navigation, not shown in demonstrations, and not
+offered as a capability. Nothing in IFL's requirement list asks for equipment
+effectiveness, and the OEE figure is inferred from event timestamps rather than
+measured, so it is not a number this project is willing to defend to a plant
+manager who never requested it. The route still resolves for internal use and
+the code is retained; restoring it is a one-line change if IFL ever asks.
+
+### 3.11 Weight (`?v=weight&sub=spread|stability|calibration`)
 
 A verdict banner above Spread and Stability: mean, spread, capability, and the
 share of subgroups outside control, with the sentence stating how far the line
@@ -195,7 +325,7 @@ a single unusual day. A sparkline per station, and an adjustment log
 station, when, by whom, why — so a flagged station can be checked against
 what was actually done about it.
 
-### 3.7 Rejects (`?v=rejects&sub=reasons|trend|station`)
+### 3.12 Rejects (`?v=rejects&sub=reasons|trend|station`)
 
 **Reasons.** Quality and weight reject counts, a Pareto of reject codes with
 the concentration computed, and inline code labelling (manager and above) that
@@ -208,15 +338,15 @@ a verdict naming which occurred.
 **By station.** A "fix this first" card cross-referencing reject rate against
 weight bias, and reject rate by station against the line baseline.
 
-### 3.8 Shifts (`?v=shift&sub=week|all`)
+### 3.13 Shifts (`?v=shift`) — **WITHDRAWN FROM THE PRODUCT, Sep 2026**
 
-Three cards, one per shift, each with hours, a computed verdict, and five
-measures (cones, reject rate, availability, stoppages, weight consistency, OEE)
-with poor values marked. Below, a three-series day-by-day trend chart, and a
-data note stating how far the plant's stored shift value disagrees with the
-recomputed one.
+Shift-versus-shift comparison across six measures with a day-by-day trend
+chart. Built and working, and withdrawn for the same reason as Output: not in
+IFL's requirement list. Shift-wise figures remain available where they were
+asked for — the Report screen (§3.8) breaks every period down by shift, in
+plain counts and weights. The route still resolves; the code is retained.
 
-### 3.9 Setup (`?v=admin&sub=people|stations|rules|sync|audit`) — admin only
+### 3.14 Setup (`?v=admin&sub=people|stations|rules|sync|audit`) — admin only
 
 **People** — accounts, roles, enable/disable, creation.
 **Stations** — naming the 14 winding positions, with the currently flagged
@@ -232,9 +362,9 @@ reject-code labels) the old value alongside the new. Independent of the
 versioned rule tables' own `changed_by`/`changed_at`, which already answer
 "what is the history of this one setting" — this answers "what has this
 person done," which nothing else on Setup could (§8).
-**Sync** — as §3.10.
+**Sync** — as §3.15.
 
-### 3.10 Sync (`?v=operations`) — reachable by every role
+### 3.15 Sync (`?v=operations`) — reachable by every role
 
 Pipeline health: a verdict with a live indicator, tables succeeded on the last
 pass, time since the oldest table ran, rows written, blocking data-quality
@@ -243,7 +373,7 @@ and the data-quality findings list by severity. Reachable at operator rank
 deliberately — the wall-screen user is the one who notices the numbers stopped
 moving.
 
-### 3.11 Login
+### 3.16 Login
 
 Two-pane sign-in with a live plant-link indicator.
 
@@ -426,11 +556,19 @@ role cannot open rather than showing it and failing.
 
 | Capability | operator | supervisor | manager | admin |
 |---|:--:|:--:|:--:|:--:|
-| Line, Records, Shifts, Sync, Product history | ✓ | ✓ | ✓ | ✓ |
-| Output, Weight, Rejects | | ✓ | ✓ | ✓ |
+| **Floor tier** — Now, Sacks, Cones, the record card, Report, Wall | ✓ | ✓ | ✓ | ✓ |
+| Sync, Product history | ✓ | ✓ | ✓ | ✓ |
 | Set the running product, log a calibration adjustment | | ✓ | ✓ | ✓ |
-| CSV export, name reject codes | | | ✓ | ✓ |
+| **Analysis tier** — Line, Records, Weight, Rejects, Exceptions | | | ✓ | ✓ |
+| CSV export of the raw register, name reject codes | | | ✓ | ✓ |
 | Setup (people, stations, rules, audit log) | | | | ✓ |
+
+The analysis tier moved from supervisor to manager in Sep 2026. A shift
+supervisor landing on control charts and capability indices was the substance
+of IFL's complaint that the software was too complicated for floor staff; the
+figures a supervisor actually needs — output, weights, pass and fail, per
+shift — are all on the floor tier, which is open to every role. The threshold
+is a single constant (`ANALYSIS_MIN_RANK`) if that judgement is revisited.
 
 Passwords are argon2-hashed. Sessions are server-side cookies, not JWTs.
 IFL's own `Users` table — three accounts whose passwords equal their usernames,
@@ -560,8 +698,11 @@ The section to read first when comparing against a requirement list.
 5. **It does not write to IFL's database.** No schema change, no index, no
    stored procedure, no data. Read-only, by client instruction.
 
-6. **It does not do live/real-time monitoring.** The floor is 60 seconds — the
-   sync cadence. It is a reporting system, not a SCADA screen.
+6. **It is near-live, not real-time.** The floor and wall screens refresh
+   themselves every ten seconds and show how long ago they last succeeded, but
+   the data behind them is only as fresh as the sync, which runs once a minute.
+   So a reading appears on the wall within about a minute of being weighed, not
+   within a second. It is not a SCADA screen and does not control anything.
 
 7. **It does not certify OEE.** Availability, performance and quality are
    inferred from event timestamps because no machine-status feed and no
@@ -579,12 +720,32 @@ The section to read first when comparing against a requirement list.
 10. **It does not do sack-side SPC, energy monitoring, order or scheduling
     integration, or mobile-native applications.** It does now do a narrower
     thing adjacent to predictive maintenance — statistical drift detection
-    per station plus a manual adjustment ledger (§3.6, §4.9) — but that is
+    per station plus a manual adjustment ledger (§3.11, §4.9) — but that is
     pattern detection on existing weight data, not failure forecasting,
     remaining-useful-life estimation, or automated maintenance scheduling.
 
 11. **It has not been tested against live plant data.** Everything stated here
     was verified against the supplied 19-day copy.
+
+12. **It does not use AI, and the calibration advice is statistical.** IFL's
+    requirement asks for AI-based analytics recommending calibration
+    adjustments. What exists is per-station drift measurement, Nelson-rule
+    detection on the weight control chart, and a ledger of adjustments a
+    supervisor has logged. That is a defensible answer to the underlying
+    question and it is arithmetic, not a model. Note also that the plant is
+    air-gapped by IFL's own hosting constraint, so nothing cloud-hosted is
+    available to it. Any future claim here should be a prediction the software
+    can actually justify from the data — for instance the number of days until
+    a station reaches its action limit at the current drift — and should be
+    described that way rather than as AI.
+
+13. **It does not track sack stock per machine, and cannot yet.** IFL's sack
+    table records the sack number, weight, in-range flag and time. It carries
+    **no machine or station column**, unlike the cone table, so a sack cannot
+    be attributed to a machine from the data supplied. Separately, nothing in
+    any supplied database records a sack *leaving*, so a stock figure built
+    from this data alone would only ever rise. Both points are questions for
+    IFL rather than work that can be started; see `IFL_SACK_STOCK_QUESTION.md`.
 
 ---
 
@@ -597,6 +758,9 @@ The section to read first when comparing against a requirement list.
 | Q10 | What do the reject inspection codes mean? | Codes shown raw; labelling is built and retroactive. |
 | Q14 | Single line or multiple? | Built single-line with `line_id` throughout. |
 | Q20 | Hosting arrangement? | Assumes a plant PC on the intranet. |
+| Q23 | How is a sack linked to a machine, and what removes a sack from stock? | **Blocks sack stock entirely** (requirement 7). Not answerable from the supplied data — see §10.13 and `IFL_SACK_STOCK_QUESTION.md`. |
+| Q24 | Is "AI" a contractual expectation, or is defensible statistics acceptable? | Confirmed open on IFL's side (2 Sep 2026). Shapes what §10.12 can claim. |
+| Q25 | Which device will floor staff use — wall monitor, shared PC, or phone? | The screens are built and verified from 420px upward; below 520px one older panel still overflows. Also decides whether Urdu labels are needed. |
 
 Resolved and reflected in the build: Q1 (no product history), Q8 (shift
 boundaries 06/14/22), Q12 (no dispatch), Q19/Q21 (sidecar, read-only, no DB

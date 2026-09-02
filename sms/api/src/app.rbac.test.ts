@@ -188,6 +188,7 @@ const ROUTES: RouteCase[] = [
   // blanket requireRole(1) tier
   { method: 'GET', path: '/api/range', minRank: 1 },
   { method: 'GET', path: '/api/live', minRank: 1 },
+  { method: 'GET', path: '/api/report?period=day&anchor=2026-07-09', minRank: 1 },
   { method: 'GET', path: '/api/operations', minRank: 1 },
   { method: 'GET', path: '/api/production', minRank: 1 },
   { method: 'GET', path: '/api/downtime', minRank: 1 },

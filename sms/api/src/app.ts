@@ -20,6 +20,7 @@ import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustmen
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getOee } from './services/oee.js';
 import { getLive } from './services/live.js';
+import { getReport, resolvePeriod, REPORT_PERIODS, type ReportPeriod } from './services/report.js';
 import {
   listUsers, createUser, updateUser,
   listStations, setStation,
@@ -247,6 +248,67 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const data = await getLive(pool, cfg.lineId, cfg.lineName, { asOfMs });
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Production report — the period summary (IFL requirement: "comprehensive reporting") ----
+  const reportQuery = z.object({
+    period: z.enum(REPORT_PERIODS).default('day'),
+    /** Day the period is derived from. Defaults to the newest production day. */
+    anchor: dateStr,
+    from: dateStr,
+    to: dateStr,
+  });
+  app.get('/api/report', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = reportQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      const { period } = q.data;
+      if (period === 'custom' && (!q.data.from || !q.data.to)) {
+        res.status(400).json({ error: 'custom period requires from and to' });
+        return;
+      }
+      if (q.data.from && q.data.to) {
+        const bad = validateRange(q.data.from, q.data.to);
+        if (bad) {
+          res.status(400).json({ error: bad });
+          return;
+        }
+      }
+      // Anchor defaults to the newest production day, so a bare /api/report
+      // answers "the latest day" rather than whatever today happens to be on a
+      // server whose source data has stopped.
+      let anchor = q.data.anchor;
+      if (!anchor) {
+        const r = await pool
+          .request()
+          .input('line', mssql.Int, cfg.lineId)
+          .query<{ d: string | null }>(
+            `SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line`,
+          );
+        anchor = r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
+      }
+      const resolved = resolvePeriod(period as ReportPeriod, anchor, q.data.from, q.data.to);
+      const spanBad = validateRange(resolved.from, resolved.to);
+      if (spanBad) {
+        res.status(400).json({ error: spanBad });
+        return;
+      }
+      const key = `report:${JSON.stringify(resolved)}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
+      const data = await getReport(pool, cfg.lineId, resolved);
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
       res.setHeader('X-Cache', 'MISS').json(env);

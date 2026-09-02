@@ -80,6 +80,7 @@ import { ProductDetailLine, CurrentProductBar } from './product';
 import { LiveProvider } from './floor/live';
 import { NowScreen } from './floor/NowScreen';
 import { ListScreen } from './floor/ListScreen';
+import { ReportScreen } from './floor/ReportScreen';
 import { WallScreen } from './wall/WallScreen';
 import { S } from './floor/strings';
 import { SCOPE_KEYS } from './floor/scope';
@@ -109,7 +110,7 @@ function parseRoute(): Route {
   if (typeof window === 'undefined') return { view: 'now' };
   const p = new URLSearchParams(window.location.search);
   const v = p.get('v');
-  const view: View = (['now', 'sacks', 'cones', 'wall', 'dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'timeline', 'admin'] as const).includes(v as View)
+  const view: View = (['now', 'sacks', 'cones', 'report', 'wall', 'dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'timeline', 'admin'] as const).includes(v as View)
     ? (v as View)
     : 'now';
   const dtype = p.get('dtype');
@@ -236,6 +237,18 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
       return { eyebrow: S.live, title: S.sacks, subTabs: SCOPE_TABS };
     case 'cones':
       return { eyebrow: S.live, title: S.cones, subTabs: SCOPE_TABS };
+    case 'report':
+      // The report's own period vocabulary. Same control, same position and the
+      // same behaviour as the floor lists' scopes — only the options differ.
+      return {
+        eyebrow: 'One period',
+        title: S.report,
+        subTabs: (['day', 'week', 'month', 'quarter', 'custom'] as const).map((k) => ({
+          key: k,
+          label: S.period[k],
+          note: S.periodNote[k],
+        })),
+      };
     case 'wall':
       return { eyebrow: S.live, title: S.wall, subTabs: [] };
     case 'dashboard':
@@ -537,6 +550,8 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           onClose={() => navigate({ view, detailType: undefined, detailId: undefined })}
           onOpenOther={(t, id) => navigate({ view: t === 'sack' ? 'sacks' : 'cones', detailType: t, detailId: String(id) })}
         />
+      ) : view === 'report' ? (
+        <ReportScreen sub={activeSub} onMeta={setFreshness} range={range} />
       ) : view === 'dashboard' ? (
         <DashboardView
           range={range}
