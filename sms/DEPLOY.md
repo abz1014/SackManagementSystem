@@ -99,6 +99,13 @@ SQL Server and the build output are the only prerequisites, all installed locall
 5. **Build:** `npm ci && npm run build:shared && npm run build --workspaces --if-present && npm run build --workspace @sms/web`.
 6. **Migrate the app DB:** apply `db/migrations/*.sql` in order (via `sqlcmd` or `npm run db:migrate`).
 7. **Create the first admin:** `node cli/dist/index.js user:create --username=admin --password=<strong> --role=admin`.
+8. **Create IFL's users at `--role=manager`.** The software is used by the GM,
+   managers and process-department engineers, and every one of them needs to
+   set the running product and to export data. Every screen is readable at any
+   rank, so the only effect of a lower role is to block those two actions for
+   no reason. Reserve `admin` for whoever administers the installation.
+   `operator` and `supervisor` exist for a possible future in which floor staff
+   are given accounts; nothing today needs them.
 8. **Install services** (below), start them, browse to `http://<host>:4000`, sign in.
 
 ---

@@ -554,21 +554,23 @@ window counts 3,144 rejects rather than 3,146; the difference is those rows.
 Four roles, enforced server-side on every request; the interface hides what a
 role cannot open rather than showing it and failing.
 
+**Reading the data is not restricted.** The software is used by one group —
+IFL's GM, managers and process-department engineers — so every screen is open
+to every signed-in account. Roles govern what a person can *change*, which is
+what requirement 9 asks for.
+
 | Capability | operator | supervisor | manager | admin |
 |---|:--:|:--:|:--:|:--:|
-| **Floor tier** — Now, Sacks, Cones, the record card, Report, Wall | ✓ | ✓ | ✓ | ✓ |
-| Sync, Product history | ✓ | ✓ | ✓ | ✓ |
+| **Every screen** — Now, Day, Records, Report, Weight, Rejects, Wall, Sync, Product history, Exceptions | ✓ | ✓ | ✓ | ✓ |
 | Set the running product, log a calibration adjustment | | ✓ | ✓ | ✓ |
-| **Analysis tier** — Line, Records, Weight, Rejects, Exceptions | | | ✓ | ✓ |
 | CSV export of the raw register, name reject codes | | | ✓ | ✓ |
 | Setup (people, stations, rules, audit log) | | | | ✓ |
 
-The analysis tier moved from supervisor to manager in Sep 2026. A shift
-supervisor landing on control charts and capability indices was the substance
-of IFL's complaint that the software was too complicated for floor staff; the
-figures a supervisor actually needs — output, weights, pass and fail, per
-shift — are all on the floor tier, which is open to every role. The threshold
-is a single constant (`ANALYSIS_MIN_RANK`) if that judgement is revisited.
+**Create IFL's own accounts at manager rank.** Every user named by IFL needs to
+set the running product and to export, so anything below manager only gets in
+their way. `admin` is for whoever administers the installation. The lower two
+roles exist for a future in which floor operators are given accounts; nothing
+today requires them.
 
 Passwords are argon2-hashed. Sessions are server-side cookies, not JWTs.
 IFL's own `Users` table — three accounts whose passwords equal their usernames,

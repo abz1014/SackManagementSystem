@@ -257,7 +257,7 @@ function sectionFor(view: View, counts: { cones?: number; sacks?: number; reject
       // anything — the URL and highlight changed, the content never did.
       return {
         eyebrow: 'One production day',
-        title: 'The line',
+        title: 'The day',
         subTabs: [
           { key: 'latest', label: 'Latest day', note: 'newest data, may be partial' },
           { key: 'previous', label: 'Day before', note: 'last complete day' },

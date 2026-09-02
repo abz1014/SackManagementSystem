@@ -43,11 +43,42 @@ merge keys and transform versions. The response, built and verified live:
   a TV; one card per line the API reports (one today — `LINE_NAME`). Sessions
   now renew while in use (`api/src/auth.ts`), so a display never logs itself
   out.
-- **Analysis screens (Line, Records, Output, Weight, Rejects, Shifts,
-  Exceptions) moved behind the manager role.** `ANALYSIS_MIN_RANK = 3` in
-  `web/src/shell.tsx` is the one knob if that call is revisited. Supervisors
-  keep the product changeover (now on the Now screen). Line's section tabs are
-  wired at last (Latest day / Day before).
+- **Line's section tabs are wired at last** (Latest day / Day before). They had
+  changed the URL and the highlight but never the content.
+
+### ⚠️ The user base is ONE audience — corrected 2 Sep 2026
+
+For a few hours on 2 Sep 2026 this project split the app in two, putting the
+analysis screens behind the manager role, on the assumption that the audience
+included non-technical floor staff. **IFL's own representative then confirmed
+the software is for the GM, managers, and engineers of the process
+department.** There is no second audience. The split was removed the same day.
+
+What this means, and it governs every future UI decision here:
+
+1. **Every screen is open to every signed-in account.** Only Setup is
+   restricted (`VIEW_MIN_RANK` in `web/src/shell.tsx`, admin only). Do not
+   reintroduce read-access tiers.
+2. **Roles remain for WRITES only** — setting the running product, logging a
+   calibration adjustment, exporting the raw register, and Setup — enforced
+   server-side. That is requirement 9's access control. **Create IFL's accounts
+   at manager rank** so none of those gates obstruct them (see `DEPLOY.md`).
+3. **"Too complicated" never meant "too advanced."** A process engineer reads a
+   control chart without help. IFL's stated objection is *"overflow of useless
+   information and a solution not implemented smartly."* The failure was
+   density, duplication and organisation, not statistical content.
+4. **No two screens may answer the same question.** The two-tier split had
+   quietly produced exactly that — Now beside Line for the current state,
+   Sacks/Cones beside Records for the register — because each tier grew its
+   own. The rail is now seven items ordered by time window, with `sacks` and
+   `cones` kept as routes only (the Now screen's tiles open their record card,
+   which has no equivalent in Records).
+5. **The Output/Shifts withdrawal still stands**, for the original reason and
+   not the retracted one. It was never "too advanced for the reader"; it is
+   that no requirement asks for OEE, and the figure is inferred from event
+   timestamps rather than measured. An engineer is the reader most likely to
+   ask how it was derived and least satisfied by the answer. The measured part,
+   time lost and stop count, survives on the Report screen.
 - **The sack ↔ cone link is approximate and says so.** The plant records no
   key from a cone to its sack, and cones between consecutive sack timestamps
   range 0–250 (measured 2 Sep 2026), not ~25. A sack's card shows "cones

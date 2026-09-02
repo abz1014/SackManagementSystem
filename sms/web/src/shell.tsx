@@ -47,34 +47,40 @@ export type View =
  * business in; it is not what stops them reading the data.
  */
 /**
- * Floor screens (Now, Sacks, Cones, Wall) are for everyone. The analysis
- * screens — the whole app until 2 Sep 2026 — moved behind the manager role
- * after IFL's first review: a shift supervisor landing on SPC charts and OEE
- * decompositions was the complaint. ANALYSIS_MIN_RANK is the one knob if
- * that call is revisited.
+ * ONE user base. Every screen is open to every signed-in account, and only
+ * Setup is restricted.
+ *
+ * For a few hours on 2 Sep 2026 this file split the app in two, putting the
+ * analysis screens behind the manager role on the theory that the audience was
+ * non-technical floor staff. IFL's own representative then confirmed the
+ * software is for GM, managers and process-department engineers. There is no
+ * second audience to protect anyone from, so the split was removed the same
+ * day. It had also started to do real damage: two tiers produced two screens
+ * for the same question, which is exactly the "overflow of useless
+ * information" IFL warned against.
+ *
+ * Read access is not the access-control requirement. Writes still carry roles
+ * (setting the running product, logging a calibration adjustment, exporting
+ * the raw register, and Setup), enforced server-side. IFL's own accounts
+ * should be created at manager rank so none of those gates are in their way —
+ * see DEPLOY.md.
  */
-export const ANALYSIS_MIN_RANK = 3;
 export const VIEW_MIN_RANK: Record<View, number> = {
   now: 1,
   sacks: 1,
   cones: 1,
-  // Everyone. "How much did we make today" is as much a floor question as a
-  // management one, and the report shows only figures the floor screens
-  // already display, aggregated.
   report: 1,
   wall: 1,
-  dashboard: ANALYSIS_MIN_RANK, // Line
-  register: ANALYSIS_MIN_RANK, // Records
-  shift: ANALYSIS_MIN_RANK, // Shifts
-  performance: ANALYSIS_MIN_RANK, // Output
-  weight: ANALYSIS_MIN_RANK,
-  rejects: ANALYSIS_MIN_RANK,
-  exceptions: ANALYSIS_MIN_RANK, // reached from Line's findings; no rail item
-  operations: 1, // reachable by anyone via the sync footer; no rail item
-  // The current product and its changeover history are shown to every role
-  // on the Now screen's product bar; the history page discloses nothing new.
-  timeline: 1, // reached via "View history"; no rail item
-  admin: 4, // Setup — admin only
+  dashboard: 1,
+  register: 1,
+  shift: 1,
+  performance: 1,
+  weight: 1,
+  rejects: 1,
+  exceptions: 1, // reached from the day view's findings; no rail item
+  operations: 1, // reached from the sync footer; no rail item
+  timeline: 1, // reached from the product bar's "View history"; no rail item
+  admin: 4, // Setup — the one genuine restriction
 };
 
 export const canOpen = (view: View, rank: number) => rank >= VIEW_MIN_RANK[view];
@@ -86,7 +92,9 @@ export const VIEW_LABEL: Record<View, string> = {
   cones: 'Cones',
   report: 'Report',
   wall: 'Wall',
-  dashboard: 'Line',
+  // 'Day' rather than 'Line': with a live Now screen beside it, the thing that
+  // distinguishes this screen is its period, not its subject.
+  dashboard: 'Day',
   register: 'Records',
   performance: 'Output',
   weight: 'Weight',
@@ -224,29 +232,35 @@ function Glyph({ children }: { children: ReactNode }) {
 }
 
 /**
- * Rail order, in groups. The floor group is everyone's; "Analysis" appears only
- * for roles that can open it (a group with no visible item renders nothing,
- * label included).
+ * One rail, ordered by the question each screen answers, narrowest window
+ * first: what is happening now, what happened on one day, every individual
+ * reading, any period, then the two standing analyses, then the wall display
+ * and configuration.
  *
- * `performance` (Output) and `shift` (Shifts) were REMOVED from the rail on
- * 2 Sep 2026, after IFL's requirement list was read back against the build.
- * Nothing in that list asks for OEE, availability, performance, quality,
- * downtime, stoppage clustering, mean time between failures, or shift-versus-
- * shift comparison. Those five sub-screens answered a question nobody posed,
- * and they carried the charts IFL specifically called unreadable. The routes
- * still resolve, so a typed URL and the existing deep links keep working, but
- * they are no longer part of the product: not in the rail, not in a demo, and
- * not claimed in CAPABILITIES.md. Restoring them is a one-line change here if
- * IFL ever asks for effectiveness reporting.
+ * Seven items and no two of them answer the same question. That constraint is
+ * the point. When this file briefly held two tiers it also held two screens
+ * for the register (Sacks/Cones beside Records) and two for the current state
+ * (Now beside Line), because each tier had grown its own — duplication that
+ * reads to a user as clutter with no explanation.
  *
- * `operations`, `exceptions` and `timeline` are absent for the original
- * reason — reachable routes without rail items, opened from the sync footer,
- * Line's findings and the product bar.
+ * ABSENT ON PURPOSE, routes still resolving:
+ *  - `sacks` / `cones` — the live plain register. Records covers listing for
+ *    this audience; these stay routed because the Now screen's last-sack and
+ *    last-cone tiles open their record card, which is the plainest view of a
+ *    single reading and has no equivalent in Records.
+ *  - `performance` (Output) and `shift` (Shifts) — withdrawn 2 Sep 2026.
+ *    Nothing in IFL's requirement list asks for OEE, availability,
+ *    performance, quality, stoppage clustering, MTBF/MTTR or shift-versus-
+ *    shift. That reasoning is unchanged by the audience being engineers: the
+ *    OEE figure is inferred from timestamps rather than measured, and an
+ *    engineer is the reader most likely to ask how, and least satisfied by the
+ *    answer. The measured part of it — time lost and stop count — survives on
+ *    the Report screen, where it is stated as what it is.
+ *  - `operations`, `exceptions`, `timeline` — reached from the sync footer,
+ *    the day view's findings, and the product bar.
  */
 const RAIL_GROUPS: { label: string | null; views: View[] }[] = [
-  { label: null, views: ['now', 'sacks', 'cones', 'report', 'wall'] },
-  { label: 'Analysis', views: ['dashboard', 'register', 'weight', 'rejects'] },
-  { label: null, views: ['admin'] },
+  { label: null, views: ['now', 'dashboard', 'register', 'report', 'weight', 'rejects', 'wall', 'admin'] },
 ];
 
 /* ------------------------------------------------------- section column cfg */
