@@ -85,6 +85,66 @@ for a TV, refreshing itself every ten seconds. Setting one up:
    a display left on a replay URL is bannered, but it is still showing old
    numbers.
 
+### Rehearsing go-live with the plant simulator
+
+The supplied copy of IFL's database ends on 10 Jul 2026, so nothing that only
+happens when readings are arriving *now* can be tested against it.
+`scripts/simulate-plant.mjs` writes plausible readings so it can be.
+
+It writes to a **separate database, `DATA_TP1U2_SIM`**, never to `DATA_TP1U2`.
+IFL's databases are read-only to this project and that does not get a local-copy
+exemption; the script refuses any target whose name does not end in `_SIM` and
+any server that is not local. The 19 real days also stay untouched, which
+matters because every measured figure in `CAPABILITIES.md` was checked against
+them.
+
+First-time setup, as a Windows administrator:
+
+```
+sqlcmd -S .\SQLEXPRESS -E -Q "CREATE DATABASE [DATA_TP1U2_SIM]"
+```
+
+then create the four wide tables with the same column types as `DATA_TP1U2`,
+grant `sms_readonly` db_datareader on it, and create a writer login for the
+simulator. Copy IFL's real rows in as well, so the simulator is a complete
+stand-in and `verify` reconciles.
+
+```bash
+node scripts/simulate-plant.mjs --check      # confirm the schema fingerprints match
+node scripts/simulate-plant.mjs --days=7     # seven days of history, ending now
+node scripts/simulate-plant.mjs --live       # keep appending, in real time
+node scripts/simulate-plant.mjs --reset      # empty the sim tables
+```
+
+Point the sync worker at it exactly as you will point it at the plant, by
+changing one line: `IFL_DB_NAME_DATA=DATA_TP1U2_SIM`. Everything downstream
+runs unchanged, so the rehearsal exercises the reader, the schema-fingerprint
+gate, the raw layer, the transform, the data-quality checks, the API and the
+screens. **Set `IFL_DB_NAME_DATA` back to `DATA_TP1U2` when you are done**, and
+rebuild the app database if you want the simulated rows out of it.
+
+#### What the first rehearsal found, and why it could not have been found sooner
+
+IFL's acquisition layer writes a cone's row about **18 minutes** after the cone
+is weighed (measured over 142,509 real rows: 909 s minimum, 1090 s mean). The
+newest production timestamp this software can see is therefore always a quarter
+of an hour old, even while the line runs flat out.
+
+The live screens originally compared that timestamp against the wall clock, so
+on a healthy line they reported **"Stopped 17 min"**, permanently, and "cones in
+the last ten minutes" was structurally always zero. Against the July copy every
+screen read "no readings" anyway, so it was invisible.
+
+The line state is now judged against `now - lag`, where the lag is measured from
+IFL's own two timestamps in the raw layer, and every "recent" window is anchored
+on the newest reading rather than the clock. The screens state the lag, so a
+reader can tell "the line stopped" from "the reading has not arrived yet".
+
+**If the plant's real lag differs from the copy's, nothing needs changing** —
+it is measured, not configured. But it is worth checking on the first live day,
+because a lag beyond two hours is treated as a clock fault rather than as an
+acquisition delay.
+
 ### Internet access is not required
 
 The built SPA references no external hosts: fonts are system stacks (Segoe UI /

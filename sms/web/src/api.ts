@@ -660,9 +660,16 @@ export interface LiveLine {
     elapsedSeconds: number;
     remainingSeconds: number;
   };
+  /** Newest production time on record, and how far behind the wall clock the
+   *  plant's own acquisition runs. Every relative time is anchored here. */
+  dataAsOfUtc: string | null;
+  ingestLagSeconds: number | null;
   state: {
     status: LineStatus;
+    /** Wall-clock age of the newest reading. */
     sinceLastConeSeconds: number | null;
+    /** How long the line has been down, net of the acquisition lag. */
+    behindSeconds: number | null;
     runStartUtc: string | null;
     stopThresholdSeconds: number;
   };

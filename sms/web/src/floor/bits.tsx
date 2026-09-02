@@ -2,7 +2,7 @@
 import { ageLabel, freshnessLevel } from '../format';
 import { useLive, usePlantNow, useTicker } from './live';
 import { S } from './strings';
-import { fmtAgo, fmtClockSec, fmtDay, type Measured } from './fmt';
+import { fmtAgo, fmtClockSec, fmtDay, fmtSpan, type Measured } from './fmt';
 
 /**
  * A number with its unit set smaller beside it, so the pair scales together and
@@ -41,10 +41,11 @@ export function ReplayBanner() {
 
 /** "Updated 4 s ago · Plant data synced 57m ago", plus an offline warning. */
 export function LiveFooter() {
-  const { meta, error, updatedAt } = useLive();
+  const { line, meta, error, updatedAt } = useLive();
   const now = useTicker(1000);
   const plantNow = usePlantNow();
   const age = updatedAt == null ? null : Math.round((now - updatedAt) / 1000);
+  const lag = line?.ingestLagSeconds ?? null;
   return (
     <div className="floor-foot">
       {error && (
@@ -55,6 +56,10 @@ export function LiveFooter() {
       <span>
         {S.updated} {fmtAgo(age)}
         {plantNow && <> · {S.plantTime} {fmtClockSec(plantNow)}</>}
+        {/* The plant's own delay between weighing a cone and writing its row.
+            Stated because it is the difference between "the line stopped" and
+            "the reading has not arrived yet", and it is about 18 minutes. */}
+        {lag != null && lag >= 60 && <> · {S.readingsBehind} {fmtSpan(lag)} {S.behind}</>}
       </span>
       {meta && (
         <span className="floor-sync">

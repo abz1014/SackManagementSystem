@@ -13,20 +13,33 @@ import { Measure, Pill, ReplayBanner, LiveFooter } from './bits';
 
 type StateCls = 'run' | 'stop' | 'idle' | 'none';
 
-/** The state block's words, from the server's classification and a ticking clock. */
+/**
+ * The state block's words.
+ *
+ * Timings come from the server's classification rather than from the wall
+ * clock, because IFL's acquisition layer writes a row about 18 minutes after
+ * the cone is weighed. "Stopped" therefore uses `behindSeconds`, which is net
+ * of that lag and is how long the line has actually been down; the raw
+ * wall-clock age of the newest reading is shown separately as "as of", so a
+ * reader can see both without the two being confused.
+ */
 export function describeState(line: LiveLine, nowIso: string): { cls: StateCls; title: string; detail: string } {
   const lc = line.lastCone;
   const since = lc ? Math.max(0, secondsBetween(lc.ts, nowIso)) : null;
+  const asOf = line.dataAsOfUtc ?? lc?.ts ?? null;
   switch (line.state.status) {
     case 'running': {
       const runFor = line.state.runStartUtc ? fmtSpan(secondsBetween(line.state.runStartUtc, nowIso)) : null;
-      const parts = [runFor ? `${S.runningFor} ${runFor}` : null, `${S.lastConeAgo} ${fmtAgo(since)}`].filter(Boolean);
+      const parts = [
+        runFor ? `${S.runningFor} ${runFor}` : null,
+        asOf ? `${S.asOf} ${fmtClockSec(asOf)}` : null,
+      ].filter(Boolean);
       return { cls: 'run', title: S.running, detail: parts.join(' · ') };
     }
     case 'stopped':
       return {
         cls: 'stop',
-        title: `${S.stopped} ${fmtSpan(since ?? 0)}`,
+        title: `${S.stopped} ${fmtSpan(line.state.behindSeconds ?? since ?? 0)}`,
         detail: lc ? `${S.stoppedAt} ${fmtClockSec(lc.ts)}` : '',
       };
     case 'idle':
@@ -167,17 +180,23 @@ export function NowScreen({
             <div className="tile-foot">{S.noneYet}</div>
           </section>
         )}
+        {/* These windows end at the newest reading, not at the wall clock. With
+            an 18-minute acquisition lag a window ending now is always empty,
+            so each says which moment it counts back from. */}
         <section className="tile">
           <div className="tile-label">{S.last10Min}</div>
           <div className="tile-value">{fmtInt(line.recent.conesLast10Min)}</div>
+          <div className="tile-foot">{line.dataAsOfUtc ? `${S.upTo} ${fmtClock(line.dataAsOfUtc)}` : ''}</div>
         </section>
         <section className="tile">
           <div className="tile-label">{S.lastHourCones}</div>
           <div className="tile-value">{fmtInt(line.recent.conesLastHour)}</div>
+          <div className="tile-foot">{line.dataAsOfUtc ? `${S.upTo} ${fmtClock(line.dataAsOfUtc)}` : ''}</div>
         </section>
         <section className="tile">
           <div className="tile-label">{S.lastHourSacks}</div>
           <div className="tile-value">{fmtInt(line.recent.sacksLastHour)}</div>
+          <div className="tile-foot">{line.dataAsOfUtc ? `${S.upTo} ${fmtClock(line.dataAsOfUtc)}` : ''}</div>
         </section>
       </div>
 

@@ -28,6 +28,10 @@ export const S = {
   noDataDetail: 'Nothing has been received from the plant yet.',
   runningFor: 'for',
   lastConeAgo: 'last cone',
+  asOf: 'as of',
+  upTo: 'up to',
+  readingsBehind: 'readings arrive',
+  behind: 'behind',
   since: 'since',
   stoppedAt: 'stopped at',
 

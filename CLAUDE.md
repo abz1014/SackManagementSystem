@@ -46,6 +46,39 @@ merge keys and transform versions. The response, built and verified live:
 - **Line's section tabs are wired at last** (Latest day / Day before). They had
   changed the URL and the highlight but never the content.
 
+### Live rehearsal and the plant simulator (2 Sep 2026)
+
+`sms/scripts/simulate-plant.mjs` writes synthetic source readings so the app can
+be exercised against data that is arriving *now*. It writes ONLY to
+`DATA_TP1U2_SIM`, never to `DATA_TP1U2` — the read-only rule gets no local-copy
+exemption, and the script refuses any target not ending in `_SIM` and any
+non-local server. Its distributions are measured from the real 19 days, not
+invented: cone gap buckets, weight mean and spread, reject rate and code Pareto,
+sack intervals, station bias, and the plant's own Shift-from-insert-time bug.
+Usage and setup are in `DEPLOY.md`.
+
+**What the first rehearsal found — a defect no amount of work against the July
+copy could have surfaced.** IFL's acquisition layer writes a cone's row about
+**18 minutes** after the cone is weighed (909 s min, 1090 s mean, over 142,509
+rows). The newest production timestamp available is therefore always ~18 minutes
+old on a perfectly healthy line. The live screens compared it against the wall
+clock and so reported **"Stopped 17 min" permanently**, with "cones in the last
+ten minutes" structurally zero. Against weeks-old data everything read "no
+readings", so nothing looked wrong.
+
+Fixed in `api/src/services/live.ts`: the line is judged against `now - lag`,
+where the lag is the median of `src_Date - src_ProductionDate` over recent raw
+rows — IFL's own insert time against their own production time. Every "recent"
+window is anchored on the newest reading rather than the clock, the per-hour
+rate divides by the time the counts actually cover, and the screens state the
+lag so "the line stopped" is distinguishable from "the reading has not arrived".
+Three regression tests lock this down.
+
+**The general lesson, worth applying to anything else time-relative:** this
+software never sees the present. It sees the plant as it was one acquisition lag
+ago. Any screen that compares a production timestamp to `Date.now()` is wrong
+unless it accounts for that.
+
 ### ⚠️ The user base is ONE audience — corrected 2 Sep 2026
 
 For a few hours on 2 Sep 2026 this project split the app in two, putting the

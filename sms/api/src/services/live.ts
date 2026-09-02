@@ -22,6 +22,24 @@
  * "stopped" so that the dev copy, which ends on 10 Jul 2026, reads as "no
  * readings since …" rather than as a 54-day stoppage.
  *
+ * THE ACQUISITION LAG IS THE WHOLE DIFFICULTY, and it is invisible on the
+ * supplied copy. IFL's acquisition layer writes a cone's row about 18 minutes
+ * after the cone was weighed (measured across 142,509 real rows: 909 s
+ * minimum, 1090 s mean). So the newest production timestamp this software can
+ * possibly see is a quarter of an hour old even while the line runs flat out.
+ *
+ * Comparing that timestamp against the wall clock — which is what this file
+ * did until the 2 Sep 2026 live rehearsal — therefore reports STOPPED, always,
+ * on a perfectly healthy line. It never showed up in development because the
+ * only data available was weeks old and everything read "no readings" anyway.
+ *
+ * The fix is to judge the line against the most recent moment data COULD exist
+ * for, `now - lag`, rather than against `now`. The lag is measured from the
+ * data itself: `src_Date - src_ProductionDate` over recent raw rows, which is
+ * IFL's own insert time against their own production time. Every "recent"
+ * window is likewise anchored on the newest reading rather than on the wall
+ * clock, because "cones in the last ten minutes" is otherwise guaranteed zero.
+ *
  * Every range predicate is on production_ts_utc_ms, which leads the unique
  * merge index on all three event tables (line_id, production_ts_utc_ms, …),
  * so each of these queries is an index seek over one shift, not a scan.
@@ -32,6 +50,11 @@ import { SHIFT_BOUNDARIES, shiftCodeFromMinutes, type NightBelongsTo, type Shift
 
 export const STOP_THRESHOLD_SECONDS = 120;
 export const IDLE_THRESHOLD_SECONDS = 8 * 3600;
+/** How many recent rows the acquisition lag is measured over. */
+export const LAG_SAMPLE_ROWS = 200;
+/** A sane ceiling. A lag beyond this is a clock fault, not an ingestion delay,
+ *  and must not be allowed to mask a genuinely stopped line indefinitely. */
+export const MAX_CREDIBLE_LAG_SECONDS = 2 * 3600;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const SHIFT_MS = 8 * HOUR_MS;
@@ -79,16 +102,31 @@ export function shiftWindowAt(tMs: number, rule: NightBelongsTo): ShiftWindow {
 
 export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
 
-/** Line state from the age of the newest cone reading. Pure. */
-export function classifyLineState(
-  lastConeMs: number | null,
-  nowMs: number,
-): { status: LineStatus; seconds: number | null } {
-  if (lastConeMs == null) return { status: 'no_data', seconds: null };
-  const seconds = Math.max(0, Math.round((nowMs - lastConeMs) / 1000));
-  if (seconds <= STOP_THRESHOLD_SECONDS) return { status: 'running', seconds };
-  if (seconds <= IDLE_THRESHOLD_SECONDS) return { status: 'stopped', seconds };
-  return { status: 'idle', seconds };
+export interface LineState {
+  status: LineStatus;
+  /** Wall-clock age of the newest reading. What a person sees on a clock. */
+  sinceLastConeSeconds: number | null;
+  /** How far the newest reading falls short of where it should be given the
+   *  lag. This, not the wall-clock age, is how long the line has been down. */
+  behindSeconds: number | null;
+}
+
+/**
+ * Line state, judged against the most recent moment data could exist for.
+ *
+ * `lagMs` is how long IFL's acquisition layer takes to write a row. A running
+ * line's newest reading sits almost exactly `lag` behind the wall clock, so
+ * that is the baseline; anything further behind is the line, not the pipeline.
+ * Pure.
+ */
+export function classifyLineState(lastConeMs: number | null, nowMs: number, lagMs = 0): LineState {
+  if (lastConeMs == null) return { status: 'no_data', sinceLastConeSeconds: null, behindSeconds: null };
+  const lag = Math.min(Math.max(0, lagMs), MAX_CREDIBLE_LAG_SECONDS * 1000);
+  const sinceLastConeSeconds = Math.max(0, Math.round((nowMs - lastConeMs) / 1000));
+  const behindSeconds = Math.max(0, Math.round((nowMs - lag - lastConeMs) / 1000));
+  if (behindSeconds <= STOP_THRESHOLD_SECONDS) return { status: 'running', sinceLastConeSeconds, behindSeconds };
+  if (behindSeconds <= IDLE_THRESHOLD_SECONDS) return { status: 'stopped', sinceLastConeSeconds, behindSeconds };
+  return { status: 'idle', sinceLastConeSeconds, behindSeconds };
 }
 
 export interface LiveLine {
@@ -106,10 +144,19 @@ export interface LiveLine {
     elapsedSeconds: number;
     remainingSeconds: number;
   };
+  /**
+   * The newest production time any reading carries, and how far behind the
+   * wall clock the plant's own acquisition runs. Everything time-relative on
+   * the live screens is anchored here rather than on the clock.
+   */
+  dataAsOfUtc: string | null;
+  ingestLagSeconds: number | null;
   state: {
     status: LineStatus;
-    /** Seconds since the newest cone reading. */
+    /** Seconds since the newest cone reading, on the wall clock. */
     sinceLastConeSeconds: number | null;
+    /** How long the line has actually been down, net of the acquisition lag. */
+    behindSeconds: number | null;
     /** Start of the current uninterrupted run when running; else null. */
     runStartUtc: string | null;
     stopThresholdSeconds: number;
@@ -123,6 +170,8 @@ export interface LiveLine {
     sackWeightKg: number;
     conesPerHour: number | null;
   };
+  /** Counted backwards from `dataAsOfUtc`, not from the wall clock: with an
+   *  18-minute acquisition lag, "the last ten minutes" is always empty. */
   recent: {
     conesLast10Min: number;
     conesLastHour: number;
@@ -173,12 +222,52 @@ export async function getLive(
     ruleRes.recordset[0]?.night_belongs_to === 'calendar_day' ? 'calendar_day' : 'start_day';
   const shift = shiftWindowAt(nowMs, rule);
 
+  /**
+   * Measure IFL's acquisition lag from their own two timestamps, over the most
+   * recent rows. This reads the RAW layer rather than canonical because the
+   * source insert time is deliberately not carried into canonical — the raw
+   * layer exists to preserve exactly this kind of source fact. It is the app's
+   * own database either way; nothing here touches IFL's.
+   *
+   * Median, not mean: a single clock-fault row in the sample would otherwise
+   * drag the lag by hours and hide a genuinely stopped line.
+   */
+  const lagRes = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('take', mssql.Int, LAG_SAMPLE_ROWS)
+    .query<{ lagSeconds: number }>(`
+      SELECT TOP (@take) DATEDIFF(SECOND, src_ProductionDate, src_Date) AS lagSeconds
+        FROM sms_raw.cone_raw
+       WHERE line_id = @line AND src_Date IS NOT NULL AND src_ProductionDate IS NOT NULL
+       ORDER BY src_id DESC`);
+  const lagSamples = lagRes.recordset
+    .map((r) => Number(r.lagSeconds))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= MAX_CREDIBLE_LAG_SECONDS)
+    .sort((a, b) => a - b);
+  const ingestLagSeconds = lagSamples.length ? lagSamples[Math.floor(lagSamples.length / 2)]! : null;
+  const lagMs = (ingestLagSeconds ?? 0) * 1000;
+
   // One lower bound serves both the shift totals and the rolling hour: the
   // hour can begin before the shift did (twenty minutes into a shift, "last
   // hour" reaches back into the previous one), so the scan starts at the
   // earlier of the two and CASE picks each window out of the same rows.
-  const hourAgoMs = nowMs - HOUR_MS;
-  const tenMinAgoMs = nowMs - 10 * 60_000;
+  // The newest production time on record. Every "recent" window is measured
+  // back from here, because a window measured back from the wall clock lands
+  // entirely inside the acquisition lag and is always empty.
+  const tipRes = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('now', mssql.BigInt, nowMs)
+    .query<{ tip: number | null }>(
+      `SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event
+        WHERE line_id = @line AND production_ts_utc_ms <= @now`,
+    );
+  const dataAsOfMs = tipRes.recordset[0]?.tip != null ? Number(tipRes.recordset[0].tip) : null;
+  const anchorMs = dataAsOfMs ?? nowMs;
+
+  const hourAgoMs = anchorMs - HOUR_MS;
+  const tenMinAgoMs = anchorMs - 10 * 60_000;
   const lo = Math.min(shift.startMs, hourAgoMs);
 
   const bind = (req: mssql.Request) =>
@@ -235,7 +324,7 @@ export async function getLive(
 
   const lastConeRow = lastCone.recordset[0] ?? null;
   const lastConeMs = lastConeRow ? new Date(lastConeRow.ts).getTime() : null;
-  const state = classifyLineState(lastConeMs, nowMs);
+  const state = classifyLineState(lastConeMs, nowMs, lagMs);
 
   // Start of the current run: the newest cone that followed a gap longer
   // than the stop threshold (or the first cone in the 24 h window). Only
@@ -263,6 +352,10 @@ export async function getLive(
   const s = sacks.recordset[0];
   const shiftCones = num(c?.cones);
   const elapsedSeconds = Math.max(0, Math.round((nowMs - shift.startMs) / 1000));
+  // The rate divides by the time the counts actually COVER, which ends at the
+  // data tip, not now. Dividing by wall-clock elapsed understates a running
+  // line by roughly the acquisition lag every time.
+  const coveredSeconds = Math.max(1, Math.round((Math.min(anchorMs, nowMs) - shift.startMs) / 1000));
   const lastSackRow = lastSack.recordset[0] ?? null;
   const lastRejectRow = lastReject.recordset[0] ?? null;
 
@@ -279,9 +372,12 @@ export async function getLive(
       elapsedSeconds,
       remainingSeconds: Math.max(0, Math.round((shift.endMs - nowMs) / 1000)),
     },
+    dataAsOfUtc: dataAsOfMs != null ? new Date(dataAsOfMs).toISOString() : null,
+    ingestLagSeconds,
     state: {
       status: state.status,
-      sinceLastConeSeconds: state.seconds,
+      sinceLastConeSeconds: state.sinceLastConeSeconds,
+      behindSeconds: state.behindSeconds,
       runStartUtc,
       stopThresholdSeconds: STOP_THRESHOLD_SECONDS,
     },
@@ -292,7 +388,7 @@ export async function getLive(
       rejectedCones: num(rejects.recordset[0]?.n),
       sacks: num(s?.sacks),
       sackWeightKg: Math.round(num(s?.kg) * 100) / 100,
-      conesPerHour: elapsedSeconds >= 600 ? Math.round((shiftCones * 3600) / elapsedSeconds) : null,
+      conesPerHour: coveredSeconds >= 600 ? Math.round((shiftCones * 3600) / coveredSeconds) : null,
     },
     recent: {
       conesLast10Min: num(c?.last10),

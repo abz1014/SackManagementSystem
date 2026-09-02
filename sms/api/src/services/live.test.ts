@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { shiftWindowAt, classifyLineState, STOP_THRESHOLD_SECONDS, IDLE_THRESHOLD_SECONDS } from './live.js';
+import {
+  shiftWindowAt,
+  classifyLineState,
+  STOP_THRESHOLD_SECONDS,
+  IDLE_THRESHOLD_SECONDS,
+  MAX_CREDIBLE_LAG_SECONDS,
+} from './live.js';
 
 const t = (s: string) => new Date(s).getTime();
 
@@ -47,22 +53,66 @@ describe('shiftWindowAt', () => {
 
 describe('classifyLineState', () => {
   const now = t('2026-07-09T10:00:00Z');
+  const MIN = 60_000;
+
   it('no cones ever → no_data', () => {
-    expect(classifyLineState(null, now)).toEqual({ status: 'no_data', seconds: null });
+    expect(classifyLineState(null, now)).toEqual({
+      status: 'no_data', sinceLastConeSeconds: null, behindSeconds: null,
+    });
   });
-  it('a cone inside the stop threshold → running', () => {
-    expect(classifyLineState(now - 30_000, now)).toEqual({ status: 'running', seconds: 30 });
+
+  it('with no lag, a recent cone is running and an old one is stopped', () => {
+    expect(classifyLineState(now - 30_000, now)).toEqual({
+      status: 'running', sinceLastConeSeconds: 30, behindSeconds: 30,
+    });
     expect(classifyLineState(now - STOP_THRESHOLD_SECONDS * 1000, now).status).toBe('running');
+    expect(classifyLineState(now - 300_000, now).status).toBe('stopped');
   });
-  it('past the threshold but within a shift → stopped', () => {
-    expect(classifyLineState(now - 300_000, now)).toEqual({ status: 'stopped', seconds: 300 });
-    expect(classifyLineState(now - IDLE_THRESHOLD_SECONDS * 1000, now).status).toBe('stopped');
+
+  /**
+   * The regression the 2 Sep 2026 live rehearsal found. IFL's acquisition layer
+   * writes a row ~18 minutes after the cone is weighed, so a perfectly healthy
+   * line's newest reading is ALWAYS about 18 minutes old. Judged against the
+   * wall clock that reads as a permanent stoppage.
+   */
+  it('a running line whose newest reading is one acquisition lag old reads as RUNNING', () => {
+    const lag = 18 * MIN;
+    const s = classifyLineState(now - lag, now, lag);
+    expect(s.status).toBe('running');
+    expect(s.behindSeconds).toBe(0);
+    // The wall-clock age is still reported, because that is what a person sees.
+    expect(s.sinceLastConeSeconds).toBe(18 * 60);
   });
-  it('longer than a whole shift → idle, not a stoppage', () => {
+
+  it('without the lag the same line would have read as stopped', () => {
+    const lag = 18 * MIN;
+    expect(classifyLineState(now - lag, now, 0).status).toBe('stopped');
+  });
+
+  it('a genuine stop is still caught, and measured net of the lag', () => {
+    const lag = 18 * MIN;
+    // Weighed 25 minutes ago: 18 of those are the pipeline, 7 are a real stop.
+    const s = classifyLineState(now - 25 * MIN, now, lag);
+    expect(s.status).toBe('stopped');
+    expect(s.behindSeconds).toBe(7 * 60);
+    expect(s.sinceLastConeSeconds).toBe(25 * 60);
+  });
+
+  it('an implausible lag cannot mask a stopped line forever', () => {
+    const absurd = 40 * 86_400_000;
+    expect(classifyLineState(now - 30 * 86_400_000, now, absurd).status).not.toBe('running');
+    expect(classifyLineState(now - 30 * 86_400_000, now, MAX_CREDIBLE_LAG_SECONDS * 1000).status).toBe('idle');
+  });
+
+  it('longer than a whole shift behind → idle, not a stoppage', () => {
     expect(classifyLineState(now - 9 * 3600 * 1000, now).status).toBe('idle');
     expect(classifyLineState(now - 54 * 86_400_000, now).status).toBe('idle');
+    expect(classifyLineState(now - IDLE_THRESHOLD_SECONDS * 1000, now).status).toBe('stopped');
   });
+
   it('a reading stamped slightly ahead of the clock counts as just now', () => {
-    expect(classifyLineState(now + 5_000, now)).toEqual({ status: 'running', seconds: 0 });
+    expect(classifyLineState(now + 5_000, now)).toEqual({
+      status: 'running', sinceLastConeSeconds: 0, behindSeconds: 0,
+    });
   });
 });
