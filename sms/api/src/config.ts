@@ -9,6 +9,21 @@ const schema = z.object({
   port: z.coerce.number().int().positive().default(4000),
   lineId: z.coerce.number().int().positive().default(1),
   cacheTtlSeconds: z.coerce.number().nonnegative().default(5),
+  /** Name of the single configured line, shown on the floor and wall screens.
+   *  Multi-line (Q14, still open) would move this into a table; one env value
+   *  keeps the display honest without inventing a line registry. */
+  lineName: z.string().min(1).default('TP1 · Line 3 · Unit 2'),
+  /**
+   * Whether /api/live accepts an `asOf` timestamp that moves the plant clock,
+   * so the floor screens can replay a past moment. Off by default: a wall
+   * display left on a replay URL would present old numbers as live. Dev sets
+   * it true, because the supplied copy ends on 10 Jul 2026 and the live
+   * screens are otherwise empty.
+   */
+  liveAllowAsOf: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   /**
    * Whether to believe X-Forwarded-For. Defaults FALSE, which is correct for the
    * current deployment (browsers hit the API directly on :4000).
@@ -56,6 +71,8 @@ export interface ApiConfig {
   port: number;
   lineId: number;
   cacheTtlSeconds: number;
+  lineName: string;
+  liveAllowAsOf: boolean;
   trustProxy: boolean;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -69,6 +86,8 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     port: env.API_PORT,
     lineId: env.LINE_ID,
     cacheTtlSeconds: env.CACHE_TTL_SECONDS,
+    lineName: env.LINE_NAME,
+    liveAllowAsOf: env.LIVE_ALLOW_AS_OF,
     trustProxy: env.TRUST_PROXY,
     tlsCertPath: env.TLS_CERT_PATH,
     tlsKeyPath: env.TLS_KEY_PATH,

@@ -21,6 +21,8 @@ import '@fontsource/dm-mono/500.css';
 
 import { App } from './App';
 import './styles.css';
+import './floor/floor.css';
+import './wall/wall.css';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

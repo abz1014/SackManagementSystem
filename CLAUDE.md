@@ -19,6 +19,98 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 **Phase 0 (Database Discovery) — COMPLETE.** → `SCHEMA.md`, `QUESTIONS.md`
 **Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 25 app tables, session-cookie auth (argon2), 17 tests, perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover (repoint `IFL_DB_SERVER`).**
 
+### Floor-first rework (2 Sep 2026) — response to IFL's first review
+
+IFL's reaction to the demo was **very poor**: too complicated for a
+non-technical floor worker, nothing live, unclear what period any number
+described, and per-sack / per-cone detail buried. All four were true in the
+code, not a matter of taste: no polling anywhere in `sms/web`; Line opened on
+the day *before* the newest data under a "Live picture" label with three tabs
+wired to nothing; ~17 analysis sub-screens of SPC/OEE/Cpk; Records exposed
+merge keys and transform versions. The response, built and verified live:
+
+- **Floor screens for every role — `?v=now` (the landing page), `?v=sacks`,
+  `?v=cones`, `?v=wall`.** Plain words (every string in
+  `web/src/floor/strings.ts`, kept there so an Urdu set can be added without
+  touching a screen), big type, ten-second refresh through `GET /api/live`
+  (`api/src/services/live.ts`: plant clock, current shift window,
+  running / stopped / idle from the same 120 s inter-cone split as downtime,
+  this-shift counts, last sack / cone / reject, per-station activity). Lists
+  re-read every 15 s and slide new rows in. **One time selector everywhere** —
+  This shift / Today / Yesterday / Pick a day — anchored on the plant clock the
+  API reports, never the browser's.
+- **Wall mode** (`?v=wall`): fullscreen, no navigation, viewport-unit type for
+  a TV; one card per line the API reports (one today — `LINE_NAME`). Sessions
+  now renew while in use (`api/src/auth.ts`), so a display never logs itself
+  out.
+- **Analysis screens (Line, Records, Output, Weight, Rejects, Shifts,
+  Exceptions) moved behind the manager role.** `ANALYSIS_MIN_RANK = 3` in
+  `web/src/shell.tsx` is the one knob if that call is revisited. Supervisors
+  keep the product changeover (now on the Now screen). Line's section tabs are
+  wired at last (Latest day / Day before).
+- **The sack ↔ cone link is approximate and says so.** The plant records no
+  key from a cone to its sack, and cones between consecutive sack timestamps
+  range 0–250 (measured 2 Sep 2026), not ~25. A sack's card shows "cones
+  weighed between the previous sack and this one" with the caveat printed —
+  never a packing list. Do not present it as one.
+- **Replay, for demos and verification:** `?at=<ISO>` moves the plant clock
+  (server flag `LIVE_ALLOW_AS_OF` — **false in production**, true in dev where
+  the copy ends 10 Jul 2026). A replay is always bannered on screen.
+- **Still open from this review:** which device the floor will use (TV, shared
+  PC, phone); Urdu labels; and whether the demo ran on the July copy or live
+  data (if the copy, half of "not live" was stale source data and disappears
+  at cutover — the missing refresh was real and is now fixed).
+
+### Requirement mapping and the Output/Shifts cut (2 Sep 2026)
+
+IFL's original requirement list was read back against the build for the first
+time on 2 Sep 2026. Ten lines. The mapping, and it is the reason for the cut:
+
+| IFL asked for | State |
+|---|---|
+| Connectivity with PLCs, HMIs, machines, databases | SQL only; PLC path deferred on IFL's own later answer (Q22) |
+| Cone weight collection, flag weights outside limits | Built |
+| Screens to view and **update product details on machines** | Half — stored in the app DB, never written to a machine |
+| History logs and trend graphs for rejected cones | Built |
+| **AI**-based analytics recommending calibration adjustments | Built as statistics (Nelson rules, station drift, ledger), not AI |
+| Collection and logging of all sack data | Built |
+| **Sack stock tracking per machine** | **Not built.** See the blocker below |
+| Comprehensive **reporting**, analytics, graphical dashboards | Analytics and dashboards yes; **reporting missing** |
+| User-friendly interface, access control, data security | Access and security built; "user-friendly" is the complaint above |
+| Scalable to more machines and data points | `line_id` throughout; multi-line not built |
+
+**Nothing in that list asks for OEE.** Not availability, performance, quality,
+downtime, stoppage clustering, MTBF/MTTR, or shift-versus-shift. Output
+(`?v=performance`) and Shifts (`?v=shift`), five sub-screens, answered a
+question no customer posed, and they carried the charts IFL called unreadable.
+They were **removed from the product** on 2 Sep 2026: gone from the rail
+(`RAIL_GROUPS` in `web/src/shell.tsx`), to be removed from `CAPABILITIES.md`,
+and not to appear in a demo. The routes still resolve so a typed URL keeps
+working; the code is not deleted. Restoring them is a one-line change.
+
+The "availability below normal" finding was dropped with them, since its only
+destination was Output. Time lost returns as a finding once the period report
+exists. The Line ribbon still shows availability as a plain figure.
+
+**Kept because they ARE contracted, not because the data allowed them:** the
+reject trend graphs (requirement 4) and the weight control chart plus station
+drift, which are the machinery under the calibration requirement (5).
+
+**The sack-stock blocker, to raise with IFL.** `sack1_TP1U2` carries no machine
+or station column — only sack number, weight, in-range and insert time. Sack
+stock *per machine* is therefore not computable from the data IFL supplied, by
+anyone. It needs the PLC path they deferred, or a manual entry screen on the
+floor. This question has a long turnaround and blocks the largest missing
+module, so it goes to IFL before the report screen is finished.
+
+**On the AI expectation (confirmed open with IFL, 2 Sep 2026).** They are
+non-technical here and simply expect AI in the product. Do not fabricate it,
+and do not promise anything cloud-hosted: the plant is air-gapped by their own
+hosting constraint. The honest deliverable is to extend the existing
+calibration advisory from "this station is off target today" to "this station
+reaches the action limit in about N days at the current drift", which is a real
+prediction from real data and is defensible when challenged.
+
 ### IFL answers — decisive points (23 Jul 2026)
 
 - **Q1:** no product data in DB; **product-wise historical reporting not required.** App adds a **Current Product** selector (Process Engineer sets it), stored in the **app-owned DB**. → `NullAttribution` default for history; `ManualEntryAttribution` forward-only.

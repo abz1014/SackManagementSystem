@@ -143,6 +143,8 @@ beforeAll(async () => {
   const cfg: ApiConfig = {
     port: 0,
     lineId: 1,
+    lineName: 'Test line',
+    liveAllowAsOf: true,
     cacheTtlSeconds: 5,
     trustProxy: false,
     appDb: { server: 'unused', port: 1433, database: 'unused', user: 'unused', password: 'unused', encrypt: false, trustServerCertificate: true },
@@ -185,6 +187,7 @@ interface RouteCase {
 const ROUTES: RouteCase[] = [
   // blanket requireRole(1) tier
   { method: 'GET', path: '/api/range', minRank: 1 },
+  { method: 'GET', path: '/api/live', minRank: 1 },
   { method: 'GET', path: '/api/operations', minRank: 1 },
   { method: 'GET', path: '/api/production', minRank: 1 },
   { method: 'GET', path: '/api/downtime', minRank: 1 },

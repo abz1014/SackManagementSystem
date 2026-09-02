@@ -13,7 +13,6 @@ import {
   getProducts,
   getCurrentProduct,
   getProductTimeline,
-  setCurrentProduct,
   adminListUsers,
   adminCreateUser,
   adminUpdateUser,
@@ -75,8 +74,15 @@ import {
   type OeeData,
   type OperationsData,
 } from './api';
-import { AppShell, canOpen, VIEW_LABEL, type View, type SectionConfig } from './shell';
+import { AppShell, canOpen, VIEW_LABEL, type View, type SectionConfig, type SubTab } from './shell';
 import { downloadCsv, csvName, type CsvRow } from './csv';
+import { ProductDetailLine, CurrentProductBar } from './product';
+import { LiveProvider } from './floor/live';
+import { NowScreen } from './floor/NowScreen';
+import { ListScreen } from './floor/ListScreen';
+import { WallScreen } from './wall/WallScreen';
+import { S } from './floor/strings';
+import { SCOPE_KEYS } from './floor/scope';
 import { fmtInt, ageLabel, freshnessLevel, fmtDuration, fmtHourLabel, fmtDateTime, fmtTime } from './format';
 
 type Shift = 'all' | 'morning' | 'evening' | 'night';
@@ -92,21 +98,28 @@ interface Route {
   sub?: string;
   detailType?: RegisterType;
   detailId?: string;
+  /** Replay instant for the live screens (floor/live.tsx). Carried on the
+   *  route so it survives navigation between Now, Sacks, Cones and Wall. */
+  at?: string;
 }
 
+const AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
 function parseRoute(): Route {
-  if (typeof window === 'undefined') return { view: 'dashboard' };
+  if (typeof window === 'undefined') return { view: 'now' };
   const p = new URLSearchParams(window.location.search);
   const v = p.get('v');
-  const view: View = (['dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'timeline', 'admin'] as const).includes(v as View)
+  const view: View = (['now', 'sacks', 'cones', 'wall', 'dashboard', 'register', 'performance', 'weight', 'shift', 'rejects', 'operations', 'exceptions', 'timeline', 'admin'] as const).includes(v as View)
     ? (v as View)
-    : 'dashboard';
+    : 'now';
   const dtype = p.get('dtype');
   const did = p.get('did');
   const sub = p.get('sub');
+  const at = p.get('at');
   return {
     view,
     sub: sub ?? undefined,
+    at: at && AT_RE.test(at) ? at : undefined,
     // 'reject' was missing here, so a reject detail URL only worked when reached
     // by CLICK (which sets route state directly) and silently fell back to the
     // cone list on a cold load — i.e. it was not actually a permalink, which is
@@ -125,6 +138,7 @@ function routeSearch(r: Route): string {
     p.set('dtype', r.detailType);
     p.set('did', r.detailId);
   }
+  if (r.at) p.set('at', r.at);
   return `?${p.toString()}`;
 }
 
@@ -210,17 +224,30 @@ function Segmented<T extends string>({
  * design's sample numbers, which are illustrative and in several cases wrong
  * for this plant.
  */
+/** The floor lists' one time selector, rendered as the section column's tabs. */
+const SCOPE_TABS: SubTab[] = SCOPE_KEYS.map((k) => ({ key: k, label: S.scope[k], note: S.scopeNote[k] }));
+
 function sectionFor(view: View, counts: { cones?: number; sacks?: number; rejects?: number; stations?: number }): SectionConfig {
   const n = (v?: number) => (v == null || v === 0 ? '—' : fmtInt(v));
   switch (view) {
+    case 'now':
+      return { eyebrow: S.live, title: S.now, subTabs: [] };
+    case 'sacks':
+      return { eyebrow: S.live, title: S.sacks, subTabs: SCOPE_TABS };
+    case 'cones':
+      return { eyebrow: S.live, title: S.cones, subTabs: SCOPE_TABS };
+    case 'wall':
+      return { eyebrow: S.live, title: S.wall, subTabs: [] };
     case 'dashboard':
+      // Two tabs that actually pick the day. Until 2 Sep 2026 this column
+      // offered Today / Yesterday / This week and none of them was wired to
+      // anything — the URL and highlight changed, the content never did.
       return {
-        eyebrow: 'Live picture',
+        eyebrow: 'One production day',
         title: 'The line',
         subTabs: [
-          { key: 'today', label: 'Today', note: 'last complete day' },
-          { key: 'yesterday', label: 'Yesterday' },
-          { key: 'week', label: 'This week' },
+          { key: 'latest', label: 'Latest day', note: 'newest data, may be partial' },
+          { key: 'previous', label: 'Day before', note: 'last complete day' },
         ],
       };
     case 'register':
@@ -434,7 +461,19 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const activeSub = route.sub ?? section.subTabs[0]?.key ?? '';
   const goSub = (k: string) => navigate({ sub: k });
 
+  // Wall mode is the one screen without the shell: a TV has no one to click a
+  // rail. It shares the live feed with everything else via the same provider.
+  const asOf = route.at ?? null;
+  if (view === 'wall') {
+    return (
+      <LiveProvider asOf={asOf}>
+        <WallScreen onExit={() => setView('now')} />
+      </LiveProvider>
+    );
+  }
+
   return (
+    <LiveProvider asOf={asOf} onMeta={setFreshness}>
     <AppShell
       view={view}
       rank={rank}
@@ -480,11 +519,30 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         </div>
       ) : rangeErr ? (
         <div className="error-card" role="alert"><b>Couldn't reach the API.</b> {rangeErr}</div>
+      ) : view === 'now' ? (
+        <NowScreen
+          rank={rank}
+          onOpenSack={(id) => navigate({ view: 'sacks', detailType: 'sack', detailId: String(id) })}
+          onOpenCone={(id) => navigate({ view: 'cones', detailType: 'cone', detailId: String(id) })}
+          onOpenTimeline={() => navigate({ view: 'timeline', sub: undefined, detailType: undefined, detailId: undefined })}
+          onProductChanged={refreshProductLabel}
+        />
+      ) : view === 'sacks' || view === 'cones' ? (
+        <ListScreen
+          key={view}
+          type={view === 'sacks' ? 'sack' : 'cone'}
+          sub={activeSub}
+          detailId={route.detailId ?? null}
+          onOpen={(id) => navigate({ view, detailType: view === 'sacks' ? 'sack' : 'cone', detailId: String(id) })}
+          onClose={() => navigate({ view, detailType: undefined, detailId: undefined })}
+          onOpenOther={(t, id) => navigate({ view: t === 'sack' ? 'sacks' : 'cones', detailType: t, detailId: String(id) })}
+        />
       ) : view === 'dashboard' ? (
         <DashboardView
           range={range}
           onMeta={setFreshness}
           rank={rank}
+          sub={activeSub}
           onNavigate={followException}
           onSeeAllExceptions={() => navigate({ view: 'exceptions', sub: undefined, detailType: undefined, detailId: undefined })}
           onOpenTimeline={() => navigate({ view: 'timeline', sub: undefined, detailType: undefined, detailId: undefined })}
@@ -519,6 +577,7 @@ function Shell({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         <AdminView sub={activeSub} onMeta={setFreshness} />
       )}
     </AppShell>
+    </LiveProvider>
   );
 }
 
@@ -1259,8 +1318,6 @@ interface Exception {
  */
 function computeExceptions(
   spc: SpcData | null,
-  downtime: DowntimeData | null,
-  baselineAvailability: number | null,
   rejectSpc: RejectSpcData | null,
   date: string,
 ): Exception[] {
@@ -1302,24 +1359,11 @@ function computeExceptions(
       });
     }
   }
-  if (downtime && baselineAvailability != null && downtime.availabilityPct != null) {
-    const gap = baselineAvailability - downtime.availabilityPct;
-    if (gap >= 5) {
-      out.push({
-        severity: gap >= 15 ? 'fault' : 'warn',
-        title: 'Availability below normal',
-        message: (
-          <>
-            <b>{downtime.availabilityPct.toFixed(1)}%</b> today vs a <b>{baselineAvailability.toFixed(1)}%</b> 6-day baseline —{' '}
-            <b>{downtime.stoppageCount}</b> stoppages cost <b>{fmtDuration(downtime.totalDownSeconds)}</b>.
-          </>
-        ),
-        view: 'performance',
-        sub: 'stops',
-        because: `${downtime.stoppageCount} stoppages cost ${fmtDuration(downtime.totalDownSeconds)} today. The timeline shows when the line was down.`,
-      });
-    }
-  }
+  // An "availability below normal" finding used to sit here, pointing at
+  // Output > Stops. Output left the product on 2 Sep 2026 (see RAIL_GROUPS in
+  // shell.tsx), so the finding had nowhere to send anyone. Time lost is still
+  // worth surfacing and returns as a finding once the period report exists,
+  // pointing there instead of at an OEE decomposition nobody asked for.
   if (rejectSpc) {
     const activeEpisode = rejectSpc.episodes.find((e) => e.startTs.slice(0, 10) <= date && date <= e.endTs.slice(0, 10));
     if (activeEpisode) {
@@ -1459,6 +1503,7 @@ function DashboardView({
   onSeeAllExceptions,
   onOpenTimeline,
   onProductChanged,
+  sub,
 }: {
   range: { min: string | null; max: string | null };
   onMeta: (m: Meta) => void;
@@ -1467,6 +1512,8 @@ function DashboardView({
   onSeeAllExceptions: () => void;
   onOpenTimeline: () => void;
   onProductChanged: () => void;
+  /** Section-column tab: 'latest' or 'previous' (see sectionFor). */
+  sub: string;
 }) {
   const [date, setDate] = useState<string>('');
   const [shift, setShift] = useState<Shift>('all');
@@ -1474,24 +1521,22 @@ function DashboardView({
   const [byShift, setByShift] = useState<ProductionData | null>(null);
   const [trend, setTrend] = useState<ProductionRow[]>([]);
   const [downtime, setDowntime] = useState<DowntimeData | null>(null);
-  const [baselineAvailability, setBaselineAvailability] = useState<number | null>(null);
   const [spc, setSpc] = useState<SpcData | null>(null);
   const [rejectSpc, setRejectSpc] = useState<RejectSpcData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // The section column's two tabs pick the day: "Latest day" is the newest
+  // data (possibly still accumulating), "Day before" the last one guaranteed
+  // complete. A date typed into the picker stands until a tab is clicked.
   useEffect(() => {
-    // Default to the day BEFORE the most recent one, not the most recent day
-    // itself: "today" is always still accumulating until the day rolls over,
-    // so defaulting to it shows a partial, misleadingly-sparse picture. The
-    // day before is the most recent one guaranteed complete.
-    if (range.max && !date) {
-      const prior = new Date(`${range.max}T12:00:00Z`);
-      prior.setUTCDate(prior.getUTCDate() - 1);
-      const priorStr = prior.toISOString().slice(0, 10);
-      setDate(range.min && priorStr >= range.min ? priorStr : range.max);
-    }
-  }, [range.max, range.min, date]);
+    if (!range.max) return;
+    const prior = new Date(`${range.max}T12:00:00Z`);
+    prior.setUTCDate(prior.getUTCDate() - 1);
+    const priorStr = prior.toISOString().slice(0, 10);
+    const previous = range.min && priorStr >= range.min ? priorStr : range.max;
+    setDate(sub === 'latest' ? range.max : previous);
+  }, [range.max, range.min, sub]);
 
   useEffect(() => {
     if (!date) return;
@@ -1502,25 +1547,20 @@ function DashboardView({
     const from7 = new Date(date);
     from7.setDate(from7.getDate() - 6);
     const trendFrom = from7.toISOString().slice(0, 10);
-    const dayBefore = new Date(date);
-    dayBefore.setDate(dayBefore.getDate() - 1);
-    const baselineTo = dayBefore.toISOString().slice(0, 10);
     Promise.all([
       getProduction({ from: date, to: date, shift: shiftParam, groupBy: 'none' }),
       getProduction({ from: date, to: date, groupBy: 'shift' }),
       getProduction({ from: trendFrom, to: date, groupBy: 'day' }),
       getDowntime(date, 120),
-      baselineTo >= trendFrom ? getOee({ from: trendFrom, to: baselineTo }) : Promise.resolve(null),
       getSpc({ type: 'cone', from: date, to: date }),
       getRejectSpc(trendFrom, date, 'all', 'day'),
     ])
-      .then(([k, s, t, d, base, sp, rj]) => {
+      .then(([k, s, t, d, sp, rj]) => {
         if (cancelled) return;
         setKpi(k);
         setByShift(s.data);
         setTrend(t.data.rows);
         setDowntime(d.data);
-        setBaselineAvailability(base?.data.availabilityPct ?? null);
         setSpc(sp.data);
         setRejectSpc(rj.data);
         onMeta(k.metadata);
@@ -1534,10 +1574,7 @@ function DashboardView({
 
 
 
-  const exceptions = useMemo(
-    () => computeExceptions(spc, downtime, baselineAvailability, rejectSpc, date),
-    [spc, downtime, baselineAvailability, rejectSpc, date],
-  );
+  const exceptions = useMemo(() => computeExceptions(spc, rejectSpc, date), [spc, rejectSpc, date]);
   // ---- derived presentation values -------------------------------------
   // The design's copy quotes fixed numbers ("7 stops", "Night runs 15% behind").
   // Every one of them is computed here instead: several are simply false for
@@ -1658,7 +1695,7 @@ function DashboardView({
     <>
       <header className="ov-head">
         <div>
-          <div className="eyebrow">Production day · last complete</div>
+          <div className="eyebrow">{sub === 'latest' ? 'Production day · latest' : 'Production day · last complete'}</div>
           <h2 className="ov-day">{dayLabel || '—'}</h2>
         </div>
         <div className="ov-head-controls">
@@ -1713,9 +1750,10 @@ function DashboardView({
               <div className="ribbon-stats">
                 <div className="rs">
                   <span className="rs-label">Availability</span>
-                  <span className={`rs-val${(downtime.availabilityPct ?? 100) < (baselineAvailability ?? 100) - 5 ? ' alarm' : ''}`}>
-                    {downtime.availabilityPct ?? '—'}%
-                  </span>
+                  {/* Plain figure now. It used to turn red against a 6-day OEE
+                      baseline, and the only place that comparison could be
+                      followed up was Output, which left the product. */}
+                  <span className="rs-val">{downtime.availabilityPct ?? '—'}%</span>
                 </div>
                 <div className="rs">
                   <span className="rs-label">Between stops</span>
@@ -1874,8 +1912,6 @@ function ExceptionsView({
 }) {
   const [date, setDate] = useState('');
   const [spc, setSpc] = useState<SpcData | null>(null);
-  const [downtime, setDowntime] = useState<DowntimeData | null>(null);
-  const [baselineAvailability, setBaselineAvailability] = useState<number | null>(null);
   const [rejectSpc, setRejectSpc] = useState<RejectSpcData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1901,20 +1937,13 @@ function ExceptionsView({
     const from7 = new Date(date);
     from7.setDate(from7.getDate() - 6);
     const trendFrom = from7.toISOString().slice(0, 10);
-    const dayBefore = new Date(date);
-    dayBefore.setDate(dayBefore.getDate() - 1);
-    const baselineTo = dayBefore.toISOString().slice(0, 10);
     Promise.all([
       getSpc({ type: 'cone', from: date, to: date }),
-      getDowntime(date, 120),
-      baselineTo >= trendFrom ? getOee({ from: trendFrom, to: baselineTo }) : Promise.resolve(null),
       getRejectSpc(trendFrom, date, 'all', 'day'),
     ])
-      .then(([sp, d, base, rj]) => {
+      .then(([sp, rj]) => {
         if (cancelled) return;
         setSpc(sp.data);
-        setDowntime(d.data);
-        setBaselineAvailability(base?.data.availabilityPct ?? null);
         setRejectSpc(rj.data);
         onMeta(sp.metadata);
       })
@@ -1925,10 +1954,7 @@ function ExceptionsView({
     };
   }, [date, onMeta]);
 
-  const all = useMemo(
-    () => computeExceptions(spc, downtime, baselineAvailability, rejectSpc, date),
-    [spc, downtime, baselineAvailability, rejectSpc, date],
-  );
+  const all = useMemo(() => computeExceptions(spc, rejectSpc, date), [spc, rejectSpc, date]);
 
   // Which screens actually appear as a target today, in the order they're
   // first seen — the filter only ever offers choices that could do something.
@@ -6366,136 +6392,6 @@ function Stat({ label, val, u, accent }: { label: string; val: string; u?: strin
  * distinguishing field) — so the id is the only real disambiguator and must
  * always be shown, in both the picker and the current-product readout,
  * or switching between two such products looks like nothing happened. */
-function productLabel(p: ProductOption): string {
-  const base = p.description || p.lotCode || `Product ${p.productId}`;
-  const wt = p.setpointG ? ` · ${p.setpointG}g` : '';
-  return `${base}${wt} · #${p.productId}`;
-}
-
-function ProductDetailLine({ p }: { p: ProductOption }) {
-  const parts: string[] = [];
-  if (p.blend) parts.push(`Blend ${p.blend}`);
-  if (p.countText) parts.push(`Count ${p.countText}`);
-  if (p.tubeType) parts.push(`Tube ${p.tubeType}${p.tubeWeightG != null ? ` (${p.tubeWeightG}g)` : ''}`);
-  if (p.setpointG != null && (p.weightOffsetMinusG != null || p.weightOffsetPlusG != null)) {
-    parts.push(`Tolerance ${p.setpointG}g −${p.weightOffsetMinusG ?? 0}/+${p.weightOffsetPlusG ?? 0}g`);
-  }
-  if (!parts.length && p.activeFlag !== false) return null;
-  return (
-    <span className="cp-detail">
-      {parts.join(' · ')}
-      {p.activeFlag === false && (
-        <span className="cp-inactive-warn"> ⚠ marked inactive in PDAS</span>
-      )}
-    </span>
-  );
-}
-
-function CurrentProductBar({
-  rank,
-  onOpenTimeline,
-  onProductChanged,
-}: {
-  rank: number;
-  onOpenTimeline: () => void;
-  onProductChanged: () => void;
-}) {
-  const [current, setCurrent] = useState<TimelineEntry | null>(null);
-  const [products, setProducts] = useState<ProductOption[]>([]);
-  const [sel, setSel] = useState<number | ''>('');
-  const [saving, setSaving] = useState(false);
-  const [justChanged, setJustChanged] = useState<ProductOption | null>(null);
-  const canSet = rank >= 2; // supervisor+
-
-  const load = () => {
-    getCurrentProduct().then((r) => setCurrent(r.current)).catch(() => {});
-  };
-  useEffect(() => {
-    load();
-    getProducts().then((r) => setProducts(r.products)).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!justChanged) return;
-    const t = setTimeout(() => setJustChanged(null), 5000);
-    return () => clearTimeout(t);
-  }, [justChanged]);
-
-  const sortedProducts = useMemo(
-    () =>
-      [...products].sort(
-        (a, b) =>
-          (a.description ?? '').localeCompare(b.description ?? '') ||
-          (a.setpointG ?? 0) - (b.setpointG ?? 0) ||
-          a.productId - b.productId,
-      ),
-    [products],
-  );
-
-  const currentDetail = current ? products.find((p) => p.productId === current.productId) ?? null : null;
-  const selectedProduct = sel === '' ? null : products.find((p) => p.productId === Number(sel)) ?? null;
-
-  const apply = async () => {
-    if (sel === '') return;
-    setSaving(true);
-    try {
-      const chosen = products.find((p) => p.productId === Number(sel)) ?? null;
-      const r = await setCurrentProduct(Number(sel));
-      setCurrent(r.current);
-      setSel('');
-      setJustChanged(chosen);
-      onProductChanged();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="cpbar">
-      <div className="cp-info">
-        <span className="lab">Current product</span>
-        {current ? (
-          <>
-            <span className="val">
-              {current.productLabel} <span className="cp-id">#{current.productId}</span>
-            </span>
-            <span className="meta">
-              since {new Date(current.effectiveFrom).toLocaleString()} · set by {current.changedBy ?? '—'}
-            </span>
-            {currentDetail && <ProductDetailLine p={currentDetail} />}
-          </>
-        ) : (
-          <span className="val none">Not set — production is unattributed (Q1)</span>
-        )}
-        {justChanged && (
-          <span className="cp-confirm">✓ Changed to {productLabel(justChanged)}</span>
-        )}
-        <button type="button" className="rr-link cp-history-link" onClick={onOpenTimeline}>
-          View history →
-        </button>
-      </div>
-      {canSet && (
-        <div className="cp-set">
-          <div className="cp-set-row">
-            <select value={sel} onChange={(e) => setSel(e.target.value === '' ? '' : Number(e.target.value))}>
-              <option value="">Change product…</option>
-              {sortedProducts.map((p) => (
-                <option key={p.productId} value={p.productId}>
-                  {productLabel(p)}
-                </option>
-              ))}
-            </select>
-            <button disabled={sel === '' || saving} onClick={apply}>
-              {saving ? 'setting…' : 'Set'}
-            </button>
-          </div>
-          {selectedProduct && <ProductDetailLine p={selectedProduct} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ---------------- Admin (admin only) ---------------- */
 
 /* ---------------- Operations: can you trust what the other pages say? ----------------

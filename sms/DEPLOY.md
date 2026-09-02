@@ -32,6 +32,8 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - `SESSION_SECRET` → a long random string.
    - `WEB_DIST=./web/dist`.
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
+   - `LINE_NAME` → the name the floor and wall screens show for the line (default `TP1 · Line 3 · Unit 2`).
+   - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
 
@@ -60,6 +62,28 @@ mystery.
 - The API binds all interfaces (`0.0.0.0`), so no host config is needed.
 - Give the plant PC a **static IP or DNS name** — operators should not be typing a
   DHCP address that changes.
+
+### Wall display (TV)
+
+The app has a wall mode at `?v=wall`: fullscreen, no navigation, type sized
+for a TV, refreshing itself every ten seconds. Setting one up:
+
+1. Any PC or stick PC driving the TV, with the browser in kiosk mode pointed at
+   the wall URL — Edge: `msedge --kiosk http://<plant-ip>:4000/?v=wall --edge-kiosk-type=fullscreen`,
+   Chrome: `chrome --kiosk http://<plant-ip>:4000/?v=wall`. Add it to the PC's
+   startup so a power cut brings the display back on its own.
+2. Sign in **once**, with an operator account made for the display:
+   `node cli/dist/index.js user:create --username=wall --password=<strong> --role=operator`.
+   Sessions renew while they are in use, so the display never returns to the
+   login page by itself; it will only if the browser's cookies are cleared or
+   the account is disabled in Setup.
+3. Turn off the PC's screen sleep. Nothing else is needed: after a network
+   drop the page shows "Could not reach the server" over the last numbers it
+   had and recovers on its own.
+4. Leave **`LIVE_ALLOW_AS_OF=false`** in production. When it is on, `?at=<time>`
+   replays a past moment — right for a demo on the July copy, wrong for a wall:
+   a display left on a replay URL is bannered, but it is still showing old
+   numbers.
 
 ### Internet access is not required
 

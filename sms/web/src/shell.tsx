@@ -17,6 +17,10 @@ import { ageLabel, freshnessLevel } from './format';
 /* ------------------------------------------------------------------ views */
 
 export type View =
+  | 'now'
+  | 'sacks'
+  | 'cones'
+  | 'wall'
   | 'dashboard'
   | 'register'
   | 'performance'
@@ -41,23 +45,30 @@ export type View =
  * the same ranks server-side. It stops a role seeing a screen it has no
  * business in; it is not what stops them reading the data.
  */
+/**
+ * Floor screens (Now, Sacks, Cones, Wall) are for everyone. The analysis
+ * screens — the whole app until 2 Sep 2026 — moved behind the manager role
+ * after IFL's first review: a shift supervisor landing on SPC charts and OEE
+ * decompositions was the complaint. ANALYSIS_MIN_RANK is the one knob if
+ * that call is revisited.
+ */
+export const ANALYSIS_MIN_RANK = 3;
 export const VIEW_MIN_RANK: Record<View, number> = {
-  dashboard: 1, // Line
-  register: 1, // Records
-  shift: 1, // Shifts
-  performance: 2, // Output — supervisor+
-  weight: 2,
-  rejects: 2,
-  operations: 1, // reachable by anyone; no rail item (see RAIL below)
-  // Same rank as Overview: an operator already sees every one of these
-  // findings embedded in Overview's "Needs a look" panel today, so a
-  // dedicated page showing the identical class of finding — filterable, and
-  // for a chosen day instead of only yesterday — discloses nothing new.
-  exceptions: 1, // reachable by anyone; no rail item (see RAIL below)
-  // Same reasoning as exceptions: the current product and its changeover
-  // history are already shown to every role on Overview's product bar (once
-  // Phase 1b lands); a dedicated history page discloses nothing new.
-  timeline: 1, // reachable by anyone; no rail item (see RAIL below)
+  now: 1,
+  sacks: 1,
+  cones: 1,
+  wall: 1,
+  dashboard: ANALYSIS_MIN_RANK, // Line
+  register: ANALYSIS_MIN_RANK, // Records
+  shift: ANALYSIS_MIN_RANK, // Shifts
+  performance: ANALYSIS_MIN_RANK, // Output
+  weight: ANALYSIS_MIN_RANK,
+  rejects: ANALYSIS_MIN_RANK,
+  exceptions: ANALYSIS_MIN_RANK, // reached from Line's findings; no rail item
+  operations: 1, // reachable by anyone via the sync footer; no rail item
+  // The current product and its changeover history are shown to every role
+  // on the Now screen's product bar; the history page discloses nothing new.
+  timeline: 1, // reached via "View history"; no rail item
   admin: 4, // Setup — admin only
 };
 
@@ -65,6 +76,10 @@ export const canOpen = (view: View, rank: number) => rank >= VIEW_MIN_RANK[view]
 
 /** Short, plain rail labels — the design deliberately renames the old ones. */
 export const VIEW_LABEL: Record<View, string> = {
+  now: 'Now',
+  sacks: 'Sacks',
+  cones: 'Cones',
+  wall: 'Wall',
   dashboard: 'Line',
   register: 'Records',
   performance: 'Output',
@@ -90,6 +105,26 @@ export const VIEW_LABEL: Record<View, string> = {
  * bound to a CSS variable here so the mask always matches the surface it sits on.
  */
 const GLYPH: Record<View, ReactNode> = {
+  // Floor glyphs, drawn in the same 24×24 / 1.8-stroke idiom as the rest.
+  now: <path d="M3 12h4l2.5-6 4 12 2.5-6H21" strokeLinecap="round" strokeLinejoin="round" />,
+  sacks: (
+    <>
+      <path d="M9 4h6l-1.5 3.5c3 1.4 4.5 4.3 4.5 7.5a6 6 0 0 1-12 0c0-3.2 1.5-6.1 4.5-7.5Z" strokeLinejoin="round" />
+      <path d="M9.5 7.5h5" opacity="0.5" />
+    </>
+  ),
+  cones: (
+    <>
+      <path d="M9.5 4h5l2 15h-9z" strokeLinejoin="round" />
+      <path d="M8.3 12.5h7.4" opacity="0.5" />
+    </>
+  ),
+  wall: (
+    <>
+      <rect x="3" y="5" width="18" height="12" rx="1.5" />
+      <path d="M9 20h6M12 17v3" strokeLinecap="round" />
+    </>
+  ),
   dashboard: (
     <>
       <path d="M3 13a9 9 0 0 1 18 0" />
@@ -175,11 +210,31 @@ function Glyph({ children }: { children: ReactNode }) {
   );
 }
 
-/** Rail order. `operations` is absent on purpose — it stays a reachable route
- *  (the section-column sync indicator opens it, and Setup renders it) without
- *  spending one of the seven rail slots or putting a Setup item in front of an
- *  operator. The register detail page already works this way. */
-const RAIL: View[] = ['dashboard', 'register', 'performance', 'weight', 'rejects', 'shift', 'admin'];
+/**
+ * Rail order, in groups. The floor group is everyone's; "Analysis" appears only
+ * for roles that can open it (a group with no visible item renders nothing,
+ * label included).
+ *
+ * `performance` (Output) and `shift` (Shifts) were REMOVED from the rail on
+ * 2 Sep 2026, after IFL's requirement list was read back against the build.
+ * Nothing in that list asks for OEE, availability, performance, quality,
+ * downtime, stoppage clustering, mean time between failures, or shift-versus-
+ * shift comparison. Those five sub-screens answered a question nobody posed,
+ * and they carried the charts IFL specifically called unreadable. The routes
+ * still resolve, so a typed URL and the existing deep links keep working, but
+ * they are no longer part of the product: not in the rail, not in a demo, and
+ * not claimed in CAPABILITIES.md. Restoring them is a one-line change here if
+ * IFL ever asks for effectiveness reporting.
+ *
+ * `operations`, `exceptions` and `timeline` are absent for the original
+ * reason — reachable routes without rail items, opened from the sync footer,
+ * Line's findings and the product bar.
+ */
+const RAIL_GROUPS: { label: string | null; views: View[] }[] = [
+  { label: null, views: ['now', 'sacks', 'cones', 'wall'] },
+  { label: 'Analysis', views: ['dashboard', 'register', 'weight', 'rejects'] },
+  { label: null, views: ['admin'] },
+];
 
 /* ------------------------------------------------------- section column cfg */
 
@@ -211,18 +266,27 @@ function Rail({
     <nav className="rail" aria-label="Sections">
       <div className="rail-mark">SMS</div>
       <div className="rail-items">
-        {RAIL.filter((v) => canOpen(v, rank)).map((v) => (
-          <button
-            key={v}
-            type="button"
-            className={`rail-btn${view === v ? ' active' : ''}`}
-            aria-current={view === v ? 'page' : undefined}
-            onClick={() => onNavigate(v)}
-          >
-            <Glyph>{GLYPH[v]}</Glyph>
-            <span className="rail-label">{VIEW_LABEL[v]}</span>
-          </button>
-        ))}
+        {RAIL_GROUPS.map((g, gi) => {
+          const items = g.views.filter((v) => canOpen(v, rank));
+          if (items.length === 0) return null;
+          return (
+            <div className="rail-group" key={gi}>
+              {g.label && <div className="rail-group-label">{g.label}</div>}
+              {items.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={`rail-btn${view === v ? ' active' : ''}`}
+                  aria-current={view === v ? 'page' : undefined}
+                  onClick={() => onNavigate(v)}
+                >
+                  <Glyph>{GLYPH[v]}</Glyph>
+                  <span className="rail-label">{VIEW_LABEL[v]}</span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
       <button type="button" className="rail-btn rail-out" onClick={onSignOut}>
         <Glyph>{SIGN_OUT_GLYPH}</Glyph>

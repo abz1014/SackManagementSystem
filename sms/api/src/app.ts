@@ -19,6 +19,7 @@ import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getOee } from './services/oee.js';
+import { getLive } from './services/live.js';
 import {
   listUsers, createUser, updateUser,
   listStations, setStation,
@@ -213,6 +214,42 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         excludedDays: excluded,
         minProductionRows: MIN_PRODUCTION_ROWS,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Live line state — polled every ~10 s by the floor screens and the wall display ----
+  // Cached under the same short TTL as production so a room of wall screens
+  // and floor PCs costs one set of queries per TTL, not one per viewer.
+  const liveQuery = z.object({
+    asOf: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
+      .optional(),
+  });
+  app.get('/api/live', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = liveQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      if (q.data.asOf && !cfg.liveAllowAsOf) {
+        res.status(400).json({ error: 'asOf replay is disabled on this server (LIVE_ALLOW_AS_OF)' });
+        return;
+      }
+      const asOfMs = q.data.asOf ? new Date(q.data.asOf).getTime() : undefined;
+      const key = `live:${asOfMs ?? 'now'}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
+      const data = await getLive(pool, cfg.lineId, cfg.lineName, { asOfMs });
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }

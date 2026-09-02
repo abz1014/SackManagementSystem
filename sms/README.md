@@ -10,8 +10,8 @@ Production monitoring for the TP1 Line 3 / Unit 2 yarn cone line. React + Node +
 | `db/migrations/` | App-DB schema (`sms_raw.*`, `sms.*`, 21 tables) | **done** |
 | `sync-worker/` | Read-only IFL → raw → canonical sync | **done** |
 | `cli/` | `sms sync / verify / summary / rebuild` | **done** |
-| `api/` | Express REST + auth | next (Step 5–6) |
-| `web/` | React dashboard | Step 7 (demo) |
+| `api/` | Express REST + auth (+ `/api/live` for the floor screens) | **done** |
+| `web/` | React app — floor screens (Now · Sacks · Cones · Wall) for every role, analysis screens for managers | **done** |
 
 ## CLI
 

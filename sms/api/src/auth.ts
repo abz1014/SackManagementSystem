@@ -125,11 +125,15 @@ export async function destroySession(pool: ConnectionPool, id: string): Promise<
   await pool.request().input('id', mssql.UniqueIdentifier, id).query(`DELETE FROM sms.session WHERE session_id=@id`);
 }
 
-async function userFromSession(pool: ConnectionPool, id: string): Promise<AuthUser | null> {
+async function userFromSession(
+  pool: ConnectionPool,
+  id: string,
+): Promise<{ user: AuthUser; expiresAtUtc: Date | null } | null> {
   const r = await pool.request().input('id', mssql.UniqueIdentifier, id).query<{
     user_id: number; username: string; display_name: string | null; role: string; rank: number;
+    expires_at_utc?: Date | null;
   }>(
-    `SELECT u.user_id, u.username, u.display_name, r.name AS role, r.rank
+    `SELECT u.user_id, u.username, u.display_name, r.name AS role, r.rank, s.expires_at_utc
      FROM sms.session s
      JOIN sms.app_user u ON u.user_id = s.user_id AND u.active = 1
      JOIN sms.role r ON r.role_id = u.role_id
@@ -137,8 +141,31 @@ async function userFromSession(pool: ConnectionPool, id: string): Promise<AuthUs
   );
   const row = r.recordset[0];
   return row
-    ? { userId: row.user_id, username: row.username, displayName: row.display_name, role: row.role, rank: row.rank }
+    ? {
+        user: { userId: row.user_id, username: row.username, displayName: row.display_name, role: row.role, rank: row.rank },
+        expiresAtUtc: row.expires_at_utc ? new Date(row.expires_at_utc) : null,
+      }
     : null;
+}
+
+/**
+ * Sliding expiry. Sessions used to be a fixed seven days from login, which is
+ * right for a desk user and wrong for the wall display: a screen that polls
+ * every ten seconds around the clock would still be thrown back to the login
+ * page once a week, at whatever hour the week happened to end. A session that
+ * is still in use is renewed once it has passed half its life, so an active
+ * screen never expires and an abandoned one still dies after seven idle days.
+ * At most one UPDATE per session per 3.5 days, not one per request.
+ */
+const RENEW_BELOW_MS = (SESSION_DAYS * 86_400_000) / 2;
+async function renewSession(pool: ConnectionPool, id: string, res: Response, req: Request): Promise<void> {
+  const expires = new Date(Date.now() + SESSION_DAYS * 86_400_000);
+  await pool
+    .request()
+    .input('id', mssql.UniqueIdentifier, id)
+    .input('exp', mssql.DateTime2, expires)
+    .query(`UPDATE sms.session SET expires_at_utc = @exp WHERE session_id = @id`);
+  setSessionCookie(res, id, expires, req);
 }
 
 function readCookie(req: Request, name: string): string | null {
@@ -190,9 +217,14 @@ export function clearSessionCookie(res: Response): void {
 
 /** Attach req.user from the session cookie (or null). */
 export function authMiddleware(pool: ConnectionPool) {
-  return async (req: Request, _res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const id = readCookie(req, SESSION_COOKIE);
-    (req as AuthedRequest).user = id ? await userFromSession(pool, id) : null;
+    const found = id ? await userFromSession(pool, id) : null;
+    (req as AuthedRequest).user = found?.user ?? null;
+    if (id && found?.expiresAtUtc && found.expiresAtUtc.getTime() - Date.now() < RENEW_BELOW_MS) {
+      // Best-effort: a failed renewal must never fail the request it rode on.
+      await renewSession(pool, id, res, req).catch((e) => console.error('[auth] session renewal failed:', e));
+    }
     next();
   };
 }

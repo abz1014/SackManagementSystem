@@ -1,0 +1,196 @@
+/* Floor screens — Now, Sacks, Cones, record card. Built on the same tokens as
+   styles.css; bigger type, fewer words, one number per tile. Everything is in
+   rem so the Text-size control (Desk / Floor / Wall) scales it. */
+
+/* ---- rail groups (Floor / Analysis divider) ---- */
+.rail-group { display: flex; flex-direction: column; gap: var(--sp-1); }
+.rail-group + .rail-group { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--ink-2); }
+.rail-group-label {
+  font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--on-ink-quiet); text-align: center; padding: 0 0 var(--sp-1);
+}
+
+/* ---- shared ---- */
+.replay-banner {
+  background: var(--warn-pale); border: 1px solid var(--warn-border); color: var(--warn-ink);
+  border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; font-size: var(--fs-body);
+}
+.pill.none { background: var(--paper-2); color: var(--muted); }
+.pill.big { font-size: var(--fs-card); padding: 6px 16px; vertical-align: middle; }
+.live-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--ok-dot);
+  margin-left: 10px; vertical-align: middle; animation: sync-pulse var(--t-pulse) ease-in-out infinite;
+}
+.floor-foot {
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: center;
+  margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--hairline);
+  color: var(--muted); font-size: var(--fs-caption); font-family: var(--font-mono);
+}
+.floor-foot .floor-offline { flex-basis: 100%; }
+.floor-foot .floor-offline b { color: var(--alarm-ink); }
+.floor-sync { display: inline-flex; align-items: center; gap: 8px; }
+.floor-sync .dot { width: 8px; height: 8px; border-radius: 50%; }
+.floor-sync .dot.ok { background: var(--ok-dot); }
+.floor-sync .dot.warn { background: var(--warn); }
+.floor-sync .dot.crit { background: var(--alarm); }
+
+/* ---- Now: state block ---- */
+.now-state {
+  display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; align-items: stretch;
+  background: var(--card); border: 1px solid var(--hairline); border-left: 10px solid var(--muted-2);
+  border-radius: var(--radius); padding: 22px 28px; margin-bottom: 14px;
+}
+.now-state.run { border-left-color: var(--ok); }
+.now-state.stop { border-left-color: var(--alarm); }
+.now-state.idle, .now-state.none { border-left-color: var(--muted-2); }
+.ns-main { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+/* "No readings" is the longest state word and it sets the width. Clamped so a
+   narrow window shrinks it instead of pushing it out of the panel. */
+.ns-title {
+  font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1; font-weight: 700;
+  letter-spacing: -0.03em; color: var(--ink); overflow-wrap: anywhere;
+}
+.now-state.run .ns-title { color: var(--ok); }
+.now-state.stop .ns-title { color: var(--alarm); }
+.now-state.idle .ns-title, .now-state.none .ns-title { color: var(--graphite); }
+.ns-detail { margin-top: 10px; font-size: var(--fs-row); color: var(--graphite); }
+.ns-side { flex: 0 1 300px; display: flex; flex-direction: column; gap: 4px; text-align: right; justify-content: center; }
+.ns-shift { font-size: var(--fs-card); font-weight: 600; letter-spacing: -0.01em; }
+.ns-shift-times { font-size: var(--fs-caption); color: var(--muted); }
+.ns-clock { margin-top: 10px; display: flex; flex-direction: column; align-items: flex-end; }
+.ns-clock-val { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--ink); font-variant-numeric: tabular-nums; }
+.ns-clock-day { font-size: var(--fs-caption); color: var(--muted); }
+
+/* ---- tiles ---- */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+/* A query container, so the numeral inside can be sized against the TILE
+   rather than the window. The two are not proportional: the rail and the
+   section column take a fixed 342px, so at 1280px wide a four-across tile is
+   only ~167px of content while `vw` still reads 1280 and hands it a 46px
+   numeral that does not fit. */
+.tile {
+  background: var(--card); border: 1px solid var(--hairline); border-radius: var(--radius);
+  padding: 18px 20px 14px; min-width: 0; text-align: left; font: inherit; color: inherit;
+  container-type: inline-size;
+}
+.tile-btn { cursor: pointer; transition: border-color var(--t-hover), background var(--t-hover); }
+.tile-btn:hover { border-color: var(--ink); background: var(--paper-3); }
+/* Label row. The pass/fail pill sits here rather than next to the numeral, so
+   the number always owns its own line. Both forms carry the same min-height so
+   a row of tiles keeps one baseline whether or not it has a pill. */
+.tile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 26px; }
+.tile-label {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow); text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); display: flex; align-items: center; min-height: 26px;
+}
+.tile-head .tile-label { min-height: 0; }
+/* Clamped, not fixed: a flat 46px cannot hold "47.20" plus its unit in a
+   narrow tile, and the unit was the part clipped at the card edge.
+
+   Two declarations on purpose. The vw one is a floor for browsers without
+   container queries (pre-2022); the cqi one wins everywhere else and is the
+   correct measure, because it reads the tile's own width. A browser that does
+   not understand `cqi` discards that whole declaration and keeps the first,
+   which is why the order matters and why the fallback is not merely decorative. */
+.tile-value {
+  margin-top: 6px; font-family: var(--font-mono);
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  font-size: clamp(1.5rem, 21cqi, 2.5rem);
+  font-weight: 500; letter-spacing: -0.03em; line-height: 1.05; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; gap: 0.26em; min-width: 0;
+}
+.m-val { white-space: nowrap; }
+.m-unit { font-size: 0.46em; font-weight: 500; color: var(--muted); letter-spacing: 0; white-space: nowrap; }
+.tile-foot {
+  margin-top: 10px; font-size: var(--fs-caption); color: var(--graphite);
+  display: flex; justify-content: space-between; gap: 8px; min-width: 0; overflow-wrap: anywhere;
+}
+.tile-go { color: var(--muted); font-size: var(--fs-card); line-height: 1; flex: none; }
+.tiles-small .tile-value {
+  font-size: clamp(1.3rem, 2.6vw, var(--fs-page));
+  font-size: clamp(1.3rem, 18cqi, var(--fs-page));
+}
+/* Drops to two across at 1200px, the same width where the section column
+   collapses. Below that a four-across tile has no room for a figure. */
+@media (max-width: 1200px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .tiles { grid-template-columns: 1fr; } }
+
+/* ---- stations ---- */
+.stations-panel { margin-bottom: 14px; }
+.stations-panel .panel-head { margin-bottom: 14px; }
+.stations { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 8px; }
+.st-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--paper-2); border: 1px solid var(--hairline-2); border-radius: var(--radius-sm); padding: 10px 4px;
+}
+.st-n { font-family: var(--font-mono); font-size: var(--fs-eyebrow); color: var(--muted); }
+.st-c { font-family: var(--font-mono); font-size: var(--fs-panel); color: var(--ink); font-variant-numeric: tabular-nums; }
+.st-cell.dim { opacity: 0.45; }
+.st-cell.off { opacity: 1; border-color: var(--alarm-border); background: var(--alarm-pale); }
+.st-cell.off .st-c { color: var(--alarm-ink); }
+.panel-foot { margin-top: 12px; font-size: var(--fs-caption); color: var(--muted); }
+
+/* ---- lists ---- */
+.list-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.list-title { margin: 6px 0 0; font-size: var(--fs-page); font-weight: 600; letter-spacing: -0.02em; }
+.list-controls { display: flex; align-items: center; gap: 14px; }
+.lrows { display: flex; flex-direction: column; gap: 6px; }
+.lrow {
+  display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(140px, 1fr) auto minmax(200px, 1fr) 24px;
+  align-items: center; gap: 16px; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: var(--card); border: 1px solid var(--hairline); border-radius: var(--radius);
+  padding: 14px 18px; cursor: pointer; transition: border-color var(--t-hover), background var(--t-hover);
+}
+.lrow:hover { border-color: var(--ink); background: var(--paper-3); }
+.lrow.fresh { animation: row-in 3s ease-out 1; }
+@keyframes row-in { 0% { background: var(--ok-pale); border-color: var(--ok); } 100% { background: var(--card); border-color: var(--hairline); } }
+.lr-id { font-family: var(--font-mono); font-size: var(--fs-row); color: var(--graphite); }
+.lr-w { font-family: var(--font-mono); font-size: var(--fs-card); color: var(--ink); font-variant-numeric: tabular-nums; }
+.lr-t { display: flex; flex-direction: column; line-height: 1.25; }
+.lr-t b { font-family: var(--font-mono); font-weight: 500; font-size: var(--fs-cell); font-variant-numeric: tabular-nums; }
+.lr-t small { font-size: var(--fs-caption); color: var(--muted); }
+.lr-go { color: var(--muted); font-size: var(--fs-card); text-align: right; }
+.lrows.compact .lrow { padding: 10px 14px; }
+.lrows.compact .lr-w { font-size: var(--fs-row); }
+.list-more { display: flex; justify-content: center; margin-top: 16px; }
+.btn-more {
+  font: inherit; font-size: var(--fs-body); padding: 12px 22px; border-radius: var(--radius);
+  border: 1px solid var(--field-border); background: var(--card); color: var(--ink); cursor: pointer;
+}
+.btn-more:hover:not(:disabled) { border-color: var(--ink); }
+.btn-more:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 720px) {
+  .lrow { grid-template-columns: 1fr 1fr auto; }
+  .lr-t { grid-column: 1 / -1; flex-direction: row; gap: 10px; }
+  .lr-go { display: none; }
+}
+
+/* ---- record card ---- */
+.card-back {
+  font: inherit; font-size: var(--fs-body); background: none; border: 0; color: var(--graphite);
+  cursor: pointer; padding: 0; margin-bottom: 16px;
+}
+.card-back:hover { color: var(--ink); }
+.card-head {
+  background: var(--card); border: 1px solid var(--hairline); border-radius: var(--radius);
+  padding: 22px 28px; margin-bottom: 14px;
+}
+.card-title { margin: 4px 0 8px; font-size: var(--fs-page); font-weight: 600; letter-spacing: -0.02em; }
+.card-weight {
+  font-family: var(--font-mono); font-size: 3.5rem; line-height: 1; letter-spacing: -0.03em; font-weight: 500;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-variant-numeric: tabular-nums;
+}
+.card-when { margin-top: 10px; font-size: var(--fs-row); color: var(--graphite); }
+.card-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 14px;
+}
+.card-grid > div { background: var(--card); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 12px 16px; }
+.card-grid dt {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+}
+.card-grid dd { margin: 6px 0 0; font-size: var(--fs-card); font-weight: 500; }
+.card-grid dd.mono { font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--graphite); }
+.card-related .panel-head { margin-bottom: 12px; flex-wrap: wrap; }

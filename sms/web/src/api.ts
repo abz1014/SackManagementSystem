@@ -642,3 +642,48 @@ export interface OperationsData {
 export function getOperations(): Promise<Envelope<OperationsData>> {
   return get('/api/operations');
 }
+
+// ---- live line state — polled by the floor screens and the wall display ----
+export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
+export interface LiveLine {
+  lineId: number;
+  lineName: string;
+  /** Plant wall clock at generation, in the production_ts convention (render in UTC). */
+  plantNowUtc: string;
+  /** True when the server clock was moved by ?asOf — a replay, never live. */
+  replay: boolean;
+  shift: {
+    code: 'morning' | 'evening' | 'night';
+    shiftDate: string;
+    startUtc: string;
+    endUtc: string;
+    elapsedSeconds: number;
+    remainingSeconds: number;
+  };
+  state: {
+    status: LineStatus;
+    sinceLastConeSeconds: number | null;
+    runStartUtc: string | null;
+    stopThresholdSeconds: number;
+  };
+  thisShift: {
+    cones: number;
+    conesInRange: number;
+    conesInRangePct: number | null;
+    rejectedCones: number;
+    sacks: number;
+    sackWeightKg: number;
+    conesPerHour: number | null;
+  };
+  recent: { conesLast10Min: number; conesLastHour: number; sacksLastHour: number };
+  lastSack: { ts: string; sourceRowId: number; sackNum: number | null; weightKg: number | null; inRange: boolean | null } | null;
+  lastCone: { ts: string; sourceRowId: number; station: number | null; weightG: number | null; inRange: boolean | null } | null;
+  lastReject: { ts: string; rejectType: string; station: number | null } | null;
+  stations: { station: number; cones: number; lastTs: string }[];
+}
+export interface LiveData {
+  lines: LiveLine[];
+}
+export function getLive(asOf?: string | null): Promise<Envelope<LiveData>> {
+  return get(asOf ? `/api/live?asOf=${encodeURIComponent(asOf)}` : '/api/live');
+}

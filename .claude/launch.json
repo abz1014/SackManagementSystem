@@ -4,8 +4,20 @@
     {
       "name": "sms-web",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "cd /d sms\\web && npx vite --port 5173"],
+      "runtimeArgs": [
+        "/c",
+        "cd /d sms\\web && npx vite --port 5173"
+      ],
       "port": 5173
+    },
+    {
+      "name": "sms-api",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d sms && node api\\dist\\index.js"
+      ],
+      "port": 4000
     }
   ]
 }
