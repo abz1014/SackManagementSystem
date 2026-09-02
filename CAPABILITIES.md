@@ -179,13 +179,28 @@ packing list, and the screen says so.
 
 The production day at a glance, defaulting to the last complete day.
 
-- **24-hour run/stop ribbon** — the whole day as one band, every detected
-  stoppage positioned and sized by its real start and duration, with shift
-  boundaries drawn from the actual 06:00/14:00/22:00 times rather than by
-  cutting the bar into thirds.
-- **Run/stop verdict** — how long the line ran of how long it was observed,
-  the stoppage count, and the longest stop with its time.
-- **Availability, mean time between stops, mean time to restart.**
+- **Run/stop band** — the day as one band, every detected stoppage positioned
+  and sized by its real start and duration, with shift boundaries drawn from
+  the actual 06:00/14:00/22:00 times rather than by cutting the bar into
+  thirds. Pointing at a stop names it in the line above the band: how long, the
+  times it ran between, and what share of the day's lost time it was. The band
+  and the list below it highlight together, so a bar and its entry are always
+  identifiable as the same stop.
+- **Three separate lines, on purpose.** Shift names above the band, the band
+  itself, hour ticks below it. Nothing shares a line with the data marks:
+  labels drawn inside the band were painted underneath the stoppage blocks and
+  a stop landing on a name cut the word in half. Hour ticks replaced a pair of
+  end timestamps that collided with the shift names on a short day.
+- **Longest stops** — the five that cost the most, each with its duration, the
+  times it ran between, and its share of the day's downtime as a bar and a
+  figure, then a line totalling the rest. The band answers *when*; this answers
+  *which*, which is the actionable half and cannot be read from a bar's width.
+  On the day shown while writing this, one 45-minute stop was 46% of all time
+  lost and fourteen others together were the remainder.
+- **Run verdict** — how long the line ran of how long it was observed.
+- **Availability, mean time between stops, mean time to restart.** Availability
+  to one decimal: it is inferred from event timestamps, and two decimals would
+  claim a precision it does not have.
 - **Four KPI cards** with 7-day sparklines: total cones, rejected cones, total
   sacks, total sack weight, each with a derived sub-figure (in-range
   percentage, reject share, cones per sack, average sack weight).

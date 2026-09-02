@@ -1547,19 +1547,67 @@ body {
   position: relative; height: 52px; background: var(--ribbon-track);
   border-radius: var(--radius-sm); overflow: hidden;
 }
-.ribbon-stop { position: absolute; top: 0; bottom: 0; background: var(--alarm); }
+/* Shift names sit on their OWN line above the band. Drawn inside it they were
+   painted underneath the stoppage blocks, so a stop landing on a name cut the
+   word in half. Nothing shares a line with the data marks. */
+.ribbon-bands {
+  position: relative; height: 1.35em; margin-bottom: 5px;
+  font-family: var(--font-mono); font-size: var(--fs-tick); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.rb-name { position: absolute; white-space: nowrap; }
+/* Tint only. */
+.ribbon-band { position: absolute; top: 0; bottom: 0; }
+.ribbon-band.b1 { background: rgba(22, 25, 28, 0.045); }
+/* A button, not a span: the only way to interrogate this band used to be a
+   native `title` tooltip, which appears after a delay and cannot be reached
+   from the keyboard. */
+.ribbon-stop {
+  position: absolute; top: 0; bottom: 0; padding: 0; border: 0; cursor: pointer;
+  background: var(--alarm); transition: filter var(--t-hover);
+}
+.ribbon-stop:hover, .ribbon-stop.on { filter: brightness(0.78); }
+.ribbon-stop.on { box-shadow: 0 0 0 2px var(--ink); }
+.ribbon-stop:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .ribbon-div { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-30); }
-/* Absolutely positioned rather than space-between: the shift labels have to sit
-   over the band they name, and flexbox would spread them evenly regardless of
-   where the 14:00/22:00 boundaries actually fall. */
+/* Regular hour ticks. Absolutely positioned because they mark real instants,
+   not evenly-spaced slots. */
 .ribbon-axis {
   position: relative; height: 1.5em; margin-top: 7px;
   font-family: var(--font-mono); font-size: var(--fs-tick); color: var(--muted);
 }
-.ra-band { position: absolute; transform: translateX(-50%); white-space: nowrap; }
-.ra-end { position: absolute; }
-.ra-end.start { left: 0; }
-.ra-end.finish { right: 0; }
+.ra-tick { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+
+/* ---- longest stops ----
+   The band shows WHEN. This shows WHICH, and how much each one cost, which is
+   the actionable half and is not readable from a bar's width. */
+.stoplist { margin-top: 18px; border-top: 1px solid var(--hairline); padding-top: 12px; }
+.stoplist-head {
+  font-family: var(--font-mono); font-size: var(--fs-eyebrow); text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px;
+}
+.stoprow {
+  display: grid; grid-template-columns: 5.5em minmax(11em, 1fr) minmax(60px, 8em) 3.5em;
+  align-items: center; gap: 14px; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: none; border: 0; border-radius: var(--radius-sm); padding: 7px 8px; margin: 0 -8px;
+  cursor: pointer; transition: background var(--t-hover);
+}
+.stoprow:hover, .stoprow.on { background: var(--paper-3); }
+.stoprow:focus-visible { outline: 2px solid var(--ok); outline-offset: -2px; }
+.sr-dur { font-family: var(--font-mono); font-size: var(--fs-cell); color: var(--ink); font-variant-numeric: tabular-nums; }
+.sr-time { font-size: var(--fs-caption); color: var(--graphite); white-space: nowrap; }
+.sr-bar { height: 8px; background: var(--track); border-radius: 2px; overflow: hidden; }
+.sr-bar i { display: block; height: 100%; background: var(--alarm-soft); }
+.stoprow.on .sr-bar i, .stoprow:hover .sr-bar i { background: var(--alarm); }
+.sr-share {
+  font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--graphite);
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.stoplist-foot { margin-top: 8px; font-size: var(--fs-caption); color: var(--muted); }
+@media (max-width: 700px) {
+  .stoprow { grid-template-columns: 5.5em 1fr 3.5em; }
+  .sr-bar { display: none; }
+}
 
 /* ---------------------------------------------------------------- KPI row */
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }

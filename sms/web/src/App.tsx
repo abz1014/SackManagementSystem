@@ -1540,6 +1540,8 @@ function DashboardView({
   const [rejectSpc, setRejectSpc] = useState<RejectSpcData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Which stoppage the reader is pointing at, on the band or in the list. */
+  const [hoverStop, setHoverStop] = useState<number | null>(null);
 
   // The section column's two tabs pick the day: "Latest day" is the newest
   // data (possibly still accumulating), "Day before" the last one guaranteed
@@ -1605,14 +1607,23 @@ function DashboardView({
     if (!downtime?.firstTs || !downtime.lastTs) return null;
     const t0 = new Date(downtime.firstTs).getTime();
     const span = Math.max(1, new Date(downtime.lastTs).getTime() - t0);
-    const blocks = downtime.stoppages.map((s) => ({
+    const totalDown = Math.max(1, downtime.totalDownSeconds);
+    const blocks = downtime.stoppages.map((s, i) => ({
+      i,
       left: ((new Date(s.startTs).getTime() - t0) / span) * 100,
       // a 2-minute stop on a 24-hour axis is 0.14% wide and would vanish; the
       // design floors it so every stop stays visible and hoverable
       width: Math.max(0.45, ((s.durationSeconds * 1000) / span) * 100),
       seconds: s.durationSeconds,
       startTs: s.startTs,
+      endTs: s.endTs,
+      /** Share of the day's lost time. The reason one stop matters and
+       *  fourteen others are noise, and not readable from the bar's width. */
+      sharePct: Math.round((1000 * s.durationSeconds) / totalDown) / 10,
     }));
+    /** Longest first. A ranked list answers "which stop cost us the day" —
+     *  the band answers "when", and neither answers the other. */
+    const ranked = [...blocks].sort((a, b) => b.seconds - a.seconds);
     const longest = [...downtime.stoppages].sort((a, b) => b.durationSeconds - a.durationSeconds)[0] ?? null;
 
     // Shift bands are placed from the real 14:00 and 22:00 boundaries, not by
@@ -1627,18 +1638,48 @@ function DashboardView({
     // zone instead put them five hours out on a UTC+5 machine.
     const bounds = [14, 22].map((h) => pctAt(new Date(`${date}T${String(h).padStart(2, '0')}:00:00Z`)));
     const edges = [0, ...bounds, 100];
+    // Bands are drawn as tinted REGIONS behind the stops rather than as labels
+    // floating on the axis. The labels used to be positioned at each band's
+    // centre on the same line as the first and last timestamps, and on a short
+    // day the evening label landed on top of the end time — "Evening" and
+    // "3:06:17 PM" printed over one another.
     const bands = ['Morning', 'Evening', 'Night']
-      .map((name, i) => ({
-        name,
-        // clamp so a band that is only partly on screen still labels its
-        // visible portion rather than drifting off the end
-        centre: (Math.max(0, edges[i]!) + Math.min(100, edges[i + 1]!)) / 2,
-        visible: Math.min(100, edges[i + 1]!) - Math.max(0, edges[i]!) > 6,
-      }))
+      .map((name, i) => {
+        const left = Math.max(0, edges[i]!);
+        const right = Math.min(100, edges[i + 1]!);
+        return {
+          name,
+          left,
+          width: right - left,
+          visible: right - left > 6,
+          // A band starting near the right edge gets its name anchored to its
+          // RIGHT, or the text runs off the panel.
+          anchorRight: left > 78,
+          right: 100 - right,
+        };
+      })
       .filter((b) => b.visible);
+
+    /**
+     * Regular hour ticks, spaced so about six fit. Replaces the old pair of
+     * end timestamps: an axis that only labels its two ends tells you the
+     * range but not where anything sits inside it.
+     */
+    const spanHours = span / 3_600_000;
+    const stepH = Math.max(1, Math.ceil(spanHours / 6));
+    const ticks: { left: number; label: string }[] = [];
+    const firstTick = new Date(t0);
+    firstTick.setUTCMinutes(0, 0, 0);
+    while (firstTick.getUTCHours() % stepH !== 0) firstTick.setUTCHours(firstTick.getUTCHours() + 1);
+    for (let d = new Date(firstTick); d.getTime() <= t0 + span; d.setUTCHours(d.getUTCHours() + stepH)) {
+      const left = pctAt(d);
+      if (left >= 2 && left <= 98) ticks.push({ left, label: fmtHourLabel(d.toISOString()) });
+    }
 
     return {
       blocks,
+      ranked,
+      ticks,
       longest,
       dividers: bounds.filter((p) => p > 0 && p < 100),
       bands,
@@ -1646,6 +1687,9 @@ function DashboardView({
       downSeconds: downtime.totalDownSeconds,
     };
   }, [downtime, date]);
+
+  /** The stop under the pointer, whether that came from the band or the list. */
+  const hoveredStop = hoverStop == null ? null : ribbon?.blocks.find((b) => b.i === hoverStop) ?? null;
 
   const kpiCards = useMemo(() => {
     const row = kpi?.data.rows[0];
@@ -1749,12 +1793,22 @@ function DashboardView({
                 <div className="verdict">
                   Line ran {fmtDuration(ribbon?.runSeconds ?? 0)} of {fmtDuration((ribbon?.runSeconds ?? 0) + (ribbon?.downSeconds ?? 0))}
                 </div>
-                <div className="verdict-sub">
-                  {downtime.stoppageCount === 0 ? (
+                {/* One readout, which is the day summary until the reader
+                    points at a stop and then describes that stop. Replaces a
+                    native `title` tooltip, which appears after a delay, cannot
+                    be styled, and was the only way to interrogate the band. */}
+                <div className="verdict-sub" aria-live="polite">
+                  {hoveredStop ? (
+                    <>
+                      Stopped {fmtDuration(hoveredStop.seconds)} · {fmtTime(hoveredStop.startTs)} to{' '}
+                      {fmtTime(hoveredStop.endTs)} · {hoveredStop.sharePct}% of the time lost today
+                    </>
+                  ) : downtime.stoppageCount === 0 ? (
                     'No stops detected on this day.'
                   ) : (
                     <>
-                      {fmtInt(downtime.stoppageCount)} stop{downtime.stoppageCount === 1 ? '' : 's'}
+                      {fmtInt(downtime.stoppageCount)} stop{downtime.stoppageCount === 1 ? '' : 's'} ·{' '}
+                      {fmtDuration(downtime.totalDownSeconds)} lost
                       {ribbon?.longest && (
                         <> · longest {fmtDuration(ribbon.longest.durationSeconds)} at {fmtTime(ribbon.longest.startTs)}</>
                       )}
@@ -1767,8 +1821,12 @@ function DashboardView({
                   <span className="rs-label">Availability</span>
                   {/* Plain figure now. It used to turn red against a 6-day OEE
                       baseline, and the only place that comparison could be
-                      followed up was Output, which left the product. */}
-                  <span className="rs-val">{downtime.availabilityPct ?? '—'}%</span>
+                      followed up was Output, which left the product.
+                      One decimal: 81.72% claims a precision an inferred figure
+                      does not have. */}
+                  <span className="rs-val">
+                    {downtime.availabilityPct == null ? '—' : `${downtime.availabilityPct.toFixed(1)}%`}
+                  </span>
                 </div>
                 <div className="rs">
                   <span className="rs-label">Between stops</span>
@@ -1781,26 +1839,81 @@ function DashboardView({
               </div>
             </div>
 
-            <div className="ribbon">
-              {ribbon?.blocks.map((b, i) => (
+            {/* Shift names get their own line ABOVE the band. Inside it they
+                were drawn underneath the stoppage blocks, so a stop landing on
+                a name cut the word in half — "EVENING" with a red bar through
+                the G. Nothing may share a line with the data marks. */}
+            <div className="ribbon-bands" aria-hidden="true">
+              {ribbon?.bands.map((b) => (
                 <span
-                  key={i}
-                  className="ribbon-stop"
+                  key={b.name}
+                  className="rb-name"
+                  style={b.anchorRight ? { right: `${b.right}%` } : { left: `${b.left}%` }}
+                >
+                  {b.name}
+                </span>
+              ))}
+            </div>
+            <div className="ribbon" onMouseLeave={() => setHoverStop(null)}>
+              {/* Tint only — the names live on their own line above. */}
+              {ribbon?.bands.map((b, i) => (
+                <span
+                  key={b.name}
+                  className={`ribbon-band b${i % 2}`}
                   style={{ left: `${b.left}%`, width: `${b.width}%` }}
-                  title={`${fmtDuration(b.seconds)} from ${fmtTime(b.startTs)}`}
+                />
+              ))}
+              {ribbon?.blocks.map((b) => (
+                <button
+                  key={b.i}
+                  type="button"
+                  className={`ribbon-stop${hoverStop === b.i ? ' on' : ''}`}
+                  style={{ left: `${b.left}%`, width: `${b.width}%` }}
+                  onMouseEnter={() => setHoverStop(b.i)}
+                  onFocus={() => setHoverStop(b.i)}
+                  onBlur={() => setHoverStop(null)}
+                  aria-label={`Stopped ${fmtDuration(b.seconds)} at ${fmtTime(b.startTs)}`}
                 />
               ))}
               {ribbon?.dividers.map((p, i) => (
                 <span key={i} className="ribbon-div" style={{ left: `${p}%` }} />
               ))}
             </div>
+            {/* Regular hour ticks. The axis used to carry only the first and
+                last timestamps plus the shift names, which collided. */}
             <div className="ribbon-axis">
-              <span className="ra-end start">{downtime.firstTs ? fmtTime(downtime.firstTs) : '—'}</span>
-              {ribbon?.bands.map((b) => (
-                <span key={b.name} className="ra-band" style={{ left: `${b.centre}%` }}>{b.name}</span>
+              {ribbon?.ticks.map((t) => (
+                <span key={t.left} className="ra-tick" style={{ left: `${t.left}%` }}>{t.label}</span>
               ))}
-              <span className="ra-end finish">{downtime.lastTs ? fmtTime(downtime.lastTs) : '—'}</span>
             </div>
+
+            {ribbon && ribbon.ranked.length > 0 && (
+              <div className="stoplist">
+                <div className="stoplist-head">Longest stops</div>
+                {ribbon.ranked.slice(0, 5).map((s) => (
+                  <button
+                    key={s.i}
+                    type="button"
+                    className={`stoprow${hoverStop === s.i ? ' on' : ''}`}
+                    onMouseEnter={() => setHoverStop(s.i)}
+                    onMouseLeave={() => setHoverStop(null)}
+                    onFocus={() => setHoverStop(s.i)}
+                    onBlur={() => setHoverStop(null)}
+                  >
+                    <span className="sr-dur">{fmtDuration(s.seconds)}</span>
+                    <span className="sr-time">{fmtTime(s.startTs)} to {fmtTime(s.endTs)}</span>
+                    <span className="sr-bar"><i style={{ width: `${s.sharePct}%` }} /></span>
+                    <span className="sr-share">{s.sharePct}%</span>
+                  </button>
+                ))}
+                {ribbon.ranked.length > 5 && (
+                  <div className="stoplist-foot">
+                    and {ribbon.ranked.length - 5} shorter stop{ribbon.ranked.length - 5 === 1 ? '' : 's'},{' '}
+                    {fmtDuration(ribbon.ranked.slice(5).reduce((a, s) => a + s.seconds, 0))} in total
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           <div className="kpis">
