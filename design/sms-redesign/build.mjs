@@ -429,7 +429,7 @@ const Rejects = doc(`${header({ active: 'Rejects', period: 'Today' })}
   <div class="details"><a href="#">Details</a> · how a sustained rise is detected · the usual range per four-hour bucket · the code table</div>
 </div>`, H.rejects);
 
-const byShift = [['Morning', '2,534', '99.6%', '103', '4,867 kg', '61', '2.4%'], ['Evening', '2,638', '99.7%', '112', '5,275 kg', '66', '2.4%'], ['Night', '2,570', '99.7%', '110', '5,198 kg', '59', '2.2%']];
+const byShift = [['Morning', '2,534', '103', '4,867 kg', '61', '2.4%'], ['Evening', '2,638', '112', '5,275 kg', '66', '2.4%'], ['Night', '2,570', '110', '5,198 kg', '59', '2.2%']];
 const byDay = [['Wed 26 Aug', '5,034', '241', '11,375 kg', '106'], ['Thu 27 Aug', '7,620', '319', '15,057 kg', '167'], ['Fri 28 Aug', '7,532', '370', '17,464 kg', '181'], ['Sat 29 Aug', '7,888', '367', '17,322 kg', '193'], ['Sun 30 Aug', '7,645', '330', '15,576 kg', '167'], ['Mon 31 Aug', '7,844', '375', '17,700 kg', '189'], ['Tue 1 Sep', '7,742', '325', '15,340 kg', '186']];
 const Report = doc(`${header({ active: 'Report', period: 'Pick dates', range: '26 Aug – 1 Sep' })}
 <div class="page">
@@ -455,11 +455,11 @@ const Report = doc(`${header({ active: 'Report', period: 'Pick dates', range: '2
     <p class="g" style="margin: 18px 0 0;">Time lost 3 h 40 min in 12 stops <span class="mut sm">(planned breaks and faults cannot be told apart in the data)</span>.</p>
     <p class="mut sm" style="margin: 10px 0 0;">Sack stock per machine is not shown: the plant's sack records carry no machine and no record of a sack leaving. IFL has been asked how sacks are linked to machines and how they leave stock.</p>
   </div>
-  <div class="block" style="display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 40px;">
+  <div class="block" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px;">
     <div>
       <p class="h2"><span>By shift, 1 Sep</span></p>
       <table>
-        <tr><th>Shift</th><th class="n">Cones</th><th class="n">In limits</th><th class="n">Sacks</th><th class="n">Sack weight</th><th class="n">Rejected</th><th class="n">Rate</th></tr>
+        <tr><th>Shift</th><th class="n">Cones</th><th class="n">Sacks</th><th class="n">Sack weight</th><th class="n">Rejected</th><th class="n">Rate</th></tr>
         ${byShift.map((r) => `<tr><td>${r[0]}</td>${r.slice(1).map((c) => `<td class="n">${c}</td>`).join('')}</tr>`).join('\n        ')}
       </table>
     </div>
@@ -479,7 +479,7 @@ const Wall = doc(`<div class="wall">
     <div class="w-shift">Evening shift 14:00 to 22:00 &nbsp;·&nbsp; 16:55</div>
   </div>
   <div class="w-figs">
-    <div class="w-fig"><b>874</b><span>cones this shift · 99.7% within limits</span></div>
+    <div class="w-fig"><b>874</b><span>cones · 99.7% within limits</span></div>
     <div class="w-fig"><b>37</b><span>sacks · 1,747 kg</span></div>
     <div class="w-fig"><b>28</b><span>rejected · 3.1%</span></div>
   </div>
@@ -488,8 +488,8 @@ const Wall = doc(`<div class="wall">
     <div class="w-st">${shiftCounts.map((c, i) => { const n = i + 1; const cls = (n === 4 || n === 7) ? ' class="flag"' : n === 12 ? ' class="dim"' : ''; return `<div${cls}><i>${n}</i><b>${c}</b></div>`; }).join('')}</div>
   </div>
   <div class="w-foot">
-    <span><span class="dot" style="width: 12px; height: 12px; margin-right: 12px;"></span>Readings to 16:39 · they reach this screen about 16 min after weighing</span>
-    <span>Stations 4 and 7: check their scales &nbsp;·&nbsp; Station 12 quiet 22 min</span>
+    <span><span class="dot" style="width: 12px; height: 12px; margin-right: 12px;"></span>Readings to 16:39 · they arrive about 16 min after weighing</span>
+    <span>Stations 4 and 7: check scales &nbsp;·&nbsp; Station 12 quiet 22 min</span>
   </div>
 </div>`, H.wall, `
 .wall{padding:44px 56px 40px;box-sizing:border-box;height:810px;display:flex;flex-direction:column;justify-content:space-between}
