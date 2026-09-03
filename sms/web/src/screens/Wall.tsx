@@ -42,17 +42,19 @@ import { getAttention, getStations, type LiveLine } from '../api';
  */
 const QUIET_AFTER_SECONDS = 20 * 60;
 
-/** The tallest a bar may be. The CSS reserves the row for exactly this. */
-const BAR_MAX_PX = 92;
-
 /**
- * The shortest a bar may be while still saying "this station produced".
+ * The shortest a bar may be while still saying "this station produced", as a
+ * fraction of the reserved row.
  *
  * Without a floor, a station that made three cones against a row maximum of
  * three hundred draws a bar under a pixel high and reads as a gap — the same
  * as a station that made none. Zero must be the only genuine gap.
+ *
+ * A FRACTION, not a pixel count: the row itself is `--bar-max` in the
+ * stylesheet, sized in vw so the board stays proportional if the panel is ever
+ * driven at 2560 or 3840. This is the 4px floor as it stood on a 1920 panel.
  */
-const BAR_MIN_PX = 4;
+const BAR_MIN_RATIO = 0.045;
 
 export function WallScreen({ onExit }: { onExit: () => void }) {
   const { line, error } = useLive();
@@ -175,10 +177,10 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
             const quiet = !row || quietSeconds(row.lastTs) > QUIET_AFTER_SECONDS;
             const flag = flagged.has(id);
             // Zero is the only genuine gap; anything produced gets a bar.
-            const h = cones === 0 ? 0 : Math.max(BAR_MIN_PX, Math.round((cones / rowMax) * BAR_MAX_PX));
+            const r = cones === 0 ? 0 : Math.max(BAR_MIN_RATIO, cones / rowMax);
             return (
               <div key={id} className={flag ? 'flag' : quiet ? 'quiet' : undefined}>
-                <span className="bar" style={{ height: `${h}px` }} />
+                <span className="bar" style={{ height: `calc(var(--bar-max) * ${r.toFixed(4)})` }} />
                 <span className="cap">
                   <b>{cones === 0 ? '—' : fmtInt(cones)}</b>
                   <i>{names.find((n) => n.stationId === id)?.name?.trim() || id}</i>

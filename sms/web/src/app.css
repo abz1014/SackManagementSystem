@@ -452,7 +452,14 @@ tr.rej td { background: var(--acc-pale); color: var(--acc); }
 tr.rej.click:hover td { background: #f8ded7; }
 
 .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; }
-@media (max-width: 860px) { .two-col { grid-template-columns: 1fr; gap: 28px; } }
+/* It collapses at 1100, not at the 860 the rest of the layout uses, and the
+   difference is deliberate. The narrowest thing a half column has to carry is
+   a reject-reason row, which needs about 330px before the bar gets anything.
+   Below 1100 the half column is under 300px, and the label column — the only
+   one that may shrink — computed to ZERO, so every reason painted over its own
+   bar. A breakpoint belongs to the narrowest content in the column, not to the
+   page. Two columns therefore exist only at the full 1100px page width. */
+@media (max-width: 1100px) { .two-col { grid-template-columns: 1fr; gap: 28px; } }
 .print-only { display: none; }
 @media print { .print-only { display: block !important; } }
 
@@ -557,8 +564,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
    bars" rendered as reasons and no bars. The name column may now shrink and
    the bar has a floor; at full width nothing changes, because the name still
    takes up to its 18em. */
+/* The 5.5em floor on the name is a BACKSTOP, not the fix — the fix is the
+   .two-col breakpoint above. It is here so that no future column narrower than
+   this row can silently reproduce the zero-width label: the row will overflow
+   visibly instead, which is a bug someone reports rather than one that reads
+   as a design. */
 .bars div {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(72px, 0.9fr) minmax(4.5em, 7em) auto;
+  /* The label takes the slack (1.6fr against the bar's 1fr) and the count is
+     max-content, because "1,204 · 55%" needs about 5em and was reserving 7.
+     Until IFL names the codes the label is a 25-character sentence, and every
+     pixel it does not get is another wrapped line. */
+  display: grid; grid-template-columns: minmax(5.5em, 1.6fr) minmax(72px, 1fr) minmax(4.5em, max-content) auto;
   align-items: center; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule);
 }
 .bars div:last-child { border-bottom: 0; }
@@ -708,8 +724,20 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
    board's composition does not change as figures gain or lose a digit. */
 .w-stwrap { margin: auto 3.6vw 0; padding-bottom: 2.4vh; }
 .w-sub { display: flex; align-items: baseline; justify-content: space-between; gap: 2vw; font-size: 1.2vw; color: var(--muted); margin-bottom: 0.9vw; }
-.w-st { display: grid; grid-template-columns: repeat(var(--st-count, 14), minmax(0, 1fr)); gap: 0.55vw; align-items: end; }
-.w-st .bar { display: block; background: var(--paper-2); border-top: 2px solid var(--ink); border-radius: 2px 2px 0 0; }
+/* --bar-max reserves the plot row, and it is in vw for the same reason
+   everything else on this board is: the panel may be driven at 2560 or 3840,
+   and a bar locked to a pixel height would shrink against the type as the
+   panel grew. 4.8vw is the 92px this row was drawn at on a 1920 panel. */
+.w-st { display: grid; grid-template-columns: repeat(var(--st-count, 14), minmax(0, 1fr)); gap: 0.55vw; --bar-max: 4.8vw; }
+/* The plot row is exactly --bar-max whatever the bars are doing, so the
+   caption baseline does not move between refreshes as the busiest station
+   changes. Without this the whole row rode on the tallest bar.
+   The cells STRETCH rather than hanging from the bottom: a station whose name
+   wraps to two lines would otherwise lift its own bar row above the rest of
+   the row, and a crooked baseline is exactly what a four-metre read notices
+   first. */
+.w-st > div { display: grid; grid-template-rows: var(--bar-max) auto; }
+.w-st .bar { display: block; align-self: end; background: var(--paper-2); border-top: 2px solid var(--ink); border-radius: 2px 2px 0 0; }
 .w-st .cap { border-top: 1px solid var(--ink); padding-top: 0.5vw; text-align: center; }
 .w-st b { display: block; font-size: 1.55vw; font-weight: 500; line-height: 1.1; }
 .w-st i { display: block; font-style: normal; font-size: 1.05vw; color: var(--muted); }

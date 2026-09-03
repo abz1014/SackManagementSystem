@@ -32,7 +32,7 @@ import { usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { TRAILING_DAYS, type Period } from '../lib/period';
 import {
-  Block, Chevron, Details, Empty, Failed, Toggle,
+  Block, Chevron, Details, Empty, Failed, rowKeys, Toggle,
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
@@ -402,10 +402,16 @@ function StationTable({
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.station} className="click" onClick={() => onOpen(r.station)}>
+          <tr
+            key={r.station}
+            className="click"
+            tabIndex={0}
+            onClick={() => onOpen(r.station)}
+            onKeyDown={rowKeys(() => onOpen(r.station))}
+          >
             <td className={r.flagged ? 'acc' : ''} style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>
               {stationLabel(byId.get(r.station), r.station)}
-              <Chevron />
+              <Chevron label={W.openRecord} />
             </td>
             <td className="n">{fmtG(r.meanG)}</td>
             <td className="n">{signed(r.vsLineG)}</td>
@@ -413,7 +419,7 @@ function StationTable({
             <td style={{ paddingLeft: 28, whiteSpace: 'nowrap' }} className={r.flagged ? 'acc' : ''}>
               {r.flagged ? `${r.daysHeld} days` : '—'}
             </td>
-            <td className="n">{r.rejectRatePct == null ? '—' : `${r.rejectRatePct}%`}</td>
+            <td className="n">{r.rejectRatePct == null ? '—' : `${r.rejectRatePct.toFixed(1)}%`}</td>
             <td style={{ paddingLeft: 28 }}>{verdict(r, data)}</td>
           </tr>
         ))}
@@ -425,11 +431,14 @@ function StationTable({
 /** What the data shows, and nothing beyond it. */
 function verdict(r: WeightStationRow, d: WeightStationsData): string {
   if (r.lastAdjustedUtc && !r.flagged) {
+    // Date.now() is correct HERE and almost nowhere else on this screen:
+    // lastAdjustedUtc is an app-written instant in genuine UTC, not a
+    // production timestamp on the plant's wall clock. See plantClock.ts.
     const days = Math.max(
       0,
-      Math.round((Date.now() - new Date(r.lastAdjustedUtc).getTime()) / 86_400_000),
+      Math.floor((Date.now() - new Date(r.lastAdjustedUtc).getTime()) / 86_400_000),
     );
-    return W.weight.adjustedSince(`${days} ${days === 1 ? 'day' : 'days'}`, '');
+    return W.weight.adjustedSince(W.weight.adjustedSpan(days));
   }
   if (!r.flagged) return W.weight.steady;
   const g = fmtG(Math.abs(r.vsLineG));

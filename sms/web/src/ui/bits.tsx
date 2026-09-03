@@ -15,7 +15,7 @@
  *  - `Loading` / `Failed` / `Empty` exist so that "no data" is a sentence
  *    rather than an empty region a reader has to interpret.
  */
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import { W } from '../lib/words';
 
 /* ------------------------------------------------------------------ blocks */
@@ -218,12 +218,39 @@ export function Empty({ message = W.nothingHere }: { message?: string }) {
 
 /* ------------------------------------------------------------------ chrome */
 
-export function Chevron() {
+export function Chevron({ label }: { label?: string }) {
   return (
-    <span className="chev" aria-hidden="true">
-      ›
-    </span>
+    <>
+      <span className="chev" aria-hidden="true">
+        ›
+      </span>
+      {/* The glyph is decoration. Without this a screen reader is told nothing
+          about the row being openable — the chevron is the only thing that
+          says so on screen, and it is hidden from them by design. */}
+      {label && <span className="sr-only">{label}</span>}
+    </>
   );
+}
+
+/**
+ * Enter and Space on a clickable table row.
+ *
+ * A <tr> that answers only onClick is invisible to a keyboard, and both
+ * registers in this application are built from them — so until this existed,
+ * a reader without a mouse could not open a single reading or station, which
+ * is the whole drill-down mechanism of the app.
+ *
+ * The row keeps its table semantics deliberately. role="button" on a <tr>
+ * would stop a screen reader announcing the cells, trading one barrier for
+ * another; the row simply becomes focusable and answers the two keys that
+ * mean "activate". Pair it with tabIndex={0}.
+ */
+export function rowKeys(open: () => void) {
+  return (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    open();
+  };
 }
 
 /**

@@ -30,12 +30,12 @@ import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Figures, Loading,
-  SkelLines, SkelStations,
+  SkelFigures, SkelLines, SkelStations,
 } from '../ui/bits';
 import { fmtClock, fmtG, fmtInt, fmtKg, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
-  getAttention, getProductAt, getStations, stationLabel,
-  type AttentionFinding, type LiveLine, type StationRow,
+  getAttention, getProduction, getProductAt, getStations, stationLabel,
+  type AttentionFinding, type LiveLine, type ProductionRow, type StationRow,
 } from '../api';
 import type { Screen } from '../ui/Bar';
 
@@ -74,6 +74,22 @@ export function LineScreen({
   const health = assessHealth(line);
 
   const stations = usePolling(() => getStations(), 10 * 60_000, 'stations');
+
+  // THE FIGURES OBEY THE PERIOD. They used to read line.thisShift, so "This
+  // month" and "This shift" printed the same three numbers on the one screen
+  // whose question is "what has it made this period" — the period control was
+  // global everywhere except the home screen.
+  const periodKey = `${period.from}:${period.to}:${period.shift ?? 'all'}`;
+  const totals = usePolling(
+    () => getProduction({ from: period.from, to: period.to, shift: period.shift, groupBy: 'none' }),
+    period.live ? REFRESH_MS : 5 * 60_000,
+    `line-totals:${periodKey}`,
+  );
+  const perStation = usePolling(
+    () => getProduction({ from: period.from, to: period.to, shift: period.shift, groupBy: 'station' }),
+    period.live ? REFRESH_MS : 5 * 60_000,
+    `line-stations:${periodKey}`,
+  );
   const product = usePolling(() => getProductAt(), REFRESH_MS, 'product-at');
   const attention = usePolling(
     () => getAttention({ from: period.from, to: period.to, shift: period.shift }),
@@ -94,7 +110,11 @@ export function LineScreen({
       </div>
 
       <Block first>
-        <Figures items={shiftFigures(line)} />
+        {totals.data ? (
+          <Figures items={periodFigures(totals.data.data.rows[0] ?? null)} />
+        ) : (
+          <SkelFigures n={3} />
+        )}
       </Block>
 
       <Block
@@ -118,7 +138,12 @@ export function LineScreen({
         label={`${W.stations} — ${W.stationsNote}`}
         note={quietNote(line, stations.data?.stations ?? [])}
       >
-        <StationRowGrid line={line} stations={stations.data?.stations ?? []} onOpen={onOpenStation} />
+        <StationRowGrid
+          line={line}
+          stations={stations.data?.stations ?? []}
+          counts={perStation.data?.data.rows ?? null}
+          onOpen={onOpenStation}
+        />
       </Block>
 
       <Block label={W.lastReadings}>
@@ -207,28 +232,27 @@ function lineTitle(line: LiveLine): string {
 
 /* ----------------------------------------------------------------- figures */
 
-function shiftFigures(line: LiveLine) {
-  const t = line.thisShift;
+/** The three figures for the SELECTED period. Zeros, not dashes: an empty
+ *  period is a normal fact on a plant that runs six days, and zero is a
+ *  measurement. */
+function periodFigures(r: ProductionRow | null) {
+  const cones = r?.cones ?? 0;
+  const rejected = r?.rejectedCones ?? 0;
+  const sacks = r?.sacks ?? 0;
+  const kg = r?.sackWeightKg ?? 0;
   const rejectRate =
-    t.cones + t.rejectedCones > 0
-      ? `${Math.round((1000 * t.rejectedCones) / (t.cones + t.rejectedCones)) / 10}%`
-      : '—';
+    cones + rejected > 0 ? `${Math.round((1000 * rejected) / (cones + rejected)) / 10}%` : '0%';
   return [
     {
-      value: fmtInt(t.cones),
+      value: fmtInt(cones),
       unit: W.fig.cones,
-      note: t.conesInRangePct != null ? W.withinLimits(`${t.conesInRangePct}%`) : null,
+      note: r?.conesInRangePct != null ? W.withinLimits(`${r.conesInRangePct}%`) : null,
     },
     // Rounded: a headline figure with two decimal places reads as precision
     // the reader is being asked to care about, and nobody weighs a shift's
     // output to the gram.
-    { value: fmtInt(t.sacks), unit: W.fig.sacks, note: `${fmtInt(Math.round(t.sackWeightKg))} ${W.fig.kg}` },
-    {
-      value: fmtInt(t.rejectedCones),
-      unit: W.fig.rejected,
-      note: W.ofEverything(rejectRate),
-      accent: false,
-    },
+    { value: fmtInt(sacks), unit: W.fig.sacks, note: `${fmtInt(Math.round(kg))} ${W.fig.kg}` },
+    { value: fmtInt(rejected), unit: W.fig.rejected, note: W.ofEverything(rejectRate) },
   ];
 }
 
@@ -354,28 +378,16 @@ function quietNote(line: LiveLine, stations: StationRow[]): string | null {
   return `${quiet.length} stations quiet, longest ${name} for ${fmtSpan(quietSeconds(line, worst.lastTs))}`;
 }
 
-/**
- * How many boxes fit on a row.
- *
- * Fourteen only while the labels are bare numbers. As soon as a station has
- * been given a plant name in Setup, fourteen columns are about 66px wide and
- * "East Conveyor" is cut to "East C…" — which is precisely the "text not
- * staying in its placeholder" IFL complained about. Seven columns give a name
- * room, and the row simply becomes two.
- */
-function stationColumns(count: number, names: Map<number, StationRow>): number {
-  const longest = Math.max(0, ...[...names.values()].map((s) => (s.name ?? '').trim().length));
-  const perRow = longest > 6 ? 7 : 14;
-  return Math.min(count, perRow);
-}
-
 function StationRowGrid({
   line,
   stations,
+  counts,
   onOpen,
 }: {
   line: LiveLine;
   stations: StationRow[];
+  /** Cones per station for the SELECTED period. Null while it loads. */
+  counts: ProductionRow[] | null;
   onOpen: (station: number) => void;
 }) {
   // The count comes from Setup, not a hardcoded fourteen: requirement 10 is
@@ -391,13 +403,18 @@ function StationRowGrid({
   // block below it does not travel up the page.
   if (ids.length === 0) return <SkelStations n={14} />;
 
-  const byId = new Map(line.stations.map((s) => [s.station, s]));
+  // Two different questions, two different sources: how many cones the period
+  // holds, and when the station last produced. The second is inherently live
+  // and is what decides "quiet"; the first follows the period control.
+  const liveById = new Map(line.stations.map((s) => [s.station, s]));
+  const countById = new Map((counts ?? []).map((r) => [Number(r.group), r.cones]));
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
 
   return (
-    <div className="stations" style={{ ['--st-count' as string]: String(stationColumns(ids.length, nameOf)) }}>
+    <div className="stations" style={{ ['--st-count' as string]: String(ids.length) }}>
       {ids.map((id) => {
-        const row = byId.get(id);
+        const row = liveById.get(id);
+        const cones = counts == null ? null : (countById.get(id) ?? 0);
         const quiet = row ? quietSeconds(line, row.lastTs) > QUIET_AFTER_SECONDS : true;
         return (
           <button
@@ -411,7 +428,7 @@ function StationRowGrid({
                 is already headed "Stations", so repeating the word fourteen
                 times is noise that also overflowed every box past nine. */}
             <span className="st-name">{nameOf.get(id)?.name?.trim() || id}</span>
-            <span className="st-val">{row ? fmtInt(row.cones) : '—'}</span>
+            <span className="st-val">{cones == null ? '—' : fmtInt(cones)}</span>
             {/* The tag line is ALWAYS rendered, even when empty. .st-tag
                 reserves 1.4em precisely so the row does not reflow — and every
                 block below it does not travel up the page — the moment a

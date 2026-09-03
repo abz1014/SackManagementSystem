@@ -117,3 +117,49 @@ Listed in `REDESIGN.md`. Not part of the visual handoff.
 - The station sheet. The spec says *"the adjustment log lives in the station
   sheet"*; that sheet does not exist yet, so the log has no home.
 - The line-level sack ledger, once IFL answers item 5.
+
+---
+
+## 12. Two pieces of MY test data are in the app database — your call
+
+**Status:** created during acceptance testing on 3 September 2026, still there.
+
+Both are in the **app-owned** database (`sms`), never IFL's. Neither is a
+defect; both are residue I made proving the app works, and deleting rows from
+an audit trail is not a call I should make alone.
+
+| What | Where it shows | Why it was created |
+|---|---|---|
+| A calibration adjustment on **station 7**, reason *"verification test — reference weight checked"* | Weight's station table now reads "Adjusted today, steady since." for station 7, and that station's drift detection has been reset from that moment | To prove the Log-an-adjustment round trip writes, attributes and displays correctly |
+| A test account **`floor`** at operator rank | Setup's user list | To prove that roles gate writes only, and that a low rank never meets a 403 |
+
+**Decide:** remove both before the next IFL demo, or keep them. If you want
+them gone I can do it — say so and I will; I have not touched them because a
+logged calibration adjustment is exactly the kind of record that should not
+disappear without the owner saying it may.
+
+## 13. Verification found six defects, all now fixed — nothing pending
+
+Recorded only so the fixes are not mistaken for taste and undone later.
+
+1. **Line's figures ignored the global period** — every period printed the
+   current shift's three numbers on the one screen whose question is "what has
+   it made this period".
+2. **The reject reason labels rendered at ZERO width** between 861 and 1040px,
+   painting each reason over its own bar. `.two-col` collapsed at the page's
+   860px breakpoint, but its half column stops fitting a reasons row about
+   180px earlier. A breakpoint belongs to the narrowest content in the column,
+   not to the page.
+3. **Neither register could be opened from a keyboard.** Readings and Weight
+   build rows as `<tr onClick>` with no tabindex and an aria-hidden chevron, so
+   the sheet — the whole drill-down mechanism — was mouse-only. Line was
+   already correct, which is how the inconsistency surfaced.
+4. **"Adjusted 0 days ago by , steady since."** The string asked for a name the
+   row type does not carry, so the comma had nothing before it and never could
+   have; and "0 days ago" is how it read for every adjustment logged that day.
+5. **The wall's bars were the one dimension not sized in vw**, so on the 2560
+   and 3840 panels the stylesheet is explicitly written for, the type doubled
+   and the bars did not.
+6. **The wall's station row hung from the bottom**, so the one station whose
+   name wraps to two lines lifted its own bar 31px above its neighbours' — a
+   crooked baseline on the screen read from four metres.

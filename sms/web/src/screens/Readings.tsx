@@ -21,7 +21,7 @@ import { useState } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
-import { Block, Chevron, Empty, Failed, SkelLines, Toolbar, Toggle } from '../ui/bits';
+import { Block, Chevron, Empty, Failed, rowKeys, SkelLines, Toolbar, Toggle } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
 import {
@@ -154,7 +154,7 @@ export function ReadingsScreen({
         />
       </Block>
 
-      <div className="page">
+      <Block>
       {rows.error && !rows.data ? (
         <Failed error={rows.error} onRetry={rows.refresh} />
       ) : rows.loading && !rows.data ? (
@@ -183,7 +183,7 @@ export function ReadingsScreen({
           </p>
         </>
       )}
-      </div>
+      </Block>
     </>
   );
 }
@@ -281,7 +281,9 @@ function ReadingTable({
               /* A wash and accent text, never a red left border — that would
                  read as a card, and there are no cards here. */
               className={`click${rejectedByScale ? ' rej' : ''}`}
+              tabIndex={0}
               onClick={() => onOpen(isSack ? 'sack' : 'cone', id)}
+              onKeyDown={rowKeys(() => onOpen(isSack ? 'sack' : 'cone', id))}
             >
               <td>{fmtClock(r.production_ts_utc)}</td>
               <td>{isSack ? (r.sack_num ?? '—') : String(id)}</td>
@@ -290,7 +292,7 @@ function ReadingTable({
                 {rejectedByScale ? <span className="acc">{W.rejectedByScale}</span> : W.passed}
               </td>
               <td className="n">
-                <Chevron />
+                <Chevron label={W.openRecord} />
               </td>
             </tr>
           );

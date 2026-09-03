@@ -26,6 +26,7 @@ import { Loading } from './ui/bits';
 import { LineScreen } from './screens/Line';
 import { ReadingsScreen } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
+import { StationSheet } from './screens/StationSheet';
 import { ReportScreen } from './screens/Report';
 import { WeightScreen } from './screens/Weight';
 import { RejectsScreen } from './screens/Rejects';
@@ -263,6 +264,13 @@ function Chrome({
 
       {/* Drill-downs open over the screen and close with Escape, so the reader
           never loses their filters, their page or their place in the list. */}
+      {route.sheet?.kind === 'station' && (
+        <StationSheet
+          station={Number(route.sheet.id)}
+          canAdjust={rank >= 2}
+          onClose={() => go({ sheet: null })}
+        />
+      )}
       {route.sheet && route.sheet.kind !== 'station' && (
         <ReadingSheet
           type={route.sheet.kind}

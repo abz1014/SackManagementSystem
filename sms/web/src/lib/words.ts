@@ -239,7 +239,11 @@ export const W = {
       `Has read about ${g} heavier than the line for ${days} days — check its scale first.`,
     readsLighter: (g: string, days: number) =>
       `Has read about ${g} lighter than the line for ${days} days — check its scale first.`,
-    adjustedSince: (span: string, who: string) => `Adjusted ${span} ago by ${who}, steady since.`,
+    // No "by <name>": the row carries no name, and the adjustment log in the
+    // station sheet is where an adjustment is attributed, beside its reason.
+    adjustedSince: (span: string) => `Adjusted ${span}, steady since.`,
+    adjustedSpan: (days: number) =>
+      days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`,
     highestRejects: 'Highest reject rate on the line, mostly quality codes — look at tubes before scales.',
     andMoreSteady: (n: number) => `and ${n} more stations, all steady`,
     logAdjustment: 'Log an adjustment',
@@ -342,6 +346,8 @@ export const W = {
   } as const,
 
   /* ------------------------------------------------------------- the sheet */
+  /** Screen-reader only: what the chevron on a clickable row means. */
+  openRecord: 'Open',
   close: 'Close',
   esc: 'Esc',
 
