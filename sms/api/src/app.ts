@@ -20,6 +20,8 @@ import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustmen
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getOee } from './services/oee.js';
 import { getLive } from './services/live.js';
+import { getAttention } from './services/attention.js';
+import { loadProductTimeline, limitsOf } from './services/productAt.js';
 import { getReport, resolvePeriod, REPORT_PERIODS, type ReportPeriod } from './services/report.js';
 import {
   listUsers, createUser, updateUser,
@@ -95,6 +97,23 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // trusting it with no proxy in front makes req.ip attacker-controlled and the
   // login lockout bypassable. Enable only behind a proxy you control (DEPLOY.md).
   app.set('trust proxy', cfg.trustProxy);
+
+  /**
+   * The newest production day on record.
+   *
+   * Every default period anchors here rather than on today's date: on a server
+   * whose source data has stopped, "today" is an empty screen and the newest
+   * day is the honest answer.
+   */
+  async function newestProductionDay(): Promise<string> {
+    const r = await pool
+      .request()
+      .input('line', mssql.Int, cfg.lineId)
+      .query<{ d: string | null }>(
+        'SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line',
+      );
+    return r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
+  }
 
   // health — no envelope, cheap liveness/DB check
   app.get('/api/health', async (_req: Request, res: Response, next: NextFunction) => {
@@ -256,6 +275,125 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
+  /**
+   * Station names, for every signed-in reader.
+   *
+   * These are LABELS — "East Conveyor", "Winder-5" — and every screen that
+   * names a station needs them: the station row on Line, the station table on
+   * Weight, the filter chip on Readings. They lived only behind the admin-only
+   * /api/admin/stations, so the rest of the app could only ever say "Station 7"
+   * and the count of stations was hardcoded in the web bundle. Writing them
+   * stays admin; reading them cannot be.
+   */
+  app.get('/api/stations', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ stations: await listStations(pool, cfg.lineId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * "Does anything need attention?" — at most three sentences for the Line
+   * screen, from three sources that each answer a requirement line.
+   *
+   * The period governs only the outside-limits count. Station drift and reject
+   * rises are judged over a FIXED trailing window ending at the newest
+   * production day, because those tests run on daily means and one shift is one
+   * point; the response states the window so the screen can say so too.
+   */
+  const attentionQuery = z.object({
+    from: dateStr,
+    to: dateStr,
+    shift: z.enum(['morning', 'evening', 'night']).optional(),
+    trailingDays: z.coerce.number().int().min(1).max(90).default(14),
+  });
+  app.get('/api/attention', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = attentionQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      const newest = await newestProductionDay();
+      const to = q.data.to ?? newest;
+      const from = q.data.from ?? to;
+      const bad = validateRange(from, to);
+      if (bad) {
+        res.status(400).json({ error: bad });
+        return;
+      }
+      const trailingTo = newest;
+      const trailingFrom = new Date(new Date(`${trailingTo}T12:00:00Z`).getTime() - (q.data.trailingDays - 1) * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+
+      const key = `attention:${from}:${to}:${q.data.shift ?? 'all'}:${trailingFrom}:${trailingTo}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
+      const data = await getAttention(
+        pool,
+        cfg.lineId,
+        { from: trailingFrom, to: trailingTo },
+        { from, to, shift: q.data.shift ?? null },
+      );
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * The product in force at a given moment, and its limits — never "the
+   * product recorded today, applied to whatever you are looking at".
+   *
+   * Without `at`, answers for the newest reading, which is what the Line and
+   * Weight screens mean by "the product running".
+   */
+  const productAtQuery = z.object({
+    at: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
+      .optional(),
+  });
+  app.get('/api/product-at', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = productAtQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      const timeline = await loadProductTimeline(pool, cfg.lineId);
+      let atMs: number;
+      if (q.data.at) {
+        atMs = new Date(q.data.at).getTime();
+      } else {
+        const r = await pool
+          .request()
+          .input('line', mssql.Int, cfg.lineId)
+          .query<{ ms: string | number | null }>(
+            'SELECT MAX(production_ts_utc_ms) AS ms FROM sms.cone_event WHERE line_id=@line',
+          );
+        atMs = r.recordset[0]?.ms != null ? Number(r.recordset[0]!.ms) : Date.now();
+      }
+      const product = timeline.at(atMs);
+      res.json({
+        at: new Date(atMs).toISOString(),
+        product,
+        limits: limitsOf(product),
+        /** True when nothing has ever been recorded, so a screen says it once. */
+        neverRecorded: timeline.isEmpty,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ---- Production report — the period summary (IFL requirement: "comprehensive reporting") ----
   const reportQuery = z.object({
     period: z.enum(REPORT_PERIODS).default('day'),
@@ -286,16 +424,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // Anchor defaults to the newest production day, so a bare /api/report
       // answers "the latest day" rather than whatever today happens to be on a
       // server whose source data has stopped.
-      let anchor = q.data.anchor;
-      if (!anchor) {
-        const r = await pool
-          .request()
-          .input('line', mssql.Int, cfg.lineId)
-          .query<{ d: string | null }>(
-            `SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line`,
-          );
-        anchor = r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
-      }
+      const anchor = q.data.anchor ?? (await newestProductionDay());
       const resolved = resolvePeriod(period as ReportPeriod, anchor, q.data.from, q.data.to);
       const spanBad = validateRange(resolved.from, resolved.to);
       if (spanBad) {
