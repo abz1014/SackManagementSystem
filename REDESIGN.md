@@ -1,6 +1,7 @@
 # SMS redesign brief
 
-**Status: proposal for sign-off, 2 Sep 2026. Nothing in this document is built.**
+**Status: SIGNED OFF 3 Sep 2026. Option A (headline sentence first) chosen; the build is under way, in the order of §12.**
+Option B (figures first, grey panels) is not being built.
 Source of truth for the next UI. Supersedes the screen descriptions in
 `CAPABILITIES.md` §3 once built; until then §3 describes what exists.
 
