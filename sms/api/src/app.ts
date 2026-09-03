@@ -21,7 +21,8 @@ import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './se
 import { getOee } from './services/oee.js';
 import { getLive } from './services/live.js';
 import { getAttention } from './services/attention.js';
-import { loadProductTimeline, limitsOf } from './services/productAt.js';
+import { loadProductTimeline, limitsOf, productDisagreement } from './services/productAt.js';
+import { getWeightStations } from './services/weightStations.js';
 import { getReport, resolvePeriod, REPORT_PERIODS, type ReportPeriod } from './services/report.js';
 import {
   listUsers, createUser, updateUser,
@@ -389,6 +390,68 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         /** True when nothing has ever been recorded, so a screen says it once. */
         neverRecorded: timeline.isEmpty,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * The station table, and the one sentence that goes above it.
+   *
+   * `from`/`to` are the TRAILING window the drift test needs (14 production
+   * days by default), not the selected period — a shift is a single daily mean
+   * and no pattern can be measured from one point. The period is passed
+   * separately, and governs only the count of cones the scale passed that sit
+   * outside the product's limits.
+   */
+  const weightStationsQuery = z.object({
+    from: dateStr,
+    to: dateStr,
+    periodFrom: dateStr,
+    periodTo: dateStr,
+    shift: z.enum(['morning', 'evening', 'night']).optional(),
+    trailingDays: z.coerce.number().int().min(1).max(90).default(14),
+  });
+  app.get('/api/weight-stations', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = weightStationsQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      const newest = await newestProductionDay();
+      const to = q.data.to ?? newest;
+      const from =
+        q.data.from ??
+        new Date(new Date(`${to}T12:00:00Z`).getTime() - (q.data.trailingDays - 1) * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+      const bad = validateRange(from, to);
+      if (bad) {
+        res.status(400).json({ error: bad });
+        return;
+      }
+      const periodTo = q.data.periodTo ?? to;
+      const periodFrom = q.data.periodFrom ?? periodTo;
+
+      const key = `wstations:${from}:${to}:${periodFrom}:${periodTo}:${q.data.shift ?? 'all'}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
+      const timeline = await loadProductTimeline(pool, cfg.lineId);
+      const [stations, disagreement] = await Promise.all([
+        getWeightStations(pool, cfg.lineId, from, to),
+        productDisagreement(pool, cfg.lineId, timeline, {
+          from: periodFrom,
+          to: periodTo,
+          shift: q.data.shift ?? null,
+        }),
+      ]);
+      const env = await envelope(pool, cfg.lineId, { ...stations, disagreement });
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }

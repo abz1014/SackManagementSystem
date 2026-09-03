@@ -27,6 +27,7 @@ import { LineScreen } from './screens/Line';
 import { ReadingsScreen } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
 import { ReportScreen } from './screens/Report';
+import { WeightScreen } from './screens/Weight';
 import { LoginScreen } from './screens/Login';
 import './app.css';
 
@@ -213,9 +214,15 @@ function Chrome({
 
         {route.view === 'report' && <ReportScreen period={period} user={user} />}
 
-        {(route.view === 'weight' || route.view === 'rejects' || route.view === 'setup') && (
-          <NotYetBuilt view={route.view} />
+        {route.view === 'weight' && (
+          <WeightScreen
+            period={period}
+            onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
+            onSeeOutside={() => go({ view: 'readings' })}
+          />
         )}
+
+        {(route.view === 'rejects' || route.view === 'setup') && <NotYetBuilt view={route.view} />}
       </main>
 
       {/* Drill-downs open over the screen and close with Escape, so the reader

@@ -842,3 +842,54 @@ export function getAttention(q: {
   if (q.trailingDays) p.set('trailingDays', String(q.trailingDays));
   return get(`/api/attention?${p.toString()}`);
 }
+
+// ---- the station table: the one station ranking in the application ----
+export interface WeightStationRow {
+  station: number;
+  n: number;
+  meanG: number;
+  /** Signed grams against the line's own mean, over the run it names. */
+  vsLineG: number;
+  /** Signed grams against the product target, or null when none was recorded. */
+  vsTargetG: number | null;
+  daysHeld: number;
+  flagged: boolean;
+  rejectRatePct: number | null;
+  lastAdjustedUtc: string | null;
+  days: { date: string; n: number; mean: number; nelson: number[] }[];
+}
+
+export interface WeightStationsData {
+  from: string;
+  to: string;
+  days: number;
+  lineMeanG: number | null;
+  targetG: number | null;
+  productId: number | null;
+  productLabel: string | null;
+  thresholdG: number;
+  minDaysHeld: number;
+  lineRejectRatePct: number | null;
+  stations: WeightStationRow[];
+  /** Scale versus product over the SELECTED period, not the trailing window. */
+  disagreement: {
+    passedButOutside: number;
+    rejectedButInside: number;
+    judged: number;
+    unjudged: number;
+  };
+}
+
+export function getWeightStations(q: {
+  trailingDays?: number;
+  periodFrom?: string;
+  periodTo?: string;
+  shift?: string | null;
+}): Promise<Envelope<WeightStationsData>> {
+  const p = new URLSearchParams();
+  if (q.trailingDays) p.set('trailingDays', String(q.trailingDays));
+  if (q.periodFrom) p.set('periodFrom', q.periodFrom);
+  if (q.periodTo) p.set('periodTo', q.periodTo);
+  if (q.shift) p.set('shift', q.shift);
+  return get(`/api/weight-stations?${p.toString()}`);
+}
