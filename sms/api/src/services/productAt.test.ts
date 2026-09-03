@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProductTimeline, limitsOf, type ProductInForce } from './productAt';
+import { ProductTimeline, limitsOf, type ProductInForce } from './productAt.js';
 
 const at = (iso: string) => new Date(iso).getTime();
 

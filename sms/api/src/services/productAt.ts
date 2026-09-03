@@ -13,9 +13,9 @@
  *
  * WHAT THE HONEST ANSWER LOOKS LIKE. Three outcomes, and the UI must be able
  * to tell them apart:
- *   - a product was in force  → limits, and a signed distance from them
- *   - no product was recorded then → say so; compute nothing
- *   - the product is known but carries no setpoint → say so; compute nothing
+ *   - a product was in force  -> limits, and a signed distance from them
+ *   - no product was recorded then -> say so; compute nothing
+ *   - the product is known but carries no setpoint -> say so; compute nothing
  *
  * THE STATUS VOCABULARY. The scale's own in-range bit stays the single flag on
  * every screen ("Passed" / "Rejected by the scale"). The product tolerance is a
@@ -51,7 +51,7 @@ export interface ProductLimits {
   targetG: number;
   loG: number;
   hiG: number;
-  /** "1,960 ± 40 g", ready to print. */
+  /** "1,960 +/- 40 g", ready to print. */
   label: string;
 }
 
@@ -90,9 +90,7 @@ export function limitsOf(p: ProductInForce | null): ProductLimits | null {
   };
 }
 
-/**
- * The resolved timeline: newest first, with a lookup by production instant.
- */
+/** The resolved timeline: newest first, with a lookup by production instant. */
 export class ProductTimeline {
   /** Newest first. */
   readonly entries: ProductInForce[];
@@ -166,17 +164,8 @@ export async function loadProductTimeline(pool: ConnectionPool, lineId: number):
   );
 }
 
-/**
- * How many cones in a window the SCALE passed but the product's own limits
- * would not — the one sentence REDESIGN.md §5.3 puts on the Weight screen
- * whenever it is non-zero.
- *
- * Counted per timeline segment so each cone is judged against the product that
- * was actually in force when it was weighed, never against today's. Readings
- * from before any product was recorded are excluded from the count rather than
- * assumed to pass: there is nothing to judge them against, and saying "0" would
- * imply there was.
- */
+/* ------------------------------------------------- scale versus product */
+
 export interface ProductDisagreement {
   /** Cones the scale passed that sit outside the product's limits. */
   passedButOutside: number;
@@ -188,59 +177,80 @@ export interface ProductDisagreement {
   unjudged: number;
 }
 
+export interface DayRange {
+  /** Production days (shift_date), inclusive. */
+  from: string;
+  to: string;
+  /** Optional single shift within those days. */
+  shift?: string | null;
+}
+
+/**
+ * How many cones in a period the SCALE passed but the product's own limits
+ * would not — the one sentence REDESIGN.md §5.3 puts on the Weight screen
+ * whenever it is non-zero.
+ *
+ * Filtered by shift_date, exactly as every other service filters a period, so
+ * a "day" here is the same day it is everywhere else. Within that, the window
+ * is split at each product changeover so every cone is judged against the
+ * product actually in force when it was weighed.
+ *
+ * Readings from before any product was recorded are counted as `unjudged`
+ * rather than assumed to pass: there is nothing to judge them against, and
+ * reporting them as zero would imply there was.
+ */
 export async function productDisagreement(
   pool: ConnectionPool,
   lineId: number,
   timeline: ProductTimeline,
-  fromMs: number,
-  toMs: number,
+  range: DayRange,
 ): Promise<ProductDisagreement> {
-  const empty: ProductDisagreement = { passedButOutside: 0, rejectedButInside: 0, judged: 0, unjudged: 0 };
+  const out: ProductDisagreement = { passedButOutside: 0, rejectedButInside: 0, judged: 0, unjudged: 0 };
 
-  // Nothing to compare against: every reading in the window is unjudged, and
-  // the caller needs the count to say so rather than print a zero.
   if (timeline.isEmpty) {
-    const n = await countCones(pool, lineId, fromMs, toMs);
-    return { ...empty, unjudged: n };
+    out.unjudged = await countCones(pool, lineId, range, null, null);
+    return out;
   }
 
-  const out = { ...empty };
-  // Walk the timeline as half-open segments [start, nextStart) clipped to the
-  // window, so one query per product in force rather than one per cone.
+  // Walk the timeline as half-open segments [start, nextStart), each clipped by
+  // the shift_date filter in SQL. One query per product in force, not per cone.
   const asc = [...timeline.entries].sort((a, b) => a.effectiveFromMs - b.effectiveFromMs);
-  const firstStart = asc[0]!.effectiveFromMs;
-  if (firstStart > fromMs) {
-    out.unjudged += await countCones(pool, lineId, fromMs, Math.min(firstStart, toMs));
-  }
+
+  // Anything in the period that predates the first recorded product.
+  out.unjudged += await countCones(pool, lineId, range, null, asc[0]!.effectiveFromMs);
 
   for (let i = 0; i < asc.length; i++) {
     const seg = asc[i]!;
-    const segFrom = Math.max(seg.effectiveFromMs, fromMs);
-    const segTo = Math.min(asc[i + 1]?.effectiveFromMs ?? toMs, toMs);
-    if (segTo <= segFrom) continue;
-
+    const segTo = asc[i + 1]?.effectiveFromMs ?? null;
     const limits = limitsOf(seg);
+
     if (!limits) {
-      out.unjudged += await countCones(pool, lineId, segFrom, segTo);
+      out.unjudged += await countCones(pool, lineId, range, seg.effectiveFromMs, segTo);
       continue;
     }
 
-    const r = await pool
+    const req = pool
       .request()
       .input('line', mssql.Int, lineId)
-      .input('from', mssql.BigInt, segFrom)
-      .input('to', mssql.BigInt, segTo)
+      .input('from', mssql.Date, range.from)
+      .input('to', mssql.Date, range.to)
+      .input('segFrom', mssql.BigInt, seg.effectiveFromMs)
       .input('lo', mssql.Float, limits.loG)
-      .input('hi', mssql.Float, limits.hiG)
-      .query<{ judged: number; passedOut: number; rejectedIn: number }>(
-        `SELECT COUNT(*) AS judged,
-                SUM(CASE WHEN in_range = 1 AND (weight_g < @lo OR weight_g > @hi) THEN 1 ELSE 0 END) AS passedOut,
-                SUM(CASE WHEN in_range = 0 AND weight_g >= @lo AND weight_g <= @hi THEN 1 ELSE 0 END) AS rejectedIn
-           FROM sms.cone_event
-          WHERE line_id = @line
-            AND production_ts_utc_ms >= @from AND production_ts_utc_ms < @to
-            AND weight_g IS NOT NULL AND in_range IS NOT NULL`,
-      );
+      .input('hi', mssql.Float, limits.hiG);
+    if (segTo != null) req.input('segTo', mssql.BigInt, segTo);
+    if (range.shift) req.input('shift', mssql.VarChar(16), range.shift);
+
+    const r = await req.query<{ judged: number; passedOut: number; rejectedIn: number }>(
+      `SELECT COUNT(*) AS judged,
+              SUM(CASE WHEN in_range = 1 AND (weight_g < @lo OR weight_g > @hi) THEN 1 ELSE 0 END) AS passedOut,
+              SUM(CASE WHEN in_range = 0 AND weight_g >= @lo AND weight_g <= @hi THEN 1 ELSE 0 END) AS rejectedIn
+         FROM sms.cone_event
+        WHERE line_id = @line AND shift_date BETWEEN @from AND @to
+          ${range.shift ? 'AND shift_code = @shift' : ''}
+          AND production_ts_utc_ms >= @segFrom
+          ${segTo != null ? 'AND production_ts_utc_ms < @segTo' : ''}
+          AND weight_g IS NOT NULL AND in_range IS NOT NULL`,
+    );
     const row = r.recordset[0];
     out.judged += Number(row?.judged ?? 0);
     out.passedButOutside += Number(row?.passedOut ?? 0);
@@ -250,17 +260,29 @@ export async function productDisagreement(
   return out;
 }
 
-async function countCones(pool: ConnectionPool, lineId: number, fromMs: number, toMs: number): Promise<number> {
-  if (toMs <= fromMs) return 0;
-  const r = await pool
+async function countCones(
+  pool: ConnectionPool,
+  lineId: number,
+  range: DayRange,
+  fromMs: number | null,
+  toMs: number | null,
+): Promise<number> {
+  const req = pool
     .request()
     .input('line', mssql.Int, lineId)
-    .input('from', mssql.BigInt, fromMs)
-    .input('to', mssql.BigInt, toMs)
-    .query<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM sms.cone_event
-        WHERE line_id = @line AND production_ts_utc_ms >= @from AND production_ts_utc_ms < @to
-          AND weight_g IS NOT NULL`,
-    );
+    .input('from', mssql.Date, range.from)
+    .input('to', mssql.Date, range.to);
+  if (fromMs != null) req.input('segFrom', mssql.BigInt, fromMs);
+  if (toMs != null) req.input('segTo', mssql.BigInt, toMs);
+  if (range.shift) req.input('shift', mssql.VarChar(16), range.shift);
+
+  const r = await req.query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM sms.cone_event
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to
+        ${range.shift ? 'AND shift_code = @shift' : ''}
+        ${fromMs != null ? 'AND production_ts_utc_ms >= @segFrom' : ''}
+        ${toMs != null ? 'AND production_ts_utc_ms < @segTo' : ''}
+        AND weight_g IS NOT NULL`,
+  );
   return Number(r.recordset[0]?.n ?? 0);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromPlantMs, plantNowMs, plantOffsetMinutes, toPlantIso, toPlantMs } from './plantClock';
+import { fromPlantMs, plantNowMs, plantOffsetMinutes, toPlantIso, toPlantMs } from './plantClock.js';
 
 /**
  * These assert the RELATIONSHIP between the two clocks rather than a fixed
