@@ -124,6 +124,65 @@ export function Details({ summary = W.working, children }: { summary?: string; c
 
 /* ------------------------------------------------------------------ states */
 
+/**
+ * Skeletons. A block waiting on its own request keeps its own HEIGHT, so the
+ * page never jumps as panels land one after another.
+ *
+ * Each screen polls its blocks independently, so a screen is routinely in two
+ * states at once — which is exactly when a shifting layout is most annoying.
+ * The named heights in app.css reserve the real element's box rather than a
+ * guess; there are no spinners anywhere, because a spinner reserves nothing.
+ */
+export function SkelFigures({ n = 3 }: { n?: number }) {
+  const cls = n === 2 ? 'figs two' : n === 4 ? 'figs four' : 'figs';
+  return (
+    <div className={cls} aria-hidden="true">
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i}>
+          <div className="skel fig" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Rows of text: a table body, a list, a key-value block. */
+export function SkelLines({ n = 3, short }: { n?: number; short?: boolean }) {
+  return (
+    <div style={{ display: 'grid', gap: 12 }} aria-hidden="true">
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className={`skel line${short && i === n - 1 ? ' short' : ''}`} />
+      ))}
+    </div>
+  );
+}
+
+export function SkelChart() {
+  return <div className="skel chart" aria-hidden="true" />;
+}
+
+/**
+ * The station row, at its configured width, so it does not reflow on arrival.
+ *
+ * Each cell is a real .st box with skeletons for its three lines, rather than
+ * the bundle's fixed .skel.st height: the box then matches the arriving cell
+ * exactly at any --ui-scale, instead of only at Desk. .st-tag keeps its
+ * reserved line here for the same reason it does in the real row.
+ */
+export function SkelStations({ n = 14 }: { n?: number }) {
+  return (
+    <div className="stations" style={{ ['--st-count' as string]: String(n) }} aria-hidden="true">
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="st">
+          <span className="st-name skel">&nbsp;</span>
+          <span className="st-val skel">&nbsp;</span>
+          <span className="st-tag">&nbsp;</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Loading({ what }: { what?: string }) {
   return (
     <p className="state loading" role="status">

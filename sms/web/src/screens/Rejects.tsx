@@ -22,8 +22,8 @@ import { useState } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { trailingWindow, type Period } from '../lib/period';
-import { Block, Details, Empty, Failed, Loading } from '../ui/bits';
-import { Readout, useChartWidth, edgeAnchor, linePath } from '../ui/chart';
+import { Block, Details, Empty, Failed, Loading, SkelChart, SkelLines } from '../ui/bits';
+import { Readout, useChartWidth, edgeAnchor, linePath, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtInt } from '../lib/fmt';
 import {
   getRejects, getRejectSpc, setRejectLabel,
@@ -121,26 +121,31 @@ export function RejectsScreen({
         </div>
       </Block>
 
-      <Block label={W.rejects.trendTitle(win.requestedDays)}>
-        {quality.loading && !quality.data ? (
-          <Loading />
-        ) : (
-          <TrendChart
-            quality={quality.data?.data ?? null}
-            weight={weight.data?.data ?? null}
-            periodFrom={period.from}
-            periodTo={period.to}
-          />
-        )}
-      </Block>
-
-      <Block label={W.rejects.reasonsTitle(win.requestedDays)} note={W.rejects.namesAwaited}>
-        <Reasons
-          rows={reasons.data?.data.reasons ?? []}
-          loading={reasons.loading && !reasons.data}
-          canName={canName}
-          onNamed={reasons.refresh}
-        />
+      {/* The rate over time on the left, what is causing it on the right:
+          the two questions are read together, not one after the other. */}
+      <Block label={W.rejects.trendTitle(win.requestedDays)} note={W.rejects.namesAwaited}>
+        <div className="two-col">
+          <div>
+            {quality.loading && !quality.data ? (
+              <SkelChart />
+            ) : (
+              <TrendChart
+                quality={quality.data?.data ?? null}
+                weight={weight.data?.data ?? null}
+                periodFrom={period.from}
+                periodTo={period.to}
+              />
+            )}
+          </div>
+          <div>
+            <Reasons
+              rows={reasons.data?.data.reasons ?? []}
+              loading={reasons.loading && !reasons.data}
+              canName={canName}
+              onNamed={reasons.refresh}
+            />
+          </div>
+        </div>
       </Block>
 
       <Block tight>
@@ -231,9 +236,10 @@ function TrendChart({
 
   const grid = [1, 2, 3, 4].filter((v) => v < max);
   const h = hover != null ? series[hover] : null;
-  const ticks = [0, Math.floor(series.length / 3), Math.floor((2 * series.length) / 3), series.length - 1].filter(
-    (v, i, a) => a.indexOf(v) === i && v >= 0 && v < series.length,
-  );
+  // How many day labels actually FIT. Four were hardcoded, which collided the
+  // moment this chart moved into a half-width column: "Wed 26 Aug" printed on
+  // top of "Sat 29 Aug".
+  const ticks = tickIndices(series.length, fittingTicks(width - L - R, 11, 13, series.length, 4));
 
   return (
     <div ref={box}>
@@ -297,7 +303,7 @@ function Reasons({
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
 
-  if (loading) return <Loading />;
+  if (loading) return <SkelLines n={6} short />;
   if (rows.length === 0) return <Empty message={W.rejects.none} />;
   const max = Math.max(...rows.map((r) => r.count), 1);
 

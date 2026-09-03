@@ -17,18 +17,19 @@
  * named as the scale's; the product comparison appears only when a product was
  * actually in force at that reading's time, and says so when none was.
  */
-import { useMemo, useState } from 'react';
-import { usePolling, LIST_POLL_MS } from '../lib/live';
+import { useState } from 'react';
+import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
-import { Block, Chevron, Empty, Failed, Loading, Toolbar, Toggle } from '../ui/bits';
-import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg } from '../lib/fmt';
+import { Block, Chevron, Empty, Failed, SkelLines, Toolbar, Toggle } from '../ui/bits';
+import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
+import { assessHealth } from '../lib/health';
 import {
   getEvents, eventsExportUrl, getStations, stationLabel,
   type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,
 } from '../api';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 100;
 
 type Listing = 'cones' | 'sacks' | 'rejected';
 
@@ -66,6 +67,15 @@ export function ReadingsScreen({
   const [listing, setListing] = useState<Listing>('cones');
   const [station, setStation] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const { line } = useLive();
+  const health = assessHealth(line);
+  const stale = health.kind !== 'ok';
+  const lagText =
+    health.kind === 'stale'
+      ? W.lag.stale(health.readingUtc ? fmtClock(health.readingUtc) : '—')
+      : health.kind === 'late'
+        ? W.lag.late(fmtSpan(health.lagSeconds))
+        : W.lag.noData;
 
   const key = `${listing}:${period.from}:${period.to}:${period.shift ?? 'all'}:${station ?? 'any'}:${page}`;
   const rows = usePolling(
@@ -148,24 +158,28 @@ export function ReadingsScreen({
       {rows.error && !rows.data ? (
         <Failed error={rows.error} onRetry={rows.refresh} />
       ) : rows.loading && !rows.data ? (
-        <Loading />
+        <SkelLines n={12} />
       ) : total === 0 ? (
         <Empty message={W.readings.nothing} />
       ) : (
         <>
           <div className="tw">
-            <ReadingTable
-              rows={rows.data?.data.rows ?? []}
-              listing={listing}
-              stations={stationList}
-              onOpen={onOpenReading}
-            />
+            <ReadingTable rows={rows.data?.data.rows ?? []} listing={listing} onOpen={onOpenReading} />
           </div>
-          <p className="mut sm" style={{ marginTop: 14 }}>
-            {W.readings.perPage(PAGE_SIZE, fmtInt(total))}
-            {period.live && ` · ${W.readings.liveNote}`}
-            {'  '}
-            <Pager page={page} total={total} onPage={setPage} />
+          {/* Left: the pulse and what it means. Right: the count. Under lag
+              the left sentence becomes the lag sentence, because "new readings
+              appear every 15 seconds" is then untrue. */}
+          <p className="row between mut sm" style={{ marginTop: 14 }}>
+            <span>
+              {period.live && (
+                <span className={`dot live${stale ? ' bad' : ''}`} aria-hidden="true" />
+              )}
+              {stale ? lagText : period.live ? W.readings.liveNote : null}
+            </span>
+            <span>
+              {W.readings.perPage(PAGE_SIZE, fmtInt(total))}
+              <Pager page={page} total={total} onPage={setPage} />
+            </span>
           </p>
         </>
       )}
@@ -238,15 +252,12 @@ function Pager({ page, total, onPage }: { page: number; total: number; onPage: (
 function ReadingTable({
   rows,
   listing,
-  stations,
   onOpen,
 }: {
   rows: RegisterRow[];
   listing: Listing;
-  stations: StationRow[];
   onOpen: (type: RegisterType, id: string | number) => void;
 }) {
-  const nameOf = useMemo(() => new Map(stations.map((s) => [s.stationId, s])), [stations]);
   const isSack = listing === 'sacks';
 
   return (
@@ -254,7 +265,7 @@ function ReadingTable({
       <thead>
         <tr>
           <th style={{ width: '9em' }}>{W.readings.time}</th>
-          <th style={{ width: '11em' }}>{isSack ? W.readings.sackNo : W.readings.filterStation}</th>
+          <th style={{ width: '11em' }}>{isSack ? W.readings.sackNo : W.readings.record}</th>
           <th className="n" style={{ width: '7em' }}>{W.readings.weight}</th>
           <th style={{ paddingLeft: 32 }}>{W.readings.status}</th>
           <th className="n" style={{ width: '2em' }} />
@@ -267,15 +278,13 @@ function ReadingTable({
           return (
             <tr
               key={`${id}`}
-              className={`click${rejectedByScale ? ' hl' : ''}`}
+              /* A wash and accent text, never a red left border — that would
+                 read as a card, and there are no cards here. */
+              className={`click${rejectedByScale ? ' rej' : ''}`}
               onClick={() => onOpen(isSack ? 'sack' : 'cone', id)}
             >
               <td>{fmtClock(r.production_ts_utc)}</td>
-              <td>
-                {isSack
-                  ? r.sack_num ?? '—'
-                  : stationLabel(nameOf.get(r.source_station ?? -1), r.source_station ?? 0)}
-              </td>
+              <td>{isSack ? (r.sack_num ?? '—') : String(id)}</td>
               <td className="n">{isSack ? fmtKg(r.weight_kg) : fmtG(r.weight_g)}</td>
               <td style={{ paddingLeft: 32 }}>
                 {rejectedByScale ? <span className="acc">{W.rejectedByScale}</span> : W.passed}

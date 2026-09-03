@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { Block, Details, Empty, Failed, Loading } from '../ui/bits';
+import { Block, Details, Empty, Failed, SkelLines } from '../ui/bits';
 import { fmtSpan } from '../lib/fmt';
 import {
   adminGetAudit, adminGetRules, adminListUsers, adminSetStation, getStations,
@@ -80,7 +80,7 @@ function SyncHealth() {
 
       <Details summary={W.sync.perTable}>
         {ops.loading && !ops.data ? (
-          <Loading />
+          <SkelLines n={4} short />
         ) : (
           <div className="tw">
             <table>
@@ -133,7 +133,7 @@ function Stations() {
   }, []);
 
   if (error) return <Block label={W.setupTabs.stations}><Failed error={error} onRetry={load} /></Block>;
-  if (!rows) return <Block label={W.setupTabs.stations}><Loading /></Block>;
+  if (!rows) return <Block label={W.setupTabs.stations}><SkelLines n={4} short /></Block>;
 
   return (
     <Block label={W.setupTabs.stations} note="the names every screen uses">
@@ -194,7 +194,7 @@ function RulesBlock() {
   useEffect(() => {
     void adminGetRules().then(setRules).catch(() => setRules(null));
   }, []);
-  if (!rules) return <Block label={W.setupTabs.rules}><Loading /></Block>;
+  if (!rules) return <Block label={W.setupTabs.rules}><SkelLines n={4} short /></Block>;
 
   return (
     <Block label={W.setupTabs.rules} note="what this system applies when it reads the plant's numbers">
@@ -227,7 +227,7 @@ function People() {
   useEffect(() => {
     void adminListUsers().then((r) => setUsers(r.users)).catch(() => setUsers([]));
   }, []);
-  if (!users) return <Block label={W.setupTabs.people}><Loading /></Block>;
+  if (!users) return <Block label={W.setupTabs.people}><SkelLines n={4} short /></Block>;
 
   return (
     <Block label={W.setupTabs.people} note="who can sign in, and what each may change">
@@ -264,7 +264,7 @@ function AuditLog() {
   useEffect(() => {
     void adminGetAudit().then((r) => setRows(r.entries)).catch(() => setRows([]));
   }, []);
-  if (!rows) return <Block label={W.setupTabs.audit}><Loading /></Block>;
+  if (!rows) return <Block label={W.setupTabs.audit}><SkelLines n={4} short /></Block>;
   if (rows.length === 0) return <Block label={W.setupTabs.audit}><Empty message="Nothing has been changed through this application yet." /></Block>;
 
   return (

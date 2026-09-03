@@ -550,8 +550,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 
 /* ---- horizontal bars (reject reasons) --------------------------------- */
 
+/* CORRECTION, the third and last. The spec puts the reasons in the RIGHT
+   COLUMN of a two-column block, but this grid reserves 9em + 6em + 5em plus
+   three gaps — about 340px — before the bar gets anything. In a half-width
+   column that leaves the bar at its 2px minimum, so "reasons as horizontal
+   bars" rendered as reasons and no bars. The name column may now shrink and
+   the bar has a floor; at full width nothing changes, because the name still
+   takes up to its 18em. */
 .bars div {
-  display: grid; grid-template-columns: minmax(9em, 18em) 1fr minmax(6em, 9em) 5em;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(72px, 0.9fr) minmax(4.5em, 7em) auto;
   align-items: center; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule);
 }
 .bars div:last-child { border-bottom: 0; }
@@ -609,7 +616,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 /* Named heights, so a skeleton reserves the real element's box rather than a
    guess. A figure skeleton must match --fs-display's line box or the page
    jumps by 16px as the first panel lands. */
-.skel.fig { height: calc(var(--fs-display) + var(--fs-body) + 8px); }
+/* CORRECTION, as with .h2 .note above. The bundle summed the note's FONT
+   SIZE, but .fig-note inherits the body line-height of 1.5, so the real box is
+   90px against a reserved 81 — the 9px jump this rule exists to prevent. The
+   figure's own line-height is 1, so it contributes its font size exactly. */
+.skel.fig { height: calc(var(--fs-display) + 8px + var(--fs-body) * 1.5); }
 .skel.line { height: 1.5em; }
 .skel.line.short { max-width: 24ch; }
 .skel.chart { height: 250px; }

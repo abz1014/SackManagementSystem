@@ -28,7 +28,10 @@ import { useLive, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
-import { Block, Chevron, Details, Empty, Figures, Loading } from '../ui/bits';
+import {
+  Block, Chevron, Details, Empty, Figures, Loading,
+  SkelLines, SkelStations,
+} from '../ui/bits';
 import { fmtClock, fmtG, fmtInt, fmtKg, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
   getAttention, getProductAt, getStations, stationLabel,
@@ -244,7 +247,9 @@ function AttentionList({
   loading: boolean;
   onNavigate: (s: Screen) => void;
 }) {
-  if (loading) return <Loading />;
+  // Two lines: the attention list is at most three sentences, and reserving
+  // two keeps the block from growing as it lands on a calm shift.
+  if (loading) return <SkelLines n={2} short />;
   if (findings.length === 0) {
     return (
       <ul className="attn calm">
@@ -308,7 +313,7 @@ function ProductBlock({
   canWrite: boolean;
   onChange: () => void;
 }) {
-  if (!data) return <Loading />;
+  if (!data) return <SkelLines n={3} short />;
   if (!data.product) return <p className="g">{W.product.none}</p>;
   return (
     <div className="row between top">
@@ -382,7 +387,9 @@ function StationRowGrid({
     return [...new Set([...configured, ...seen])].sort((a, b) => a - b);
   }, [stations, line.stations]);
 
-  if (ids.length === 0) return <Empty message={W.nothingHere} />;
+  // The row keeps its full width and height while the names arrive, so the
+  // block below it does not travel up the page.
+  if (ids.length === 0) return <SkelStations n={14} />;
 
   const byId = new Map(line.stations.map((s) => [s.station, s]));
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
@@ -405,7 +412,11 @@ function StationRowGrid({
                 times is noise that also overflowed every box past nine. */}
             <span className="st-name">{nameOf.get(id)?.name?.trim() || id}</span>
             <span className="st-val">{row ? fmtInt(row.cones) : '—'}</span>
-            {quiet && <span className="st-name">{W.quiet}</span>}
+            {/* The tag line is ALWAYS rendered, even when empty. .st-tag
+                reserves 1.4em precisely so the row does not reflow — and every
+                block below it does not travel up the page — the moment a
+                station goes quiet. */}
+            <span className="st-tag">{quiet ? W.quiet : ' '}</span>
           </button>
         );
       })}

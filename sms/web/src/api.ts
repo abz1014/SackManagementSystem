@@ -57,11 +57,22 @@ function handleStatus(res: Response, path: string): void {
  */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** Seconds from the server's Retry-After, so a lockout can state a number
+   *  rather than saying "try again later" and leaving the reader guessing. */
+  readonly retryAfter: number | null;
+  constructor(status: number, message: string, retryAfter: number | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.retryAfter = retryAfter;
   }
+}
+
+/** Retry-After, in whole seconds, when the server sent one. */
+function retryAfterOf(res: Response): number | null {
+  const raw = res.headers.get('Retry-After');
+  const n = raw == null ? NaN : Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -83,7 +94,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) {
     handleStatus(res, path);
     const b = await res.json().catch(() => ({}));
-    throw new Error((b as { error?: string }).error ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, (b as { error?: string }).error ?? `HTTP ${res.status}`, retryAfterOf(res));
   }
   return res.json() as Promise<T>;
 }

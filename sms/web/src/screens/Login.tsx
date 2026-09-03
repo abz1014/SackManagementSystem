@@ -7,7 +7,7 @@
  * sign in, and the hardcoded facts were wrong the moment a station was added.
  */
 import { useState } from 'react';
-import { login as apiLogin, type AuthUser } from '../api';
+import { ApiError, login as apiLogin, type AuthUser } from '../api';
 import { W } from '../lib/words';
 
 export function LoginScreen({ onLogin }: { onLogin: (u: AuthUser) => void }) {
@@ -24,9 +24,18 @@ export function LoginScreen({ onLogin }: { onLogin: (u: AuthUser) => void }) {
       const r = await apiLogin(username, password);
       onLogin(r.user);
     } catch (err) {
-      // Deliberately does not say which of the two was wrong: naming the field
-      // turns the form into a way to confirm that an account exists.
-      setError('That username and password did not match.');
+      // Four states, and only two messages. It never names the field: saying
+      // which one was wrong turns the form into a way to confirm an account
+      // exists. A lockout, though, states a NUMBER — the server sends the
+      // seconds remaining, so "try again later" would be withholding
+      // something it already knows.
+      const e = err instanceof ApiError ? err : null;
+      if (e?.status === 429) {
+        const mins = Math.max(1, Math.ceil((e.retryAfter ?? 900) / 60));
+        setError(`Too many attempts. Try again in ${mins} ${mins === 1 ? 'minute' : 'minutes'}.`);
+      } else {
+        setError('That username and password did not match.');
+      }
       setBusy(false);
     }
   }

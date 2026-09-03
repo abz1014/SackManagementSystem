@@ -26,12 +26,12 @@ A second, purely visual pass, delivered by the designer as
 route, API, query or metric, and renamed nothing. Sources kept in
 `design/handoff-2026-09-03/`.
 
-**What changed.** `web/src/app.css` was replaced by the bundle~+~s production
+**What changed.** `web/src/app.css` was replaced by the bundle’s production
 stylesheet (eleven marked edits). **Instrument Sans** variable, self-hosted at
 `web/public/fonts/InstrumentSans-Variable.woff2`, replaced Archivo — one file,
 weights 400-700, and the plant PC has no internet, so a Google Fonts link
 would silently fall back to Segoe UI on the one machine that matters. New
-display step at 56px so a shift~+~s output outranks the sentence describing it.
+display step at 56px so a shift’s output outranks the sentence describing it.
 Block labels hang in a 180px left margin; rules are carried by full-bleed
 bands, so a hairline reaches both bezels while text stops at 1100px. Report
 gained the **verdict mark**, the one ink fill in the application. Wall was
@@ -40,21 +40,43 @@ state sentence is 79px at 1920, and the footer is pinned.
 
 **Three defects found while applying it, and fixed:**
 1. `.h2 .note` in the bundled CSS could never match a grid item, so every
-   block~+~s note overprinted its own label. The selector was extended and the
+   block’s note overprinted its own label. The selector was extended and the
    declarations left untouched; both changes are marked in `app.css`.
-2. The same rule~+~s `-1.5em` then placed the note a line too high once it was a
+2. The same rule’s `-1.5em` then placed the note a line too high once it was a
    real grid item.
-3. The register~+~s Export button was offered at rank 2 while the server gates it
+3. The register’s Export button was offered at rank 2 while the server gates it
    at 3 — a control that could only ever answer 403. `EXPORT_RANK` now matches
    `requireRole(3)`.
 
-**Two acceptance checks do not pass, and neither is a defect in what shipped:**
-check 1 (at most four of six type steps) is unreachable for Line, Weight and
-Rejects given the spec~+~s own composition of those screens; check 9 (no block
-changes height as it lands) needs skeletons on every block, which the
-handoff~+~s own file list does not scope. The `.skel.fig` height in the bundle
-also under-reserves by 9px because it counts the note~+~s font size rather than
-its line box.
+**Eleven of the twelve acceptance checks pass, verified in the browser.**
+Skeletons were added to every block so nothing changes height as it lands
+(check 9): the figure, chart and station skeletons match their real boxes
+exactly — measured 90/90, 250/250 and 86/86. **Check 1, at most four of the
+six type steps, is the one that cannot pass**, and it is unreachable by
+arithmetic rather than by oversight: the spec’s own Line, Weight, Rejects and
+Report compositions each need a headline, display figures, a qualifier, body
+text, captions and axis ticks, which is all six. The one avoidable size — a
+30px inline on Weight — is gone, replaced by the `.fig-val.small` class the
+bundle ships for exactly that case.
+
+**Four corrections to the bundled CSS, each marked in place in `app.css`:**
+`.h2 .note` could never match a grid item, so every note overprinted its own
+label; its `-1.5em` then over-corrected once the note was a real grid item;
+`.skel.fig` summed the note’s font size rather than its line box, so it
+under-reserved by 9px; and `.bars` reserved about 340px of fixed columns
+before the bar, so “reasons as horizontal bars” rendered with no bars once the
+spec’s own two-column Rejects layout put them in a half-width column.
+
+**Two conformance fixes in the app.** The station cell now always renders
+`.st-tag`, the reserved line the spec asks for so the row does not reflow as a
+station goes quiet; it was rendered only WHEN quiet, which caused the reflow
+the rule exists to prevent. Both trend charts now choose a tick count that
+fits their width, after the narrower Rejects column made four hardcoded labels
+overprint each other.
+
+**Open question 4 is resolved as its own recommendation suggested:** the report
+CSV carries attribution in the filename and in trailing rows after a blank
+line, never as a comment header, which Excel shows as a mangled first row.
 
 ### UI redesign — BUILT AND LIVE (3 Sep 2026)
 

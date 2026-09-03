@@ -17,7 +17,7 @@ import { useState } from 'react';
 import { usePolling, usePlantNow, useLive } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
-import { Block, Empty, Failed, Loading } from '../ui/bits';
+import { Block, Empty, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor } from '../ui/chart';
 import { fmtDayLong, fmtInt, fmtSpan } from '../lib/fmt';
 import { downloadCsv, csvName, type CsvRow } from '../csv';
@@ -38,7 +38,7 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
   );
 
   if (r.error && !r.data) return <Failed error={r.error} onRetry={r.refresh} />;
-  if (!r.data) return <Loading />;
+  if (!r.data) return <ReportSkeleton />;
   const d = r.data.data;
 
   return (
@@ -63,7 +63,7 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
             <button type="button" className="btn" disabled={r.loading} onClick={() => window.print()}>
               {W.report.print}
             </button>
-            <button type="button" className="btn" disabled={r.loading} onClick={() => exportCsv(d)}>
+            <button type="button" className="btn" disabled={r.loading} onClick={() => exportCsv(d, plantNow, user, lineName)}>
               {W.report.exportCsv}
             </button>
           </div>
@@ -287,7 +287,7 @@ function LineTable({ rows, head }: { rows: ReportLine[]; head: string }) {
 
 /* ------------------------------------------------------------------ export */
 
-function exportCsv(d: ReportData): void {
+function exportCsv(d: ReportData, plantNowUtc: string | null, user: AuthUser, lineName: string): void {
   const headers = [
     "scope", "group", "cones", "cones_in_range_pct", "sacks", "sack_weight_kg",
     "avg_sack_kg", "cones_per_sack", "rejected_cones", "reject_rate_pct",
@@ -301,5 +301,35 @@ function exportCsv(d: ReportData): void {
     ...d.byShift.map((r) => line("shift", r)),
     ...d.byDay.map((r) => line("day", r)),
   ];
-  downloadCsv(csvName("report", d.period.from, d.period.to), headers, rows);
+  // (d) the filename plus (c) trailing rows after a blank line: the filename
+  // does the everyday work, the rows survive for anyone who opens the file
+  // properly, and neither mangles Excel the way a comment header would.
+  const who = user.displayName ?? user.username;
+  downloadCsv(csvName("report", d.period.from, d.period.to, who), headers, rows, [
+    ["line", lineName],
+    ["period", `${d.period.from} to ${d.period.to}`],
+    ["days_with_data", String(d.coverage.daysWithData)],
+    ["exported", printedLine(plantNowUtc, user)],
+  ]);
+}
+
+/** Report's shape while it loads: coverage sentence, four totals, chart, tables. */
+function ReportSkeleton() {
+  return (
+    <>
+      <div className="page">
+        <p className="q">{W.question.report}</p>
+        <div className="skel line" style={{ height: 'var(--fs-head)', maxWidth: '34ch' }} />
+      </div>
+      <Block first>
+        <SkelFigures n={4} />
+      </Block>
+      <Block label={W.report.conesPerDay}>
+        <SkelChart />
+      </Block>
+      <Block label={W.report.byDay}>
+        <SkelLines n={7} />
+      </Block>
+    </>
+  );
 }

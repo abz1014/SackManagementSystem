@@ -33,8 +33,23 @@ export function toCsv(headers: string[], rows: CsvRow[]): string {
  * reads UTF-8 as the local codepage and mangles the units and symbols these
  * exports carry (±, σ, µ, °) — the plant runs Windows, so this is the common case.
  */
-export function downloadCsv(filename: string, headers: string[], rows: CsvRow[]): void {
-  const csv = toCsv(headers, rows);
+export function downloadCsv(
+  filename: string,
+  headers: string[],
+  rows: CsvRow[],
+  /**
+   * Attribution, appended after a BLANK LINE rather than as a comment header.
+   *
+   * A CSV of a signed report carries the figures and nothing else, so the
+   * moment it leaves the building it is an unattributed spreadsheet — which is
+   * the problem the verdict mark exists to solve. Trailing rows survive Excel
+   * and most parsers stop at the blank line; a `#`-prefixed header would show
+   * in Excel as a mangled first row, which is worse than no attribution.
+   */
+  meta?: [string, string][],
+): void {
+  const body = toCsv(headers, rows);
+  const csv = meta && meta.length ? `${body}\n\n${toCsv([], meta.map(([k, v]) => [k, v]))}` : body;
   const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -48,8 +63,16 @@ export function downloadCsv(filename: string, headers: string[], rows: CsvRow[])
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-/** Filename stem carrying the view and the exact range, so files stay tellable apart. */
-export function csvName(view: string, from?: string | null, to?: string | null): string {
+/**
+ * Filename stem carrying the view, the exact range and who exported it.
+ *
+ * The filename is the first thing anyone sees and costs nothing to read, so it
+ * does the everyday attribution work; the trailing rows are there for whoever
+ * opens the file properly. Filenames get renamed, which is why it is not the
+ * only place the attribution lives.
+ */
+export function csvName(view: string, from?: string | null, to?: string | null, by?: string | null): string {
   const span = from && to ? (from === to ? from : `${from}_to_${to}`) : new Date().toISOString().slice(0, 10);
-  return `sms-${view}-${span}`;
+  const who = by ? `-${by.toLowerCase().replace(/[^a-z0-9]+/g, '')}` : '';
+  return `sms-${view}-${span}${who}`;
 }

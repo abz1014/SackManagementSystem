@@ -31,8 +31,11 @@ import { useState } from 'react';
 import { usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { TRAILING_DAYS, type Period } from '../lib/period';
-import { Block, Chevron, Details, Empty, Failed, Loading, Toggle } from '../ui/bits';
-import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain } from '../ui/chart';
+import {
+  Block, Chevron, Details, Empty, Failed, Toggle,
+  SkelChart, SkelFigures, SkelLines,
+} from '../ui/bits';
+import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtG, fmtInt } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel,
@@ -91,7 +94,9 @@ export function WeightScreen({
   );
 
   if (st.error && !st.data) return <Failed error={st.error} onRetry={st.refresh} />;
-  if (!st.data) return <Loading />;
+  // Not a bare spinner: the screen's own shape, at its own heights, so nothing
+  // moves when the figures and the table arrive.
+  if (!st.data) return <ScreenSkeleton question={W.question.weight} figures={3} table={8} />;
   const d = st.data.data;
   const s = spc.data?.data ?? null;
 
@@ -118,7 +123,7 @@ export function WeightScreen({
             <span className="fig-note">rejected by the scale</span>
           </div>
           <div>
-            <b className="fig-val" style={{ fontSize: 'calc(30px * var(--ui-scale))' }}>
+            <b className="fig-val small">
               {s ? W.weight.spread(fmtInt(Math.round(s.mean - 2 * s.stdevOverall)), fmtInt(Math.round(s.mean + 2 * s.stdevOverall))) : '—'}
             </b>
             <span className="fig-note">{W.weight.spreadNote}</span>
@@ -147,7 +152,7 @@ export function WeightScreen({
           />
         </div>
         {spc.loading && !s ? (
-          <Loading />
+          <SkelChart />
         ) : !s || s.subgroups.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : mode === 'time' ? (
@@ -245,9 +250,9 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
   const x = (i: number) => L + (i / Math.max(1, g.length - 1)) * (width - L - R);
   const y = (v: number) => T + ((hi - v) / (hi - lo)) * (H - T - B);
 
-  const ticks = [0, Math.floor(g.length / 3), Math.floor((2 * g.length) / 3), g.length - 1].filter(
-    (v, i, a) => a.indexOf(v) === i && v >= 0 && v < g.length,
-  );
+  // Width-aware for the same reason as Rejects: a multi-day window labels
+  // ticks "2 Sept 06:00", which is twice as wide as a bare time.
+  const ticks = tickIndices(g.length, fittingTicks(width - L - R, multiDay ? 13 : 6, 13, g.length, 4));
   const h = hover != null ? g[hover] : null;
 
   return (
@@ -429,4 +434,29 @@ function verdict(r: WeightStationRow, d: WeightStationsData): string {
   if (!r.flagged) return W.weight.steady;
   const g = fmtG(Math.abs(r.vsLineG));
   return r.vsLineG > 0 ? W.weight.readsHeavier(g, r.daysHeld) : W.weight.readsLighter(g, r.daysHeld);
+}
+
+/**
+ * The screen's own shape while it loads: the question, a headline-sized bar,
+ * the figure row, the chart and the table, each at its real height. A spinner
+ * reserves nothing, so the page jumps twice as the two requests land.
+ */
+function ScreenSkeleton({ question, figures, table }: { question: string; figures: number; table: number }) {
+  return (
+    <>
+      <div className="page">
+        <p className="q">{question}</p>
+        <div className="skel line" style={{ height: 'var(--fs-head)', maxWidth: '34ch' }} />
+      </div>
+      <Block first>
+        <SkelFigures n={figures} />
+      </Block>
+      <Block>
+        <SkelChart />
+      </Block>
+      <Block label={W.weight.stationsTable}>
+        <SkelLines n={table} />
+      </Block>
+    </>
+  );
 }
