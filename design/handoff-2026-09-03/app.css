@@ -1,0 +1,743 @@
+/**
+ * SMS — the redesign stylesheet (REDESIGN.md §10, mockup design/sms-redesign/).
+ *
+ * A briefing note, not a cockpit. What that means concretely, and why each rule
+ * is here rather than a matter of taste:
+ *
+ *  - ONE typeface. Instrument Sans throughout, with tabular figures switched on
+ *    globally so every column of numbers lines up without a second family.
+ *    The old sheet paired Archivo with DM Mono for every numeral, eyebrow and
+ *    table cell; that is what made the app read as an instrument panel.
+ *  - ONE accent, `--acc`, and it means exactly one thing: this needs
+ *    attention. Green survives only as the health dot. A healthy screen is
+ *    therefore calm black text on white, and the absence of the accent is what
+ *    "fine" looks like — so nothing decorative may ever use it.
+ *  - RULES, NOT BOXES. Blocks are separated by a hairline and 28px of space,
+ *    never by a border, a card, a shadow or a nested panel. Radii stop at 4px.
+ *  - ONE COLUMN, 1100px. No sticky rails, no section column, no sub-tab rows.
+ *    Drill-downs open as a right-hand sheet over the screen so the reader
+ *    never loses their place.
+ *
+ * Type scale is fixed in px and multiplied by --ui-scale (Desk 1, Wall 1.3),
+ * because "the text is too small" was IFL's standing complaint and the fix that
+ * answered it was making size a setting rather than our guess.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THE 2026-09 SPEC CHANGED, and nothing else changed.
+ *
+ * Every edit below is marked /* [SPEC] */ /*. Read those eleven markers and you
+ * have read the whole diff. No colour token changed. No class was renamed or
+ * removed, so no .tsx selector broke. Three additions are genuinely new
+ * (.band, .verdict, the .wall rewrite); the rest are typographic.
+ *
+ *   1. --font        Archivo → Instrument Sans.
+ *   2. --fs-head     30px → 34px.
+ *   3. --fs-display  NEW step at 56px. --fs-fig kept as an alias so existing
+ *                    markup keeps working; new markup uses --fs-display.
+ *   4. .band         NEW. Full-bleed rule; .page still caps at 1100px inside.
+ *   5. .block        Becomes a 180px + 1fr grid so its label hangs left.
+ *   6. .figs         Hairline between figures, no grid gap, --fs-display.
+ *   7. .strip        Gains the plant-clock slot and the live pulse dot.
+ *   8. .verdict      NEW. The one ink fill in the app. Report only. Prints.
+ *   9. .wall*        Rewritten as a composed board: station bars, pinned foot.
+ *  10. .sheet        Figure uses --fs-display; kv gains a print rule.
+ *  11. @media print  The verdict mark and the station bars survive printing.
+ * ------------------------------------------------------------------------- */
+
+/* ------------------------------------------------------------------ tokens */
+
+:root {
+  /* ink */
+  --ink: #16191c;        /* body text, primary marks                        */
+  --graphite: #4a5057;   /* secondary text, second chart series   8.15:1 ↑  */
+  --muted: #5f656c;      /* labels, captions, axis ticks          6.61:1 ↑  */
+  --grid: #8c9298;       /* GRAPHICS ONLY — gridlines, chevrons, dimmed     */
+
+  /* paper */
+  --paper: #ffffff;      /* the page                                        */
+  --paper-2: #f2f2ef;    /* period control track, shaded chart region       */
+  --paper-3: #f6f6f3;    /* header strip, row hover, highlighted row        */
+  --rule: #e7e8e4;       /* between blocks and table rows                   */
+  --rule-2: #d3d5d1;     /* control borders, table header underline         */
+  --track: #e4e7e3;      /* bar-chart track                                 */
+
+  /* the one accent — attention, and nothing else */
+  --acc: #a5330f;        /* accent TEXT and marks                 6.82:1 ↑  */
+  --acc-fill: #d8451b;   /* accent fill behind white / large only           */
+  --acc-pale: #fbe9e4;   /* accent row wash                                 */
+
+  /* health dot only */
+  --ok: #1e8757;
+  --warn: #aa730e;
+
+  /* [SPEC 1] Instrument Sans. Taller x-height at the same size, so a 13px
+     station label survives a wall; unambiguous 1/7/9 at four metres; and a
+     display cut tight enough that one family carries both a 13px axis tick
+     and a 132px wall figure. Archivo's tracking loosened at display size,
+     which is what had made a second family look necessary. Self-hosted as
+     woff2 in /fonts — the plant PC has no internet. */
+  --font: 'Instrument Sans', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
+
+  /* Type. One ramp, six steps, and a screen may use at most four of them. */
+  --ui-scale: 1;
+  --fs-tick: calc(13px * var(--ui-scale));    /* axis ticks, station labels  */
+  --fs-small: calc(15px * var(--ui-scale));   /* captions, chrome, table head*/
+  --fs-body: calc(17px * var(--ui-scale));    /* body, table cells           */
+  --fs-qual: calc(22px * var(--ui-scale));    /* a figure's qualifier        */
+  --fs-head: calc(34px * var(--ui-scale));    /* [SPEC 2] was 30px           */
+  --fs-display: calc(56px * var(--ui-scale)); /* [SPEC 3] NEW. The three
+                                                 headline figures. Exists so
+                                                 the shift's output outranks
+                                                 the sentence describing it;
+                                                 at 40px against a 30px
+                                                 headline neither won.       */
+  --fs-fig: var(--fs-display);                /* alias — existing markup     */
+
+  --gap-block: 28px;
+  --radius: 4px;
+  --t: 120ms ease;
+
+  color-scheme: light;
+}
+
+/* The plant PC is a fixed, known machine and the app is read in daylight on a
+   bright floor; a dark theme would be a second design to maintain and a second
+   contrast audit to pass. The page commits to one look deliberately. */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* [SPEC 1] Self-hosted. Variable font, one file, weights 400–700 — the whole
+   ramp including the 600 display cut. No network at run time. */
+@font-face {
+  font-family: 'Instrument Sans';
+  src: url('/fonts/InstrumentSans-Variable.woff2') format('woff2-variations');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ------------------------------------------------------------------- reset */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* Tabular figures everywhere, so one family can carry every number in the
+     app and columns still align. This is what retires DM Mono. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+h1, h2, h3, p, ul, ol, figure { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+button { font: inherit; color: inherit; }
+svg text { font-family: var(--font); font-variant-numeric: tabular-nums; }
+
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: #b7bab5;
+}
+a:hover { color: var(--acc); text-decoration-color: var(--acc); }
+
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 100;
+  background: var(--ink); color: #fff; padding: 10px 16px; text-decoration: none;
+}
+.skip-link:focus { left: 0; }
+
+/* --------------------------------------------------------------- the shell */
+
+.app { min-height: 100%; display: flex; flex-direction: column; }
+
+/* ---- top bar: five words, one period control, the lag sentence ---------- */
+
+.bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; padding: 0 32px; height: 56px; background: var(--paper);
+}
+.nav { display: flex; align-items: center; gap: 26px; height: 56px; min-width: 0; }
+.brand { font-weight: 600; letter-spacing: 0.04em; margin-right: 6px; }
+.nav-link {
+  display: flex; align-items: center; height: 56px; padding-top: 2px;
+  border: 0; border-bottom: 2px solid transparent; background: none;
+  color: var(--graphite); text-decoration: none; cursor: pointer;
+  white-space: nowrap; transition: color var(--t);
+}
+.nav-link:hover { color: var(--ink); }
+.nav-link.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+.nav-link:focus-visible { outline-offset: -4px; }
+
+.bar-right { display: flex; align-items: center; gap: 14px; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0; border: 0; border-radius: var(--radius);
+  background: none; color: var(--graphite); cursor: pointer; transition: background var(--t), color var(--t);
+}
+.icon-btn:hover { background: var(--paper-3); color: var(--ink); }
+
+/* ---- the user menu: name, text size, sign out --------------------------- */
+
+.menu-wrap { position: relative; }
+.icon-btn.initials { font-size: var(--fs-small); font-weight: 600; letter-spacing: 0.02em; background: var(--paper-2); }
+.icon-btn.initials:hover { background: var(--rule); }
+.menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 232px;
+  padding: 6px; border: 1px solid var(--rule-2); border-radius: var(--radius);
+  background: var(--paper); box-shadow: 0 6px 20px rgba(22, 25, 28, 0.10);
+}
+.menu-who { padding: 8px 10px 10px; border-bottom: 1px solid var(--rule); }
+.menu-who b { display: block; font-weight: 500; }
+.menu-who span { color: var(--muted); font-size: var(--fs-small); }
+.menu-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px; border-bottom: 1px solid var(--rule); font-size: var(--fs-small); color: var(--muted);
+}
+.menu-item {
+  display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 3px;
+  background: none; text-align: left; cursor: pointer;
+}
+.menu-item:hover { background: var(--paper-3); }
+
+/* ---- the one period control -------------------------------------------- */
+
+.period {
+  display: flex; gap: 2px; padding: 2px; border-radius: var(--radius);
+  background: var(--paper-2);
+}
+.period button {
+  padding: 4px 11px; border: 0; border-radius: 3px; background: none;
+  font-size: var(--fs-small); color: var(--graphite); cursor: pointer;
+  white-space: nowrap; transition: background var(--t), color var(--t);
+}
+.period button:hover { color: var(--ink); }
+.period button.on { background: var(--paper); color: var(--ink); box-shadow: 0 0 0 1px var(--rule); }
+.period button[disabled] { opacity: 0.42; cursor: not-allowed; }
+.period button[disabled]:hover { color: var(--graphite); }
+
+.picked { display: inline-flex; align-items: center; gap: 8px; }
+.picked input {
+  font: inherit; font-size: var(--fs-small); padding: 3px 8px;
+  border: 1px solid var(--rule-2); border-radius: var(--radius); background: var(--paper); color: var(--ink);
+}
+
+/* ---- the strip: line name, plant clock, and the lag sentence ------------ */
+
+.strip {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  min-height: 32px; padding: 5px 32px; background: var(--paper-3);
+  font-size: var(--fs-small); color: var(--graphite);
+}
+.strip-link {
+  border: 0; background: none; padding: 0; text-align: right; cursor: pointer;
+  color: inherit; font-size: inherit;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #b7bab5;
+}
+.strip-link:hover { color: var(--acc); text-decoration-color: var(--acc); }
+.strip.alarm, .strip.alarm .strip-link { color: var(--acc); }
+.strip.alarm { background: var(--acc-pale); }
+
+/* [SPEC 7] The plant clock, and the pulse. Two rules, one purpose: a screen
+   that has stopped receiving data must LOOK stopped. The clock is the plant
+   clock from /api/live, never Date.now() — the doctrine's "nothing measured
+   against the browser clock" applies to what is displayed as much as to what
+   is computed. The pulse is the only animation in the app outside the
+   skeleton, and it stops on .alarm rather than turning red: motion ceasing is
+   read faster than a colour change. */
+.strip .clock { font-variant-numeric: tabular-nums; }
+.strip .dot.live { animation: beat 2.4s ease-in-out infinite; }
+.strip.alarm .dot.live { animation: none; }
+@keyframes beat { 50% { opacity: 0.28; } }
+
+.dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ok); margin-right: 8px; vertical-align: 1px; flex: none;
+}
+.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--acc-fill); }
+
+.replay {
+  padding: 7px 32px; background: var(--ink); color: #fff; font-size: var(--fs-small);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.replay a { color: #fff; }
+
+/* ---- the page: one column, 1100px --------------------------------------- */
+
+.page { width: 100%; max-width: 1100px; margin: 0 auto; padding: 34px 32px 64px; }
+
+/* [SPEC 4] NEW. A full-bleed band carrying the rule.
+   The old page drew every block's hairline at 1100px, so on the office's
+   2560px monitor the page was a narrow strip of lines floating in white and
+   had no architecture at all. The rule now reaches the bezels; the content
+   still stops at 1100px. Markup: <div class="band"><div class="page">…
+   Blocks inside a band drop their own top border — the band carries it. */
+.band { border-top: 1px solid var(--rule); }
+.band.hard { border-top-color: var(--ink); }
+.band > .page { padding-top: var(--gap-block); padding-bottom: var(--gap-block); }
+.band > .page > .block.first { border-top: 0; padding-top: 0; }
+
+/* The question each screen answers, stated on the page rather than on hover:
+   hover does not exist on a wall display or a touch screen. */
+.q { font-size: var(--fs-small); color: var(--muted); margin-bottom: 6px; }
+
+h1, .headline {
+  font-size: var(--fs-head); line-height: 1.28; font-weight: 500;
+  letter-spacing: -0.015em; text-wrap: pretty; max-width: 34ch;
+}
+h1.wide, .headline.wide { max-width: none; }
+h1 .acc, .headline .acc { color: var(--acc); }
+
+/* [SPEC 5] Blocks become a two-column grid so the label hangs in a left
+   margin instead of sitting on top of the content. Two things follow: the
+   content column has one left edge all the way down the screen, and the eye
+   can skim the labels without reading through them. The .h2 markup is
+   unchanged — it just lands in column 1 now, which is why no .tsx needed
+   touching. Below 860px the grid collapses and .h2 goes back on top. */
+.block {
+  display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 0 40px;
+  padding: var(--gap-block) 0; border-top: 1px solid var(--rule);
+}
+.block.first { border-top: 0; padding-top: 26px; }
+.block.tight { padding-top: 18px; padding-bottom: 18px; }
+.block.plain { border-top: 0; }
+/* A block with no label spans both columns rather than leaving a 180px hole. */
+.block.wide, .block.plain { grid-template-columns: minmax(0, 1fr); }
+.block > .h2 { grid-column: 1; }
+.block > *:not(.h2) { grid-column: 2; }
+.block.wide > *, .block.plain > * { grid-column: 1; }
+
+/* Every block's label row: a quiet left label, an optional right-hand note
+   that carries the scope or the caveat. Never a title plus a lede paragraph.
+   [SPEC 5] The label now stacks; its .note moves out to sit flush right
+   against the content column's right edge, on the label's own baseline. */
+.h2 {
+  font-size: var(--fs-small); font-weight: 500; color: var(--muted);
+  margin-bottom: 14px; align-self: start;
+}
+.h2 .note {
+  display: block; font-weight: 400; color: var(--muted);
+  /* pulled into the content column, flush right, on the label's baseline */
+  grid-column: 2; text-align: right; margin-top: -1.5em; margin-bottom: 8px;
+}
+@media (max-width: 860px) {
+  .block { grid-template-columns: minmax(0, 1fr); }
+  .block > *, .block > .h2 { grid-column: 1; }
+  .h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+  .h2 .note { display: inline; margin: 0; text-align: right; }
+}
+
+/* A screen headline with its actions beside it. The actions never wrap below
+   the headline: a full-width headline plus flex-wrap put Print and Export
+   under the sentence, where they read as body content rather than controls. */
+.head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.head-actions { flex: none; padding-top: 26px; }
+@media (max-width: 620px) { .head-row { flex-direction: column; } .head-actions { padding-top: 0; } }
+
+/* ---- figures ------------------------------------------------------------ */
+
+/* [SPEC 6] A hairline between figures instead of a 32px gap, and the display
+   step. The gap alone let the middle figure's note read as a caption for the
+   left figure; the rule ends that ambiguity for one pixel. */
+.figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.figs.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.figs.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.figs > * { padding: 0 32px; border-left: 1px solid var(--rule); }
+.figs > *:first-child { padding-left: 0; border-left: 0; }
+.figs > *:last-child { padding-right: 0; }
+.fig-val {
+  display: block; font-size: var(--fs-display); line-height: 1; font-weight: 600;
+  letter-spacing: -0.03em; white-space: nowrap;
+}
+.fig-unit {
+  font-size: var(--fs-qual); font-weight: 500; color: var(--graphite);
+  margin-left: 7px; letter-spacing: 0;
+}
+.fig-note { display: block; color: var(--graphite); margin-top: 8px; text-wrap: pretty; }
+/* A figure that is a range or a sentence rather than a count steps down one
+   notch, so it still fits on one line at 1100px. Was an inline style. */
+.fig-val.small { font-size: var(--fs-head); }
+
+/* ---- attention: at most three sentences, each ending in a link ---------- */
+
+.attn li { position: relative; padding-left: 18px; margin-bottom: 10px; text-wrap: pretty; }
+.attn li:last-child { margin-bottom: 0; }
+.attn li::before {
+  content: ''; position: absolute; left: 0; top: 0.6em;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--acc-fill);
+}
+.attn .say { color: var(--acc); }
+.attn.calm li { color: var(--graphite); padding-left: 0; }
+.attn.calm li::before { display: none; }
+.attn-more { margin-top: 10px; color: var(--graphite); font-size: var(--fs-small); }
+
+/* ---- stations ----------------------------------------------------------- */
+
+/* Count comes from Setup › Stations, so the grid is driven by a custom
+   property rather than a hardcoded 14 (REDESIGN.md §5.1, requirement 10). */
+.stations { display: grid; grid-template-columns: repeat(var(--st-count, 14), minmax(0, 1fr)); gap: 8px; }
+.st {
+  padding: 9px 4px 8px; border: 1px solid var(--rule); border-radius: var(--radius);
+  background: none; text-align: center; cursor: pointer;
+  transition: border-color var(--t), background var(--t);
+}
+.st:hover { background: var(--paper-3); border-color: var(--rule-2); }
+.st-name {
+  display: block; font-size: var(--fs-tick); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.st-val { display: block; font-size: calc(18px * var(--ui-scale)); font-weight: 500; margin-top: 1px; }
+/* A one-word state under the value: "quiet". Reserves its line whether or not
+   a station has one, so the row never reflows as stations go quiet. */
+.st-tag { display: block; font-size: var(--fs-tick); color: var(--grid); min-height: 1.4em; }
+.st.quiet { border-style: dashed; }
+.st.quiet .st-val, .st.quiet .st-name { color: var(--grid); }
+.st.flag { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.st.flag .st-val { color: var(--acc); }
+
+/* ---- tables ------------------------------------------------------------- */
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  padding: 0 12px 8px 0; border-bottom: 1px solid var(--rule-2);
+  font-size: var(--fs-small); font-weight: 500; color: var(--muted);
+  text-align: left; white-space: nowrap;
+}
+td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th.n, td.n { text-align: right; padding-right: 0; padding-left: 18px; white-space: nowrap; }
+tr.on td, tr.hl td { background: var(--paper-3); }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--paper-3); }
+tbody tr:last-child td { border-bottom: 0; }
+.tw { overflow-x: auto; }                 /* wide tables scroll, the page never does */
+.chev { color: var(--grid); margin-left: 8px; }
+/* A row the scale rejected. Wash plus accent text — never a red left border,
+   which would read as a card. */
+tr.rej td { background: var(--acc-pale); color: var(--acc); }
+tr.rej.click:hover td { background: #f8ded7; }
+
+.two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; }
+@media (max-width: 860px) { .two-col { grid-template-columns: 1fr; gap: 28px; } }
+.print-only { display: none; }
+@media print { .print-only { display: block !important; } }
+
+/* ---- controls ----------------------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 12px; border: 1px solid var(--rule-2); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink); font-size: var(--fs-small);
+  text-decoration: none; white-space: nowrap; cursor: pointer; transition: background var(--t), border-color var(--t);
+}
+.btn:hover { background: var(--paper-3); border-color: var(--grid); color: var(--ink); }
+.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+.btn.primary:hover { background: #2c3034; color: #fff; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 12px; border: 1px solid var(--rule-2); border-radius: 999px;
+  background: var(--paper); font-size: var(--fs-small); white-space: nowrap; cursor: pointer;
+  transition: background var(--t), border-color var(--t);
+}
+.chip:hover { background: var(--paper-3); }
+.chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.chip .x { color: inherit; opacity: 0.75; }
+
+.toggle { display: inline-flex; border: 1px solid var(--rule-2); border-radius: var(--radius); overflow: hidden; }
+.toggle button {
+  padding: 5px 14px; border: 0; border-right: 1px solid var(--rule-2);
+  background: var(--paper); font-size: var(--fs-small); color: var(--graphite);
+  white-space: nowrap; cursor: pointer; transition: background var(--t), color var(--t);
+}
+.toggle button:last-child { border-right: 0; }
+.toggle button:hover { background: var(--paper-3); color: var(--ink); }
+.toggle button.on { background: var(--ink); color: #fff; }
+
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row.between { justify-content: space-between; }
+.row.top { align-items: flex-start; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > span { font-size: var(--fs-small); color: var(--muted); }
+input[type='text'], input[type='date'], input[type='number'], input[type='password'], select, textarea {
+  font: inherit; font-size: var(--fs-body); padding: 6px 10px;
+  border: 1px solid var(--rule-2); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink);
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; border-color: var(--ink); }
+
+/* A button that reads as a link: used where an action sits inside a
+   sentence, so the sentence still reads as a sentence. */
+.linkish {
+  border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #b7bab5;
+}
+.linkish:hover { color: var(--acc); text-decoration-color: var(--acc); }
+.linkish[disabled] { color: var(--grid); cursor: not-allowed; text-decoration: none; }
+
+.product-name { font-size: var(--fs-qual); font-weight: 500; }
+
+/* [SPEC 8] NEW. The verdict mark — the one ink fill in the application.
+   A figure that has been signed for, with its period and its author attached.
+   It appears at most ONCE per screen and only on Report, because Report is the
+   only screen whose output leaves the building. It is not a button style, not
+   a badge, and not available to any other screen. If a second one appears
+   anywhere, the fill has stopped meaning anything and this rule should be
+   deleted rather than reused. */
+.verdict {
+  padding: 22px 24px; border-radius: var(--radius);
+  background: var(--ink); color: #fff;
+}
+.verdict > .lbl {
+  display: block; font-size: var(--fs-tick); font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.62;
+}
+.verdict > .val {
+  display: block; font-size: calc(26px * var(--ui-scale)); font-weight: 500;
+  letter-spacing: -0.02em; line-height: 1.2; margin-top: 10px;
+}
+.verdict > .who {
+  display: block; font-size: var(--fs-small); margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.22); opacity: 0.8;
+}
+
+/* ---- charts ------------------------------------------------------------- */
+
+/* The hover readout is a line of TEXT above the chart, never a floating
+   tooltip: a tooltip covers the marks it describes, cannot be read from a
+   wall display, and does not exist for a keyboard. */
+.readout { font-size: var(--fs-small); color: var(--graphite); text-align: right; min-height: 1.5em; }
+.readout .dim { color: var(--muted); }
+.chart { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .mark { fill: var(--acc-fill); }
+.chart .hit { fill: transparent; cursor: crosshair; }
+
+/* ---- horizontal bars (reject reasons) --------------------------------- */
+
+.bars div {
+  display: grid; grid-template-columns: minmax(9em, 18em) 1fr minmax(6em, 9em) 5em;
+  align-items: center; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule);
+}
+.bars div:last-child { border-bottom: 0; }
+.bars i { display: block; height: 12px; border-radius: 2px; font-style: normal; min-width: 2px; }
+.bars em { font-style: normal; text-align: right; color: var(--graphite); white-space: nowrap; }
+.bars .sm { font-size: var(--fs-small); }
+@media (max-width: 700px) {
+  .bars div { grid-template-columns: 1fr minmax(6em, 9em) 5em; }
+  .bars i { display: none; }
+}
+
+/* ---- the details disclosure -------------------------------------------- */
+
+.details { padding-top: 22px; border-top: 1px solid var(--rule); font-size: var(--fs-small); color: var(--graphite); }
+.details summary { cursor: pointer; }
+.details summary::marker { color: var(--grid); }
+.details[open] summary { margin-bottom: 12px; color: var(--ink); }
+.details .body { padding-left: 2px; max-width: 78ch; }
+.details .body p { margin-bottom: 10px; }
+
+/* ---- the right-hand sheet ---------------------------------------------- */
+
+.scrim { position: fixed; inset: 0; background: rgba(22, 25, 28, 0.18); border: 0; padding: 0; z-index: 40; animation: fade var(--t); }
+@keyframes fade { from { opacity: 0; } }
+.sheet {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw);
+  z-index: 41; background: var(--paper); border-left: 1px solid var(--rule-2);
+  padding: 26px 32px 48px; overflow-y: auto; animation: slide 160ms ease;
+}
+@keyframes slide { from { transform: translateX(16px); opacity: 0; } }
+.sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 4px; }
+.sheet h2 { font-size: calc(26px * var(--ui-scale)); font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; text-wrap: pretty; }
+/* [SPEC 10] The sheet's weight takes the display step: it is the answer to the
+   question that opened the sheet, and at 40px it tied with the h2 above it. */
+.sheet .big { font-size: var(--fs-display); font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+.sheet .eyebrow { font-size: var(--fs-small); color: var(--muted); }
+/* The scale's verdict, directly under the weight. Named as the scale's. */
+.sheet .said { margin-top: 8px; font-weight: 500; }
+.sheet .said.acc { color: var(--acc); }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 28px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+
+/* ---- states ------------------------------------------------------------- */
+
+.state { padding: 40px 0; color: var(--muted); }
+.state.err { color: var(--acc); }
+.loading { color: var(--muted); }
+
+/* A block waiting on its own request keeps its height so the page does not
+   jump as each panel lands. */
+.skel { background: var(--paper-3); border-radius: var(--radius); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.55; } }
+/* Named heights, so a skeleton reserves the real element's box rather than a
+   guess. A figure skeleton must match --fs-display's line box or the page
+   jumps by 16px as the first panel lands. */
+.skel.fig { height: calc(var(--fs-display) + var(--fs-body) + 8px); }
+.skel.line { height: 1.5em; }
+.skel.line.short { max-width: 24ch; }
+.skel.chart { height: 250px; }
+.skel.st { height: 62px; }
+
+/* ---- login: one centred form ------------------------------------------- */
+
+.login { min-height: 100%; display: grid; place-items: center; padding: 32px; }
+.login form { width: min(360px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.login .brand { font-size: calc(22px * var(--ui-scale)); margin: 0 0 4px; }
+/* The lockout sentence sits where the error sentence sits, so the form never
+   changes height between the two. */
+.login .acc { text-wrap: pretty; }
+
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 1080px) {
+  .bar { flex-wrap: wrap; height: auto; padding: 8px 20px; gap: 10px; }
+  .nav, .nav-link { height: 40px; }
+  .strip, .page { padding-left: 20px; padding-right: 20px; }
+  /* [SPEC 6] The hairline between figures becomes a hairline between rows
+     once they wrap, or the second row hangs off nothing. */
+  .figs, .figs.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .figs > *:nth-child(3), .figs > *:nth-child(4) { padding-top: 24px; border-top: 1px solid var(--rule); }
+  .figs > *:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .stations { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  :root { --fs-display: calc(38px * var(--ui-scale)); --fs-head: calc(26px * var(--ui-scale)); }
+  .figs, .figs.two, .figs.four { grid-template-columns: 1fr; }
+  .figs > * { padding: 18px 0 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .figs > *:first-child { padding-top: 0; border-top: 0; }
+  .stations { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .strip { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .sheet { width: 100vw; border-left: 0; }
+  .verdict { padding: 18px 20px; }
+}
+
+/* ------------------------------------------------------------------- wall */
+
+/* [SPEC 9] Rewritten.
+ *
+ * The old wall was the Line screen with the chrome removed and the type in
+ * viewport units. That is a scale trick, not a design: it inherited a reading
+ * order built for a mouse at 60cm, and its fourteen bordered station boxes
+ * with numbers inside them were illegible from a doorway. This is a board,
+ * composed once, for a glance from four metres.
+ *
+ * Three rules it follows and the desk screen does not:
+ *   - ONE thing is biggest, and it is the state sentence. 4.1vw is 79px on a
+ *     1920 panel: readable from outside the room, which is the whole job.
+ *   - Stations encode their count as BAR HEIGHT, with the number below a rule.
+ *     A quiet station becomes a visible gap in the row — the fastest read on
+ *     the board, and it needs no colour at all.
+ *   - The footer is pinned and never leaves. A display left on for a week must
+ *     always be able to say how fresh it is.
+ *
+ * Sized in vw, not vh: the panel is a known 16:9 and vw keeps the composition
+ * proportional if it is ever driven at 2560 or 3840.
+ */
+.wall {
+  height: 100vh; box-sizing: border-box; display: flex; flex-direction: column;
+  background: var(--paper); cursor: none; overflow: hidden;
+}
+.w-head { padding: 3.4vh 3.6vw 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 3vw; }
+.w-line { font-size: 1.15vw; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.w-state { font-size: 4.1vw; line-height: 1.04; font-weight: 600; letter-spacing: -0.03em; margin-top: 0.5vw; }
+.w-state.acc, .w-foot.acc, .w-note.acc { color: var(--acc); }
+.w-clock { text-align: right; flex: none; }
+.w-clock b { display: block; font-size: 2.1vw; font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
+.w-clock span { display: block; font-size: 1.15vw; color: var(--muted); margin-top: 0.3vw; }
+
+.w-figs {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 3.2vh 3.6vw 0; padding-top: 2.2vh; border-top: 1px solid var(--ink);
+}
+.w-figs > * { padding: 0 3vw; border-left: 1px solid var(--rule); }
+.w-figs > *:first-child { padding-left: 0; border-left: 0; }
+.w-figs > *:last-child { padding-right: 0; }
+.w-figs b { display: block; font-size: 7.4vw; line-height: 0.92; font-weight: 600; letter-spacing: -0.04em; }
+.w-figs span { display: block; font-size: 1.35vw; color: var(--graphite); margin-top: 0.7vw; }
+
+/* margin-top:auto pins everything below to the bottom of the panel, so the
+   board's composition does not change as figures gain or lose a digit. */
+.w-stwrap { margin: auto 3.6vw 0; padding-bottom: 2.4vh; }
+.w-sub { display: flex; align-items: baseline; justify-content: space-between; gap: 2vw; font-size: 1.2vw; color: var(--muted); margin-bottom: 0.9vw; }
+.w-st { display: grid; grid-template-columns: repeat(var(--st-count, 14), minmax(0, 1fr)); gap: 0.55vw; align-items: end; }
+.w-st .bar { display: block; background: var(--paper-2); border-top: 2px solid var(--ink); border-radius: 2px 2px 0 0; }
+.w-st .cap { border-top: 1px solid var(--ink); padding-top: 0.5vw; text-align: center; }
+.w-st b { display: block; font-size: 1.55vw; font-weight: 500; line-height: 1.1; }
+.w-st i { display: block; font-style: normal; font-size: 1.05vw; color: var(--muted); }
+.w-st .quiet .bar { background: var(--paper-3); border-top-color: var(--rule-2); }
+.w-st .quiet b, .w-st .quiet i { color: var(--grid); }
+.w-st .flag .bar { background: var(--acc-pale); border-top-color: var(--acc); }
+.w-st .flag b { color: var(--acc); }
+
+.w-foot {
+  padding: 1.5vh 3.6vw; background: var(--paper-3);
+  display: flex; align-items: center; justify-content: space-between; gap: 3vw;
+  font-size: 1.2vw; color: var(--graphite);
+}
+.w-foot.acc { background: var(--acc-pale); }
+.w-foot .dot { width: 0.85vw; height: 0.85vw; margin-right: 0.8vw; }
+.w-foot .dot.live { animation: beat 2.4s ease-in-out infinite; }
+.w-foot.acc .dot.live { animation: none; }
+
+/* Above 14 stations the row gets a second line rather than thinner bars: a
+   bar narrower than about 1.4vw stops reading as a height at four metres. */
+@media (min-width: 1px) { .w-st { min-height: 0; } }
+
+/* ------------------------------------------------------------------ print */
+
+/* The print header block carries what the screen chrome would otherwise take
+   away with it: which line, which period, coverage, the newest reading, and
+   who printed it. Without it a printed report is undated and unattributed. */
+@media print {
+  .bar, .strip, .replay, .no-print, .scrim, .sheet, .wall { display: none !important; }
+  body { font-size: 11pt; }
+  .page { max-width: none; padding: 0; }
+  .band { border-top: 0; }
+  .band > .page { padding: 0; }
+  .block { break-inside: avoid; }
+  /* [SPEC 5] The hanging label would waste 180px of a sheet of A4. On paper
+     the label goes back above its content. */
+  .block { display: block; }
+  .h2 { display: flex; justify-content: space-between; align-items: baseline; }
+  .h2 .note { display: inline; margin: 0; }
+  .print-head { display: block !important; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--rule-2); }
+  a { text-decoration: none; }
+  tr { break-inside: avoid; }
+  /* [SPEC 11] The verdict mark is the reason the page is worth printing, so
+     it must not be dropped by the browser's "background graphics" default.
+     Printed as a ruled block with ink text — same content, same authority, no
+     dependence on a setting the person printing does not know exists. */
+  .verdict {
+    background: none !important; color: var(--ink) !important;
+    padding: 0 0 12px; border: 0; border-bottom: 2px solid var(--ink); border-radius: 0;
+    break-inside: avoid; break-after: avoid;
+  }
+  .verdict > .lbl { opacity: 1; color: var(--muted); }
+  .verdict > .who { opacity: 1; border-top-color: var(--rule-2); color: var(--graphite); }
+  /* Station bars would print as empty boxes; the numbers carry the same fact. */
+  .w-st .bar, .skel { display: none !important; }
+  .figs { gap: 0 18px; }
+}
+.print-head { display: none; }

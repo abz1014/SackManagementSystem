@@ -19,6 +19,43 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 **Phase 0 (Database Discovery) — COMPLETE.** → `SCHEMA.md`, `QUESTIONS.md`
 **Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 25 app tables, session-cookie auth (argon2), 17 tests, perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover (repoint `IFL_DB_SERVER`).**
 
+### Visual redesign applied from the design handoff (3 Sep 2026)
+
+A second, purely visual pass, delivered by the designer as
+`Sack Management System Redesign.zip` and applied in full. It changed no
+route, API, query or metric, and renamed nothing. Sources kept in
+`design/handoff-2026-09-03/`.
+
+**What changed.** `web/src/app.css` was replaced by the bundle~+~s production
+stylesheet (eleven marked edits). **Instrument Sans** variable, self-hosted at
+`web/public/fonts/InstrumentSans-Variable.woff2`, replaced Archivo — one file,
+weights 400-700, and the plant PC has no internet, so a Google Fonts link
+would silently fall back to Segoe UI on the one machine that matters. New
+display step at 56px so a shift~+~s output outranks the sentence describing it.
+Block labels hang in a 180px left margin; rules are carried by full-bleed
+bands, so a hairline reaches both bezels while text stops at 1100px. Report
+gained the **verdict mark**, the one ink fill in the application. Wall was
+rebuilt as a composed board: stations encode their count as bar height, the
+state sentence is 79px at 1920, and the footer is pinned.
+
+**Three defects found while applying it, and fixed:**
+1. `.h2 .note` in the bundled CSS could never match a grid item, so every
+   block~+~s note overprinted its own label. The selector was extended and the
+   declarations left untouched; both changes are marked in `app.css`.
+2. The same rule~+~s `-1.5em` then placed the note a line too high once it was a
+   real grid item.
+3. The register~+~s Export button was offered at rank 2 while the server gates it
+   at 3 — a control that could only ever answer 403. `EXPORT_RANK` now matches
+   `requireRole(3)`.
+
+**Two acceptance checks do not pass, and neither is a defect in what shipped:**
+check 1 (at most four of six type steps) is unreachable for Line, Weight and
+Rejects given the spec~+~s own composition of those screens; check 9 (no block
+changes height as it lands) needs skeletons on every block, which the
+handoff~+~s own file list does not scope. The `.skel.fig` height in the bundle
+also under-reserves by 9px because it counts the note~+~s font size rather than
+its line box.
+
 ### UI redesign — BUILT AND LIVE (3 Sep 2026)
 
 The floor-first rework below did not cure the interface; the owner's verdict

@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#ffffff;color:#16191c;font-family:'Instrument Sans','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,Arial,sans-serif;font-size:17px;line-height:1.5;font-variant-numeric:tabular-nums;font-feature-settings:'tnum' 1;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,p,ul,ol,figure,dl,dd{margin:0}
+ul,ol{padding:0;list-style:none}
+button{font:inherit;color:inherit}
+table{border-collapse:collapse;width:100%}
+a{color:#16191c;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px;text-decoration-color:#b7bab5}
+a:hover{color:#a5330f;text-decoration-color:#a5330f}
+code{font-family:inherit;background:#f6f6f3;padding:1px 5px;border-radius:3px}
+::selection{background:#fbe9e4}
+@keyframes smsPulse{0%,100%{opacity:1}50%{opacity:.28}}
+@keyframes smsSkel{50%{opacity:.55}}
+</style>
+</helmet>
+
+<div style="max-width:100%;overflow-x:hidden">
+
+<div style="max-width:1240px;margin:0 auto;padding:72px 32px 0">
+  <div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:0 48px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c;padding-top:9px">Part two</div>
+    <div>
+      <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c;margin-bottom:22px">IFL Sack Management System · states, roles, print</div>
+      <h1 style="font-size:60px;line-height:1.03;font-weight:500;letter-spacing:-.035em;max-width:22ch;text-wrap:pretty">What the screens do when the data doesn't cooperate.</h1>
+      <p style="font-size:20px;line-height:1.45;color:#4a5057;max-width:54ch;margin-top:26px;text-wrap:pretty">Part one speced the healthy screen. This part covers the other four fifths of the time: a request in flight, a request that failed, a period with nothing in it, a plant link that has gone quiet, and a screen being read by someone who is not allowed to change anything.</p>
+      <p style="font-size:15px;color:#5f656c;max-width:54ch;margin-top:18px">Paired with <code>spec/app.css</code>, which is the real stylesheet, and <code>spec/HANDOFF.md</code>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- correction notice -->
+<div style="border-top:1px solid #a5330f;margin-top:52px">
+  <div style="max-width:1240px;margin:0 auto;padding:26px 32px;display:grid;grid-template-columns:180px minmax(0,1fr);gap:0 48px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#a5330f">Correction</div>
+    <div>
+      <p style="max-width:74ch;text-wrap:pretty"><span style="color:#a5330f">Part one drew Setup as a five-tab screen. That is wrong.</span> <code>Setup.tsx</code> is deliberately one page with five stacked blocks — the header comment says the old tabbed version “read as project documentation”, and Sync health is first because the strip's <em style="font-style:normal">readings to 10:34</em> sentence links straight to it. Section 19 below is the corrected version. Ignore part one's §12.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== 14 THE SHEET -->
+<div id="s14" style="border-top:1px solid #e7e8e4">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:0 48px">
+      <div>
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">14</div>
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c;margin-top:2px">The sheet</div>
+        <p style="font-size:13px;color:#5f656c;margin-top:20px;text-wrap:pretty">460px, from the right, over the screen that opened it. Every drill-down in the app is this one surface.</p>
+      </div>
+      <div>
+        <h2 style="font-size:34px;line-height:1.2;font-weight:500;letter-spacing:-.02em;max-width:36ch;text-wrap:pretty">One reading, four cases, and a hard rule about what it may not say.</h2>
+        <p style="font-size:17px;color:#4a5057;margin-top:18px;max-width:66ch;text-wrap:pretty">The sheet replaced both a sticky detail rail and a full record page. Between them they leaked merge-key uniqueness, transform version and a data-quality collision id to somebody who had asked what a cone weighed. The only change part two makes is typographic: the weight takes the new display step, because it is the answer to the question that opened the sheet and at 40px it tied with the heading above it.</p>
+
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px;margin-top:36px">
+          <sc-for list="{{ sheets }}" as="sh" hint-placeholder-count="4">
+            <div>
+              <div style="font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;padding-bottom:9px;border-bottom:1px solid #16191c">{{ sh.case }}</div>
+              <div style="border:1px solid #d3d5d1;border-left-width:1px;border-radius:4px;background:#fff;padding:18px 18px 22px;margin-top:14px;min-height:250px">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+                  <div>
+                    <div style="font-size:22px;font-weight:500;letter-spacing:-.01em">{{ sh.title }}</div>
+                    <div style="font-size:13px;color:#5f656c;margin-top:1px">{{ sh.eyebrow }}</div>
+                  </div>
+                  <span style="color:#8c9298;flex:none">✕</span>
+                </div>
+                <div style="font-size:40px;font-weight:600;letter-spacing:-.03em;line-height:1;margin-top:20px;color:{{ sh.bigFg }}">{{ sh.big }}</div>
+                <div style="font-weight:500;margin-top:8px;color:{{ sh.saidFg }};font-size:15px">{{ sh.said }}</div>
+                <div style="font-size:15px;color:{{ sh.cmpFg }};margin-top:6px;text-wrap:pretty">{{ sh.compare }}</div>
+                <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 16px;margin-top:18px;font-size:15px">
+                  <sc-for list="{{ sh.kv }}" as="k" hint-placeholder-count="4">
+                    <div style="color:#5f656c">{{ k.k }}</div>
+                    <div>{{ k.v }}</div>
+                  </sc-for>
+                </div>
+                <div style="font-size:13px;color:#5f656c;margin-top:16px;text-wrap:pretty">{{ sh.extra }}</div>
+                <div style="font-size:13px;color:#5f656c;margin-top:14px;padding-top:10px;border-top:1px solid #e7e8e4">▸ Where this row came from</div>
+              </div>
+              <p style="font-size:15px;color:#4a5057;margin-top:12px;text-wrap:pretty">{{ sh.why }}</p>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:40px;margin-top:38px">
+          <div style="padding-top:16px;border-top:1px solid #16191c">
+            <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">May say</div>
+            <ul style="display:grid;gap:9px;margin-top:12px;font-size:15px;color:#4a5057">
+              <li>The scale's verdict, always, named as the scale's.</li>
+              <li>The product's limits <em style="font-style:normal;color:#16191c">only</em> when a product was in force at this reading's time.</li>
+              <li>On a sack, one line about cones weighed since the previous sack, with the caveat in the same sentence.</li>
+              <li>Provenance, behind a disclosure, for the one reader in a hundred who wants it.</li>
+            </ul>
+          </div>
+          <div style="padding-top:16px;border-top:1px solid #a5330f">
+            <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#a5330f">May not say</div>
+            <ul style="display:grid;gap:9px;margin-top:12px;font-size:15px;color:#4a5057">
+              <li>Today's tolerance applied to a reading from weeks ago. The old app printed that difference and it meant nothing.</li>
+              <li>A cone count on a cone sheet — it would read as a packing list. The plant records no cone-to-sack link, and the count between two sacks has been measured from 0 to 254.</li>
+              <li>Merge keys, transform versions, source system names, collision ids.</li>
+            </ul>
+          </div>
+        </div>
+        <p style="font-size:15px;color:#5f656c;margin-top:28px;padding-top:16px;border-top:1px solid #e7e8e4;max-width:78ch;text-wrap:pretty">Behaviour: Esc closes, the scrim closes, focus moves to the sheet on open and returns to the row on close. The sheet is <code>display:none</code> in print — a printed report must not carry whichever row happened to be open.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================= 15 STATES -->
+<div id="s15" style="border-top:1px solid #e7e8e4;background:#f6f6f3">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">15</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">Every state</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:68ch;margin-bottom:34px;text-wrap:pretty">Five states, drawn at desk size. Each block polls independently, so a screen is routinely in two of these at once — the rule that follows from that is the important one: a block waiting on its own request keeps its own height, so the page never jumps as panels land.</p>
+
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:34px">
+
+      <!-- loading -->
+      <div style="background:#fff;border:1px solid #d3d5d1;border-radius:4px;padding:26px 30px 30px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Loading</div>
+          <div style="font-size:13px;color:#5f656c"><code>.skel</code> · named heights</div>
+        </div>
+        <div style="height:14px;width:34%;margin-top:20px;background:#f6f6f3;border-radius:4px;animation:smsSkel 1.4s ease-in-out infinite"></div>
+        <div style="height:38px;width:76%;margin-top:12px;background:#f6f6f3;border-radius:4px;animation:smsSkel 1.4s ease-in-out infinite"></div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:26px">
+          <div style="padding-right:26px"><div style="height:80px;background:#f6f6f3;border-radius:4px;animation:smsSkel 1.4s ease-in-out infinite"></div></div>
+          <div style="padding:0 26px;border-left:1px solid #e7e8e4"><div style="height:80px;background:#f6f6f3;border-radius:4px;animation:smsSkel 1.4s ease-in-out infinite"></div></div>
+          <div style="padding-left:26px;border-left:1px solid #e7e8e4"><div style="height:80px;background:#f6f6f3;border-radius:4px;animation:smsSkel 1.4s ease-in-out infinite"></div></div>
+        </div>
+        <p style="font-size:15px;color:#4a5057;margin-top:22px;padding-top:14px;border-top:1px solid #e7e8e4;text-wrap:pretty">A figure skeleton is <code>--fs-display + --fs-body + 8px</code> tall, not a guess — otherwise the page shifts 16px when the first panel arrives. No spinners anywhere: the shapes say what is coming.</p>
+      </div>
+
+      <!-- error -->
+      <div style="background:#fff;border:1px solid #d3d5d1;border-radius:4px;padding:26px 30px 30px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Failed</div>
+          <div style="font-size:13px;color:#5f656c"><code>.state.err</code> + Retry</div>
+        </div>
+        <div style="padding:34px 0 30px">
+          <p style="color:#a5330f;max-width:44ch;text-wrap:pretty">That did not load. The plant database may be unreachable from this machine.</p>
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button type="button" style="padding:4px 12px;border:1px solid #d3d5d1;border-radius:4px;background:#fff;font-size:15px;cursor:pointer">Try again</button>
+            <button type="button" style="padding:4px 12px;border:0;background:none;font-size:15px;color:#4a5057;text-decoration:underline;text-underline-offset:3px;cursor:pointer">What this means</button>
+          </div>
+          <p style="font-size:13px;color:#5f656c;margin-top:20px;max-width:52ch;text-wrap:pretty">The raw error goes to the console, never to the page. “Try again” refetches only the failed block.</p>
+        </div>
+        <p style="font-size:15px;color:#4a5057;padding-top:14px;border-top:1px solid #e7e8e4;text-wrap:pretty">One failed block never blanks the screen. If Attention fails, the figures above it still stand — they came from a different request.</p>
+      </div>
+
+      <!-- empty -->
+      <div style="background:#fff;border:1px solid #d3d5d1;border-radius:4px;padding:26px 30px 30px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Empty</div>
+          <div style="font-size:13px;color:#5f656c"><code>Empty</code> · one sentence, no art</div>
+        </div>
+        <div style="padding:30px 0">
+          <div style="font-size:15px;font-weight:500;color:#5f656c">Readings</div>
+          <p style="color:#5f656c;margin-top:12px">Nothing was recorded in this period.</p>
+          <p style="font-size:15px;color:#4a5057;margin-top:14px">The line may not have run. <a href="#s15">Try the whole day</a></p>
+        </div>
+        <p style="font-size:15px;color:#4a5057;padding-top:14px;border-top:1px solid #e7e8e4;text-wrap:pretty">An empty period is a normal fact on a plant that runs six days. It gets a sentence and a way out, never an illustration and never “No data available”.</p>
+      </div>
+
+      <!-- offline / stale -->
+      <div style="background:#fff;border:1px solid #d3d5d1;border-radius:4px;padding:26px 30px 30px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Stale &amp; late</div>
+          <div style="font-size:13px;color:#5f656c"><code>.strip.alarm</code> · measured, not assumed</div>
+        </div>
+        <div style="display:grid;gap:9px;margin-top:18px">
+          <sc-for list="{{ health }}" as="h" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;background:{{ h.bg }};border-radius:4px;font-size:15px;color:{{ h.fg }}">
+              <span style="width:8px;height:8px;border-radius:50%;background:{{ h.dot }};flex:none;{{ h.pulse }}"></span>
+              <span style="text-wrap:pretty">{{ h.text }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <p style="font-size:15px;color:#4a5057;margin-top:20px;padding-top:14px;border-top:1px solid #e7e8e4;text-wrap:pretty">Cadence and the stale threshold both come from <code>/api/live</code> — they are measured from sync history, not hardcoded. When stale, the headline stops asserting a state and the pulse stops. Motion ceasing reads faster than a colour change.</p>
+      </div>
+
+      <!-- replay -->
+      <div style="background:#fff;border:1px solid #d3d5d1;border-radius:4px;padding:26px 30px 30px;grid-column:1/-1">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Replay</div>
+          <div style="font-size:13px;color:#5f656c"><code>.replay</code> · the second ink band, and the only other one</div>
+        </div>
+        <div style="margin-top:20px;border:1px solid #e7e8e4;border-radius:4px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:7px 24px;background:#16191c;color:#fff;font-size:15px">
+            <span>Showing the line as it stood at 09:40 on 28 August 2026. This is not live.</span>
+            <a href="#s15" style="color:#fff">Return to now</a>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 24px;background:#f6f6f3;font-size:15px;color:#4a5057">
+            <span style="display:inline-flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:50%;background:#8c9298;flex:none"></span>TP1 · Line 3 · Unit 2 · plant clock 09:40:00</span>
+            <span>as-of view · readings frozen</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:20px">
+          <p style="font-size:15px;color:#4a5057;text-wrap:pretty">Ink, full width, above the bar — the only element allowed to sit above the app's own chrome, because it changes the meaning of every number below it.</p>
+          <p style="font-size:15px;color:#4a5057;text-wrap:pretty">The pulse does not run in replay. Nothing is arriving, so nothing should look like it is.</p>
+          <p style="font-size:15px;color:#4a5057;text-wrap:pretty">Gated by <code>liveAllowAsOf</code> in config. When off, the band and the mode cannot be reached at all.</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:44px">
+      <div style="font-size:15px;font-weight:500;color:#5f656c;padding-bottom:10px;border-bottom:1px solid #16191c">Which screen shows which, and what it says</div>
+      <div style="overflow-x:auto">
+        <table style="margin-top:4px;min-width:820px">
+          <thead><tr>
+            <th style="padding:10px 12px 8px 0;border-bottom:1px solid #d3d5d1;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left">Screen</th>
+            <th style="padding:10px 12px 8px 0;border-bottom:1px solid #d3d5d1;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left">Loading</th>
+            <th style="padding:10px 12px 8px 0;border-bottom:1px solid #d3d5d1;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left">Empty</th>
+            <th style="padding:10px 12px 8px 0;border-bottom:1px solid #d3d5d1;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left">Failed</th>
+            <th style="padding:10px 0 8px 0;border-bottom:1px solid #d3d5d1;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left">Stale</th>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{ matrix }}" as="m" hint-placeholder-count="8">
+              <tr>
+                <td style="padding:12px 12px 12px 0;border-bottom:1px solid #e7e8e4;font-weight:500;white-space:nowrap;vertical-align:top">{{ m.screen }}</td>
+                <td style="padding:12px 12px 12px 0;border-bottom:1px solid #e7e8e4;font-size:15px;color:#4a5057;vertical-align:top;text-wrap:pretty">{{ m.loading }}</td>
+                <td style="padding:12px 12px 12px 0;border-bottom:1px solid #e7e8e4;font-size:15px;color:#4a5057;vertical-align:top;text-wrap:pretty">{{ m.empty }}</td>
+                <td style="padding:12px 12px 12px 0;border-bottom:1px solid #e7e8e4;font-size:15px;color:#4a5057;vertical-align:top;text-wrap:pretty">{{ m.failed }}</td>
+                <td style="padding:12px 0;border-bottom:1px solid #e7e8e4;font-size:15px;color:{{ m.staleFg }};vertical-align:top;text-wrap:pretty">{{ m.stale }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== 16 RESPONSIVE -->
+<div id="s16" style="border-top:1px solid #e7e8e4">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">16</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">Three widths</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:68ch;margin-bottom:32px;text-wrap:pretty">Not a phone app. The breakpoints exist because the plant PC runs at 1366, the office monitor at 2560, and a supervisor occasionally opens it on a tablet in landscape. Everything below 620px is a courtesy, not a target.</p>
+
+    <div style="display:grid;grid-template-columns:1.5fr 1fr .62fr;gap:26px;align-items:start">
+      <sc-for list="{{ widths }}" as="w" hint-placeholder-count="3">
+        <div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:10px;border-bottom:1px solid #16191c">
+            <div style="font-size:19px;font-weight:500">{{ w.name }}</div>
+            <div style="font-size:13px;color:#5f656c">{{ w.px }}</div>
+          </div>
+          <div style="border:1px solid #d3d5d1;border-radius:4px;background:#fff;margin-top:14px;padding:14px;overflow:hidden">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding-bottom:9px;border-bottom:1px solid #e7e8e4;font-size:11px;color:#5f656c">
+              <span style="font-weight:600;color:#16191c">SMS</span>
+              <span style="color:#16191c;border-bottom:2px solid #16191c;padding-bottom:2px">Line</span>
+              <span>Readings</span>
+              <span>{{ w.navRest }}</span>
+            </div>
+            <div style="font-size:11px;color:#5f656c;padding:5px 0;background:#f6f6f3;margin:0 -14px;padding-left:14px;padding-right:14px">{{ w.strip }}</div>
+            <div style="height:11px;width:70%;background:#e7e8e4;border-radius:2px;margin-top:14px"></div>
+            <div style="display:grid;grid-template-columns:{{ w.figCols }};gap:{{ w.figGap }};margin-top:14px">
+              <sc-for list="{{ w.figs }}" as="f" hint-placeholder-count="3">
+                <div style="border-left:{{ f.bl }};border-top:{{ f.bt }};padding-left:{{ f.pl }};padding-top:{{ f.pt }}">
+                  <div style="height:{{ w.figH }};background:#16191c;border-radius:2px;opacity:.86"></div>
+                  <div style="height:7px;background:#e7e8e4;border-radius:2px;margin-top:5px;width:80%"></div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:grid;grid-template-columns:{{ w.blockCols }};gap:{{ w.blockGap }};margin-top:16px;padding-top:12px;border-top:1px solid #e7e8e4">
+              <div style="height:8px;background:#e7e8e4;border-radius:2px;{{ w.labelW }}"></div>
+              <div style="display:grid;gap:5px">
+                <div style="height:8px;background:#f2f2ef;border-radius:2px"></div>
+                <div style="height:8px;background:#f2f2ef;border-radius:2px;width:72%"></div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat({{ w.stCols }},minmax(0,1fr));gap:4px;margin-top:16px">
+              <sc-for list="{{ w.sts }}" as="q" hint-placeholder-count="14">
+                <div style="height:{{ w.stH }};border:1px solid #e7e8e4;border-radius:2px"></div>
+              </sc-for>
+            </div>
+          </div>
+          <ul style="display:grid;gap:8px;margin-top:14px;font-size:15px;color:#4a5057">
+            <sc-for list="{{ w.notes }}" as="n" hint-placeholder-count="3">
+              <li style="text-wrap:pretty">{{ n.text }}</li>
+            </sc-for>
+          </ul>
+        </div>
+      </sc-for>
+    </div>
+    <p style="font-size:15px;color:#5f656c;margin-top:32px;padding-top:16px;border-top:1px solid #e7e8e4;max-width:82ch;text-wrap:pretty">The hanging label collapses at <strong style="font-weight:500">860px</strong>, not at 1080 — that is where 180px + 40px + content stops leaving a readable measure. It is the one breakpoint the redesign adds, and it is also the print rule: on paper the label goes back above its content rather than wasting 180px of A4.</p>
+  </div>
+</div>
+
+<!-- ========================================================== 17 PRINT -->
+<div id="s17" style="border-top:1px solid #e7e8e4;background:#f6f6f3">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">17</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">The printed report</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:68ch;margin-bottom:30px;text-wrap:pretty">Part one claimed the verdict mark prints and never showed the page. Here it is, at A4 proportion, 11pt body. This is the artefact the system is judged by — it is the only thing that leaves the building.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:44px;align-items:start">
+      <div style="background:#fff;aspect-ratio:1/1.414;border:1px solid #d3d5d1;padding:6% 7%;overflow:hidden;box-shadow:0 1px 3px rgba(22,25,28,.06)">
+        <div style="padding-bottom:10px;border-bottom:1px solid #d3d5d1;font-size:11px;line-height:1.55;color:#4a5057">
+          <div style="font-weight:600;color:#16191c;letter-spacing:.04em">SMS · IFL</div>
+          <div style="display:flex;justify-content:space-between;gap:16px;margin-top:5px">
+            <span>TP1 · Line 3 · Unit 2</span>
+            <span>28 Aug – 3 Sep 2026 · all shifts</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;gap:16px">
+            <span>All 6 days hold production data.</span>
+            <span>Newest reading 3 Sep 11:12 · printed 3 Sep 11:26 by A. Raza</span>
+          </div>
+        </div>
+
+        <div style="font-size:17px;font-weight:500;line-height:1.3;letter-spacing:-.01em;margin-top:16px;max-width:34ch;text-wrap:pretty">This week: all 6 days hold production data.</div>
+
+        <div style="margin-top:16px;padding-bottom:9px;border-bottom:2px solid #16191c">
+          <div style="font-size:8px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:#5f656c">Verdict</div>
+          <div style="font-size:15px;font-weight:500;letter-spacing:-.01em;margin-top:5px">11,698 cones, 325 sacks, 14,821 kg</div>
+          <div style="font-size:9px;color:#4a5057;margin-top:7px;padding-top:6px;border-top:1px solid #d3d5d1;line-height:1.5">28 Aug – 3 Sep 2026 · TP1 · Line 3 · Unit 2<br>Printed 3 Sep 2026 11:26 by A. Raza</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0 14px;margin-top:14px">
+          <sc-for list="{{ printFigs }}" as="p" hint-placeholder-count="4">
+            <div style="border-left:{{ p.bl }};padding-left:{{ p.pl }}">
+              <div style="font-size:15px;font-weight:600;letter-spacing:-.02em;line-height:1">{{ p.v }}</div>
+              <div style="font-size:8.5px;color:#4a5057;margin-top:3px">{{ p.l }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:13px">
+          <div style="font-size:9px;font-weight:500;color:#5f656c;padding-bottom:4px;border-bottom:1px solid #d3d5d1">By shift</div>
+          <sc-for list="{{ printShifts }}" as="r" hint-placeholder-count="3">
+            <div style="display:grid;grid-template-columns:1.7fr .8fr .8fr .8fr .8fr;gap:8px;padding:4px 0;border-bottom:1px solid #e7e8e4;font-size:9.5px">
+              <span>{{ r.a }}</span>
+              <span style="text-align:right">{{ r.b }}</span>
+              <span style="text-align:right">{{ r.c }}</span>
+              <span style="text-align:right">{{ r.d }}</span>
+              <span style="text-align:right;color:#4a5057">{{ r.e }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="margin-top:13px">
+          <div style="display:flex;justify-content:space-between;gap:12px;font-size:9px;font-weight:500;color:#5f656c;padding-bottom:4px;border-bottom:1px solid #d3d5d1"><span>By day</span><span style="font-weight:400">first 4 of 6 · mock only</span></div>
+          <sc-for list="{{ printDays }}" as="r" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:1.7fr .8fr .8fr .8fr .8fr;gap:8px;padding:3px 0;border-bottom:1px solid #e7e8e4;font-size:9.5px">
+              <span>{{ r.a }}</span>
+              <span style="text-align:right">{{ r.b }}</span>
+              <span style="text-align:right">{{ r.c }}</span>
+              <span style="text-align:right">{{ r.d }}</span>
+              <span style="text-align:right;color:#4a5057">{{ r.e }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="font-size:9.5px;color:#4a5057;margin-top:12px;padding-top:8px;border-top:1px solid #e7e8e4;line-height:1.55;text-wrap:pretty">Time lost 3 h 41 m in 9 stops <span style="color:#5f656c">— planned breaks and faults cannot be told apart in the data.</span> Sack stock per machine is not shown: the plant's sack records carry no machine and no record of a sack leaving.</div>
+      </div>
+
+      <div>
+        <div style="padding-top:16px;border-top:1px solid #16191c">
+          <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">The verdict mark, on paper</div>
+          <p style="font-size:15px;color:#4a5057;margin-top:10px;text-wrap:pretty">On screen it is an ink fill. In print it becomes a rule and ink text — because browsers drop background graphics by default, and the person printing does not know that setting exists. Same content, same authority, no dependency on a checkbox.</p>
+        </div>
+        <div style="padding-top:16px;border-top:1px solid #16191c;margin-top:26px">
+          <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">What the print header carries</div>
+          <p style="font-size:15px;color:#4a5057;margin-top:10px;text-wrap:pretty">Line, period, shift, coverage, newest reading, who printed it and when. The screen chrome would otherwise take all of it away, leaving a page of numbers that is undated and unattributed — and therefore worthless as a record.</p>
+        </div>
+        <div style="padding-top:16px;border-top:1px solid #16191c;margin-top:26px">
+          <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">Dropped in print</div>
+          <ul style="display:grid;gap:7px;margin-top:10px;font-size:15px;color:#4a5057">
+            <li>Bar, strip, replay band, sheet, scrim, wall.</li>
+            <li>Station bars — empty boxes on paper; the numbers carry the fact.</li>
+            <li>Skeletons, hover readouts, every <code>.no-print</code>.</li>
+            <li>The hanging label: blocks go back to label-above-content.</li>
+          </ul>
+        </div>
+        <p style="font-size:13px;color:#5f656c;margin-top:26px;text-wrap:pretty">Rows and blocks carry <code>break-inside: avoid</code>, so a shift never splits across two sheets. Colour survives: the accent is 6.82:1 and prints legibly in greyscale.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================== 18 LOGIN -->
+<div id="s18" style="border-top:1px solid #e7e8e4">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">18</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">Sign in</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:66ch;margin-bottom:30px;text-wrap:pretty">One centred form, four states. The old login was 326 lines whose left half advertised the plant — “14 stations · 3 shifts · 60-second sync” — none of which helped anyone sign in, and all of which was wrong the moment a station was added.</p>
+
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px">
+      <sc-for list="{{ logins }}" as="l" hint-placeholder-count="4">
+        <div>
+          <div style="font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;padding-bottom:9px;border-bottom:1px solid #16191c">{{ l.name }}</div>
+          <div style="border:1px solid #d3d5d1;border-radius:4px;background:#fff;margin-top:14px;padding:30px 26px;display:grid;place-items:center;min-height:290px">
+            <div style="width:100%;display:grid;gap:15px">
+              <div>
+                <div style="font-size:22px;font-weight:600;letter-spacing:.04em">SMS</div>
+                <div style="font-size:15px;color:#5f656c;margin-top:2px">Sack Management System</div>
+              </div>
+              <div style="display:grid;gap:5px">
+                <span style="font-size:15px;color:#5f656c">Username</span>
+                <div style="border:1px solid {{ l.b1 }};border-radius:4px;padding:6px 10px;font-size:15px;min-height:33px;color:#16191c">{{ l.u }}</div>
+              </div>
+              <div style="display:grid;gap:5px">
+                <span style="font-size:15px;color:#5f656c">Password</span>
+                <div style="border:1px solid {{ l.b2 }};border-radius:4px;padding:6px 10px;font-size:15px;min-height:33px;color:#16191c">{{ l.p }}</div>
+              </div>
+              <div style="font-size:15px;color:#a5330f;min-height:2.6em;text-wrap:pretty">{{ l.err }}</div>
+              <div style="padding:5px 12px;border:1px solid #16191c;border-radius:4px;background:#16191c;color:#fff;font-size:15px;text-align:center;opacity:{{ l.btnOp }}">{{ l.btn }}</div>
+            </div>
+          </div>
+          <p style="font-size:15px;color:#4a5057;margin-top:12px;text-wrap:pretty">{{ l.why }}</p>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px;margin-top:36px">
+      <div style="padding-top:14px;border-top:1px solid #16191c">
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">Never names the field</div>
+        <p style="font-size:15px;color:#4a5057;margin-top:8px;text-wrap:pretty">“That username and password did not match.” Saying which one was wrong turns the form into a way to confirm that an account exists.</p>
+      </div>
+      <div style="padding-top:14px;border-top:1px solid #16191c">
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">Lockout is stated in minutes</div>
+        <p style="font-size:15px;color:#4a5057;margin-top:8px;text-wrap:pretty">Eight failures in fifteen minutes locks that client out for fifteen. The server returns the seconds remaining, so the form says a number rather than “try again later”.</p>
+      </div>
+      <div style="padding-top:14px;border-top:1px solid #a5330f">
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#a5330f">The wall must never see this screen</div>
+        <p style="font-size:15px;color:#4a5057;margin-top:8px;text-wrap:pretty">Sessions renew once past half their seven-day life, so a display that polls all week never expires. If the wall ever shows a login form, that is a bug in session renewal, not a thing to design for.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================== 19 SETUP -->
+<div id="s19" style="border-top:1px solid #e7e8e4;background:#f6f6f3">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">19</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">Setup — corrected</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:70ch;margin-bottom:12px;text-wrap:pretty">One page, five blocks, in this order. Not tabs. Sync health is first because it is the only thing here that everybody — not just an admin — has a reason to reach: the strip's lag sentence links straight to it.</p>
+    <p style="font-size:15px;color:#5f656c;max-width:70ch;margin-bottom:26px;text-wrap:pretty">It also states the source in plain words, so the real status of requirement 1 — SQL only, no PLC — is visible in the product rather than only in a document.</p>
+
+    <div style="background:#fff;border:1px solid #d3d5d1;border-radius:4px;padding:34px 40px 40px">
+      <div style="font-size:15px;color:#5f656c">Who can sign in, what this system applies to the plant's numbers, and is the connection healthy?</div>
+      <h3 style="font-size:34px;font-weight:500;letter-spacing:-.015em;line-height:1.2;margin-top:6px">Setup</h3>
+
+      <sc-for list="{{ setupBlocks }}" as="b" hint-placeholder-count="5">
+        <div style="display:grid;grid-template-columns:180px minmax(0,1fr);gap:0 40px;padding:26px 0;border-top:1px solid #e7e8e4">
+          <div>
+            <div style="font-size:15px;font-weight:500;color:#5f656c">{{ b.label }}</div>
+            <div style="font-size:13px;color:#8c9298;margin-top:3px;text-wrap:pretty">{{ b.role }}</div>
+          </div>
+          <div>
+            <div style="font-size:15px;color:#5f656c;text-align:right;margin-top:-22px;margin-bottom:10px">{{ b.note }}</div>
+            <div style="font-size:{{ b.leadSize }};color:{{ b.leadFg }};font-weight:{{ b.leadWeight }};text-wrap:pretty">{{ b.lead }}</div>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:3px 28px;margin-top:16px;font-size:15px">
+              <sc-for list="{{ b.kv }}" as="k" hint-placeholder-count="3">
+                <div style="color:#5f656c">{{ k.k }}</div>
+                <div style="color:{{ k.fg }}">{{ k.v }}</div>
+              </sc-for>
+            </div>
+            <div style="font-size:15px;color:#5f656c;margin-top:14px;text-wrap:pretty">{{ b.foot }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <p style="font-size:15px;color:#5f656c;margin-top:26px;padding-top:16px;border-top:1px solid #e7e8e4;max-width:82ch;text-wrap:pretty">The three unconfirmed rules are interpreted at read time, never baked into stored data — so confirming one is a settings change, not a re-sync. That is why the screen can afford to say “not confirmed” out loud instead of hiding it.</p>
+  </div>
+</div>
+
+<!-- ========================================================= 20 WEIGHT -->
+<div id="s20" style="border-top:1px solid #e7e8e4">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">20</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">Weight — the second chart, and the adjustment log</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:70ch;margin-bottom:30px;text-wrap:pretty">Distribution is the second position on a toggle, never the default. A distribution tells you the spread; it cannot tell you that weight stepped up at 09:40 after a doff, which is the thing an engineer fixes during a shift.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:44px">
+      <div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Distribution</div>
+          <div style="display:flex;border:1px solid #d3d5d1;border-radius:4px;overflow:hidden;font-size:13px">
+            <span style="padding:4px 11px;border-right:1px solid #d3d5d1;color:#4a5057">Over time</span>
+            <span style="padding:4px 11px;background:#16191c;color:#fff">Distribution</span>
+          </div>
+        </div>
+        <div style="font-size:15px;color:#4a5057;text-align:right;margin-top:14px">4,182 cones, 1,204 g to 1,302 g</div>
+        <div style="position:relative;height:22px;margin-top:10px">
+          <div style="position:absolute;left:0;right:81%;top:0;font-size:13px;color:#5f656c;text-align:right;padding-right:6px;white-space:nowrap">lower 1,225 g</div>
+          <div style="position:absolute;left:50%;top:0;font-size:13px;color:#16191c;padding-left:6px;white-space:nowrap">target 1,250 g</div>
+          <div style="position:absolute;right:0;top:0;font-size:13px;color:#5f656c;text-align:right;white-space:nowrap">upper 1,275 g</div>
+        </div>
+        <div style="position:relative;height:212px">
+          <div style="position:absolute;inset:0;display:flex;align-items:flex-end;gap:2px">
+            <sc-for list="{{ hist }}" as="h" hint-placeholder-count="22">
+              <div style="flex:1;height:{{ h.h }};background:{{ h.fill }}"></div>
+            </sc-for>
+          </div>
+          <div style="position:absolute;left:19%;top:0;bottom:1px;border-left:1px dashed #8c9298"></div>
+          <div style="position:absolute;left:50%;top:0;bottom:1px;border-left:1px solid #4a5057"></div>
+          <div style="position:absolute;left:81%;top:0;bottom:1px;border-left:1px dashed #8c9298"></div>
+          <div style="position:absolute;left:0;right:0;bottom:0;border-bottom:1px solid #d3d5d1"></div>
+        </div>
+        <p style="font-size:15px;color:#4a5057;margin-top:16px;padding-top:12px;border-top:1px solid #e7e8e4;text-wrap:pretty">Bins beyond a limit take the accent fill; everything inside is graphite, and hover turns one bin ink. The readout is a line of text above the chart, right-aligned — never a floating tooltip, which covers the marks it describes, cannot be read from a wall, and does not exist for a keyboard.</p>
+        <p style="font-size:15px;color:#4a5057;margin-top:12px;text-wrap:pretty"><span style="color:#a5330f">The three reference labels sit in a band above the plot, and that is a correction.</span> <code>Weight.tsx</code> draws them in-SVG at <code>y={T + 11}</code> while a bar may reach <code>y={T}</code>, so whether a label is readable depends on the bin heights of the day. Give the plot a 22px top inset and hang the labels off it: lower limit right-aligned to its rule, target and upper left-aligned. The same fix applies to the <em style="font-style:normal">Over time</em> chart's <code>RefLine</code> labels, which can collide with the line they annotate.</p>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #16191c">
+          <div style="font-size:19px;font-weight:500">Adjustment log</div>
+          <div style="font-size:13px;color:#5f656c">in the station sheet · supervisor and above</div>
+        </div>
+        <div style="border:1px solid #d3d5d1;border-radius:4px;background:#fff;padding:22px 24px;margin-top:14px">
+          <div style="font-size:22px;font-weight:500;letter-spacing:-.01em">Station 7</div>
+          <div style="font-size:13px;color:#5f656c;margin-top:1px">reads 9 g heavier than the line · 4 days</div>
+          <div style="font-size:15px;color:#5f656c;margin-top:20px;padding-bottom:8px;border-bottom:1px solid #e7e8e4;font-weight:500">Adjustments recorded here</div>
+          <sc-for list="{{ adjustments }}" as="a" hint-placeholder-count="3">
+            <div style="display:grid;grid-template-columns:5.6em 1fr;gap:14px;padding:9px 0;border-bottom:1px solid #e7e8e4;font-size:15px">
+              <div style="color:#5f656c">{{ a.when }}</div>
+              <div><div>{{ a.who }}</div><div style="color:#4a5057;text-wrap:pretty">{{ a.reason }}</div></div>
+            </div>
+          </sc-for>
+          <div style="display:grid;gap:8px;margin-top:18px">
+            <span style="font-size:15px;color:#5f656c">Record an adjustment</span>
+            <div style="border:1px solid #d3d5d1;border-radius:4px;padding:8px 10px;font-size:15px;color:#8c9298">What was done, and why</div>
+            <div style="display:flex;justify-content:flex-end"><div style="padding:5px 13px;border:1px solid #16191c;border-radius:4px;background:#16191c;color:#fff;font-size:15px">Record</div></div>
+          </div>
+        </div>
+        <p style="font-size:15px;color:#4a5057;margin-top:16px;text-wrap:pretty">This is the one write an operator cannot make. It exists so the station table can say “adjusted 6 days ago by M. Iqbal, steady since” instead of flagging a station that somebody already dealt with — a note only becomes possible because someone was able to record it.</p>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:32px;margin-top:36px;padding-top:20px;border-top:1px solid #e7e8e4">
+      <p style="font-size:15px;color:#4a5057;text-wrap:pretty"><span style="color:#16191c;font-weight:500">The time chart is primary.</span> It is not in a disclosure and not behind a picker.</p>
+      <p style="font-size:15px;color:#4a5057;text-wrap:pretty"><span style="color:#16191c;font-weight:500">No difference until the basis is confirmed.</span> Stated on opposite bases the comparison is out by a whole tube.</p>
+      <p style="font-size:15px;color:#4a5057;text-wrap:pretty"><span style="color:#16191c;font-weight:500">Both biases, always.</span> A line running 12 g heavy everywhere reads “fine” on all fourteen rows if you only show vs-line.</p>
+      <p style="font-size:15px;color:#4a5057;text-wrap:pretty"><span style="color:#16191c;font-weight:500">The drift window is fixed.</span> Fourteen production days whatever the period says, and the table says so.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================== 21 ROLES -->
+<div id="s21" style="border-top:1px solid #e7e8e4;background:#f6f6f3">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px">
+    <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">21</div>
+    <h2 style="font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1.15;margin:2px 0 8px">Four roles</h2>
+    <p style="font-size:17px;color:#4a5057;max-width:72ch;margin-bottom:8px;text-wrap:pretty">Read off <code>auth.ts</code> and the route table in <code>app.rbac.test.ts</code>, not invented. Ranks are numeric and gates are <code>&gt;=</code>, so every higher role inherits everything below it.</p>
+    <p style="font-size:15px;color:#5f656c;max-width:72ch;margin-bottom:30px;text-wrap:pretty">Every role sees every screen and every number. Roles gate <em style="font-style:normal">writes</em> and two exports — never visibility. That is the design rule: an operator who cannot see the reject rate cannot act on it.</p>
+
+    <div style="overflow-x:auto">
+      <table style="min-width:860px">
+        <thead><tr>
+          <th style="padding:0 12px 10px 0;border-bottom:1px solid #16191c;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left">Can</th>
+          <sc-for list="{{ roles }}" as="r" hint-placeholder-count="4">
+            <th style="padding:0 0 10px 20px;border-bottom:1px solid #16191c;font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#5f656c;text-align:left;white-space:nowrap">{{ r.name }}<span style="color:#8c9298;font-weight:400"> · {{ r.rank }}</span></th>
+          </sc-for>
+        </tr></thead>
+        <tbody>
+          <sc-for list="{{ perms }}" as="p" hint-placeholder-count="9">
+            <tr>
+              <td style="padding:11px 12px 11px 0;border-bottom:1px solid #e7e8e4;vertical-align:top">
+                <div>{{ p.what }}</div>
+                <div style="font-size:13px;color:#5f656c;margin-top:1px">{{ p.route }}</div>
+              </td>
+              <sc-for list="{{ p.cells }}" as="c" hint-placeholder-count="4">
+                <td style="padding:11px 0 11px 20px;border-bottom:1px solid #e7e8e4;vertical-align:top;color:{{ c.fg }};white-space:nowrap">{{ c.mark }}</td>
+              </sc-for>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="font-size:19px;font-weight:500;margin-top:44px;padding-bottom:12px;border-bottom:1px solid #16191c">What each role's Line screen actually looks like</h3>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:26px;margin-top:22px">
+      <sc-for list="{{ roleViews }}" as="v" hint-placeholder-count="4">
+        <div>
+          <div style="font-size:15px;font-weight:500">{{ v.name }}</div>
+          <div style="font-size:13px;color:#5f656c;margin-top:1px;margin-bottom:12px">{{ v.who }}</div>
+          <div style="border:1px solid #d3d5d1;border-radius:4px;background:#fff;padding:14px;min-height:150px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid #e7e8e4">
+              <span style="font-size:11px;font-weight:600">SMS</span>
+              <span style="font-size:11px;color:{{ v.gearFg }}">{{ v.gear }}</span>
+            </div>
+            <div style="font-size:11px;color:#5f656c;margin-top:10px">Product recorded in this system</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px">
+              <span style="font-size:11px">20/1 Ne PC Cone</span>
+              <span style="font-size:10px;padding:2px 7px;border:1px solid {{ v.changeBorder }};border-radius:3px;color:{{ v.changeFg }};white-space:nowrap">{{ v.change }}</span>
+            </div>
+            <div style="font-size:11px;color:#5f656c;margin-top:14px">Rejects · reason names</div>
+            <div style="font-size:11px;color:{{ v.nameFg }};margin-top:4px">{{ v.nameIt }}</div>
+            <div style="font-size:11px;color:#5f656c;margin-top:14px">Report</div>
+            <div style="font-size:11px;color:{{ v.exportFg }};margin-top:4px">{{ v.exportIt }}</div>
+          </div>
+          <p style="font-size:15px;color:#4a5057;margin-top:12px;text-wrap:pretty">{{ v.note }}</p>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px;margin-top:38px;padding-top:20px;border-top:1px solid #e7e8e4">
+      <div>
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">Hidden, not disabled</div>
+        <p style="font-size:15px;color:#4a5057;margin-top:8px;text-wrap:pretty">A control a role can never use is absent, not greyed. A disabled button is a promise the app will not keep. The one exception is the period control, where a disabled button means “no data for that range”, which is a fact about the data rather than about the reader.</p>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c">The gear is the only nav change</div>
+        <p style="font-size:15px;color:#4a5057;margin-top:8px;text-wrap:pretty">Setup is admin-only and lives behind the gear, so the nav is identical for the other three roles. Sync health, the one block in Setup everybody needs, is reachable from the strip's lag sentence regardless of role.</p>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#a5330f">A 403 is a bug, not a state</div>
+        <p style="font-size:15px;color:#4a5057;margin-top:8px;text-wrap:pretty">If the UI hides what a role cannot do, a 403 can only mean the client and the server disagree. It gets the generic failed state and a console error — never a designed “you don't have permission” screen, which would only ever be seen because of a mistake.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= 22 CHECKLIST -->
+<div id="s22" style="border-top:1px solid #16191c">
+  <div style="max-width:1240px;margin:0 auto;padding:56px 32px 44px;display:grid;grid-template-columns:180px minmax(0,1fr);gap:0 48px">
+    <div>
+      <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#8c9298">22</div>
+      <div style="font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5f656c;margin-top:2px">Acceptance</div>
+    </div>
+    <div>
+      <h2 style="font-size:34px;line-height:1.2;font-weight:500;letter-spacing:-.02em;max-width:32ch;text-wrap:pretty">How to tell the build matches the spec.</h2>
+      <p style="font-size:17px;color:#4a5057;margin-top:16px;max-width:64ch;text-wrap:pretty">Twelve checks, each one observable in a browser without reading the source. If all twelve pass, the redesign shipped.</p>
+      <ol style="display:grid;gap:0;margin-top:30px">
+        <sc-for list="{{ checks }}" as="c" hint-placeholder-count="12">
+          <li style="display:grid;grid-template-columns:2.2em 1fr;gap:16px;padding:14px 0;border-bottom:1px solid #e7e8e4">
+            <span style="color:#8c9298">{{ c.n }}</span>
+            <span style="text-wrap:pretty">{{ c.text }}</span>
+          </li>
+        </sc-for>
+      </ol>
+      <p style="font-size:15px;color:#5f656c;margin-top:36px;padding-top:18px;border-top:1px solid #e7e8e4">IFL Sack Management System · design spec, part two · 3 September 2026 · with <code>spec/app.css</code> and <code>spec/HANDOFF.md</code></p>
+    </div>
+  </div>
+</div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240}}">
+class Component extends DCLogic {
+  renderVals() {
+    const yes = { mark: 'yes', fg: '#16191c' };
+    const no = { mark: '—', fg: '#8c9298' };
+    const row = (what, route, from) => ({
+      what, route,
+      cells: [1, 2, 3, 4].map((r) => (r >= from ? yes : no)),
+    });
+
+    return {
+      sheets: [
+        {
+          case: 'Cone · inside limits', title: 'Cone', eyebrow: 'Cone · Station 4 · morning shift',
+          big: '1,262 g', bigFg: '#16191c', said: 'Passed', saidFg: '#16191c',
+          compare: "Inside the product's limits, 1,225–1,275 g.", cmpFg: '#4a5057',
+          kv: [{ k: 'Weighed', v: '3 Sep, 11:12' }, { k: 'Shift', v: 'Morning' }, { k: 'Station', v: 'Station 4' }, { k: 'Product then', v: '20/1 Ne PC Cone' }],
+          extra: '', why: 'The ordinary case. Two facts and a comparison, in that order.',
+        },
+        {
+          case: 'Cone · scale rejected', title: 'Rejected cone', eyebrow: 'Cone · Station 12 · morning shift',
+          big: '1,208 g', bigFg: '#a5330f', said: 'Rejected by the scale', saidFg: '#a5330f',
+          compare: '17 g under the lower limit, 1,225–1,275 g.', cmpFg: '#a5330f',
+          kv: [{ k: 'Weighed', v: '3 Sep, 11:11' }, { k: 'Shift', v: 'Morning' }, { k: 'Station', v: 'Station 12' }, { k: 'Product then', v: '20/1 Ne PC Cone' }],
+          extra: '', why: 'The verdict is always named as the scale\u2019s, never the app\u2019s. The app did not reject anything.',
+        },
+        {
+          case: 'Cone · no product then', title: 'Cone', eyebrow: 'Cone · Station 3 · night shift',
+          big: '1,244 g', bigFg: '#16191c', said: 'Passed', saidFg: '#16191c',
+          compare: 'No product was recorded at this time, so there are no limits to compare against.', cmpFg: '#5f656c',
+          kv: [{ k: 'Weighed', v: '14 Aug, 02:31' }, { k: 'Shift', v: 'Night' }, { k: 'Station', v: 'Station 3' }, { k: 'Record', v: '881204' }],
+          extra: '', why: 'Computes nothing rather than applying today\u2019s tolerance to a reading from weeks ago \u2014 which the old app did, and printed the difference.',
+        },
+        {
+          case: 'Sack', title: 'Sack', eyebrow: 'Sack · morning shift',
+          big: '45.6 kg', bigFg: '#16191c', said: 'Passed', saidFg: '#16191c',
+          compare: '', cmpFg: '#4a5057',
+          kv: [{ k: 'Weighed', v: '3 Sep, 11:08' }, { k: 'Shift', v: 'Morning' }, { k: 'Sack no.', v: '1164' }, { k: 'Record', v: '904118' }],
+          extra: '38 cones were weighed between the previous sack and this one. The plant records no link between a cone and its sack, so this is a count over time, not a packing list.',
+          why: 'The cone count appears on sacks only, once, with its caveat in the same sentence. Between two sacks the count has been measured from 0 to 254.',
+        },
+      ],
+
+      health: [
+        { text: 'Readings to 11:12 · they reach this system about 14 min after weighing.', bg: '#f6f6f3', fg: '#4a5057', dot: '#1e8757', pulse: 'animation:smsPulse 2.4s ease-in-out infinite' },
+        { text: 'Readings are arriving 41 min late — the line state above may be out of date.', bg: '#fbe9e4', fg: '#a5330f', dot: '#aa730e', pulse: '' },
+        { text: 'No new readings since 10:47 — the plant link may be down.', bg: '#fbe9e4', fg: '#a5330f', dot: '#d8451b', pulse: '' },
+      ],
+
+      matrix: [
+        { screen: 'Line', loading: 'Skeleton per block. Figures reserve their box; stations reserve 62px.', empty: '“The line did not run in this period.” Figures show zeros, not dashes — zero is a measurement.', failed: 'Per block. A failed Attention leaves the figures standing.', stale: 'Headline stops asserting a state. Pulse stops. Strip washes accent.', staleFg: '#a5330f' },
+        { screen: 'Wall', loading: 'State line reads “Waiting for the first reading.” No skeletons — motion at that size is a distraction.', empty: '“Nothing recorded this shift.” Bars flat, numbers zero.', failed: 'Footer carries it. The board never blanks; a blank wall screen looks like a dead PC.', stale: 'Footer washes accent, pulse stops, state refuses to claim running.', staleFg: '#a5330f' },
+        { screen: 'Weight', loading: 'Chart area holds 250px. Station table shows six skeleton rows.', empty: '“No cones were weighed in this period.” The headline says it, the chart is absent.', failed: 'Whole-screen failed state — every block here depends on the same two requests.', stale: 'Nothing special. Weight is judged over 14 production days, so minutes do not matter.', staleFg: '#4a5057' },
+        { screen: 'Rejects', loading: 'Headline skeleton, then both charts at fixed height.', empty: '“Nothing was rejected in this period.” Which is good news, so it is not accented.', failed: 'Per block.', stale: 'Nothing special.', staleFg: '#4a5057' },
+        { screen: 'Readings', loading: 'Eight skeleton rows at row height. Filters are live immediately.', empty: '“Nothing matched.” With the active filters listed, and a way to clear them.', failed: 'Table area only. Filters and count stay.', stale: 'The “new readings every 15 seconds” line becomes the lag sentence.', staleFg: '#a5330f' },
+        { screen: 'Report', loading: 'Figures and both tables as skeletons. Print and Export disabled while loading.', empty: '“No production days in this period.” The verdict mark is absent — there is nothing to sign for.', failed: 'Whole screen. A half-loaded report must not be printable.', stale: 'Coverage sentence names the newest reading, so a stale report is self-describing.', staleFg: '#4a5057' },
+        { screen: 'Setup', loading: 'Per block. Sync health first, so the one thing everybody came for lands first.', empty: 'Audit log only: “Nothing has been changed through this application yet.”', failed: 'Per block, with Retry.', stale: 'Sync health is the screen that explains staleness, so it states it plainly.', staleFg: '#a5330f' },
+        { screen: 'Sheet', loading: 'One “Loading” line. It is 460px wide and resolves in one request.', empty: 'Not reachable — a sheet is opened from a row that exists.', failed: '“That reading could not be loaded.” The sheet stays open so the reader keeps their place.', stale: 'Nothing special. A sheet shows one historical reading.', staleFg: '#4a5057' },
+      ],
+
+      widths: [
+        {
+          name: 'Office monitor', px: '1440–2560', navRest: 'Weight   Rejects   Report',
+          strip: 'TP1 · Line 3 · Unit 2 · plant clock 11:26:04', figCols: 'repeat(3,minmax(0,1fr))', figGap: '0', figH: '30px',
+          figs: [{ bl: '0', bt: '0', pl: '0', pt: '0' }, { bl: '1px solid #e7e8e4', bt: '0', pl: '18px', pt: '0' }, { bl: '1px solid #e7e8e4', bt: '0', pl: '18px', pt: '0' }],
+          blockCols: '90px 1fr', blockGap: '0 20px', labelW: 'width:70%', stCols: 14, stH: '26px',
+          sts: Array.from({ length: 14 }, (_, i) => ({ i })),
+          notes: [
+            { text: 'Bands run to the bezels; content stays at 1100px. This is the width the full-bleed rule was added for.' },
+            { text: 'Hanging labels at 180px, figures three-up with hairlines.' },
+            { text: 'All 14 stations in one row.' },
+          ],
+        },
+        {
+          name: 'Plant PC', px: '1080–1366', navRest: 'Weight  Rejects',
+          strip: 'TP1 · Line 3 · Unit 2 · 11:26:04', figCols: 'repeat(2,minmax(0,1fr))', figGap: '14px 0', figH: '26px',
+          figs: [{ bl: '0', bt: '0', pl: '0', pt: '0' }, { bl: '1px solid #e7e8e4', bt: '0', pl: '14px', pt: '0' }, { bl: '0', bt: '1px solid #e7e8e4', pl: '0', pt: '12px' }],
+          blockCols: '1fr', blockGap: '10px', labelW: 'width:38%', stCols: 7, stH: '24px',
+          sts: Array.from({ length: 14 }, (_, i) => ({ i })),
+          notes: [
+            { text: 'Figures go two-up; the third gains a top rule so it does not hang off nothing.' },
+            { text: 'Bar wraps to two lines, 20px page padding.' },
+            { text: 'Stations wrap to 7 × 2 — the point at which a bare number stops fitting its box.' },
+          ],
+        },
+        {
+          name: 'Tablet', px: '≤620', navRest: '⋯',
+          strip: 'Line 3 · 11:26', figCols: '1fr', figGap: '10px', figH: '20px',
+          figs: [{ bl: '0', bt: '0', pl: '0', pt: '0' }, { bl: '0', bt: '1px solid #e7e8e4', pl: '0', pt: '10px' }, { bl: '0', bt: '1px solid #e7e8e4', pl: '0', pt: '10px' }],
+          blockCols: '1fr', blockGap: '8px', labelW: 'width:46%', stCols: 4, stH: '22px',
+          sts: Array.from({ length: 12 }, (_, i) => ({ i })),
+          notes: [
+            { text: 'Display step drops to 38px, headline to 26px.' },
+            { text: 'Figures stack with rules between; sheet goes full width.' },
+            { text: 'A courtesy, not a target. Nobody is asked to run a shift from here.' },
+          ],
+        },
+      ],
+
+      printFigs: [
+        { v: '11,698', l: 'cones', bl: '0', pl: '0' },
+        { v: '325', l: 'sacks · 14,821 kg', bl: '1px solid #e7e8e4', pl: '14px' },
+        { v: '36.0', l: 'cones per sack', bl: '1px solid #e7e8e4', pl: '14px' },
+        { v: '225', l: 'rejected · 1.9%', bl: '1px solid #e7e8e4', pl: '14px' },
+      ],
+      printShifts: [
+        { a: 'Morning · 06:00–14:00', b: '4,182', c: '116', d: '76', e: '1.8%' },
+        { a: 'Evening · 14:00–22:00', b: '3,914', c: '109', d: '88', e: '2.2%' },
+        { a: 'Night · 22:00–06:00', b: '3,602', c: '100', d: '61', e: '1.7%' },
+      ],
+      printDays: [
+        { a: 'Fri 28 Aug', b: '1,988', c: '55', d: '38', e: '1.9%' },
+        { a: 'Sat 29 Aug', b: '1,942', c: '54', d: '41', e: '2.1%' },
+        { a: 'Mon 31 Aug', b: '2,014', c: '56', d: '35', e: '1.7%' },
+        { a: 'Tue 1 Sep', b: '1,976', c: '55', d: '44', e: '2.2%' },
+      ],
+
+      logins: [
+        { name: 'Resting', u: '', p: '', err: '', btn: 'Sign in', btnOp: '1', b1: '#16191c', b2: '#d3d5d1', why: 'Focus is in Username on load. Two fields, one button, no “remember me” on a shared plant PC.' },
+        { name: 'Wrong', u: 'a.raza', p: '••••••••', err: 'That username and password did not match.', btn: 'Sign in', btnOp: '1', b1: '#d3d5d1', b2: '#d3d5d1', why: 'The sentence never says which field. Password clears, username stays — the usual mistake is the password.' },
+        { name: 'Working', u: 'a.raza', p: '••••••••', err: '', btn: 'Signing in…', btnOp: '.5', b1: '#d3d5d1', b2: '#d3d5d1', why: 'Button label carries the state; nothing else moves. Argon2 verification takes long enough that this matters.' },
+        { name: 'Locked out', u: 'a.raza', p: '', err: 'Too many attempts. Try again in 14 minutes.', btn: 'Sign in', btnOp: '.5', b1: '#d3d5d1', b2: '#d3d5d1', why: 'Eight failures in fifteen minutes. The server returns seconds remaining, so the form states a number.' },
+      ],
+
+      setupBlocks: [
+        {
+          label: 'Sync health', role: 'everybody', note: 'measured, not assumed',
+          lead: 'Readings are arriving about 14 min after weighing.', leadFg: '#16191c', leadSize: '22px', leadWeight: '400',
+          kv: [{ k: 'Last pass', v: '2 min ago', fg: '#16191c' }, { k: 'Oldest table', v: 'cone_register', fg: '#16191c' }, { k: 'Findings', v: 'none', fg: '#16191c' }],
+          foot: 'Source: IFL SQL Server, read-only. There is no PLC connection. ▸ Table by table',
+        },
+        {
+          label: 'Stations', role: 'admin', note: 'the names every screen uses',
+          lead: '14 stations · 3 named', leadFg: '#16191c', leadSize: '17px', leadWeight: '400',
+          kv: [{ k: 'Station 1', v: 'Doffer A · Rename', fg: '#16191c' }, { k: 'Station 2', v: 'not named · Rename', fg: '#5f656c' }, { k: 'Station 3', v: 'not named · Rename', fg: '#5f656c' }],
+          foot: 'Naming a station changes it everywhere at once, including history. Above 7 named stations the grid drops to 7 columns — a name needs the width a bare number does not.',
+        },
+        {
+          label: 'Rules', role: 'admin', note: 'what this system applies when it reads the plant’s numbers',
+          lead: 'Three values IFL has not confirmed.', leadFg: '#a5330f', leadSize: '17px', leadWeight: '400',
+          kv: [
+            { k: 'Weight basis', v: 'As recorded — until confirmed, Weight states the average and the target as two facts rather than a difference', fg: '#16191c' },
+            { k: 'Shift boundaries', v: '06:00 · 14:00 · 22:00 (corrected) — a night shift belongs to the day it started', fg: '#16191c' },
+            { k: 'Plausible cone', v: '1,000 to 1,600 g — the window a reading must fall in to be believed at all, deliberately far wider than the product’s 1,225–1,275 g limits', fg: '#16191c' },
+            { k: 'Plausible sack', v: '40 to 60 kg', fg: '#16191c' },
+          ],
+          foot: 'Interpreted at read time, never baked into stored data — so confirming one is a settings change, not a re-sync.',
+        },
+        {
+          label: 'People', role: 'admin', note: 'who can sign in, and what each may change',
+          lead: '6 accounts · 1 inactive', leadFg: '#16191c', leadSize: '17px', leadWeight: '400',
+          kv: [{ k: 'A. Raza', v: 'a.raza · manager · active', fg: '#16191c' }, { k: 'M. Iqbal', v: 'm.iqbal · supervisor · active', fg: '#16191c' }, { k: 'S. Khan', v: 's.khan · operator · no', fg: '#a5330f' }],
+          foot: 'This system keeps its own accounts. It never touches IFL’s Users table.',
+        },
+        {
+          label: 'Audit log', role: 'admin', note: 'every change made through this application',
+          lead: '40 most recent', leadFg: '#16191c', leadSize: '17px', leadWeight: '400',
+          kv: [
+            { k: '3 Sep 09:14', v: 'A. Raza · product.set · 20/1 Ne PC Cone', fg: '#16191c' },
+            { k: '28 Aug 16:02', v: 'M. Iqbal · calibration.adjust · Station 7, reseated load cell', fg: '#16191c' },
+            { k: '27 Aug 11:40', v: 'A. Raza · rejectCode.label · 4/12 → “Yarn break”', fg: '#16191c' },
+          ],
+          foot: 'Reads and exports are not logged; only changes. Empty state: “Nothing has been changed through this application yet.”',
+        },
+      ],
+
+      hist: [3, 6, 11, 18, 29, 44, 62, 79, 92, 100, 97, 88, 74, 58, 43, 30, 20, 13, 8, 5, 3, 2].map((v, i) => ({
+        h: v + '%',
+        fill: i <= 3 || i >= 19 ? '#d8451b' : '#4a5057',
+      })),
+
+      adjustments: [
+        { when: '28 Aug', who: 'M. Iqbal', reason: 'Reseated the load cell and re-zeroed. Bias was +11 g before.' },
+        { when: '12 Aug', who: 'M. Iqbal', reason: 'Cleaned the pan. No adjustment made.' },
+        { when: '3 Jul', who: 'A. Raza', reason: 'Calibrated against the 1 kg reference weight.' },
+      ],
+
+      roles: [
+        { name: 'Operator', rank: 'rank 1' },
+        { name: 'Supervisor', rank: 'rank 2' },
+        { name: 'Manager', rank: 'rank 3' },
+        { name: 'Admin', rank: 'rank 4' },
+      ],
+
+      perms: [
+        row('See every screen, every figure, every reading', 'GET /api/live, /production, /weights, /rejects, /events, /report …', 1),
+        row('Read the adjustment history on a station', 'GET /api/calibration/adjustments', 1),
+        row('Change the product recorded in this system', 'POST /api/current-product', 2),
+        row('Record a scale adjustment', 'POST /api/calibration/adjustments', 2),
+        row('Export readings as CSV', 'GET /api/events/export', 3),
+        row('Name a reject code', 'PUT /api/reject-codes/:id', 3),
+        row('Reach Setup at all', 'the gear in the bar', 4),
+        row('Add or deactivate an account', 'GET·POST·PATCH /api/admin/users', 4),
+        row('Rename a station', 'PUT /api/admin/stations/:id', 4),
+        row('Confirm the weight basis, shifts, plausibility', 'POST /api/admin/rules/*', 4),
+        row('Read the audit log', 'GET /api/admin/audit', 4),
+      ],
+
+      roleViews: [
+        { name: 'Operator', who: 'at the machine', gear: '', gearFg: '#fff', change: 'no button', changeBorder: 'transparent', changeFg: '#8c9298', nameIt: 'not named — no link', nameFg: '#8c9298', exportIt: 'Print only', exportFg: '#16191c', note: 'Reads everything, changes nothing. Print survives because it is a browser feature, not a route.' },
+        { name: 'Supervisor', who: 'runs the shift', gear: '', gearFg: '#fff', change: 'Change', changeBorder: '#d3d5d1', changeFg: '#16191c', nameIt: 'not named — no link', nameFg: '#8c9298', exportIt: 'Print only', exportFg: '#16191c', note: 'Gains the two writes that belong to running a shift: the product in force, and a recorded adjustment.' },
+        { name: 'Manager', who: 'the GM', gear: '', gearFg: '#fff', change: 'Change', changeBorder: '#d3d5d1', changeFg: '#16191c', nameIt: 'not named — Name it', nameFg: '#16191c', exportIt: 'Print · Export CSV', exportFg: '#16191c', note: 'The role this redesign is aimed at. Gains CSV, and the ability to give a reject code a name that applies to history.' },
+        { name: 'Admin', who: 'sets it up', gear: '⚙', gearFg: '#16191c', change: 'Change', changeBorder: '#d3d5d1', changeFg: '#16191c', nameIt: 'not named — Name it', nameFg: '#16191c', exportIt: 'Print · Export CSV', exportFg: '#16191c', note: 'The only role with a different nav. Everything else is identical to Manager.' },
+      ],
+
+      checks: [
+        { n: '01', text: 'No screen shows more than four of the six type steps.' },
+        { n: '02', text: 'On a healthy screen there is no accent anywhere. Search the DOM for --acc and find nothing rendered.' },
+        { n: '03', text: 'A block’s hairline reaches both bezels on a 2560px monitor; its text still stops at 1100px.' },
+        { n: '04', text: 'Every block label sits in the left margin, and the content column has one left edge from top to bottom.' },
+        { n: '05', text: 'The ink fill appears exactly once in the whole application, on Report.' },
+        { n: '06', text: 'Pull the network: within one poll the pulse stops, the strip washes accent, and the headline stops claiming the line is running.' },
+        { n: '07', text: 'On the wall at 1920, the state sentence measures about 79px and is legible from four metres.' },
+        { n: '08', text: 'A quiet station on the wall is a visible gap in the bar row, with no colour involved.' },
+        { n: '09', text: 'Reload with a cold cache: no block changes height as it lands.' },
+        { n: '10', text: 'Print the Report: the verdict mark, the print header and the day table all survive with background graphics OFF.' },
+        { n: '11', text: 'Sign in as an operator: no Change button, no Name it link, no Export CSV, no gear. None of them greyed — all absent.' },
+        { n: '12', text: 'Open a cone from a period with no product: the sheet states that and computes no difference.' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
