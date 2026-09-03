@@ -17,7 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, type AuthUser,
 } from './api';
-import { LiveProvider, readAsOf, useLive } from './lib/live';
+import { LiveProvider, readAsOf, useLive, usePlantNow } from './lib/live';
 import { assessHealth } from './lib/health';
 import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams } from './lib/period';
 import { W } from './lib/words';
@@ -52,6 +52,13 @@ interface Route {
 }
 
 const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall'] as const;
+
+/**
+ * The register export is requireRole(3) on the server. Offering it at rank 2
+ * put a button in front of a supervisor that could only ever answer 403 — and
+ * a 403 is a bug, not a state. A control a role cannot use is absent.
+ */
+const EXPORT_RANK = 3;
 
 function parseRoute(): Route {
   if (typeof window === 'undefined') return { view: 'line', period: { key: 'shift' }, sheet: null, at: null };
@@ -138,6 +145,9 @@ function Chrome({
   onSignOut: () => void;
 }) {
   const { line, loading, error } = useLive();
+  // Ticks every second off the instant /api/live reported, so the strip's
+  // clock is the plant's and keeps time between polls.
+  const plantNow = usePlantNow();
   const rank = ROLE_RANK[user.role] ?? 1;
   const health = assessHealth(line);
 
@@ -174,6 +184,7 @@ function Chrome({
       <Bar
         screen={route.view === 'setup' ? 'setup' : (route.view as Screen)}
         lineName={line.lineName}
+        plantNowUtc={plantNow}
         health={health}
         period={route.period}
         user={user}
@@ -195,7 +206,9 @@ function Chrome({
         </div>
       )}
 
-      <main id="main" className="page" tabIndex={-1}>
+      {/* Not .page any more: every band carries its own 1100px page inside a
+          full-bleed rule, and each screen wraps its head area in one. */}
+      <main id="main" tabIndex={-1}>
         {route.view === 'line' && (
           <LineScreen
             period={period}
@@ -211,7 +224,7 @@ function Chrome({
           <ReadingsScreen
             period={period}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-            canExport={rank >= 2}
+            canExport={rank >= EXPORT_RANK}
           />
         )}
 
@@ -241,10 +254,10 @@ function Chrome({
           (rank >= 4 ? (
             <SetupScreen />
           ) : (
-            <>
+            <div className="page">
               <p className="q">{W.question.setup}</p>
               <h1 className="wide">{W.notAllowed}</h1>
-            </>
+            </div>
           ))}
       </main>
 

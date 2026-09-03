@@ -95,6 +95,7 @@ export function RejectsScreen({
 
   return (
     <>
+      <div className="page">
       <p className="q">{W.question.rejects}</p>
       <h1 className="wide">
         {q == null || w == null
@@ -103,6 +104,7 @@ export function RejectsScreen({
               rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : W.rejects.steady
             }.`}
       </h1>
+      </div>
 
       <Block first>
         <div className="figs two">
@@ -152,6 +154,7 @@ export function RejectsScreen({
         </p>
       </Block>
 
+      <div className="page">
       <Details>
         <p>
           The trend is drawn over the last {win.requestedDays} production days with the selected period shaded, because
@@ -163,6 +166,7 @@ export function RejectsScreen({
           Reject rate is rejected cones over everything weighed, rejected cones included.
         </p>
       </Details>
+      </div>
     </>
   );
 }

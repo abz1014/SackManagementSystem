@@ -14,7 +14,7 @@
  *    looks for it must find the reason rather than a blank space.
  */
 import { useState } from 'react';
-import { usePolling } from '../lib/live';
+import { usePolling, usePlantNow, useLive } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import { Block, Empty, Failed, Loading } from '../ui/bits';
@@ -24,6 +24,11 @@ import { downloadCsv, csvName, type CsvRow } from '../csv';
 import { getReport, type ReportData, type ReportLine, type AuthUser } from '../api';
 
 export function ReportScreen({ period, user }: { period: Period; user: AuthUser }) {
+  // The plant's clock, not the browser's: a printed plant record is stamped
+  // with the time the plant was keeping.
+  const plantNow = usePlantNow();
+  const { line } = useLive();
+  const lineName = line?.lineName ?? '';
   // The global period always resolves to explicit dates, so the report is
   // always asked for a custom range — one period control, not two.
   const r = usePolling(
@@ -38,25 +43,51 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
 
   return (
     <>
+      <div className="page">
       <div className="print-head">
         <b>Report · {period.from} to {period.to}</b>
-        <div>{W.report.printedAt} {new Date().toLocaleString('en-GB')} {W.report.printedBy} {user.displayName ?? user.username}</div>
+        <div>{printedLine(plantNow, user)}</div>
       </div>
 
-      <div className="head-row no-print">
+      <div className="head-row">
         <div>
-          <p className="q">{W.question.report}</p>
+          <p className="q no-print">{W.question.report}</p>
           <h1 className="wide">{coverage(d)}</h1>
         </div>
-        {/* Print and Export sit at the TOP of the screen. A control the reader
-            has to scroll past the content to find is a control they do not
-            know exists. */}
-        <div className="row head-actions">
-          <button type="button" className="btn" onClick={() => window.print()}>{W.report.print}</button>
-          <button type="button" className="btn" onClick={() => exportCsv(d)}>{W.report.exportCsv}</button>
+        <div className="head-actions">
+          {/* Print and Export sit at the TOP of the screen. A control the
+              reader has to scroll past the content to find is a control they
+              do not know exists. Both are disabled while the report is still
+              arriving: a half-loaded report must not be printable. */}
+          <div className="row no-print">
+            <button type="button" className="btn" disabled={r.loading} onClick={() => window.print()}>
+              {W.report.print}
+            </button>
+            <button type="button" className="btn" disabled={r.loading} onClick={() => exportCsv(d)}>
+              {W.report.exportCsv}
+            </button>
+          </div>
+          {/* THE VERDICT MARK — the one ink fill in the application, and the
+              reason this is the only screen carrying it: Report is the only
+              one whose output leaves the building. It states the figure that
+              was signed for, its period and its line, and who printed it.
+              Absent when the period holds no production days: there is
+              nothing to sign for. */}
+          {d.coverage.daysWithData > 0 && (
+            <div className="verdict">
+              <span className="lbl">{W.report.verdict}</span>
+              <span className="val">
+                {fmtInt(d.totals.cones)} {W.fig.cones}, {fmtInt(d.totals.sacks)} {W.fig.sacks},{' '}
+                {fmtInt(Math.round(d.totals.sackWeightKg))} {W.fig.kg}
+                <br />
+                {fmtDayShort(d.period.from)} – {fmtDayShort(d.period.to)} · {lineName}
+              </span>
+              <span className="who">{printedLine(plantNow, user)}</span>
+            </div>
+          )}
         </div>
       </div>
-      <h1 className="wide print-only">{coverage(d)}</h1>
+      </div>
 
       {d.totals.cones === 0 ? (
         <Block first>
@@ -203,6 +234,17 @@ function DayBars({ rows }: { rows: ReportLine[] }) {
       </svg>
     </div>
   );
+}
+
+/** Who printed this, and when, on the plant's own clock. */
+function printedLine(plantNowUtc: string | null, user: AuthUser): string {
+  const when = plantNowUtc
+    ? new Date(plantNowUtc).toLocaleString('en-GB', {
+        timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
+    : '—';
+  return `${W.report.printedAt} ${when} ${W.report.printedBy} ${user.displayName ?? user.username}`;
 }
 
 /** "31 Aug" — a bar label a person reads without decoding. */

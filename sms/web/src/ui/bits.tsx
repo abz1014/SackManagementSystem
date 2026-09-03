@@ -8,7 +8,9 @@
  *    without saying what it counts and on what basis.
  *  - `Block` is a rule and 28px of space, never a card. There is no `Card`
  *    component on purpose: cards nest, and nested cards are what the old
- *    screens turned into.
+ *    screens turned into. Its label hangs in a 180px left margin so the
+ *    content column has one left edge from the top of the screen to the
+ *    bottom, and its rule is carried by a full-bleed band.
  *  - `Details` is the only route by which a statistic reaches the screen.
  *  - `Loading` / `Failed` / `Empty` exist so that "no data" is a sentence
  *    rather than an empty region a reader has to interpret.
@@ -34,18 +36,35 @@ export function Block({
   plain?: boolean;
   children: ReactNode;
 }) {
-  const cls = ['block', first && 'first', tight && 'tight', plain && 'plain'].filter(Boolean).join(' ');
-  return (
+  // A block that is not the screen's first sits inside a BAND, and the band
+  // carries the rule. That is what lets a hairline reach both bezels on a
+  // 2560px monitor while the text still stops at 1100px — the old page drew
+  // every rule at 1100px, so on a wide monitor it was a narrow strip of lines
+  // floating in white with no architecture at all.
+  //
+  // The section itself always takes .first: inside a band it must not draw a
+  // second rule 1px below the band's, and outside one there is nothing above
+  // it to separate from.
+  const banded = !first && !plain;
+  const cls = ['block', 'first', tight && 'tight', plain && 'plain', !label && !note && 'wide']
+    .filter(Boolean)
+    .join(' ');
+
+  const inner = (
     <section className={cls}>
-      {(label || note) && (
-        <p className="h2">
-          <span>{label}</span>
-          {note && <span className="note">{note}</span>}
-        </p>
-      )}
-      {children}
+      {label && <p className="h2">{label}</p>}
+      {/* A direct child of the block grid, so it lands in the content column
+          flush right on the label's baseline rather than on top of the label. */}
+      {note && <span className="note">{note}</span>}
+      {/* The one wrapper div. It makes every child ONE grid item in column 2,
+          so the label hangs beside the whole block rather than beside only its
+          first element. */}
+      <div>{children}</div>
     </section>
   );
+
+  const page = <div className="page">{inner}</div>;
+  return banded ? <div className="band">{page}</div> : page;
 }
 
 /* ----------------------------------------------------------------- figures */

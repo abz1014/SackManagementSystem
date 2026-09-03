@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { W } from '../lib/words';
 import { PERIOD_KEYS, type PeriodKey, type PeriodParams } from '../lib/period';
 import type { Health } from '../lib/health';
-import { fmtClock, fmtSpan } from '../lib/fmt';
+import { fmtClockSec, fmtClock, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
 
 export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'report';
@@ -175,41 +175,47 @@ function UserMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }
 
 /* ------------------------------------------------------------- the strip */
 
+/** The colour of the health dot. The PULSE is stopped by .strip.alarm. */
+function dotClass(health: Health): string {
+  switch (health.kind) {
+    case 'ok':
+      return 'dot live';
+    case 'late':
+      return 'dot warn live';
+    case 'stale':
+      return 'dot bad live';
+    default:
+      return 'dot warn live';
+  }
+}
+
 /** The lag sentence, in whichever of its three states is true. */
 export function HealthLine({ health, onOpen }: { health: Health; onOpen: () => void }) {
   let text: string;
-  let dot: string;
 
   switch (health.kind) {
     case 'ok':
-      dot = 'dot';
       text =
         health.lagSeconds != null
           ? W.lag.ok(fmtClock(health.readingUtc), fmtSpan(health.lagSeconds))
           : W.lag.okNoLag(fmtClock(health.readingUtc));
       break;
     case 'stale':
-      dot = 'dot bad';
       text = W.lag.stale(health.readingUtc ? fmtClock(health.readingUtc) : '—');
       break;
     case 'late':
-      dot = 'dot bad';
       text = W.lag.late(fmtSpan(health.lagSeconds));
       break;
     default:
-      dot = 'dot warn';
       text = W.lag.noData;
   }
 
   return (
-    <span>
-      <span className={dot} aria-hidden="true" />
-      {/* The whole sentence is the link, and it ends in the word "details":
-          a bare coloured dot beside a sentence is not a target anyone finds. */}
-      <button type="button" className="strip-link" onClick={onOpen}>
-        {text} {W.lag.details}
-      </button>
-    </span>
+    /* The whole sentence is the link, and it ends in the word "details":
+       a bare coloured dot beside a sentence is not a target anyone finds. */
+    <button type="button" className="strip-link" onClick={onOpen}>
+      {text} {W.lag.details}
+    </button>
   );
 }
 
@@ -218,6 +224,7 @@ export function HealthLine({ health, onOpen }: { health: Health; onOpen: () => v
 export function Bar({
   screen,
   lineName,
+  plantNowUtc,
   health,
   period,
   user,
@@ -231,6 +238,8 @@ export function Bar({
 }: {
   screen: Screen | 'setup';
   lineName: string;
+  /** The plant's clock, from /api/live. Never the browser's. */
+  plantNowUtc: string | null;
   health: Health;
   period: PeriodParams;
   user: AuthUser;
@@ -276,8 +285,22 @@ export function Bar({
         </div>
       </div>
 
+      {/* [SPEC 7] Left: the dot, the line, and the PLANT clock. Right: the lag
+          sentence. The dot pulses while data is arriving and stops on .alarm —
+          motion ceasing is read faster than a colour change, and it is driven
+          by the health payload, never a local timer, so a frozen screen cannot
+          keep pulsing happily. */}
       <div className={`strip no-print${alarm ? ' alarm' : ''}`}>
-        <span>{lineName}</span>
+        <span>
+          <span className={dotClass(health)} aria-hidden="true" />
+          {lineName}
+          {plantNowUtc && (
+            <>
+              {' · '}
+              {W.plantClock} <span className="clock">{fmtClockSec(plantNowUtc)}</span>
+            </>
+          )}
+        </span>
         <HealthLine health={health} onOpen={onOpenSync} />
       </div>
     </>

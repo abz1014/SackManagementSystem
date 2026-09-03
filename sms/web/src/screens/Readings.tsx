@@ -98,8 +98,10 @@ export function ReadingsScreen({
 
   return (
     <>
-      <p className="q">{W.question.readings}</p>
-      <h1 className="wide">{countLine(period, listing, total, rejectedTotal)}</h1>
+      <div className="page">
+        <p className="q">{W.question.readings}</p>
+        <h1 className="wide">{countLine(period, listing, total, rejectedTotal)}</h1>
+      </div>
 
       <Block first tight>
         <Toolbar
@@ -142,6 +144,7 @@ export function ReadingsScreen({
         />
       </Block>
 
+      <div className="page">
       {rows.error && !rows.data ? (
         <Failed error={rows.error} onRetry={rows.refresh} />
       ) : rows.loading && !rows.data ? (
@@ -166,6 +169,7 @@ export function ReadingsScreen({
           </p>
         </>
       )}
+      </div>
     </>
   );
 }

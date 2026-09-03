@@ -97,8 +97,10 @@ export function WeightScreen({
 
   return (
     <>
-      <p className="q">{W.question.weight}</p>
-      <h1 className="wide">{headline(d, s)}</h1>
+      <div className="page">
+        <p className="q">{W.question.weight}</p>
+        <h1 className="wide">{headline(d, s)}</h1>
+      </div>
 
       <Block first>
         <div className="figs">
@@ -164,6 +166,7 @@ export function WeightScreen({
         </div>
       </Block>
 
+      <div className="page">
       <Details>
         <p>
           A station is flagged when it has held one side of the line by at least {fmtG(d.thresholdG)} for{' '}
@@ -187,6 +190,7 @@ export function WeightScreen({
             ` ${fmtInt(d.disagreement.unjudged)} could not be judged because no product was recorded at the time.`}
         </p>
       </Details>
+      </div>
     </>
   );
 }
@@ -281,13 +285,22 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
   );
 }
 
+/**
+ * The band above the plot that the three reference labels hang in.
+ *
+ * They used to be drawn INSIDE the plot, on the same baseline a bar can reach,
+ * so whether "target 1,960 g" was readable depended on that day's bin heights.
+ * Nothing may share a line with the data marks.
+ */
+const REF_BAND = 22;
+
 function Distribution({ spc, target }: { spc: SpcData; target: number | null }) {
   const [box, width] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
   const H = 250;
   const L = 8;
   const R = 150;
-  const T = 16;
+  const T = 16 + REF_BAND;
   const B = 30;
 
   const bins = spc.histogram;
@@ -319,12 +332,23 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
                 fill={outside(b) ? 'var(--acc-fill)' : hover === i ? 'var(--ink)' : 'var(--graphite)'}
                 onMouseEnter={() => setHover(i)} />
         ))}
+        {/* The rule runs the height of the plot; its label hangs in the band
+            ABOVE it. The lower limit reads back toward its own rule so it
+            cannot collide with the target label beside it. */}
         {[['lower limit', spc.spec.lsl], ['target', target], ['upper limit', spc.spec.usl]].map(([label, v]) =>
           typeof v === 'number' && xOf(v) != null ? (
             <g key={String(label)}>
               <line x1={xOf(v)!} x2={xOf(v)!} y1={T} y2={H - B} stroke={label === 'target' ? 'var(--graphite)' : 'var(--grid)'}
                     strokeDasharray={label === 'target' ? undefined : '3 3'} />
-              <text x={xOf(v)! + 5} y={T + 11} fontSize="var(--fs-tick)" fill="var(--muted)">{label} {fmtG(v)}</text>
+              <text
+                x={label === 'lower limit' ? xOf(v)! - 5 : xOf(v)! + 5}
+                y={T - 8}
+                textAnchor={label === 'lower limit' ? 'end' : 'start'}
+                fontSize="var(--fs-tick)"
+                fill="var(--muted)"
+              >
+                {label} {fmtG(v)}
+              </text>
             </g>
           ) : null,
         )}

@@ -83,10 +83,12 @@ export function LineScreen({
 
   return (
     <>
-      <p className="q">{W.question.line}</p>
-      <h1 className="wide">
-        <Headline line={line} knowable={stateIsKnowable(health)} />
-      </h1>
+      <div className="page">
+        <p className="q">{W.question.line}</p>
+        <h1 className="wide">
+          <Headline line={line} knowable={stateIsKnowable(health)} />
+        </h1>
+      </div>
 
       <Block first>
         <Figures items={shiftFigures(line)} />
@@ -120,6 +122,7 @@ export function LineScreen({
         <LastReadings line={line} onOpen={onOpenReading} />
       </Block>
 
+      <div className="page">
       <Details summary={W.details}>
         <p>
           The line is judged against the newest reading rather than the clock, because the plant writes a
@@ -134,6 +137,7 @@ export function LineScreen({
           {attention.data?.data.thresholds.minDaysHeld ?? '—'} days or more.
         </p>
       </Details>
+      </div>
     </>
   );
 }

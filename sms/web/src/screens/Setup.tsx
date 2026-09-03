@@ -26,8 +26,10 @@ import {
 export function SetupScreen() {
   return (
     <>
-      <p className="q">{W.question.setup}</p>
-      <h1 className="wide">Setup</h1>
+      <div className="page">
+        <p className="q">{W.question.setup}</p>
+        <h1 className="wide">Setup</h1>
+      </div>
       <SyncHealth />
       <Stations />
       <RulesBlock />

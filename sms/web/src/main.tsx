@@ -2,20 +2,15 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 
 /**
- * Self-hosted fonts. ONE family: Archivo, with tabular figures switched on in
- * app.css so a single typeface carries every number in the app. Imported (not linked from Google Fonts) because the plant PC is
- * air-gapped: a webfont link would simply never resolve there and the app would
- * silently fall back, which is exactly the kind of "worked on my machine" failure
- * this deployment cannot afford. @fontsource ships the woff2 files locally and
- * Vite fingerprints them into the bundle, so there is no runtime network call.
+ * ONE typeface: Instrument Sans, variable, weights 400-700, in a single
+ * self-hosted woff2 at public/fonts/InstrumentSans-Variable.woff2.
  *
- * Only the four weights the design specifies are imported. Pulling the
- * whole family would add ~60 unused font files to the build.
+ * The @font-face lives in app.css rather than here because the whole ramp —
+ * including the 600 display cut the wall figures use — comes from that one
+ * file. THE PLANT PC HAS NO INTERNET: a Google Fonts <link> would silently
+ * fall back to Segoe UI on the one machine that matters, so the file is
+ * vendored into the repository and served from the app itself.
  */
-import '@fontsource/archivo/400.css';
-import '@fontsource/archivo/500.css';
-import '@fontsource/archivo/600.css';
-import '@fontsource/archivo/700.css';
 
 import { App } from './App';
 import './app.css';

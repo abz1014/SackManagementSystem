@@ -36,6 +36,10 @@ export const W = {
   } as const,
   wall: 'Wall',
   setup: 'Setup',
+  /* The strip's clock is labelled because the lag sentence beside it carries a
+     second time; unlabelled, the two read as the same clock. It is the PLANT's
+     clock, from /api/live — never the browser's. */
+  plantClock: 'plant clock',
   signOut: 'Sign out',
   skipToContent: 'Skip to content',
 
@@ -310,6 +314,9 @@ export const W = {
     exportCsv: 'Export CSV',
     printedAt: 'Printed',
     printedBy: 'by',
+    /* The label on the verdict mark — the one ink fill in the application,
+       and the only thing that names it. */
+    verdict: 'Verdict',
   } as const,
 
   /* ------------------------------------------------------------------ setup */
