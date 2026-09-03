@@ -55,6 +55,26 @@ export const LAG_SAMPLE_ROWS = 200;
 /** A sane ceiling. A lag beyond this is a clock fault, not an ingestion delay,
  *  and must not be allowed to mask a genuinely stopped line indefinitely. */
 export const MAX_CREDIBLE_LAG_SECONDS = 2 * 3600;
+/**
+ * How large a lag may be and still be REPORTED.
+ *
+ * These are two different ceilings, and conflating them hid a whole state.
+ * MAX_CREDIBLE is the point past which a lag stops being usable for judging
+ * whether the line is running. Filtering the SAMPLE at that value before
+ * taking the median, which this file used to do, also meant the measured lag
+ * came back null in exactly the case the screens need to warn about — so
+ * "readings are arriving two hours late" could never be said, and the state
+ * meant to catch it was unreachable. The lag is now measured up to a day and
+ * reported as measured; only the LINE STATE gets the credible cap.
+ */
+export const MAX_REPORTABLE_LAG_SECONDS = 24 * 3600;
+
+/** Never call the pipeline stale sooner than this, however fast it runs. */
+export const MIN_STALE_AFTER_SECONDS = 90;
+/** Missed passes before the pipeline counts as stale. */
+export const STALE_CADENCE_MULTIPLE = 3;
+/** Used until two successful passes exist to measure a cadence from. */
+export const DEFAULT_STALE_AFTER_SECONDS = 180;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const SHIFT_MS = 8 * HOUR_MS;
@@ -101,6 +121,113 @@ export function shiftWindowAt(tMs: number, rule: NightBelongsTo): ShiftWindow {
 }
 
 export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
+
+/**
+ * Whether the numbers on screen can be trusted right now.
+ *
+ * Deliberately separate from the LINE state. If the sync worker stops, the
+ * newest reading keeps ageing while nothing arrives, and within two minutes
+ * the line-state arithmetic reports "Stopped 3 min" about a line running flat
+ * out. An amber dot in the corner does not undo a wrong headline, so when this
+ * is anything but 'ok' no screen may assert running or stopped.
+ */
+export type LiveHealthKind = 'ok' | 'stale' | 'late' | 'no_data';
+
+export interface SyncHealth {
+  /**
+   * Seconds since the OLDEST of the source tables last synced successfully.
+   *
+   * The oldest, not the newest: the response envelope's freshness uses
+   * MAX(finished_at_utc) across all four tables, so a dead cone feed hides
+   * behind three healthy ones and the app reports itself current while the
+   * only table any screen reads is frozen.
+   */
+  ageSeconds: number | null;
+  /** The table furthest behind, so Setup can name it. */
+  oldestTable: string | null;
+  /** The MEASURED gap between successful passes. Null until two exist. */
+  cadenceSeconds: number | null;
+  /** Age beyond which the pipeline counts as stale. Derived, not assumed. */
+  staleAfterSeconds: number;
+}
+
+export interface LiveHealth extends SyncHealth {
+  kind: LiveHealthKind;
+  /** The lag past which the line state is no longer asserted. */
+  lagCeilingSeconds: number;
+}
+
+/**
+ * Sync freshness, measured rather than assumed.
+ *
+ * The cadence comes from the gaps between recent successful passes instead of
+ * a hardcoded sixty seconds, so changing the worker's schedule cannot silently
+ * turn every screen's freshness warning into a false alarm.
+ */
+export async function getSyncHealth(pool: ConnectionPool, lineId: number): Promise<SyncHealth> {
+  const [oldest, gaps] = await Promise.all([
+    pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .query<{ target_table: string; ageSeconds: number | null }>(`
+        WITH last_ok AS (
+          SELECT target_table, MAX(finished_at_utc) AS finished
+            FROM sms.sync_run
+           WHERE line_id = @line AND outcome = 'success'
+           GROUP BY target_table
+        )
+        SELECT TOP 1 target_table, DATEDIFF(SECOND, finished, SYSUTCDATETIME()) AS ageSeconds
+          FROM last_ok ORDER BY finished ASC`),
+    pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .query<{ gapSeconds: number | null }>(`
+        WITH passes AS (
+          SELECT run_id, MAX(finished_at_utc) AS finished
+            FROM sms.sync_run
+           WHERE line_id = @line AND outcome = 'success'
+           GROUP BY run_id
+        ),
+        recent AS (
+          SELECT TOP 20 finished, LAG(finished) OVER (ORDER BY finished) AS prev
+            FROM passes ORDER BY finished DESC
+        )
+        SELECT DATEDIFF(SECOND, prev, finished) AS gapSeconds FROM recent WHERE prev IS NOT NULL`),
+  ]);
+
+  const row = oldest.recordset[0];
+  const sample = gaps.recordset
+    .map((g) => Number(g.gapSeconds))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => a - b);
+  const cadenceSeconds = sample.length ? sample[Math.floor(sample.length / 2)]! : null;
+
+  return {
+    ageSeconds: row?.ageSeconds == null ? null : Number(row.ageSeconds),
+    oldestTable: row?.target_table ?? null,
+    cadenceSeconds,
+    staleAfterSeconds:
+      cadenceSeconds == null
+        ? DEFAULT_STALE_AFTER_SECONDS
+        : Math.max(MIN_STALE_AFTER_SECONDS, Math.round(cadenceSeconds * STALE_CADENCE_MULTIPLE)),
+  };
+}
+
+/** Pure: which of the four states the pipeline is in. */
+export function classifyHealth(
+  dataAsOfMs: number | null,
+  sync: SyncHealth,
+  ingestLagSeconds: number | null,
+  replay: boolean,
+): LiveHealthKind {
+  // A replay is pinned to a past instant on purpose and is bannered
+  // separately; sync freshness says nothing about it.
+  if (replay) return dataAsOfMs == null ? 'no_data' : 'ok';
+  if (dataAsOfMs == null) return 'no_data';
+  if (sync.ageSeconds == null || sync.ageSeconds > sync.staleAfterSeconds) return 'stale';
+  if (ingestLagSeconds != null && ingestLagSeconds > MAX_CREDIBLE_LAG_SECONDS) return 'late';
+  return 'ok';
+}
 
 export interface LineState {
   status: LineStatus;
@@ -151,6 +278,8 @@ export interface LiveLine {
    */
   dataAsOfUtc: string | null;
   ingestLagSeconds: number | null;
+  /** Whether the figures below can be trusted, and why not when they cannot. */
+  health: LiveHealth;
   state: {
     status: LineStatus;
     /** Seconds since the newest cone reading, on the wall clock. */
@@ -243,10 +372,11 @@ export async function getLive(
        ORDER BY src_id DESC`);
   const lagSamples = lagRes.recordset
     .map((r) => Number(r.lagSeconds))
-    .filter((n) => Number.isFinite(n) && n >= 0 && n <= MAX_CREDIBLE_LAG_SECONDS)
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= MAX_REPORTABLE_LAG_SECONDS)
     .sort((a, b) => a - b);
   const ingestLagSeconds = lagSamples.length ? lagSamples[Math.floor(lagSamples.length / 2)]! : null;
-  const lagMs = (ingestLagSeconds ?? 0) * 1000;
+  // Reported as measured; capped only where it is USED to judge the line.
+  const lagMs = Math.min(ingestLagSeconds ?? 0, MAX_CREDIBLE_LAG_SECONDS) * 1000;
 
   // One lower bound serves both the shift totals and the rolling hour: the
   // hour can begin before the shift did (twenty minutes into a shift, "last
@@ -322,6 +452,7 @@ export async function getLive(
       GROUP BY source_station ORDER BY source_station`),
   ]);
 
+  const sync = await getSyncHealth(pool, lineId);
   const lastConeRow = lastCone.recordset[0] ?? null;
   const lastConeMs = lastConeRow ? new Date(lastConeRow.ts).getTime() : null;
   const state = classifyLineState(lastConeMs, nowMs, lagMs);
@@ -374,6 +505,11 @@ export async function getLive(
     },
     dataAsOfUtc: dataAsOfMs != null ? new Date(dataAsOfMs).toISOString() : null,
     ingestLagSeconds,
+    health: {
+      ...sync,
+      kind: classifyHealth(dataAsOfMs, sync, ingestLagSeconds, replay),
+      lagCeilingSeconds: MAX_CREDIBLE_LAG_SECONDS,
+    },
     state: {
       status: state.status,
       sinceLastConeSeconds: state.sinceLastConeSeconds,

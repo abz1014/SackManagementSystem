@@ -293,7 +293,10 @@ h1 .acc, .headline .acc { color: var(--acc); }
   transition: border-color var(--t), background var(--t);
 }
 .st:hover { background: var(--paper-3); border-color: var(--rule-2); }
-.st-name { display: block; font-size: var(--fs-tick); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-name {
+  display: block; font-size: var(--fs-tick); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .st-val { display: block; font-size: calc(18px * var(--ui-scale)); font-weight: 500; margin-top: 1px; }
 .st.quiet { border-style: dashed; }
 .st.quiet .st-val, .st.quiet .st-name { color: var(--grid); }

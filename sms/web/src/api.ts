@@ -645,6 +645,18 @@ export function getOperations(): Promise<Envelope<OperationsData>> {
 
 // ---- live line state — polled by the floor screens and the wall display ----
 export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
+export type LiveHealthKind = "ok" | "stale" | "late" | "no_data";
+export interface LiveHealth {
+  kind: LiveHealthKind;
+  /** Seconds since the OLDEST source table last synced — not the newest. */
+  ageSeconds: number | null;
+  oldestTable: string | null;
+  /** The measured gap between successful passes, never an assumed 60 s. */
+  cadenceSeconds: number | null;
+  staleAfterSeconds: number;
+  lagCeilingSeconds: number;
+}
+
 export interface LiveLine {
   lineId: number;
   lineName: string;
@@ -664,6 +676,8 @@ export interface LiveLine {
    *  plant's own acquisition runs. Every relative time is anchored here. */
   dataAsOfUtc: string | null;
   ingestLagSeconds: number | null;
+  /** Whether the figures can be trusted, decided server-side. */
+  health: LiveHealth;
   state: {
     status: LineStatus;
     /** Wall-clock age of the newest reading. */
@@ -736,4 +750,95 @@ export function getReport(q: {
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
   return get(`/api/report?${p.toString()}`);
+}
+
+/* ==================================================================== */
+/* The redesign's additions (REDESIGN.md §12 step 2).                    */
+/* ==================================================================== */
+
+// ---- station names, for every reader ----
+/**
+ * Station labels. Previously readable only by admins, which is why every
+ * screen could say nothing but "Station 7" and the count of fourteen was
+ * hardcoded in this bundle. Writing them is still admin-only.
+ */
+export function getStations(): Promise<{ stations: StationRow[] }> {
+  return get('/api/stations');
+}
+
+/** The station's plant name when it has one, else a plain numbered label. */
+export function stationLabel(s: StationRow | undefined, n: number): string {
+  return s?.name?.trim() || `Station ${n}`;
+}
+
+// ---- the product in force at a moment ----
+export interface ProductInForce {
+  productId: number;
+  label: string;
+  setpointG: number | null;
+  weightOffsetMinusG: number | null;
+  weightOffsetPlusG: number | null;
+  effectiveFromUtc: string;
+}
+export interface ProductLimits {
+  targetG: number;
+  loG: number;
+  hiG: number;
+  /** "1,960 ± 40 g", ready to print. */
+  label: string;
+}
+export interface ProductAtData {
+  at: string;
+  /** Null when nothing was in force then — the screen says so, and computes nothing. */
+  product: ProductInForce | null;
+  limits: ProductLimits | null;
+  /** True when no product has ever been recorded for this line. */
+  neverRecorded: boolean;
+}
+export function getProductAt(at?: string | null): Promise<ProductAtData> {
+  return get(at ? `/api/product-at?at=${encodeURIComponent(at)}` : '/api/product-at');
+}
+
+// ---- the attention list ----
+export type FindingKind = 'station_drift' | 'reject_rise' | 'outside_product_limits';
+
+export interface AttentionFinding {
+  kind: FindingKind;
+  /** The IFL requirement line this finding serves. Stated in Details. */
+  requirement: 2 | 4 | 5;
+  screen: 'weight' | 'rejects' | 'readings';
+  station?: number;
+  /** Signed grams against the line mean, over the run of days it names. */
+  deltaG?: number;
+  days?: number;
+  rejectKind?: 'quality' | 'weight';
+  sinceUtc?: string;
+  ratePct?: number;
+  usualPct?: number;
+  count?: number;
+}
+
+export interface AttentionData {
+  /** The FIXED trailing window the drift and reject rules used. */
+  window: { from: string; to: string; days: number };
+  /** The selected period, which only the outside-limits count uses. */
+  period: { from: string; to: string; shift: string | null };
+  findings: AttentionFinding[];
+  /** Before the cap of three, so the screen can say "and 2 more". */
+  totalFindings: number;
+  thresholds: { driftG: number; minDaysHeld: number };
+}
+
+export function getAttention(q: {
+  from?: string;
+  to?: string;
+  shift?: string | null;
+  trailingDays?: number;
+}): Promise<Envelope<AttentionData>> {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.shift) p.set('shift', q.shift);
+  if (q.trailingDays) p.set('trailingDays', String(q.trailingDays));
+  return get(`/api/attention?${p.toString()}`);
 }

@@ -92,7 +92,7 @@ export const W = {
     idle: (since: string) => `has had no readings since ${since}`,
     unknown: 'Cannot tell whether the line is running',
     intoShift: (span: string, shift: string, from: string, to: string) =>
-      `${span} into the ${shift}, ${from} ${nbsp}to${nbsp} ${to}`,
+      `${span} into the ${shift}, ${from}${nbsp}to${nbsp}${to}`,
     shiftOf: (shift: string, from: string, to: string) => `${shift}, ${from} to ${to}`,
   } as const,
   shift: { morning: 'morning shift', evening: 'evening shift', night: 'night shift' } as const,
