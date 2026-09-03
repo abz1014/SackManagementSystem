@@ -13,12 +13,12 @@
  *  3. Nothing on it may be hover-only. Every number carries its own label.
  */
 import { useEffect } from 'react';
-import { useLive, usePlantNow } from '../floor/live';
+import { useLive, usePlantNow } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
-import { fmtClock, fmtInt, fmtKg, fmtSpan } from '../floor/fmt';
+import { fmtClock, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
 import { getStations, type LiveLine } from '../api';
-import { usePolling } from '../floor/live';
+import { usePolling } from '../lib/live';
 
 const QUIET_AFTER_SECONDS = 20 * 60;
 

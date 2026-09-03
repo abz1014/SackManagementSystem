@@ -25,7 +25,7 @@
  *    the distribution and the report — the things a person means when they ask
  *    "over what?".
  */
-import { addDays } from '../floor/fmt';
+import { addDays } from './fmt';
 
 export type PeriodKey = 'shift' | 'today' | 'yesterday' | 'week' | 'month' | 'pick';
 

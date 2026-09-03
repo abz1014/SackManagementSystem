@@ -24,12 +24,12 @@
  *    the last true counts.
  */
 import { useMemo } from 'react';
-import { useLive, usePolling } from '../floor/live';
+import { useLive, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import { Block, Chevron, Details, Empty, Figures, Loading } from '../ui/bits';
-import { fmtClock, fmtG, fmtInt, fmtKg, fmtSpan, secondsBetween } from '../floor/fmt';
+import { fmtClock, fmtG, fmtInt, fmtKg, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
   getAttention, getProductAt, getStations, stationLabel,
   type AttentionFinding, type LiveLine, type StationRow,

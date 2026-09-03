@@ -14,12 +14,12 @@
  *    looks for it must find the reason rather than a blank space.
  */
 import { useState } from 'react';
-import { usePolling } from '../floor/live';
+import { usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import { Block, Empty, Failed, Loading } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor } from '../ui/chart';
-import { fmtDayLong, fmtInt, fmtSpan } from '../floor/fmt';
+import { fmtDayLong, fmtInt, fmtSpan } from '../lib/fmt';
 import { downloadCsv, csvName, type CsvRow } from '../csv';
 import { getReport, type ReportData, type ReportLine, type AuthUser } from '../api';
 

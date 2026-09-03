@@ -14,10 +14,10 @@
  * product rather than only in a document.
  */
 import { useEffect, useState } from 'react';
-import { useLive, usePolling } from '../floor/live';
+import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { Block, Details, Empty, Failed, Loading } from '../ui/bits';
-import { fmtSpan } from '../floor/fmt';
+import { fmtSpan } from '../lib/fmt';
 import {
   adminGetAudit, adminGetRules, adminListUsers, adminSetStation, getStations,
   getOperations, type AdminUser, type AuditEntry, type Rules, type StationRow,

@@ -24,7 +24,7 @@ import { useEffect, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Details, Loading } from '../ui/bits';
 import { W } from '../lib/words';
-import { fmtClock, fmtDayLong, fmtG, fmtKg } from '../floor/fmt';
+import { fmtClock, fmtDayLong, fmtG, fmtKg } from '../lib/fmt';
 import {
   getEventDetail, getEvents, getProductAt, getStations, stationLabel,
   type ProductAtData, type RegisterRow, type RegisterType, type StationRow,

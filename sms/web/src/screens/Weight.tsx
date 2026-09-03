@@ -28,12 +28,12 @@
  *    is set to, and the table says so.
  */
 import { useState } from 'react';
-import { usePolling } from '../floor/live';
+import { usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { TRAILING_DAYS, type Period } from '../lib/period';
 import { Block, Chevron, Details, Empty, Failed, Loading, Toggle } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain } from '../ui/chart';
-import { fmtG, fmtInt } from '../floor/fmt';
+import { fmtG, fmtInt } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel,
   type SpcData, type StationRow, type WeightStationRow, type WeightStationsData,

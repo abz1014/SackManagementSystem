@@ -17,7 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, type AuthUser,
 } from './api';
-import { LiveProvider, readAsOf, useLive } from './floor/live';
+import { LiveProvider, readAsOf, useLive } from './lib/live';
 import { assessHealth } from './lib/health';
 import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams } from './lib/period';
 import { W } from './lib/words';

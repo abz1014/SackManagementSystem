@@ -9,16 +9,14 @@ import type { ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
 import { getOperations } from './services/operations.js';
 import { getProduction, type GroupBy } from './services/production.js';
-import { getShiftAnalysis } from './services/shiftAnalysis.js';
 import { getRejectPareto, setRejectLabel } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
 import { listEvents, getEventDetail, exportEventsCsv, type EventType } from './services/register.js';
-import { getDowntime, getStoppagePatterns } from './services/downtime.js';
+import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
-import { getOee } from './services/oee.js';
 import { getLive } from './services/live.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, limitsOf, productDisagreement } from './services/productAt.js';
@@ -569,32 +567,6 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  // ---- Stoppage patterns across a range — one query, not one call per day ----
-  app.get('/api/stoppage-patterns', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const q = z
-        .object({
-          from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          thresholdSeconds: z.coerce.number().int().min(30).max(3600).default(120),
-        })
-        .safeParse(req.query);
-      if (!q.success) {
-        res.status(400).json({ error: 'invalid query — from/to=YYYY-MM-DD required' });
-        return;
-      }
-      const rangeErr = validateRange(q.data.from, q.data.to);
-      if (rangeErr) {
-        res.status(400).json({ error: rangeErr });
-        return;
-      }
-      const data = await getStoppagePatterns(pool, cfg.lineId, q.data.from, q.data.to, q.data.thresholdSeconds);
-      res.json(await envelope(pool, cfg.lineId, data));
-    } catch (err) {
-      next(err);
-    }
-  });
-
   // ---- Weight SPC — I-MR control chart + Cp/Cpk/Pp/Ppk (only with a real spec) ----
   app.get('/api/spc', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -649,44 +621,6 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const bucket: RejectBucketSize = q.data.bucket ?? (q.data.from === q.data.to ? 'hour' : 'day');
       const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter);
-      res.json(await envelope(pool, cfg.lineId, data));
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // ---- Inferred OEE — estimated, every input visible/overridable ----
-  app.get('/api/oee', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const q = z
-        .object({
-          from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          thresholdSeconds: z.coerce.number().int().min(30).max(3600).default(120),
-          plannedHoursPerDay: z.coerce.number().min(1).max(24).default(24),
-          idealCycleSeconds: z.coerce.number().positive().optional(),
-          shift: z.enum(['morning', 'evening', 'night']).optional(),
-        })
-        .safeParse(req.query);
-      if (!q.success) {
-        res.status(400).json({ error: 'invalid query — from/to=YYYY-MM-DD required' });
-        return;
-      }
-      const rangeErr = validateRange(q.data.from, q.data.to);
-      if (rangeErr) {
-        res.status(400).json({ error: rangeErr });
-        return;
-      }
-      const data = await getOee(
-        pool,
-        cfg.lineId,
-        q.data.from,
-        q.data.to,
-        q.data.thresholdSeconds,
-        q.data.plannedHoursPerDay,
-        q.data.idealCycleSeconds ?? null,
-        q.data.shift ?? null,
-      );
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -776,24 +710,6 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       res.json({ row });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // shift analysis — corrected vs legacy (Q7), with mismatch count
-  app.get('/api/shift-analysis', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const q = z
-        .object({ from: dateStr, to: dateStr })
-        .refine((v) => !(v.from && v.to) || v.from <= v.to, 'from must be <= to')
-        .safeParse(req.query);
-      if (!q.success) {
-        res.status(400).json({ error: 'invalid query' });
-        return;
-      }
-      const data = await getShiftAnalysis(pool, cfg.lineId, q.data.from, q.data.to);
-      res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
     }

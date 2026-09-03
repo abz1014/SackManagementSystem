@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { W } from '../lib/words';
 import { PERIOD_KEYS, type PeriodKey, type PeriodParams } from '../lib/period';
 import type { Health } from '../lib/health';
-import { fmtClock, fmtSpan } from '../floor/fmt';
+import { fmtClock, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
 
 export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'report';

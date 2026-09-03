@@ -18,11 +18,11 @@
  * actually in force at that reading's time, and says so when none was.
  */
 import { useMemo, useState } from 'react';
-import { usePolling, LIST_POLL_MS } from '../floor/live';
+import { usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import { Block, Chevron, Empty, Failed, Loading, Toolbar, Toggle } from '../ui/bits';
-import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg } from '../floor/fmt';
+import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg } from '../lib/fmt';
 import {
   getEvents, eventsExportUrl, getStations, stationLabel,
   type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,

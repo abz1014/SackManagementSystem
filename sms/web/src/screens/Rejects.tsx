@@ -19,12 +19,12 @@
  * Weight, which already carries a reject-rate column.
  */
 import { useState } from 'react';
-import { useLive, usePolling } from '../floor/live';
+import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { trailingWindow, type Period } from '../lib/period';
 import { Block, Details, Empty, Failed, Loading } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, linePath } from '../ui/chart';
-import { fmtInt } from '../floor/fmt';
+import { fmtInt } from '../lib/fmt';
 import {
   getRejects, getRejectSpc, setRejectLabel,
   type RejectReason, type RejectSpcData,
