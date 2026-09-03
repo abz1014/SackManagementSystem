@@ -1,5 +1,14 @@
 # SMS — what the software does
 
+> **SUPERSEDED FOR THE USER INTERFACE, 3 Sep 2026.** The screens described in
+> §3 and §4 below were replaced by the redesign. What the application actually
+> shows is now described by [`REDESIGN.md`](REDESIGN.md) §5, and the code is
+> under `sms/web/src/screens/`. Output, Shifts, Exceptions, the product-history
+> page, the Sacks and Cones lists, the Records detail rail and full record page,
+> the material-giveaway figure and the S-chart have been deleted from the
+> product. The data, API and security sections below remain accurate.
+
+
 **Sack Management System, Ibrahim Fibres Limited, TP1 Line 3 / Unit 2.**
 Reference document for comparing the delivered software against a requirement
 list. Written to be checked: every figure below was measured against the running

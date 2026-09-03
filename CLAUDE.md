@@ -19,21 +19,59 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 **Phase 0 (Database Discovery) — COMPLETE.** → `SCHEMA.md`, `QUESTIONS.md`
 **Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 25 app tables, session-cookie auth (argon2), 17 tests, perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover (repoint `IFL_DB_SERVER`).**
 
-### UI redesign proposal (2 Sep 2026) — AWAITING SIGN-OFF, nothing built
+### UI redesign — BUILT AND LIVE (3 Sep 2026)
 
 The floor-first rework below did not cure the interface; the owner's verdict
 after a day of point fixes was "unusable". A three-agent audit plus two
-adversarial critics (IFL's representative, a process engineer) produced
-**[`REDESIGN.md`](REDESIGN.md)** — the corrected brief: principles, one top
-bar with one period control, five screens + Wall + Setup, the removed list,
-the requirement-by-requirement gap/plan table, the questions to send IFL, the
-build order and its gates — and a **mockup for sign-off**:
-https://claude.ai/code/artifact/abc93e4f-009f-418f-b0fa-a88be73abaae
-(source: `design/sms-redesign/build.mjs` writes the `.dc.html` boards; the
-numbers are sample values shaped from the simulator's last complete day).
-**Do not build any of it before the owner signs off**, then build in the
-order `REDESIGN.md` §12 gives. Until then `CAPABILITIES.md` §3 describes what
-exists, and the floor-first screens below are what runs.
+adversarial critics produced **[`REDESIGN.md`](REDESIGN.md)** and a mockup;
+the owner chose **Option A** and the redesign was built the same day.
+
+**What the app is now.** One slim top bar — SMS, then Line · Readings · Weight
+· Rejects · Report — one global period control, and one sentence about how old
+the data is. Seven screens, each answering one question, under
+`web/src/screens/`; shared pieces under `web/src/ui/`; the rules that must not
+differ between screens under `web/src/lib/`. The 7,400-line `App.tsx`, the icon
+rail, the section column, the "Light Steel" stylesheet, the floor and wall
+screens and the three endpoints no requirement asks for (`/api/oee`,
+`/api/shift-analysis`, `/api/stoppage-patterns`) are **deleted**, not unrouted.
+Net: 8,058 lines added, 10,375 removed.
+
+**Rules the code now enforces, each of which was a real defect before.** Do not
+undo any of these without reading why they exist:
+
+1. **ONE STATUS VOCABULARY.** The scale's own in-range bit is the single flag,
+   named as the scale's ("Passed" / "Rejected by the scale"). The product's
+   tolerance is a SECOND, separately-named fact, shown only when a product was
+   in force at that reading's time — `api/src/services/productAt.ts`. The old
+   app applied today's tolerance to readings weeks old and printed a difference
+   that meant nothing.
+2. **TWO CLOCKS, NAMED.** `api/src/services/plantClock.ts`. Production
+   timestamps are the plant's wall clock labelled UTC; app-written instants
+   (product timeline, rules, adjustments, sync runs) are genuine UTC. They are
+   five hours apart on this plant. Never compare them unconverted.
+3. **THE DETECTORS IGNORE THE PERIOD.** Station drift, the attention list and
+   reject episodes run over a fixed 14 production days (`lib/period.ts`
+   `trailingWindow`), because the pattern tests need consecutive DAYS and one
+   shift is a single point.
+4. **THE HEALTH DECISION IS SERVER-SIDE AND MEASURED.** `live.ts` reports the
+   sync cadence it observes, freshness from the OLDEST source table (not the
+   newest — one dead feed used to hide behind three healthy ones), and the lag
+   as measured up to a day. When it is not `ok`, no screen asserts whether the
+   line is running.
+5. **NO OVER-CLAIMING.** No "reduce station 7 by 9 g": weighing data cannot
+   tell a heavy scale from heavy cones. No product limits without a product.
+   The Weight headline states the mean and the target as two facts until the
+   weight basis is confirmed in Setup.
+6. **ONE STATION TABLE** in the whole application, on Weight, and it shows bias
+   against the line AND against the target. On live data every station sits
+   within 3 g of the line and 9-12 g below target: the old "difference from the
+   line" column alone would have read "Fine" on all fourteen rows.
+
+**Still to do, in this order:** the role rename to viewer/engineer/manager/
+admin; the app-owned product-details overlay and a *Product limits* rule in
+Setup; the per-day-per-code reason sheet; the station sheet; the line-level
+sack ledger once IFL answers. **The five questions in `REDESIGN.md` §11 have
+not been sent.**
 
 ### Floor-first rework (2 Sep 2026) — response to IFL's first review
 

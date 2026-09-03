@@ -83,7 +83,7 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
           {line.lastSack && <>Last sack {fmtKg(line.lastSack.weightKg)} at {fmtClock(line.lastSack.ts)}</>}
           {line.lastCone && <> · last cone {fmtInt(Math.round(line.lastCone.weightG ?? 0))} g at {fmtClock(line.lastCone.ts)}</>}
         </div>
-        <div className="w-st" style={{ ['--st-count' as string]: String(Math.min(ids.length, 14)) }}>
+        <div className="w-st" style={{ ['--st-count' as string]: String(Math.min(ids.length, names.some((n) => (n.name ?? '').trim().length > 6) ? 7 : 14)) }}>
           {ids.map((id) => {
             const row = byId.get(id);
             const quiet = row ? (new Date(anchor).getTime() - new Date(row.lastTs).getTime()) / 1000 > QUIET_AFTER_SECONDS : true;

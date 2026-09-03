@@ -1,7 +1,14 @@
 # SMS redesign brief
 
-**Status: SIGNED OFF 3 Sep 2026. Option A (headline sentence first) chosen; the build is under way, in the order of §12.**
-Option B (figures first, grey panels) is not being built.
+**Status: BUILT, 3 Sep 2026.** Option A was signed off and all seven screens
+are live: Line, Readings, Weight, Rejects, Report, Wall and Setup. The old
+interface has been deleted rather than unrouted. Option B was not built.
+
+What is NOT yet done, and is the next work: the role rename of §7
+(viewer / engineer / manager / admin), the product-details overlay and
+*Product limits* rule of §8 lines 2 and 3, the per-day-per-code reason sheet
+of §5.4, the station sheet of §6, and the sack-stock fallback of §8 line 7.
+The questions in §11 are still unsent.
 Source of truth for the next UI. Supersedes the screen descriptions in
 `CAPABILITIES.md` §3 once built; until then §3 describes what exists.
 

@@ -345,6 +345,21 @@ function quietNote(line: LiveLine, stations: StationRow[]): string | null {
   return `${quiet.length} stations quiet, longest ${name} for ${fmtSpan(quietSeconds(line, worst.lastTs))}`;
 }
 
+/**
+ * How many boxes fit on a row.
+ *
+ * Fourteen only while the labels are bare numbers. As soon as a station has
+ * been given a plant name in Setup, fourteen columns are about 66px wide and
+ * "East Conveyor" is cut to "East C…" — which is precisely the "text not
+ * staying in its placeholder" IFL complained about. Seven columns give a name
+ * room, and the row simply becomes two.
+ */
+function stationColumns(count: number, names: Map<number, StationRow>): number {
+  const longest = Math.max(0, ...[...names.values()].map((s) => (s.name ?? '').trim().length));
+  const perRow = longest > 6 ? 7 : 14;
+  return Math.min(count, perRow);
+}
+
 function StationRowGrid({
   line,
   stations,
@@ -369,7 +384,7 @@ function StationRowGrid({
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
 
   return (
-    <div className="stations" style={{ ['--st-count' as string]: String(Math.min(ids.length, 14)) }}>
+    <div className="stations" style={{ ['--st-count' as string]: String(stationColumns(ids.length, nameOf)) }}>
       {ids.map((id) => {
         const row = byId.get(id);
         const quiet = row ? quietSeconds(line, row.lastTs) > QUIET_AFTER_SECONDS : true;
