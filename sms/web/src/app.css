@@ -400,6 +400,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .chart .mark { fill: var(--acc-fill); }
 .chart .hit { fill: transparent; cursor: crosshair; }
 
+/* ---- horizontal bars (reject reasons) --------------------------------- */
+
+.bars div {
+  display: grid; grid-template-columns: minmax(9em, 18em) 1fr minmax(6em, 9em) 5em;
+  align-items: center; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule);
+}
+.bars div:last-child { border-bottom: 0; }
+.bars i { display: block; height: 12px; border-radius: 2px; font-style: normal; min-width: 2px; }
+.bars em { font-style: normal; text-align: right; color: var(--graphite); white-space: nowrap; }
+.bars .sm { font-size: var(--fs-small); }
+@media (max-width: 700px) {
+  .bars div { grid-template-columns: 1fr minmax(6em, 9em) 5em; }
+  .bars i { display: none; }
+}
+
 /* ---- the details disclosure -------------------------------------------- */
 
 .details { padding-top: 22px; border-top: 1px solid var(--rule); font-size: var(--fs-small); color: var(--graphite); }
@@ -461,6 +476,31 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   .strip { flex-direction: column; align-items: flex-start; gap: 2px; }
   .sheet { width: 100vw; border-left: 0; }
 }
+
+/* ------------------------------------------------------------------- wall */
+
+/* Sized in viewport units throughout: this is read from across a room, and a
+   pixel ramp tuned for a desk is illegible at four metres. */
+.wall {
+  min-height: 100vh; box-sizing: border-box; padding: 4vh 4vw 3.5vh;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 3vh;
+  background: var(--paper); cursor: default;
+}
+.w-head { display: flex; justify-content: space-between; align-items: baseline; gap: 3vw; flex-wrap: wrap; }
+.w-state { font-size: min(7vh, 4.6vw); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+.w-state.acc, .w-foot.acc { color: var(--acc); }
+.w-shift { font-size: min(3.2vh, 2vw); color: var(--graphite); }
+.w-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4vw; }
+.w-figs b { display: block; font-size: min(13vh, 8.6vw); line-height: 1; font-weight: 600; letter-spacing: -0.03em; }
+.w-figs span { display: block; font-size: min(3.2vh, 2vw); color: var(--graphite); margin-top: 1vh; }
+.w-sub { font-size: min(3vh, 1.9vw); color: var(--graphite); margin-bottom: 1.6vh; }
+.w-st { display: grid; grid-template-columns: repeat(var(--st-count, 14), minmax(0, 1fr)); gap: 0.8vw; }
+.w-st div { border: 2px solid var(--rule); border-radius: 6px; text-align: center; padding: 1.2vh 0.4vw 1vh; }
+.w-st i { display: block; font-style: normal; font-size: min(2vh, 1.2vw); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.w-st b { display: block; font-size: min(3.4vh, 2.2vw); font-weight: 500; line-height: 1.2; }
+.w-st .quiet { border-style: dashed; }
+.w-st .quiet b, .w-st .quiet i { color: var(--grid); }
+.w-foot { display: flex; justify-content: space-between; gap: 3vw; font-size: min(2.7vh, 1.7vw); color: var(--graphite); flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------ print */
 

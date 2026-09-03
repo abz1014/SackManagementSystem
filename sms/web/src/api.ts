@@ -48,12 +48,28 @@ function handleStatus(res: Response, path: string): void {
   if (res.status === 401 && !path.startsWith('/api/auth/login')) onUnauthorized?.();
 }
 
+/**
+ * An API failure that remembers its status.
+ *
+ * Without this every failure rendered as "the plant connection may be down",
+ * including a 403 — so a supervisor opening an admin-only panel was told the
+ * factory link was broken. A refusal and an outage are different sentences.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: 'application/json' } });
   if (!res.ok) {
     handleStatus(res, path);
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`);
   }
   return res.json() as Promise<T>;
 }

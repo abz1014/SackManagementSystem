@@ -28,6 +28,9 @@ import { ReadingsScreen } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
 import { ReportScreen } from './screens/Report';
 import { WeightScreen } from './screens/Weight';
+import { RejectsScreen } from './screens/Rejects';
+import { WallScreen } from './screens/Wall';
+import { SetupScreen } from './screens/Setup';
 import { LoginScreen } from './screens/Login';
 import './app.css';
 
@@ -140,7 +143,7 @@ function Chrome({
 
   // Wall is the Line screen without the chrome, so it returns before the bar.
   if (route.view === 'wall') {
-    return <WallHost onExit={() => go({ view: 'line' })} />;
+    return <WallScreen onExit={() => go({ view: 'line' })} />;
   }
 
   if (!line) {
@@ -222,7 +225,27 @@ function Chrome({
           />
         )}
 
-        {(route.view === 'rejects' || route.view === 'setup') && <NotYetBuilt view={route.view} />}
+        {route.view === 'rejects' && (
+          <RejectsScreen
+            period={period}
+            onSeeCones={() => go({ view: 'readings' })}
+            onSeeStations={() => go({ view: 'weight' })}
+            canName={rank >= 3}
+          />
+        )}
+
+        {/* Hiding the gear is decluttering, not access control: a typed URL
+            would otherwise render a page of panels that each fail with 403.
+            The API enforces the same rank server-side. */}
+        {route.view === 'setup' &&
+          (rank >= 4 ? (
+            <SetupScreen />
+          ) : (
+            <>
+              <p className="q">{W.question.setup}</p>
+              <h1 className="wide">{W.notAllowed}</h1>
+            </>
+          ))}
       </main>
 
       {/* Drill-downs open over the screen and close with Escape, so the reader
@@ -238,42 +261,3 @@ function Chrome({
   );
 }
 
-/**
- * The honest placeholder for a screen whose redesign has not landed yet.
- *
- * It says which screen and what it will answer, in the new design's own voice,
- * rather than leaving a blank region or silently routing to the old layout —
- * mixing two visual languages in one app is exactly the incoherence this
- * redesign exists to remove.
- */
-function NotYetBuilt({ view }: { view: View }) {
-  const q = (W.question as Record<string, string>)[view];
-  return (
-    <>
-      <p className="q">{q ?? ''}</p>
-      <h1 className="wide">This screen is being rebuilt.</h1>
-      <p className="fig-note" style={{ marginTop: 16 }}>
-        The Line screen is finished and live. This one follows in the same design.
-      </p>
-    </>
-  );
-}
-
-/** Placeholder host until the redesigned wall screen lands. */
-function WallHost({ onExit }: { onExit: () => void }) {
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onExit();
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
-  }, [onExit]);
-  return (
-    <div className="app">
-      <main className="page">
-        <h1>Wall display is being rebuilt.</h1>
-        <p className="fig-note" style={{ marginTop: 16 }}>
-          Press Escape to go back.
-        </p>
-      </main>
-    </div>
-  );
-}

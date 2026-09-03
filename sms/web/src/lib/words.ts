@@ -343,6 +343,7 @@ export const W = {
   details: 'Details',
   loading: 'Loading…',
   couldNotLoad: 'Could not load this. The plant connection may be down.',
+  notAllowed: 'This is only available to an administrator.',
   retry: 'Try again',
   nothingHere: 'Nothing recorded in this period.',
   replay: 'REPLAY — showing the plant as it was at',

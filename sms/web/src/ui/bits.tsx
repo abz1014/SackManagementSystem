@@ -114,10 +114,14 @@ export function Loading({ what }: { what?: string }) {
 }
 
 export function Failed({ error, onRetry }: { error?: string | null; onRetry?: () => void }) {
+  // A refusal is not an outage. Telling somebody the plant link is down when
+  // they simply are not allowed to see something sends them to look for a
+  // fault that does not exist.
+  const refused = !!error && /insufficient role|authentication required/i.test(error);
   return (
     <p className="state err" role="status">
-      {W.couldNotLoad}
-      {onRetry && (
+      {refused ? W.notAllowed : W.couldNotLoad}
+      {onRetry && !refused && (
         <>
           {' '}
           <button type="button" className="btn" onClick={onRetry}>
