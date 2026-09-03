@@ -254,6 +254,13 @@ h1 .acc, .headline .acc { color: var(--acc); }
 }
 .h2 .note { font-weight: 400; text-align: right; }
 
+/* A screen headline with its actions beside it. The actions never wrap below
+   the headline: a full-width headline plus flex-wrap put Print and Export
+   under the sentence, where they read as body content rather than controls. */
+.head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.head-actions { flex: none; padding-top: 26px; }
+@media (max-width: 620px) { .head-row { flex-direction: column; } .head-actions { padding-top: 0; } }
+
 /* ---- figures ------------------------------------------------------------ */
 
 .figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
@@ -320,6 +327,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .tw { overflow-x: auto; }                 /* wide tables scroll, the page never does */
 .chev { color: var(--grid); margin-left: 8px; }
 
+.two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; }
+@media (max-width: 860px) { .two-col { grid-template-columns: 1fr; gap: 28px; } }
+.print-only { display: none; }
+@media print { .print-only { display: block !important; } }
+
 /* ---- controls ----------------------------------------------------------- */
 
 .btn {
@@ -365,6 +377,17 @@ input[type='text'], input[type='date'], input[type='number'], input[type='passwo
   background: var(--paper); color: var(--ink);
 }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; border-color: var(--ink); }
+
+/* A button that reads as a link: used where an action sits inside a
+   sentence, so the sentence still reads as a sentence. */
+.linkish {
+  border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #b7bab5;
+}
+.linkish:hover { color: var(--acc); text-decoration-color: var(--acc); }
+.linkish[disabled] { color: var(--grid); cursor: not-allowed; text-decoration: none; }
+
+.product-name { font-size: var(--fs-qual); font-weight: 500; }
 
 /* ---- charts ------------------------------------------------------------- */
 

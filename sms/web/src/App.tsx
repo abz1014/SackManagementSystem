@@ -24,6 +24,9 @@ import { W } from './lib/words';
 import { Bar, SCREENS, type Screen } from './ui/Bar';
 import { Loading } from './ui/bits';
 import { LineScreen } from './screens/Line';
+import { ReadingsScreen } from './screens/Readings';
+import { ReadingSheet } from './screens/ReadingSheet';
+import { ReportScreen } from './screens/Report';
 import { LoginScreen } from './screens/Login';
 import './app.css';
 
@@ -200,8 +203,30 @@ function Chrome({
           />
         )}
 
-        {route.view !== 'line' && <NotYetBuilt view={route.view} />}
+        {route.view === 'readings' && (
+          <ReadingsScreen
+            period={period}
+            onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+            canExport={rank >= 2}
+          />
+        )}
+
+        {route.view === 'report' && <ReportScreen period={period} user={user} />}
+
+        {(route.view === 'weight' || route.view === 'rejects' || route.view === 'setup') && (
+          <NotYetBuilt view={route.view} />
+        )}
       </main>
+
+      {/* Drill-downs open over the screen and close with Escape, so the reader
+          never loses their filters, their page or their place in the list. */}
+      {route.sheet && route.sheet.kind !== 'station' && (
+        <ReadingSheet
+          type={route.sheet.kind}
+          id={route.sheet.id}
+          onClose={() => go({ sheet: null })}
+        />
+      )}
     </div>
   );
 }

@@ -27,7 +27,10 @@ export function fmtDay(iso: string): string {
 
 /** "Thursday 9 July 2026" — for a picked day (YYYY-MM-DD). */
 export function fmtDayLong(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', {
+  // Tolerant of both shapes: shift_date arrives as a bare production day from
+  // some endpoints and as a full ISO datetime from others, and concatenating a
+  // time onto the latter produced "Invalid Date" on the reading sheet.
+  return new Date(`${date.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', {
     timeZone: UTC, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
 }
