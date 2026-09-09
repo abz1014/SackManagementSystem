@@ -53,6 +53,20 @@ import {
  * records spurious merge-collision findings for data that isn't new — caught
  * live in the Aug 2026 audit's rewind test.
  */
+/**
+ * Lowest source_row_id in a batch, by reduce and NOT by a spread into Math.min:
+ * a fresh app database hands the transform the whole history in one batch
+ * (142,511 cone rows on the July copy), and spreading that many arguments
+ * overflows the call stack. This crashed the first backfill — the go-live
+ * cutover path — while every incremental pass, at ~500 rows, sailed through.
+ * persistRaw.ts found the identical bug earlier; this is the same fix.
+ */
+function minSourceRowId(rows: ReadonlyArray<{ source_row_id: number }>): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (const r of rows) if (r.source_row_id < min) min = r.source_row_id;
+  return min;
+}
+
 async function onlyFresh<T extends { source_row_id: number }>(
   pool: ConnectionPool,
   table: string,
@@ -61,7 +75,7 @@ async function onlyFresh<T extends { source_row_id: number }>(
 ): Promise<T[]> {
   if (rows.length === 0) return rows;
   const seen = await existingSourceIds(
-    pool, table, extraFilter, Math.min(...rows.map((r) => r.source_row_id)),
+    pool, table, extraFilter, minSourceRowId(rows),
   );
   return rows.filter((r) => !seen.has(Number(r.source_row_id)));
 }
@@ -217,7 +231,7 @@ export async function runTransform(
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
       const findings = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs);
       const res = await persistCanonical(appPool, 'sms.cone_event', CONE_COLS, rows, {
-        minSourceRowId: rows.length ? Math.min(...rows.map((r) => r.source_row_id)) : undefined,
+        minSourceRowId: rows.length ? minSourceRowId(rows) : undefined,
       });
       await persistFindings(appPool, runId, findings);
       await setWatermark(appPool, WM_KEYS.cone, maxRawId(raw));
@@ -240,7 +254,7 @@ export async function runTransform(
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
       const findings = computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs);
       const res = await persistCanonical(appPool, 'sms.sack_event', SACK_COLS, rows, {
-        minSourceRowId: rows.length ? Math.min(...rows.map((r) => r.source_row_id)) : undefined,
+        minSourceRowId: rows.length ? minSourceRowId(rows) : undefined,
       });
       await persistFindings(appPool, runId, findings);
       await setWatermark(appPool, WM_KEYS.sack, maxRawId(raw));
@@ -284,11 +298,11 @@ export async function runTransform(
       const w = wFresh;
       const rq = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, q, {
         extraExistingFilter: "AND reject_type = 'quality'",
-        minSourceRowId: q.length ? Math.min(...q.map((r) => r.source_row_id)) : undefined,
+        minSourceRowId: q.length ? minSourceRowId(q) : undefined,
       });
       const rw = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, w, {
         extraExistingFilter: "AND reject_type = 'weight'",
-        minSourceRowId: w.length ? Math.min(...w.map((r) => r.source_row_id)) : undefined,
+        minSourceRowId: w.length ? minSourceRowId(w) : undefined,
       });
       const findings = computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs);
       await persistFindings(appPool, runId, findings);
