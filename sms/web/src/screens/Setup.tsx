@@ -59,7 +59,13 @@ function SyncHealth() {
           : W.sync.ok;
 
   const failures = ops.data?.data.sync.filter((s) => s.outcome !== 'success') ?? [];
-  const blocking = ops.data?.data.dq.findings.filter((f) => f.severity === 'error' || f.severity === 'fault') ?? [];
+  // The severities are the database's own: CK_dq_severity allows exactly
+  // INFO / WARNING / ERROR / CRITICAL. This compared against 'error' and
+  // 'fault' — neither of which any row can hold — so the count read "None"
+  // no matter what was standing. Found 14 Sep 2026 while making the worker's
+  // halts visible; the transform_failed CRITICAL finding is the first that
+  // would have been hidden by it in practice.
+  const blocking = ops.data?.data.dq.findings.filter((f) => f.severity === 'ERROR' || f.severity === 'CRITICAL') ?? [];
   const mixedRules = ops.data?.data.shiftRuleRegimes?.filter((r) => r.mixed) ?? [];
 
   return (

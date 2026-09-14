@@ -34,6 +34,7 @@ import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { PlausibilityRule } from './admin.js';
 import { nelsonViolations, type NelsonRuleId } from './nelson.js';
+import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
 
 export type SpcType = 'cone' | 'sack';
 
@@ -76,6 +77,17 @@ export interface SpecLimits {
   nominal: number | null;
   source: 'product' | 'manual' | 'none';
   productLabel?: string;
+  /**
+   * When `source` is 'product' and a period was given: the version of the
+   * limits the chart is drawn against (in force at the END of the period),
+   * and how many times the limits changed INSIDE the period. A non-zero
+   * count means the single pair of lines on the chart did not apply to every
+   * point on it — the screen says so rather than letting the reader judge
+   * last week's cones by this week's tolerance.
+   */
+  limitsEffectiveFromUtc?: string;
+  limitsAreLowerBound?: boolean;
+  limitsChangedInPeriod?: number;
 }
 
 /**
@@ -162,6 +174,9 @@ export async function getSpec(
   manualUsl: number | null,
   manualLsl: number | null,
   type: SpcType = 'cone',
+  /** The chart's period, production dates. With it, limits come from the
+   *  versioned history; without it, from the mirror's current row. */
+  range?: { from: string; to: string },
 ): Promise<SpecLimits> {
   if (manualUsl != null && manualLsl != null) {
     return { usl: manualUsl, lsl: manualLsl, nominal: round((manualUsl + manualLsl) / 2), source: 'manual' };
@@ -173,6 +188,39 @@ export async function getSpec(
   // supplies those in the record's own unit.
   if (type === 'sack') {
     return { usl: null, lsl: null, nominal: null, source: 'none' };
+  }
+  // Time-versioned limits (sms.product_limit_version, migration 027). Until
+  // 14 Sep 2026 this read sms.product — the mirror's CURRENT values — so a
+  // chart of last month was judged by this month's tolerance, which is the
+  // exact error the versioned table was built to end (weightStations.ts and
+  // productAt.ts had already moved; this was the one consumer left behind).
+  // The same instant convention as weightStations: the end of the `to` day.
+  if (productId != null && range) {
+    const catalogue = await loadProductCatalogue(pool);
+    const startMs = new Date(`${range.from}T00:00:00Z`).getTime();
+    const endMs = new Date(`${range.to}T23:59:59Z`).getTime();
+    const v = catalogue.versionAt(productId, endMs);
+    const lim = limitsFromVersion(v);
+    if (v && lim) {
+      const changed = catalogue
+        .versionsAscending(productId)
+        .filter((x) => x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
+      return {
+        usl: lim.hiG,
+        lsl: lim.loG,
+        nominal: lim.targetG,
+        source: 'product',
+        productLabel: catalogue.product(productId)?.label ?? `Product ${productId}`,
+        limitsEffectiveFromUtc: v.effectiveFromUtc,
+        limitsAreLowerBound: v.effectiveIsLowerBound,
+        // The version in force at the end is not itself "a change inside the
+        // period" unless it began inside it; the filter above counts it then.
+        limitsChangedInPeriod: changed,
+      };
+    }
+    // No version yet (a mirror that has never completed a pass since 027):
+    // fall through to the current row, honestly labelled by the absence of
+    // limitsEffectiveFromUtc.
   }
   if (productId != null) {
     const r = await pool

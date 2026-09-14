@@ -257,6 +257,12 @@ export const W = {
     weight: 'Weight',
     status: 'Status',
     record: 'Record',
+    /* The reject sheet. A quality reject is pulled before the scale sees it
+       and so has no weight; a weight reject has one. Neither has in_range. */
+    notWeighed: 'not weighed',
+    rejectedFor: (reason: string) => `Rejected \u2014 ${reason}`,
+    weightReject: 'weight reject',
+    qualityRejectCode: (pair: string) => `quality reject, code ${pair} (not yet named)`,
     weighed: 'Weighed',
     /* Finding M7 (Sep 2026 audit): mapSack flags every sack row
        production_ts_is_insert_time=true — the plant has no separate weighing
@@ -297,6 +303,11 @@ export const W = {
        lands inside, and the population is a mixture of fourteen
        differently-biased stations, so the normal-theory 95% does not follow. */
     spreadNote: 'two standard deviations either side of the average',
+    /* One pair of limit lines, one version of the tolerance. */
+    limitsChanged: (n: number) =>
+      n === 1
+        ? 'The product’s limits changed once inside this period. The dashed lines are the version in force at its end and did not apply to every reading before the change.'
+        : `The product’s limits changed ${n} times inside this period. The dashed lines are the version in force at its end and did not apply to every reading before the changes.`,
     overTime: 'Over time',
     distribution: 'Distribution',
     stationsTable: 'Stations',

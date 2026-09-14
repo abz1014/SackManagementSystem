@@ -63,7 +63,15 @@ export function ReadingSheet({
         // The row's OWN product when it carries one (MaterialId, Sep 2026):
         // without it this sheet judged a September cone against the line-wide
         // timeline product — a retired July material.
-        const product = await getProductAt(row.production_ts_utc, row.material_id ?? undefined);
+        // The weight goes too, so the verdict comes back computed server-side
+        // by the one implementation every screen shares. Sacks have no
+        // product limits (a cone setpoint in grams against a sack in kg is
+        // the 1960 kg "setpoint" spc.ts remembers), so none is sent for them.
+        const product = await getProductAt(
+          row.production_ts_utc,
+          row.material_id ?? undefined,
+          type === 'sack' ? undefined : (row.weight_g ?? undefined),
+        );
         if (cancelled) return;
 
         let around: State['around'] = null;
@@ -97,29 +105,51 @@ export function ReadingSheet({
 }
 
 function eyebrow(type: RegisterType, s: State): string {
-  if (!s.row) return type === 'sack' ? 'Sack' : 'Cone';
+  const noun = type === 'sack' ? 'Sack' : type === 'reject' ? 'Rejected cone' : 'Cone';
+  if (!s.row) return noun;
   const st = s.row.source_station;
   const station = st != null ? ` · ${stationLabel(s.stations.find((x) => x.stationId === st), st)}` : '';
-  return `${type === 'sack' ? 'Sack' : 'Cone'}${station} · ${W.shiftName[s.row.shift_code as 'morning'] ?? s.row.shift_code} shift`;
+  return `${noun}${station} · ${W.shiftName[s.row.shift_code as 'morning'] ?? s.row.shift_code} shift`;
+}
+
+/**
+ * What a reject was rejected FOR, in the words the Rejects screen uses: the
+ * manager's label when one exists, otherwise the kind and the raw code pair.
+ * IFL has not said what the inspection codes mean (Q10), so a bare pair is
+ * never presented as a reason.
+ */
+function rejectReason(row: RegisterRow): string {
+  if (row.reject_label) return row.reject_label;
+  if (row.reject_type === 'weight') return W.readings.weightReject;
+  const pair = `${row.tube_inspect_code ?? '—'}/${row.material_inspect_code ?? '—'}`;
+  return W.readings.qualityRejectCode(pair);
 }
 
 function Body({ type, state }: { type: RegisterType; state: State }) {
   const row = state.row!;
   const isSack = type === 'sack';
-  const weight = isSack ? row.weight_kg : row.weight_g;
-  const rejectedByScale = row.in_range === false;
+  const isReject = type === 'reject';
+  // reject_event has no in_range column — the row IS a rejection. Until 14
+  // Sep 2026 this read `row.in_range === false`, which is undefined on a
+  // reject, and the sheet opened on a rejected cone with the word "Passed".
+  const rejectedByScale = isReject || row.in_range === false;
   const p = state.product;
-  const verdict = p?.limits && weight != null && !isSack ? judge(Number(weight), p.limits) : null;
+  // Server-side, from ProductTimeline.verdict(). This sheet used to keep its
+  // own judge(); the register's "outside limits" column and this sentence
+  // could then have disagreed about the same cone.
+  const verdict = !isSack && p?.verdict && p.verdict.inside != null ? p.verdict : null;
 
   return (
     <>
-      <div className="big">{isSack ? fmtKg(row.weight_kg) : fmtG(row.weight_g)}</div>
+      {/* A quality reject is rejected before it is weighed and carries no weight. */}
+      <div className="big">{isSack ? fmtKg(row.weight_kg) : row.weight_g == null ? W.readings.notWeighed : fmtG(row.weight_g)}</div>
       <div className={rejectedByScale ? 'acc' : ''} style={{ marginTop: 8, fontWeight: 500 }}>
-        {rejectedByScale ? W.rejectedByScale : W.passed}
+        {isReject ? W.readings.rejectedFor(rejectReason(row)) : rejectedByScale ? W.rejectedByScale : W.passed}
       </div>
 
-      {/* The product comparison — only when there was a product to compare to. */}
-      {!isSack && (
+      {/* The product comparison — only when there was a product to compare
+          to, and only for a reading that has a weight to compare. */}
+      {!isSack && row.weight_g != null && (
         <div className="g" style={{ marginTop: 6 }}>
           {p?.product == null ? (
             W.noProductThen
@@ -129,14 +159,16 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
             `Inside the product's limits, ${p.limits.label}.`
           ) : (
             <span className="acc">
-              {W.alsoOutsideProduct(p.limits.label, describeMiss(verdict.byG))}
+              {W.alsoOutsideProduct(p.limits.label, describeMiss(verdict.outsideByG!))}
             </span>
           )}
         </div>
       )}
 
       <dl className="kv" style={{ marginTop: 24 }}>
-        <dt>{isSack && row.production_ts_is_insert_time ? W.readings.recorded : W.readings.weighed}</dt>
+        {/* A reject's time is when the rejection was recorded — a quality
+            reject never reaches the scale, so "Weighed" would be untrue. */}
+        <dt>{isReject || (isSack && row.production_ts_is_insert_time) ? W.readings.recorded : W.readings.weighed}</dt>
         <dd>
           {fmtDayLong(row.shift_date)}, {fmtClock(row.production_ts_utc)}
         </dd>
@@ -154,8 +186,9 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
             <dd>{row.sack_num}</dd>
           </>
         )}
+        {/* Null on a reject: the source records no id for those rows. */}
         <dt>{W.readings.record}</dt>
-        <dd>{String(row.source_row_id)}</dd>
+        <dd>{row.source_row_id == null ? '—' : String(row.source_row_id)}</dd>
         {p?.product && (
           <>
             <dt>Product then</dt>
@@ -182,27 +215,21 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
         <p>{W.readings.provenanceNote}</p>
         <dl className="kv">
           <dt>Source row</dt>
-          <dd>{String(row.source_row_id)}</dd>
+          <dd>{row.source_row_id == null ? '—' : String(row.source_row_id)}</dd>
           <dt>Plant-stored shift</dt>
           <dd>{row.shift_code_legacy ?? '—'}</dd>
           <dt>Production day</dt>
-          <dd>{row.shift_date}</dd>
+          <dd>{String(row.shift_date).slice(0, 10)}</dd>
         </dl>
       </Details>
     </>
   );
 }
 
-function judge(weight: number, limits: { loG: number; hiG: number }): { inside: boolean; byG: number } {
-  if (weight < limits.loG) return { inside: false, byG: Math.round((weight - limits.loG) * 100) / 100 };
-  if (weight > limits.hiG) return { inside: false, byG: Math.round((weight - limits.hiG) * 100) / 100 };
-  return { inside: true, byG: 0 };
-}
-
 function describeMiss(byG: number): string {
-  // A miss is never zero — judge() only calls this when the reading is
-  // genuinely outside — so a magnitude under half a gram must not round to
-  // "0 g under the lower limit", which reads as no miss at all.
+  // A miss is never zero — the server's outsideByG is 0 only when inside, and
+  // this is only called when it is not — so a magnitude under half a gram
+  // must not round to "0 g under the lower limit", which reads as no miss.
   const magnitude = Math.abs(byG);
   const g = magnitude < 1 ? `${magnitude.toFixed(1)}${String.fromCharCode(0xa0)}g` : fmtG(magnitude);
   return byG < 0 ? `${g} under the lower limit` : `${g} over the upper limit`;

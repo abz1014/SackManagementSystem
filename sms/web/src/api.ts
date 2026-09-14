@@ -376,6 +376,8 @@ export interface RegisterRow {
   tube_inspect_code?: number | null;
   material_inspect_code?: number | null;
   reject_label?: string | null;
+  /** The code's pass flag, once a manager has set it; null until then. */
+  reject_is_pass?: boolean | null;
   production_ts_utc: string;
   shift_code: string;
   shift_date: string;
@@ -524,6 +526,11 @@ export interface SpecLimits {
   nominal: number | null;
   source: 'product' | 'manual' | 'none';
   productLabel?: string;
+  /** The limits version the chart is drawn against, and how many times the
+   *  limits changed inside the period (0 = one tolerance applied throughout). */
+  limitsEffectiveFromUtc?: string;
+  limitsAreLowerBound?: boolean;
+  limitsChangedInPeriod?: number;
 }
 export interface SpecAgreement {
   evaluated: number;
@@ -935,17 +942,29 @@ export interface ProductAtData {
    * attribution rows from before that column existed can have. Null when none.
    */
   attribution: 'row' | 'timeline' | null;
+  /**
+   * Present only when a weight was sent: the server's judgement of that
+   * weight against the limits in force then. `inside` null = unjudgeable,
+   * and `reason` says why. `outsideByG` is signed: negative = under the
+   * lower limit, positive = over the upper, 0 = inside.
+   */
+  verdict: { inside: boolean | null; outsideByG: number | null; reason: 'no_product_recorded' | 'no_setpoint' | null } | null;
+  /** The limits are the oldest version known and the reading predates it. */
+  limitsAreLowerBound: boolean;
 }
 /**
  * `productId` is the reading's own material, when the row carries one. Pass it
  * whenever you have it: six materials run concurrently on different machines,
  * so "the product recorded on the line" is the wrong answer for a reading that
  * knows its own — it was judging September cones against a retired July product.
+ * `weightG` asks the server to judge the reading too; the sheet no longer
+ * carries its own copy of the comparison.
  */
-export function getProductAt(at?: string | null, productId?: number | null): Promise<ProductAtData> {
+export function getProductAt(at?: string | null, productId?: number | null, weightG?: number | null): Promise<ProductAtData> {
   const p = new URLSearchParams();
   if (at) p.set('at', at);
   if (productId != null) p.set('productId', String(productId));
+  if (weightG != null) p.set('weightG', String(weightG));
   const qs = p.toString();
   return get(qs ? `/api/product-at?${qs}` : '/api/product-at');
 }

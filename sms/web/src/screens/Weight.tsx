@@ -170,6 +170,16 @@ export function WeightScreen({
         ) : (
           <Distribution spc={s} target={d.targetG} />
         )}
+        {/* The limit lines are one version of the product's tolerance — the
+            one in force at the end of the period. When the tolerance changed
+            inside the period, say so; the dashed lines then did not apply to
+            every point, and a reader judging last week's cones by this
+            week's limits is the error the versioned history exists to end. */}
+        {s && s.spec.source === 'product' && (s.spec.limitsChangedInPeriod ?? 0) > 0 && (
+          <p className="mut sm" style={{ marginTop: 10 }}>
+            {W.weight.limitsChanged(s.spec.limitsChangedInPeriod!)}
+          </p>
+        )}
       </Block>
 
       <Block

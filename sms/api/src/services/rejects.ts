@@ -90,17 +90,26 @@ export async function setRejectLabel(
   pool: ConnectionPool,
   rejectCodeId: number,
   label: string | null,
-  isPass: boolean | null,
+  /**
+   * `undefined` leaves the flag alone; `null` clears it; a boolean sets it.
+   * The distinction matters: the Rejects screen renames a label and sends
+   * no isPass at all, and until 14 Sep 2026 that absent value arrived here
+   * as null and was written — every rename wiped the code's pass flag.
+   */
+  isPass: boolean | null | undefined,
 ): Promise<{ rowsAffected: number; oldLabel: string | null; oldIsPass: boolean | null }> {
   const r = await pool
     .request()
     .input('id', mssql.BigInt, rejectCodeId)
     .input('label', mssql.NVarChar(128), label)
-    .input('pass', mssql.Bit, isPass)
+    .input('setPass', mssql.Bit, isPass !== undefined)
+    .input('pass', mssql.Bit, isPass ?? null)
     .query<{ old_label: string | null; old_is_pass: boolean | null }>(
-      `UPDATE sms.reject_code SET label=@label, is_pass=@pass
+      `UPDATE sms.reject_code
+          SET label = @label,
+              is_pass = CASE WHEN @setPass = 1 THEN @pass ELSE is_pass END
        OUTPUT deleted.label AS old_label, deleted.is_pass AS old_is_pass
-       WHERE reject_code_id=@id`,
+       WHERE reject_code_id = @id`,
     );
   const row = r.recordset[0];
   return {

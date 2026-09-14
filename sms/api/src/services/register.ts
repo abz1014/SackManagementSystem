@@ -197,11 +197,16 @@ const SACK_COLS = `e.sack_event_id AS event_id, ${IDENTITY_COLS},
 // LEFT JOIN reject_code so a labelled code shows its meaning the moment IFL
 // answers Q10 — until then label is NULL and the raw codes carry the
 // information, which is why they are always returned.
+//
+// material_id was missing here until 14 Sep 2026 although migration 024 put
+// it on reject_event and the transform stamps it: the reject sheet therefore
+// had no product of its own to ask about and fell back to the line-wide
+// timeline — a retired July material for a September reject.
 const REJECT_COLS = `e.reject_event_id AS event_id, ${IDENTITY_COLS}, e.reject_type,
   e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
   e.hanger_num, e.source_station, e.lifter_station,
-  e.tube_inspect_code, e.material_inspect_code, e.weight_g,
-  e.production_ts_utc_ms, c.label AS reject_label`;
+  e.tube_inspect_code, e.material_inspect_code, e.weight_g, e.material_id,
+  e.production_ts_utc_ms, c.label AS reject_label, c.is_pass AS reject_is_pass`;
 const colsFor = (type: EventType) =>
   type === 'cone' ? CONE_COLS : type === 'sack' ? SACK_COLS : REJECT_COLS;
 
@@ -218,9 +223,15 @@ const fromFor = (type: EventType) =>
       : `sms.reject_event e
   LEFT JOIN sms.reject_code c
     ON c.reject_type = e.reject_type
-   AND c.tube_code = e.tube_inspect_code
-   AND c.material_code = e.material_inspect_code
+   AND ISNULL(c.tube_code, -999)     = ISNULL(e.tube_inspect_code, -999)
+   AND ISNULL(c.material_code, -999) = ISNULL(e.material_inspect_code, -999)
   ${EPOCH_JOIN}`;
+// ISNULL(..., -999) on both sides, as rejects.ts already did: a WEIGHT reject
+// carries no inspection codes, so both columns are NULL on the event and on
+// its reject_code row, and `NULL = NULL` is never true in SQL. Until 14 Sep
+// 2026 the plain equality meant no weight reject ever matched its code row
+// in the register, so a label a manager had given the weight-reject code
+// showed on the Rejects screen and not on the Readings listing or the sheet.
 /** Every query aliases the event table `e` — see bindFilters for why it is explicit. */
 const ALIAS = 'e.';
 

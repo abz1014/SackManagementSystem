@@ -407,6 +407,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
      * rows), as before.
      */
     productId: z.coerce.number().int().positive().optional(),
+    /**
+     * The reading's weight in grams. With it, the response carries the
+     * verdict — inside the limits, or by how much outside — computed by the
+     * same ProductTimeline.verdict() the register and the attention list use.
+     * Until 14 Sep 2026 the reading sheet re-derived this in the browser with
+     * its own copy of the comparison, which is exactly the "two places answer
+     * one question" rule REDESIGN.md forbids.
+     */
+    weightG: z.coerce.number().optional(),
   });
   app.get('/api/product-at', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -436,33 +445,26 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         // any cone has ever synced for this line.
         atMs = r.recordset[0]?.ms != null ? Number(r.recordset[0]!.ms) : plantNowMs();
       }
-      // Row attribution first (see productAtQuery.productId), timeline second.
-      const rowProduct =
-        q.data.productId != null && (catalogue.product(q.data.productId) || catalogue.versionAt(q.data.productId, atMs))
-          ? (() => {
-              const cp = catalogue.product(q.data.productId!);
-              const v = catalogue.versionAt(q.data.productId!, atMs);
-              return {
-                productId: q.data.productId!,
-                label: cp?.label ?? `Product ${q.data.productId}`,
-                setpointG: v?.setpointG ?? null,
-                weightOffsetMinusG: v?.offsetMinusG ?? null,
-                weightOffsetPlusG: v?.offsetPlusG ?? null,
-                effectiveFromMs: v?.effectiveFromMs ?? atMs,
-                effectiveFromUtc: v?.effectiveFromUtc ?? new Date(atMs).toISOString(),
-              };
-            })()
-          : null;
-      const product = rowProduct ?? timeline.at(atMs);
+      // One implementation of "which product, which limits, inside or not":
+      // ProductTimeline.verdict() — row attribution first (the reading's own
+      // MaterialId), the line-wide timeline second, limits from the versioned
+      // history at that instant rather than the mirror's current values.
+      // This route used to hand-roll the first two steps itself and leave the
+      // third to the browser.
+      const v = timeline.verdict(atMs, q.data.weightG ?? null, { productId: q.data.productId ?? null, catalogue });
       res.json({
         at: new Date(atMs).toISOString(),
-        product,
-        // The limits in force AT that instant, from the versioned history —
-        // not the mirror's current values, which would re-judge the past
-        // every time a setpoint changed (productLimits.ts).
-        limits: product ? (catalogue.limitsAt(product.productId, atMs) ?? limitsOf(product)) : null,
+        product: v.product,
+        limits: v.limits,
         /** 'row' = the reading's own MaterialId; 'timeline' = the hand-entered line-wide product. */
-        attribution: rowProduct ? 'row' : product ? 'timeline' : null,
+        attribution: v.attribution,
+        /** Only when weightG was given: the judgement, or why there is none. */
+        verdict:
+          q.data.weightG == null
+            ? null
+            : { inside: v.inside, outsideByG: v.outsideByG, reason: v.reason },
+        /** The limits are the oldest version known and the instant predates it. */
+        limitsAreLowerBound: v.limitsAreLowerBound,
         /** True when nothing has ever been recorded, so a screen says it once. */
         neverRecorded: timeline.isEmpty,
       });
@@ -673,7 +675,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
-      const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type);
+      const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type, { from: q.data.from, to: q.data.to });
       const plausibility = await getPlausibilityRule(pool, cfg.lineId);
       const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null);
       res.json(await envelope(pool, cfg.lineId, data));
@@ -863,8 +865,12 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const newLabel = body.data.label || null;
-      const { rowsAffected, oldLabel } = await setRejectLabel(pool, id, newLabel, body.data.isPass ?? null);
-      if (rowsAffected > 0) audit(req, 'reject_code.label', 'reject_code', id, `label "${oldLabel ?? '(none)'}" -> "${newLabel ?? '(none)'}"`);
+      // isPass is passed through as-is: undefined means "not this time".
+      const { rowsAffected, oldLabel, oldIsPass } = await setRejectLabel(pool, id, newLabel, body.data.isPass);
+      if (rowsAffected > 0) {
+        const passNote = body.data.isPass === undefined ? '' : `, is_pass ${String(oldIsPass)} -> ${String(body.data.isPass)}`;
+        audit(req, 'reject_code.label', 'reject_code', id, `label "${oldLabel ?? '(none)'}" -> "${newLabel ?? '(none)'}"${passNote}`);
+      }
       res.json({ updated: rowsAffected });
     } catch (err) {
       next(err);
@@ -1058,7 +1064,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     offsetPlusG: z.coerce.number().min(0),
     desc1: z.string().max(255).nullable().optional().transform((v) => v ?? null),
     desc2: z.string().max(255).nullable().optional().transform((v) => v ?? null),
-    active: z.coerce.boolean(),
+    // z.boolean(), not z.coerce.boolean(): coerce is Boolean(value), so the
+    // string "false" became true. On the retire route that is the difference
+    // between retiring a product and re-activating it.
+    active: z.boolean(),
   });
   const writeReason = z.string().min(10).max(255);
   const setpointBounds = async () => {
@@ -1101,7 +1110,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.post('/api/products/:id/active', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = z.coerce.number().int().positive().safeParse(req.params.id);
-      const b = z.object({ active: z.coerce.boolean(), reason: writeReason }).safeParse(req.body);
+      const b = z.object({ active: z.boolean(), reason: writeReason }).safeParse(req.body);
       if (!id.success || !b.success) {
         res.status(400).json({ error: 'productId, active and a reason of at least 10 characters are required' });
         return;
