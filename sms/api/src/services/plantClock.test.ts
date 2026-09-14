@@ -42,6 +42,17 @@ describe('the two clocks', () => {
     // getTimezoneOffset() is positive WEST of Greenwich, which is the opposite
     // of how everyone states a timezone; the wrapper exists to hide that.
     const d = new Date(utcInstant);
-    expect(plantOffsetMinutes(d)).toBe(-d.getTimezoneOffset());
+    expect(plantOffsetMinutes(d)).toBe(0 - d.getTimezoneOffset());
+  });
+
+  it('is never negative zero, so the suite passes on a UTC host as well as at the plant', () => {
+    // On a zero-offset machine — GitHub's ubuntu-latest, for one — a unary
+    // minus on getTimezoneOffset() yields -0, and Object.is(-0, 0) is false,
+    // which made the first test above fail there and nowhere else. Found on
+    // 14 Sep 2026 by running the suite under TZ=UTC; the plant and the
+    // development machine are both UTC+5 and never showed it.
+    const d = new Date(utcInstant);
+    expect(Object.is(plantOffsetMinutes(d), -0)).toBe(false);
+    expect(Object.is(toPlantMs(utcInstant) - d.getTime(), -0)).toBe(false);
   });
 });

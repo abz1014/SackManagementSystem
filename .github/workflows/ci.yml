@@ -12,8 +12,8 @@
 # end-of-life 30 Apr 2026). argon2 is the one native module; it installs from
 # a prebuilt binary on ubuntu-latest, and `npm ci` fails loudly if it cannot.
 #
-# Adds no dependency to the project: setup-node and checkout are the two
-# first-party GitHub actions, and everything else is the repository's own
+# Adds no dependency to the project: checkout, setup-node and upload-artifact
+# are first-party GitHub actions, and everything else is the repository's own
 # scripts.
 name: CI
 
@@ -68,9 +68,13 @@ jobs:
             exit 1
           fi
 
+      # From the repository root, not sms/: `git ls-files` lists only the
+      # current directory's subtree, and the root is where extracted/ and the
+      # client archive would land if anyone ever un-ignored them.
       - name: No env or backup file is tracked
+        working-directory: ${{ github.workspace }}
         run: |
-          bad="$(git ls-files | grep -E '(^|/)\.env$|\.bak$|sms-tunnel-policy\.yml$|\.mdf$|\.ldf$' || true)"
+          bad="$(git ls-files --full-name | grep -E '(^|/)\.env$|\.bak$|sms-tunnel-policy\.yml$|\.mdf$|\.ldf$|\.rar$|(^|/)SPS\.adding$' || true)"
           if [ -n "$bad" ]; then
             echo "::error::Files that must never be committed are tracked:"
             echo "$bad"

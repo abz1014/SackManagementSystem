@@ -33,7 +33,7 @@ cd sms
 npm install
 cp .env.example .env      # fill in APP_DB_* and IFL_DB_* (dev: local .\SQLEXPRESS copy)
 npm run build:shared
-npm test                  # shared unit tests
+npm test                  # the whole suite (vitest, all five workspaces; no database needed)
 npm run db:migrate        # apply db/migrations/*.sql in order, tracked in sms.schema_migration (run db/bootstrap/00_create_app_database.sql first on a new server)
 ```
 

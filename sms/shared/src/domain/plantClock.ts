@@ -23,7 +23,14 @@
  */
 export function plantOffsetMinutes(at: Date = new Date()): number {
   // getTimezoneOffset() is POSITIVE west of Greenwich: UTC+5 reports -300.
-  return -at.getTimezoneOffset();
+  //
+  // `0 - x`, not `-x`: on a UTC host the offset is 0 and unary minus turns it
+  // into -0. Every arithmetic use is indifferent, but Object.is(-0, 0) is
+  // false, so `expect(...).toBe(...)` on a value derived from this failed on
+  // any zero-offset machine — found 14 Sep 2026 when an adversarial check ran
+  // the suite under TZ=UTC, which is what GitHub's ubuntu-latest runner is.
+  // The development machine (UTC+5) never saw it.
+  return 0 - at.getTimezoneOffset();
 }
 
 /** The plant's wall clock now, encoded the way production_ts_utc_ms is. */

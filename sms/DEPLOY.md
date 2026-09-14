@@ -110,8 +110,10 @@ sqlcmd -S .\SQLEXPRESS -E -Q "CREATE DATABASE [DATA_TP1U2_SIM]"
 
 then create the four wide tables with the same column types as `DATA_TP1U2`,
 grant `sms_readonly` db_datareader on it, and create a writer login for the
-simulator. Copy IFL's real rows in as well, so the simulator is a complete
-stand-in and `verify` reconciles.
+simulator (`sms_sim`; its name, database and password go in `.env` as
+`SIM_DB_USER`, `SIM_DB_NAME`, `SIM_DB_PASSWORD` — see `.env.example`). Copy
+IFL's real rows in as well, so the simulator is a complete stand-in and
+`verify` reconciles.
 
 ```bash
 node scripts/simulate-plant.mjs --check      # confirm the schema fingerprints match
@@ -161,7 +163,7 @@ SQL Server and the build output are the only prerequisites, all installed locall
 > internet. Neither is part of the plant deployment: no tunnel, no `ops/`
 > watchdog, no outbound dependency. Use the NSSM services below instead.
 5. **Build:** `npm ci && npm run build` (builds all five workspaces in dependency order). To gate a release: `npm run verify:release` = typecheck of all five workspaces + the test suite + the build.
-6. **Migrate the app DB:** apply `db/migrations/*.sql` in order (via `sqlcmd` or `npm run db:migrate`).
+6. **Migrate the app DB:** `npm run db:migrate` (from `sms/`). Not `sqlcmd` over the files by hand: the migration files do not write `sms.schema_migration` themselves — the runner does — so a hand-applied set leaves an empty history, and the next `db:migrate` re-applies everything and fails inside 026 (the hazard described below). If that has already happened, `--mark-applied-through` is the way back.
    - **Stop the sync-worker service first when migrating an app DB that already holds data.**
      Some migrations build indexes on `cone_event`/`reject_event`, which take a
      schema-modification lock; against a service inserting every 60 s that means
@@ -407,7 +409,9 @@ the backup file is good.
 > `sms.source_epoch`, `sms.product_limit_version`; July + September generations
 > loaded: 275,063 cone rows across `cone_event`). Backup with `CHECKSUM`: 242 MB;
 > `RESTORE VERIFYONLY WITH CHECKSUM` passed; restore into a scratch database:
-> **5 s**; every one of 33 tables' row counts matched the live database exactly;
+> **5 s**; every table's row counts matched the live database exactly (31
+> tables; an earlier draft of this record said 33 — the live sidecar has 27
+> `sms.*` + 4 `sms_raw.*` and nothing else, re-checked 14 Sep 2026);
 > `product_timeline`'s newest row matched to the second. The scratch database
 > was dropped afterwards. This is the rehearsal the 19 Aug one below no longer
 > covers — that one predates ten migrations and the second source generation.
@@ -492,6 +496,7 @@ Four database logins exist by design, each for one job. None is ever written int
 | `sms_readonly` | IFL's plant SQL Server | `db_datareader` on `DATA_TP1U2` **and** `PDAS_TP1U2`, nothing else | IFL's DBA (`db/bootstrap/10_ifl_readonly_login.template.sql`) | sync worker, CLI — `IFL_DB_USER/PASSWORD` |
 | `sms_app` | the sidecar server | `db_datareader`, `db_datawriter`, `db_ddladmin` on `[sms]` only | us, at install (`db/bootstrap/00_create_app_database.sql`) | API, sync worker, CLI, `db:migrate` — `APP_DB_USER/PASSWORD` |
 | `sms_backup` | the sidecar server | `db_backupoperator` on `[sms]` only | us, at install (SQL in *Backup & restore*) | `scripts/backup-appdb.ps1` — passed as `-Pass` |
+| `sms_sim` | **development machines only** | writer on `DATA_TP1U2_SIM` (a database whose name ends `_SIM`; the simulator refuses any other) | the developer, by hand (*Plant simulator*, above) | `scripts/simulate-plant.mjs` — `SIM_DB_NAME/USER/PASSWORD` in `.env`; never created on a plant server |
 | `sms_pdas_writer` | IFL's plant SQL Server | `UPDATE`/`INSERT` on `dbo.Materials`, `EXECUTE` on `CreateMaterial` + `SetMaterialStatusActive`, `INSERT` on `dbo.nhs_events` — **does not exist yet** | IFL's DBA, only after written authority for PDAS writes | API — `PDAS_WRITE_USER/PASSWORD`, behind `PDAS_WRITE_ENABLED` |
 
 Storage: `.env` on the sidecar host, readable by the service account only. Rotation: change the password at the source, update `.env`, restart the affected service. The backup script currently takes its password on the command line; for an unattended Task Scheduler run, store it in a wrapper script with restricted ACLs or run the task as a Windows account holding `db_backupoperator` — do not put it in the task's argument string, which is readable in the task XML.

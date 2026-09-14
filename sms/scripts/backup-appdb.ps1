@@ -54,8 +54,14 @@ $file  = Join-Path $OutDir "$Db-$stamp.bak"
 # never actually been run against an Express instance, so nothing caught it —
 # every "backup written" line it ever printed on Express would have been
 # false, for the same reason the exit-code check below now exists.
-$sql = "BACKUP DATABASE [$Db] TO DISK = N'$file' WITH INIT, STATS = 10;"
-sqlcmd -S $Server -U $User -P $Pass -C -Q $sql
+# CHECKSUM: page checksums are verified as the backup is written and a backup
+# checksum is stored with it, so `RESTORE VERIFYONLY ... WITH CHECKSUM` can
+# later prove the file is intact without restoring it. Added 14 Sep 2026: the
+# rehearsal records described this script as writing WITH CHECKSUM and it did
+# not — the checksummed baseline backup had been taken by hand. Supported on
+# Express (unlike COMPRESSION, above).
+$sql = "BACKUP DATABASE [$Db] TO DISK = N'$file' WITH INIT, CHECKSUM, STATS = 10;"
+sqlcmd -S $Server -U $User -P $Pass -C -b -Q $sql
 if ($LASTEXITCODE -ne 0) {
   Write-Error "BACKUP DATABASE failed (sqlcmd exit $LASTEXITCODE) — see the SQL error above. No backup was written to $file despite any file that may exist at that path (SQL Server pre-creates the device before failing)."
   exit $LASTEXITCODE
@@ -63,6 +69,15 @@ if ($LASTEXITCODE -ne 0) {
 if (-not (Test-Path $file)) {
   Write-Error "sqlcmd reported success but $file does not exist — treating this as a failed backup rather than reporting success."
   exit 1
+}
+
+# Verify what was just written, the same way the restore rehearsal does. A
+# backup that cannot pass this is not a backup; fail the run so a scheduled
+# task shows red rather than a green run over a file that will not restore.
+sqlcmd -S $Server -U $User -P $Pass -C -b -Q "RESTORE VERIFYONLY FROM DISK = N'$file' WITH CHECKSUM;"
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "RESTORE VERIFYONLY WITH CHECKSUM failed on $file (sqlcmd exit $LASTEXITCODE) — the file was written but did not verify. Not deleting it; investigate before trusting any backup from this host."
+  exit $LASTEXITCODE
 }
 
 # retention: keep 30 days
