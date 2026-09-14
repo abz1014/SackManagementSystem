@@ -81,6 +81,15 @@ function SyncHealth() {
           {failures.length} of {ops.data?.data.sync.length} tables did not sync on the last pass.
         </p>
       )}
+      {/* The worker's own words for why. A generation halt says which command
+          to run; a connection halt names the host; a "not read this pass" row
+          points at the table that stopped it. */}
+      {failures.length > 0 && ops.data?.data.lifetime.lastFailure?.error && (
+        <p className="mut sm" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+          {W.sync.lastFailure(ops.data.data.lifetime.lastFailure.targetTable)}{' '}
+          {ops.data.data.lifetime.lastFailure.error}
+        </p>
+      )}
 
       {/* Only appears when a table genuinely holds two regimes, which can
           only happen after the night rule was changed without a rebuild. */}

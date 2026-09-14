@@ -12,7 +12,8 @@ export type Severity = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
 export interface Finding {
   check_name: string;
   severity: Severity;
-  subject_table: string;
+  /** Null for a finding about the pass as a whole, not one table. */
+  subject_table: string | null;
   count: number;
   detail: string;
 }
@@ -114,6 +115,20 @@ export function computeFindings<T extends Weighted>(
   );
   add('merge_key_collision', 'INFO', collision, `${collision} rows share a non-unique merge key (DQ-2)`);
   return findings;
+}
+
+/**
+ * Remove every standing finding of one check. For the worker's own STATE
+ * findings only — `product_mirror_failed`, `transform_failed` — which describe
+ * a condition that is either present or not, and must disappear when it
+ * clears. Ingest-time DATA findings (a future timestamp, an impossible weight)
+ * are facts about rows and are never cleared by this.
+ */
+export async function clearFindings(pool: ConnectionPool, checkName: string): Promise<void> {
+  await pool
+    .request()
+    .input('check', mssql.VarChar(64), checkName)
+    .query(`DELETE FROM sms.dq_finding WHERE check_name = @check`);
 }
 
 export async function persistFindings(

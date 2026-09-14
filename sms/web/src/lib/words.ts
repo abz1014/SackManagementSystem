@@ -455,6 +455,10 @@ export const W = {
     oldestTable: 'Oldest table',
     findings: 'Blocking findings',
     perTable: 'Per table',
+    /* The reason the worker stopped, from the sync_run row it now writes on
+       every halt (14 Sep 2026). Before that a halt wrote nothing, so this
+       screen could only say the data was ageing, never why. */
+    lastFailure: (table: string) => `Last failure, on ${table}:`,
     /** A pass recorded before source generations existed — true, and worth saying. */
     preEpochPass: 'before generations were recorded',
     /* The H5 hazard, said plainly. Changing the night rule restamps only

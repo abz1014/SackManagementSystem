@@ -6,8 +6,11 @@ export async function sync(): Promise<number> {
   const ctx = await openContext({ needIfl: true });
   try {
     const started = Date.now();
-    const { reader, transform } = await runFullSync(ctx.app, ctx.ifl, ctx.cfg);
+    const { reader, transform, productMirrorError } = await runFullSync(ctx.app, ctx.ifl, ctx.cfg);
     const secs = ((Date.now() - started) / 1000).toFixed(1);
+    if (productMirrorError) {
+      console.warn(`  WARNING: PDAS product mirror failed (readings still ingested): ${productMirrorError}`);
+    }
     for (const o of reader) {
       console.log(`  raw ${o.table.replace('sms_raw.', '').padEnd(20)} read=${o.read} written=${o.written}`);
     }

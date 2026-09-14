@@ -44,10 +44,33 @@ export type DbConfig = z.infer<typeof dbSchema>;
 export interface SyncConfig {
   lineId: number;
   overlapRows: number;
+  /** Seconds between passes in loop mode. Floor 5. */
+  intervalSeconds: number;
   app: DbConfig;
   iflData: DbConfig;
   pdasDbName: string;
   appConfig: AppConfig;
+}
+
+/**
+ * A whole-number env key, validated rather than `Number()`-ed.
+ *
+ * `Number('6O')` is NaN, and NaN passes straight through everything that used
+ * to guard these values: `Math.max(5, NaN)` is NaN, and Node clamps a NaN
+ * `setTimeout` delay to 1 ms. So a typo in SYNC_INTERVAL_SECONDS turned the
+ * 60 s loop into a tight loop hammering both databases, and a typo in
+ * SYNC_OVERLAP_ROWS made the read boundary NaN. Neither said anything at
+ * startup. Now both refuse to start, naming the key.
+ */
+function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, min: number): number {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  if (!/^-?\d+$/.test(raw.trim())) {
+    throw new Error(`${key} must be a whole number, got ${JSON.stringify(raw)}`);
+  }
+  const n = Number(raw.trim());
+  if (n < min) throw new Error(`${key} must be at least ${min}, got ${n}`);
+  return n;
 }
 
 export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig {
@@ -70,8 +93,9 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
     trustServerCertificate: env.IFL_DB_TRUST_SERVER_CERTIFICATE,
   });
   return {
-    lineId: Number(env.LINE_ID ?? 1),
-    overlapRows: Number(env.SYNC_OVERLAP_ROWS ?? 500),
+    lineId: intEnv(env, 'LINE_ID', 1, 1),
+    overlapRows: intEnv(env, 'SYNC_OVERLAP_ROWS', 500, 0),
+    intervalSeconds: intEnv(env, 'SYNC_INTERVAL_SECONDS', 60, 5),
     app,
     iflData,
     pdasDbName: env.IFL_DB_NAME_PDAS ?? 'PDAS_TP1U2',

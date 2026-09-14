@@ -5,25 +5,20 @@
  * transient DB blip. Set SYNC_ONCE=true for a single pass (dev/CI).
  */
 import { loadDotEnv, loadSyncConfig } from './config.js';
-import { createPool } from './db.js';
-import { runFullSync } from './pipeline.js';
+import { runPass } from './pass.js';
 
 const log = (level: string, msg: string, extra: Record<string, unknown> = {}) =>
   console.log(JSON.stringify({ ts: new Date().toISOString(), level, svc: 'sync-worker', msg, ...extra }));
 
 async function onePass(cfg: ReturnType<typeof loadSyncConfig>): Promise<void> {
-  const app = await createPool(cfg.app);
-  const ifl = await createPool(cfg.iflData);
-  try {
-    const started = Date.now();
-    const { reader, transform } = await runFullSync(app, ifl, cfg);
-    const rawWritten = reader.reduce((s, o) => s + o.written, 0);
-    const canonWritten = transform.reduce((s, o) => s + o.written, 0);
-    const dq = transform.flatMap((o) => o.findings).reduce((m, f) => ({ ...m, [f.severity]: (m[f.severity] ?? 0) + 1 }), {} as Record<string, number>);
-    log('info', 'sync pass complete', { ms: Date.now() - started, rawWritten, canonWritten, dq });
-  } finally {
-    await app.close();
-    await ifl.close();
+  const started = Date.now();
+  const { reader, transform, productMirrorError } = await runPass(cfg);
+  const rawWritten = reader.reduce((s, o) => s + o.written, 0);
+  const canonWritten = transform.reduce((s, o) => s + o.written, 0);
+  const dq = transform.flatMap((o) => o.findings).reduce((m, f) => ({ ...m, [f.severity]: (m[f.severity] ?? 0) + 1 }), {} as Record<string, number>);
+  log('info', 'sync pass complete', { ms: Date.now() - started, rawWritten, canonWritten, dq });
+  if (productMirrorError) {
+    log('warn', 'PDAS product mirror failed (ingestion ran; recorded as a finding)', { error: productMirrorError });
   }
 }
 
@@ -34,12 +29,14 @@ async function main(): Promise<void> {
   // cmd.exe, which doesn't support `VAR=val node ...` shell syntax, so the
   // flag is the portable way to request a single pass from package.json.
   const once = process.env.SYNC_ONCE === 'true' || process.argv.includes('--once');
-  const intervalMs = Math.max(5, cfg.appConfig ? Number(process.env.SYNC_INTERVAL_SECONDS ?? 60) : 60) * 1000;
+  // Validated in loadSyncConfig: a non-numeric SYNC_INTERVAL_SECONDS used to
+  // reach setTimeout as NaN, which Node runs as 1 ms — a tight loop.
+  const intervalMs = cfg.intervalSeconds * 1000;
 
   log('info', 'starting', {
     line: cfg.lineId,
     source: `${cfg.iflData.database}@${cfg.iflData.server}:${cfg.iflData.port}`,
-    mode: once ? 'once' : `loop ${intervalMs / 1000}s`,
+    mode: once ? 'once' : `loop ${cfg.intervalSeconds}s`,
   });
 
   if (once) {

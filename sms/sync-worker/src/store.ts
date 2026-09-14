@@ -121,3 +121,51 @@ export async function finishSyncRun(
        WHERE sync_run_id = @id`,
     );
 }
+
+export interface SyncRunHalt {
+  runId: string;
+  adapter: string;
+  targetTable: string;
+  lineId: number;
+  /** Known only when the halt came after the generation was resolved. */
+  sourceEpoch: number | null;
+  /** Known only when the halt came after the watermark was read. */
+  watermarkFrom: number | null;
+  error: string;
+}
+
+/**
+ * A table-run that stopped BEFORE it could open its own run row: an
+ * unrecognised source generation, a source that went backwards, a table the
+ * pass never reached because an earlier one halted, or a source connection
+ * that never opened.
+ *
+ * Before this, such a halt wrote nothing. The newest row for the table stayed
+ * the last good one — outcome 'success' — and the only symptom anywhere was
+ * a rising age on the top bar, while `logs\sync.err.log` held the reason.
+ * Setup's "N of 4 tables did not sync" line could not fire, because it counts
+ * latest rows whose outcome is not 'success', and the halt had not written one.
+ *
+ * Written as a single already-finished INSERT, never INSERT-then-UPDATE, so a
+ * crash between the two cannot leave a phantom 'running' row. `outcome` is
+ * 'halted' rather than 'failed' so the two remain distinguishable: 'failed'
+ * means the read or the write went wrong; 'halted' means the pass refused to
+ * read at all, which is a decision, not a fault.
+ */
+export async function recordHaltedRun(pool: ConnectionPool, h: SyncRunHalt): Promise<void> {
+  await pool
+    .request()
+    .input('run', mssql.UniqueIdentifier, h.runId)
+    .input('adapter', mssql.VarChar(20), h.adapter)
+    .input('tt', mssql.VarChar(40), h.targetTable)
+    .input('line', mssql.Int, h.lineId)
+    .input('wm', mssql.BigInt, h.watermarkFrom)
+    .input('epoch', mssql.Int, h.sourceEpoch)
+    .input('err', mssql.NVarChar(mssql.MAX), h.error)
+    .query(
+      `INSERT INTO sms.sync_run
+         (run_id, adapter, target_table, line_id, watermark_from, watermark_to,
+          rows_read, rows_written, outcome, error_text, source_epoch, finished_at_utc)
+       VALUES (@run, @adapter, @tt, @line, @wm, @wm, 0, 0, 'halted', @err, @epoch, SYSUTCDATETIME())`,
+    );
+}
