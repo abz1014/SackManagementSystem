@@ -2,6 +2,20 @@
 // Reads connection config from .env. Splits on GO batches. Idempotent SQL.
 // Never touches IFL's database.
 //
+// Usage:
+//   node scripts/migrate.mjs                            apply every unapplied file, in order
+//   node scripts/migrate.mjs --mark-applied-through=022 record files 001..022 as applied WITHOUT
+//                                                       running them, then apply the rest normally
+//
+// --mark-applied-through exists for ONE situation: a database that was migrated by
+// the pre-Sep-2026 runner, which kept no history table. On such a database this
+// runner's first run would see an empty sms.schema_migration and re-apply every
+// file from 001 — and NOT every file is a no-op on re-run: 016 is a bare DELETE and
+// 026 has seven unguarded ALTER COLUMN ... NOT NULL statements plus a THROW guard, so
+// the re-run fails inside 026 and rolls that file back. Marking the already-applied
+// range first avoids that. Never use it on a database whose real state you do not
+// know; it asserts, it does not verify.
+//
 // Fixes finding M2 (Sep 2026 audit): each file used to run as a series of
 // separate auto-commit batches with no history table — if a later batch in a
 // file failed (e.g. an index statement after its table's CREATE succeeded),
@@ -85,7 +99,25 @@ async function applyFile(pool, filename, raw) {
   }
 }
 
+function parseArgs(argv) {
+  const out = { markThrough: null };
+  for (const a of argv) {
+    const m = a.match(/^--mark-applied-through=(\d{3})$/);
+    if (m) out.markThrough = m[1];
+    else if (a.startsWith('--')) throw new Error(`Unknown option: ${a}`);
+  }
+  return out;
+}
+
+async function markApplied(pool, filename) {
+  await pool
+    .request()
+    .input('f', sql.VarChar(255), filename)
+    .query('INSERT INTO sms.schema_migration (filename) VALUES (@f)');
+}
+
 async function main() {
+  const args = parseArgs(process.argv.slice(2));
   loadEnv();
   const config = {
     server: process.env.APP_DB_SERVER ?? '.\\SQLEXPRESS',
@@ -118,6 +150,11 @@ async function main() {
   for (const file of files) {
     if (await alreadyApplied(pool, file)) {
       console.log(`Skipping ${file} (already applied)`);
+      continue;
+    }
+    if (args.markThrough !== null && file.slice(0, 3) <= args.markThrough) {
+      await markApplied(pool, file);
+      console.log(`Marked ${file} as applied (NOT executed; --mark-applied-through=${args.markThrough})`);
       continue;
     }
     const raw = readFileSync(join(migrationsDir, file), 'utf8');

@@ -274,7 +274,7 @@ The app DB holds the only irreplaceable data (product timeline, reject labels, u
 ## 14. Observability, retry, performance
 
 - **Observability (scoped to one box):** structured JSON logs, correlation `run_id` threaded through the pipeline, sync duration + rows/sec + slow-query logging into `sync_run`. **No** Prometheus/Grafana/ELK. **Trigger:** multi-node.
-- **Retry:** exponential backoff on IFL disconnect; resume from watermark; persistent failure raises a `CRITICAL` dq/op finding.
+- **Retry:** exponential backoff on the IFL *row read only* (`withRetry` wraps `adapter.readSince`; the generation gate, `maxSourceId`, the watermark read and the product seed are not retried — verified 14 Sep 2026); resume from watermark. ~~Persistent failure raises a `CRITICAL` dq/op finding~~ — **not built**: a halted pass writes no `sync_run` row and no finding; it surfaces only as rising data age. Listed as remaining work in `ROADMAP-GAP-ANALYSIS.md` (Phase 2, Phase 11).
 - **Performance targets (guardrails, not current problems):** dashboard <300 ms, API <100 ms, sync pass <30 s. Tested against; at 142k rows we're far under.
 
 ---
@@ -321,7 +321,7 @@ sms rebuild         # rebuild canonical from raw at current transform_version
 
 | # | Step | Milestone |
 |---|---|---|
-| 1 | ✅ **DONE** Models & DDL — raw, canonical (+transform_version), reference tables, product_timeline, dq_finding, rebuild_audit | Schema applied + verified (21 tables) |
+| 1 | ✅ **DONE** Models & DDL — raw, canonical (+transform_version), reference tables, product_timeline, dq_finding, rebuild_audit | Schema applied + verified (21 tables at the time; 31 after migrations 017–027) |
 | 2 | ✅ **DONE** Reader → `sms_raw.*` (overlap window, retry, schema fingerprint) | 151,119 rows synced, source⇄raw reconciled exactly |
 | 3 | ✅ **DONE** Transform → `sms.*` (pure, versioned) + inline DQ | 151k canonical rows; shift-fix live (4.45% of cones corrected); idempotent; DQ matches SCHEMA DQ-6 |
 | 4 | ✅ **DONE** CLI (`sync/verify/summary/rebuild`) | Reconciles source⇄raw⇄canonical; summary prints KPIs; rebuild snapshot-gate enforced |

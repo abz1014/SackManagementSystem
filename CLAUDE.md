@@ -27,7 +27,7 @@ A second sample from IFL (`SPS.rar`, 7 Sep) showed the plant **dropped and recre
 
 **Still to ask IFL for:** the 10 Jul – 5 Aug data (exists, not sent); `db_datareader` on both DBs; written authority for PDAS writes; whether the PLC reads limits live.
 
-**Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 25 app tables, session-cookie auth (argon2), 17 tests, perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover (repoint `IFL_DB_SERVER`).**
+**Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 31 app tables after 27 migrations (27 `sms.*` + 4 `sms_raw.*`; this line used to say 25, and README said 21 — both were wrong), session-cookie auth (argon2), 266 tests in 28 files (the "17 tests" this line carried was Phase 1's count), perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover — which is repointing `IFL_DB_*` *plus* `sms epoch:accept` for the live generation; "repoint and nothing else" stopped being true on 5 Aug 2026.**
 
 ### Visual redesign applied from the design handoff (3 Sep 2026)
 
@@ -222,8 +222,9 @@ department.** There is no second audience. The split was removed the same day.
 What this means, and it governs every future UI decision here:
 
 1. **Every screen is open to every signed-in account.** Only Setup is
-   restricted (`VIEW_MIN_RANK` in `web/src/shell.tsx`, admin only). Do not
-   reintroduce read-access tiers.
+   restricted (`rank >= 4` in `web/src/App.tsx`; there is no `shell.tsx` —
+   that file belonged to the 2 Sep intermediate structure and was deleted in
+   the 3 Sep redesign). Do not reintroduce read-access tiers.
 2. **Roles remain for WRITES only** — setting the running product, logging a
    calibration adjustment, exporting the raw register, and Setup — enforced
    server-side. That is requirement 9's access control. **Create IFL's accounts
@@ -279,10 +280,15 @@ time on 2 Sep 2026. Ten lines. The mapping, and it is the reason for the cut:
 downtime, stoppage clustering, MTBF/MTTR, or shift-versus-shift. Output
 (`?v=performance`) and Shifts (`?v=shift`), five sub-screens, answered a
 question no customer posed, and they carried the charts IFL called unreadable.
-They were **removed from the product** on 2 Sep 2026: gone from the rail
-(`RAIL_GROUPS` in `web/src/shell.tsx`), to be removed from `CAPABILITIES.md`,
-and not to appear in a demo. The routes still resolve so a typed URL keeps
-working; the code is not deleted. Restoring them is a one-line change.
+They were **removed from the product** on 2 Sep 2026 and then **deleted
+outright** in the 3 Sep redesign (commit `f4b941a`): the screens, their
+services (`oee.ts`, `shiftAnalysis.ts`) and the routes `/api/oee`,
+`/api/shift-analysis`, `/api/stoppage-patterns` are gone, and the view
+parameter itself changed from `?v=` to `?s=`, so an old URL lands on Line.
+Restoring them means recovering the code from git history (`git show
+f4b941a^:<path>`), not flipping a switch. Three orphaned client wrappers
+(`getOee`, `getShiftAnalysis`, `getStoppagePatterns` in `web/src/api.ts`)
+remain and target endpoints that now 404.
 
 The "availability below normal" finding was dropped with them, since its only
 destination was Output. Time lost returns as a finding once the period report

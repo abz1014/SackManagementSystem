@@ -77,8 +77,8 @@ Four stages. Each is a separate process or package, so a fault can be located.
 IFL SQL Server                SMS SQL Server (app-owned)              Browser
 ──────────────                ──────────────────────────              ───────
 DATA_TP1U2                    sms_raw.*          sms.*
-  sack1_TP1U2    ──reader──►  cone_raw     ──transform──► cone_event  ──API──►
-  pack1_TP1U2                 sack_raw                    sack_event
+  pack1_TP1U2    ──reader──►  cone_raw     ──transform──► cone_event  ──API──►
+  sack1_TP1U2                 sack_raw                    sack_event
   rejectQCS1_TP1U2            reject_qcs_raw              reject_event
   rejectWeight1_TP1U2         reject_weight_raw           + reference tables
        (read-only)            (append-only, verbatim)     (canonical, typed)
@@ -256,9 +256,10 @@ icon, same as Exceptions and Sync.
 
 Every individual reading, filterable and exportable.
 
-- **Filter chips** — active filters shown as removable chips: date range,
-  shift, station, in-range status, reject type, weight range, and a
-  time-window filter. A "+ filter" panel adds them on demand.
+- **Filter chips** — *(as designed; superseded)* the API accepts date range,
+  shift, station, in-range status, reject type, weight range and a
+  time-window filter, but the shipped Readings screen (3 Sep 2026) exposes
+  the listing toggle, the station filter and one deep-linked chip only.
 - **Table** — production time, shift, station (or sack number), weight,
   status. Sortable by time or weight, paged, 25 rows a page.
 - **Sticky detail rail** — selecting a row shows everything recorded about it
@@ -554,7 +555,7 @@ flagged pattern can be checked against what was actually done about it.
 
 ## 5. Data model
 
-**Sources read (IFL, read-only).** `sack1_TP1U2` (cones), `pack1_TP1U2`
+**Sources read (IFL, read-only).** `pack1_TP1U2` (cones), `sack1_TP1U2`
 (sacks), `rejectQCS1_TP1U2` (quality rejects), `rejectWeight1_TP1U2` (weight
 rejects). The wide tables only — never the EAV originals, which carry six times
 the rows and no extra information.
@@ -783,7 +784,7 @@ The section to read first when comparing against a requirement list.
 
 | | Question | Effect while unanswered |
 |---|---|---|
-| Q4 / Q5 | Are recorded weights gross or net, and in what unit? | Absolute weights and the giveaway figure carry a provisional caveat. The toggle is built and versioned; answering it is one admin action. |
+| Q4 / Q5 | Are recorded weights gross or net, and in what unit? | Absolute weights carry a provisional caveat (the giveaway figure was deleted in the Sep 2026 redesign). The `weight_rule` table is built and versioned, but as of 14 Sep 2026 there is **no admin form** for it — Setup shows it read-only and the only write path is `POST /api/admin/rules/weight` by hand; `WEIGHT_BASIS` in `.env` is read on the first seed only. Answering it is therefore one hand-crafted request, not one admin action, until the form exists. |
 | Q7 | Should the plant's stored shift value be corrected, or reproduced as-is? | Both modes are built. Default is corrected; the stored value disagrees on 4.45% of rows. |
 | Q10 | What do the reject inspection codes mean? | Codes shown raw; labelling is built and retroactive. |
 | Q14 | Single line or multiple? | Built single-line with `line_id` throughout. |

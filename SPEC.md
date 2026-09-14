@@ -1,7 +1,7 @@
 # SPEC.md — IFL Sack Management System
 
-**Status:** Phase 1 scope frozen · awaiting sign-off on deliverables · **no code written yet**
-**Last updated:** 21 July 2026
+**Status:** Phase 1 scope document — **historical**. Written 21 July 2026 before any code existed; the system has since been built (see `ARCHITECTURE.md`, `CLAUDE.md`, `PROJECT_TECHNICAL_HISTORY.md`). Sections marked NOT IMPLEMENTED describe design targets that were never built. Read it for the *reasoning* behind the sidecar schema, not for current state.
+**Last updated:** 21 July 2026 (status line corrected 14 Sep 2026)
 
 > **Standing caveat.** IFL has not yet answered the questionnaire (`../QUESTIONS.md`). Five questions are blocking. This spec is written so that Phase 1 can proceed *around* the unanswered ones — chiefly by putting product attribution behind an interface (§5). Anything that genuinely cannot be built without an answer is marked **⛔ BLOCKED** and excluded from the Phase 1 deliverables list.
 
@@ -247,7 +247,7 @@ PLC_CONE_ID_DB=DB7.DBD10      # P1_ConeID, from t_items
 
 - Config keys are **declared, not parsed or validated**. No adapter is registered.
 - **No PLC library is in any dependency manifest.** Enforced by review convention, not by a test — adding that test is cheap and would make the guarantee real.
-- A test asserts the flag defaults to false and that no PLC dependency is importable — so Phase 1 cannot accidentally acquire PLC connectivity.
+- ~~A test asserts the flag defaults to false and that no PLC dependency is importable.~~ **No such test exists** (verified 14 Sep 2026: `grep PLC` across every `*.test.ts` returns nothing; `PLC_READER_ENABLED` has zero references in any `.ts` file — it is an inert template key, not a flag any code reads). The guarantee is the line above: review convention, not a test.
 
 ---
 

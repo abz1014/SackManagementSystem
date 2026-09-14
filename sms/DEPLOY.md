@@ -23,18 +23,20 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
 
 ## First-time production setup
 
-1. **Install** Node 20+ and SQL Server (Express is fine) on the plant server.
+1. **Install** Node **22** (pinned: `sms/.nvmrc`, `engines` in `sms/package.json`; Node 20 reached end-of-life 30 Apr 2026) and SQL Server (Express is fine) on the plant server. `npm ci` needs the npm registry — see *Internet access* below for an air-gapped host.
 2. **Get from IFL:** a dedicated **read-only** SQL login (not `sa`, not the vendor app account) with **`db_datareader` on BOTH `DATA_TP1U2` and `PDAS_TP1U2`**, and the server\instance + port. Enable TCP on the plant SQL Server if needed.
-   **This is a hard requirement, not a preference.** IFL's own engineering login (`ibrahim`, seen in the Sep 2026 sample) has EXECUTE on PDAS's stored procedures and **no table read at all** on PDAS. Handed that login, the product mirror (`seedProducts`) fails on cutover day and every screen loses its targets and limits. Ask for `db_datareader` on PDAS by name, and test it with `SELECT TOP 1 * FROM PDAS_TP1U2.dbo.Materials` before the day.
+   **This is a hard requirement, not a preference.** IFL's own engineering login (`ibrahim`, seen in the Sep 2026 sample) has EXECUTE on PDAS's stored procedures and **no table read at all** on PDAS. Handed that login, the product mirror (`seedProducts`) fails on cutover day and every screen loses its targets and limits. Ask for `db_datareader` on PDAS by name, and test it with `SELECT TOP 1 * FROM PDAS_TP1U2.dbo.Materials` before the day. **The exact SQL to hand IFL's DBA is `db/bootstrap/10_ifl_readonly_login.template.sql`**, with the four pre-day test queries at the bottom. Note that a login without table read on PDAS stops **all** ingestion, not only the product mirror: the product seed runs before the cone/sack/reject reader on every pass.
    *(Separately and later — only if IFL confirms in writing that SMS may write product data: an `sms_pdas_writer` login for the Add / Retire / Change-limits path, see `PDAS_WRITE_*` in `.env.example`. It is a different login, never the read-only one.)*
-3. **Create the app DB + its login** (`sms_app`, read/write on the `sms` database only).
+3. **Create the app DB + its login** — run `db/bootstrap/00_create_app_database.sql` once as a sysadmin:
+   `sqlcmd -S <server\instance> -E -i db\bootstrap\00_create_app_database.sql -v AppPassword="<strong unique password>"`
+   It creates `[sms]` (recovery model SIMPLE — see the file header for why), the `sms_app` login, and grants it `db_datareader`, `db_datawriter` and `db_ddladmin` — the last because `npm run db:migrate` runs as `sms_app`. Nothing more; backups use a separate login (below). Idempotent.
 4. **Configure** `.env` from `.env.example`:
    - `IFL_DB_*` → the plant server + the read-only login. **This is the only dev→live change.**
    - `APP_DB_*` → the local app DB + `sms_app` (a **strong, unique** password — never the dev password).
    - No `SESSION_SECRET` to set — sessions are server-side random UUIDs, not signed cookies (see `.env.example`).
    - `WEB_DIST=./web/dist`.
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
-   - `LINE_NAME` → the name the floor and wall screens show for the line (default `TP1 · Line 3 · Unit 2`).
+   - `LINE_ID` (default `1`) and `LINE_NAME` → the line every row is stamped with, and the name the screens show (default `TP1 · Line 3 · Unit 2`). Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested.
    - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
@@ -67,12 +69,12 @@ mystery.
 
 ### Wall display (TV)
 
-The app has a wall mode at `?v=wall`: fullscreen, no navigation, type sized
+The app has a wall mode at `?s=wall` (the view parameter is `s`; an older `?v=` form is ignored and lands on the Line screen): fullscreen, no navigation, type sized
 for a TV, refreshing itself every ten seconds. Setting one up:
 
 1. Any PC or stick PC driving the TV, with the browser in kiosk mode pointed at
-   the wall URL — Edge: `msedge --kiosk http://<plant-ip>:4000/?v=wall --edge-kiosk-type=fullscreen`,
-   Chrome: `chrome --kiosk http://<plant-ip>:4000/?v=wall`. Add it to the PC's
+   the wall URL — Edge: `msedge --kiosk http://<plant-ip>:4000/?s=wall --edge-kiosk-type=fullscreen`,
+   Chrome: `chrome --kiosk http://<plant-ip>:4000/?s=wall`. Add it to the PC's
    startup so a power cut brings the display back on its own.
 2. Sign in **once**, with an operator account made for the display:
    `node cli/dist/index.js user:create --username=wall --password=<strong> --role=operator`.
@@ -158,7 +160,7 @@ SQL Server and the build output are the only prerequisites, all installed locall
 > (`ops/sms-watchdog.ps1`) exist to share the app with reviewers over the
 > internet. Neither is part of the plant deployment: no tunnel, no `ops/`
 > watchdog, no outbound dependency. Use the NSSM services below instead.
-5. **Build:** `npm ci && npm run build:shared && npm run build --workspaces --if-present && npm run build --workspace @sms/web`.
+5. **Build:** `npm ci && npm run build` (builds all five workspaces in dependency order). To gate a release: `npm run verify:release` = typecheck of all five workspaces + the test suite + the build.
 6. **Migrate the app DB:** apply `db/migrations/*.sql` in order (via `sqlcmd` or `npm run db:migrate`).
    - **Stop the sync-worker service first when migrating an app DB that already holds data.**
      Some migrations build indexes on `cone_event`/`reject_event`, which take a
@@ -166,11 +168,35 @@ SQL Server and the build output are the only prerequisites, all installed locall
      blocking, and potentially a deadlocked migration, on a live host. A fresh
      install has nothing to contend with and can skip this.
    - `npm run db:migrate` records what it applies in `sms.schema_migration` and
-     skips those files next time. On a database migrated before that table
-     existed, the first run re-applies every earlier file — they are all
-     guarded (`IF OBJECT_ID(...) IS NULL`), so this is a no-op, but it means the
-     first recorded timestamps are when tracking began, not when those
-     migrations were originally applied.
+     skips those files next time. **A fresh database applies 001 → 027 unattended.**
+   - **A database migrated by the pre-September runner** (which kept no history
+     table) is a different case, and it is *not* a no-op: the first run would
+     see an empty history and re-apply every file, and not every file tolerates
+     that — `016` is a bare `DELETE`, and `026` carries seven unguarded
+     `ALTER COLUMN … NOT NULL` statements plus a `THROW` guard, so the re-run
+     fails inside 026 and rolls that file back. Record the already-applied range
+     first: `node scripts/migrate.mjs --mark-applied-through=NNN` (records files
+     ≤ NNN as applied *without executing them*, then applies the rest). Use it
+     only when you know the database's real state — it asserts, it does not verify.
+   - **A database that already holds pre-epoch rows** (raw/canonical data loaded
+     before migration 025) needs the interleaved sequence, with the sync worker
+     stopped: apply through `025` → run `node scripts/backfill-source-epoch.mjs`
+     (assigns every existing row to its generation; read the script header — it
+     encodes one machine's id boundaries and must be adapted) → apply `026`,
+     whose guard refuses to run while any `source_epoch` is still NULL. The
+     development sidecar has been through this; a plant sidecar never will,
+     because it starts empty.
+   - The development machine's two closed bootstrap generations are **not** in
+     migration 025 (moved out 14 Sep 2026 to `scripts/seed-dev-epochs.sql`). A
+     plant sidecar starts with an empty `sms.source_epoch` and registers its
+     live generation with `sms epoch:accept` (cutover, below).
+   - **Rehearsed from zero, 14 Sep 2026:** a database created with exactly the
+     bootstrap's three roles, then `npm run db:migrate` as `sms_app` — all 27
+     files applied unattended, `31` tables (27 `sms.*` + 4 `sms_raw.*`),
+     `sms.source_epoch` empty, 27 history rows. `--mark-applied-through=010`
+     was then exercised on the same database with 001–010 forgotten from the
+     history: 10 marked without execution, 17 skipped, 27 rows restored. The
+     throwaway database was dropped.
 7. **Create the first admin:** `node cli/dist/index.js user:create --username=admin --password=<strong> --role=admin`.
 8. **Create IFL's users at `--role=manager`.** The software is used by the GM,
    managers and process-department engineers, and every one of them needs to
@@ -179,7 +205,7 @@ SQL Server and the build output are the only prerequisites, all installed locall
    no reason. Reserve `admin` for whoever administers the installation.
    `operator` and `supervisor` exist for a possible future in which floor staff
    are given accounts; nothing today needs them.
-8. **Install services** (below), start them, browse to `http://<host>:4000`, sign in.
+9. **Install services** (below), start them, browse to `http://<host>:4000`, sign in.
 
 ---
 
@@ -282,11 +308,28 @@ nssm start SMS-Sync
 nssm install SMS-Api "C:\Program Files\nodejs\node.exe" "C:\sms\api\dist\index.js"
 nssm set SMS-Api AppDirectory "C:\sms"
 nssm set SMS-Api AppStdout "C:\sms\logs\api.log"
+nssm set SMS-Api AppStderr "C:\sms\logs\api.err.log"
 nssm set SMS-Api Start SERVICE_AUTO_START
 nssm start SMS-Api
+
+:: both: start after SQL Server, and do not crash-loop at boot while it is still coming up
+nssm set SMS-Sync DependOnService MSSQL$SQLEXPRESS
+nssm set SMS-Api  DependOnService MSSQL$SQLEXPRESS
+nssm set SMS-Sync AppRestartDelay 10000
+nssm set SMS-Api  AppRestartDelay 10000
+
+:: log rotation (NSSM does it; the app does not): rotate at 50 MB, keep rotating online
+nssm set SMS-Sync AppRotateFiles 1
+nssm set SMS-Sync AppRotateOnline 1
+nssm set SMS-Sync AppRotateBytes 52428800
+nssm set SMS-Api  AppRotateFiles 1
+nssm set SMS-Api  AppRotateOnline 1
+nssm set SMS-Api  AppRotateBytes 52428800
 ```
 
 Both boot with the machine and restart on crash. The sync-worker also self-heals per pass (a transient DB error is logged and retried next tick — it never exits on a blip).
+
+**`AppStderr` for `SMS-Api` is not optional.** Every warning the API writes goes to stderr — the `COOKIE_SECURE` cookie-drop warning, the plant-clock offset mismatch, the access log of non-2xx requests, audit-write failures, and the stack of every 500. Without `AppStderr` the documented install discards all of them. **`DependOnService`** names the SQL Server service — `MSSQL$SQLEXPRESS` for a default Express install; check `sc query` for the instance name — because the API exits with code 1 if the app database is not reachable at startup, which at boot would otherwise put it into NSSM's restart loop until SQL Server finishes starting. The rotation settings replace the absence of any log rotation in the application itself.
 
 ---
 
@@ -360,6 +403,15 @@ Restoring over the live `sms` database directly is `WITH REPLACE`, no `MOVE`
 needed — but do that only once the scratch restore above has already proven
 the backup file is good.
 
+> **Re-rehearsed 14 Sep 2026 on the two-generation schema** (migrations 001–027,
+> `sms.source_epoch`, `sms.product_limit_version`; July + September generations
+> loaded: 275,063 cone rows across `cone_event`). Backup with `CHECKSUM`: 242 MB;
+> `RESTORE VERIFYONLY WITH CHECKSUM` passed; restore into a scratch database:
+> **5 s**; every one of 33 tables' row counts matched the live database exactly;
+> `product_timeline`'s newest row matched to the second. The scratch database
+> was dropped afterwards. This is the rehearsal the 19 Aug one below no longer
+> covers — that one predates ten migrations and the second source generation.
+
 > **Rehearsed 19 Aug 2026 against this exact script and this exact database**
 > (142,511 cone events, 5,462 sack events, 3,146 reject events, 20 product
 > changeovers). Backup: 75.7 MB, 9,226 pages, 5.6 s. Restore into a scratch DB:
@@ -395,7 +447,9 @@ the backup file is good.
 
 ## Operations & monitoring
 
-- **`GET /api/operations`** (Operations screen) — last sync per table, watermark, schema-fingerprint status, transform version, source age, DQ roll-up by severity. First place to look if a dashboard reads low/zero: check `sourceAgeSeconds` — climbing age = sync stalled.
+- **The top-bar sentence** on every screen states how old the newest data is, measured from the *oldest* of the four source tables (one dead feed cannot hide behind three healthy ones). When it is not "ok", no screen asserts whether the line is running.
+- **Setup › Sync health** (admin only) — verdict, last pass age, per-table outcome with the source *generation* and *watermark* it came from, measured cadence, and the count of blocking data-quality findings. First place to look if a dashboard reads low or zero: a climbing age with outcome `success` on the last row means the worker is *halted before it can write a run row* (unknown generation, source gone backwards, or a PDAS/IFL connection failure) — the reason is in `logs\sync.err.log`.
+- **`GET /api/operations`** — the JSON behind that section, open to any signed-in account: per-table sync outcome, generation label, watermark range, age, lifetime pass/failure counts, the last failure's error text, DQ roll-up by severity, and mixed shift-rule regimes.
 - **`node cli/dist/index.js verify`** — full reconciliation + DQ findings.
 - **`node cli/dist/index.js summary --date=YYYY-MM-DD`** — spot-check totals from the shell.
 - **Logs** — structured JSON lines in `logs\sync.log` / `logs\api.log`.
@@ -428,6 +482,21 @@ total.
   needed today — this is a plan to revisit, not an action to take now.
 
 ---
+
+## Credentials and secrets
+
+Four database logins exist by design, each for one job. None is ever written into source control; `.env` and `ops/sms-tunnel-policy.yml` are git-ignored (verified against every commit on every branch, 14 Sep 2026).
+
+| Login | Where it lives | Rights | Issued by | Used by |
+|---|---|---|---|---|
+| `sms_readonly` | IFL's plant SQL Server | `db_datareader` on `DATA_TP1U2` **and** `PDAS_TP1U2`, nothing else | IFL's DBA (`db/bootstrap/10_ifl_readonly_login.template.sql`) | sync worker, CLI — `IFL_DB_USER/PASSWORD` |
+| `sms_app` | the sidecar server | `db_datareader`, `db_datawriter`, `db_ddladmin` on `[sms]` only | us, at install (`db/bootstrap/00_create_app_database.sql`) | API, sync worker, CLI, `db:migrate` — `APP_DB_USER/PASSWORD` |
+| `sms_backup` | the sidecar server | `db_backupoperator` on `[sms]` only | us, at install (SQL in *Backup & restore*) | `scripts/backup-appdb.ps1` — passed as `-Pass` |
+| `sms_pdas_writer` | IFL's plant SQL Server | `UPDATE`/`INSERT` on `dbo.Materials`, `EXECUTE` on `CreateMaterial` + `SetMaterialStatusActive`, `INSERT` on `dbo.nhs_events` — **does not exist yet** | IFL's DBA, only after written authority for PDAS writes | API — `PDAS_WRITE_USER/PASSWORD`, behind `PDAS_WRITE_ENABLED` |
+
+Storage: `.env` on the sidecar host, readable by the service account only. Rotation: change the password at the source, update `.env`, restart the affected service. The backup script currently takes its password on the command line; for an unattended Task Scheduler run, store it in a wrapper script with restricted ACLs or run the task as a Windows account holding `db_backupoperator` — do not put it in the task's argument string, which is readable in the task XML.
+
+There is no `SESSION_SECRET`: sessions are server-side random UUIDs (`sms.session`), not signed cookies.
 
 ## Hard rules (never violate)
 
