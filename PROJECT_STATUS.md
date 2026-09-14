@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md — IFL Sack Management System
 
-**As of:** 14 September 2026, end of Wave A · branch `floor-first-rework` · HEAD after `a473d4d`
+**As of:** 14 September 2026, end of Wave A after the adversarial re-check · branch `floor-first-rework` · HEAD after `7a0c5f7`
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
@@ -11,7 +11,7 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 
 | Phase | Status | What that means today |
 |---|---|---|
-| 0 — Freeze & baseline | **COMPLETE, one criterion partial** | Tag `v0.1.0-baseline`; `BASELINE.md`; from-zero DB rehearsal; restore rehearsal; captured test run; CI workflow; no secrets in history. *Partial:* "starts from a clean checkout" rehearsed on the development machine only — no second machine exists yet (Q65–70). Owner actions outstanding: push, branch decision, second off-machine copy (§4). |
+| 0 — Freeze & baseline | **COMPLETE** (all five acceptance criteria met; adversarially re-checked) | Tag `v0.1.0-baseline`; `BASELINE.md`; from-zero DB rehearsal (reproduced independently); restore rehearsal; clean-checkout rehearsal (`npm ci` → gate → services started, in a fresh clone); no secrets in history (re-verified by hashing the real values); CI workflow. Three independent verifiers refuted five statements of the first closure and one real defect (the suite failed on UTC hosts); all fixed in `7a0c5f7`. What remains is not a criterion: a rehearsal on hardware other than the development machine waits on IFL's host (Q65–70), and CI has not run because nothing is pushed. Owner actions: push, branch decision, a copy on other hardware (§4). |
 | 1 — Configurable platform | **NOT STARTED** (Wave B) | 5 of 10 configuration entities have no representation; the three Setup rule forms have endpoints and no UI. Waits on Q1/Q3/Q4/Q14 (entities, multi-line). |
 | 2 — Integration layer | **PARTIAL** | Epochs, per-generation watermarks, halt-on-unknown, verify-to-checksum all real and now committed. The adapter *interface* the roadmap names is not built — `IflSqlAdapter` is instantiated directly; `'ifl_sql'` is a literal at six sites. Wave B with Phase 1. |
 | 3 — Canonical data model | **PARTIAL** | 31 tables, provenance on every row, transform versioned in the schema. `TRANSFORM_VERSION` has not been bumped although semantics changed; that bump and its rebuild are deliberately held for Wave B. No data dictionary yet. |
@@ -23,7 +23,7 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 | 9 — Calibration analytics | **PARTIAL** | 7 of 8 items computed; several rendered nowhere; median absent. |
 | 10 — Optional AI/ML | **BLOCKED** | 53 production days held against a six-month minimum; one ledger row. Wave F, after go-live plus accrual. |
 | 11 — Security & operations | **PARTIAL** | Auth, RBAC, audit, bootstrap SQL, credentials statement, NSSM hardening in `DEPLOY.md`, every halt now visible in Setup (Wave A). Rotation, retention, upgrade procedure, scheduled backup job, cutover rehearsal on the live source — Wave C, after the live login and host. |
-| 12 — Testing & release | **PARTIAL** | 323 tests / 34 files, all against fakes; CI workflow added (Wave A); `verify:release` gate. UI screens untested; no performance, FAT or SAT material. |
+| 12 — Testing & release | **PARTIAL** | 324 tests / 34 files, all against fakes, passing under UTC±0 and UTC+5; CI workflow added (Wave A); `verify:release` gate. UI screens untested; no performance, FAT or SAT material. |
 | 13 — Documentation | **PARTIAL** | `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected), credentials statement, technical history, questions status. Data dictionary, operator manual, FAT/SAT protocols absent. |
 | 14 — Site commissioning | out of scope until a host exists | — |
 
@@ -34,14 +34,15 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 ### Day 0 (14 Sep 2026)
 - Repository preparation: `.gitattributes`, `q.mjs`/`sync-trace.mjs` ignored, Node 22 pin (`.nvmrc`, `engines`), root `typecheck` covering all five workspaces, root `build`, `verify:release`.
 - Atomic baseline commit `a585302` (114 paths) and annotated tag `v0.1.0-baseline`; staged set checked for secrets and client data before committing.
-- Off-machine copies on the second drive: `git bundle --all` (verified) and a checksummed app-DB backup (`RESTORE VERIFYONLY` passed).
+- Copies of the repository (`git bundle --all`, verified) and a checksummed app-DB backup (`RESTORE VERIFYONLY` passed) — first to `C:\sms-backups` (which turned out to be the OS disk, not a second drive), then on 14 Sep 14:08 hash-matched to `D:\sms-backups` on the second physical disk.
 - Captured release gate: `sms/BASELINE-RUN-2026-09-14.txt`.
 
 ### Wave A — Phase 0 closure and phase-independent hardening
 - **`92df608`** — from-zero bootstrap (`db/bootstrap/00_create_app_database.sql`, least-privilege `sms_app`), the IFL read-only login template for their DBA, dev epoch seed moved out of migration 025, `migrate.mjs --mark-applied-through`, `DEPLOY.md` migration guidance made true (026 is not re-runnable), NSSM `AppStderr`/`DependOnService`/rotation, the *Credentials and secrets* section, `?v=`→`?s=`, duplicated step 8, three table counts reconciled (31), `CAPABILITIES.md` inversions, `SPEC.md` phantom test. From-zero migration rehearsal and restore re-rehearsal on the two-generation schema, both recorded.
 - **`478c456`** — every sync halt writes a `sync_run` row per table (`outcome = 'halted'`, reason in `error_text`); Setup prints the reason; PDAS mirror failure is a standing finding and no longer stops ingestion; transform failure is a standing CRITICAL finding; both clear on recovery; app-pool leak on IFL connect failure fixed; `SYNC_INTERVAL_SECONDS`/`SYNC_OVERLAP_ROWS`/`LINE_ID` validated as whole numbers. Verified against the sidecar with a forced source failure. 23 new tests.
 - **`a473d4d`** — reject sheet tells the truth ("Rejected cone", the reason, "not weighed", the row's own product); weight rejects match their code row in the register; renaming a reject code no longer wipes its pass flag; `z.boolean()` on the product-active routes; Setup's blocking-findings count compares against the real severities; SPC limits from the versioned history at the end of the period, with a note when they changed inside it; one server-side verdict via `/api/product-at?weightG=` and the client `judge()` removed. Verified in the browser on two September rejects. 34 new tests (routes, getSpec, seeders).
-- **This commit** — `BASELINE.md`, this file, `.github/workflows/ci.yml` (typecheck · test · build · clean-tree check · no-secret-file check; no new dependency).
+- **`0dd33fa`** — `BASELINE.md`, this file, `.github/workflows/ci.yml` (typecheck · test · build · clean-tree check · no-secret-file check; no new dependency).
+- **`7a0c5f7`** — after three adversarial verifiers: the `-0` timezone defect that would have made CI red on first push; `CHECKSUM` + self-verification in the backup script; the CI secret-file check run from the repository root; simulator env keys and the `sms_sim` login documented; `DEPLOY.md` step 6 and the 31-table figure corrected. Then the clean-checkout rehearsal (fresh clone on the second disk, `npm ci`, full gate, API + worker + CLI started from `dist/`), the second-disk copies of every artefact, and this file and `BASELINE.md` corrected to what is actually true.
 
 ---
 
@@ -58,9 +59,9 @@ These are not done unilaterally. Each is one action.
 | # | Decision | Why it is the owner's |
 |---|---|---|
 | 1 | `git push` of `floor-first-rework` and the tag; whether `main` fast-forwards | Outward-facing; the branch has no upstream. CI runs only after this. |
-| 2 | A **second** off-machine copy of `C:\sms-backups\*` (bundle + `.bak`) — a different machine or medium | The July generation (142,511 cones) exists nowhere else; IFL dropped the table. |
+| 2 | A copy of `D:\sms-backups\*` (two bundles, the baseline `.bak`, the script-statement `.bak`) **on other hardware** — the artefacts are now on both physical disks of the development machine and nowhere else | The July generation (142,511 cones) exists nowhere else; IFL dropped the table. |
 | 3 | Send the IFL question pack (`IFL-QUESTIONS-STATUS.md`, 36 open; §18 of the gap analysis for the consolidated set) | Client communication. Every wave after A waits on some of these. |
-| 4 | Drop the two `snap25_*` tables on the dev sidecar; explain or drop the `sms_real` database on the same instance | Data on the owner's instance. |
+| 4 | Explain or drop the `sms_real` database on the development instance; delete or deliberately keep `sms/.env.backup-before-sim` (ignored, never committed, real values) | Data and secrets on the owner's machine. |
 | 5 | The two test-data rows (`DECISIONS-PENDING.md` §12: station-7 "verification test" adjustment, `floor` account) — remove or keep as audit trail | Owner's data. |
 | 6 | Provision `sms_pdas_writer` locally against the SEP07 copy so the write path can be exercised offline | Touches a copy of client data. |
 | 7 | `TRANSFORM_VERSION` bump + rebuild | Deliberately held for Wave B (needs Q1/Q3/Q4/Q14 first so it is bumped once). |
@@ -88,11 +89,11 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 
 | | Value |
 |---|---|
-| Suite | vitest, 34 files, **323 tests, 323 passing** (14 Sep 2026, after `a473d4d`) |
+| Suite | vitest, 34 files, **324 tests, 324 passing** (14 Sep 2026, after `7a0c5f7`) — under the host zone (UTC+5), `TZ=UTC` and `TZ=GMT`; also in a fresh clone after `npm ci` |
 | Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 |
 | CI | `.github/workflows/ci.yml` runs the same gate plus a clean-tree check and a tracked-secret-file check on every push to `main`/`floor-first-rework` and every PR. **Has not run yet** — nothing is pushed. |
 | Database needed | None. Every test runs against a fake `mssql` pool or pure functions. |
-| Known failures | None. |
+| Known failures | None. One existed at `0dd33fa` and was found only by an adversarial run under `TZ=UTC` (two `plantClock` tests, `-0` vs `0`); fixed and pinned in `7a0c5f7`. |
 | Coverage gaps | Web: 1 test file (a date helper); 11 screens untested — verified by hand in the browser. No performance, load, FAT or SAT tests. The PDAS write path is tested against fakes only and has never executed against a PDAS database. |
 | Live verification recorded this wave | Forced source failure → four `halted` rows → Setup shows the reason → healthy pass supersedes them (`478c456`). Weight reject 18376 and quality reject 18335 sheets (`a473d4d`). |
 

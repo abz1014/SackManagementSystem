@@ -1,7 +1,7 @@
 # BASELINE.md — what the IFL Sack Management System does today
 
 **Baseline:** tag `v0.1.0-baseline` = commit `a585302`, branch `floor-first-rework`, 14 September 2026.
-**This document was verified against:** `a473d4d` (the same tree plus the four Wave A commits listed in §1), the development sidecar database, and a captured run of the release gate. Every claim below is either greppable in the code at that commit or names the rehearsal that produced it. Where something is a plan and not a fact, it says so.
+**This document was verified against:** `a473d4d` (the same tree plus the Wave A commits listed in §1), the development sidecar database, and a captured run of the release gate — and then **adversarially re-verified on 14 Sep 2026 by three independent checks** (git/secrets, tests/build/CI, database/environment), each of which tried to refute it with its own commands. They refuted five statements in the first draft; those are corrected below and marked *(corrected after adversarial check)*, and the code defects they exposed are fixed in `7a0c5f7`. Every claim that remains is either greppable in the code or names the rehearsal that produced it. Where something is a plan and not a fact, it says so.
 
 This is the Phase 0 deliverable the roadmap asks for ("a `BASELINE.md` describing what works today"). Its companion, `PROJECT_STATUS.md`, is the living status the roadmap's rule 15 requires and is updated per phase; this file describes one frozen point and is not.
 
@@ -14,8 +14,8 @@ This is the Phase 0 deliverable the roadmap asks for ("a `BASELINE.md` describin
 | Tag | `v0.1.0-baseline` (annotated) on `a585302` — "Freeze the September 2026 working tree as the Phase 0 baseline" |
 | Branch | `floor-first-rework`. `origin/main` is at `b1c6de2` (19 Aug 2026) and is a **strict ancestor**: fast-forwarding `main` to this branch is clean. The branch has **no upstream and has not been pushed** — that is an owner decision (§10). |
 | Paths frozen by the baseline commit | 114 (48 added, 66 modified). Per-file disposition: Appendix A. |
-| Commits on top of the baseline at the time of writing | `92df608` from-zero bootstrap and honest migration guidance · `478c456` sync-worker halt rows, product-mirror isolation, pool lifecycle, validated env · `a473d4d` reject sheet, one server-side verdict, versioned SPC limits · plus the commit carrying this file, `PROJECT_STATUS.md` and `.github/workflows/ci.yml` |
-| Off-machine copies | `C:\sms-backups\sms-repo-2026-09-14.bundle` (`git bundle --all`, verified) and `C:\sms-backups\sms-2026-09-14-baseline.bak` (app DB, 242 MB, `WITH CHECKSUM`, `RESTORE VERIFYONLY` passed). Both on the development machine's second drive only — see §10. |
+| Commits on top of the baseline | `92df608` from-zero bootstrap and honest migration guidance · `478c456` sync-worker halt rows, product-mirror isolation, pool lifecycle, validated env · `a473d4d` reject sheet, one server-side verdict, versioned SPC limits · `0dd33fa` this file, `PROJECT_STATUS.md`, `.github/workflows/ci.yml` · `7a0c5f7` the fixes from the adversarial check (§7) · plus the commit carrying this corrected text. **A checkout of the tag itself does not contain this file or the CI workflow** — they were written after the freeze; read them at the branch head. |
+| Copies *(corrected after adversarial check)* | The first draft said "the second drive". False: `C:\sms-backups` is on disk 0, the OS disk — the same physical disk as the repository and as SQL Server's data files. Corrected 14 Sep 14:08: `D:\sms-backups` (disk 1, a separate physical drive) now holds SHA-256-matched copies of `sms-2026-09-14-baseline.bak` (242 MB, `RESTORE VERIFYONLY WITH CHECKSUM` passed on the copy), `sms-repo-2026-09-14.bundle` (HEAD `a585302` + tag) and `sms-repo-2026-09-14-waveA.bundle` (HEAD `0dd33fa` + tag), plus `sms-20260914-140827.bak` written by the backup script's exact statement. **Still one machine.** A copy on other hardware is the owner's (§10). |
 | Node / npm | 22 (pinned in `sms/.nvmrc` and `engines`) / ≥ 10 |
 | Database engine | SQL Server Express (dev instance `localhost,14330`, app DB `sms`) |
 
@@ -60,7 +60,7 @@ One top bar, one global period control, one sentence about how old the data is. 
 - `db/bootstrap/00_create_app_database.sql` creates the database (SIMPLE recovery), the `sms_app` login (password only via `sqlcmd -v`, never in the file) and its three roles. `10_ifl_readonly_login.template.sql` is the SQL to hand IFL's DBA.
 - **27 migrations** (`001`–`027`), idempotent, applied by `scripts/migrate.mjs` and tracked in `sms.schema_migration`. They define **31 tables**: 27 `sms.*` and 4 `sms_raw.*`.
 - **From-zero rehearsal, 14 Sep 2026:** a database created with exactly the bootstrap's roles, then `npm run db:migrate` as `sms_app` — all 27 applied unattended, 31 tables, `sms.source_epoch` empty, 27 history rows. `--mark-applied-through=NNN` exercised for a database migrated by the pre-history runner (10 marked, 17 skipped).
-- The development sidecar also holds 2 `snap25_*` snapshot tables from a rebuild rehearsal (33 tables in all) — stale, an owner decision to drop (§10).
+- The development sidecar holds exactly these 31 tables — re-checked by schema on 14 Sep 2026 (`sms` 27, `sms_raw` 4, no others). *(Corrected after adversarial check: the first draft said 33 tables including two `snap25_*` snapshot tables; there are none.)*
 
 ### 2.6 Data on the development sidecar
 
@@ -70,15 +70,17 @@ Two source generations, from two samples IFL supplied: **July** (19 production d
 
 ## 3. Test status — captured
 
-| | Baseline commit `a585302` | At `a473d4d` |
+| | Baseline commit `a585302` | At `7a0c5f7` |
 |---|---|---|
 | Test files | 28 | 34 |
-| Tests | 266, all passing | 323, all passing |
+| Tests | 266, all passing | 324, all passing — under the host zone (UTC+5), `TZ=UTC` and `TZ=GMT` |
 | Typecheck (`tsc -b` over all five workspaces) | exit 0 | exit 0 |
 | Build (five workspaces, dependency order) | exit 0 | exit 0 |
-| Captured run | `sms/BASELINE-RUN-2026-09-14.txt` | CI (`.github/workflows/ci.yml`) runs the same gate on every push |
+| Captured run | `sms/BASELINE-RUN-2026-09-14.txt` (at `e86357f` + the tree that became `a585302`) | the clean-checkout rehearsal in §9; CI (`.github/workflows/ci.yml`) runs the same gate on every push once the branch is pushed — **it has not run yet** |
 
 The gate is `npm run verify:release` = typecheck + `vitest run` + build. **No test needs a database:** every service test uses a hand-rolled fake `mssql` pool or pure functions; the two `app.*.test.ts` files run the real Express app over such a pool and drive it with Node's `fetch`. What CI cannot reach is the live-database behaviour — that is verified in the browser and recorded in commit messages and `DEPLOY.md`.
+
+**A failure that existed and is fixed** *(found by the adversarial check)*: at `0dd33fa` two `plantClock` tests failed on any zero-offset host — `TZ=UTC npx vitest run` gave 1 failed / 322 passed, deterministically — because `plantOffsetMinutes()` returned `-0` there and the tests compare with `Object.is`. GitHub's ubuntu-latest is such a host, so the CI workflow would have been red on its first run. Fixed in `7a0c5f7` (`0 - offset`; a new test pins it). The development machine and the plant are both UTC+5 and could never show it. No test needs a database, and none reads `.env`.
 
 **Coverage that is missing, stated plainly:** the web workspace has **one** test file (`lib/period.test.ts`, a date helper). None of the eleven screen components has a test. The UI is verified by hand in the browser, not by the suite.
 
@@ -96,32 +98,33 @@ The gate is `npm run verify:release` = typecheck + `vitest run` + build. **No te
 
 ## 5. Environment variables — names only, no values
 
-Forty-two active keys and nine commented ones in `sms/.env.example`; `.env` is git-ignored and has never been committed on any branch (verified by a history-wide scan on 14 Sep 2026).
+Forty-two active keys and ten commented ones in `sms/.env.example` (seven were commented in the first draft, which miscounted them as nine; `7a0c5f7` added the three simulator keys as commented, development-only entries). `.env` is git-ignored and has never been committed on any branch — verified by a history-wide scan on 14 Sep 2026, and independently re-verified by hashing the real local values and searching every reachable and unreachable object for them: zero hits.
 
 | Group | Keys | Read by |
 |---|---|---|
 | App DB | `APP_DB_SERVER` `APP_DB_PORT` `APP_DB_NAME` `APP_DB_USER` `APP_DB_PASSWORD` `APP_DB_ENCRYPT` `APP_DB_TRUST_SERVER_CERTIFICATE` | api, sync-worker, cli, `migrate.mjs` |
 | IFL source (read-only) | `IFL_DB_SERVER` `IFL_DB_PORT` `IFL_DB_NAME_DATA` `IFL_DB_NAME_PDAS` `IFL_DB_USER` `IFL_DB_PASSWORD` `IFL_DB_ENCRYPT` `IFL_DB_TRUST_SERVER_CERTIFICATE` | sync-worker, cli |
 | PDAS write path (off) | `PDAS_WRITE_ENABLED` `PDAS_WRITE_SERVER` `PDAS_WRITE_PORT` `PDAS_WRITE_DATABASE` `PDAS_WRITE_USER` `PDAS_WRITE_PASSWORD` `PDAS_WRITE_ENCRYPT` `PDAS_WRITE_TRUST_SERVER_CERTIFICATE` | api |
-| Sync | `SYNC_INTERVAL_SECONDS` `SYNC_OVERLAP_ROWS` `LINE_ID` (`SYNC_ONCE` commented) | sync-worker (all three validated as whole numbers since `478c456`) |
+| Sync | `SYNC_INTERVAL_SECONDS` `SYNC_OVERLAP_ROWS` `LINE_ID` (`SYNC_ONCE` commented) | sync-worker (all three validated as whole numbers since `478c456`); `LINE_ID` is also read by the API (`api/src/config.ts`) and shared config (`appConfig.ts`) — set it the same everywhere |
+| Plant simulator (development only, commented) | `SIM_DB_NAME` `SIM_DB_USER` `SIM_DB_PASSWORD` | `scripts/simulate-plant.mjs` — *(added after adversarial check: in real use on the development machine and read by tracked code, documented nowhere until `7a0c5f7`)* |
 | API | `API_PORT` `CACHE_TTL_SECONDS` `LINE_NAME` `LIVE_ALLOW_AS_OF` `TRUST_PROXY` `COOKIE_SECURE` (`PLANT_UTC_OFFSET_MINUTES` `TLS_PFX_PATH` `TLS_PFX_PASSPHRASE` `TLS_CERT_PATH` `TLS_KEY_PATH` `WEB_DIST` commented) | api |
 | Behavioural defaults (first seed only) | `WEIGHT_BASIS` `CONE_TUBE_WEIGHT_G` `SACK_TARE_KG` `SHIFT_MODE` `SHIFT_NIGHT_BELONGS_TO` | shared `loadAppConfig` → `seedReference` |
 | Inert | `PLC_READER_ENABLED` `PLC_HOST` `PLC_RACK` `PLC_SLOT` `PLC_CONE_ID_DB` | nothing (§4) |
 
-**Secrets.** Four database logins exist by design — `sms_readonly` (IFL's server, `db_datareader` on both databases), `sms_app` (sidecar, three roles on `[sms]`), `sms_backup` (`db_backupoperator`), `sms_pdas_writer` (not yet provisioned) — each with issuer, storage and rotation described in `DEPLOY.md` → *Credentials and secrets*. There is no `SESSION_SECRET`: sessions are server-side random ids. The one other secret on the development machine, an ngrok tunnel credential, lives in a git-ignored ops file and appears in no deliverable.
+**Secrets.** Four database logins exist by design for a plant installation — `sms_readonly` (IFL's server, `db_datareader` on both databases), `sms_app` (sidecar, three roles on `[sms]`), `sms_backup` (`db_backupoperator`), `sms_pdas_writer` (not yet provisioned) — plus a fifth, `sms_sim`, on development machines only (the simulator's writer on a `*_SIM` database; it exists on the development instance and is never created on a plant server). Each has issuer, storage and rotation in `DEPLOY.md` → *Credentials and secrets*. There is no `SESSION_SECRET`: sessions are server-side random ids. Two other secret-bearing files sit on the development machine, both git-ignored and never committed: the ngrok tunnel policy (`sms/ops/sms-tunnel-policy.yml`) and a 2 Sep 2026 copy of `.env` (`sms/.env.backup-before-sim`) — the latter is residue and is listed for the owner in §10. The tracked `sms/ops/sms-watchdog.ps1` embeds the tunnel's public hostname; that is an endpoint, not a credential.
 
 ---
 
 ## 6. Backup and restore — procedure and rehearsals
 
-Procedure: `scripts/backup-appdb.ps1` (full backup `WITH CHECKSUM`, as `sms_backup`) and the restore steps in `DEPLOY.md` → *Backup & restore*.
+Procedure: `scripts/backup-appdb.ps1` (full backup as `sms_backup`, `WITH CHECKSUM`, followed by `RESTORE VERIFYONLY WITH CHECKSUM` on the file it wrote) and the restore steps in `DEPLOY.md` → *Backup & restore*. *(Corrected after adversarial check: until `7a0c5f7` the script wrote no checksum — the first draft said it did — and the checksummed baseline backup had been taken by hand. The script's exact new statements were then executed with Windows auth: 230.9 MB to `D:\sms-backups\sms-20260914-140827.bak`, "The backup set on file 1 is valid.")*
 
 | Rehearsal | Schema | Result |
 |---|---|---|
 | 19 Aug 2026 | pre-epoch, July only, 21 tables | 75.7 MB; backup 5.6 s; restore 9.4 s; row counts matched |
-| **14 Sep 2026** | two generations, migrations 001–027 | **242 MB; `RESTORE VERIFYONLY WITH CHECKSUM` passed; restore into a scratch database 5 s; all 33 tables' row counts matched the live database; `product_timeline`'s newest row matched to the second.** Scratch database dropped afterwards. |
+| **14 Sep 2026** | two generations, migrations 001–027 | **242 MB; `RESTORE VERIFYONLY WITH CHECKSUM` passed; restore into a scratch database 5 s; every table's row counts matched the live database (31 tables — the first draft said 33, corrected); `product_timeline`'s newest row matched to the second.** Scratch database dropped afterwards. The same `.bak` was re-verified from its copy on disk 1 at 14:08. |
 
-The nightly backup is an **instruction in `DEPLOY.md`, not an installed job** on any machine.
+The nightly backup is an **instruction in `DEPLOY.md`, not an installed job** on any machine (re-confirmed: no scheduled task references the script; SQL Server Express has no Agent). The independent database check also reproduced the migration hazard `DEPLOY.md` describes — history emptied, `db:migrate` fails inside 026 and rolls it back, `--mark-applied-through` restores it — so that guidance is verified, not asserted.
 
 ---
 
@@ -141,6 +144,9 @@ The full verified register is `ROADMAP-GAP-ANALYSIS.md` §17 (23 areas). The ite
 | A sync halt wrote no `sync_run` row and no finding | Fixed `478c456` |
 | PDAS mirror failure stopped all ingestion | Fixed `478c456` |
 | App pool abandoned per tick on IFL connect failure; NaN interval ran a 1 ms loop | Fixed `478c456` |
+| Suite failed on any UTC±0 host (`plantOffsetMinutes()` returned `-0`; `Object.is` comparisons) — CI would have been red on first push | Fixed `7a0c5f7` *(found by the adversarial check)* |
+| Backup script wrote no `CHECKSUM` and never verified its own file, while the records said it did | Fixed `7a0c5f7` *(found by the adversarial check)* |
+| CI tracked-secret-file check ran from `sms/` and could not see the repository root | Fixed `7a0c5f7` *(found by the adversarial check)* |
 | `DEPLOY.md` claimed re-running migrations was a no-op (026 is not re-runnable); no `CREATE DATABASE`/login anywhere; dev epoch seed inside migration 025 | Fixed `92df608` |
 | Three documents gave three table counts; `sack1`/`pack1` inverted in `CAPABILITIES.md`; phantom PLC test in `SPEC.md` | Fixed `92df608` |
 | `shared/src/domain/events.ts` is a dead contract (exported, never imported by a consumer) | **Open** — obsolete; removal is a Phase 2 adapter-extraction decision |
@@ -163,9 +169,10 @@ The full verified register is `ROADMAP-GAP-ANALYSIS.md` §17 (23 areas). The ite
 | Dev-only scratch, **not** in repo | `sms/q.mjs`, `sms/sync-trace.mjs` | Git-ignored since `a585302`; the first hard-codes the developer's absolute path |
 | Design sources | `design/handoff-2026-09-03/` | Keep as the record of what was applied |
 | Historical documents | `SPEC.md` (header marked historical), `SEPT-2026-DB-BRIEFING.md` (with retractions annotated), `SEPT-2026-DB-FINDINGS-RAW.md` | Keep; read for reasoning, not for current state |
-| Dead code | `shared/src/domain/events.ts`; three client wrappers in `web/src/api.ts`; `web/src/lib/strings.ts` (floor-era Urdu-ready string set, superseded by `words.ts`) | Obsolete — §7 |
+| Dead code | `shared/src/domain/events.ts` (re-exported from `shared/src/index.ts`, no type-level consumer anywhere); three client wrappers in `web/src/api.ts` targeting routes deleted at `f4b941a`; `web/src/lib/strings.ts` (floor-era string set — still imported by `fmtAgo` in `lib/fmt.ts`, which itself has no callers, so dead transitively rather than unreferenced) | Obsolete — §7 |
 | Shipped but off | The PDAS write path (`api/src/services/pdasWrite.ts`, three routes, `ProductSheet.tsx` forms) | Complete and tested; stays off until IFL confirms in writing |
-| Stale on the dev sidecar only | 2 `snap25_*` tables; an unexplained `sms_real` database on the same instance | Owner decision (§10) |
+| On the dev instance only | An unexplained `sms_real` database beside `sms` (the `snap25_*` snapshot tables the first draft listed do not exist) | Owner decision (§10) |
+| Secret-bearing residue, ignored, never committed | `sms/.env.backup-before-sim` (a 2 Sep 2026 copy of `.env`) | Owner decision (§10): delete, or keep as the pre-simulator record |
 | Test residue on the dev sidecar | a station-7 calibration adjustment with reason "verification test"; a `floor` operator account | Owner decision (`DECISIONS-PENDING.md` §12) |
 
 ---
@@ -175,10 +182,10 @@ The full verified register is `ROADMAP-GAP-ANALYSIS.md` §17 (23 areas). The ite
 | Criterion | State |
 |---|---|
 | Clean Git baseline | **Met.** Tag `v0.1.0-baseline`; working tree clean after each Wave A commit. |
-| Existing tests pass or known failures are documented | **Met.** 323/323; no known failures. Coverage gaps documented in §3. |
-| Application starts from a clean checkout | **Met on the development machine** (`npm ci && npm run build`, both services started from `dist/`). **Not yet rehearsed on a second machine** — no second machine or target host is available (roadmap Q65–70). CI will exercise install, typecheck, test and build on a fresh Ubuntu runner once the branch is pushed. |
+| Existing tests pass or known failures are documented | **Met.** 324/324 at `7a0c5f7`, under three timezones and in a fresh clone; no known failures. The one failure that existed at the first closure (UTC hosts) is recorded in §3 with its fix. Coverage gaps documented in §3. |
+| Application starts from a clean checkout | **Met — rehearsed for real on 14 Sep 2026** *(the first draft claimed this on the strength of a build over a month-old `node_modules`; the adversarial check pointed out `npm ci` had never actually been run, so it was done properly)*: `git clone` of `7a0c5f7` into a fresh directory on the second disk → `npm ci` (184 packages from the lockfile) → `npm run verify:release` (typecheck 0; 34 files / 324 tests; five builds) → `git status --porcelain` empty after the build → the API started from `api/dist/index.js` on a spare port and answered `/api/health` `{"status":"ok","db":"up"}`, the SPA and `/api/auth/me` → the sync worker ran one full pass from `sync-worker/dist/index.js --once` → `cli/dist/index.js summary` printed the 7 Sep day. The clone (and the `.env` copied into it) was deleted afterwards. **Same machine, fresh checkout, fresh dependencies.** A different machine still waits on IFL's host (Q65–70); CI, once pushed, adds a fresh Ubuntu runner for install/typecheck/test/build — it starts no service and no database, so it does not replace this rehearsal. |
 | Database can be created/restored from documented steps | **Met.** From-zero rehearsal (§2.5) and restore rehearsal (§6), both on 14 Sep 2026, both recorded in `DEPLOY.md`. |
-| No production credentials in source control | **Met.** Verified four ways on 14 Sep 2026 (history over `*.env` on every branch, `git ls-files`, `git check-ignore`, history-wide `-p` scan); CI now fails if an `.env`, `.bak`, `.mdf`/`.ldf` or the tunnel policy file is ever tracked. |
+| No production credentials in source control | **Met.** Verified four ways on 14 Sep 2026 (history over `*.env` on every branch, `git ls-files`, `git check-ignore`, history-wide `-p` scan), and independently by the adversarial check, which hashed the real local secret values and found them in no reachable or unreachable object. CI's tracked-secret-file check now runs from the repository root (`7a0c5f7`) and fails on any tracked `.env`, `.bak`, `.mdf`/`.ldf`, `.rar`, `SPS.adding` or the tunnel policy file — **a control that has not yet executed**, because nothing is pushed. |
 
 ---
 
@@ -187,8 +194,9 @@ The full verified register is `ROADMAP-GAP-ANALYSIS.md` §17 (23 areas). The ite
 Not done unilaterally; listed in `PROJECT_STATUS.md` under *Blocked — owner decision*.
 
 1. **Push** `floor-first-rework` (no upstream yet) and the tag; decide whether `main` fast-forwards to it.
-2. **Second off-machine copy** of the bundle and the `.bak` — both currently sit on the development machine's second drive. The July generation (142,511 cones) survives only there and in an extracted MDF; IFL dropped the table.
-3. Drop the two `snap25_*` tables and explain or drop `sms_real`.
+2. **A copy on other hardware** of `D:\sms-backups\*` (the bundles and the `.bak` now sit on both physical disks of the development machine, and nowhere else). The July generation (142,511 cones) survives only in those files and in an extracted MDF; IFL dropped the table.
+3. Explain or drop the `sms_real` database on the development instance.
+3a. Delete `sms/.env.backup-before-sim` (an ignored, never-committed 2 Sep copy of `.env` with real values) or keep it deliberately.
 4. The two test-data rows (`DECISIONS-PENDING.md` §12).
 5. Whether to provision `sms_pdas_writer` locally against the SEP07 copy for offline write-path tests (touches a copy of client data).
 6. Send the IFL question pack (`IFL-QUESTIONS-STATUS.md`: 36 open).
@@ -197,7 +205,7 @@ Not done unilaterally; listed in `PROJECT_STATUS.md` under *Blocked — owner de
 
 ## Appendix A — per-file disposition of the 114 paths frozen by `a585302`
 
-Classification: **done** = completed feature or its test, in use · **schema** = migration, applied and rehearsed · **doc** = documentation · **tooling** = build/ops/dev script · **off** = complete, shipped disabled · **obsolete** = dead or superseded, kept for now · **defect** = carried a known defect at the baseline (see §7 for status).
+Classification: **done** = completed feature or its test, in use · **schema** = migration, applied and rehearsed · **doc** = documentation · **tooling** = build/ops/dev script · **off** = complete, shipped disabled · **defect** = carried a known defect at the baseline (see §7 for status). No whole path is obsolete; the obsolete items are parts of files (§8) and appear as notes on the rows that hold them.
 
 Totals: 114 paths — done 65, doc 16, tooling 11, schema 11, defect 8, off 3.
 
