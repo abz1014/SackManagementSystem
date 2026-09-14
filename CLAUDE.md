@@ -16,6 +16,26 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### Roadmap execution — the IFL requirement (from 14 Sep 2026)
+
+`IFL_SMS_Claude_Code_Development_Roadmap.md` is **the requirement** from IFL's
+quotation document, not a proposal to be argued with: existing code is credit
+toward it, and where the code differs the difference is a clarification to
+confirm with IFL, never a reason to call the roadmap wrong. Three files carry
+its execution and must be kept true:
+
+- **`PROJECT_STATUS.md`** — roadmap rule 15 (completed / in progress /
+  blocked / IFL dependency / test status). Update it at the end of every wave
+  or phase; never mark a phase complete without it (rule 14).
+- **`BASELINE.md`** — the frozen Phase 0 picture at tag `v0.1.0-baseline`
+  (`a585302`); not updated.
+- **`ROADMAP-GAP-ANALYSIS.md`** — verified per-phase gap analysis, the wave
+  plan (§15), the defect register (§17) and the IFL clarifications (§18).
+
+Day 0 and Wave A are done (`92df608`, `478c456`, `a473d4d` + the docs/CI
+commit). Wave B onward waits on IFL answers or owner decisions listed in
+`PROJECT_STATUS.md` §4–§5. Rule 17: never guess past an IFL dependency.
+
 **Phase 0 (Database Discovery) — COMPLETE.** → `SCHEMA.md`, `QUESTIONS.md`
 ### September 2026 — IFL's rebuilt source, and what the app does about it (11 Sep 2026)
 

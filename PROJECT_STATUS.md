@@ -1,0 +1,103 @@
+# PROJECT_STATUS.md — IFL Sack Management System
+
+**As of:** 14 September 2026, end of Wave A · branch `floor-first-rework` · HEAD after `a473d4d`
+**Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
+
+Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
+
+---
+
+## 1. Phase board
+
+| Phase | Status | What that means today |
+|---|---|---|
+| 0 — Freeze & baseline | **COMPLETE, one criterion partial** | Tag `v0.1.0-baseline`; `BASELINE.md`; from-zero DB rehearsal; restore rehearsal; captured test run; CI workflow; no secrets in history. *Partial:* "starts from a clean checkout" rehearsed on the development machine only — no second machine exists yet (Q65–70). Owner actions outstanding: push, branch decision, second off-machine copy (§4). |
+| 1 — Configurable platform | **NOT STARTED** (Wave B) | 5 of 10 configuration entities have no representation; the three Setup rule forms have endpoints and no UI. Waits on Q1/Q3/Q4/Q14 (entities, multi-line). |
+| 2 — Integration layer | **PARTIAL** | Epochs, per-generation watermarks, halt-on-unknown, verify-to-checksum all real and now committed. The adapter *interface* the roadmap names is not built — `IflSqlAdapter` is instantiated directly; `'ifl_sql'` is a literal at six sites. Wave B with Phase 1. |
+| 3 — Canonical data model | **PARTIAL** | 31 tables, provenance on every row, transform versioned in the schema. `TRANSFORM_VERSION` has not been bumped although semantics changed; that bump and its rebuild are deliberately held for Wave B. No data dictionary yet. |
+| 4 — Cone weight module | **PARTIAL** | Ingestion, versioned limits, row attribution, one server-side verdict (Wave A). Five-state classification, weight reconciliation and the approved test fixture wait on Q33–37 (Wave D). |
+| 5 — Reject management | **PARTIAL** | Spine real; reject sheet corrected (Wave A); weight-reject labels now reach the register. Per-day-per-code sheet, `GET /api/reject-codes`, control limits on the trend, code meanings — Q10/Q24 (Wave D). |
+| 6 — Product / PDAS | **BUILT, OFF** | Complete write path through the vendor's procs, tested against fakes, never executed against any PDAS database; `sms_pdas_writer` provisioned nowhere. Stays off until IFL confirms in writing (Q5). |
+| 7 — Sack management & stock | **PARTIAL / BLOCKED** | Sack ingestion, register, sheet real. Stock ledger does not exist; per-machine stock is not computable from IFL's data (no machine column on `sack1_TP1U2`) — Q28–32 (Wave E). |
+| 8 — Dashboards & reports | **PARTIAL** | Seven screens live; the report screen produces one of the nine reports named. KPI sheet for IFL approval not started — Q12 (Wave D). |
+| 9 — Calibration analytics | **PARTIAL** | 7 of 8 items computed; several rendered nowhere; median absent. |
+| 10 — Optional AI/ML | **BLOCKED** | 53 production days held against a six-month minimum; one ledger row. Wave F, after go-live plus accrual. |
+| 11 — Security & operations | **PARTIAL** | Auth, RBAC, audit, bootstrap SQL, credentials statement, NSSM hardening in `DEPLOY.md`, every halt now visible in Setup (Wave A). Rotation, retention, upgrade procedure, scheduled backup job, cutover rehearsal on the live source — Wave C, after the live login and host. |
+| 12 — Testing & release | **PARTIAL** | 323 tests / 34 files, all against fakes; CI workflow added (Wave A); `verify:release` gate. UI screens untested; no performance, FAT or SAT material. |
+| 13 — Documentation | **PARTIAL** | `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected), credentials statement, technical history, questions status. Data dictionary, operator manual, FAT/SAT protocols absent. |
+| 14 — Site commissioning | out of scope until a host exists | — |
+
+---
+
+## 2. Completed
+
+### Day 0 (14 Sep 2026)
+- Repository preparation: `.gitattributes`, `q.mjs`/`sync-trace.mjs` ignored, Node 22 pin (`.nvmrc`, `engines`), root `typecheck` covering all five workspaces, root `build`, `verify:release`.
+- Atomic baseline commit `a585302` (114 paths) and annotated tag `v0.1.0-baseline`; staged set checked for secrets and client data before committing.
+- Off-machine copies on the second drive: `git bundle --all` (verified) and a checksummed app-DB backup (`RESTORE VERIFYONLY` passed).
+- Captured release gate: `sms/BASELINE-RUN-2026-09-14.txt`.
+
+### Wave A — Phase 0 closure and phase-independent hardening
+- **`92df608`** — from-zero bootstrap (`db/bootstrap/00_create_app_database.sql`, least-privilege `sms_app`), the IFL read-only login template for their DBA, dev epoch seed moved out of migration 025, `migrate.mjs --mark-applied-through`, `DEPLOY.md` migration guidance made true (026 is not re-runnable), NSSM `AppStderr`/`DependOnService`/rotation, the *Credentials and secrets* section, `?v=`→`?s=`, duplicated step 8, three table counts reconciled (31), `CAPABILITIES.md` inversions, `SPEC.md` phantom test. From-zero migration rehearsal and restore re-rehearsal on the two-generation schema, both recorded.
+- **`478c456`** — every sync halt writes a `sync_run` row per table (`outcome = 'halted'`, reason in `error_text`); Setup prints the reason; PDAS mirror failure is a standing finding and no longer stops ingestion; transform failure is a standing CRITICAL finding; both clear on recovery; app-pool leak on IFL connect failure fixed; `SYNC_INTERVAL_SECONDS`/`SYNC_OVERLAP_ROWS`/`LINE_ID` validated as whole numbers. Verified against the sidecar with a forced source failure. 23 new tests.
+- **`a473d4d`** — reject sheet tells the truth ("Rejected cone", the reason, "not weighed", the row's own product); weight rejects match their code row in the register; renaming a reject code no longer wipes its pass flag; `z.boolean()` on the product-active routes; Setup's blocking-findings count compares against the real severities; SPC limits from the versioned history at the end of the period, with a note when they changed inside it; one server-side verdict via `/api/product-at?weightG=` and the client `judge()` removed. Verified in the browser on two September rejects. 34 new tests (routes, getSpec, seeders).
+- **This commit** — `BASELINE.md`, this file, `.github/workflows/ci.yml` (typecheck · test · build · clean-tree check · no-secret-file check; no new dependency).
+
+---
+
+## 3. In progress
+
+Nothing is mid-change. The working tree is clean at every commit above. The next planned work is Wave B and it has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
+
+---
+
+## 4. Blocked — owner decision (not IFL)
+
+These are not done unilaterally. Each is one action.
+
+| # | Decision | Why it is the owner's |
+|---|---|---|
+| 1 | `git push` of `floor-first-rework` and the tag; whether `main` fast-forwards | Outward-facing; the branch has no upstream. CI runs only after this. |
+| 2 | A **second** off-machine copy of `C:\sms-backups\*` (bundle + `.bak`) — a different machine or medium | The July generation (142,511 cones) exists nowhere else; IFL dropped the table. |
+| 3 | Send the IFL question pack (`IFL-QUESTIONS-STATUS.md`, 36 open; §18 of the gap analysis for the consolidated set) | Client communication. Every wave after A waits on some of these. |
+| 4 | Drop the two `snap25_*` tables on the dev sidecar; explain or drop the `sms_real` database on the same instance | Data on the owner's instance. |
+| 5 | The two test-data rows (`DECISIONS-PENDING.md` §12: station-7 "verification test" adjustment, `floor` account) — remove or keep as audit trail | Owner's data. |
+| 6 | Provision `sms_pdas_writer` locally against the SEP07 copy so the write path can be exercised offline | Touches a copy of client data. |
+| 7 | `TRANSFORM_VERSION` bump + rebuild | Deliberately held for Wave B (needs Q1/Q3/Q4/Q14 first so it is bumped once). |
+
+---
+
+## 5. IFL dependency
+
+Consolidated in `ROADMAP-GAP-ANALYSIS.md` §18 and numbered in `IFL-QUESTIONS-STATUS.md`. The ones that gate the next waves:
+
+| Wave | Needs from IFL | Gates |
+|---|---|---|
+| B | Q1/Q3/Q4/Q14 — plant/unit/line/machine entities, multi-line intent | Phase 1 schema, adapter extraction, the single `TRANSFORM_VERSION` bump |
+| C | The live read-only login (`10_ifl_readonly_login.template.sql`) and the target host (Q65–70) | Phase 11 live cutover rehearsal, `sms verify` on an `ifl_live` generation, scheduled backup, NSSM install |
+| D | Q33–37 (weight states, reconciliation), Q12 (KPI/report approval), Q24/Q10 (reject code meanings) | Phases 4, 5, 8 |
+| E | Q28–32, Q43 — sack↔machine association, stock ledger definition | Phase 7 |
+| — | The 10 Jul – 5 Aug 2026 data (exists at IFL, not sent) | Continuity of history; note the July reader shape must be re-enabled to load it |
+| — | Written authority for PDAS writes (Q5) | Phase 6 switch-on |
+
+Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does not depend on them.
+
+---
+
+## 6. Test status
+
+| | Value |
+|---|---|
+| Suite | vitest, 34 files, **323 tests, 323 passing** (14 Sep 2026, after `a473d4d`) |
+| Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 |
+| CI | `.github/workflows/ci.yml` runs the same gate plus a clean-tree check and a tracked-secret-file check on every push to `main`/`floor-first-rework` and every PR. **Has not run yet** — nothing is pushed. |
+| Database needed | None. Every test runs against a fake `mssql` pool or pure functions. |
+| Known failures | None. |
+| Coverage gaps | Web: 1 test file (a date helper); 11 screens untested — verified by hand in the browser. No performance, load, FAT or SAT tests. The PDAS write path is tested against fakes only and has never executed against a PDAS database. |
+| Live verification recorded this wave | Forced source failure → four `halted` rows → Setup shows the reason → healthy pass supersedes them (`478c456`). Weight reject 18376 and quality reject 18335 sheets (`a473d4d`). |
+
+---
+
+## 7. How to update this file
+
+At the end of each wave or phase: move items from §3 to §2 with their commit ids; re-state §1 for any phase whose verified status changed; refresh §6's counts from a captured run; keep §4 and §5 as the true list of what is waiting on whom. Do not record a capability here that cannot be pointed to in code or in a recorded rehearsal.

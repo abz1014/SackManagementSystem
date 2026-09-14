@@ -1,0 +1,86 @@
+# Continuous integration for the IFL Sack Management System.
+#
+# Exactly what `npm run verify:release` does on the development machine —
+# typecheck of all five workspaces, the vitest suite, and the five builds in
+# dependency order — so a green run here means the same thing as a green run
+# there. No database is started: every test in the suite runs against a
+# hand-rolled fake pool or pure functions (34 files, 323 tests at 14 Sep 2026);
+# the live-database checks are the browser verifications recorded in the
+# commit messages and DEPLOY.md, not something CI can reach.
+#
+# Node 22, pinned in sms/.nvmrc and sms/package.json `engines` (Node 20 reached
+# end-of-life 30 Apr 2026). argon2 is the one native module; it installs from
+# a prebuilt binary on ubuntu-latest, and `npm ci` fails loudly if it cannot.
+#
+# Adds no dependency to the project: setup-node and checkout are the two
+# first-party GitHub actions, and everything else is the repository's own
+# scripts.
+name: CI
+
+on:
+  push:
+    branches: [main, floor-first-rework]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: sms
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: sms/.nvmrc
+          cache: npm
+          cache-dependency-path: sms/package-lock.json
+
+      - name: Install (lockfile-exact)
+        run: npm ci
+
+      - name: Typecheck all five workspaces
+        run: npm run typecheck
+
+      # Results go outside the checkout so the clean-tree check below stays honest.
+      - name: Test
+        run: npm test -- --reporter=default --reporter=junit --outputFile="$RUNNER_TEMP/test-results.xml"
+
+      - name: Build all five workspaces
+        run: npm run build
+
+      # Two things a green build must also prove: the tree is not dirtied by
+      # the build (a generated file someone forgot to ignore), and no secret
+      # file is tracked. Both are cheap and both have bitten this project.
+      - name: Working tree is clean after build
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The build modified tracked files or left untracked ones:"
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: No env or backup file is tracked
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)\.env$|\.bak$|sms-tunnel-policy\.yml$|\.mdf$|\.ldf$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Files that must never be committed are tracked:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results
+          path: ${{ runner.temp }}/test-results.xml
+          if-no-files-found: ignore
