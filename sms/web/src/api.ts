@@ -21,6 +21,13 @@ export interface ProductionRow {
 export interface ProductionData {
   groupBy: string;
   rows: ProductionRow[];
+  /**
+   * Only on a product-filtered call, else null. Cones in the period carrying
+   * no product at all (`rows`) out of every cone in it (`of`): readings from
+   * before the source recorded a product are dropped by the filter, and the
+   * screen must say so rather than narrow the period silently.
+   */
+  unattributed: { rows: number; of: number } | null;
 }
 
 export interface Envelope<T> {
@@ -35,6 +42,10 @@ export interface ProductionQuery {
   to?: string;
   shift?: string;
   station?: number;
+  /** Instant cap, so a replay (?at=) counts only what existed at that moment. */
+  tsTo?: string;
+  /** material_id. Narrows cones and rejects only; see ProductionData.unattributed. */
+  product?: number;
   groupBy?: GroupBy;
 }
 
@@ -159,6 +170,8 @@ export interface ProductOption {
   /** PDAS MaterialActive — informational only, shown so a supervisor sees it
    *  before confirming a changeover, not to block the choice. */
   activeFlag: boolean | null;
+  /** PDAS MaterialDesc2 — real color data on this line, e.g. 'PARROT'. */
+  color: string | null;
 }
 export interface TimelineEntry {
   timelineId: number; productId: number; productLabel: string;
@@ -175,6 +188,39 @@ export function getCurrentProduct(): Promise<{ current: TimelineEntry | null }> 
 }
 export function setCurrentProduct(productId: number, reason?: string): Promise<{ current: TimelineEntry | null }> {
   return post('/api/current-product', { productId, reason });
+}
+
+// ---- PDAS write path: product Add / Retire / Change limits (§5) ----
+/** The six fields an operator sees and may change on a product. */
+export interface ProductFields {
+  setpointG: number; offsetMinusG: number; offsetPlusG: number;
+  desc1: string | null; desc2: string | null; active: boolean;
+}
+export interface ProductWriteStatus {
+  /** Server-side flag + credentials present. */
+  enabled: boolean;
+  /** Why not, in words the operator can act on; null when enabled. */
+  reason: string | null;
+  /** enabled AND this user's rank allows it. */
+  canWrite: boolean;
+}
+export interface ProductOptions {
+  blends: { id: number; name: string }[];
+  counts: { id: number; name: string }[];
+  tubeTypes: { id: number; name: string; tubeWeightG: number | null }[];
+}
+export function getProductWriteStatus(): Promise<ProductWriteStatus> { return get('/api/product-write/status'); }
+export function getProductOptions(): Promise<ProductOptions> { return get('/api/product-options'); }
+export function createProduct(p: {
+  blendId: number; countId: number; tubeTypeId: number; fields: ProductFields; reason: string;
+}): Promise<{ productId: number; products: ProductOption[] }> {
+  return post('/api/products', p);
+}
+export function setProductActive(productId: number, active: boolean, reason: string): Promise<{ productId: number; active: boolean; products: ProductOption[] }> {
+  return post(`/api/products/${productId}/active`, { active, reason });
+}
+export function updateProductLimits(productId: number, before: ProductFields, after: ProductFields, reason: string): Promise<{ productId: number; observedAfter: ProductFields; products: ProductOption[] }> {
+  return post(`/api/products/${productId}/limits`, { before, after, reason });
 }
 
 export interface ExcludedDay { date: string; rows: number; }
@@ -238,7 +284,8 @@ export async function setRejectLabel(id: number, label: string | null): Promise<
 
 export type Basis = 'as_recorded' | 'gross' | 'net';
 export interface Bucket { bucket: number; count: number; }
-export interface Outlier { weight: number; shiftDate: string | null; sourceRowId: number | null; }
+/** `eventId` is the register's row identity (the canonical PK), what a reading permalink takes. */
+export interface Outlier { weight: number; shiftDate: string | null; eventId: number | null; }
 export interface WeightStats {
   count: number; avg: number | null; min: number | null; max: number | null; stdev: number | null;
   unit: 'g' | 'kg'; bucketSize: number; histogram: Bucket[]; outliers: Outlier[];
@@ -279,6 +326,8 @@ export function getProduction(q: ProductionQuery): Promise<Envelope<ProductionDa
   if (q.to) p.set('to', q.to);
   if (q.shift) p.set('shift', q.shift);
   if (q.station != null) p.set('station', String(q.station));
+  if (q.tsTo) p.set('tsTo', q.tsTo);
+  if (q.product != null) p.set('product', String(q.product));
   p.set('groupBy', q.groupBy ?? 'none');
   return get(`/api/production?${p.toString()}`);
 }
@@ -299,6 +348,8 @@ export interface RegisterQuery {
   wMax?: number;
   tsFrom?: string;
   tsTo?: string;
+  /** cone only — see api's register.ts OutsideLimitsSegment. */
+  outsideProductLimits?: boolean;
   sort?: RegisterSort;
   dir?: 'asc' | 'desc';
   page?: number;
@@ -306,14 +357,25 @@ export interface RegisterQuery {
 }
 
 export interface RegisterRow {
-  source_row_id: string | number;
-  /** reject only — the real identity; source_row_id is aliased to it. */
-  reject_event_id?: string | number;
+  /**
+   * THE row identity on every type — the canonical PK (cone_event_id /
+   * sack_event_id / reject_event_id) under one name. Permalinks, list keys and
+   * the CSV row id all use this, never source_row_id.
+   */
+  event_id: string | number;
+  /**
+   * IFL's own id, for display only. The plant's identities restarted at 1 on
+   * 2026-08-05, so this number names two rows unless the epoch is beside it;
+   * null on a reject, where the source records none.
+   */
+  source_row_id: string | number | null;
+  source_epoch: number;
+  /** Which generation of the source this reading came from, e.g. "July copy - cones". */
+  source_epoch_label: string | null;
   reject_type?: 'quality' | 'weight';
   tube_inspect_code?: number | null;
   material_inspect_code?: number | null;
   reject_label?: string | null;
-  source_id?: string | number | null;
   production_ts_utc: string;
   shift_code: string;
   shift_date: string;
@@ -351,6 +413,7 @@ function registerParams(q: RegisterQuery): URLSearchParams {
   if (q.wMax != null) p.set('wMax', String(q.wMax));
   if (q.tsFrom) p.set('tsFrom', q.tsFrom);
   if (q.tsTo) p.set('tsTo', q.tsTo);
+  if (q.outsideProductLimits) p.set('outsideProductLimits', 'true');
   p.set('sort', q.sort ?? 'time');
   p.set('dir', q.dir ?? 'desc');
   if (q.page) p.set('page', String(q.page));
@@ -544,6 +607,8 @@ export interface CalibrationAdjustment {
   recordedBy: string | null;
   reason: string | null;
   note: string | null;
+  /** Signed grams the scale was moved by — positive = now reads heavier. */
+  amountG: number | null;
 }
 export function getCalibration(from: string, to: string): Promise<Envelope<CalibrationData>> {
   return get(`/api/calibration?${new URLSearchParams({ from, to }).toString()}`);
@@ -552,7 +617,7 @@ export function getCalibrationAdjustments(): Promise<{ adjustments: CalibrationA
   return get('/api/calibration/adjustments');
 }
 export function recordCalibrationAdjustment(a: {
-  stationId?: number; adjustedAt?: string; reason?: string; note?: string;
+  stationId?: number; adjustedAt?: string; reason?: string; note?: string; amountG?: number;
 }): Promise<{ adjustmentId: number; adjustments: CalibrationAdjustment[] }> {
   return post('/api/calibration/adjustments', a);
 }
@@ -562,12 +627,26 @@ export type RejectBucketSize = 'hour' | 'day';
 export type RejectTypeFilter = 'all' | 'quality' | 'weight';
 export interface RejectBucket {
   bucketTs: string;
+  /** Source generation (ordinal shared by cones and rejects); limits are per generation. */
+  generation: number;
   produced: number;
+  /** Cones + rejects of every type — the rate's denominator. */
+  inspected: number;
   rejects: number;
   rate: number | null;
   ucl: number | null;
   lcl: number | null;
   outOfControl: boolean;
+}
+/** One source generation's share of a range, with its own p̄. */
+export interface RejectGeneration {
+  generation: number;
+  totalProduced: number;
+  totalRejects: number;
+  totalInspected: number;
+  pBar: number | null;
+  firstBucketTs: string;
+  lastBucketTs: string;
 }
 export interface RejectEpisode {
   startTs: string;
@@ -581,7 +660,11 @@ export interface RejectSpcData {
   rejectTypeFilter: RejectTypeFilter;
   totalProduced: number;
   totalRejects: number;
+  /** Pooled within one generation; across the 5 Aug 2026 rebuild it is the newest generation's. */
   pBar: number | null;
+  /** True when the range crosses a source-generation boundary — limits are then per generation. */
+  spansGenerations: boolean;
+  generations: RejectGeneration[];
   outOfControlCount: number;
   buckets: RejectBucket[];
   episodes: RejectEpisode[];
@@ -637,13 +720,29 @@ export function getOee(q: OeeQuery): Promise<Envelope<OeeData>> {
 export interface SyncStatus {
   targetTable: string;
   outcome: string;
+  /** Source id bounds of the pass — meaningless without the epoch, whose ids restart at 1. */
+  watermarkFrom: number | null;
   watermark: number | null;
+  /** null = a pass recorded before epochs existed. */
+  epochId: number | null;
+  epochLabel: string | null;
   rowsRead: number;
   rowsWritten: number;
   finishedAtUtc: string | null;
   ageSeconds: number | null;
 }
-export interface SchemaFingerprint { table: string; fingerprint: string; status: string; }
+/**
+ * Per SOURCE table: the fingerprint the sync worker is enforcing, from the
+ * open epoch row. Never 'ok' — this API cannot reach the plant's database to
+ * verify anything; 'enforced-by-worker' is what it can actually see.
+ */
+export interface SchemaFingerprint {
+  table: string;
+  fingerprint: string | null;
+  status: 'enforced-by-worker' | 'no-open-epoch';
+  epochId: number | null;
+  epochLabel: string | null;
+}
 export interface DqFinding { checkName: string; severity: string; subjectTable: string | null; detail: string | null; }
 export interface SyncLifetime {
   passes: number;
@@ -656,8 +755,17 @@ export interface SyncLifetime {
   slowestMs: number | null;
   lastFailure: { targetTable: string; startedAtUtc: string; error: string | null } | null;
 }
+/** Canonical tables holding rows under more than one night-attribution rule. */
+export interface ShiftRuleRegimes {
+  table: string;
+  rules: { rule: string | null; rows: number }[];
+  mixed: boolean;
+}
+
 export interface OperationsData {
   sync: SyncStatus[];
+  /** Non-empty only when a rebuild is due — see Setup's Sync health block. */
+  shiftRuleRegimes: ShiftRuleRegimes[];
   lifetime: SyncLifetime;
   schema: SchemaFingerprint[];
   dq: {
@@ -708,7 +816,7 @@ export interface LiveLine {
   state: {
     status: LineStatus;
     /** Wall-clock age of the newest reading. */
-    sinceLastConeSeconds: number | null;
+    sinceLastReadingSeconds: number | null;
     /** How long the line has been down, net of the acquisition lag. */
     behindSeconds: number | null;
     runStartUtc: string | null;
@@ -724,8 +832,8 @@ export interface LiveLine {
     conesPerHour: number | null;
   };
   recent: { conesLast10Min: number; conesLastHour: number; sacksLastHour: number };
-  lastSack: { ts: string; sourceRowId: number; sackNum: number | null; weightKg: number | null; inRange: boolean | null } | null;
-  lastCone: { ts: string; sourceRowId: number; station: number | null; weightG: number | null; inRange: boolean | null } | null;
+  lastSack: { ts: string; eventId: number; sourceRowId: number; sackNum: number | null; weightKg: number | null; inRange: boolean | null } | null;
+  lastCone: { ts: string; eventId: number; sourceRowId: number; station: number | null; weightG: number | null; inRange: boolean | null } | null;
   lastReject: { ts: string; rejectType: string; station: number | null } | null;
   stations: { station: number; cones: number; lastTs: string }[];
 }
@@ -821,9 +929,25 @@ export interface ProductAtData {
   limits: ProductLimits | null;
   /** True when no product has ever been recorded for this line. */
   neverRecorded: boolean;
+  /**
+   * 'row' — the reading's own MaterialId (IFL's Sep 2026 schema), the plant's
+   * own attribution. 'timeline' — the hand-entered line-wide product, the only
+   * attribution rows from before that column existed can have. Null when none.
+   */
+  attribution: 'row' | 'timeline' | null;
 }
-export function getProductAt(at?: string | null): Promise<ProductAtData> {
-  return get(at ? `/api/product-at?at=${encodeURIComponent(at)}` : '/api/product-at');
+/**
+ * `productId` is the reading's own material, when the row carries one. Pass it
+ * whenever you have it: six materials run concurrently on different machines,
+ * so "the product recorded on the line" is the wrong answer for a reading that
+ * knows its own — it was judging September cones against a retired July product.
+ */
+export function getProductAt(at?: string | null, productId?: number | null): Promise<ProductAtData> {
+  const p = new URLSearchParams();
+  if (at) p.set('at', at);
+  if (productId != null) p.set('productId', String(productId));
+  const qs = p.toString();
+  return get(qs ? `/api/product-at?${qs}` : '/api/product-at');
 }
 
 // ---- the attention list ----

@@ -14,6 +14,17 @@ export interface ProductionParams {
   shift?: string; // morning|evening|night
   station?: number;
   product?: number; // material_id (null in Phase 1 → yields empty)
+  /**
+   * Upper bound on the production INSTANT, not the day — what makes a replay
+   * (`?at=`) show only what existed at that moment.
+   *
+   * Without it this endpoint answered with the whole shift while /api/live
+   * truncated at the replay instant, so under replay the Line screen's sack
+   * and cone counts read roughly DOUBLE the Wall display's for the same
+   * shift, mid-shift. period.ts documents `tsTo` as exactly this guard; it
+   * simply was never plumbed through to here.
+   */
+  tsTo?: string;
   groupBy: GroupBy;
 }
 
@@ -61,28 +72,77 @@ function bindFilters(
     w.push('shift_code = @shift');
     req.input('shift', mssql.VarChar(10), p.shift);
   }
+  // production_ts_utc_ms leads the merge index on all three tables, so this
+  // stays an index seek rather than turning the scan wider.
+  if (p.tsTo) {
+    w.push('production_ts_utc_ms <= @tsTo');
+    req.input('tsTo', mssql.BigInt, new Date(p.tsTo).getTime());
+  }
   if (p.station != null && hasStation) {
     w.push('source_station = @station');
     req.input('station', mssql.Int, p.station);
   }
   if (p.product != null && hasStation) {
-    // material_id is null in Phase 1 (NullAttribution) → this yields no rows
+    // material_id is NULL on every row from before the 2026-08-05 source
+    // rebuild (the column did not exist at source), so this filter drops that
+    // whole generation; getProduction reports how many via `unattributed`.
     w.push('material_id = @product');
     req.input('product', mssql.Int, p.product);
   }
   return w.join(' AND ');
 }
 
+/**
+ * Present only on a product-filtered call, and the reason it exists: product
+ * attribution is asymmetric across the 2026-08-05 source rebuild. Every
+ * July-generation cone carries material_id NULL because the column did not
+ * exist at source then, and back-filling it would be fabrication. So
+ * `?product=` over a range spanning both generations silently answers with
+ * the September rows only, for a period the screen says covers both
+ * (SEPT-2026-EPOCH-DECISION §4.6). `rows` is the count of cones in the
+ * requested range with NO attribution at all, `of` every cone in the range —
+ * both counted WITHOUT the product filter — so the screen can say "N of M
+ * readings in this period predate product recording" instead of narrowing
+ * the period without saying so. Cones only: sacks are never product-filtered
+ * here (see bindFilters), so they are never silently dropped.
+ */
+export interface Unattributed {
+  rows: number;
+  of: number;
+}
+
+export interface ProductionResult {
+  groupBy: GroupBy;
+  rows: ProductionRow[];
+  /** null on an unfiltered call — nothing was narrowed, so there is nothing to say. */
+  unattributed: Unattributed | null;
+}
+
 export async function getProduction(
   pool: ConnectionPool,
   lineId: number,
   p: ProductionParams,
-): Promise<{ groupBy: GroupBy; rows: ProductionRow[] }> {
+): Promise<ProductionResult> {
   const g = groupExpr(p.groupBy);
   const byStation = p.groupBy === 'station';
   // 'none' → single aggregate row: label with the literal, NO GROUP BY
   // (SQL Server rejects GROUP BY on a constant).
   const groupClause = p.groupBy === 'none' ? '' : `GROUP BY ${g}`;
+
+  // The unattributed count, when a product filter is on: the same range and
+  // station/shift filters, minus the product, so `of` is the population the
+  // caller believes the period covers.
+  let unattributed: Unattributed | null = null;
+  if (p.product != null) {
+    const uReq = pool.request();
+    const uWhere = bindFilters(uReq, { ...p, product: undefined }, lineId, true);
+    const u = await uReq.query<{ n: number; no_attr: number }>(
+      `SELECT COUNT(*) n, SUM(CASE WHEN material_id IS NULL THEN 1 ELSE 0 END) no_attr
+       FROM sms.cone_event WHERE ${uWhere}`,
+    );
+    const u0 = u.recordset[0];
+    unattributed = { rows: Number(u0?.no_attr ?? 0), of: Number(u0?.n ?? 0) };
+  }
 
   // cones (with in-range %)
   const coneReq = pool.request();
@@ -145,5 +205,5 @@ export async function getProduction(
   const rows = [...map.values()].sort((a, b) =>
     byStation ? Number(a.group) - Number(b.group) : a.group.localeCompare(b.group),
   );
-  return { groupBy: p.groupBy, rows };
+  return { groupBy: p.groupBy, rows, unattributed };
 }

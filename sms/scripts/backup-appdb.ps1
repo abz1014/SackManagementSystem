@@ -3,7 +3,7 @@
 # users, config, rules). IFL's DB is not ours to back up.
 # Schedule via Task Scheduler, or use a SQL Agent job on non-Express editions.
 #
-#   powershell -File scripts\backup-appdb.ps1 -Server "localhost,14330" -Db sms -OutDir "D:\sms-backups"
+#   powershell -File scripts\backup-appdb.ps1 -Server "localhost,14330" -Db sms -Pass "<sms_backup password>" -OutDir "D:\sms-backups"
 #
 # The login needs the db_backupoperator role on the target database — the
 # app's own runtime login (sms_app) deliberately does NOT have it (least
@@ -22,12 +22,27 @@
 param(
   [string]$Server = "localhost,14330",
   [string]$Db     = "sms",
-  [string]$User   = "sms_app",
-  [string]$Pass   = $env:APP_DB_PASSWORD,
+  # Fixes finding L4 (Sep 2026 audit): this default used to be "sms_app" —
+  # the app's own runtime login, which this very file's header comment says
+  # deliberately does NOT have db_backupoperator. Every "backup written" run
+  # on that default would have failed at the sqlcmd step; the default now
+  # matches the login DEPLOY.md's setup section actually creates for this.
+  [string]$User   = "sms_backup",
+  [string]$Pass,
   [string]$OutDir = "C:\sms-backups"
 )
 
 $ErrorActionPreference = "Stop"
+
+# No default for -Pass, deliberately: defaulting a backup login's password to
+# anything (including $env:APP_DB_PASSWORD, the PREVIOUS behaviour here) risks
+# silently running as the wrong login. sms_backup's password is a separate
+# credential DEPLOY.md never puts in .env, so there is nothing safe to default
+# it to — require it explicitly every run.
+if (-not $Pass) {
+  Write-Error "-Pass is required (the sms_backup login's password, see DEPLOY.md's backup setup). Refusing to guess or fall back to another login's credential."
+  exit 1
+}
 
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"

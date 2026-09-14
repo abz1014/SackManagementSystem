@@ -26,3 +26,7 @@ Thumbs.db
 
 # Tunnel policy — contains a shared basic-auth password
 sms/ops/sms-tunnel-policy.yml
+
+# Client data — Sep 2026 SPS archive (databases + screenshots)
+extracted-sps-*/
+SPS.rar

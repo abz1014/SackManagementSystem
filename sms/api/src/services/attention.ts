@@ -24,6 +24,12 @@
  * Rule 3 is a count, so it honours the period, and the screen says which is
  * which.
  *
+ * AND "CONSECUTIVE" MEANS ON THE CALENDAR. The daily means list only days that
+ * hold data, and the record has a permanent hole (10 Jul to 5 Aug 2026, when
+ * IFL rebuilt their tables). Counting array neighbours as consecutive days
+ * reported a station "heavy for 2 days" across 26 days of nothing; every run
+ * here tests consecutiveProductionDays between adjacent entries instead.
+ *
  * THE FINDINGS CARRY NUMBERS, NOT SENTENCES. Copy lives in the web app's
  * words file so an Urdu set can be added without touching the API.
  */
@@ -33,7 +39,8 @@ import { getStationDrift, listCalibrationAdjustments } from './calibration.js';
 import { getRejectSpc, type RejectSpcData, type RejectTypeFilter } from './rejectSpc.js';
 import { getPlausibilityRule } from './admin.js';
 import { loadProductTimeline, limitsOf, productDisagreement, type DayRange } from './productAt.js';
-import { toPlantMs } from './plantClock.js';
+import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
+import { consecutiveProductionDays, toPlantMs } from './plantClock.js';
 
 /** At most three sentences; the rest are counted and linked. */
 export const MAX_SHOWN = 3;
@@ -57,7 +64,7 @@ export interface AttentionFinding {
   station?: number;
   /** Signed grams against the line mean over the trailing window. */
   deltaG?: number;
-  /** Consecutive production days the station has held that side. */
+  /** Calendar-consecutive production days the station has held that side. */
   days?: number;
   /* reject_rise */
   rejectKind?: 'quality' | 'weight';
@@ -150,6 +157,8 @@ export function stationDriftFindings(cal: CalibrationData, opts: DriftOptions): 
     const run: typeof days = [];
     for (let i = days.length - 1; i >= 0; i--) {
       if (sign(days[i]!.mean - lineMean) !== side) break;
+      // A hole in the calendar ends the run as surely as a change of side.
+      if (i < days.length - 1 && !consecutiveProductionDays(days[i]!.date, days[i + 1]!.date)) break;
       run.unshift(days[i]!);
     }
     if (run.length < minDays) continue;
@@ -193,7 +202,11 @@ export function rejectRiseFinding(spc: RejectSpcData, kind: 'quality' | 'weight'
   const ongoing = spc.episodes.find((e) => e.endTs === lastTs);
   if (!ongoing) return null;
 
-  const rate = ongoing.totalProduced > 0 ? (100 * ongoing.totalRejects) / ongoing.totalProduced : null;
+  // totalInspected, not totalProduced: this rate is printed in the same
+  // sentence as usualPct (= pBar), so the two must divide by the same
+  // population. Dividing by cones alone here made the Home screen state a
+  // rise and its own baseline on different denominators.
+  const rate = ongoing.totalInspected > 0 ? (100 * ongoing.totalRejects) / ongoing.totalInspected : null;
   if (rate == null) return null;
 
   return {
@@ -215,16 +228,21 @@ export async function getAttention(
   trailing: { from: string; to: string },
   period: DayRange,
 ): Promise<AttentionData> {
-  const [plausibility, timeline, adjustments] = await Promise.all([
+  const [plausibility, timeline, adjustments, catalogue] = await Promise.all([
     getPlausibilityRule(pool, lineId),
     loadProductTimeline(pool, lineId),
     listCalibrationAdjustments(pool, lineId),
+    loadProductCatalogue(pool),
   ]);
 
   // The tolerance in force now sizes the drift threshold. Using the current
   // product here is right: the threshold is "how much of the allowed band is
   // worth acting on", a property of the product being made, not of a reading.
-  const limits = limitsOf(timeline.entries[0] ?? null);
+  // "Now" means the NEWEST recorded version of that product's limits — the
+  // versioned history, not the mirror, so this and the per-reading verdicts
+  // read from one source (productLimits.ts).
+  const cur = timeline.entries[0] ?? null;
+  const limits = cur ? (limitsFromVersion(catalogue.latest(cur.productId)) ?? limitsOf(cur)) : null;
   const toleranceWidthG = limits ? limits.hiG - limits.loG : null;
 
   const adjustedAtMsByStation = new Map<number, number>();
@@ -240,7 +258,7 @@ export async function getAttention(
     getStationDrift(pool, lineId, trailing.from, trailing.to, plausibility),
     getRejectSpc(pool, lineId, trailing.from, trailing.to, 'day', 'quality' as RejectTypeFilter),
     getRejectSpc(pool, lineId, trailing.from, trailing.to, 'day', 'weight' as RejectTypeFilter),
-    productDisagreement(pool, lineId, timeline, period),
+    productDisagreement(pool, lineId, timeline, period, catalogue),
   ]);
 
   const stationMeans = cal.stations.filter((s) => s.n > 0).map((s) => s.grandMean);

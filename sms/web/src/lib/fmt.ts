@@ -94,6 +94,21 @@ export function fmtInt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US');
 }
 
+/**
+ * A rate, to one decimal: "2.0%", "0.3%", "—".
+ *
+ * There was no percentage helper here until Sep 2026, and five files had
+ * invented three conventions between them: `Math.round(p * 10) / 10` (drops
+ * the trailing zero, so the SAME rate read "2%" in the Weight tile and "2.0%"
+ * in the station table beside it), a bare `toFixed(1)`, and raw interpolation
+ * of whatever the server sent. One decimal everywhere: a reject rate moves in
+ * tenths, and dropping the zero makes two identical numbers look different.
+ * No space before the sign — "2.0%" is one token, unlike "1,951 g".
+ */
+export function fmtPct1(n: number | null | undefined): string {
+  return n == null ? '—' : `${n.toFixed(1)}%`;
+}
+
 /** YYYY-MM-DD plus n days (calendar arithmetic in UTC). */
 export function addDays(date: string, n: number): string {
   const d = new Date(`${date}T12:00:00Z`);

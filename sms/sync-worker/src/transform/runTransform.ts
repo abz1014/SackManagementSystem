@@ -28,6 +28,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import type { NightBelongsTo } from '@sms/shared';
 import type { SyncConfig } from '../config.js';
 import {
   mapCone,
@@ -40,7 +41,7 @@ import {
 } from './transform.js';
 import {
   persistCanonical,
-  existingSourceIds,
+  existingRawIds,
   CONE_COLS,
   SACK_COLS,
   REJECT_COLS,
@@ -54,30 +55,34 @@ import {
  * live in the Aug 2026 audit's rewind test.
  */
 /**
- * Lowest source_row_id in a batch, by reduce and NOT by a spread into Math.min:
+ * Lowest raw_id in a batch, by reduce and NOT by a spread into Math.min:
  * a fresh app database hands the transform the whole history in one batch
  * (142,511 cone rows on the July copy), and spreading that many arguments
  * overflows the call stack. This crashed the first backfill — the go-live
  * cutover path — while every incremental pass, at ~500 rows, sailed through.
  * persistRaw.ts found the identical bug earlier; this is the same fix.
  */
-function minSourceRowId(rows: ReadonlyArray<{ source_row_id: number }>): number {
+function minRawId(rows: ReadonlyArray<{ raw_id: number }>): number {
   let min = Number.POSITIVE_INFINITY;
-  for (const r of rows) if (r.source_row_id < min) min = r.source_row_id;
+  for (const r of rows) if (r.raw_id < min) min = r.raw_id;
   return min;
 }
 
-async function onlyFresh<T extends { source_row_id: number }>(
+/** Exposed for the regression test (finding H11, Sep 2026 audit): this
+ *  function shipped with zero test coverage despite being the exact site of
+ *  the 142,511-row stack overflow fixed in e86357f. */
+export const __minRawIdForTest = minRawId;
+
+/** Rows not yet in canonical, by raw_id — see existingRawIds for why not source_row_id. */
+async function onlyFresh<T extends { raw_id: number }>(
   pool: ConnectionPool,
   table: string,
   rows: T[],
   extraFilter = '',
 ): Promise<T[]> {
   if (rows.length === 0) return rows;
-  const seen = await existingSourceIds(
-    pool, table, extraFilter, minSourceRowId(rows),
-  );
-  return rows.filter((r) => !seen.has(Number(r.source_row_id)));
+  const seen = await existingRawIds(pool, table, extraFilter, minRawId(rows));
+  return rows.filter((r) => !seen.has(Number(r.raw_id)));
 }
 import { computeFindings, persistFindings, type Finding } from './dq.js';
 import { seedRejectCodes } from './seedRejectCodes.js';
@@ -140,6 +145,54 @@ export async function resetTransformWatermarks(pool: ConnectionPool, table: stri
   for (const key of WM_BY_TABLE[table] ?? []) await setWatermark(pool, key, 0);
 }
 
+/**
+ * The night-attribution rule currently on file (Q8's still-open half), read
+ * fresh from sms.shift_rule at the start of every pass.
+ *
+ * Fixes finding H5 (Sep 2026 audit): admin.ts's /api/admin/rules/shift wrote
+ * this table and told the caller "rebuild canonical to apply" — but this
+ * module is a pure, DB-free mapping (by design: see the file header) that
+ * only ever read cfg.appConfig.shift.nightBelongsTo, itself frozen from the
+ * SHIFT_NIGHT_BELONGS_TO env var at process startup. A rebuild after using
+ * that endpoint re-derived the OLD rule, silently. Falls back to the env
+ * default when the table is empty (a fresh install, or before anyone has
+ * ever changed it), matching the fallback pattern already used for the
+ * plausibility rule in api/src/services/admin.ts.
+ */
+/**
+ * One row per check per pass, not one per reject stream.
+ *
+ * The quality and weight streams are checked separately (each has its own
+ * source-id ordering, which the stale-clock test depends on), but they land in
+ * ONE canonical table. Persisting both results verbatim wrote two
+ * `no_station` rows for `reject_event` on the same pass, and Operations
+ * counts dq_finding ROWS by severity — so a single fault was reported twice.
+ * Counts are summed and both details kept, so the split stays visible.
+ */
+function mergeByCheck(...groups: Finding[][]): Finding[] {
+  const out = new Map<string, Finding>();
+  for (const f of groups.flat()) {
+    const prev = out.get(f.check_name);
+    if (!prev) {
+      out.set(f.check_name, { ...f });
+      continue;
+    }
+    prev.count += f.count;
+    prev.detail = `${prev.detail} | ${f.detail}`;
+  }
+  return [...out.values()];
+}
+
+async function resolveNightBelongsTo(pool: ConnectionPool, lineId: number, fallback: NightBelongsTo): Promise<NightBelongsTo> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ nb: NightBelongsTo }>(
+      `SELECT TOP 1 night_belongs_to nb FROM sms.shift_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+    );
+  return r.recordset[0]?.nb ?? fallback;
+}
+
 // ---- batch helpers ----------------------------------------------------------
 
 async function readRawSince(pool: ConnectionPool, table: string, watermark: number): Promise<Raw[]> {
@@ -167,7 +220,9 @@ async function maxCanonicalTs(pool: ConnectionPool, table: string): Promise<numb
  * The scan is bounded to canonical rows at/after the batch's earliest
  * timestamp: batches are recent, so this window is small on live.
  */
-async function seedExistingCollisions<T extends { production_ts_utc_ms: number; ingest_seq: number }>(
+async function seedExistingCollisions<
+  T extends { production_ts_utc_ms: number; ingest_seq: number; source_epoch: number },
+>(
   pool: ConnectionPool,
   table: string,
   rows: T[],
@@ -176,14 +231,22 @@ async function seedExistingCollisions<T extends { production_ts_utc_ms: number; 
 ): Promise<void> {
   if (rows.length === 0) return;
   const minTs = rows.reduce((m, r) => Math.min(m, r.production_ts_utc_ms), Infinity);
-  const r = await pool
-    .request()
-    .input('minTs', mssql.BigInt, minTs)
-    .query<{ k: string; max_seq: number }>(
-      `SELECT ${keyExprSql} k, MAX(ingest_seq) max_seq
-       FROM ${table} WHERE production_ts_utc_ms >= @minTs
-       GROUP BY ${keyExprSql}`,
-    );
+  // Scoped to the generations actually present in this batch. Two reasons:
+  // the key includes the epoch, so rows from other generations can never
+  // collide and scanning them is waste; and both IFL copies carry a
+  // 1970-01-01 clock-fault row on pack1, so on a full backfill minTs
+  // degenerates to the Unix epoch and the GROUP BY would otherwise sweep the
+  // whole canonical table.
+  const epochs = [...new Set(rows.map((r) => r.source_epoch))];
+  const req = pool.request().input('minTs', mssql.BigInt, minTs);
+  epochs.forEach((e, i) => req.input(`e${i}`, mssql.Int, e));
+  const inList = epochs.map((_, i) => `@e${i}`).join(', ');
+  const r = await req.query<{ k: string; max_seq: number }>(
+    `SELECT ${keyExprSql} k, MAX(ingest_seq) max_seq
+     FROM ${table}
+     WHERE production_ts_utc_ms >= @minTs AND source_epoch IN (${inList})
+     GROUP BY ${keyExprSql}`,
+  );
   if (r.recordset.length === 0) return;
   const existing = new Map(r.recordset.map((x) => [x.k, x.max_seq]));
   for (const row of rows) {
@@ -198,9 +261,41 @@ async function seedExistingCollisions<T extends { production_ts_utc_ms: number; 
 }
 
 // SQL twins of coneKey/sackKey/rejectKey in transform.ts — must stay in step.
-const CONE_KEY_SQL = `CONCAT(production_ts_utc_ms, '|', ISNULL(CAST(hanger_num AS varchar(20)), ''))`;
-const SACK_KEY_SQL = `CAST(production_ts_utc_ms AS varchar(20))`;
-const REJECT_KEY_SQL = `CONCAT(reject_type, '|', production_ts_utc_ms, '|', ISNULL(CAST(hanger_num AS varchar(20)), ''))`;
+const CONE_KEY_SQL = `CONCAT(production_ts_utc_ms, '|', ISNULL(CAST(hanger_num AS varchar(20)), ''), '|', source_epoch)`;
+const SACK_KEY_SQL = `CONCAT(production_ts_utc_ms, '|', source_epoch)`;
+const REJECT_KEY_SQL = `CONCAT(reject_type, '|', production_ts_utc_ms, '|', ISNULL(CAST(hanger_num AS varchar(20)), ''), '|', source_epoch)`;
+
+/**
+ * The transform must never advance its watermark past rows it did not write.
+ *
+ * `fresh` is what onlyFresh said was NOT yet in canonical; `written` is what
+ * the bulk insert actually landed. If the first is non-zero and the second is
+ * zero, rows were dropped between the two — and advancing the watermark would
+ * mark them transformed forever. Under the old source_row_id dedupe that is
+ * exactly how a whole generation vanished silently (every September row
+ * "already seen", watermark advanced, never revisited). Keyed on raw_id it
+ * should now be unreachable; if it is reached, that is a defect to stop on.
+ *
+ * Note what this is NOT: fresh === 0 with raw rows present is legitimate
+ * (a crash between persist and setWatermark re-reads rows that are already
+ * in canonical) and the watermark should advance.
+ */
+async function guardZeroWrite(
+  pool: ConnectionPool,
+  runId: string,
+  table: string,
+  fresh: number,
+  written: number,
+): Promise<void> {
+  if (fresh === 0 || written > 0) return;
+  const detail =
+    `${fresh} rows for ${table} were not yet in canonical but the insert wrote none of them. ` +
+    `Watermark NOT advanced so they are retried; investigate before it advances.`;
+  await persistFindings(pool, runId, [
+    { check_name: 'transform_zero_write', severity: 'CRITICAL', subject_table: table, count: fresh, detail },
+  ]);
+  throw new Error(detail);
+}
 
 export interface TransformOutcome {
   table: string;
@@ -216,6 +311,15 @@ export async function runTransform(
   const runId = randomUUID();
   const out: TransformOutcome[] = [];
 
+  // The DB-recorded rule wins over the env default (finding H5) — resolved
+  // once per pass and threaded through as an override, since mapCone/mapSack/
+  // mapReject stay pure functions of their arguments.
+  const nightBelongsTo = await resolveNightBelongsTo(appPool, cfg.lineId, cfg.appConfig.shift.nightBelongsTo);
+  const cfgForMapping: SyncConfig =
+    nightBelongsTo === cfg.appConfig.shift.nightBelongsTo
+      ? cfg
+      : { ...cfg, appConfig: { ...cfg.appConfig, shift: { ...cfg.appConfig.shift, nightBelongsTo } } };
+
   // cones ---------------------------------------------------------------------
   {
     const wm = await getWatermark(appPool, WM_KEYS.cone, `SELECT MAX(raw_id) m FROM sms.cone_event`);
@@ -225,15 +329,16 @@ export async function runTransform(
     } else {
       const rows = await onlyFresh(
         appPool, 'sms.cone_event',
-        assignMergeKeys(raw.map((r) => mapCone(r, cfg, runId)), coneKey),
+        assignMergeKeys(raw.map((r) => mapCone(r, cfgForMapping, runId)), coneKey),
       );
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
       const findings = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs);
       const res = await persistCanonical(appPool, 'sms.cone_event', CONE_COLS, rows, {
-        minSourceRowId: rows.length ? minSourceRowId(rows) : undefined,
+        minRawId: rows.length ? minRawId(rows) : undefined,
       });
       await persistFindings(appPool, runId, findings);
+      await guardZeroWrite(appPool, runId, 'cone_event', rows.length, res.written);
       await setWatermark(appPool, WM_KEYS.cone, maxRawId(raw));
       out.push({ table: 'cone_event', read: raw.length, written: res.written, findings });
     }
@@ -248,15 +353,16 @@ export async function runTransform(
     } else {
       const rows = await onlyFresh(
         appPool, 'sms.sack_event',
-        assignMergeKeys(raw.map((r) => mapSack(r, cfg, runId)), sackKey),
+        assignMergeKeys(raw.map((r) => mapSack(r, cfgForMapping, runId)), sackKey),
       );
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
       const findings = computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs);
       const res = await persistCanonical(appPool, 'sms.sack_event', SACK_COLS, rows, {
-        minSourceRowId: rows.length ? minSourceRowId(rows) : undefined,
+        minRawId: rows.length ? minRawId(rows) : undefined,
       });
       await persistFindings(appPool, runId, findings);
+      await guardZeroWrite(appPool, runId, 'sack_event', rows.length, res.written);
       await setWatermark(appPool, WM_KEYS.sack, maxRawId(raw));
       out.push({ table: 'sack_event', read: raw.length, written: res.written, findings });
     }
@@ -273,8 +379,8 @@ export async function runTransform(
     } else {
       const mapped = assignMergeKeys(
         [
-          ...qcs.map((r) => mapReject(r, 'quality', cfg, runId)),
-          ...wt.map((r) => mapReject(r, 'weight', cfg, runId)),
+          ...qcs.map((r) => mapReject(r, 'quality', cfgForMapping, runId)),
+          ...wt.map((r) => mapReject(r, 'weight', cfgForMapping, runId)),
         ],
         rejectKey,
       );
@@ -298,14 +404,27 @@ export async function runTransform(
       const w = wFresh;
       const rq = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, q, {
         extraExistingFilter: "AND reject_type = 'quality'",
-        minSourceRowId: q.length ? minSourceRowId(q) : undefined,
+        minRawId: q.length ? minRawId(q) : undefined,
       });
       const rw = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, w, {
         extraExistingFilter: "AND reject_type = 'weight'",
-        minSourceRowId: w.length ? minSourceRowId(w) : undefined,
+        minRawId: w.length ? minRawId(w) : undefined,
       });
-      const findings = computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs);
+      // Finding H7 (Sep 2026 audit): this used to check ONLY the weight-type
+      // batch — quality rejects (2,900 of the real 19-day copy's 3,146, ~12x
+      // the weight-type count) never had future/stale-clock/no-station/
+      // collision checks run on them at all. Checked as two separate calls,
+      // not one on the concatenated array: q and w are independent raw
+      // streams with their own source-id ordering, and the stale-clock check
+      // assumes rows arrive in that order — interleaving two differently-
+      // ordered streams would produce false positives, not a stricter check.
+      const findings = mergeByCheck(
+        computeFindings(q, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs),
+        computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs),
+      );
       await persistFindings(appPool, runId, findings);
+      await guardZeroWrite(appPool, runId, 'reject_event', q.length, rq.written);
+      await guardZeroWrite(appPool, runId, 'reject_event', w.length, rw.written);
       if (qcs.length > 0) await setWatermark(appPool, WM_KEYS.reject_qcs, maxRawId(qcs));
       if (wt.length > 0) await setWatermark(appPool, WM_KEYS.reject_weight, maxRawId(wt));
       out.push({

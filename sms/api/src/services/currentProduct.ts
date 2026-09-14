@@ -26,6 +26,9 @@ export interface ProductOption {
    *  so a supervisor sees it before confirming, not to block the choice: PDAS
    *  being stale is at least as likely as the product genuinely being retired. */
   activeFlag: boolean | null;
+  /** PDAS MaterialDesc2 — real color data on this line (finding M10), never
+   *  surfaced before now. */
+  color: string | null;
 }
 
 export interface TimelineEntry {
@@ -42,11 +45,11 @@ export async function listProducts(pool: ConnectionPool): Promise<ProductOption[
   const r = await pool.request().query<{
     product_id: number; description: string | null; lot_code: string | null; sp: number | null;
     blend: string | null; count_text: string | null; tube_type: string | null; tube_weight_g: number | null;
-    om: number | null; op: number | null; active: boolean | null;
+    om: number | null; op: number | null; active: boolean | null; color: string | null;
   }>(
     `SELECT p.product_id, p.description, p.lot_code, p.setpoint_weight_g AS sp,
             b.blend, y.count_text, t.tube_type, t.tube_weight_g,
-            p.weight_offset_minus_g AS om, p.weight_offset_plus_g AS op, p.active_flag AS active
+            p.weight_offset_minus_g AS om, p.weight_offset_plus_g AS op, p.active_flag AS active, p.color
      FROM sms.product p
      LEFT JOIN sms.blend b ON b.blend_id = p.blend_id
      LEFT JOIN sms.yarn_count y ON y.count_id = p.count_id
@@ -65,6 +68,7 @@ export async function listProducts(pool: ConnectionPool): Promise<ProductOption[
     weightOffsetMinusG: x.om == null ? null : Number(x.om),
     weightOffsetPlusG: x.op == null ? null : Number(x.op),
     activeFlag: x.active == null ? null : Boolean(x.active),
+    color: x.color,
   }));
 }
 

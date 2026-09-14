@@ -171,11 +171,13 @@ const spc = (over: Partial<RejectSpcData>): RejectSpcData => ({
   totalProduced: 100_000,
   totalRejects: 2_000,
   pBar: 0.02,
+  spansGenerations: false,
+  generations: [],
   outOfControlCount: 0,
   buckets: [
-    { bucketTs: '2026-08-30T00:00:00.000Z', produced: 7000, rejects: 140, rate: 0.02, ucl: 0.025, lcl: 0.015, outOfControl: false },
-    { bucketTs: '2026-08-31T00:00:00.000Z', produced: 7000, rejects: 210, rate: 0.03, ucl: 0.025, lcl: 0.015, outOfControl: true },
-    { bucketTs: '2026-09-01T00:00:00.000Z', produced: 7000, rejects: 217, rate: 0.031, ucl: 0.025, lcl: 0.015, outOfControl: true },
+    { bucketTs: '2026-08-30T00:00:00.000Z', generation: 3, produced: 7000, inspected: 7140, rejects: 140, rate: 0.02, ucl: 0.025, lcl: 0.015, outOfControl: false },
+    { bucketTs: '2026-08-31T00:00:00.000Z', generation: 3, produced: 7000, inspected: 7210, rejects: 210, rate: 0.03, ucl: 0.025, lcl: 0.015, outOfControl: true },
+    { bucketTs: '2026-09-01T00:00:00.000Z', generation: 3, produced: 7000, inspected: 7217, rejects: 217, rate: 0.031, ucl: 0.025, lcl: 0.015, outOfControl: true },
   ],
   episodes: [],
   ...over,
@@ -185,7 +187,7 @@ describe('rejectRiseFinding', () => {
   it('reports an episode that is still going', () => {
     const data = spc({
       episodes: [
-        { startTs: '2026-08-31T00:00:00.000Z', endTs: '2026-09-01T00:00:00.000Z', bucketCount: 2, totalRejects: 427, totalProduced: 14_000 },
+        { startTs: '2026-08-31T00:00:00.000Z', endTs: '2026-09-01T00:00:00.000Z', bucketCount: 2, totalRejects: 427, totalProduced: 14_000, totalInspected: 14_427 },
       ],
     });
     expect(rejectRiseFinding(data, 'quality')).toMatchObject({
@@ -194,7 +196,10 @@ describe('rejectRiseFinding', () => {
       screen: 'rejects',
       rejectKind: 'quality',
       sinceUtc: '2026-08-31T00:00:00.000Z',
-      ratePct: 3.1,
+      // 427 / 14,427 inspected = 2.96%. Was 427 / 14,000 cones = 3.05% —
+      // a different denominator from usualPct (= pBar) printed in the
+      // same sentence. Both now divide by cones + rejects.
+      ratePct: 3,
       usualPct: 2,
     });
   });
@@ -202,7 +207,7 @@ describe('rejectRiseFinding', () => {
   it('IGNORES AN EPISODE THAT ALREADY ENDED — history belongs on the Rejects screen', () => {
     const data = spc({
       episodes: [
-        { startTs: '2026-08-20T00:00:00.000Z', endTs: '2026-08-22T00:00:00.000Z', bucketCount: 3, totalRejects: 500, totalProduced: 14_000 },
+        { startTs: '2026-08-20T00:00:00.000Z', endTs: '2026-08-22T00:00:00.000Z', bucketCount: 3, totalRejects: 500, totalProduced: 14_000, totalInspected: 14_500 },
       ],
     });
     expect(rejectRiseFinding(data, 'quality')).toBeNull();
@@ -221,7 +226,7 @@ describe('rejectRiseFinding', () => {
     const data = spc({
       rejectTypeFilter: 'weight',
       episodes: [
-        { startTs: '2026-09-01T00:00:00.000Z', endTs: '2026-09-01T00:00:00.000Z', bucketCount: 1, totalRejects: 217, totalProduced: 7000 },
+        { startTs: '2026-09-01T00:00:00.000Z', endTs: '2026-09-01T00:00:00.000Z', bucketCount: 1, totalRejects: 217, totalProduced: 7000, totalInspected: 7217 },
       ],
     });
     expect(rejectRiseFinding(data, 'weight')?.rejectKind).toBe('weight');

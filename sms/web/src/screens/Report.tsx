@@ -19,7 +19,7 @@ import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import { Block, Empty, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor } from '../ui/chart';
-import { fmtDayLong, fmtInt, fmtSpan } from '../lib/fmt';
+import { fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { downloadCsv, csvName, type CsvRow } from '../csv';
 import { getReport, type ReportData, type ReportLine, type AuthUser } from '../api';
 
@@ -147,10 +147,10 @@ function coverage(d: ReportData): string {
 function Totals({ t }: { t: ReportLine }) {
   return (
     <div className="figs four">
-      <Fig v={fmtInt(t.cones)} u={W.fig.cones} n={t.conesInRangePct != null ? W.withinLimits(`${t.conesInRangePct}%`) : null} />
+      <Fig v={fmtInt(t.cones)} u={W.fig.cones} n={t.conesInRangePct != null ? W.withinLimits(fmtPct1(t.conesInRangePct)) : null} />
       <Fig v={fmtInt(t.sacks)} u={W.fig.sacks} n={t.conesPerSack != null ? `${t.conesPerSack} ${W.report.perSack}` : null} />
-      <Fig v={fmtInt(Math.round(t.sackWeightKg))} u={W.fig.kg} n={t.avgSackKg != null ? `${t.avgSackKg} kg ${W.report.averageSack}` : null} />
-      <Fig v={fmtInt(t.rejectedCones)} u={W.fig.rejected} n={t.rejectRatePct != null ? W.ofEverything(`${Math.round(t.rejectRatePct * 10) / 10}%`) : null} />
+      <Fig v={fmtInt(Math.round(t.sackWeightKg))} u={W.fig.kg} n={t.avgSackKg != null ? `${fmtKg(t.avgSackKg)} ${W.report.averageSack}` : null} />
+      <Fig v={fmtInt(t.rejectedCones)} u={W.fig.rejected} n={t.rejectRatePct != null ? W.ofEverything(fmtPct1(t.rejectRatePct)) : null} />
     </div>
   );
 }
@@ -276,7 +276,7 @@ function LineTable({ rows, head }: { rows: ReportLine[]; head: string }) {
             <td>{head === W.report.colShift ? (W.shiftName[r.group as 'morning'] ?? r.group) : fmtDayShort(r.group)}</td>
             <td className="n">{fmtInt(r.cones)}</td>
             <td className="n">{fmtInt(r.sacks)}</td>
-            <td className="n">{fmtInt(Math.round(r.sackWeightKg))} kg</td>
+            <td className="n">{fmtInt(Math.round(r.sackWeightKg))} {W.fig.kg}</td>
             <td className="n">{fmtInt(r.rejectedCones)}</td>
           </tr>
         ))}

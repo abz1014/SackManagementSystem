@@ -79,6 +79,26 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
   };
 }
 
+/**
+ * node-mssql defaults `requestTimeout` to 15 seconds, which is sized for the
+ * incremental pass (measured median 5ms, p95 10ms) and far too short for the
+ * bulk paths that share this pool: a first backfill and a `rebuild` both hand
+ * the transform the WHOLE history in one batch, and the rebuild's DELETE
+ * clears the whole canonical table in one statement.
+ *
+ * Measured, Sep 2026 audit: `rebuild --table=cone_event` over 204,076 rows
+ * failed outright — "Failed to cancel request in 5000ms" — leaving the audit
+ * row 'failed' and the table untouched. cone_event had therefore NEVER been
+ * rebuilt successfully, which matters because a rebuild is the prescribed
+ * remedy for a mixed shift-rule regime (H5). sack_event (8,201) and
+ * reject_event (4,570) fit inside 15s and hid the problem.
+ *
+ * This is a maintenance-path timeout on the worker/CLI pools only — the API
+ * builds its own pool and keeps its short one, so no user-facing request can
+ * hang for ten minutes.
+ */
+export const SYNC_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
 /** Translate our DbConfig into an mssql connection config. */
 export function toMssqlConfig(c: DbConfig) {
   return {
@@ -95,5 +115,6 @@ export function toMssqlConfig(c: DbConfig) {
       useUTC: true,
     },
     pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
+    requestTimeout: SYNC_REQUEST_TIMEOUT_MS,
   };
 }

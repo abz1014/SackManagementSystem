@@ -4,10 +4,33 @@ import { createServer as createHttpsServer } from 'node:https';
 import { loadDotEnv, createPool } from '@sms/sync-worker';
 import { loadApiConfig } from './config.js';
 import { createApp } from './app.js';
+import { plantOffsetMinutes } from './services/plantClock.js';
+
+/**
+ * Cross-checks PLANT_UTC_OFFSET_MINUTES (if set) against this process's own
+ * OS timezone (finding M6, Sep 2026 audit). plantClock.ts's whole two-clocks
+ * design assumes the deployment host's timezone equals the plant's; nothing
+ * previously verified that, and a mismatch fails silently by exactly the
+ * offset — five hours on this plant. A loud warning, not a crash: getting
+ * this check wrong must never be worse than not having it.
+ */
+function checkPlantOffset(expectedMinutes: number | undefined): void {
+  if (expectedMinutes == null) return;
+  const actual = plantOffsetMinutes();
+  if (actual !== expectedMinutes) {
+    console.error(
+      `[plantClock] WARNING: this host's OS timezone reports a UTC offset of ${actual} minutes, ` +
+        `but PLANT_UTC_OFFSET_MINUTES says the plant is at ${expectedMinutes}. Every production/app-time ` +
+        `comparison in this app (product changeovers, calibration adjustments, live status) will be off by ` +
+        `${actual - expectedMinutes} minutes until this host's timezone matches the plant's.`,
+    );
+  }
+}
 
 async function main(): Promise<void> {
   loadDotEnv();
   const cfg = loadApiConfig();
+  checkPlantOffset(cfg.plantUtcOffsetMinutes);
   const pool = await createPool(cfg.appDb);
   const app = createApp(pool, cfg);
 

@@ -26,30 +26,3 @@ export function shiftCodeFromMinutes(minutes: number): ShiftCode {
   return 'night';
 }
 
-/**
- * Derive the corrected shift code from a real production timestamp.
- * Pure function — no timezone surprises; caller supplies a local Date.
- */
-export function shiftCodeFromLocalTime(local: Date): ShiftCode {
-  return shiftCodeFromMinutes(local.getHours() * 60 + local.getMinutes());
-}
-
-/**
- * Business date the shift is counted against.
- * For the night shift (22:00–06:00) the rule is still open (Q8): under
- * 'start_day' a 02:00 event belongs to the previous calendar day.
- */
-export function shiftDateFromLocalTime(
-  local: Date,
-  rule: NightBelongsTo,
-): { year: number; month: number; day: number } {
-  const d = new Date(local.getTime());
-  if (rule === 'start_day') {
-    const minutes = d.getHours() * 60 + d.getMinutes();
-    // Night shift after midnight but before 06:00 belongs to the previous day.
-    if (minutes < SHIFT_BOUNDARIES.morningStart) {
-      d.setDate(d.getDate() - 1);
-    }
-  }
-  return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
-}

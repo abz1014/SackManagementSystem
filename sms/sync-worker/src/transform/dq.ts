@@ -5,6 +5,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { plantNowMs } from '@sms/shared';
 
 export type Severity = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
 
@@ -53,9 +54,12 @@ export function computeFindings<T extends Weighted>(
   // wallClock.ts / format.ts) — comparing it against real UTC Date.now()
   // would flag EVERY live reading as "future" on a UTC+5 plant, an error
   // that never fires in dev against weeks-old data and floods findings from
-  // the first live pass. Compare wall clock against wall clock: this
-  // process runs on the plant PC, so its own local wall time IS the plant's.
-  const nowMs = Date.now() - new Date().getTimezoneOffset() * 60_000 + FUTURE_SKEW_MS;
+  // the first live pass. Compare wall clock against wall clock via
+  // plantNowMs() (finding L2, Sep 2026 audit: this used to be its own third
+  // independent copy of that formula, alongside api's plantClock.ts and
+  // live.ts) — this process runs on the plant PC, so its own local wall time
+  // IS the plant's.
+  const nowMs = plantNowMs() + FUTURE_SKEW_MS;
   let future = 0;
   let stale = 0;
   let noStation = 0;
@@ -118,6 +122,11 @@ export async function persistFindings(
   findings: Finding[],
 ): Promise<void> {
   for (const f of findings) {
+    // Deduplicated on (check, table, detail). A finding that halts a pass is
+    // raised again on every retry — every 60 s — and a bare INSERT would grow
+    // the table by thousands of identical rows a day (4 tables x 1,440 passes).
+    // Migration 016 cleaned that up once; this stops it recurring. The
+    // standing state is what the Operations screen shows, not a tally.
     await pool
       .request()
       .input('run', mssql.UniqueIdentifier, runId)
@@ -127,7 +136,12 @@ export async function persistFindings(
       .input('detail', mssql.NVarChar(500), f.detail)
       .query(
         `INSERT INTO sms.dq_finding (run_id, check_name, severity, subject_table, detail)
-         VALUES (@run, @check, @sev, @tbl, @detail)`,
+         SELECT @run, @check, @sev, @tbl, @detail
+          WHERE NOT EXISTS (
+            SELECT 1 FROM sms.dq_finding
+             WHERE check_name = @check
+               AND ISNULL(subject_table, '') = ISNULL(@tbl, '')
+               AND ISNULL(detail, '') = ISNULL(@detail, ''))`,
       );
   }
 }

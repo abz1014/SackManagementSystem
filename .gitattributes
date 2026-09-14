@@ -1,0 +1,17 @@
+# Normalise line endings: LF in the repository for every text file.
+# The index was already all-LF when this was added (14 Sep 2026), so this
+# changes nothing historically; it stops future drift between machines
+# with different core.autocrlf settings.
+* text=auto
+
+# Windows-executed scripts keep CRLF on checkout so PowerShell/cmd read them cleanly.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets
+*.woff2 binary
+*.woff  binary
+*.png   binary
+*.jpg   binary
+*.ico   binary

@@ -1,7 +1,7 @@
 /** Express app factory. Routes mounted here; DB pool injected. */
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { z } from 'zod';
@@ -12,7 +12,9 @@ import { getProduction, type GroupBy } from './services/production.js';
 import { getRejectPareto, setRejectLabel } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
-import { listEvents, getEventDetail, exportEventsCsv, type EventType } from './services/register.js';
+import {
+  listEvents, getEventDetail, exportEventsCsv, type EventType, type OutsideLimitsSegment,
+} from './services/register.js';
 import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
@@ -20,6 +22,9 @@ import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './se
 import { getLive } from './services/live.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, limitsOf, productDisagreement } from './services/productAt.js';
+import { loadProductCatalogue } from './services/productLimits.js';
+import { PdasWriter } from './services/pdasWrite.js';
+import { plantNowMs } from './services/plantClock.js';
 import { getWeightStations } from './services/weightStations.js';
 import { getReport, resolvePeriod, REPORT_PERIODS, type ReportPeriod } from './services/report.js';
 import {
@@ -68,6 +73,13 @@ const productionQuery = z.object({
   shift: z.enum(['morning', 'evening', 'night']).optional(),
   station: z.coerce.number().int().positive().optional(),
   product: z.coerce.number().int().positive().optional(),
+  // Caps the window at an INSTANT so a replay (?at=) shows only what existed
+  // then. The route spreads parsed.data straight into getProduction and keys
+  // its cache on the same object, so both follow automatically.
+  tsTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
+    .optional(),
   groupBy: z.enum(['day', 'shift', 'station', 'none']).default('day'),
 });
 
@@ -76,6 +88,32 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.use(securityHeaders());
   app.use(express.json());
   app.use(authMiddleware(pool)); // attaches req.user (or null) from session cookie
+  // The PDAS write path (§5). Holds the ONLY writable IFL connection in the
+  // API, opened lazily and only if PDAS_WRITE_ENABLED + a writer login are
+  // configured; otherwise every write answers DISABLED with the reason.
+  const pdas = new PdasWriter(pool, cfg.pdasWrite, cfg.lineId);
+
+  // Access log for every non-2xx response except 304 (finding H10, Sep 2026
+  // audit: there was previously no request/access log of any kind — a refused
+  // or redirected request left no trace at all). 5xx is logged by the error
+  // handler below instead, with the stack trace this line doesn't have.
+  //
+  // 304 is the one deliberate exclusion: the live screens poll every 10-60s
+  // and a conditional GET answers 304 almost every time, so logging those
+  // would bury real events under thousands of lines a day. Every other 3xx —
+  // a genuine redirect — IS logged, because those are rare here and a
+  // redirect nobody expected is exactly the kind of thing worth a trace.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const startedAt = Date.now();
+    res.on('finish', () => {
+      if (res.statusCode < 300 || res.statusCode >= 500 || res.statusCode === 304) return;
+      const user = (req as AuthedRequest).user;
+      console.error(
+        `[http] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - startedAt}ms) user=${user?.username ?? 'anonymous'}`,
+      );
+    });
+    next();
+  });
 
   const prodCache = new TtlCache<Envelope<unknown>>(cfg.cacheTtlSeconds * 1000);
   const loginLimiter = new LoginRateLimiter();
@@ -359,6 +397,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
       .optional(),
+    /**
+     * The reading's OWN product — IFL's MaterialId, stamped on every row since
+     * their 2026-08-05 rebuild. When given, the answer is that product's label
+     * and its limits in force at `at`, and the line-wide timeline is not
+     * consulted: six materials run concurrently on different machines, so the
+     * timeline is the wrong question for a reading that knows its product.
+     * Without it, the timeline is the only attribution there is (pre-MaterialId
+     * rows), as before.
+     */
+    productId: z.coerce.number().int().positive().optional(),
   });
   app.get('/api/product-at', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -367,7 +415,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
         return;
       }
-      const timeline = await loadProductTimeline(pool, cfg.lineId);
+      const [timeline, catalogue] = await Promise.all([
+        loadProductTimeline(pool, cfg.lineId),
+        loadProductCatalogue(pool),
+      ]);
       let atMs: number;
       if (q.data.at) {
         atMs = new Date(q.data.at).getTime();
@@ -378,13 +429,40 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           .query<{ ms: string | number | null }>(
             'SELECT MAX(production_ts_utc_ms) AS ms FROM sms.cone_event WHERE line_id=@line',
           );
-        atMs = r.recordset[0]?.ms != null ? Number(r.recordset[0]!.ms) : Date.now();
+        // Finding M5 (Sep 2026 audit): the empty-database fallback used raw
+        // Date.now() — genuine UTC — against a timeline whose effectiveFromMs
+        // values are on the production-time convention (plant wall clock
+        // labelled UTC). Off by the plant's UTC offset. Only reachable before
+        // any cone has ever synced for this line.
+        atMs = r.recordset[0]?.ms != null ? Number(r.recordset[0]!.ms) : plantNowMs();
       }
-      const product = timeline.at(atMs);
+      // Row attribution first (see productAtQuery.productId), timeline second.
+      const rowProduct =
+        q.data.productId != null && (catalogue.product(q.data.productId) || catalogue.versionAt(q.data.productId, atMs))
+          ? (() => {
+              const cp = catalogue.product(q.data.productId!);
+              const v = catalogue.versionAt(q.data.productId!, atMs);
+              return {
+                productId: q.data.productId!,
+                label: cp?.label ?? `Product ${q.data.productId}`,
+                setpointG: v?.setpointG ?? null,
+                weightOffsetMinusG: v?.offsetMinusG ?? null,
+                weightOffsetPlusG: v?.offsetPlusG ?? null,
+                effectiveFromMs: v?.effectiveFromMs ?? atMs,
+                effectiveFromUtc: v?.effectiveFromUtc ?? new Date(atMs).toISOString(),
+              };
+            })()
+          : null;
+      const product = rowProduct ?? timeline.at(atMs);
       res.json({
         at: new Date(atMs).toISOString(),
         product,
-        limits: limitsOf(product),
+        // The limits in force AT that instant, from the versioned history —
+        // not the mirror's current values, which would re-judge the past
+        // every time a setpoint changed (productLimits.ts).
+        limits: product ? (catalogue.limitsAt(product.productId, atMs) ?? limitsOf(product)) : null,
+        /** 'row' = the reading's own MaterialId; 'timeline' = the hand-entered line-wide product. */
+        attribution: rowProduct ? 'row' : product ? 'timeline' : null,
         /** True when nothing has ever been recorded, so a screen says it once. */
         neverRecorded: timeline.isEmpty,
       });
@@ -438,14 +516,19 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.setHeader('X-Cache', 'HIT').json(cached);
         return;
       }
-      const timeline = await loadProductTimeline(pool, cfg.lineId);
+      const [timeline, catalogue] = await Promise.all([
+        loadProductTimeline(pool, cfg.lineId),
+        loadProductCatalogue(pool),
+      ]);
       const [stations, disagreement] = await Promise.all([
         getWeightStations(pool, cfg.lineId, from, to),
-        productDisagreement(pool, cfg.lineId, timeline, {
-          from: periodFrom,
-          to: periodTo,
-          shift: q.data.shift ?? null,
-        }),
+        productDisagreement(
+          pool,
+          cfg.lineId,
+          timeline,
+          { from: periodFrom, to: periodTo, shift: q.data.shift ?? null },
+          catalogue,
+        ),
       ]);
       const env = await envelope(pool, cfg.lineId, { ...stations, disagreement });
       prodCache.set(key, env);
@@ -644,9 +727,43 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     wMax: z.coerce.number().optional(),
     tsFrom: isoTs,
     tsTo: isoTs,
+    // Finding H4 (Sep 2026 audit): cones the scale passed but a product's own
+    // limits would not — cone only, resolved to segments below.
+    outsideProductLimits: z.enum(['true']).optional(),
     sort: z.enum(['time', 'weight']).default('time'),
     dir: z.enum(['asc', 'desc']).default('desc'),
   });
+
+  /**
+   * The product timeline's usable-limits stretches, in the shape register.ts's
+   * outsideLimitsSegments filter needs. Segments with no usable limits
+   * (no product recorded, or a product with no setpoint/offsets) are dropped
+   * rather than treated as "anything goes" — an unjudgeable cone is neither
+   * inside nor outside a limit that does not exist.
+   */
+  async function outsideLimitsSegmentsFor(): Promise<OutsideLimitsSegment[]> {
+    const [timeline, catalogue] = await Promise.all([
+      loadProductTimeline(pool, cfg.lineId),
+      loadProductCatalogue(pool),
+    ]);
+    const asc = [...timeline.entries].sort((a, b) => a.effectiveFromMs - b.effectiveFromMs);
+    const segments: OutsideLimitsSegment[] = [];
+    for (let i = 0; i < asc.length; i++) {
+      const seg = asc[i]!;
+      // Limits as they stood when this segment began, not as the mirror holds
+      // them today. Segments follow the line-wide timeline, which is the only
+      // attribution readings from before MaterialId existed can have.
+      const limits = catalogue.limitsAt(seg.productId, seg.effectiveFromMs) ?? limitsOf(seg);
+      if (!limits) continue;
+      segments.push({
+        fromMs: seg.effectiveFromMs,
+        toMs: asc[i + 1]?.effectiveFromMs ?? null,
+        loG: limits.loG,
+        hiG: limits.hiG,
+      });
+    }
+    return segments;
+  }
 
   function parseRegisterQuery(raw: unknown) {
     const parsed = registerQuery.safeParse(raw);
@@ -669,7 +786,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid page/pageSize' });
         return;
       }
-      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data });
+      const outsideLimitsSegments =
+        q.outsideProductLimits && q.type === 'cone' ? await outsideLimitsSegmentsFor() : undefined;
+      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, outsideLimitsSegments });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -686,7 +805,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid query' });
         return;
       }
-      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, q);
+      const outsideLimitsSegments =
+        q.outsideProductLimits && q.type === 'cone' ? await outsideLimitsSegmentsFor() : undefined;
+      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, outsideLimitsSegments });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${q.type}-events.csv"`);
       if (truncated) res.setHeader('X-Export-Truncated', 'true');
@@ -805,6 +926,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           adjustedAt: z.string().datetime().optional(),
           reason: z.string().max(255).optional(),
           note: z.string().max(500).optional(),
+          // Signed grams the scale was moved by (finding M9) — positive =
+          // now reads heavier, negative = lighter.
+          amountG: z.coerce.number().optional(),
         })
         .safeParse(req.body);
       if (!body.success) {
@@ -825,7 +949,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const adjustedAt = body.data.adjustedAt ? new Date(body.data.adjustedAt) : new Date();
       const id = await recordCalibrationAdjustment(
         pool, cfg.lineId, body.data.stationId ?? null, adjustedAt, user.userId,
-        body.data.reason ?? null, body.data.note ?? null,
+        body.data.reason ?? null, body.data.note ?? null, body.data.amountG ?? null,
       );
       audit(
         req, 'calibration.adjustment', 'station', body.data.stationId ?? 'line-wide',
@@ -893,6 +1017,127 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = await setCurrent(pool, cfg.lineId, body.data.productId, eff, user.userId, body.data.reason ?? null);
       audit(req, 'product.changeover', 'product', body.data.productId, body.data.reason ?? null);
       res.json({ timelineId: id, current: await getCurrent(pool, cfg.lineId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- PDAS write path: product Add / Retire / Change limits (§5) ----
+  // Rank 3 (manager). These change what the scale ACCEPTS, not what a report
+  // is labelled — heavier than /api/current-product's rank 2. The status
+  // endpoint is open to any signed-in user so the screen can be read-only and
+  // say why, instead of offering a button that can only answer 503.
+  app.get('/api/product-write/status', async (req: Request, res: Response) => {
+    const user = (req as AuthedRequest).user;
+    res.json({
+      enabled: pdas.enabled,
+      reason: pdas.disabledReason,
+      canWrite: Boolean(user) && (user?.rank ?? 0) >= 3 && pdas.enabled,
+    });
+  });
+
+  // The pickers for "Create a new product": the mirrored reference tables.
+  app.get('/api/product-options', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const [b, c, t] = await Promise.all([
+        pool.request().query<{ id: number; name: string }>(`SELECT blend_id id, blend name FROM sms.blend ORDER BY blend`),
+        pool.request().query<{ id: number; name: string }>(`SELECT count_id id, count_text name FROM sms.yarn_count ORDER BY count_val, count_text`),
+        pool.request().query<{ id: number; name: string; tubeWeightG: number | null }>(
+          `SELECT tube_type_id id, tube_type name, tube_weight_g tubeWeightG FROM sms.tube_type ORDER BY tube_type`,
+        ),
+      ]);
+      res.json({ blends: b.recordset, counts: c.recordset, tubeTypes: t.recordset });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const productFields = z.object({
+    setpointG: z.coerce.number().positive(),
+    offsetMinusG: z.coerce.number().min(0),
+    offsetPlusG: z.coerce.number().min(0),
+    desc1: z.string().max(255).nullable().optional().transform((v) => v ?? null),
+    desc2: z.string().max(255).nullable().optional().transform((v) => v ?? null),
+    active: z.coerce.boolean(),
+  });
+  const writeReason = z.string().min(10).max(255);
+  const setpointBounds = async () => {
+    const p = await getPlausibilityRule(pool, cfg.lineId);
+    return { setpointLoG: p.coneLoG, setpointHiG: p.coneHiG };
+  };
+  const actorOf = (req: Request) => {
+    const u = (req as AuthedRequest).user!;
+    return { userId: u.userId, username: u.username };
+  };
+  const writeStatus = (code: string): number =>
+    code === 'DISABLED' ? 503 : code === 'CONFLICT' ? 409 : code === 'IMPLAUSIBLE' ? 400 : code === 'NOT_FOUND' ? 404 : code === 'PDAS_ERROR' ? 422 : 500;
+
+  app.post('/api/products', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const b = z
+        .object({
+          blendId: z.coerce.number().int().positive(),
+          countId: z.coerce.number().int().positive(),
+          tubeTypeId: z.coerce.number().int().positive(),
+          fields: productFields,
+          reason: writeReason,
+        })
+        .safeParse(req.body);
+      if (!b.success) {
+        res.status(400).json({ error: 'invalid product', detail: b.error.flatten().fieldErrors });
+        return;
+      }
+      const r = await pdas.createProduct({ ...b.data, bounds: await setpointBounds(), actor: actorOf(req) });
+      if (!r.ok) {
+        res.status(writeStatus(r.code)).json({ error: r.message, code: r.code, pdasErrorCode: r.pdasErrorCode ?? null });
+        return;
+      }
+      res.json({ productId: r.productId, products: await listProducts(pool) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/products/:id/active', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = z.coerce.number().int().positive().safeParse(req.params.id);
+      const b = z.object({ active: z.coerce.boolean(), reason: writeReason }).safeParse(req.body);
+      if (!id.success || !b.success) {
+        res.status(400).json({ error: 'productId, active and a reason of at least 10 characters are required' });
+        return;
+      }
+      const r = await pdas.setProductActive({ productId: id.data, active: b.data.active, reason: b.data.reason, actor: actorOf(req) });
+      if (!r.ok) {
+        res.status(writeStatus(r.code)).json({ error: r.message, code: r.code, pdasErrorCode: r.pdasErrorCode ?? null });
+        return;
+      }
+      res.json({ productId: r.productId, active: r.active, products: await listProducts(pool) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/products/:id/limits', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = z.coerce.number().int().positive().safeParse(req.params.id);
+      const b = z.object({ before: productFields, after: productFields, reason: writeReason }).safeParse(req.body);
+      if (!id.success || !b.success) {
+        res.status(400).json({ error: 'productId, before, after and a reason of at least 10 characters are required' });
+        return;
+      }
+      const r = await pdas.updateProductLimits({
+        productId: id.data,
+        before: b.data.before,
+        after: b.data.after,
+        bounds: await setpointBounds(),
+        reason: b.data.reason,
+        actor: actorOf(req),
+      });
+      if (!r.ok) {
+        res.status(writeStatus(r.code)).json({ error: r.message, code: r.code, pdasErrorCode: r.pdasErrorCode ?? null });
+        return;
+      }
+      res.json({ productId: r.productId, observedAfter: r.observedAfter, products: await listProducts(pool) });
     } catch (err) {
       next(err);
     }
@@ -976,7 +1221,24 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       if (!b.success) { res.status(400).json({ error: 'invalid' }); return; }
       await setShiftRule(pool, cfg.lineId, b.data.mode, b.data.nightBelongsTo, (req as AuthedRequest).user!.userId, b.data.reason ?? null);
       audit(req, 'rule.shift', 'shift_rule', cfg.lineId, `mode ${b.data.mode}, night belongs to ${b.data.nightBelongsTo}`);
-      res.json({ ok: true, note: 'shift rule stored; rebuild canonical to apply to stored shift_code/shift_date' });
+      // Finding H5 (Sep 2026 audit): this note used to say "rebuild canonical
+      // to apply" while the transform actually read a static env var and
+      // never this table at all — a rebuild silently re-derived the OLD
+      // rule. runTransform.ts now resolves night_belongs_to from this table
+      // fresh every pass, so the note is now true: new syncs pick it up
+      // immediately, and a rebuild is only needed to recompute what is
+      // already stored. The corrected/legacy `mode` itself remains recorded
+      // but not yet applied anywhere — Q7 (fix vs reproduce) is still open.
+      res.json({
+        ok: true,
+        rebuildRequired: true,
+        note:
+          'Night-attribution rule stored. The transform picks it up on its NEXT pass, so from now on new rows ' +
+          'are stamped under the new rule while everything already in canonical keeps the old one — until you ' +
+          'rebuild, one table holds two attribution regimes and every shift_date figure blends them. ' +
+          'Run: sms rebuild --table=cone_event --snapshot-id=<id> (and the same for sack_event and reject_event). ' +
+          'The corrected/legacy mode is recorded for when Q7 is resolved; it does not change shift_code yet.',
+      });
     } catch (e) { next(e); }
   });
   app.post('/api/admin/rules/plausibility', requireRole(4), async (req, res, next) => {
@@ -1011,16 +1273,30 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.use('/api', (_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));
 
   // production single-service: serve the built React app if WEB_DIST is set/exists
-  const webDist = process.env.WEB_DIST ?? join(process.cwd(), 'web', 'dist');
+  //
+  // resolve(), not the raw value: res.sendFile REFUSES a relative path
+  // ("path must be absolute or specify root"), and DEPLOY.md's own setup step
+  // tells operators to set `WEB_DIST=./web/dist`. express.static tolerates a
+  // relative path, so the app looked fine — assets loaded — while every request
+  // that fell through to the SPA fallback answered 500. Found by running the
+  // built stack with the documented value (Sep 2026 audit follow-up).
+  const webDist = resolve(process.env.WEB_DIST ?? join(process.cwd(), 'web', 'dist'));
   if (existsSync(join(webDist, 'index.html'))) {
     app.use(express.static(webDist));
     // SPA fallback for client-side routes (non-/api)
     app.get('*', (_req: Request, res: Response) => res.sendFile(join(webDist, 'index.html')));
   }
 
-  // error handler — never leak internals
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    console.error('api error:', err instanceof Error ? err.message : err);
+  // Error handler — never leak internals to the client, but log everything an
+  // on-call engineer needs at 2am. Previously logged only err.message with no
+  // request, no path and no stack (finding H10, Sep 2026 audit) — the entire
+  // diagnostic artifact for a 500 was a bare one-line message.
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    const user = (req as AuthedRequest).user;
+    console.error(
+      `api error: ${req.method} ${req.originalUrl} user=${user?.username ?? 'anonymous'}`,
+      err instanceof Error ? (err.stack ?? err.message) : err,
+    );
     res.status(500).json({ error: 'internal error' });
   });
 

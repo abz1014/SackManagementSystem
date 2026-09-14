@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "IFL Sack Management System — monorepo root",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
   "workspaces": [
     "shared",
     "sync-worker",
@@ -12,10 +16,12 @@
   ],
   "scripts": {
     "build:shared": "npm run build --workspace @sms/shared",
-    "dev": "echo \"Step 0 scaffold — per-workspace dev scripts arrive with Steps 1-3\" && exit 0",
-    "typecheck": "tsc -b shared sync-worker cli api",
+    "dev": "echo \"Run per workspace: 'npm run dev --workspace @sms/web' (Vite on :5173) and 'node api/dist/index.js' after a build. See DEPLOY.md.\" && exit 0",
+    "typecheck": "tsc -b shared sync-worker cli api web",
     "test": "vitest run",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "build": "npm run build --workspace @sms/shared && npm run build --workspace @sms/sync-worker && npm run build --workspace @sms/cli && npm run build --workspace @sms/api && npm run build --workspace @sms/web",
+    "verify:release": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "mssql": "^11.0.1",

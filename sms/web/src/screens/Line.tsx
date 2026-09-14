@@ -29,15 +29,15 @@ import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import {
-  Block, Chevron, Details, Empty, Figures, Loading,
+  Block, Chevron, Details, Empty, Failed, Figures, Loading,
   SkelFigures, SkelLines, SkelStations,
 } from '../ui/bits';
-import { fmtClock, fmtG, fmtInt, fmtKg, fmtSpan, secondsBetween } from '../lib/fmt';
+import { fmtClock, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
   getAttention, getProduction, getProductAt, getStations, stationLabel,
   type AttentionFinding, type LiveLine, type ProductionRow, type StationRow,
 } from '../api';
-import type { Screen } from '../ui/Bar';
+import type { Screen, ReadingsFilter } from '../ui/Bar';
 
 /**
  * How long a station must be silent before it is worth saying so — measured
@@ -64,7 +64,7 @@ export function LineScreen({
   canWrite,
 }: {
   period: Period;
-  onNavigate: (s: Screen) => void;
+  onNavigate: (s: Screen, filter?: ReadingsFilter) => void;
   onOpenStation: (station: number) => void;
   onOpenReading: (type: 'cone' | 'sack', id: string | number) => void;
   onChangeProduct: () => void;
@@ -79,18 +79,25 @@ export function LineScreen({
   // month" and "This shift" printed the same three numbers on the one screen
   // whose question is "what has it made this period" — the period control was
   // global everywhere except the home screen.
-  const periodKey = `${period.from}:${period.to}:${period.shift ?? 'all'}`;
+  // tsTo is what makes a replay honest. /api/live caps its counts at the
+  // replay instant; /api/production had no instant bound at all, so under
+  // `?at=` this screen counted the WHOLE shift while the Wall display counted
+  // up to the replayed moment — mid-shift, Line read roughly double Wall for
+  // the same shift. period.ts documents tsTo as exactly this guard.
+  const periodKey = `${period.from}:${period.to}:${period.shift ?? 'all'}:${period.tsTo}`;
   const totals = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, groupBy: 'none' }),
+    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: 'none' }),
     period.live ? REFRESH_MS : 5 * 60_000,
     `line-totals:${periodKey}`,
   );
   const perStation = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, groupBy: 'station' }),
+    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: 'station' }),
     period.live ? REFRESH_MS : 5 * 60_000,
     `line-stations:${periodKey}`,
   );
-  const product = usePolling(() => getProductAt(), REFRESH_MS, 'product-at');
+  // Same leak, same fix: with no argument this asked for the product running
+  // NOW, so a July replay showed today's product beside July's readings.
+  const product = usePolling(() => getProductAt(period.tsTo), REFRESH_MS, `product-at:${period.tsTo}`);
   const attention = usePolling(
     () => getAttention({ from: period.from, to: period.to, shift: period.shift }),
     REFRESH_MS,
@@ -110,7 +117,12 @@ export function LineScreen({
       </div>
 
       <Block first>
-        {totals.data ? (
+        {/* Finding H14 (Sep 2026 audit): a persistent fetch failure used to
+            render this as an unending skeleton — indistinguishable from
+            "still loading" no matter how long it had actually been failing. */}
+        {totals.error && !totals.data ? (
+          <Failed error={totals.error} onRetry={totals.refresh} />
+        ) : totals.data ? (
           <Figures items={periodFigures(totals.data.data.rows[0] ?? null)} />
         ) : (
           <SkelFigures n={3} />
@@ -121,29 +133,61 @@ export function LineScreen({
         label={W.attention}
         note={attention.data ? W.judgedOver(attention.data.data.window.days) : null}
       >
-        <AttentionList
-          findings={attention.data?.data.findings ?? []}
-          total={attention.data?.data.totalFindings ?? 0}
-          stations={stations.data?.stations ?? []}
-          loading={attention.loading && !attention.data}
-          onNavigate={onNavigate}
-        />
+        {/* Finding H14: the worst instance found — a failed attention check
+            used to render "Nothing needs attention", the calm state, because
+            an empty findings array looks identical whether the check ran and
+            found nothing or never ran at all. */}
+        {attention.error && !attention.data ? (
+          <Failed error={attention.error} onRetry={attention.refresh} />
+        ) : (
+          <AttentionList
+            findings={attention.data?.data.findings ?? []}
+            total={attention.data?.data.totalFindings ?? 0}
+            stations={stations.data?.stations ?? []}
+            loading={attention.loading && !attention.data}
+            onNavigate={onNavigate}
+          />
+        )}
       </Block>
 
-      <Block label={W.product.title} note={<a href="#history">{W.product.history}</a>}>
-        <ProductBlock data={product.data} canWrite={canWrite} onChange={onChangeProduct} />
+      <Block
+        label={W.product.title}
+        // Fixed alongside H3 (Sep 2026 audit): this linked to a #history
+        // anchor that existed nowhere on the page. It now opens the same
+        // product sheet the Change button does, which carries the full
+        // changeover history — available to every reader, not only canWrite.
+        note={<button type="button" className="linkish" onClick={onChangeProduct}>{W.product.history}</button>}
+      >
+        {product.error && !product.data ? (
+          <Failed error={product.error} onRetry={product.refresh} />
+        ) : (
+          <ProductBlock data={product.data} canWrite={canWrite} onChange={onChangeProduct} />
+        )}
       </Block>
 
       <Block
         label={`${W.stations} — ${W.stationsNote}`}
         note={quietNote(line, stations.data?.stations ?? [])}
       >
-        <StationRowGrid
-          line={line}
-          stations={stations.data?.stations ?? []}
-          counts={perStation.data?.data.rows ?? null}
-          onOpen={onOpenStation}
-        />
+        {/* perStation counted too: without it a failed counts fetch left
+            every station cell in its permanent loading state — the
+            endless-skeleton half of H14, in the same block as the fixed half. */}
+        {(stations.error && !stations.data) || (perStation.error && !perStation.data) ? (
+          <Failed
+            error={stations.error ?? perStation.error}
+            onRetry={() => {
+              stations.refresh();
+              perStation.refresh();
+            }}
+          />
+        ) : (
+          <StationRowGrid
+            line={line}
+            stations={stations.data?.stations ?? []}
+            counts={perStation.data?.data.rows ?? null}
+            onOpen={onOpenStation}
+          />
+        )}
       </Block>
 
       <Block label={W.lastReadings}>
@@ -246,7 +290,7 @@ function periodFigures(r: ProductionRow | null) {
     {
       value: fmtInt(cones),
       unit: W.fig.cones,
-      note: r?.conesInRangePct != null ? W.withinLimits(`${r.conesInRangePct}%`) : null,
+      note: r?.conesInRangePct != null ? W.withinLimits(fmtPct1(r.conesInRangePct)) : null,
     },
     // Rounded: a headline figure with two decimal places reads as precision
     // the reader is being asked to care about, and nobody weighs a shift's
@@ -269,7 +313,7 @@ function AttentionList({
   total: number;
   stations: StationRow[];
   loading: boolean;
-  onNavigate: (s: Screen) => void;
+  onNavigate: (s: Screen, filter?: ReadingsFilter) => void;
 }) {
   // Two lines: the attention list is at most three sentences, and reserving
   // two keeps the block from growing as it lands on a calm shift.
@@ -288,14 +332,27 @@ function AttentionList({
         {findings.map((f, i) => (
           <li key={i}>
             <span className="say">{sentence(f, byId)}</span>{' '}
-            <button type="button" className="linkish" onClick={() => onNavigate(f.screen as Screen)}>
+            <button
+              type="button"
+              className="linkish"
+              // Finding H4 (Sep 2026 audit): this used to open Readings
+              // unfiltered regardless of which finding was clicked — the same
+              // dead end as Weight's disagreement banner.
+              onClick={() => onNavigate(f.screen as Screen, f.kind === 'outside_product_limits' ? 'outsideLimits' : undefined)}
+            >
               {W.nav[f.screen as keyof typeof W.nav]}
             </button>
           </li>
         ))}
       </ul>
+      {/* Name the screen the FIRST HIDDEN finding actually lives on.
+          attention.ts orders drift findings first and caps at three, so the
+          overflow is precisely the reject-rise and outside-limits findings —
+          never Weight, which is what this used to hardcode. */}
       {total > findings.length && (
-        <p className="attn-more">{W.andMore(total - findings.length, W.nav.weight)}</p>
+        <p className="attn-more">
+          {W.andMore(total - findings.length, W.nav[(findings[findings.length - 1]?.screen ?? 'weight') as keyof typeof W.nav])}
+        </p>
       )}
     </>
   );
@@ -319,7 +376,7 @@ function sentence(f: AttentionFinding, stations: Map<number, StationRow>): strin
     case 'reject_rise': {
       const kind = f.rejectKind === 'weight' ? W.rejects.weightKind : W.rejects.quality;
       const since = f.sinceUtc ? fmtClock(f.sinceUtc) : '—';
-      return `${cap(kind)} rejects have been rising since ${since} — ${f.ratePct}% against a usual ${f.usualPct}%.`;
+      return `${cap(kind)} rejects have been rising since ${since} — ${fmtPct1(f.ratePct)} against a usual ${fmtPct1(f.usualPct)}.`;
     }
     case 'outside_product_limits':
       return W.disagreement(f.count ?? 0);
@@ -455,7 +512,9 @@ function LastReadings({
     rows.push({
       label: W.lastSack,
       type: 'sack',
-      id: line.lastSack.sourceRowId,
+      // The permalink takes the canonical PK. sourceRowId is IFL's own counter,
+      // which they reset on 2026-08-05, so it now names two different sacks.
+      id: line.lastSack.eventId,
       text: `${fmtKg(line.lastSack.weightKg)} · ${line.lastSack.inRange === false ? W.rejectedByScale : W.passed} · ${fmtClock(line.lastSack.ts)}`,
     });
   }
@@ -463,7 +522,7 @@ function LastReadings({
     rows.push({
       label: W.lastCone,
       type: 'cone',
-      id: line.lastCone.sourceRowId,
+      id: line.lastCone.eventId,
       text: `${fmtG(line.lastCone.weightG)} · ${line.lastCone.inRange === false ? W.rejectedByScale : W.passed} · Station ${line.lastCone.station ?? '—'} · ${fmtClock(line.lastCone.ts)}`,
     });
   }

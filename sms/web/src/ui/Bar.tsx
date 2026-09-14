@@ -23,6 +23,14 @@ export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'report';
 
 export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'report'] as const;
 
+/**
+ * What Readings should be narrowed to when a link elsewhere promises a
+ * specific population of cones (finding H4, Sep 2026 audit) rather than
+ * opening the plain, unfiltered register. Declared here, alongside `Screen`,
+ * so both App.tsx and the individual screens can import it without a cycle.
+ */
+export type ReadingsFilter = 'outsideLimits' | 'inspectionRejects' | null;
+
 /* -------------------------------------------------------------- the gear */
 
 function GearIcon() {
@@ -40,9 +48,15 @@ function GearIcon() {
 export function PeriodControl({
   value,
   onChange,
+  plantNowUtc,
 }: {
   value: PeriodParams;
   onChange: (p: PeriodParams) => void;
+  /** Finding M11 (Sep 2026 audit): defaulting "Pick dates" from the browser's
+   *  clock reintroduces the exact browser-vs-plant-clock bug class this app
+   *  otherwise avoids everywhere else — a laptop in another timezone, or one
+   *  with a wrong clock, would default the picker to the wrong days. */
+  plantNowUtc: string | null;
 }) {
   const picked = value.picked;
   return (
@@ -54,7 +68,7 @@ export function PeriodControl({
             type="button"
             className={value.key === k ? 'on' : ''}
             aria-pressed={value.key === k}
-            onClick={() => onChange(k === 'pick' ? { key: 'pick', picked: picked ?? todayRange() } : { key: k })}
+            onClick={() => onChange(k === 'pick' ? { key: 'pick', picked: picked ?? todayRange(plantNowUtc) } : { key: k })}
           >
             {W.period[k as PeriodKey]}
           </button>
@@ -83,9 +97,14 @@ export function PeriodControl({
   );
 }
 
-/** A sane starting range when "Pick dates" is first chosen: the last week. */
-function todayRange(): { from: string; to: string } {
-  const d = new Date();
+/**
+ * A sane starting range when "Pick dates" is first chosen: the last week,
+ * anchored on the plant's clock. Falls back to the browser's own clock only
+ * when no plant time has arrived yet (e.g. before the first /api/live poll
+ * resolves) — a genuine last resort, not the default.
+ */
+function todayRange(plantNowUtc: string | null): { from: string; to: string } {
+  const d = plantNowUtc ? new Date(plantNowUtc) : new Date();
   const to = d.toISOString().slice(0, 10);
   d.setUTCDate(d.getUTCDate() - 6);
   return { from: d.toISOString().slice(0, 10), to };
@@ -190,7 +209,7 @@ function dotClass(health: Health): string {
 }
 
 /** The lag sentence, in whichever of its three states is true. */
-export function HealthLine({ health, onOpen }: { health: Health; onOpen: () => void }) {
+export function HealthLine({ health, onOpen, canOpen }: { health: Health; onOpen: () => void; canOpen: boolean }) {
   let text: string;
 
   switch (health.kind) {
@@ -209,6 +228,13 @@ export function HealthLine({ health, onOpen }: { health: Health; onOpen: () => v
     default:
       text = W.lag.noData;
   }
+
+  /* A control a role cannot use is absent — the same rule that removed the
+     Export button from rank 2. "details" opens Setup, which is admin-only, so
+     for everyone else it led to "This is only available to an administrator."
+     The sentence itself still shows: the lag matters to every reader, it is
+     only the way IN to Setup that does not. */
+  if (!canOpen) return <span>{text}</span>;
 
   return (
     /* The whole sentence is the link, and it ends in the word "details":
@@ -270,7 +296,7 @@ export function Bar({
           ))}
         </nav>
 
-        <PeriodControl value={period} onChange={onPeriod} />
+        <PeriodControl value={period} onChange={onPeriod} plantNowUtc={plantNowUtc} />
 
         <div className="bar-right">
           <button type="button" className="btn" onClick={onWall}>
@@ -301,7 +327,7 @@ export function Bar({
             </>
           )}
         </span>
-        <HealthLine health={health} onOpen={onOpenSync} />
+        <HealthLine health={health} onOpen={onOpenSync} canOpen={isAdmin} />
       </div>
     </>
   );

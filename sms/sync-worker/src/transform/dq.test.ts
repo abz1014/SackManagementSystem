@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { plantNowMs } from '@sms/shared';
 import { computeFindings } from './dq.js';
 
 const ms = (iso: string) => new Date(iso + 'Z').getTime();
@@ -112,8 +113,11 @@ describe('future_timestamp measures against the plant WALL clock, not real UTC (
   // production_ts_utc_ms is the plant's wall clock labelled as UTC. On a UTC+5
   // plant, a cone produced RIGHT NOW carries a ms value 5h ahead of Date.now()
   // — the old real-UTC comparison flagged every live reading as "future",
-  // an error invisible in dev against weeks-old data.
-  const wallNow = () => Date.now() - new Date().getTimezoneOffset() * 60_000;
+  // an error invisible in dev against weeks-old data. Uses the same
+  // plantNowMs() the production code calls (finding L2, Sep 2026 audit) —
+  // asserting against an independently hand-rolled copy would only prove the
+  // two copies still agreed today, not that the behavior is correct.
+  const wallNow = plantNowMs;
 
   it('does not flag a reading stamped at the current wall clock', () => {
     const rows = [{ production_ts_utc_ms: wallNow(), merge_key_is_unique: true, weight_g: 1950, source_station: 7 }];

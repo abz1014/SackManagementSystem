@@ -71,7 +71,9 @@ nhs_*Captions / nhs_columnsMaxLen / nhs_settings — UI label & formatting confi
 
 ### 1.3 ⚠️ The two databases are NOT linked
 
-**There is no join key of any kind between `DATA_TP1U2` and `PDAS_TP1U2`.** The weighing records carry no `MaterialId`, `PalletId`, `Lot`, or product code. The only apparent linkage mechanism is **temporal + implicit**: `Materials.MaterialActive = 1` marks the SKU currently running, so a weighing row is attributed to whichever material was active at that moment.
+**SUPERSEDED 11 Sep 2026 — there IS a join key now.** IFL's 2026-08-05 rebuild added **`MaterialId`** to all four wide tables (`pack1`, `sack1`, `rejectQCS1`, `rejectWeight1`), populated on **100 %** of rows in the September sample (pack1 132,552/132,552) and joining cleanly to `PDAS_TP1U2.dbo.Materials`. IFL confirmed on 2026-09-10 that it is trustworthy. Up to **six** materials run concurrently on different machines. The paragraph below describes the July sample and is kept for the record.
+
+*(July sample:)* There is no join key of any kind between `DATA_TP1U2` and `PDAS_TP1U2`. The weighing records carry no `MaterialId`, `PalletId`, `Lot`, or product code. The only apparent linkage mechanism is **temporal + implicit**: `Materials.MaterialActive = 1` marks the SKU currently running, so a weighing row is attributed to whichever material was active at that moment.
 
 This is **Open Question 1** and it is the single biggest determinant of what the app can report. Everything about product-wise / lot-wise reporting depends on the answer.
 
@@ -290,17 +292,35 @@ Numbers below are the **QUESTIONS.md** numbers (client-facing), which differ fro
 
 **Still blocking after this round:** weights gross/net + units (Q4/Q5 = OQ-2/OQ-3), reject-code meanings (Q10 = OQ-5), and the shift fix-vs-reproduce decision (part of Q7/Q8 = OQ-4).
 
+### September 2026 source schema — what changed in IFL's database (recorded 11 Sep 2026)
+
+A second sample (`SPS.rar`, backups dated 2026-09-07) showed that IFL **dropped and recreated all four wide tables on 2026-08-05** (18:54:50–19:03:16, from `sys.tables.create_date`), and that the live schema differs from the July sample:
+
+| Table | July | September |
+|---|---|---|
+| `pack1_TP1U2`, `rejectQCS1_TP1U2`, `rejectWeight1_TP1U2` | `Source` | **`MachineNo`** (same meaning — machine 1–14) **+ `MaterialId`** |
+| `sack1_TP1U2` | — | **`+ MaterialId`** |
+
+Consequences, all now handled in code (`SEPT-2026-EPOCH-DECISION.md` is the build record):
+
+- **Every identity restarted at 1.** `id` is not a stable key across time. The sidecar keeps each physical generation of each table as a `source_epoch` (`sms.source_epoch`), and generations coexist. `source_row_id` is display only.
+- **IFL's live tables hold about a month.** The September sample has nothing before 5 Aug; the July sample is the only copy of 22 Jun–10 Jul we hold. The 10 Jul–5 Aug window exists at IFL and was simply not included in the sample — **still to be requested.**
+- **`MaterialId` resolves OQ-1** (below) and gives per-cone, per-machine product attribution. `NullAttribution` is gone for rows that carry it; rows from before the column existed keep `attribution_method = 'none'` honestly.
+- **PDAS was not rebuilt.** `Materials` ids 1–18 are identical across both samples; September only added 20, 21, 1021–1024. Do not put an epoch on the reference tables.
+- **`rejectWeight1_TP1U2`** captured only 41 rows in the September sample, all in August — it appears to chronically under-record (about 59 % of out-of-range cones in July). Worth asking IFL about; not a defect in this software.
+
 ### Blocking — these change what the app can do
 
-**OQ-1 — How is a sack/cone linked to a product (Material / Lot / order)?** ✅ **RESOLVED 23 Jul 2026.**
+**OQ-1 — How is a sack/cone linked to a product (Material / Lot / order)?** ✅ **RESOLVED 23 Jul 2026 — then SUPERSEDED 11 Sep 2026: IFL's rebuild added `MaterialId` to every weighing row (see the September 2026 section above). The link now exists in IFL's own data and the app uses it. The 23 Jul answer below is kept for the record.**
 Answer: no link exists in the DB and none is required historically. The app will offer a **Current Product** selector (Process Engineer sets it; persists until changed), stored in the **app-owned database**. Product-wise historical reporting is explicitly not required. Implementation: `NullAttribution` remains the default for historical data; `ManualEntryAttribution` becomes a forward-only feature (SPEC.md §5). *(Original question retained below for context.)*
 There is no join key between the weighing data and the product master. Options: (a) infer from `Materials.MaterialActive = 1` at the time of weighing — but **two** materials are currently active, so this is ambiguous; (b) the dropped `P1_ConeID` tag carries it; (c) the link is tracked manually/on paper today; (d) it genuinely isn't tracked. **Which is it?** Without this, we cannot produce product-wise or lot-wise sack reports — only time/shift/station-wise.
 
 **OQ-2 — Is `sack1_TP1U2.Weight` gross or net, and what unit?**
 Values ~47.2. Arithmetic (24 cones × 1.9515 kg + 0.5 kg sack tare = 47.34 kg) suggests **kg, gross, 24 cones/sack**. Confirm: kg or lb? Does it include the sack? Is 24 cones/sack correct and fixed?
 
-**OQ-3 — Is `pack1_TP1U2.Weight` gross or net, and does it include the 70 g tube?**
-Values ~1951, matching `MaterialSetpointWeight` (1950–1960). Presumably **grams**. Is the 70 g `TubeWeight` included (gross) or already subtracted (net yarn)? This changes every yield calculation.
+**OQ-3 — Is `pack1_TP1U2.Weight` gross or net, and does it include the 70 g tube?** ✅ **RESOLVED FOR CONES BY MEASUREMENT, 11 Sep 2026.**
+With `MaterialId` on every September row, IFL's own `inRange` bit can be tested against IFL's own setpoint: it equals `Weight BETWEEN MaterialSetpointWeight − OffsetMinus AND MaterialSetpointWeight + OffsetPlus` on **132,551 of 132,551** joinable cones — zero accepted-outside, zero rejected-inside, across all seven materials present. If the PLC wrote a value on a different basis from the one it compared, that agreement could not hold. **The recorded cone weight and `MaterialSetpointWeight` are one quantity; never subtract the tube.** Mean recorded weight 1,951.8 g against a 1,960 g setpoint (−0.42 %); against setpoint + 70 g tube it would be −78 g. July corroborates independently: accepted weights span exactly [1910, 2007] g inside 1960 ± 50. `WEIGHT_BASIS` stays `as_recorded` for cones. Whether 1,960 g is "with tube" or "yarn alone" is a labelling question only (no arithmetic depends on it) and is still with IFL. **OQ-2 (sack tare) stays open:** the implied packaging weight measures 0.427–0.461 kg against the nominal 0.5, and the 24-cones-per-sack figure is inferred from the ratio, not read from `PackSchemas`.
+*(Original question:)* Values ~1951, matching `MaterialSetpointWeight` (1950–1960). Presumably **grams**. Is the 70 g `TubeWeight` included (gross) or already subtracted (net yarn)? This changes every yield calculation.
 
 **OQ-4 — Should shift be recomputed from `ProductionDate`?** ⚠️ **PARTIAL 23 Jul 2026.**
 Shift boundaries **confirmed: Morning 06:00–14:00, Evening 14:00–22:00, Night 22:00–06:00.** **Still open:** (a) fix-vs-reproduce the shift-lag bug, and (b) the night-shift date rule (does 22:00–06:00 belong to the starting or ending calendar day). Until decided, the sidecar stores both corrected and legacy shift so either can be shown.

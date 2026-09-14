@@ -22,6 +22,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import type { PlausibilityRule } from './admin.js';
 import { nelsonViolations, type NelsonRuleId } from './nelson.js';
+import { consecutiveProductionDays } from './plantClock.js';
 
 function round(n: number, dp = 2): number {
   const f = 10 ** dp;
@@ -132,10 +133,25 @@ export async function getStationDrift(
       // estimator — average moving range / d2 (1.128 for a 2-point range).
       const sigmaDayToDay = individualsSigma(rows.map((x) => x.mean));
 
-      const nelson = nelsonViolations(
-        rows.map((x) => ({ value: x.mean, se: sigmaDayToDay })),
-        grandMean,
-      );
+      // Nelson's "N in a row" rules (2: nine on one side, 3: six trending)
+      // assume consecutive DAYS. `rows` holds only days with readings, so
+      // array neighbours are not calendar neighbours — and the record has a
+      // hole (10 Jul → 5 Aug 2026, IFL's table rebuild) across which two
+      // entries would otherwise read as one continuous run. The rows are
+      // split into calendar-contiguous segments and each is evaluated alone,
+      // so no run can straddle a gap. The engine itself stays date-blind.
+      const points = rows.map((x) => ({ value: x.mean, se: sigmaDayToDay }));
+      const dateOf = (x: { d: Date | string }) => new Date(x.d).toISOString().slice(0, 10);
+      const nelson: NelsonRuleId[][] = [];
+      let segStart = 0;
+      for (let k = 1; k <= rows.length; k++) {
+        const boundary =
+          k === rows.length || !consecutiveProductionDays(dateOf(rows[k - 1]!), dateOf(rows[k]!));
+        if (boundary) {
+          nelson.push(...nelsonViolations(points.slice(segStart, k), grandMean));
+          segStart = k;
+        }
+      }
 
       const days: StationDriftDay[] = rows.map((x, i) => ({
         date: new Date(x.d).toISOString().slice(0, 10),
@@ -175,15 +191,18 @@ export interface CalibrationAdjustment {
   recordedBy: string | null;
   reason: string | null;
   note: string | null;
+  /** Signed grams the scale was moved by (finding M9): positive = now reads
+   *  heavier, negative = lighter. Null when not recorded. */
+  amountG: number | null;
 }
 
 export async function listCalibrationAdjustments(pool: ConnectionPool, lineId: number, limit = 200): Promise<CalibrationAdjustment[]> {
   const r = await pool.request().input('line', mssql.Int, lineId).input('n', mssql.Int, limit).query<{
     adjustment_id: number; station_id: number | null; adjusted_at_utc: Date; recorded_at_utc: Date;
-    recorded_by: string | null; reason: string | null; note: string | null;
+    recorded_by: string | null; reason: string | null; note: string | null; amount_g: number | null;
   }>(
     `SELECT TOP (@n) a.adjustment_id, a.station_id, a.adjusted_at_utc, a.recorded_at_utc,
-            u.display_name AS recorded_by, a.reason, a.note
+            u.display_name AS recorded_by, a.reason, a.note, a.amount_g
      FROM sms.calibration_adjustment a
      LEFT JOIN sms.app_user u ON u.user_id = a.recorded_by
      WHERE a.line_id=@line
@@ -197,6 +216,7 @@ export async function listCalibrationAdjustments(pool: ConnectionPool, lineId: n
     recordedBy: x.recorded_by,
     reason: x.reason,
     note: x.note,
+    amountG: x.amount_g == null ? null : Number(x.amount_g),
   }));
 }
 
@@ -208,6 +228,7 @@ export async function recordCalibrationAdjustment(
   recordedBy: number,
   reason: string | null,
   note: string | null,
+  amountG: number | null,
 ): Promise<number> {
   const r = await pool
     .request()
@@ -217,10 +238,11 @@ export async function recordCalibrationAdjustment(
     .input('by', mssql.Int, recordedBy)
     .input('reason', mssql.NVarChar(255), reason)
     .input('note', mssql.NVarChar(500), note)
+    .input('amount', mssql.Decimal(10, 2), amountG)
     .query<{ id: number }>(
-      `INSERT INTO sms.calibration_adjustment (line_id, station_id, adjusted_at_utc, recorded_by, reason, note)
+      `INSERT INTO sms.calibration_adjustment (line_id, station_id, adjusted_at_utc, recorded_by, reason, note, amount_g)
        OUTPUT INSERTED.adjustment_id id
-       VALUES (@line, @station, @adj, @by, @reason, @note)`,
+       VALUES (@line, @station, @adj, @by, @reason, @note, @amount)`,
     );
   return r.recordset[0]!.id;
 }

@@ -35,12 +35,17 @@ export const __stationForTest = station;
 
 export interface ConeRow {
   line_id: number;
+  /** Source generation (sms.source_epoch). Part of the merge key: two cones nine
+   *  weeks apart in different generations must never be mistaken for a collision. */
+  source_epoch: number;
   production_ts_utc: Date;
   production_ts_utc_ms: number;
   ingest_ts_utc: Date | null;
   shift_code: string;
   shift_date: Date;
   shift_code_legacy: string | null;
+  /** Which night-attribution rule produced this row's shift_date. */
+  night_belongs_to: string;
   hanger_num: number | null;
   source_station: number | null;
   lifter_station: number | null;
@@ -63,6 +68,7 @@ export interface ConeRow {
 
 export interface SackRow {
   line_id: number;
+  source_epoch: number;
   production_ts_utc: Date;
   production_ts_utc_ms: number;
   ingest_ts_utc: Date | null;
@@ -70,6 +76,8 @@ export interface SackRow {
   shift_code: string;
   shift_date: Date;
   shift_code_legacy: string | null;
+  /** Which night-attribution rule produced this row's shift_date. */
+  night_belongs_to: string;
   sack_num: number | null;
   weight_kg: number | null;
   in_range: boolean | null;
@@ -88,6 +96,7 @@ export interface SackRow {
 
 export interface RejectRow {
   line_id: number;
+  source_epoch: number;
   reject_type: 'quality' | 'weight';
   production_ts_utc: Date;
   production_ts_utc_ms: number;
@@ -95,12 +104,16 @@ export interface RejectRow {
   shift_code: string;
   shift_date: Date;
   shift_code_legacy: string | null;
+  /** Which night-attribution rule produced this row's shift_date. */
+  night_belongs_to: string;
   hanger_num: number | null;
   source_station: number | null;
   lifter_station: number | null;
   tube_inspect_code: number | null;
   material_inspect_code: number | null;
   weight_g: number | null;
+  /** IFL's own product key (Sep 2026); null for rows read before it existed. */
+  material_id: number | null;
   source_system: string;
   source_row_id: number;
   raw_id: number;
@@ -111,31 +124,88 @@ export interface RejectRow {
 
 const BASE = {
   source_system: 'ifl_sql',
-  attribution_method: 'none', // NullAttribution (Q1: no historical product-wise)
-  attribution_confidence: null as string | null,
-  material_id: null as number | null,
   lot_code: null as string | null,
 };
 
+/**
+ * Product attribution, from IFL's own `MaterialId` column (Sep 2026).
+ *
+ * This replaces NullAttribution, which was never a design choice — it was forced
+ * by SCHEMA.md OQ-1: the weighing tables carried no product or lot key, so the
+ * two databases could not be joined, and `attribution_method: 'none'` was stamped
+ * on all 142,511 rows. IFL's 2026-08-05 rebuild added `MaterialId` to all four
+ * wide tables, populated on 100% of rows (pack1 132,552/132,552, sack1 5,435/
+ * 5,435, rejectQCS1 6,049/6,049), joining cleanly to PDAS.dbo.Materials. The
+ * owner confirmed with IFL on 2026-09-10 that it is trustworthy.
+ *
+ * `source_column` is deliberately NOT `manual_entry`: this is the plant's own
+ * recorded attribution for that individual cone, not a human telling the app
+ * what was running. Confidence is 'high' because the value comes from the same
+ * acquisition row as the weight — there is no inference step to be wrong about.
+ *
+ * Rows read BEFORE the rebuild keep `none`/null: the source column did not exist
+ * when they were ingested, so their product is genuinely unknown. Saying so is
+ * the point — back-filling them from today's active material would apply a
+ * product to readings taken weeks before it existed, which is precisely the
+ * class of bug CLAUDE.md rule 1 was written to stop.
+ */
+function attribution(rawMaterialId: unknown): {
+  material_id: number | null;
+  attribution_method: string;
+  attribution_confidence: string | null;
+} {
+  const id = num(rawMaterialId);
+  // MaterialId 0 is not a product: it appears only on the single 1970-01-01
+  // clock-fault row, and joins to nothing in PDAS.
+  if (id === null || id <= 0) {
+    return { material_id: null, attribution_method: 'none', attribution_confidence: null };
+  }
+  return { material_id: id, attribution_method: 'source_column', attribution_confidence: 'high' };
+}
+
+/**
+ * EVERY mapper below stamps `line_id: cfg.lineId` — this PROCESS's configured
+ * line, never anything read from the row itself (finding M3, Sep 2026 audit).
+ * This is not a shortcut: IFL's source tables carry NO line-identifying
+ * column at all (see iflTables.ts) — line identity is encoded entirely in
+ * WHICH table you read (the `_TP1U2` suffix is Plant 1 / Unit 2), which
+ * correlates with the deploying process's own config. There is nothing in a
+ * row to check cfg.lineId against, so no code-level verification is possible
+ * with today's data model.
+ *
+ * Dormant with one line. The moment a second line is added (CLAUDE.md
+ * explicitly anticipates this — `line_id` is threaded everywhere for it),
+ * EVERY row that second sync-worker instance reads will be stamped with
+ * WHATEVER LINE_ID that instance's own .env says — correct only if that
+ * instance is also pointed at that second line's own, differently-named
+ * source tables. Getting LINE_ID or the source table names wrong on a second
+ * deployment silently cross-contaminates canonical data between lines, with
+ * nothing in this code able to detect it. This is a deployment-discipline
+ * requirement to document loudly at that point (DEPLOY.md), not a bug fixable
+ * here — there is no ground truth in the row to verify against.
+ */
 export function mapCone(raw: Raw, cfg: SyncConfig, runId: string): ConeRow {
   const eventDt = (raw.src_ProductionDate ?? raw.src_Date) as Date;
   const wc = wallClockOf(eventDt);
   return {
     line_id: cfg.lineId,
+    source_epoch: Number(raw.source_epoch),
     production_ts_utc: eventDt,
     production_ts_utc_ms: wc.ms,
     ingest_ts_utc: (raw.src_Date as Date) ?? null,
     shift_code: shiftCodeOf(wc),
     shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
+    night_belongs_to: cfg.appConfig.shift.nightBelongsTo,
     hanger_num: num(raw.src_HangerNum),
-    source_station: station(raw.src_Source),
+    source_station: station(raw.src_MachineNo),
     lifter_station: station(raw.src_Lifter),
     weight_g: num(raw.src_Weight),
     in_range: bit(raw.src_inRange),
     cone_id: null,
     cone_id_source: null,
     ...BASE,
+    ...attribution(raw.src_MaterialId),
     source_row_id: Number(raw.src_id),
     raw_id: Number(raw.raw_id),
     ingest_run_id: runId,
@@ -151,6 +221,7 @@ export function mapSack(raw: Raw, cfg: SyncConfig, runId: string): SackRow {
   const wc = wallClockOf(eventDt);
   return {
     line_id: cfg.lineId,
+    source_epoch: Number(raw.source_epoch),
     production_ts_utc: eventDt,
     production_ts_utc_ms: wc.ms,
     ingest_ts_utc: eventDt ?? null,
@@ -158,10 +229,12 @@ export function mapSack(raw: Raw, cfg: SyncConfig, runId: string): SackRow {
     shift_code: shiftCodeOf(wc),
     shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
+    night_belongs_to: cfg.appConfig.shift.nightBelongsTo,
     sack_num: num(raw.src_SackNum),
     weight_kg: num(raw.src_Weight),
     in_range: bit(raw.src_inRange),
     ...BASE,
+    ...attribution(raw.src_MaterialId),
     source_row_id: Number(raw.src_id),
     raw_id: Number(raw.raw_id),
     ingest_run_id: runId,
@@ -181,6 +254,7 @@ export function mapReject(
   const wc = wallClockOf(eventDt);
   return {
     line_id: cfg.lineId,
+    source_epoch: Number(raw.source_epoch),
     reject_type: kind,
     production_ts_utc: eventDt,
     production_ts_utc_ms: wc.ms,
@@ -188,12 +262,15 @@ export function mapReject(
     shift_code: shiftCodeOf(wc),
     shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
+    night_belongs_to: cfg.appConfig.shift.nightBelongsTo,
     hanger_num: num(raw.src_HangerNum),
-    source_station: station(raw.src_Source),
+    source_station: station(raw.src_MachineNo),
     lifter_station: station(raw.src_Lifter),
     tube_inspect_code: kind === 'quality' ? num(raw.src_TubeInspectResult) : null,
     material_inspect_code: kind === 'quality' ? num(raw.src_MaterialInspectResult) : null,
     weight_g: kind === 'weight' ? num(raw.src_Weight) : null,
+    // A reject rate is only meaningful per product, so rejects carry the key too.
+    material_id: attribution(raw.src_MaterialId).material_id,
     source_system: 'ifl_sql',
     source_row_id: Number(raw.src_id),
     raw_id: Number(raw.raw_id),
@@ -229,7 +306,12 @@ export function assignMergeKeys<T extends { source_row_id: number; ingest_seq: n
   return rows;
 }
 
-export const coneKey = (r: ConeRow) => `${r.production_ts_utc_ms}|${r.hanger_num ?? ''}`;
-export const sackKey = (r: SackRow) => `${r.production_ts_utc_ms}`;
+// The epoch is part of every key. Without it two cones nine weeks apart in
+// different generations that happen to share (ts, hanger) would be flagged as
+// merge_key_is_unique = 0, which the app reports as DQ-2 "possibly the same cone
+// weighed twice". They are not. It also means assignMergeKeys can never form a
+// cross-epoch collision group, so its source_row_id sort stays deterministic.
+export const coneKey = (r: ConeRow) => `${r.production_ts_utc_ms}|${r.hanger_num ?? ''}|${r.source_epoch}`;
+export const sackKey = (r: SackRow) => `${r.production_ts_utc_ms}|${r.source_epoch}`;
 export const rejectKey = (r: RejectRow) =>
-  `${r.reject_type}|${r.production_ts_utc_ms}|${r.hanger_num ?? ''}`;
+  `${r.reject_type}|${r.production_ts_utc_ms}|${r.hanger_num ?? ''}|${r.source_epoch}`;

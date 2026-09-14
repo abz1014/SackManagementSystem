@@ -29,8 +29,9 @@ import mssql from 'mssql';
 import { getStationDrift, listCalibrationAdjustments, type StationDriftDay } from './calibration.js';
 import { getPlausibilityRule } from './admin.js';
 import { loadProductTimeline, limitsOf } from './productAt.js';
+import { loadProductCatalogue } from './productLimits.js';
 import { driftThresholdG, MIN_DAYS_HELD } from './attention.js';
-import { toPlantMs } from './plantClock.js';
+import { consecutiveProductionDays, toPlantMs } from './plantClock.js';
 
 export interface WeightStationRow {
   station: number;
@@ -76,21 +77,28 @@ export async function getWeightStations(
   from: string,
   to: string,
 ): Promise<WeightStationsData> {
-  const [plausibility, timeline, adjustments] = await Promise.all([
+  const [plausibility, timeline, adjustments, catalogue] = await Promise.all([
     getPlausibilityRule(pool, lineId),
     loadProductTimeline(pool, lineId),
     listCalibrationAdjustments(pool, lineId),
+    loadProductCatalogue(pool),
   ]);
 
   // The target is the product in force at the END of the window: it is what
   // the line is making now, and the table is read to decide what to do next.
-  const product = timeline.at(`${to}T23:59:59Z`);
-  const limits = limitsOf(product);
+  // Its limits come from the versioned history AT that instant, not from the
+  // mirror's current values (productLimits.ts). Still one line-wide target:
+  // with up to six materials running on different machines (Sep 2026 data),
+  // a per-machine target is the honest next step — recorded, not built.
+  const endMs = new Date(`${to}T23:59:59Z`).getTime();
+  const product = timeline.at(endMs);
+  const limits = product ? (catalogue.limitsAt(product.productId, endMs) ?? limitsOf(product)) : null;
 
-  const [drift, rejects] = await Promise.all([
+  const [drift, rejectStats] = await Promise.all([
     getStationDrift(pool, lineId, from, to, plausibility),
     rejectRatesByStation(pool, lineId, from, to),
   ]);
+  const rejects = rejectStats.rates;
 
   const active = drift.stations.filter((s) => s.n > 0);
   const totalN = active.reduce((s, x) => s + x.n, 0);
@@ -124,6 +132,12 @@ export async function getWeightStations(
       const run: StationDriftDay[] = [];
       for (let i = days.length - 1; i >= 0; i--) {
         if (sign(days[i]!.mean - lineMeanG) !== side) break;
+        // A hole in the calendar ends the run as surely as a change of side.
+        // `days` holds only days WITH readings, so array neighbours are not
+        // calendar neighbours: with the record's gap (10 Jul → 5 Aug, IFL's
+        // table rebuild), 2026-07-10 and 2026-08-05 would otherwise count as a
+        // two-day run and the screen would say "heavier for 2 days".
+        if (i < days.length - 1 && !consecutiveProductionDays(days[i]!.date, days[i + 1]!.date)) break;
         run.unshift(days[i]!);
       }
       daysHeld = run.length;
@@ -159,7 +173,13 @@ export async function getWeightStations(
   const key = (s: WeightStationRow) => Math.abs((limits ? s.vsTargetG : s.vsLineG) ?? 0);
   stations.sort((a, b) => Number(b.flagged) - Number(a.flagged) || key(b) - key(a));
 
-  const lineRejects = [...rejects.values()];
+  // Volume-weighted, not an average of the stations' own percentages — a
+  // mean-of-ratios treats a station handling 200 cones/day the same as one
+  // handling 20,000, which is exactly wrong for a LINE total. Fixed Sep 2026
+  // (finding H2): this used to average the per-station rates and read 2.03%
+  // on real data where the true line rate is 2.16%.
+  const lineTotal = rejectStats.totalCones + rejectStats.totalRejects;
+  const lineRejectRatePct = lineTotal > 0 ? round((100 * rejectStats.totalRejects) / lineTotal, 2) : null;
   return {
     from,
     to,
@@ -170,7 +190,7 @@ export async function getWeightStations(
     productLabel: product?.label ?? null,
     thresholdG,
     minDaysHeld: MIN_DAYS_HELD,
-    lineRejectRatePct: lineRejects.length ? round(lineRejects.reduce((s, v) => s + v, 0) / lineRejects.length, 2) : null,
+    lineRejectRatePct,
     stations,
   };
 }
@@ -181,12 +201,15 @@ export async function getWeightStations(
  * The denominator is cones PLUS rejects, because a rejected cone never became
  * a cone_event row — dividing by cones alone would understate every station.
  */
-async function rejectRatesByStation(
+/** Exported for the finding-H2 regression test — the line-rate volume-
+ *  weighting is exercised through this function's totals, not by mocking the
+ *  much larger getWeightStations call graph. */
+export async function rejectRatesByStation(
   pool: ConnectionPool,
   lineId: number,
   from: string,
   to: string,
-): Promise<Map<number, number>> {
+): Promise<{ rates: Map<number, number>; totalCones: number; totalRejects: number }> {
   const r = await pool
     .request()
     .input('line', mssql.Int, lineId)
@@ -210,8 +233,39 @@ async function rejectRatesByStation(
 
   const out = new Map<number, number>();
   for (const row of r.recordset) {
-    const total = Number(row.cones) + Number(row.rejects);
-    if (total > 0) out.set(Number(row.st), (100 * Number(row.rejects)) / total);
+    const cones = Number(row.cones);
+    const rejects = Number(row.rejects);
+    const total = cones + rejects;
+    if (total > 0) out.set(Number(row.st), (100 * rejects) / total);
   }
-  return out;
+
+  /**
+   * The LINE totals are counted WITHOUT the station filter, unlike the
+   * per-station rates above, which cannot exist without a station.
+   *
+   * Summing the per-station rows instead silently excluded every reading that
+   * carries no station id — and the transform raises a `no_station` DQ
+   * finding precisely because those are expected. The Rejects screen's
+   * headline counts them (rejectSpc.ts filters on neither), so the two
+   * screens' "line reject rate" measured different populations and would have
+   * disagreed the moment such a row appeared. Today there are none in the
+   * real data, which is exactly why this had gone unnoticed.
+   */
+  const totals = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('from', mssql.Date, from)
+    .input('to', mssql.Date, to)
+    .query<{ cones: number; rejects: number }>(`
+      SELECT
+        (SELECT COUNT(*) FROM sms.cone_event
+          WHERE line_id = @line AND shift_date BETWEEN @from AND @to) AS cones,
+        (SELECT COUNT(*) FROM sms.reject_event
+          WHERE line_id = @line AND shift_date BETWEEN @from AND @to) AS rejects`);
+  const t = totals.recordset[0];
+  return {
+    rates: out,
+    totalCones: Number(t?.cones ?? 0),
+    totalRejects: Number(t?.rejects ?? 0),
+  };
 }

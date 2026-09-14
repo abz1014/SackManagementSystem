@@ -48,6 +48,10 @@ export function StationSheet({
 
   useEffect(() => {
     let dead = false;
+    // Cleared on every re-run: without this one failed load pinned the error
+    // branch permanently, so a later successful retry (or opening a different
+    // station) still rendered "could not load".
+    setError(null);
     (async () => {
       try {
         const [w, s, a] = await Promise.all([
@@ -72,12 +76,23 @@ export function StationSheet({
   const name = stationLabel(names.find((n) => n.stationId === station), station);
   const mine = useMemo(() => (log ?? []).filter((a) => a.stationId === station), [log, station]);
 
+  // The window is only named once it is known: `?? 0` printed "judged over
+  // the last 0 production days" for the whole load.
   return (
-    <Sheet title={name} eyebrow={`${W.weight.stationsTable} · ${W.judgedOver(data?.days ?? 0)}`} onClose={onClose}>
+    <Sheet
+      title={name}
+      eyebrow={data ? `${W.weight.stationsTable} · ${W.judgedOver(data.days)}` : W.weight.stationsTable}
+      onClose={onClose}
+    >
       {error ? (
         <p className="state err">{W.couldNotLoad}</p>
-      ) : !data || !row ? (
+      ) : !data ? (
         <SkelLines n={5} short />
+      ) : !row ? (
+        // Finding H13: loaded successfully, but no station with this id
+        // holds any readings in the window — distinct from still loading,
+        // which the branch above already covers.
+        <Empty message={W.stationNotFound} />
       ) : (
         <Body row={row} data={data} name={name} log={mine} canAdjust={canAdjust} onLogged={() => setNonce((n) => n + 1)} />
       )}
@@ -143,6 +158,9 @@ function Body({
             {log.slice(0, 6).map((a) => (
               <tr key={a.adjustmentId}>
                 <td style={{ width: '10em' }}>{new Date(a.adjustedAtUtc).toLocaleDateString('en-GB')}</td>
+                <td className="n" style={{ width: '6em' }}>
+                  {signed(a.amountG)}
+                </td>
                 <td>
                   {a.reason ?? '—'}
                   {a.recordedBy && <span className="mut"> · {a.recordedBy}</span>}
@@ -266,6 +284,7 @@ const short = (d: string) =>
 function LogForm({ station, name, onLogged }: { station: number; name: string; onLogged: () => void }) {
   const [open, setOpen] = useState(false);
   const [why, setWhy] = useState('');
+  const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -285,9 +304,15 @@ function LogForm({ station, name, onLogged }: { station: number; name: string; o
         setBusy(true);
         setFailed(false);
         try {
-          await recordCalibrationAdjustment({ stationId: station, reason: why.trim() || undefined });
+          const amountG = amount.trim() === '' ? undefined : Number(amount);
+          await recordCalibrationAdjustment({
+            stationId: station,
+            reason: why.trim() || undefined,
+            amountG: amountG != null && Number.isFinite(amountG) ? amountG : undefined,
+          });
           setOpen(false);
           setWhy('');
+          setAmount('');
           onLogged();
         } catch {
           setFailed(true);
@@ -297,8 +322,12 @@ function LogForm({ station, name, onLogged }: { station: number; name: string; o
       }}
     >
       <label className="field">
+        <span>{W.weight.adjustAmount}</span>
+        <input type="number" step="0.1" value={amount} autoFocus onChange={(e) => setAmount(e.target.value)} />
+      </label>
+      <label className="field">
         <span>{W.weight.adjustWhy} — {name}</span>
-        <input type="text" value={why} autoFocus onChange={(e) => setWhy(e.target.value)} />
+        <input type="text" value={why} onChange={(e) => setWhy(e.target.value)} />
       </label>
       {failed && <p className="acc sm">{W.couldNotLoad}</p>}
       <div className="row">

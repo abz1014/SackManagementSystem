@@ -31,7 +31,7 @@ import { useEffect, useMemo } from 'react';
 import { useLive, usePlantNow, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
-import { fmtClock, fmtClockSec, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
+import { fmtClock, fmtClockSec, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { getAttention, getStations, type LiveLine } from '../api';
 
 /**
@@ -146,7 +146,7 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
           <b>{fmtInt(t.cones)}</b>
           <span>
             {W.fig.cones}
-            {t.conesInRangePct != null && ` · ${W.withinLimits(`${t.conesInRangePct}%`)}`}
+            {t.conesInRangePct != null && ` · ${W.withinLimits(fmtPct1(t.conesInRangePct))}`}
           </span>
         </div>
         <div>
@@ -163,7 +163,7 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
 
       <div className="w-stwrap">
         <div className="w-sub">
-          <span>{W.stations} — {W.stationsNote}</span>
+          <span>{W.stations} — {W.stationsNoteShift}</span>
           {quietCount > 0 && (
             <span className="w-note acc">
               {quietCount} {W.quiet}
@@ -199,7 +199,7 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
         <span>
           {line.lastSack && `${W.lastSack} ${fmtKg(line.lastSack.weightKg)} ${fmtClock(line.lastSack.ts)}`}
           {line.lastCone &&
-            ` · ${W.lastCone} ${fmtInt(Math.round(line.lastCone.weightG ?? 0))} g ${fmtClock(line.lastCone.ts)}`}
+            ` · ${W.lastCone} ${fmtG(line.lastCone.weightG)} ${fmtClock(line.lastCone.ts)}`}
           {error && ` · ${W.offline}`}
         </span>
       </div>

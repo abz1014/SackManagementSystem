@@ -19,10 +19,11 @@ CREATE TABLE dbo.pack1_TP1U2 (
   [Area] varchar(10) NULL,
   [ProductionDate] datetime NULL,
   [HangerNum] int NULL,
-  [Source] int NULL,
+  [MachineNo] int NULL,
   [Lifter] int NULL,
   [Weight] decimal(6,2) NULL,
-  [inRange] bit NULL
+  [inRange] bit NULL,
+  [MaterialId] int NULL
 );
 GO
 IF OBJECT_ID('dbo.sack1_TP1U2') IS NULL
@@ -33,7 +34,8 @@ CREATE TABLE dbo.sack1_TP1U2 (
   [Area] varchar(10) NULL,
   [SackNum] int NULL,
   [Weight] decimal(6,3) NULL,
-  [inRange] bit NULL
+  [inRange] bit NULL,
+  [MaterialId] int NULL
 );
 GO
 IF OBJECT_ID('dbo.rejectQCS1_TP1U2') IS NULL
@@ -44,10 +46,11 @@ CREATE TABLE dbo.rejectQCS1_TP1U2 (
   [Area] varchar(10) NULL,
   [ProductionDate] datetime NULL,
   [HangerNum] int NULL,
-  [Source] int NULL,
+  [MachineNo] int NULL,
   [Lifter] int NULL,
   [TubeInspectResult] int NULL,
-  [MaterialInspectResult] int NULL
+  [MaterialInspectResult] int NULL,
+  [MaterialId] int NULL
 );
 GO
 IF OBJECT_ID('dbo.rejectWeight1_TP1U2') IS NULL
@@ -58,9 +61,10 @@ CREATE TABLE dbo.rejectWeight1_TP1U2 (
   [Area] varchar(10) NULL,
   [ProductionDate] datetime NULL,
   [HangerNum] int NULL,
-  [Source] int NULL,
+  [MachineNo] int NULL,
   [Lifter] int NULL,
-  [Weight] decimal(6,2) NULL
+  [Weight] decimal(6,2) NULL,
+  [MaterialId] int NULL
 );
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = 'sms_readonly')

@@ -3,13 +3,24 @@
  * cone_event / sack_event / reject_event with pagination, sort, single-row
  * detail, and a bounded CSV export. Pure read over existing columns.
  *
- * reject_event is NOT shaped like the other two, and three differences are
- * load-bearing rather than cosmetic:
+ * IDENTITY. Every type is addressed by its canonical PK — cone_event_id /
+ * sack_event_id / reject_event_id — surfaced to the client under one name,
+ * `event_id`, so the permalink, the list row key and the CSV row id are the
+ * same number everywhere. Cone and sack used to be addressed by source_row_id.
+ * That stopped identifying a row on 2026-08-05, when IFL dropped and recreated
+ * the wide tables and every identity restarted at 1: July's id 5 and
+ * September's id 5 are different physical cones nine weeks apart, told apart
+ * only by `source_epoch` (SEPT-2026-EPOCH-DECISION §4.2). A `TOP 1 … WHERE
+ * source_row_id=@id` with no ORDER BY over a non-unique index returned
+ * whichever generation the seek met first. source_row_id is still RETURNED,
+ * with its epoch's label beside it, because it is the number IFL's own
+ * engineers quote against the plant's tables — but it is a display column,
+ * never an address. On reject_event it never could address a row: NULLABLE,
+ * and unique only per reject_type.
  *
- *  1. IDENTITY. cone/sack are addressed by source_row_id. On reject_event that
- *     column is NULLABLE and is only unique per reject_type, so it cannot
- *     address a row. Rejects are addressed by reject_event_id (the PK) instead,
- *     which is what makes a reject permalink possible at all.
+ * reject_event is otherwise NOT shaped like the other two, and two more
+ * differences are load-bearing rather than cosmetic:
+ *
  *  2. NO in_range COLUMN. Binding the in_range filter against reject_event
  *     would be a SQL error, not an empty result — so the filter is skipped for
  *     rejects rather than silently mis-applied.
@@ -26,6 +37,19 @@ export type EventType = 'cone' | 'sack' | 'reject';
 export type SortField = 'time' | 'weight';
 export type SortDir = 'asc' | 'desc';
 
+/**
+ * One stretch of the product timeline with usable limits — the caller (the
+ * `/api/events` route) resolves these via productAt.ts's ProductTimeline
+ * before calling in here, because limits vary by WHEN a cone was weighed and
+ * this module has no DB access of its own for that lookup.
+ */
+export interface OutsideLimitsSegment {
+  fromMs: number | null;
+  toMs: number | null;
+  loG: number;
+  hiG: number;
+}
+
 export interface RegisterFilters {
   from?: string;
   to?: string;
@@ -37,6 +61,17 @@ export interface RegisterFilters {
   wMax?: number;
   tsFrom?: string; // fine-grained deep-link window, ANDed with the day-level from/to
   tsTo?: string;
+  /**
+   * cone only: restrict to cones the scale PASSED but a product's own limits
+   * would not — the specific population Weight's disagreement banner and the
+   * Home attention list's "outside product limits" finding both promise and,
+   * until finding H4 (Sep 2026 audit), both actually opened an unfiltered
+   * register instead of this. An empty array means no product in the window
+   * ever carried usable limits, and must match nothing, not fall back to
+   * unfiltered — that would silently show cones from before the register
+   * even existed.
+   */
+  outsideLimitsSegments?: OutsideLimitsSegment[];
 }
 
 export interface RegisterQuery extends RegisterFilters {
@@ -47,18 +82,21 @@ export interface RegisterQuery extends RegisterFilters {
 }
 
 const weightCol = (type: EventType) => (type === 'sack' ? 'weight_kg' : 'weight_g');
-/** The column that addresses one row for detail/permalinks. */
-export const idCol = (type: EventType) => (type === 'reject' ? 'reject_event_id' : 'source_row_id');
-const tableFor = (type: EventType) =>
-  type === 'cone' ? 'sms.cone_event' : type === 'sack' ? 'sms.sack_event' : 'sms.reject_event';
+/**
+ * The column that addresses one row for detail/permalinks: the canonical PK,
+ * never source_row_id — see IDENTITY in the header for why that distinction
+ * is the whole point of this function.
+ */
+export const idCol = (type: EventType) =>
+  type === 'cone' ? 'cone_event_id' : type === 'sack' ? 'sack_event_id' : 'reject_event_id';
 const sortCol = (type: EventType, sort: SortField) =>
   sort === 'weight' ? weightCol(type) : 'production_ts_utc';
 
 /**
  * Binds shared filters onto a request and returns the WHERE fragment.
  *
- * `alias` qualifies every column, because the reject query needs a JOIN (to pick
- * up the code label) and therefore an alias, while cone/sack query a bare table.
+ * `alias` qualifies every column, because every query JOINs (all three to
+ * source_epoch for the label, rejects to reject_code as well) and so needs one.
  * Passed explicitly rather than patched onto the finished SQL afterwards — a
  * regex that prefixes column names in an already-built clause works until
  * someone adds a filter whose name overlaps another token, and then fails
@@ -117,29 +155,74 @@ function bindFilters(
     w.push(`${c('production_ts_utc')} <= @tsTo`);
     req.input('tsTo', mssql.DateTime2(3), new Date(f.tsTo));
   }
+  if (f.outsideLimitsSegments != null && type === 'cone') {
+    if (f.outsideLimitsSegments.length === 0) {
+      w.push('1 = 0');
+    } else {
+      const segs = f.outsideLimitsSegments.map((seg, i) => {
+        const parts = [`${c('in_range')} = 1`, `(${c('weight_g')} < @segLo${i} OR ${c('weight_g')} > @segHi${i})`];
+        req.input(`segLo${i}`, mssql.Float, seg.loG);
+        req.input(`segHi${i}`, mssql.Float, seg.hiG);
+        if (seg.fromMs != null) {
+          parts.push(`${c('production_ts_utc_ms')} >= @segFrom${i}`);
+          req.input(`segFrom${i}`, mssql.BigInt, seg.fromMs);
+        }
+        if (seg.toMs != null) {
+          parts.push(`${c('production_ts_utc_ms')} < @segTo${i}`);
+          req.input(`segTo${i}`, mssql.BigInt, seg.toMs);
+        }
+        return `(${parts.join(' AND ')})`;
+      });
+      w.push(`(${segs.join(' OR ')})`);
+    }
+  }
   return w.join(' AND ');
 }
 
-const CONE_COLS = `source_row_id, production_ts_utc, shift_code, shift_date, shift_code_legacy,
-  hanger_num, source_station, lifter_station, weight_g, in_range, cone_id, material_id, lot_code,
-  merge_key_is_unique, production_ts_utc_ms`;
-const SACK_COLS = `source_row_id, production_ts_utc, shift_code, shift_date, shift_code_legacy,
-  sack_num, weight_kg, in_range, material_id, lot_code, merge_key_is_unique,
-  production_ts_is_insert_time, production_ts_utc_ms`;
-// Aliased to reject_event_id so the client has one stable row identity across
-// all three types. LEFT JOIN reject_code so a labelled code shows its meaning
-// the moment IFL answers Q10 — until then label is NULL and the raw codes carry
-// the information, which is why they are always returned.
-const REJECT_COLS = `e.reject_event_id AS source_row_id, e.reject_event_id, e.reject_type,
+// Every column list opens with the same three facts in the same order: the
+// canonical PK as `event_id` (the one row identity the client uses for
+// everything), then IFL's own source_row_id with the label of the epoch it
+// belongs to. The pair is what an engineer quotes when checking a reading
+// against the plant's tables; since the 2026-08-05 rebuild the number alone
+// names two rows. The event table is always aliased `e`, the epoch `ep`.
+const IDENTITY_COLS = `e.source_row_id, e.source_epoch, ep.label AS source_epoch_label`;
+const CONE_COLS = `e.cone_event_id AS event_id, ${IDENTITY_COLS},
+  e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
+  e.hanger_num, e.source_station, e.lifter_station, e.weight_g, e.in_range, e.cone_id, e.material_id, e.lot_code,
+  e.merge_key_is_unique, e.production_ts_utc_ms`;
+const SACK_COLS = `e.sack_event_id AS event_id, ${IDENTITY_COLS},
+  e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
+  e.sack_num, e.weight_kg, e.in_range, e.material_id, e.lot_code, e.merge_key_is_unique,
+  e.production_ts_is_insert_time, e.production_ts_utc_ms`;
+// LEFT JOIN reject_code so a labelled code shows its meaning the moment IFL
+// answers Q10 — until then label is NULL and the raw codes carry the
+// information, which is why they are always returned.
+const REJECT_COLS = `e.reject_event_id AS event_id, ${IDENTITY_COLS}, e.reject_type,
   e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
   e.hanger_num, e.source_station, e.lifter_station,
   e.tube_inspect_code, e.material_inspect_code, e.weight_g,
-  e.source_row_id AS source_id, e.production_ts_utc_ms, c.label AS reject_label`;
-const REJECT_FROM = `sms.reject_event e
+  e.production_ts_utc_ms, c.label AS reject_label`;
+const colsFor = (type: EventType) =>
+  type === 'cone' ? CONE_COLS : type === 'sack' ? SACK_COLS : REJECT_COLS;
+
+// source_epoch is a small, PK-keyed reference table (one row per source table
+// per generation), so the join costs a nested-loop seek per row and nothing
+// more. LEFT rather than INNER only so a row can never vanish from the
+// register because its epoch row was dropped underneath it.
+const EPOCH_JOIN = `LEFT JOIN sms.source_epoch ep ON ep.epoch_id = e.source_epoch`;
+const fromFor = (type: EventType) =>
+  type === 'cone'
+    ? `sms.cone_event e ${EPOCH_JOIN}`
+    : type === 'sack'
+      ? `sms.sack_event e ${EPOCH_JOIN}`
+      : `sms.reject_event e
   LEFT JOIN sms.reject_code c
     ON c.reject_type = e.reject_type
    AND c.tube_code = e.tube_inspect_code
-   AND c.material_code = e.material_inspect_code`;
+   AND c.material_code = e.material_inspect_code
+  ${EPOCH_JOIN}`;
+/** Every query aliases the event table `e` — see bindFilters for why it is explicit. */
+const ALIAS = 'e.';
 
 export interface RegisterPage {
   rows: Record<string, unknown>[];
@@ -154,20 +237,18 @@ export async function listEvents(
   type: EventType,
   q: RegisterQuery,
 ): Promise<RegisterPage> {
-  const isReject = type === 'reject';
-  const alias = isReject ? 'e.' : '';
-  const from = isReject ? REJECT_FROM : tableFor(type);
-  const cols = isReject ? REJECT_COLS : type === 'cone' ? CONE_COLS : SACK_COLS;
-  const order = `${alias}${sortCol(type, q.sort)} ${q.dir === 'asc' ? 'ASC' : 'DESC'}`;
+  const from = fromFor(type);
+  const cols = colsFor(type);
+  const order = `${ALIAS}${sortCol(type, q.sort)} ${q.dir === 'asc' ? 'ASC' : 'DESC'}`;
   const offset = (q.page - 1) * q.pageSize;
 
   const countReq = pool.request();
-  const where = bindFilters(countReq, lineId, type, q, alias);
+  const where = bindFilters(countReq, lineId, type, q, ALIAS);
   const countRes = await countReq.query<{ n: number }>(`SELECT COUNT(*) n FROM ${from} WHERE ${where}`);
   const total = countRes.recordset[0]?.n ?? 0;
 
   const rowsReq = pool.request();
-  bindFilters(rowsReq, lineId, type, q, alias);
+  bindFilters(rowsReq, lineId, type, q, ALIAS);
   rowsReq.input('offset', mssql.Int, offset).input('take', mssql.Int, q.pageSize);
   const res = await rowsReq.query<Record<string, unknown>>(
     `SELECT ${cols} FROM ${from} WHERE ${where}
@@ -183,20 +264,19 @@ export async function getEventDetail(
   type: EventType,
   rowId: number,
 ): Promise<Record<string, unknown> | null> {
-  const isReject = type === 'reject';
-  const alias = isReject ? 'e.' : '';
-  const from = isReject ? REJECT_FROM : tableFor(type);
-  // Rejects are addressed by reject_event_id: source_row_id is nullable there and
-  // unique only per reject_type, so it cannot identify a row on its own.
-  const key = `${alias}${idCol(type)}`;
-  const base = isReject ? REJECT_COLS : type === 'cone' ? CONE_COLS : SACK_COLS;
-  const cols = `${base}, ${alias}source_system, ${alias}ingest_ts_utc, ${alias}transform_version`;
+  const from = fromFor(type);
+  // Addressed by the canonical PK on every type (idCol). For cone and sack
+  // that is what makes this lookup deterministic at all: source_row_id
+  // repeats across epochs, and TOP 1 with no ORDER BY over that non-unique
+  // index answered with whichever generation the seek met first.
+  const key = `${ALIAS}${idCol(type)}`;
+  const cols = `${colsFor(type)}, ${ALIAS}source_system, ${ALIAS}ingest_ts_utc, ${ALIAS}transform_version`;
   const res = await pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('id', mssql.BigInt, rowId)
     .query<Record<string, unknown>>(
-      `SELECT TOP 1 ${cols} FROM ${from} WHERE ${alias}line_id=@line AND ${key}=@id`,
+      `SELECT TOP 1 ${cols} FROM ${from} WHERE ${ALIAS}line_id=@line AND ${key}=@id`,
     );
   return res.recordset[0] ?? null;
 }
@@ -210,14 +290,12 @@ export async function exportEventsCsv(
   type: EventType,
   f: RegisterFilters & { sort: SortField; dir: SortDir },
 ): Promise<{ csv: string; truncated: boolean }> {
-  const isReject = type === 'reject';
-  const alias = isReject ? 'e.' : '';
-  const from = isReject ? REJECT_FROM : tableFor(type);
-  const cols = isReject ? REJECT_COLS : type === 'cone' ? CONE_COLS : SACK_COLS;
-  const order = `${alias}${sortCol(type, f.sort)} ${f.dir === 'asc' ? 'ASC' : 'DESC'}`;
+  const from = fromFor(type);
+  const cols = colsFor(type);
+  const order = `${ALIAS}${sortCol(type, f.sort)} ${f.dir === 'asc' ? 'ASC' : 'DESC'}`;
 
   const req = pool.request();
-  const where = bindFilters(req, lineId, type, f, alias);
+  const where = bindFilters(req, lineId, type, f, ALIAS);
   req.input('cap', mssql.Int, CSV_ROW_CAP + 1);
   const res = await req.query<Record<string, unknown>>(
     `SELECT TOP (@cap) ${cols} FROM ${from} WHERE ${where} ORDER BY ${order}`,

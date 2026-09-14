@@ -11,7 +11,12 @@ import { getPlausibilityRule } from './admin.js';
 export type Basis = 'as_recorded' | 'gross' | 'net';
 
 export interface Bucket { bucket: number; count: number; }
-export interface Outlier { weight: number; shiftDate: string | null; sourceRowId: number | null; }
+/**
+ * `eventId` is the canonical PK (cone_event_id / sack_event_id), which is what
+ * the register's permalink takes. It was source_row_id until the 2026-08-05
+ * source rebuild made that number name two rows (register.ts, IDENTITY).
+ */
+export interface Outlier { weight: number; shiftDate: string | null; eventId: number | null; }
 
 export interface WeightStats {
   count: number;
@@ -137,7 +142,7 @@ export async function getWeights(
      GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket ORDER BY bucket`,
   );
   const coneOut = await bind(pool.request()).query<{ w: number; d: string; id: number }>(
-    `SELECT TOP 20 weight_g - @coneAdj w, CONVERT(varchar(10), shift_date, 120) d, source_row_id id
+    `SELECT TOP 20 weight_g - @coneAdj w, CONVERT(varchar(10), shift_date, 120) d, cone_event_id id
      FROM sms.cone_event WHERE ${dateWhere()} AND (weight_g < @coneOut OR weight_g <= 0) ORDER BY weight_g`,
   );
 
@@ -152,7 +157,7 @@ export async function getWeights(
      GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket ORDER BY bucket`,
   );
   const sackOut = await bind(pool.request()).query<{ w: number; d: string; id: number }>(
-    `SELECT TOP 20 weight_kg - @sackAdj w, CONVERT(varchar(10), shift_date, 120) d, source_row_id id
+    `SELECT TOP 20 weight_kg - @sackAdj w, CONVERT(varchar(10), shift_date, 120) d, sack_event_id id
      FROM sms.sack_event WHERE ${dateWhere()} AND (weight_kg < @sackOut OR weight_kg <= 0) ORDER BY weight_kg`,
   );
 
@@ -205,7 +210,7 @@ export async function getWeights(
   const ss = sackStat.recordset[0]!;
 
   const mapOut = (rs: { w: number; d: string; id: number }[]): Outlier[] =>
-    rs.map((r) => ({ weight: Math.round(Number(r.w) * 100) / 100, shiftDate: r.d, sourceRowId: r.id == null ? null : Number(r.id) }));
+    rs.map((r) => ({ weight: Math.round(Number(r.w) * 100) / 100, shiftDate: r.d, eventId: r.id == null ? null : Number(r.id) }));
 
   return {
     basis,

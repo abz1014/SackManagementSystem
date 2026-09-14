@@ -36,7 +36,7 @@ import {
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
-import { fmtG, fmtInt } from '../lib/fmt';
+import { fmtG, fmtInt, fmtPct1 } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel,
   type SpcData, type StationRow, type WeightStationRow, type WeightStationsData,
@@ -111,7 +111,10 @@ export function WeightScreen({
         <div className="figs">
           <div>
             <b className="fig-val">
-              {s ? fmtInt(Math.round(s.mean)) : '—'}
+              {/* count === 0, not just `!s`: an empty period comes back as a
+                  real SpcData with mean 0, which printed a confident "0 g
+                  average" for a period in which nothing was weighed. */}
+              {s && s.count > 0 ? fmtInt(Math.round(s.mean)) : '—'}
               <span className="fig-unit">{W.fig.gAverage}</span>
             </b>
             <span className="fig-note">
@@ -124,7 +127,9 @@ export function WeightScreen({
           </div>
           <div>
             <b className="fig-val small">
-              {s ? W.weight.spread(fmtInt(Math.round(s.mean - 2 * s.stdevOverall)), fmtInt(Math.round(s.mean + 2 * s.stdevOverall))) : '—'}
+              {s && s.count > 0
+                ? W.weight.spread(fmtInt(Math.round(s.mean - 2 * s.stdevOverall)), fmtInt(Math.round(s.mean + 2 * s.stdevOverall)))
+                : '—'}
             </b>
             <span className="fig-note">{W.weight.spreadNote}</span>
           </div>
@@ -151,7 +156,12 @@ export function WeightScreen({
             ]}
           />
         </div>
-        {spc.loading && !s ? (
+        {spc.error && !s ? (
+          // Finding H14 (Sep 2026 audit): this used to fall through to
+          // "Nothing recorded in this period" on a fetch failure — a false
+          // claim indistinguishable from a genuinely quiet period.
+          <Failed error={spc.error} onRetry={spc.refresh} />
+        ) : spc.loading && !s ? (
           <SkelChart />
         ) : !s || s.subgroups.length === 0 ? (
           <Empty message={W.nothingHere} />
@@ -164,7 +174,7 @@ export function WeightScreen({
 
       <Block
         label={`${W.weight.stationsTable}, ${W.judgedOver(d.days)}`}
-        note={W.weight.sortNote}
+        note={d.targetG != null ? W.weight.sortNote : W.weight.sortNoteNoTarget}
       >
         <div className="tw">
           <StationTable rows={d.stations} data={d} names={names.data?.stations ?? []} onOpen={onOpenStation} />
@@ -203,7 +213,13 @@ export function WeightScreen({
 /* --------------------------------------------------------------- headline */
 
 function headline(d: WeightStationsData, s: SpcData | null): string {
-  if (!s) return 'No cones were weighed in this period.';
+  // `s` is non-null but EMPTY for a period that holds no readings: /api/spc
+  // answers with count 0 and mean 0 rather than with nothing at all, so `!s`
+  // alone only ever catches loading and error. Without the count check this
+  // headline stated "Average cone weight is 0 g" and "Every station is
+  // steady" about a period in which nothing was weighed — three false
+  // sentences, and the honest one below was unreachable.
+  if (!s || s.count === 0) return 'No cones were weighed in this period.';
   const mean = fmtG(s.mean);
   const need = d.stations.filter((x) => x.flagged).length;
   const tail = need === 0 ? W.weight.allStationsSteady : W.weight.stationsNeedLook(need);
@@ -215,8 +231,9 @@ function headline(d: WeightStationsData, s: SpcData | null): string {
 
 /** The complement of the in-range share, to one decimal. */
 function rejectedShare(inRangePct: number | null): string {
-  if (inRangePct == null) return '—';
-  return `${Math.round((100 - inRangePct) * 10) / 10}%`;
+  // fmtPct1, so this tile reads "2.0%" like the station table and the sheet
+  // beside it rather than dropping the zero to "2%".
+  return inRangePct == null ? '—' : fmtPct1(100 - inRangePct);
 }
 
 /* ----------------------------------------------------------------- charts */

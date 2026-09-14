@@ -17,6 +17,16 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 ## Current phase
 
 **Phase 0 (Database Discovery) — COMPLETE.** → `SCHEMA.md`, `QUESTIONS.md`
+### September 2026 — IFL's rebuilt source, and what the app does about it (11 Sep 2026)
+
+A second sample from IFL (`SPS.rar`, 7 Sep) showed the plant **dropped and recreated its four weighing tables on 2026-08-05**, restarting every identity at 1, renaming `Source` → `MachineNo`, and adding **`MaterialId` to every row** (populated on 100 %, joins to `PDAS.Materials`, confirmed trustworthy by IFL). Three things followed, all built and verified:
+
+1. **Source generations ("epochs").** `sms.source_epoch` names each physical generation of each source table; the worker resolves its generation before every read and **halts** on an unknown one (`sms epoch:accept` registers it — never automatic). July's 142,511 cones and September's 132,552 coexist under different epochs. The sidecar is the archive of record; IFL keeps about a month. **`sms verify` reconciles per generation to the checksum (`SUM(id)`).** Full record: `SEPT-2026-EPOCH-DECISION.md`.
+2. **Product attribution is real.** `NullAttribution` is retired for rows that carry `MaterialId` (`attribution_method = 'source_column'`); older rows keep `'none'` honestly. Limits are **time-versioned** (`sms.product_limit_version`): a reading is judged by the limits in force at its own time, never by today's mirror. Up to six materials run concurrently on different machines, so the line-wide "Current Product" is now only the fallback for pre-`MaterialId` rows.
+3. **The PDAS write path exists and is OFF.** Add / Retire / Change-limits, through the vendor's own procs (there is no UPDATE proc; changing a setpoint is one guarded single-row UPDATE with the vendor's own event-log row), rank ≥ 3, `PDAS_WRITE_ENABLED=false`, a **separate** writer login. It stays off until IFL confirms **in writing** that SMS may write to PDAS — the read-only rule for `DATA_TP1U2` is unchanged. Retire-and-recreate is **not** an edit: `CreateMaterial` refuses a duplicate blend/count/tube regardless of active flag (IFL's own engineer hit this four times on 18 Aug).
+
+**Still to ask IFL for:** the 10 Jul – 5 Aug data (exists, not sent); `db_datareader` on both DBs; written authority for PDAS writes; whether the PLC reads limits live.
+
 **Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 25 app tables, session-cookie auth (argon2), 17 tests, perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover (repoint `IFL_DB_SERVER`).**
 
 ### Visual redesign applied from the design handoff (3 Sep 2026)
@@ -127,10 +137,19 @@ undo any of these without reading why they exist:
    line" column alone would have read "Fine" on all fourteen rows.
 
 **Still to do, in this order:** the role rename to viewer/engineer/manager/
-admin; the app-owned product-details overlay and a *Product limits* rule in
-Setup; the per-day-per-code reason sheet; the station sheet; the line-level
-sack ledger once IFL answers. **The five questions in `REDESIGN.md` §11 have
-not been sent.**
+admin; a *Product limits* rule in Setup; the per-day-per-code reason sheet;
+the line-level sack ledger once IFL answers. **The five questions in
+`REDESIGN.md` §11 have not been sent.**
+
+> **Update, Sep 2026 audit fix (finding H3):** the app-owned product-details
+> overlay (dropped from the list above — it is done, not pending) is now built
+> as `web/src/screens/ProductSheet.tsx`, opened from Line's "Change" button and
+> its "History" link — both previously dead ends: the button navigated to
+> admin-only Setup, which has no product section, and the link pointed at a
+> `#history` anchor that existed nowhere on the page. It is a sheet, not a
+> Setup section, because Setup is gated at `rank >= 4` while setting the
+> product is a `rank >= 2` action server-side; nesting it in Setup would have
+> hidden it from every supervisor/manager account IFL actually uses.
 
 ### Floor-first rework (2 Sep 2026) — response to IFL's first review
 
@@ -247,7 +266,7 @@ time on 2 Sep 2026. Ten lines. The mapping, and it is the reason for the cut:
 |---|---|
 | Connectivity with PLCs, HMIs, machines, databases | SQL only; PLC path deferred on IFL's own later answer (Q22) |
 | Cone weight collection, flag weights outside limits | Built |
-| Screens to view and **update product details on machines** | Half — stored in the app DB, never written to a machine |
+| Screens to view and **update product details on machines** | **Built, off:** Add / Retire / Change-limits write to PDAS through the vendor's procs behind `PDAS_WRITE_ENABLED` (11 Sep 2026). Still never written to a *machine* (Q22); whether the PLC reads the values live is an open question for IFL |
 | History logs and trend graphs for rejected cones | Built |
 | **AI**-based analytics recommending calibration adjustments | Built as statistics (Nelson rules, station drift, ledger), not AI |
 | Collection and logging of all sack data | Built |
@@ -290,7 +309,7 @@ prediction from real data and is defensible when challenged.
 
 ### IFL answers — decisive points (23 Jul 2026)
 
-- **Q1:** no product data in DB; **product-wise historical reporting not required.** App adds a **Current Product** selector (Process Engineer sets it), stored in the **app-owned DB**. → `NullAttribution` default for history; `ManualEntryAttribution` forward-only.
+- **Q1:** no product data in DB; **product-wise historical reporting not required.** App adds a **Current Product** selector (Process Engineer sets it), stored in the **app-owned DB**. → `NullAttribution` default for history; `ManualEntryAttribution` forward-only. **Superseded 11 Sep 2026:** IFL's rebuilt tables carry `MaterialId` on every row; attribution is now the plant's own for those rows.
 - **Q21 (HARD):** **zero modifications to IFL's DB** — no schema, indexes, tables, procs, or data. Retires the "add indexes" option. All optimisation is app-side.
 - **Q22:** **no PLC integration in scope.** Component B is now indefinitely deferred; `cone_id` column stays nullable but its PLC path is dormant. Q2 redirects cone traceability to `rejectWeight1_TP1U2.[Source]` (a station, not a unique id).
 - **Q12:** dispatch **not required** (confirmed out).
@@ -314,7 +333,7 @@ Commissioning is split by **component**, not just by activity. Phase 1 does **no
 
 1. **Do not implement Component B.** No PLC reader logic. (Q22: PLC integration is out of scope entirely.)
 2. **Do not add any PLC dependency** — no `snap7`, `python-snap7`, `S7NetPlus`, or equivalent, in any manifest.
-3. **Do not write to IFL's databases, and do not alter them in any way** — no schema, **indexes**, tables, procs, or data (Q21, hard client constraint). Reads only. Writes (Current Product, users, notes) go to the **app-owned DB only**.
+3. **Do not write to IFL's acquisition database (`DATA_TP1U2`), and do not alter it in any way** — no schema, **indexes**, tables, procs, or data (Q21, hard client constraint). Reads only. Writes (Current Product, users, notes) go to the **app-owned DB only**. **The one exception, 11 Sep 2026:** product Add / Retire / Change-limits may write to **`PDAS_TP1U2.dbo.Materials` (+ its own `nhs_events`)** through the vendor's stored procedures, on a separate `sms_pdas_writer` login, behind `PDAS_WRITE_ENABLED` — the client confirmed IFL's engineers already do this by hand in SSMS. It ships **off**, and stays off until IFL confirms in writing. No new PDAS objects, no DELETE, no other table, ever.
 4. **Web app queries the app-owned DB** (sidecar). *Pending D0:* IFL's Q19 says "connect directly"; do not finalise the data-access path until D0 is decided.
 
 ### Phase 2 readiness — VERIFIED STATUS (audited 17 Aug 2026)
@@ -331,11 +350,11 @@ Commissioning is split by **component**, not just by activity. Phase 1 does **no
 2. ❌ **DESIGNED ONLY — ingestion is NOT adapter-based.** There is no `IngestionAdapter` interface anywhere in the codebase (zero hits in any `.ts`). `SPEC.md` §3 and `ARCHITECTURE.md` §10 describe an *intended* shape. In reality the runner news a concrete `IflSqlAdapter`, `transform.ts` bakes in `source_system: 'ifl_sql'`, and `persistRaw` is insert-only. Adding a second source is a refactor (~1.5 wk), not a drop-in. **Do not quote §3 as evidence of pluggability.**
 3. ✅ **IMPLEMENTED — cross-source merge key** `(line_id, production_ts_utc_ms, hanger_num)` is on every row and enforced by a unique index. Verified: `UX_cone_merge` on `(line_id, production_ts_utc_ms, hanger_num, ingest_seq)`, `003_cone_event.sql:55`. See `SPEC.md` §3.2 for the DQ-2 collision caveat. *Caveat:* a `plc_direct` row arriving on an existing merge key would **violate** this index, not enrich the row — Phase 2 needs a merge-and-enrich upsert, not `UPDATE ... SET cone_id`.
 4. ❌ **DESIGNED ONLY — there is no PLC stub and no test.** `PLC_READER_ENABLED` and the host/rack/slot keys appear **only** in `.env.example`; no TypeScript file reads them, nothing validates them, no stub class exists, and **no test asserts anything about them** (3 test files total: `appConfig`, `fingerprint`, `transform` — zero PLC references). What IS true, and is the only version safe to state externally: **no PLC library appears in any of the five package manifests.** That is a convention, enforced by review, not by a test. Describe this as *a documented, dependency-free re-entry point* — never as "PLC-ready" or "a stub".
-5. ⚠️ **PARTIAL — `NullAttribution` is a comment, not an abstraction.** There is no `ProductAttributionStrategy` type. `transform.ts:97` hardcodes `attribution_method: 'none'` with `NullAttribution` in a trailing comment, and all 142,511 rows carry it. The *effect* (no product attribution) is correct and honest; the *swappability* is not built. `/api/production?product=` is wired and dead.
+5. ✅ **RESOLVED BY IFL'S DATA (11 Sep 2026).** `transform.ts` now stamps `attribution_method = 'source_column'` from the row's own `MaterialId` (132,551 of 132,552 September cones) and `'none'` only where the column did not exist (all July rows). `/api/production?product=` is live and reports the unattributed count alongside its rows so a screen can say which readings predate product recording.
 
 ### Consequence of unanswered Q1
 
-Phase 1 ships with `NullAttribution`: **no product-wise or lot-wise reporting.** All time/shift/station-wise reporting works. Do not fabricate product attribution to fill the gap.
+Phase 1 shipped with `NullAttribution`. **From the September 2026 sample onward, product attribution comes from IFL's own `MaterialId`** and product-wise reporting is possible for those rows. Rows from before the column existed stay unattributed — do not fabricate attribution for them.
 
 ## Working rules (apply to the whole project)
 
@@ -391,7 +410,7 @@ Request a **dedicated read-only SQL login** from IFL — do not use `sa` or the 
 - **The two databases cannot be joined** — there is no product/lot key on the weighing data (OQ-1, blocking).
 - **No dispatch data exists** anywhere (OQ-15). If dispatch is in scope it is a new module.
 - Wide tables have only a clustered PK on `id`; date-range queries will scan. Index additions need client approval.
-- Only **19 production days** of data (2026-06-22 → 2026-07-10). Two further
+- Two samples, two source generations: **19 production days** (2026-06-22 → 2026-07-10, July sample) and **34 days** (2026-08-05 → 2026-09-07, September sample), with the month between them not yet sent by IFL. Two further
   dates appear in the raw data and are excluded as clock faults: 1969-12-31 and
   2026-06-21, holding 1 and 2 readings.
 

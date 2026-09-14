@@ -3,6 +3,26 @@
  * Each definition maps a source *_TP1U2 wide table to its verbatim raw table.
  * `src` is the IFL column, `raw` the sms_raw column, `type` drives fingerprint
  * + bulk-insert typing. `id` is always the source row key (SCHEMA rule).
+ *
+ * SEPTEMBER 2026 SCHEMA. IFL rebuilt these tables on 2026-08-05 and changed two
+ * things that reach us:
+ *
+ *  1. `Source` was renamed `MachineNo` on the three cone/reject tables. Same
+ *     quantity — the machine that weighed the cone, observed 1..14, matching the
+ *     14 rewinders in IFL's own line drawing — so `src_Source` is RENAMED rather
+ *     than replaced (migration 024), keeping every historical value. `sack1` never
+ *     had it and still does not: sacks carry no machine, which is why sack-stock
+ *     per machine remains uncomputable (CLAUDE.md's sack-stock blocker).
+ *
+ *  2. `MaterialId` was ADDED to all four tables and is populated on 100% of rows
+ *     (verified: pack1 132,552/132,552, sack1 5,435/5,435, rejectQCS1 6,049/6,049).
+ *     It joins to PDAS.dbo.Materials. This is the product key SCHEMA.md OQ-1
+ *     recorded as non-existent and which forced NullAttribution across the whole
+ *     project; IFL confirmed on 2026-09-10 that it is trustworthy.
+ *
+ * The July shape is NOT supported. It is gone from IFL's live server, and
+ * carrying both would mean a reader that cannot tell a schema change from a
+ * misconfiguration — exactly what the fingerprint gate exists to prevent.
  */
 export type ColType = 'int' | 'datetime' | 'varchar' | 'decimal' | 'bit';
 
@@ -33,10 +53,11 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'Area', raw: 'src_Area', type: 'varchar' },
       { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
       { src: 'HangerNum', raw: 'src_HangerNum', type: 'int' },
-      { src: 'Source', raw: 'src_Source', type: 'int' },
+      { src: 'MachineNo', raw: 'src_MachineNo', type: 'int' },
       { src: 'Lifter', raw: 'src_Lifter', type: 'int' },
       { src: 'Weight', raw: 'src_Weight', type: 'decimal' },
       { src: 'inRange', raw: 'src_inRange', type: 'bit' },
+      { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
   {
@@ -51,6 +72,7 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'SackNum', raw: 'src_SackNum', type: 'int' },
       { src: 'Weight', raw: 'src_Weight', type: 'decimal' },
       { src: 'inRange', raw: 'src_inRange', type: 'bit' },
+      { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
   {
@@ -64,10 +86,11 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'Area', raw: 'src_Area', type: 'varchar' },
       { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
       { src: 'HangerNum', raw: 'src_HangerNum', type: 'int' },
-      { src: 'Source', raw: 'src_Source', type: 'int' },
+      { src: 'MachineNo', raw: 'src_MachineNo', type: 'int' },
       { src: 'Lifter', raw: 'src_Lifter', type: 'int' },
       { src: 'TubeInspectResult', raw: 'src_TubeInspectResult', type: 'int' },
       { src: 'MaterialInspectResult', raw: 'src_MaterialInspectResult', type: 'int' },
+      { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
   {
@@ -81,9 +104,10 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'Area', raw: 'src_Area', type: 'varchar' },
       { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
       { src: 'HangerNum', raw: 'src_HangerNum', type: 'int' },
-      { src: 'Source', raw: 'src_Source', type: 'int' },
+      { src: 'MachineNo', raw: 'src_MachineNo', type: 'int' },
       { src: 'Lifter', raw: 'src_Lifter', type: 'int' },
       { src: 'Weight', raw: 'src_Weight', type: 'decimal' },
+      { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
 ];

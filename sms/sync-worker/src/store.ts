@@ -32,19 +32,34 @@ export async function setConfig(
     );
 }
 
-/** Highest source id already in a raw table for this line (0 if empty). */
+/**
+ * Highest source id already ingested for this line WITHIN ONE GENERATION.
+ *
+ * Scoped by epoch because IFL's `id` restarts: they recreated the four wide
+ * tables on 2026-08-05 and every identity went back to 1. An unscoped MAX would
+ * return July's 142,511 while reading a source whose ids run 1..132,552, so the
+ * reader would ask for `id > 142011`, get nothing, and report success forever.
+ *
+ * Returns null — not 0 — when this generation has no rows yet. The distinction
+ * matters: the "watermark went backwards" gate must not fire on a brand-new
+ * epoch that legitimately has nothing, and `0` is itself a legitimate watermark
+ * (rejectWeight1_TP1U2 has a real row at src_id = 0).
+ */
 export async function getWatermark(
   pool: ConnectionPool,
   rawTable: string,
   lineId: number,
-): Promise<number> {
+  epochId: number,
+): Promise<number | null> {
   const r = await pool
     .request()
     .input('line', mssql.Int, lineId)
-    .query<{ wm: number }>(
-      `SELECT ISNULL(MAX(src_id), 0) AS wm FROM ${rawTable} WHERE line_id = @line`,
+    .input('epoch', mssql.Int, epochId)
+    .query<{ wm: number | null }>(
+      `SELECT MAX(src_id) AS wm FROM ${rawTable} WHERE line_id = @line AND source_epoch = @epoch`,
     );
-  return r.recordset[0]?.wm ?? 0;
+  const wm = r.recordset[0]?.wm;
+  return wm == null ? null : Number(wm);
 }
 
 export interface SyncRunStart {
@@ -53,6 +68,9 @@ export interface SyncRunStart {
   targetTable: string;
   lineId: number;
   watermarkFrom: number;
+  /** Which source generation this pass read. Without it, watermark_from
+   *  jumping from 204,076 to 1 is an uninterpretable number on the Setup panel. */
+  sourceEpoch: number;
 }
 
 export async function startSyncRun(
@@ -66,10 +84,11 @@ export async function startSyncRun(
     .input('tt', mssql.VarChar(40), s.targetTable)
     .input('line', mssql.Int, s.lineId)
     .input('wm', mssql.BigInt, s.watermarkFrom)
+    .input('epoch', mssql.Int, s.sourceEpoch)
     .query<{ id: number }>(
-      `INSERT INTO sms.sync_run (run_id, adapter, target_table, line_id, watermark_from)
+      `INSERT INTO sms.sync_run (run_id, adapter, target_table, line_id, watermark_from, source_epoch)
        OUTPUT INSERTED.sync_run_id AS id
-       VALUES (@run, @adapter, @tt, @line, @wm)`,
+       VALUES (@run, @adapter, @tt, @line, @wm, @epoch)`,
     );
   return r.recordset[0]!.id;
 }

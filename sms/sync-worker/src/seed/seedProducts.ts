@@ -37,7 +37,10 @@ export async function seedProducts(
   const tubes = (await iflPool.request().query(`SELECT TubeTypeId, TubeType, TubeWeight FROM ${db}.dbo.TubeTypes`)).recordset;
   const mats = (
     await iflPool.request().query(
-      `SELECT MaterialId, BlendId, CountId, TubeTypeId, MaterialSetpointWeight, MaterialActive, MaterialDesc1,
+      // MaterialDesc2 added for finding M10 (Sep 2026 audit): real color data
+      // (e.g. 'PARROT', 'Khaki-2' on this line) was silently dropped before —
+      // MaterialDesc1 alone was selected and never MaterialDesc2.
+      `SELECT MaterialId, BlendId, CountId, TubeTypeId, MaterialSetpointWeight, MaterialActive, MaterialDesc1, MaterialDesc2,
               MaterialWeightOffsetMinus, MaterialWeightOffsetPlus
        FROM ${db}.dbo.Materials WHERE MaterialId > 10`,
     )
@@ -78,9 +81,9 @@ export async function seedProducts(
     await up(
       `MERGE sms.product t USING (SELECT @id id) s ON t.product_id=s.id
        WHEN MATCHED THEN UPDATE SET blend_id=@b, count_id=@c, tube_type_id=@tt, setpoint_weight_g=@sp, active_flag=@a, description=@d,
-                                     weight_offset_minus_g=@om, weight_offset_plus_g=@op
-       WHEN NOT MATCHED THEN INSERT (product_id, blend_id, count_id, tube_type_id, setpoint_weight_g, active_flag, description, weight_offset_minus_g, weight_offset_plus_g)
-         VALUES (@id, @b, @c, @tt, @sp, @a, @d, @om, @op);`,
+                                     weight_offset_minus_g=@om, weight_offset_plus_g=@op, color=@col
+       WHEN NOT MATCHED THEN INSERT (product_id, blend_id, count_id, tube_type_id, setpoint_weight_g, active_flag, description, weight_offset_minus_g, weight_offset_plus_g, color)
+         VALUES (@id, @b, @c, @tt, @sp, @a, @d, @om, @op, @col);`,
       (r) => {
         r.input('id', mssql.Int, m.MaterialId);
         r.input('b', mssql.Int, m.BlendId);
@@ -91,7 +94,51 @@ export async function seedProducts(
         r.input('d', mssql.NVarChar(255), m.MaterialDesc1);
         r.input('om', mssql.Decimal(10, 2), m.MaterialWeightOffsetMinus);
         r.input('op', mssql.Decimal(10, 2), m.MaterialWeightOffsetPlus);
+        r.input('col', mssql.NVarChar(255), m.MaterialDesc2 || null);
       },
     );
+  }
+
+  // Limits HISTORY, not just the mirror. sms.product is overwritten above on
+  // every pass, so on its own it cannot say what a product's limits WERE when
+  // a reading was taken — and PDAS keeps no history either (Materials.Timestamp
+  // is never touched on UPDATE). Whenever the mirrored values differ from the
+  // newest recorded version, append a new one. It is a LOWER BOUND on when the
+  // change took effect: the mirror noticed it now; it may have happened any
+  // time since the last pass. api/src/services/productLimits.ts reads these.
+  for (const m of mats) {
+    const sp = m.MaterialSetpointWeight == null ? null : Number(m.MaterialSetpointWeight);
+    const om = m.MaterialWeightOffsetMinus == null ? null : Number(m.MaterialWeightOffsetMinus);
+    const op = m.MaterialWeightOffsetPlus == null ? null : Number(m.MaterialWeightOffsetPlus);
+    const latest = await appPool
+      .request()
+      .input('id', mssql.Int, m.MaterialId)
+      .query<{ sp: number | null; om: number | null; op: number | null }>(
+        `SELECT TOP 1 setpoint_g sp, offset_minus_g om, offset_plus_g op
+           FROM sms.product_limit_version WHERE product_id = @id
+          ORDER BY effective_from DESC, version_id DESC`,
+      );
+    const l = latest.recordset[0];
+    const same =
+      l != null &&
+      (l.sp == null ? null : Number(l.sp)) === sp &&
+      (l.om == null ? null : Number(l.om)) === om &&
+      (l.op == null ? null : Number(l.op)) === op;
+    if (same) continue;
+    await appPool
+      .request()
+      .input('id', mssql.Int, m.MaterialId)
+      .input('sp', mssql.Decimal(10, 2), sp)
+      .input('om', mssql.Decimal(10, 2), om)
+      .input('op', mssql.Decimal(10, 2), op)
+      .input('reason', mssql.NVarChar(255), l == null
+        ? 'First seen by the mirror.'
+        : 'Mirror observed PDAS values differing from the newest recorded version.')
+      .query(
+        `INSERT INTO sms.product_limit_version
+           (product_id, setpoint_g, offset_minus_g, offset_plus_g, effective_from,
+            effective_is_lower_bound, source, reason)
+         VALUES (@id, @sp, @om, @op, SYSUTCDATETIME(), 1, 'pdas_observed', @reason)`,
+      );
   }
 }

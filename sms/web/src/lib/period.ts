@@ -171,6 +171,21 @@ export function trailingWindow(a: PeriodAnchor, days = TRAILING_DAYS): TrailingW
 }
 
 /**
+ * How many distinct days in a set of DAY buckets actually hold readings.
+ *
+ * trailingWindow clamps at the first day on record and nowhere else — it cannot
+ * see a hole in the middle. The record has one: nothing between 10 Jul and
+ * 5 Aug 2026 (IFL rebuilt their tables; the month before it has not been
+ * sent). A screen that says "the last 14 days" over that hole must also say how
+ * many of them hold anything, or a two-day trend reads as a fortnight's.
+ * Day buckets carry the shift date at midnight, so the date is the first ten
+ * characters of bucketTs.
+ */
+export function daysWithReadings(buckets: ReadonlyArray<{ bucketTs: string; produced: number }>): number {
+  return new Set(buckets.filter((b) => b.produced > 0).map((b) => b.bucketTs.slice(0, 10))).size;
+}
+
+/**
  * True when the selected period is too short for a screen to say anything.
  *
  * The screen must then SAY so — "One shift is too short to judge drift; showing

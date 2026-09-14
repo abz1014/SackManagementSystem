@@ -10,11 +10,13 @@
  *
  * CLOCK. production_ts_utc is the PLANT'S WALL CLOCK labelled as UTC (see
  * sync-worker dq.ts and web format.ts). "Now" must be expressed the same way
- * or every comparison is five hours out on this UTC+5 plant. plantNowMs()
- * mirrors dq.ts: this process runs on the plant PC, so its local wall time IS
- * the plant's. An `asOf` override exists so a past moment can be replayed —
- * gated by config, because a wall display left on a replay URL would present
- * old numbers as live.
+ * or every comparison is five hours out on this UTC+5 plant. plantNowMs(),
+ * imported from plantClock.ts — the ONE place this conversion is defined
+ * (finding L2, Sep 2026 audit: this file used to carry its own second,
+ * independent copy of the identical formula) — assumes this process runs on
+ * the plant PC, so its local wall time IS the plant's. An `asOf` override
+ * exists so a past moment can be replayed — gated by config, because a wall
+ * display left on a replay URL would present old numbers as live.
  *
  * RUNNING / STOPPED uses the same 120 s inter-cone split as downtime.ts:
  * normal gaps have p99 ≈ 31 s and real stops start at 180 s+, so there is no
@@ -47,6 +49,7 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { SHIFT_BOUNDARIES, shiftCodeFromMinutes, type NightBelongsTo, type ShiftCode } from '@sms/shared';
+import { plantNowMs } from './plantClock.js';
 
 export const STOP_THRESHOLD_SECONDS = 120;
 export const IDLE_THRESHOLD_SECONDS = 8 * 3600;
@@ -78,11 +81,6 @@ export const DEFAULT_STALE_AFTER_SECONDS = 180;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const SHIFT_MS = 8 * HOUR_MS;
-
-/** The plant's wall clock, encoded the way production_ts_utc_ms is. */
-export function plantNowMs(): number {
-  return Date.now() - new Date().getTimezoneOffset() * 60_000;
-}
 
 export interface ShiftWindow {
   code: ShiftCode;
@@ -231,8 +229,10 @@ export function classifyHealth(
 
 export interface LineState {
   status: LineStatus;
-  /** Wall-clock age of the newest reading. What a person sees on a clock. */
-  sinceLastConeSeconds: number | null;
+  /** Wall-clock age of the newest reading — a cone, or a reject if one is
+   *  more recent (finding M4: a span producing only rejects must not read as
+   *  full downtime). What a person sees on a clock. */
+  sinceLastReadingSeconds: number | null;
   /** How far the newest reading falls short of where it should be given the
    *  lag. This, not the wall-clock age, is how long the line has been down. */
   behindSeconds: number | null;
@@ -246,14 +246,14 @@ export interface LineState {
  * that is the baseline; anything further behind is the line, not the pipeline.
  * Pure.
  */
-export function classifyLineState(lastConeMs: number | null, nowMs: number, lagMs = 0): LineState {
-  if (lastConeMs == null) return { status: 'no_data', sinceLastConeSeconds: null, behindSeconds: null };
+export function classifyLineState(lastReadingMs: number | null, nowMs: number, lagMs = 0): LineState {
+  if (lastReadingMs == null) return { status: 'no_data', sinceLastReadingSeconds: null, behindSeconds: null };
   const lag = Math.min(Math.max(0, lagMs), MAX_CREDIBLE_LAG_SECONDS * 1000);
-  const sinceLastConeSeconds = Math.max(0, Math.round((nowMs - lastConeMs) / 1000));
-  const behindSeconds = Math.max(0, Math.round((nowMs - lag - lastConeMs) / 1000));
-  if (behindSeconds <= STOP_THRESHOLD_SECONDS) return { status: 'running', sinceLastConeSeconds, behindSeconds };
-  if (behindSeconds <= IDLE_THRESHOLD_SECONDS) return { status: 'stopped', sinceLastConeSeconds, behindSeconds };
-  return { status: 'idle', sinceLastConeSeconds, behindSeconds };
+  const sinceLastReadingSeconds = Math.max(0, Math.round((nowMs - lastReadingMs) / 1000));
+  const behindSeconds = Math.max(0, Math.round((nowMs - lag - lastReadingMs) / 1000));
+  if (behindSeconds <= STOP_THRESHOLD_SECONDS) return { status: 'running', sinceLastReadingSeconds, behindSeconds };
+  if (behindSeconds <= IDLE_THRESHOLD_SECONDS) return { status: 'stopped', sinceLastReadingSeconds, behindSeconds };
+  return { status: 'idle', sinceLastReadingSeconds, behindSeconds };
 }
 
 export interface LiveLine {
@@ -283,7 +283,7 @@ export interface LiveLine {
   state: {
     status: LineStatus;
     /** Seconds since the newest cone reading, on the wall clock. */
-    sinceLastConeSeconds: number | null;
+    sinceLastReadingSeconds: number | null;
     /** How long the line has actually been down, net of the acquisition lag. */
     behindSeconds: number | null;
     /** Start of the current uninterrupted run when running; else null. */
@@ -306,8 +306,12 @@ export interface LiveLine {
     conesLastHour: number;
     sacksLastHour: number;
   };
+  /** `eventId` is the canonical PK — what the register's permalink takes.
+   *  `sourceRowId` is IFL's own id, kept for display: since the 2026-08-05
+   *  source rebuild it names two rows (register.ts, IDENTITY). */
   lastSack: {
     ts: string;
+    eventId: number;
     sourceRowId: number;
     sackNum: number | null;
     weightKg: number | null;
@@ -315,6 +319,7 @@ export interface LiveLine {
   } | null;
   lastCone: {
     ts: string;
+    eventId: number;
     sourceRowId: number;
     station: number | null;
     weightG: number | null;
@@ -360,6 +365,16 @@ export async function getLive(
    *
    * Median, not mean: a single clock-fault row in the sample would otherwise
    * drag the lag by hours and hide a genuinely stopped line.
+   *
+   * ORDER BY raw_id, NOT src_id. `src_id` is IFL's counter, and IFL restarts it:
+   * they dropped and recreated the four wide tables on 2026-08-05 and every
+   * identity went back to 1. Ordering by it means "newest" is whichever
+   * GENERATION happens to hold the biggest numbers, not the newest reading —
+   * so once a second generation lands, this samples the OLDER one until the new
+   * one out-counts it (~68 days at 3,000 cones/day against our 204,076). The
+   * whole acquisition-lag and line-state machinery would then run on stale rows
+   * with no visible symptom. `raw_id` is OUR identity column: monotone by
+   * ingest, never reused, never reset.
    */
   const lagRes = await pool
     .request()
@@ -369,7 +384,7 @@ export async function getLive(
       SELECT TOP (@take) DATEDIFF(SECOND, src_ProductionDate, src_Date) AS lagSeconds
         FROM sms_raw.cone_raw
        WHERE line_id = @line AND src_Date IS NOT NULL AND src_ProductionDate IS NOT NULL
-       ORDER BY src_id DESC`);
+       ORDER BY raw_id DESC`);
   const lagSamples = lagRes.recordset
     .map((r) => Number(r.lagSeconds))
     .filter((n) => Number.isFinite(n) && n >= 0 && n <= MAX_REPORTABLE_LAG_SECONDS)
@@ -385,13 +400,24 @@ export async function getLive(
   // The newest production time on record. Every "recent" window is measured
   // back from here, because a window measured back from the wall clock lands
   // entirely inside the acquisition lag and is always empty.
+  // Cones AND rejects, because this is "the newest production time on
+  // record" and a reject is a reading. Cone-only left the line able to
+  // report `running` (which counts rejects since finding M4) beside a frozen
+  // `dataAsOfUtc` and empty recent windows — a self-contradictory answer
+  // during exactly the span M4 exists to describe: inspection rejecting
+  // everything, no good cones.
   const tipRes = await pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('now', mssql.BigInt, nowMs)
     .query<{ tip: number | null }>(
-      `SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event
-        WHERE line_id = @line AND production_ts_utc_ms <= @now`,
+      `SELECT MAX(tip) AS tip FROM (
+         SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event
+          WHERE line_id = @line AND production_ts_utc_ms <= @now
+         UNION ALL
+         SELECT MAX(production_ts_utc_ms) FROM sms.reject_event
+          WHERE line_id = @line AND production_ts_utc_ms <= @now
+       ) t`,
     );
   const dataAsOfMs = tipRes.recordset[0]?.tip != null ? Number(tipRes.recordset[0].tip) : null;
   const anchorMs = dataAsOfMs ?? nowMs;
@@ -429,15 +455,15 @@ export async function getLive(
       SELECT COUNT(*) AS n FROM sms.reject_event
       WHERE line_id = @line AND production_ts_utc_ms >= @shiftStart AND production_ts_utc_ms <= @now`),
     bind(pool.request()).query<{
-      ts: Date; source_row_id: number; source_station: number | null; weight_g: number | null; in_range: boolean | null;
+      ts: Date; event_id: number; source_row_id: number; source_station: number | null; weight_g: number | null; in_range: boolean | null;
     }>(`
-      SELECT TOP 1 production_ts_utc AS ts, source_row_id, source_station, weight_g, in_range
+      SELECT TOP 1 production_ts_utc AS ts, cone_event_id AS event_id, source_row_id, source_station, weight_g, in_range
       FROM sms.cone_event WHERE line_id = @line AND production_ts_utc_ms <= @now
       ORDER BY production_ts_utc_ms DESC`),
     bind(pool.request()).query<{
-      ts: Date; source_row_id: number; sack_num: number | null; weight_kg: number | null; in_range: boolean | null;
+      ts: Date; event_id: number; source_row_id: number; sack_num: number | null; weight_kg: number | null; in_range: boolean | null;
     }>(`
-      SELECT TOP 1 production_ts_utc AS ts, source_row_id, sack_num, weight_kg, in_range
+      SELECT TOP 1 production_ts_utc AS ts, sack_event_id AS event_id, source_row_id, sack_num, weight_kg, in_range
       FROM sms.sack_event WHERE line_id = @line AND production_ts_utc_ms <= @now
       ORDER BY production_ts_utc_ms DESC`),
     bind(pool.request()).query<{ ts: Date; reject_type: string; source_station: number | null }>(`
@@ -454,12 +480,26 @@ export async function getLive(
 
   const sync = await getSyncHealth(pool, lineId);
   const lastConeRow = lastCone.recordset[0] ?? null;
-  const lastConeMs = lastConeRow ? new Date(lastConeRow.ts).getTime() : null;
-  const state = classifyLineState(lastConeMs, nowMs, lagMs);
+  const lastReadingMs = lastConeRow ? new Date(lastConeRow.ts).getTime() : null;
+  // Finding M4 (Sep 2026 audit): judging running/stopped on cones alone reads
+  // a span producing only rejects — inspection stations active, no good
+  // cones — as full downtime. classifyLineState only cares that it is given
+  // the newest RELEVANT reading, not what kind it is, so the newest of
+  // either stream is what "the line is producing something" actually means.
+  const lastRejectRowForState = lastReject.recordset[0] ?? null;
+  const lastRejectMs = lastRejectRowForState ? new Date(lastRejectRowForState.ts).getTime() : null;
+  const lastActivityMs =
+    lastReadingMs == null ? lastRejectMs : lastRejectMs == null ? lastReadingMs : Math.max(lastReadingMs, lastRejectMs);
+  const state = classifyLineState(lastActivityMs, nowMs, lagMs);
 
-  // Start of the current run: the newest cone that followed a gap longer
-  // than the stop threshold (or the first cone in the 24 h window). Only
+  // Start of the current run: the newest reading that followed a gap longer
+  // than the stop threshold (or the first in the 24 h window). Only
   // meaningful while running; a stopped line has no current run.
+  //
+  // Over cones AND rejects, matching what `status` is judged on. Cone-only
+  // returned null — "running since never" — for a run carried by rejects
+  // alone, and would have measured a gap as a break in the run when the line
+  // was in fact producing rejects throughout it.
   let runStartUtc: string | null = null;
   if (state.status === 'running') {
     const r = await pool
@@ -469,11 +509,17 @@ export async function getLive(
       .input('now', mssql.BigInt, nowMs)
       .input('gapMs', mssql.BigInt, STOP_THRESHOLD_SECONDS * 1000)
       .query<{ runStart: Date | null }>(`
-        WITH c AS (
-          SELECT production_ts_utc AS ts, production_ts_utc_ms AS ms,
-                 LAG(production_ts_utc_ms) OVER (ORDER BY production_ts_utc_ms) AS prev_ms
-          FROM sms.cone_event
-          WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now
+        WITH a AS (
+          SELECT production_ts_utc AS ts, production_ts_utc_ms AS ms
+            FROM sms.cone_event
+           WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now
+          UNION ALL
+          SELECT production_ts_utc, production_ts_utc_ms
+            FROM sms.reject_event
+           WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now
+        ),
+        c AS (
+          SELECT ts, ms, LAG(ms) OVER (ORDER BY ms) AS prev_ms FROM a
         )
         SELECT MAX(ts) AS runStart FROM c WHERE prev_ms IS NULL OR ms - prev_ms > @gapMs`);
     runStartUtc = iso(r.recordset[0]?.runStart ?? null);
@@ -512,7 +558,7 @@ export async function getLive(
     },
     state: {
       status: state.status,
-      sinceLastConeSeconds: state.sinceLastConeSeconds,
+      sinceLastReadingSeconds: state.sinceLastReadingSeconds,
       behindSeconds: state.behindSeconds,
       runStartUtc,
       stopThresholdSeconds: STOP_THRESHOLD_SECONDS,
@@ -534,6 +580,7 @@ export async function getLive(
     lastSack: lastSackRow
       ? {
           ts: iso(lastSackRow.ts)!,
+          eventId: Number(lastSackRow.event_id),
           sourceRowId: Number(lastSackRow.source_row_id),
           sackNum: lastSackRow.sack_num,
           weightKg: lastSackRow.weight_kg == null ? null : Number(lastSackRow.weight_kg),
@@ -543,6 +590,7 @@ export async function getLive(
     lastCone: lastConeRow
       ? {
           ts: iso(lastConeRow.ts)!,
+          eventId: Number(lastConeRow.event_id),
           sourceRowId: Number(lastConeRow.source_row_id),
           station: lastConeRow.source_station,
           weightG: lastConeRow.weight_g == null ? null : Number(lastConeRow.weight_g),

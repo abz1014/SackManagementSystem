@@ -21,14 +21,27 @@
 import { useState } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { trailingWindow, type Period } from '../lib/period';
+import { trailingWindow, daysWithReadings, type Period } from '../lib/period';
 import { Block, Details, Empty, Failed, Loading, SkelChart, SkelLines } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, linePath, fittingTicks, tickIndices } from '../ui/chart';
-import { fmtInt } from '../lib/fmt';
+import { fmtInt, fmtPct1 } from '../lib/fmt';
 import {
-  getRejects, getRejectSpc, setRejectLabel,
+  getRejects, getRejectSpc, getRange, setRejectLabel,
   type RejectReason, type RejectSpcData,
 } from '../api';
+
+/**
+ * A promise that never settles, for a poll whose window is not known yet.
+ *
+ * The alternative — `win!.from` while `win` is null — threw inside the
+ * poller, which recorded a real error; the screen then flashed "could not
+ * load" in the gap between the window arriving and the retry succeeding,
+ * because usePolling keeps the last error until the next success. Never
+ * settling instead means no request, no error and no state change: the hook
+ * simply stays `loading` until the key changes and the real fetch runs. The
+ * abandoned promise is dropped by the effect's own cancelled flag.
+ */
+const never = (): Promise<never> => new Promise<never>(() => {});
 
 export function RejectsScreen({
   period,
@@ -42,28 +55,44 @@ export function RejectsScreen({
   canName: boolean;
 }) {
   const { line } = useLive();
-  const win = line
-    ? trailingWindow({
-        shiftDate: line.shift.shiftDate,
-        shiftCode: line.shift.code,
-        shiftStartUtc: line.shift.startUtc,
-        plantNowUtc: line.plantNowUtc,
-        dataAsOfUtc: line.dataAsOfUtc,
-      })
-    : null;
+  // Rarely changes (it moves once a day at most), so a slow heartbeat is
+  // plenty. Finding H6 (Sep 2026 audit): without this, trailingWindow() below
+  // always claimed the full 14 days regardless of how much history actually
+  // exists — the exact wrong side to be wrong on right after go-live, when
+  // the record is a handful of days old.
+  const range = usePolling(() => getRange(), 30 * 60_000, 'range');
+  // Wait for BOTH before computing the window. Deriving it from `line` alone
+  // and letting `firstDay` arrive later meant the first paint used an
+  // unclipped 14-day window: three requests went out against it, were thrown
+  // away the moment /api/range resolved and the window shrank, and the "last
+  // N days" label visibly changed under the reader. `range.error` also
+  // releases the wait, so a failing /api/range degrades to the unclipped
+  // window rather than holding the screen on a spinner forever.
+  const rangeSettled = range.data != null || range.error != null;
+  const win =
+    line && rangeSettled
+      ? trailingWindow({
+          shiftDate: line.shift.shiftDate,
+          shiftCode: line.shift.code,
+          shiftStartUtc: line.shift.startUtc,
+          plantNowUtc: line.plantNowUtc,
+          dataAsOfUtc: line.dataAsOfUtc,
+          firstDay: range.data?.minDate ?? null,
+        })
+      : null;
 
   const quality = usePolling(
-    () => getRejectSpc(win!.from, win!.to, 'quality', 'day'),
+    () => (win ? getRejectSpc(win.from, win.to, 'quality', 'day') : never()),
     5 * 60_000,
     `rspc:q:${win?.from}:${win?.to}`,
   );
   const weight = usePolling(
-    () => getRejectSpc(win!.from, win!.to, 'weight', 'day'),
+    () => (win ? getRejectSpc(win.from, win.to, 'weight', 'day') : never()),
     5 * 60_000,
     `rspc:w:${win?.from}:${win?.to}`,
   );
   const reasons = usePolling(
-    () => getRejects(win!.from, win!.to),
+    () => (win ? getRejects(win.from, win.to) : never()),
     5 * 60_000,
     `reasons:${win?.from}:${win?.to}`,
   );
@@ -84,12 +113,26 @@ export function RejectsScreen({
 
   const q = periodQ.data?.data ?? null;
   const w = periodW.data?.data ?? null;
+  // The band is drawn only where the period intersects the trailing window.
+  const periodOverlapsWindow = period.from <= win.to && period.to >= win.from;
+  const anyReasonUnnamed = (reasons.data?.data.reasons ?? []).some((r) => !r.label);
   const totalRejects = (q?.totalRejects ?? 0) + (w?.totalRejects ?? 0);
   const produced = q?.totalProduced ?? 0;
   const ratePct = produced + totalRejects > 0 ? (100 * totalRejects) / (produced + totalRejects) : null;
 
   const rising = ongoing(quality.data?.data) ?? ongoing(weight.data?.data);
   const risingKind = ongoing(quality.data?.data) ? W.rejects.quality : W.rejects.weightKind;
+  // Every rise in the window, not just one still running at the newest
+  // bucket — otherwise the headline says "Steady." over a chart of spikes.
+  const windowEpisodes = [
+    ...(quality.data?.data.episodes ?? []),
+    ...(weight.data?.data.episodes ?? []),
+  ];
+  const lastEnded = windowEpisodes.map((e) => e.endTs).sort().slice(-1)[0] ?? null;
+  const settledTail =
+    windowEpisodes.length > 0 && lastEnded
+      ? W.rejects.steadyAfterRises(windowEpisodes.length, dayLabel(lastEnded))
+      : W.rejects.steady;
 
   const top = reasons.data?.data.reasons?.[0] ?? null;
 
@@ -100,8 +143,8 @@ export function RejectsScreen({
       <h1 className="wide">
         {q == null || w == null
           ? '…'
-          : `${W.rejects.headline(fmtInt(totalRejects), ratePct == null ? '—' : `${Math.round(ratePct * 10) / 10}%`, q.totalRejects, w.totalRejects)} — ${
-              rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : W.rejects.steady
+          : `${W.rejects.headline(fmtInt(totalRejects), fmtPct1(ratePct), q.totalRejects, w.totalRejects)} — ${
+              rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : settledTail
             }.`}
       </h1>
       </div>
@@ -110,7 +153,7 @@ export function RejectsScreen({
         <div className="figs two">
           <div>
             <b className="fig-val">{fmtInt(totalRejects)}<span className="fig-unit">{W.fig.rejected}</span></b>
-            <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(`${Math.round(ratePct * 10) / 10}%`)}</span>
+            <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtPct1(ratePct))}</span>
           </div>
           <div>
             <b className="fig-val">{top ? `${Math.round(top.pct)}%` : '—'}</b>
@@ -123,7 +166,15 @@ export function RejectsScreen({
 
       {/* The rate over time on the left, what is causing it on the right:
           the two questions are read together, not one after the other. */}
-      <Block label={W.rejects.trendTitle(win.requestedDays)} note={W.rejects.namesAwaited}>
+      {/* Title and note both conditional: the shaded band is only drawn
+          when the selected period overlaps the trailing window (pick older
+          dates and there is no band), and "names have not been supplied"
+          must not print on a screen where every shown code IS named — the
+          same screen offers "Name it" and writes those labels. */}
+      <Block
+        label={periodOverlapsWindow ? W.rejects.trendTitle(win.requestedDays) : W.rejects.trendTitleNoShade(win.requestedDays)}
+        note={anyReasonUnnamed ? W.rejects.namesAwaited : null}
+      >
         <div className="two-col">
           <div>
             {quality.loading && !quality.data ? (
@@ -163,9 +214,23 @@ export function RejectsScreen({
       <Details>
         <p>
           The trend is drawn over the last {win.requestedDays} production days with the selected period shaded, because
-          a sustained rise cannot be seen inside a single shift. A day is marked as a rise when its rate sits above the
+          a sustained rise cannot be seen inside a single shift.
+          {/* The window clamps at the first day on record, not at a hole in
+              the middle — and the record has one (10 Jul → 5 Aug 2026). Say
+              how many of the requested days actually hold anything. */}
+          {(() => {
+            const held = daysWithReadings([
+              ...(quality.data?.data.buckets ?? []),
+              ...(weight.data?.data.buckets ?? []),
+            ]);
+            return held > 0 && held < win.requestedDays ? ` ${W.rejects.daysHoldReadings(held, win.requestedDays)}` : '';
+          })()}
+          {' '}A day is marked as a rise when its rate sits above the
           usual range for that many cones, and consecutive marked days are joined into one episode.
         </p>
+        {(quality.data?.data.spansGenerations || weight.data?.data.spansGenerations) && (
+          <p className="mut">{W.rejects.spansGenerations}</p>
+        )}
         <p>
           Weight and quality rejects are counted separately throughout: a rise in one says nothing about the other.
           Reject rate is rejected cones over everything weighed, rejected cones included.

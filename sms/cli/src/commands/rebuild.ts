@@ -6,7 +6,7 @@
  */
 import mssql from 'mssql';
 import { TRANSFORM_VERSION } from '@sms/shared';
-import { runTransform, resetTransformWatermarks } from '@sms/sync-worker';
+import { runTransform, resetTransformWatermarks, withTransformLock } from '@sms/sync-worker';
 import { openContext, parseArgs } from '../context.js';
 
 const ALLOWED = new Set(['cone_event', 'sack_event', 'reject_event']);
@@ -28,6 +28,7 @@ export async function rebuild(argv: string[]): Promise<number> {
   }
 
   const ctx = await openContext();
+  let rebuildId: number | undefined;
   try {
     const from = (
       await ctx.app.request().query<{ v: number }>(
@@ -45,19 +46,42 @@ export async function rebuild(argv: string[]): Promise<number> {
         `INSERT INTO sms.rebuild_audit (snapshot_id, from_transform_version, to_transform_version, target_table)
          OUTPUT INSERTED.rebuild_id id VALUES (@snap, @from, @to, @tbl)`,
       );
-    const rebuildId = audit.recordset[0]!.id;
+    rebuildId = audit.recordset[0]!.id;
 
     console.log(`rebuild ${table}: snapshot ${snapshotId}, transform v${from} → v${TRANSFORM_VERSION}`);
-    await ctx.app.request().query(`DELETE FROM sms.${table} WHERE source_system='ifl_sql'`);
-    // The transform is incremental (raw watermark) — reset this stream's
-    // watermark or the re-run sees an empty batch and rebuilds nothing. The
-    // re-run also re-records this table's ingest-time DQ findings, so clear
-    // the old ones first or every rebuild would duplicate the standing set.
-    await ctx.app.request().input('tbl2', mssql.VarChar(40), table)
-      .query(`DELETE FROM sms.dq_finding WHERE subject_table=@tbl2`);
-    await resetTransformWatermarks(ctx.app, table);
-    const out = await runTransform(ctx.app, ctx.cfg);
-    const rebuilt = out.find((o) => o.table === table)?.written ?? 0;
+
+    // Everything from here on races the sync-worker's own continuous transform
+    // pass against the same canonical table and watermark keys (finding C1,
+    // Sep 2026 audit) — hold the shared lock for all of it, not just the
+    // transform call, so the DELETE below can't land mid-way through a
+    // concurrent pass.
+    const rebuilt = await withTransformLock(ctx.cfg.app, async () => {
+      // Chunked, not one statement. Clearing cone_event is 204,076 rows: as a
+      // single DELETE that is one transaction held open for the whole scan,
+      // growing the log by the size of the table — on a plant PC with a modest
+      // disk that is how a maintenance command becomes an outage. Small
+      // batches keep each statement short and let the log wrap between them.
+      // `table` is checked against ALLOWED above, so the interpolation is safe.
+      let cleared = 0;
+      for (;;) {
+        const del = await ctx.app
+          .request()
+          .query(`DELETE TOP (5000) FROM sms.${table} WHERE source_system='ifl_sql'`);
+        const n = del.rowsAffected[0] ?? 0;
+        cleared += n;
+        if (n === 0) break;
+      }
+      console.log(`cleared ${cleared} existing rows`);
+      // The transform is incremental (raw watermark) — reset this stream's
+      // watermark or the re-run sees an empty batch and rebuilds nothing. The
+      // re-run also re-records this table's ingest-time DQ findings, so clear
+      // the old ones first or every rebuild would duplicate the standing set.
+      await ctx.app.request().input('tbl2', mssql.VarChar(40), table)
+        .query(`DELETE FROM sms.dq_finding WHERE subject_table=@tbl2`);
+      await resetTransformWatermarks(ctx.app, table);
+      const out = await runTransform(ctx.app, ctx.cfg);
+      return out.find((o) => o.table === table)?.written ?? 0;
+    });
 
     await ctx.app
       .request()
@@ -68,6 +92,26 @@ export async function rebuild(argv: string[]): Promise<number> {
       );
     console.log(`rebuilt ${rebuilt} rows (audit #${rebuildId})`);
     return 0;
+  } catch (err) {
+    // Previously absent entirely: any error here left the row's outcome
+    // stuck at its default 'running' forever, with canonical already
+    // deleted, indistinguishable from a rebuild still in progress.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`rebuild failed: ${message}`);
+    if (rebuildId !== undefined) {
+      try {
+        await ctx.app
+          .request()
+          .input('id', mssql.BigInt, rebuildId)
+          .input('msg', mssql.NVarChar(2000), message.slice(0, 2000))
+          .query(
+            `UPDATE sms.rebuild_audit SET outcome='failed', error_message=@msg, finished_at_utc=SYSUTCDATETIME() WHERE rebuild_id=@id`,
+          );
+      } catch (auditErr) {
+        console.error(`(also failed to record the failure in rebuild_audit: ${String(auditErr)})`);
+      }
+    }
+    return 1;
   } finally {
     await ctx.close();
   }

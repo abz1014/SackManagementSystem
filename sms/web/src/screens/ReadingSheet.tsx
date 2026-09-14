@@ -60,7 +60,10 @@ export function ReadingSheet({
 
         // The product is resolved at THIS reading's production time, never
         // "the product recorded today".
-        const product = await getProductAt(row.production_ts_utc);
+        // The row's OWN product when it carries one (MaterialId, Sep 2026):
+        // without it this sheet judged a September cone against the line-wide
+        // timeline product — a retired July material.
+        const product = await getProductAt(row.production_ts_utc, row.material_id ?? undefined);
         if (cancelled) return;
 
         let around: State['around'] = null;
@@ -133,7 +136,7 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
       )}
 
       <dl className="kv" style={{ marginTop: 24 }}>
-        <dt>{W.readings.weighed}</dt>
+        <dt>{isSack && row.production_ts_is_insert_time ? W.readings.recorded : W.readings.weighed}</dt>
         <dd>
           {fmtDayLong(row.shift_date)}, {fmtClock(row.production_ts_utc)}
         </dd>
@@ -161,9 +164,16 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
         )}
       </dl>
 
+      {/* Finding M7: named "Recorded" above rather than "Weighed" for exactly
+          this reason, stated once here rather than repeated per row in the
+          list — every sack carries this flag, so it would be noise there. */}
+      {isSack && row.production_ts_is_insert_time && (
+        <p className="mut sm" style={{ marginTop: 22 }}>{W.readings.insertTimeCaveat}</p>
+      )}
+
       {/* Sacks only, once, with the caveat in the same sentence. */}
       {isSack && state.around && (
-        <p className="mut sm" style={{ marginTop: 22 }}>
+        <p className="mut sm" style={{ marginTop: 8 }}>
           {W.readings.aroundSack(state.around.cones)}
         </p>
       )}
@@ -190,7 +200,11 @@ function judge(weight: number, limits: { loG: number; hiG: number }): { inside: 
 }
 
 function describeMiss(byG: number): string {
-  const g = fmtG(Math.abs(byG));
+  // A miss is never zero — judge() only calls this when the reading is
+  // genuinely outside — so a magnitude under half a gram must not round to
+  // "0 g under the lower limit", which reads as no miss at all.
+  const magnitude = Math.abs(byG);
+  const g = magnitude < 1 ? `${magnitude.toFixed(1)}${String.fromCharCode(0xa0)}g` : fmtG(magnitude);
   return byG < 0 ? `${g} under the lower limit` : `${g} over the upper limit`;
 }
 

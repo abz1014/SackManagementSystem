@@ -145,6 +145,7 @@ export const W = {
        misrepresented one. */
     notSentToMachine: 'Recorded here for weight limits and reports. It is not sent to the machine.',
     target: 'Target',
+    targetAndLimits: 'Target and limits',
     limits: 'limits',
     since: 'since',
     setBy: 'set by',
@@ -152,15 +153,65 @@ export const W = {
     history: 'History',
     none: 'No product has been recorded for this line yet.',
     inactive: 'This product is marked inactive in the product master.',
+    /* Finding M10 (Sep 2026 audit): PDAS's MaterialDesc2 carries real color
+       data (e.g. 'PARROT', 'Khaki-2') that was never selected or shown. */
+    colour: 'Colour',
     previewLimits: (limits: string) => `New limits would be ${limits}.`,
     confirm: 'Record this product',
     cancel: 'Cancel',
     reason: 'Why (optional)',
+
+    /* ---- PDAS write path (SEPT-2026-EPOCH-DECISION §5.5). Two distinct
+       actions, never one "Edit" button: one keeps the product number and one
+       cannot exist for the same blend + count + tube type. Never "Delete",
+       never anything implying we wrote to the PLC. */
+    pdasTitle: 'Products in PDAS',
+    pdasNote:
+      'These are written to PDAS through its own procedures, as the process engineer does by hand today. Nothing is sent to a machine.',
+    writeUnavailable: (why: string) => `Changing products in PDAS is not available here: ${why}`,
+    writeNeedsRank: 'Changing products in PDAS needs a manager account.',
+    changeLimits: 'Change weight limits',
+    changeLimitsHeading: (label: string, blend: string, count: string, tube: string, id: number) =>
+      `Change weight limits — ${label} · ${blend} · ${count} · ${tube} (product ${id})`,
+    targetTo: (from: string, to: string) => `Target ${from} → ${to}`,
+    rangeTo: (from: string, to: string) => `Accepted range ${from} → ${to}`,
+    changeLimitsNote:
+      'This changes the limits the scale uses from now on. Readings already recorded keep the limits that were in force when they were weighed.',
+    changeLimitsKeepsNumber: (id: number) =>
+      `Product ${id} keeps its number, so past and future readings stay under the same product. If this is really a different yarn, create a new product instead.`,
+    /* Pending IFL's answer on propagation (§6.2 q1). Not optional. */
+    changeLimitsPropagation: 'The scale picks up the new limits when the product is next selected on the machine.',
+    whyRequired: 'Why is this changing? (required)',
+    changeLimitsConfirm: 'Change the limits',
+    newProduct: 'Create a new product',
+    newProductNote: 'A new product gets a new number. Readings from now on are recorded against it; nothing already recorded moves.',
+    newProductTriple: (blend: string, count: string, tube: string, id: number) =>
+      `PDAS allows only one product per blend + count + tube type. ${blend} · ${count} · ${tube} already exists as product ${id}. To create a new product, change one of those three — or change the limits on product ${id} instead.`,
+    newProductConfirm: 'Create the product',
+    retire: 'Retire',
+    activate: 'Activate',
+    retireNote: (id: number) =>
+      `Retire product ${id}. It stops being selectable on the machine. Readings already recorded keep it, and you can bring it back later.`,
+    activateNote: (id: number) => `Make product ${id} selectable on the machine again.`,
+    setpointG: 'Target (g)',
+    offsetMinusG: 'Below target (g)',
+    offsetPlusG: 'Above target (g)',
+    desc1: 'Lot / description',
+    blend: 'Blend',
+    count: 'Count',
+    tubeType: 'Tube type',
+    retired: 'retired',
+    reasonTooShort: 'Please give a reason of at least 10 characters.',
+    written: 'Written to PDAS.',
   } as const,
 
   /* -------------------------------------------------------------- stations */
   stations: 'Stations',
   stationsNote: 'cones this period',
+  /* The wall has no period control: its per-station counts are measured
+     from the start of the shift (live.ts), so it must not borrow Line's
+     "this period" wording. */
+  stationsNoteShift: 'cones this shift',
   station: (n: number) => `Station ${n}`,
   quiet: 'quiet',
   quietFor: (span: string, n: number) => `Station ${n} has been quiet for ${span}`,
@@ -173,6 +224,20 @@ export const W = {
     cones: 'Cones',
     sacks: 'Sacks',
     rejectedCones: 'Rejected cones',
+    /* A different population from rejectedCones above: those are cones the
+       SCALE rejected (cone_event.in_range = 0); these are inspection rejects
+       that never became a cone_event row at all (reject_event). Added for
+       finding H4 (Sep 2026 audit) — Rejects' "see the rejected cones" link
+       had nowhere that actually listed this population until now. */
+    inspectionRejects: 'Rejected before weighing',
+    filterOutsideLimits: 'Outside product limits',
+    /* The count sentence while the outside-limits filter is on. It may NOT
+       reuse countLine's "N weighed, M rejected (P%)": with the filter on
+       those two counts describe different populations, and the percentage
+       between them is unbounded (40 against 160 printed "400.0%"). */
+    countLineOutside: (n: string) =>
+      `${n} cones passed by the scale but outside the product's limits.`,
+    nothingOutside: 'No cones in this period were passed by the scale but outside the product’s limits.',
     countLine: (n: string, rejected: string, pct: string) =>
       `${n} weighed, ${rejected} rejected by the scale (${pct}).`,
     filterStation: 'Station',
@@ -193,6 +258,13 @@ export const W = {
     status: 'Status',
     record: 'Record',
     weighed: 'Weighed',
+    /* Finding M7 (Sep 2026 audit): mapSack flags every sack row
+       production_ts_is_insert_time=true — the plant has no separate weighing
+       time for a sack (DQ-5) — and that flag was captured end-to-end but
+       never shown anywhere. A sack's "Weighed" time is actually when the
+       reading was written, which can trail the real event. */
+    recorded: 'Recorded',
+    insertTimeCaveat: "The plant records no separate weighing time for a sack — this is when the reading was written, which can trail the actual weighing.",
     provenance: 'Provenance',
     provenanceNote: 'Where this reading came from and when it arrived.',
     /* The plant records no link from a cone to a sack; cones between two
@@ -219,11 +291,21 @@ export const W = {
     above: 'above',
     below: 'below',
     spread: (lo: string, hi: string) => `${lo} to ${hi}`,
-    spreadNote: '95 of every 100 cones fall in this range',
+    /* States the arithmetic, not an unmeasured distributional claim. It
+       used to read "95 of every 100 cones fall in this range": the range is
+       mean ± 2 standard deviations, nothing counts the share that actually
+       lands inside, and the population is a mixture of fourteen
+       differently-biased stations, so the normal-theory 95% does not follow. */
+    spreadNote: 'two standard deviations either side of the average',
     overTime: 'Over time',
     distribution: 'Distribution',
     stationsTable: 'Stations',
+    /* Two sorts, because weightStations.ts sorts by distance from TARGET
+       only when a product was in force at the window's end, and by distance
+       from the line average otherwise — which is the default state, and
+       exactly when every "vs target" cell reads "—". */
     sortNote: 'flagged first, then by distance from target',
+    sortNoteNoTarget: 'flagged first, then by distance from the line average',
     colStation: 'Station',
     colAverage: 'Average',
     colVsLine: 'vs line',
@@ -251,6 +333,9 @@ export const W = {
     adjustmentsIn: (n: number, days: number) =>
       `${n} ${n === 1 ? 'adjustment' : 'adjustments'} in the last ${days} days.`,
     adjustmentResets: "A logged adjustment restarts that station's pattern from that moment.",
+    /* Was already drafted but never wired to a field until finding M9 (Sep
+       2026 audit) — REDESIGN.md §5.3 specifies "station, signed grams, time,
+       why", and LogForm below had a place for why but not for the number. */
     adjustAmount: 'Amount (grams, signed)',
     adjustWhen: 'When',
     adjustWhy: 'Why',
@@ -262,13 +347,30 @@ export const W = {
   rejects: {
     headline: (n: string, pct: string, quality: number, weight: number) =>
       `${n} cones rejected, ${pct} of everything weighed — ${quality} for quality, ${weight} for weight`,
+    /* "steady" is only honest when the WINDOW was steady. The rising test
+       asks whether an episode is still running at the NEWEST bucket, so a
+       fortnight holding three rises that ended on Tuesday read "steady." to a
+       reader looking straight at those spikes on the chart below it. */
     steady: 'steady',
+    steadyAfterRises: (n: number, lastEnded: string) =>
+      n === 1
+        ? `not rising now, after one rise in this window that ended ${lastEnded}`
+        : `not rising now, after ${n} rises in this window, the last ending ${lastEnded}`,
     risingSince: (when: string, kind: string) => `${kind} rejects have been rising since ${when}`,
     topReason: 'the top reason',
     notYetNamed: 'not yet named',
     codeUnnamed: (code: string) => `Code ${code} — not yet named`,
     noCode: 'No code recorded',
+    /* The shaded band is only drawn when the selected period overlaps the
+       trailing window; pick dates older than it and the title promised a
+       band that is not there. */
     trendTitle: (days: number) => `Reject rate over the last ${days} days · this period shaded`,
+    trendTitleNoShade: (days: number) => `Reject rate over the last ${days} days`,
+    /** Only printed when fewer days hold readings than the window asked for. */
+    daysHoldReadings: (n: number, of: number) => `Only ${n} of those ${of} days hold readings.`,
+    /** The window crosses the 5 Aug 2026 rebuild of IFL's tables. */
+    spansGenerations:
+      "This window crosses the 5 August rebuild of IFL's tables. The usual range is worked out separately on each side of it, never across.",
     usualRange: 'usual range',
     quality: 'quality',
     weightKind: 'weight',
@@ -278,9 +380,16 @@ export const W = {
     namesAwaited: 'Reason names have not been supplied yet. A manager can name a code here; the name applies to history.',
     nameIt: 'Name it',
     seeTheCones: 'See the rejected cones themselves',
-    seeTheConesNote: 'opens Readings with the Rejected toggle and this period',
+    // Fixed alongside finding H4/M8 (Sep 2026 audit): this used to describe
+    // the SCALE-rejected cone toggle, but the link actually opens the
+    // inspection-reject listing — a different population (reject_event, not
+    // cone_event.in_range=0). See Readings.tsx's 'inspectionRejects' listing.
+    seeTheConesNote: 'opens Readings filtered to cones rejected before weighing, for this period',
     byStation: 'By station',
-    byStationNote: 'opens the Weight station table sorted by reject rate',
+    // Fixed alongside finding M8 (Sep 2026 audit): described a reject-rate
+    // sort that has never existed — weightStations.ts sorts flagged stations
+    // first, then by distance from target (or from the line with no target).
+    byStationNote: 'opens the Weight station table, flagged stations first',
     perDay: 'Rejects per day',
     none: 'No cones were rejected in this period.',
   } as const,
@@ -303,8 +412,12 @@ export const W = {
     /* Requirement 7 is the largest thing IFL asked for and it is not built,
        because their sack table carries no machine and no record of a sack
        leaving. A GM who looks for stock must find the reason, not a blank. */
+    /* Says only what is true. The previous wording ended "IFL has been
+       asked how sacks are linked to machines…" — but IFL_SACK_STOCK_QUESTION.md
+       still reads "drafted 2 Sep 2026, not yet sent". This prints on the
+       Report, the one screen that leaves the building, possibly to IFL. */
     noSackStock:
-      "Sack stock per machine is not shown: the plant's sack records carry no machine and no record of a sack leaving. IFL has been asked how sacks are linked to machines and how they leave stock.",
+      "Sack stock per machine is not shown: the plant's sack records carry no machine and no record of a sack leaving.",
     byShift: 'By shift',
     byDay: 'By day',
     colShift: 'Shift',
@@ -342,6 +455,14 @@ export const W = {
     oldestTable: 'Oldest table',
     findings: 'Blocking findings',
     perTable: 'Per table',
+    /** A pass recorded before source generations existed — true, and worth saying. */
+    preEpochPass: 'before generations were recorded',
+    /* The H5 hazard, said plainly. Changing the night rule restamps only
+       NEW rows, so until a rebuild runs the table holds two regimes and every
+       shift_date figure blends them. Migration 023 marks each row so this can
+       be detected at all. */
+    mixedShiftRules: (tables: string) =>
+      `${tables} hold readings attributed under two different night-shift rules. Every figure counted by production day blends them until a rebuild is run.`,
     none: 'None',
   } as const,
 
@@ -357,6 +478,10 @@ export const W = {
   loading: 'Loading…',
   couldNotLoad: 'Could not load this. The plant connection may be down.',
   notAllowed: 'This is only available to an administrator.',
+  /* Finding H13 (Sep 2026 audit): StationSheet had no branch for "loaded, but
+     this station isn't in the data" — an invalid or renamed station id spun
+     on a loading skeleton forever, indistinguishable from a slow network. */
+  stationNotFound: 'This station has no readings in the window this sheet looks at, or the number in the link no longer matches a station.',
   retry: 'Try again',
   nothingHere: 'Nothing recorded in this period.',
   replay: 'REPLAY — showing the plant as it was at',

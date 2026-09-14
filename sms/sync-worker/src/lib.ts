@@ -6,3 +6,11 @@ export { runOnce, type TableOutcome } from './runner.js';
 export { runTransform, resetTransformWatermarks, type TransformOutcome } from './transform/runTransform.js';
 export { runFullSync, type FullSyncResult } from './pipeline.js';
 export { IFL_TABLES } from './reader/iflTables.js';
+export {
+  resolveEpoch,
+  readSourceIdentity,
+  openEpoch,
+  type EpochRow,
+  type SourceIdentity,
+} from './epoch.js';
+export { acquireTransformLock, withTransformLock, type TransformLock } from './lock.js';

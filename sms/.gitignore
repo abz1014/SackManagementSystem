@@ -21,3 +21,7 @@ npm-debug.log*
 # client data — never commit (also excluded at repo root)
 *.mdf
 *.ldf
+
+# developer-only scratch tools (hard-code a local path; not part of the product)
+/q.mjs
+/sync-trace.mjs

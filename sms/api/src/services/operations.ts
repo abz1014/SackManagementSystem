@@ -5,11 +5,41 @@ import mssql from 'mssql';
 export interface SyncStatus {
   targetTable: string;
   outcome: string;
+  /**
+   * Source `id` bounds of the pass. Only meaningful WITH the epoch: IFL's
+   * identities restarted at 1 on 2026-08-05, so without it the watermark
+   * reads as a number that jumps from 204,076 to 1 for no reason
+   * (SEPT-2026-EPOCH-DECISION §4.8). `epochId`/`epochLabel` are null for
+   * passes recorded before the column existed — the screen says so.
+   */
+  watermarkFrom: number | null;
   watermark: number | null;
+  epochId: number | null;
+  epochLabel: string | null;
   rowsRead: number;
   rowsWritten: number;
   finishedAtUtc: string | null;
   ageSeconds: number | null;
+}
+
+/**
+ * Schema-fingerprint status per SOURCE table, from `sms.source_epoch`.
+ *
+ * The fingerprint the worker enforces lives on the open epoch row (the one
+ * with `closed_utc IS NULL`), and the worker — not this API — compares it to
+ * the live source on every pass and halts on drift. This API cannot reach the
+ * source at all, so it never reports 'ok': it reports what it can actually
+ * see. 'enforced-by-worker' means an open epoch exists and carries the
+ * fingerprint the worker is checking against; 'no-open-epoch' means nothing
+ * is registered for that table and the worker halts on it until
+ * `sms epoch:accept` runs.
+ */
+export interface SchemaEpoch {
+  table: string;
+  fingerprint: string | null;
+  status: 'enforced-by-worker' | 'no-open-epoch';
+  epochId: number | null;
+  epochLabel: string | null;
 }
 
 /**
@@ -22,23 +52,60 @@ export interface SyncStatus {
  * it is showing.
  *
  * Durations are per table-run, not per query, and are held as milliseconds.
+ *
+ * medianMs/p95Ms/slowestMs are over RECENT_WINDOW_DAYS, not all-time (finding
+ * H9, Sep 2026 audit): PERCENTILE_CONT has to sort every row it's given, so
+ * computing it over the whole, unboundedly-growing table on every 60s poll of
+ * the Setup screen was a cost that grows forever for a number where "recent"
+ * is what an operator actually wants anyway — a rate from a year ago tells
+ * you nothing about whether today's sync is healthy. passes/tableRuns/
+ * failures/firstRunUtc/lastRunUtc stay true lifetime figures: they're plain
+ * COUNT/SUM/MIN/MAX, which the new index keeps cheap at any table size.
  */
+/**
+ * Seven days, not ninety. `sync_run` gains ~4 rows a minute (one per source
+ * table per 60s pass) — about 5,800 a day — so a 90-day window would hand
+ * PERCENTILE_CONT roughly half a million rows to sort TWICE on every 60s poll
+ * of the Setup screen. Seven days is ~40,000 rows, and "how fast have passes
+ * been running lately" is the question this figure answers anyway: a median
+ * blended across a quarter of a year tells an operator nothing about today.
+ */
+export const RECENT_WINDOW_DAYS = 7;
+
 export interface SyncLifetime {
   passes: number;
   tableRuns: number;
   failures: number;
   firstRunUtc: string | null;
   lastRunUtc: string | null;
+  /** Over the last RECENT_WINDOW_DAYS days (7), not all-time. */
   medianMs: number | null;
   p95Ms: number | null;
   slowestMs: number | null;
   lastFailure: { targetTable: string; startedAtUtc: string; error: string | null } | null;
 }
 
+/**
+ * Canonical tables that hold rows stamped with more than one night-attribution
+ * rule — the H5 hazard, made visible.
+ *
+ * Changing the rule applies to newly-transformed rows at once, so until a
+ * rebuild runs the table blends two regimes and every shift_date-keyed figure
+ * silently mixes them. Nothing could detect that before migration 023 gave
+ * each row a marker. `null` counts rows written before the marker existed.
+ */
+export interface ShiftRuleRegimes {
+  table: string;
+  rules: { rule: string | null; rows: number }[];
+  mixed: boolean;
+}
+
 export interface OperationsData {
   sync: SyncStatus[];
+  /** Non-empty only when at least one table is mixed — a rebuild is due. */
+  shiftRuleRegimes: ShiftRuleRegimes[];
   lifetime: SyncLifetime;
-  schema: { table: string; fingerprint: string; status: string }[];
+  schema: SchemaEpoch[];
   dq: {
     latestRunId: string | null;
     bySeverity: Record<string, number>;
@@ -48,10 +115,15 @@ export interface OperationsData {
 
 export async function getOperations(pool: ConnectionPool, lineId: number): Promise<OperationsData> {
   // latest sync_run per target_table
+  // LEFT JOIN, not INNER: source_epoch is NULL on every pass recorded before
+  // the column existed, and those rows must still appear.
   const sync = await pool.request().input('line', mssql.Int, lineId).query<{
     target_table: string;
     outcome: string;
+    watermark_from: number | null;
     watermark_to: number | null;
+    source_epoch: number | null;
+    epoch_label: string | null;
     rows_read: number;
     rows_written: number;
     finished_at_utc: Date | null;
@@ -61,42 +133,51 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
       SELECT *, ROW_NUMBER() OVER (PARTITION BY target_table ORDER BY sync_run_id DESC) rn
       FROM sms.sync_run WHERE line_id=@line
     )
-    SELECT target_table, outcome, watermark_to, rows_read, rows_written, finished_at_utc,
-           DATEDIFF(SECOND, finished_at_utc, SYSUTCDATETIME()) AS age_seconds
-    FROM latest WHERE rn=1 ORDER BY target_table
+    SELECT l.target_table, l.outcome, l.watermark_from, l.watermark_to, l.source_epoch, ep.label AS epoch_label,
+           l.rows_read, l.rows_written, l.finished_at_utc,
+           DATEDIFF(SECOND, l.finished_at_utc, SYSUTCDATETIME()) AS age_seconds
+    FROM latest l LEFT JOIN sms.source_epoch ep ON ep.epoch_id = l.source_epoch
+    WHERE l.rn=1 ORDER BY l.target_table
   `);
 
-  // lifetime roll-up: one pass writes one row per table, so passes and
-  // table-runs are counted separately rather than conflated
+  // Lifetime roll-up: one pass writes one row per table, so passes and
+  // table-runs are counted separately rather than conflated. Plain aggregates
+  // over the whole table — cheap at any size with IX_sync_run_line_started.
   const life = await pool.request().input('line', mssql.Int, lineId).query<{
     passes: number;
     table_runs: number;
     failures: number;
     first_run: Date | null;
     last_run: Date | null;
-    median_ms: number | null;
-    p95_ms: number | null;
-    slowest_ms: number | null;
   }>(`
     SELECT COUNT(DISTINCT run_id) AS passes,
            COUNT(*) AS table_runs,
            SUM(CASE WHEN outcome <> 'success' THEN 1 ELSE 0 END) AS failures,
            MIN(started_at_utc) AS first_run,
-           MAX(started_at_utc) AS last_run,
-           MAX(median_ms) AS median_ms,
-           MAX(p95_ms) AS p95_ms,
-           MAX(dur_ms) AS slowest_ms
+           MAX(started_at_utc) AS last_run
+    FROM sms.sync_run WHERE line_id = @line
+  `);
+  const lr = life.recordset[0];
+
+  // Timing percentiles, bounded to a recent window (finding H9) — see the
+  // RECENT_WINDOW_DAYS comment on SyncLifetime for why.
+  const timing = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('windowDays', mssql.Int, RECENT_WINDOW_DAYS)
+    .query<{ median_ms: number | null; p95_ms: number | null; slowest_ms: number | null }>(`
+    SELECT MAX(median_ms) AS median_ms, MAX(p95_ms) AS p95_ms, MAX(dur_ms) AS slowest_ms
     FROM (
-      SELECT run_id, outcome, started_at_utc,
-             DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc) AS dur_ms,
+      SELECT DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc) AS dur_ms,
              PERCENTILE_CONT(0.50) WITHIN GROUP (
                ORDER BY DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc)) OVER () AS median_ms,
              PERCENTILE_CONT(0.95) WITHIN GROUP (
                ORDER BY DATEDIFF(MILLISECOND, started_at_utc, finished_at_utc)) OVER () AS p95_ms
-      FROM sms.sync_run WHERE line_id = @line
+      FROM sms.sync_run
+      WHERE line_id = @line AND started_at_utc >= DATEADD(DAY, -@windowDays, SYSUTCDATETIME())
     ) x
   `);
-  const lr = life.recordset[0];
+  const tm = timing.recordset[0];
 
   // the most recent failure, so "1 failure" is actionable rather than a bare count
   const fail = await pool.request().input('line', mssql.Int, lineId).query<{
@@ -116,18 +197,41 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     failures: Number(lr?.failures ?? 0),
     firstRunUtc: lr?.first_run ? lr.first_run.toISOString() : null,
     lastRunUtc: lr?.last_run ? lr.last_run.toISOString() : null,
-    medianMs: lr?.median_ms != null ? Math.round(Number(lr.median_ms)) : null,
-    p95Ms: lr?.p95_ms != null ? Math.round(Number(lr.p95_ms)) : null,
-    slowestMs: lr?.slowest_ms != null ? Math.round(Number(lr.slowest_ms)) : null,
+    medianMs: tm?.median_ms != null ? Math.round(Number(tm.median_ms)) : null,
+    p95Ms: tm?.p95_ms != null ? Math.round(Number(tm.p95_ms)) : null,
+    slowestMs: tm?.slowest_ms != null ? Math.round(Number(tm.slowest_ms)) : null,
     lastFailure: f0
       ? { targetTable: f0.target_table, startedAtUtc: f0.started_at_utc.toISOString(), error: f0.error_text }
       : null,
   };
 
-  // schema fingerprints (baselined => ok; drift would have halted sync)
-  const fp = await pool.request().query<{ config_key: string; config_value: string }>(
-    `SELECT config_key, config_value FROM sms.app_config WHERE config_key LIKE 'fingerprint.%'`,
+  // Schema fingerprints, per source table, from the epoch register. Every
+  // generation of a table has its own row; the OPEN one (closed_utc IS NULL)
+  // carries the fingerprint the worker enforces. Closed rows are read too so
+  // a table with no open epoch still appears, flagged — otherwise a table the
+  // worker is halted on would simply be missing from the list. See
+  // SchemaEpoch for why the status is never 'ok'.
+  const fp = await pool.request().input('line', mssql.Int, lineId).query<{
+    source_table: string;
+    epoch_id: number;
+    label: string;
+    schema_fingerprint: string;
+    is_open: number;
+  }>(
+    `SELECT source_table, epoch_id, label, schema_fingerprint,
+            CASE WHEN closed_utc IS NULL THEN 1 ELSE 0 END AS is_open
+     FROM sms.source_epoch WHERE line_id = @line
+     ORDER BY source_table, epoch_id`,
   );
+  const schema: SchemaEpoch[] = [];
+  for (const table of [...new Set(fp.recordset.map((r) => r.source_table))]) {
+    const open = fp.recordset.find((r) => r.source_table === table && r.is_open === 1);
+    schema.push(
+      open
+        ? { table, fingerprint: open.schema_fingerprint, status: 'enforced-by-worker', epochId: open.epoch_id, epochLabel: open.label }
+        : { table, fingerprint: null, status: 'no-open-epoch', epochId: null, epochLabel: null },
+    );
+  }
 
   // DQ roll-up — ALL standing findings, not just the most recent run's.
   // Findings are batch-scoped since the Aug 2026 audit: each is recorded once,
@@ -159,22 +263,38 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
   // kept for API-shape stability: the run that recorded the newest finding
   const latestRunId = f.recordset[0]?.run_id ?? null;
 
+  // Which night-attribution rules the canonical rows were stamped under.
+  // Cheap: three grouped counts over an indexed line_id, and only reported
+  // when a table actually holds more than one.
+  const regimes: ShiftRuleRegimes[] = [];
+  for (const table of ['cone_event', 'sack_event', 'reject_event']) {
+    // `rule` and `rows` are both reserved T-SQL keywords — unbracketed, this
+    // query does not parse and the whole endpoint 500s.
+    const rr = await pool.request().input('line', mssql.Int, lineId).query<{ rule: string | null; rows: number }>(
+      `SELECT night_belongs_to AS [rule], COUNT(*) AS [rows]
+         FROM sms.${table} WHERE line_id = @line
+        GROUP BY night_belongs_to`,
+    );
+    const rules = rr.recordset.map((x) => ({ rule: x.rule, rows: Number(x.rows) }));
+    if (rules.length > 1) regimes.push({ table, rules, mixed: true });
+  }
+
   return {
     lifetime,
+    shiftRuleRegimes: regimes,
     sync: sync.recordset.map((r) => ({
       targetTable: r.target_table,
       outcome: r.outcome,
+      watermarkFrom: r.watermark_from == null ? null : Number(r.watermark_from),
       watermark: r.watermark_to == null ? null : Number(r.watermark_to),
+      epochId: r.source_epoch == null ? null : Number(r.source_epoch),
+      epochLabel: r.epoch_label,
       rowsRead: r.rows_read,
       rowsWritten: r.rows_written,
       finishedAtUtc: r.finished_at_utc ? new Date(r.finished_at_utc).toISOString() : null,
       ageSeconds: r.age_seconds,
     })),
-    schema: fp.recordset.map((r) => ({
-      table: r.config_key.replace('fingerprint.', ''),
-      fingerprint: r.config_value,
-      status: 'ok',
-    })),
+    schema,
     dq: { latestRunId, bySeverity, findings },
   };
 }

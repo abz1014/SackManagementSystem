@@ -46,6 +46,46 @@ export class IflSqlAdapter {
     return computeFingerprint(cols, depended);
   }
 
+  /**
+   * When the source TABLE was created, as an ISO string, or null if it cannot be
+   * read. This is the epoch discriminator (finding: Sep 2026 source rebuild).
+   *
+   * IFL dropped and recreated the four wide tables on 2026-08-05 between 18:54:50
+   * and 19:03:16, restarting every identity at 1. `sys.databases.create_date` does
+   * NOT move for that — the database survived, only its tables were replaced — so
+   * the per-table create_date is the signal that actually fires.
+   *
+   * Read-only, and needs no permission beyond seeing the table itself.
+   */
+  async sourceEpoch(): Promise<string | null> {
+    // Schema-qualified. An unqualified name can match more than one table, and
+    // silently taking the first would mean the generation key describes a
+    // different object than the one we read rows from.
+    const res = await this.pool
+      .request()
+      .input('t', mssql.NVarChar, this.def.sourceTable)
+      .query<{ created: Date | null }>(
+        `SELECT create_date AS created FROM sys.tables
+          WHERE name = @t AND SCHEMA_NAME(schema_id) = 'dbo'`,
+      );
+    if (res.recordset.length > 1) {
+      throw new Error(
+        `ambiguous source table: ${res.recordset.length} tables named dbo.${this.def.sourceTable}`,
+      );
+    }
+    const created = res.recordset[0]?.created ?? null;
+    return created ? new Date(created).toISOString() : null;
+  }
+
+  /** Highest `id` currently in the source table, or null when it is empty. */
+  async maxSourceId(): Promise<number | null> {
+    const res = await this.pool
+      .request()
+      .query<{ hi: number | null }>(`SELECT MAX([id]) AS hi FROM [${this.def.sourceTable}]`);
+    const hi = res.recordset[0]?.hi;
+    return hi == null ? null : Number(hi);
+  }
+
   /** Read source rows with id > afterId (parameterised), mapped to raw columns. */
   async readSince(afterId: number): Promise<RawRecord[]> {
     const srcList = this.def.columns.map((c) => `[${c.src}]`).join(', ');

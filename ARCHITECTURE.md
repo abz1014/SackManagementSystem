@@ -148,9 +148,15 @@ sms.product_timeline (append-only — NEVER updated or deleted)
 
 `MAX(source_row_id)` alone is unsafe (restore, reseed, deletes). Instead:
 
-- **Overlap re-read window:** each incremental pass re-reads the last **N=500** source rows below the watermark and relies on the **idempotent upsert** (unique merge key) to absorb duplicates. Survives late inserts and small reseeds.
-- **Idempotent upsert** on `(line_id, production_ts_utc_ms, hanger_num, ingest_seq)` — re-reading a row is a no-op.
-- **Schema fingerprint at startup:** hash the *specific columns/types we depend on* in each IFL table; compare to the expected hash. A silent `decimal(10,2)→float` or a renamed/added column **halts sync with a clear error** rather than corrupting canonical. Fingerprint is over our dependencies only, not the noisy full DB.
+- **Overlap re-read window:** each incremental pass re-reads the last **N=500** source rows below the watermark and relies on idempotent persistence to absorb duplicates. Survives late inserts and small reseeds. It does **not** survive a reset — see *source generations* below.
+- **Idempotent persistence.** Raw is unique on `(line_id, source_epoch, src_id)`; canonical is deduplicated on `raw_id` — **our** identity, never IFL's counter — and unique on `(line_id, production_ts_utc_ms, hanger_num, ingest_seq, source_epoch)`. Re-reading a row is a no-op.
+- **Schema fingerprint:** hash the *specific columns/types we depend on* in each IFL table and compare on every pass. A silent `decimal(10,2)→float` or a **renamed** depended-on column halts sync with a clear error. **An added column does not** — the fingerprint is over our dependencies only, by design, and a column we do not read is not drift. (An earlier version of this paragraph claimed added columns halt sync. They never did; corrected 11 Sep 2026 after `sack1_TP1U2` gained `MaterialId` with its fingerprint byte-identical.)
+
+**Source generations ("epochs") — built 11 Sep 2026, after IFL did the thing this section only theorised.** On 2026-08-05 IFL dropped and recreated all four wide tables and every identity restarted at 1. None of the three mechanisms above could see it: the schema was unchanged on one table and the watermark simply sat above every id the source now held, so the worker read nothing and reported success. Now:
+
+- `sms.source_epoch` names each physical generation of each source table by `(line, table, server, database, create_date)`; the fingerprint lives on that row. The worker **resolves its generation before reading** and **halts** on an unknown one, a changed server/database, a changed fingerprint, or a watermark above the source's `MAX(id)` (a restore inside one generation). Registering a new generation is a deliberate operator act: `sms epoch:accept`. There is no auto-registration — a `create_date` cannot distinguish a vendor rebuild from a wrong connection string.
+- Generations **coexist**: July's rows and September's live side by side under different `source_epoch`s. The sidecar is therefore the archive of record; IFL's live tables hold roughly one month. `sms verify` reconciles each open generation against its source by count, min, max and **sum of ids**, and reports closed generations as archived.
+- `source_row_id` is display only. Every permalink, list key and CSV row id is the canonical PK.
 
 ---
 

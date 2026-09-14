@@ -1,7 +1,8 @@
 /**
- * Idempotent canonical persistence. Insert-if-not-exists keyed on
- * (source_system, source_row_id) — deterministic transform means re-runs are
- * no-ops. Typed bulk load. Used by cone/sack/reject.
+ * Idempotent canonical persistence. Insert-if-not-exists keyed on raw_id (our
+ * own identity — see existingRawIds for why not IFL's source_row_id), so a
+ * deterministic transform makes re-runs no-ops. Typed bulk load. Used by
+ * cone/sack/reject.
  */
 import type { ConnectionPool, ISqlType } from 'mssql';
 import mssql from 'mssql';
@@ -12,40 +13,52 @@ export interface ColSpec {
   nullable?: boolean;
 }
 
-export async function existingSourceIds(
+/**
+ * Which raw rows are ALREADY in canonical, keyed on raw_id.
+ *
+ * raw_id, not source_row_id. source_row_id is IFL's counter and IFL resets it
+ * (2026-08-05: every identity back to 1), so at a generation boundary July's
+ * id 5 and September's id 5 are different cones and a source_row_id lookup
+ * discards the new one as already-seen — and the transform then advances its
+ * watermark past it, so it is never revisited. raw_id is OUR identity: an
+ * IDENTITY column, monotone across generations, never reused, and enforced
+ * unique on canonical by UX_*_raw_id (migration 026). It also keeps the scan
+ * bound meaningful — `source_row_id >= 1` is no bound at all at every epoch
+ * boundary, whereas raw_id only ever grows.
+ */
+export async function existingRawIds(
   pool: ConnectionPool,
   table: string,
   extraFilter = '',
-  minSourceRowId?: number,
+  minRawId?: number,
 ): Promise<Set<number>> {
   const req = pool.request();
-  // Bound the scan to ids the batch could actually collide with — source ids
-  // are monotone, so nothing below the batch minimum can match. Without this
-  // the id scan is O(total history) per pass, the same unbounded-growth shape
-  // the transform watermark was added to remove.
+  // Bound the scan to ids the batch could actually collide with. Without this
+  // the scan is O(total history) per pass, the same unbounded-growth shape the
+  // transform watermark was added to remove.
   let bound = '';
-  if (minSourceRowId != null) {
-    req.input('minId', mssql.BigInt, minSourceRowId);
-    bound = 'AND source_row_id >= @minId';
+  if (minRawId != null) {
+    req.input('minId', mssql.BigInt, minRawId);
+    bound = 'AND raw_id >= @minId';
   }
-  const r = await req.query<{ source_row_id: number }>(
-    `SELECT source_row_id FROM ${table} WHERE source_system = 'ifl_sql' ${bound} ${extraFilter}`,
+  const r = await req.query<{ raw_id: number }>(
+    `SELECT raw_id FROM ${table} WHERE source_system = 'ifl_sql' ${bound} ${extraFilter}`,
   );
-  // NB: source_row_id is BIGINT — mssql returns it as a STRING. Normalise to
-  // Number so the has(Number(...)) lookup in the caller matches (idempotency).
-  return new Set(r.recordset.map((x) => Number(x.source_row_id)));
+  // NB: raw_id is BIGINT — mssql returns it as a STRING. Normalise to Number
+  // so the has(Number(...)) lookup in the caller matches (idempotency).
+  return new Set(r.recordset.map((x) => Number(x.raw_id)));
 }
 
-export async function persistCanonical<T extends { source_row_id: number }>(
+export async function persistCanonical<T extends { raw_id: number }>(
   pool: ConnectionPool,
   table: string,
   cols: ColSpec[],
   rows: T[],
-  opts: { extraExistingFilter?: string; minSourceRowId?: number } = {},
+  opts: { extraExistingFilter?: string; minRawId?: number } = {},
 ): Promise<{ read: number; written: number }> {
   if (rows.length === 0) return { read: 0, written: 0 };
-  const seen = await existingSourceIds(pool, table, opts.extraExistingFilter ?? '', opts.minSourceRowId);
-  const fresh = rows.filter((r) => !seen.has(Number(r.source_row_id)));
+  const seen = await existingRawIds(pool, table, opts.extraExistingFilter ?? '', opts.minRawId);
+  const fresh = rows.filter((r) => !seen.has(Number(r.raw_id)));
   if (fresh.length === 0) return { read: rows.length, written: 0 };
 
   const tvp = new mssql.Table(table);
@@ -67,12 +80,14 @@ const NV = mssql.NVarChar;
 
 export const CONE_COLS: ColSpec[] = [
   { name: 'line_id', type: mssql.Int, nullable: false },
+  { name: 'source_epoch', type: mssql.Int, nullable: false },
   { name: 'production_ts_utc', type: mssql.DateTime2(3), nullable: false },
   { name: 'production_ts_utc_ms', type: mssql.BigInt, nullable: false },
   { name: 'ingest_ts_utc', type: mssql.DateTime2(3) },
   { name: 'shift_code', type: V(10), nullable: false },
   { name: 'shift_date', type: mssql.Date, nullable: false },
   { name: 'shift_code_legacy', type: V(10) },
+  { name: 'night_belongs_to', type: V(15) },
   { name: 'hanger_num', type: mssql.Int },
   { name: 'source_station', type: mssql.Int },
   { name: 'lifter_station', type: mssql.Int },
@@ -95,6 +110,7 @@ export const CONE_COLS: ColSpec[] = [
 
 export const SACK_COLS: ColSpec[] = [
   { name: 'line_id', type: mssql.Int, nullable: false },
+  { name: 'source_epoch', type: mssql.Int, nullable: false },
   { name: 'production_ts_utc', type: mssql.DateTime2(3), nullable: false },
   { name: 'production_ts_utc_ms', type: mssql.BigInt, nullable: false },
   { name: 'ingest_ts_utc', type: mssql.DateTime2(3) },
@@ -102,6 +118,7 @@ export const SACK_COLS: ColSpec[] = [
   { name: 'shift_code', type: V(10), nullable: false },
   { name: 'shift_date', type: mssql.Date, nullable: false },
   { name: 'shift_code_legacy', type: V(10) },
+  { name: 'night_belongs_to', type: V(15) },
   { name: 'sack_num', type: mssql.Int },
   { name: 'weight_kg', type: mssql.Decimal(10, 3) },
   { name: 'in_range', type: mssql.Bit },
@@ -120,6 +137,7 @@ export const SACK_COLS: ColSpec[] = [
 
 export const REJECT_COLS: ColSpec[] = [
   { name: 'line_id', type: mssql.Int, nullable: false },
+  { name: 'source_epoch', type: mssql.Int, nullable: false },
   { name: 'reject_type', type: V(10), nullable: false },
   { name: 'production_ts_utc', type: mssql.DateTime2(3), nullable: false },
   { name: 'production_ts_utc_ms', type: mssql.BigInt, nullable: false },
@@ -127,12 +145,16 @@ export const REJECT_COLS: ColSpec[] = [
   { name: 'shift_code', type: V(10), nullable: false },
   { name: 'shift_date', type: mssql.Date, nullable: false },
   { name: 'shift_code_legacy', type: V(10) },
+  { name: 'night_belongs_to', type: V(15) },
   { name: 'hanger_num', type: mssql.Int },
   { name: 'source_station', type: mssql.Int },
   { name: 'lifter_station', type: mssql.Int },
   { name: 'tube_inspect_code', type: mssql.Int },
   { name: 'material_inspect_code', type: mssql.Int },
   { name: 'weight_g', type: mssql.Decimal(10, 2) },
+  // Added by migration 024: IFL now stamps MaterialId on both reject tables, and
+  // a reject rate computed per product needs the key on both sides of the ratio.
+  { name: 'material_id', type: mssql.Int },
   { name: 'source_system', type: V(20), nullable: false },
   { name: 'source_row_id', type: mssql.BigInt },
   { name: 'raw_id', type: mssql.BigInt },

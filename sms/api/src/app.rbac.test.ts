@@ -13,7 +13,12 @@
  * what it shouldn't.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import type { Server } from 'node:http';
+// 'http', NOT 'node:http'. Express's own types reference the bare-specifier
+// module, and with the installed @types/node the two resolve to structurally
+// different Server types ("Property 'keepAliveTimeoutBuffer' is missing"), so
+// `app.listen()`'s return would not assign to a node:http Server. Matching
+// express's specifier fixes it without touching any dependency version.
+import type { Server } from 'http';
 import argon2 from 'argon2';
 import { createApp } from './app.js';
 import type { ApiConfig } from './config.js';
@@ -148,6 +153,9 @@ beforeAll(async () => {
     cacheTtlSeconds: 5,
     trustProxy: false,
     appDb: { server: 'unused', port: 1433, database: 'unused', user: 'unused', password: 'unused', encrypt: false, trustServerCertificate: true },
+    // Off, as in production until IFL confirms in writing (§6.2). The write
+    // routes must still exist and answer 503 with this reason, not 404.
+    pdasWrite: { enabled: false, db: null, disabledReason: 'PDAS_WRITE_ENABLED is not true.' },
   };
   const app = createApp(db as unknown as import('mssql').ConnectionPool, cfg);
   server = app.listen(0);

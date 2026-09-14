@@ -240,6 +240,24 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
   border: 1px solid var(--rule-2); border-radius: var(--radius); background: var(--paper); color: var(--ink);
 }
 
+/* Below about 885px the bar's own contents — brand, five nav links, six period
+   buttons, two date inputs and the right-hand controls, all `nowrap` — are
+   wider than the viewport, and because nothing was allowed to wrap the whole
+   PAGE gained a horizontal scrollbar. That shifted every screen sideways, not
+   just the picker. Measured, not guessed: the document's scrollWidth stuck at
+   885px while the viewport shrank below it.
+
+   Wrapping is the proportionate response. The plant PC and the 1920 wall are
+   both far wider than this, so it only affects a window someone has dragged
+   narrow — but a horizontal scrollbar on a factory dashboard reads as broken. */
+@media (max-width: 900px) {
+  .bar { flex-wrap: wrap; height: auto; padding: 8px 16px; row-gap: 8px; }
+  .nav { height: auto; flex-wrap: wrap; row-gap: 6px; }
+  .bar-right { flex-wrap: wrap; row-gap: 8px; }
+  .picked { flex-wrap: wrap; }
+  .strip { padding-left: 16px; padding-right: 16px; }
+}
+
 /* ---- the strip: line name, plant clock, and the lag sentence ------------ */
 
 .strip {

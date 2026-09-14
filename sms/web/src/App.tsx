@@ -21,12 +21,13 @@ import { LiveProvider, readAsOf, useLive, usePlantNow } from './lib/live';
 import { assessHealth } from './lib/health';
 import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams } from './lib/period';
 import { W } from './lib/words';
-import { Bar, SCREENS, type Screen } from './ui/Bar';
+import { Bar, SCREENS, type Screen, type ReadingsFilter } from './ui/Bar';
 import { Loading } from './ui/bits';
 import { LineScreen } from './screens/Line';
 import { ReadingsScreen } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
 import { StationSheet } from './screens/StationSheet';
+import { ProductSheet } from './screens/ProductSheet';
 import { ReportScreen } from './screens/Report';
 import { WeightScreen } from './screens/Weight';
 import { RejectsScreen } from './screens/Rejects';
@@ -40,7 +41,7 @@ import './app.css';
 type View = Screen | 'setup' | 'wall';
 
 export interface Sheet {
-  kind: 'station' | 'cone' | 'sack' | 'reject';
+  kind: 'station' | 'cone' | 'sack' | 'reject' | 'product';
   id: string;
 }
 
@@ -50,6 +51,7 @@ interface Route {
   sheet: Sheet | null;
   /** Replay instant for the live screens; only honoured when the API allows it. */
   at: string | null;
+  readingsFilter: ReadingsFilter;
 }
 
 const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall'] as const;
@@ -62,17 +64,21 @@ const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall'] as const;
 const EXPORT_RANK = 3;
 
 function parseRoute(): Route {
-  if (typeof window === 'undefined') return { view: 'line', period: { key: 'shift' }, sheet: null, at: null };
+  if (typeof window === 'undefined') {
+    return { view: 'line', period: { key: 'shift' }, sheet: null, at: null, readingsFilter: null };
+  }
   const p = new URLSearchParams(window.location.search);
   const raw = p.get('s');
   const view: View = (VIEWS as readonly string[]).includes(raw ?? '') ? (raw as View) : 'line';
   const sheetRaw = p.get('sheet');
-  const m = sheetRaw?.match(/^(station|cone|sack|reject):(.+)$/);
+  const m = sheetRaw?.match(/^(station|cone|sack|reject|product):(.+)$/);
+  const rf = p.get('rf');
   return {
     view,
     period: parsePeriodParams(p),
     sheet: m ? { kind: m[1] as Sheet['kind'], id: m[2]! } : null,
     at: readAsOf(),
+    readingsFilter: rf === 'outsideLimits' || rf === 'inspectionRejects' ? rf : null,
   };
 }
 
@@ -82,6 +88,7 @@ function routeSearch(r: Route): string {
   writePeriodParams(p, r.period);
   if (r.sheet) p.set('sheet', `${r.sheet.kind}:${r.sheet.id}`);
   if (r.at) p.set('at', r.at);
+  if (r.readingsFilter) p.set('rf', r.readingsFilter);
   return `?${p.toString()}`;
 }
 
@@ -190,7 +197,7 @@ function Chrome({
         period={route.period}
         user={user}
         isAdmin={rank >= 4}
-        onNavigate={(s) => go({ view: s, sheet: null })}
+        onNavigate={(s) => go({ view: s, sheet: null, readingsFilter: null })}
         onPeriod={(p) => go({ period: p })}
         onWall={() => go({ view: 'wall' })}
         onSetup={() => go({ view: 'setup', sheet: null })}
@@ -213,10 +220,10 @@ function Chrome({
         {route.view === 'line' && (
           <LineScreen
             period={period}
-            onNavigate={(s) => go({ view: s })}
+            onNavigate={(s, filter) => go({ view: s, readingsFilter: filter ?? null })}
             onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-            onChangeProduct={() => go({ view: 'setup' })}
+            onChangeProduct={() => go({ sheet: { kind: 'product', id: 'current' } })}
             canWrite={rank >= 2}
           />
         )}
@@ -224,6 +231,8 @@ function Chrome({
         {route.view === 'readings' && (
           <ReadingsScreen
             period={period}
+            initialFilter={route.readingsFilter}
+            onFilterChange={(f) => go({ readingsFilter: f })}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
             canExport={rank >= EXPORT_RANK}
           />
@@ -235,14 +244,14 @@ function Chrome({
           <WeightScreen
             period={period}
             onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
-            onSeeOutside={() => go({ view: 'readings' })}
+            onSeeOutside={() => go({ view: 'readings', readingsFilter: 'outsideLimits' })}
           />
         )}
 
         {route.view === 'rejects' && (
           <RejectsScreen
             period={period}
-            onSeeCones={() => go({ view: 'readings' })}
+            onSeeCones={() => go({ view: 'readings', readingsFilter: 'inspectionRejects' })}
             onSeeStations={() => go({ view: 'weight' })}
             canName={rank >= 3}
           />
@@ -253,7 +262,7 @@ function Chrome({
             The API enforces the same rank server-side. */}
         {route.view === 'setup' &&
           (rank >= 4 ? (
-            <SetupScreen />
+            <SetupScreen currentUsername={user.username} />
           ) : (
             <div className="page">
               <p className="q">{W.question.setup}</p>
@@ -271,7 +280,10 @@ function Chrome({
           onClose={() => go({ sheet: null })}
         />
       )}
-      {route.sheet && route.sheet.kind !== 'station' && (
+      {route.sheet?.kind === 'product' && (
+        <ProductSheet canWrite={rank >= 2} onClose={() => go({ sheet: null })} />
+      )}
+      {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && (
         <ReadingSheet
           type={route.sheet.kind}
           id={route.sheet.id}

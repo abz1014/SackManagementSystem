@@ -57,13 +57,13 @@ describe('classifyLineState', () => {
 
   it('no cones ever → no_data', () => {
     expect(classifyLineState(null, now)).toEqual({
-      status: 'no_data', sinceLastConeSeconds: null, behindSeconds: null,
+      status: 'no_data', sinceLastReadingSeconds: null, behindSeconds: null,
     });
   });
 
   it('with no lag, a recent cone is running and an old one is stopped', () => {
     expect(classifyLineState(now - 30_000, now)).toEqual({
-      status: 'running', sinceLastConeSeconds: 30, behindSeconds: 30,
+      status: 'running', sinceLastReadingSeconds: 30, behindSeconds: 30,
     });
     expect(classifyLineState(now - STOP_THRESHOLD_SECONDS * 1000, now).status).toBe('running');
     expect(classifyLineState(now - 300_000, now).status).toBe('stopped');
@@ -81,7 +81,7 @@ describe('classifyLineState', () => {
     expect(s.status).toBe('running');
     expect(s.behindSeconds).toBe(0);
     // The wall-clock age is still reported, because that is what a person sees.
-    expect(s.sinceLastConeSeconds).toBe(18 * 60);
+    expect(s.sinceLastReadingSeconds).toBe(18 * 60);
   });
 
   it('without the lag the same line would have read as stopped', () => {
@@ -95,7 +95,7 @@ describe('classifyLineState', () => {
     const s = classifyLineState(now - 25 * MIN, now, lag);
     expect(s.status).toBe('stopped');
     expect(s.behindSeconds).toBe(7 * 60);
-    expect(s.sinceLastConeSeconds).toBe(25 * 60);
+    expect(s.sinceLastReadingSeconds).toBe(25 * 60);
   });
 
   it('an implausible lag cannot mask a stopped line forever', () => {
@@ -112,7 +112,7 @@ describe('classifyLineState', () => {
 
   it('a reading stamped slightly ahead of the clock counts as just now', () => {
     expect(classifyLineState(now + 5_000, now)).toEqual({
-      status: 'running', sinceLastConeSeconds: 0, behindSeconds: 0,
+      status: 'running', sinceLastReadingSeconds: 0, behindSeconds: 0,
     });
   });
 });

@@ -208,6 +208,28 @@ const SACK_WEIGHT_SD = 0.08;
 const STATIONS = 14;
 const HANGERS = 299;
 
+/**
+ * Which product each machine is running (IFL's `MaterialId`, Sep 2026).
+ *
+ * This is NOT one product for the line. In the real September data six materials
+ * run CONCURRENTLY on different machines — measured over 132,551 cones:
+ * 21 = 52,887, 20 = 49,050, 1021 = 21,149, 1022 = 6,262, 1023 = 2,107,
+ * 1024 = 1,095. The split below reproduces both that concurrency and roughly
+ * that mix, so anything assuming a single line-wide product fails here rather
+ * than in front of IFL.
+ *
+ * Stable per machine for a run: a winder does not change product mid-cone.
+ */
+const MACHINE_MATERIAL = {
+  1: 21, 2: 21, 3: 21, 4: 21, 5: 21,
+  6: 20, 7: 20, 8: 20, 9: 20,
+  10: 1021, 11: 1021,
+  12: 1022,
+  13: 1023,
+  14: 1024,
+};
+const materialOf = (station) => MACHINE_MATERIAL[station] ?? 21;
+
 /** Station 4 runs light in the real data (-2.92 g against the line average).
  *  Kept, so the per-station and calibration screens have a real signal. */
 const STATION_BIAS = { 4: -2.9, 10: 1.4, 13: -1.1 };
@@ -268,7 +290,7 @@ function generate(fromMs, toMs, ids, state, insertAt) {
         const c = pick(QCS_CODES);
         qcs.push({
           id: ids.qcs++, Date: asDate(insertMs), Shift: shift, Area: 'Package-1',
-          ProductionDate: asDate(t), HangerNum: hanger, Source: station, Lifter: station,
+          ProductionDate: asDate(t), HangerNum: hanger, MachineNo: station, Lifter: station, MaterialId: materialOf(station),
           TubeInspectResult: c.tube, MaterialInspectResult: c.mat,
         });
       } else {
@@ -276,7 +298,7 @@ function generate(fromMs, toMs, ids, state, insertAt) {
         const w = rand() < 0.7 ? gauss(2055, 55) : gauss(1890, 45);
         wrej.push({
           id: ids.wrej++, Date: asDate(insertMs), Shift: shift, Area: 'Package-1',
-          ProductionDate: asDate(t), HangerNum: hanger, Source: station, Lifter: station,
+          ProductionDate: asDate(t), HangerNum: hanger, MachineNo: station, Lifter: station, MaterialId: materialOf(station),
           Weight: round2(Math.max(0, w)),
         });
       }
@@ -289,7 +311,7 @@ function generate(fromMs, toMs, ids, state, insertAt) {
       if (rand() < 0.00012) w = uniform(200, 900);
       cones.push({
         id: ids.cone++, Date: asDate(insertMs), Shift: shift, Area: 'Package-1',
-        ProductionDate: asDate(t), HangerNum: hanger, Source: station, Lifter: station,
+        ProductionDate: asDate(t), HangerNum: hanger, MachineNo: station, Lifter: station, MaterialId: materialOf(station),
         Weight: round2(w), inRange: inRange ? 1 : 0,
       });
     }
@@ -340,22 +362,22 @@ async function insertRows(pool, table, rows, shape) {
 
 const CONE_SHAPE = [
   ['id', mssql.Int], ['Date', mssql.DateTime], ['Shift', mssql.VarChar(8)], ['Area', mssql.VarChar(10)],
-  ['ProductionDate', mssql.DateTime], ['HangerNum', mssql.Int], ['Source', mssql.Int], ['Lifter', mssql.Int],
-  ['Weight', mssql.Decimal(6, 2)], ['inRange', mssql.Bit],
+  ['ProductionDate', mssql.DateTime], ['HangerNum', mssql.Int], ['MachineNo', mssql.Int], ['Lifter', mssql.Int],
+  ['Weight', mssql.Decimal(6, 2)], ['inRange', mssql.Bit], ['MaterialId', mssql.Int],
 ];
 const SACK_SHAPE = [
   ['id', mssql.Int], ['Date', mssql.DateTime], ['Shift', mssql.VarChar(8)], ['Area', mssql.VarChar(10)],
-  ['SackNum', mssql.Int], ['Weight', mssql.Decimal(6, 3)], ['inRange', mssql.Bit],
+  ['SackNum', mssql.Int], ['Weight', mssql.Decimal(6, 3)], ['inRange', mssql.Bit], ['MaterialId', mssql.Int],
 ];
 const QCS_SHAPE = [
   ['id', mssql.Int], ['Date', mssql.DateTime], ['Shift', mssql.VarChar(8)], ['Area', mssql.VarChar(10)],
-  ['ProductionDate', mssql.DateTime], ['HangerNum', mssql.Int], ['Source', mssql.Int], ['Lifter', mssql.Int],
-  ['TubeInspectResult', mssql.Int], ['MaterialInspectResult', mssql.Int],
+  ['ProductionDate', mssql.DateTime], ['HangerNum', mssql.Int], ['MachineNo', mssql.Int], ['Lifter', mssql.Int],
+  ['TubeInspectResult', mssql.Int], ['MaterialInspectResult', mssql.Int], ['MaterialId', mssql.Int],
 ];
 const WREJ_SHAPE = [
   ['id', mssql.Int], ['Date', mssql.DateTime], ['Shift', mssql.VarChar(8)], ['Area', mssql.VarChar(10)],
-  ['ProductionDate', mssql.DateTime], ['HangerNum', mssql.Int], ['Source', mssql.Int], ['Lifter', mssql.Int],
-  ['Weight', mssql.Decimal(6, 2)],
+  ['ProductionDate', mssql.DateTime], ['HangerNum', mssql.Int], ['MachineNo', mssql.Int], ['Lifter', mssql.Int],
+  ['Weight', mssql.Decimal(6, 2)], ['MaterialId', mssql.Int],
 ];
 
 async function writeAll(pool, batch) {
@@ -399,10 +421,10 @@ async function loadState(pool) {
 /* ------------------------------------------------------------- fingerprint */
 
 const DEPENDED = {
-  pack1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'ProductionDate', 'HangerNum', 'Source', 'Lifter', 'Weight', 'inRange'],
-  sack1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'SackNum', 'Weight', 'inRange'],
-  rejectQCS1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'ProductionDate', 'HangerNum', 'Source', 'Lifter', 'TubeInspectResult', 'MaterialInspectResult'],
-  rejectWeight1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'ProductionDate', 'HangerNum', 'Source', 'Lifter', 'Weight'],
+  pack1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'ProductionDate', 'HangerNum', 'MachineNo', 'Lifter', 'Weight', 'inRange', 'MaterialId'],
+  sack1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'SackNum', 'Weight', 'inRange', 'MaterialId'],
+  rejectQCS1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'ProductionDate', 'HangerNum', 'MachineNo', 'Lifter', 'TubeInspectResult', 'MaterialInspectResult', 'MaterialId'],
+  rejectWeight1_TP1U2: ['id', 'Date', 'Shift', 'Area', 'ProductionDate', 'HangerNum', 'MachineNo', 'Lifter', 'Weight', 'MaterialId'],
 };
 
 /** Mirrors sync-worker/src/reader/fingerprint.ts exactly. If these disagree,

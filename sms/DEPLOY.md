@@ -24,12 +24,14 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
 ## First-time production setup
 
 1. **Install** Node 20+ and SQL Server (Express is fine) on the plant server.
-2. **Get from IFL:** a dedicated **read-only** SQL login (not `sa`, not the vendor app account) with `db_datareader` on `DATA_TP1U2` and `PDAS_TP1U2`, and the server\instance + port. Enable TCP on the plant SQL Server if needed.
+2. **Get from IFL:** a dedicated **read-only** SQL login (not `sa`, not the vendor app account) with **`db_datareader` on BOTH `DATA_TP1U2` and `PDAS_TP1U2`**, and the server\instance + port. Enable TCP on the plant SQL Server if needed.
+   **This is a hard requirement, not a preference.** IFL's own engineering login (`ibrahim`, seen in the Sep 2026 sample) has EXECUTE on PDAS's stored procedures and **no table read at all** on PDAS. Handed that login, the product mirror (`seedProducts`) fails on cutover day and every screen loses its targets and limits. Ask for `db_datareader` on PDAS by name, and test it with `SELECT TOP 1 * FROM PDAS_TP1U2.dbo.Materials` before the day.
+   *(Separately and later — only if IFL confirms in writing that SMS may write product data: an `sms_pdas_writer` login for the Add / Retire / Change-limits path, see `PDAS_WRITE_*` in `.env.example`. It is a different login, never the read-only one.)*
 3. **Create the app DB + its login** (`sms_app`, read/write on the `sms` database only).
 4. **Configure** `.env` from `.env.example`:
    - `IFL_DB_*` → the plant server + the read-only login. **This is the only dev→live change.**
    - `APP_DB_*` → the local app DB + `sms_app` (a **strong, unique** password — never the dev password).
-   - `SESSION_SECRET` → a long random string.
+   - No `SESSION_SECRET` to set — sessions are server-side random UUIDs, not signed cookies (see `.env.example`).
    - `WEB_DIST=./web/dist`.
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
    - `LINE_NAME` → the name the floor and wall screens show for the line (default `TP1 · Line 3 · Unit 2`).
@@ -158,6 +160,17 @@ SQL Server and the build output are the only prerequisites, all installed locall
 > watchdog, no outbound dependency. Use the NSSM services below instead.
 5. **Build:** `npm ci && npm run build:shared && npm run build --workspaces --if-present && npm run build --workspace @sms/web`.
 6. **Migrate the app DB:** apply `db/migrations/*.sql` in order (via `sqlcmd` or `npm run db:migrate`).
+   - **Stop the sync-worker service first when migrating an app DB that already holds data.**
+     Some migrations build indexes on `cone_event`/`reject_event`, which take a
+     schema-modification lock; against a service inserting every 60 s that means
+     blocking, and potentially a deadlocked migration, on a live host. A fresh
+     install has nothing to contend with and can skip this.
+   - `npm run db:migrate` records what it applies in `sms.schema_migration` and
+     skips those files next time. On a database migrated before that table
+     existed, the first run re-applies every earlier file — they are all
+     guarded (`IF OBJECT_ID(...) IS NULL`), so this is a no-op, but it means the
+     first recorded timestamps are when tracking began, not when those
+     migrations were originally applied.
 7. **Create the first admin:** `node cli/dist/index.js user:create --username=admin --password=<strong> --role=admin`.
 8. **Create IFL's users at `--role=manager`.** The software is used by the GM,
    managers and process-department engineers, and every one of them needs to
@@ -279,15 +292,18 @@ Both boot with the machine and restart on crash. The sync-worker also self-heals
 
 ## Dev → Live cutover
 
-By design this is **one connection string**. Nothing in `api/` or `web/` changes.
+By design the *connection* is one string; nothing in `api/` or `web/` changes. But the live server is a **different physical source** with its own `id` counter, and the app DB already holds generations of data from the samples. The worker must be told, deliberately, that a new generation is being read — it will not guess. (An earlier version of this section said "first pass backfills from the live DB". It did not: with a watermark above every id the new source held, the worker read nothing and reported success every 60 s, forever. That is exactly what `sms epoch:accept` now prevents — `SEPT-2026-EPOCH-DECISION.md` §2.7.)
 
-1. Take a backup/snapshot of the app DB (see below).
-2. Stop `SMS-Sync`.
-3. Edit `.env`: point `IFL_DB_SERVER` / `IFL_DB_PORT` / `IFL_DB_USER` / `IFL_DB_PASSWORD` at the **live** plant DB.
-4. Start `SMS-Sync`. First pass backfills from the live DB into the app DB; watch `logs\sync.log`.
-5. `node cli/dist/index.js verify` — reconcile source ⇄ raw ⇄ canonical.
+1. Take a backup of the app DB (see below). **Nothing in the app DB is deleted by this procedure** — the sample generations stay as archived history beside the live one.
+2. Stop `SMS-Sync`. Confirm nothing is mid-pass: `SELECT COUNT(*) FROM sms.sync_run WHERE finished_at_utc IS NULL` → 0.
+3. Edit `.env`: point `IFL_DB_SERVER` / `IFL_DB_PORT` / `IFL_DB_NAME_DATA` / `IFL_DB_NAME_PDAS` / `IFL_DB_USER` / `IFL_DB_PASSWORD` at the **live** plant DB and the `db_datareader` login IFL provisioned (setup step 2). Leave `PDAS_WRITE_ENABLED=false`.
+4. `node cli/dist/index.js sync` — **it must halt** with `No open source generation … sms epoch:accept`. That halt is the gate working. If it does anything else, stop and look.
+5. `node cli/dist/index.js epoch:accept --all --provenance=ifl_live --label="Plant, live"` — read the plan it prints: the server/database, each table's `create_date`, fingerprint and `MAX(id)`. Then re-run with `--confirm`. (`--label` needs the `=`.)
+6. Start `SMS-Sync`. The first pass backfills the live generation; watch `logs\sync.log` — every stream's `written` should equal its `read`.
+7. `node cli/dist/index.js verify` — every **open** generation must reconcile with its source by count, min, max and sum of ids; the sample generations are reported as *archived*. **A STOP after the backfill has settled is a stop condition, not noise.**
+8. `node cli/dist/index.js epoch:list` — the live generation should be OPEN with rows; the samples closed.
 
-The **schema-fingerprint gate** halts sync with a clear error if the live schema differs from our snapshot — investigate before forcing.
+The worker keeps halting, on every pass, if the live schema drifts within a generation (fingerprint), if the source is replaced (`create_date`), if the connection points at a different server/database, or if the source's `MAX(id)` falls below the watermark (a restore). Each message names the fix. Never clear `sms.source_epoch` by hand; `sms cutover --confirm` exists for "throw every reproducible row away and start again" and nothing else.
 
 ---
 
@@ -297,10 +313,12 @@ The app DB is the only irreplaceable data (product timeline, reject labels, user
 
 ### One-time setup: a login the script can actually use
 
-`scripts/backup-appdb.ps1` defaults to `sms_app` (the app's own runtime
-login), but that login should **not** be given backup rights — it has no
-operational reason to ever take a backup of itself, and least-privilege means
-not handing it permissions it will never use. Create a dedicated login instead:
+`scripts/backup-appdb.ps1` defaults `-User` to `sms_backup` (fixed Sep 2026 —
+it used to default to `sms_app`, the app's own runtime login, which must
+**not** be given backup rights: it has no operational reason to ever take a
+backup of itself, and least-privilege means not handing it permissions it
+will never use). `-Pass` has no default and is required every run — create
+the dedicated login first:
 
 ```sql
 CREATE LOGIN sms_backup WITH PASSWORD = '<a-real-password>', CHECK_POLICY = ON;
@@ -309,7 +327,8 @@ CREATE USER sms_backup FOR LOGIN sms_backup;
 ALTER ROLE db_backupoperator ADD MEMBER sms_backup;
 ```
 
-Pass it explicitly: `-User sms_backup -Pass <that password>`.
+`-User` defaults to `sms_backup` already; pass the password every run:
+`-Pass <that password>`.
 
 ### Running it
 
@@ -322,6 +341,13 @@ Pass it explicitly: `-User sms_backup -Pass <that password>`.
   `EXEC master.dbo.xp_instance_regread N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'BackupDirectory';`
 - **Monthly:** test a restore into a scratch DB — an untested backup is not a backup.
 - **Before any canonical rebuild:** the `sms rebuild` command **requires** a point-in-time snapshot id and refuses without it (`ARCHITECTURE §18`). This is separate from and more precise than the nightly backup.
+- **Rebuild and the sync-worker service are now mutually exclusive** (Sep 2026
+  audit fix, C1): `sms rebuild` and the service's own 60s transform pass take
+  the same `sp_getapplock`, so running `sms rebuild` with the service still
+  running is safe — one simply waits for the other rather than racing on the
+  canonical tables. You do not need to stop the service first, but stopping
+  it is still the faster path if you're doing several rebuilds in a row (each
+  one otherwise waits for up to a minute for the lock).
 
 Restore into a scratch DB first, never straight over `sms`:
 ```sql
@@ -356,6 +382,14 @@ the backup file is good.
 >    forever. Both are fixed: `COMPRESSION` is removed, and the script now
 >    checks `sqlcmd`'s exit code and the resulting file's existence before
 >    ever reporting success.
+>
+> **Follow-up, Sep 2026 audit (finding L4):** item 1 above fixed the *login's*
+> permissions but not the *script's own default* — `-User` still defaulted to
+> `sms_app` despite this file's own header comment saying never to use it for
+> backups, so a run with no `-User` flag would always fail at the sqlcmd step.
+> Fixed: `-User` now defaults to `sms_backup`, and `-Pass` has no default at
+> all (previously `$env:APP_DB_PASSWORD` — another login's password) and is
+> required on every invocation.
 
 ---
 
@@ -368,6 +402,30 @@ the backup file is good.
 
 ### Performance targets (guardrails)
 Dashboard < 300 ms · API < 100 ms · sync pass < 30 s. At the current data volume we are well under; re-check after a few months of accumulation and add indexes on `sms.*` if needed (never on IFL's DB).
+
+### Database size (SQL Server Express's 10 GB ceiling) — finding L5, Sep 2026 audit
+
+SQL Server Express caps each database's data file at **10 GB** (log file is
+unbounded). This was never checked or planned for. The real 19-day copy holds
+142,511 cone events + 5,462 sack events + 3,146 reject events — roughly 8,000
+rows/day across the three event tables — which, at that rate, projects to
+somewhere around **1 GB/year** of raw event data (rough order-of-magnitude
+from the 19-day copy, not a measured multi-year rate). That is years of
+runway on a 10 GB cap, not an urgent problem — but it is currently unplanned,
+and `sms_raw.*` (the raw layer, kept for replay/lineage) adds to the same
+total.
+
+- **Check current size:** `EXEC sp_spaceused;` against the `sms` database, or
+  `SELECT name, size/128.0 AS size_mb, max_size FROM sys.master_files WHERE
+  database_id = DB_ID('sms');` — re-run this every few months alongside the
+  performance guardrails above.
+- **When it becomes a real concern** (size approaching a few GB, or multi-line
+  deployment — see `CLAUDE.md`'s note on `line_id` cross-contamination —
+  multiplying the growth rate): either archive/prune old `sms_raw.*` rows
+  (canonical is the layer every screen actually reads; raw exists for replay
+  and lineage, and is the safer thing to trim first) or move off Express to a
+  licensed SQL Server edition, which removes the cap entirely. Neither is
+  needed today — this is a plan to revisit, not an action to take now.
 
 ---
 
