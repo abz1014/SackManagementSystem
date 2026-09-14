@@ -8,7 +8,8 @@ import { seedProducts } from './seed/seedProducts.js';
 import { runOnce, type TableOutcome } from './runner.js';
 import { runTransform, type TransformOutcome } from './transform/runTransform.js';
 import { withTransformLock } from './lock.js';
-import { IFL_TABLES } from './reader/iflTables.js';
+import { fallbackHaltTargets, rawShortName } from './reader/iflTables.js';
+import { loadSourceTables } from './reader/sourceTables.js';
 import { recordHaltedRun } from './store.js';
 import { clearFindings, persistFindings } from './transform/dq.js';
 
@@ -27,6 +28,12 @@ export const TRANSFORM_FAILED = 'transform_failed';
  * A halt that happened before the reader ran leaves one 'halted' row per
  * source table, so the Setup screen counts every table as "did not sync"
  * and carries the reason — instead of four ageing 'success' rows.
+ *
+ * The tables are the line's configured ones (roadmap Phase 1). When the
+ * configuration itself cannot be read — the app database is not migrated, or
+ * the line has no rows — the halt still owes a row per raw table the schema
+ * has, so it falls back to every kind with the adapter marked unknown rather
+ * than writing nothing, which is the silence this function exists to end.
  */
 export async function recordPassHalt(
   appPool: ConnectionPool,
@@ -36,11 +43,20 @@ export async function recordPassHalt(
 ): Promise<void> {
   const runId = randomUUID();
   const reason = err instanceof Error ? err.message : String(err);
-  for (const def of IFL_TABLES) {
+  let targets: { targetTable: string; adapter: string }[];
+  try {
+    targets = (await loadSourceTables(appPool, cfg.lineId)).map((d) => ({
+      targetTable: rawShortName(d.rawTable),
+      adapter: d.systemCode,
+    }));
+  } catch {
+    targets = fallbackHaltTargets();
+  }
+  for (const t of targets) {
     await recordHaltedRun(appPool, {
       runId,
-      adapter: 'ifl_sql',
-      targetTable: def.rawTable.replace('sms_raw.', ''),
+      adapter: t.adapter,
+      targetTable: t.targetTable,
       lineId: cfg.lineId,
       sourceEpoch: null,
       watermarkFrom: null,

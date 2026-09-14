@@ -6,10 +6,23 @@
  */
 import mssql from 'mssql';
 import { TRANSFORM_VERSION } from '@sms/shared';
-import { runTransform, resetTransformWatermarks, withTransformLock } from '@sms/sync-worker';
+import {
+  loadSourceStreams,
+  runTransform,
+  resetTransformWatermarks,
+  withTransformLock,
+  type TableKind,
+} from '@sms/sync-worker';
 import { openContext, parseArgs } from '../context.js';
 
 const ALLOWED = new Set(['cone_event', 'sack_event', 'reject_event']);
+
+/** Which raw kinds feed each canonical table — reject_event is fed by two. */
+const KINDS_OF: Record<string, TableKind[]> = {
+  cone_event: ['cone'],
+  sack_event: ['sack'],
+  reject_event: ['reject_qcs', 'reject_weight'],
+};
 
 export async function rebuild(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
@@ -30,9 +43,22 @@ export async function rebuild(argv: string[]): Promise<number> {
   const ctx = await openContext();
   let rebuildId: number | undefined;
   try {
+    // The rows this rebuild owns are the ones stamped with the system code(s)
+    // of the source(s) this line's tables are read through (sms.data_source,
+    // roadmap Phase 1) — was the literal 'ifl_sql'. Bound as parameters; the
+    // two reject kinds may in principle come through different sources, so
+    // it is an IN list of the distinct codes.
+    const streams = await loadSourceStreams(ctx.app, ctx.cfg.lineId);
+    const systems = [...new Set(KINDS_OF[table]!.map((k) => streams[k].systemCode))];
+    const withSystems = (r: mssql.Request): { req: mssql.Request; inList: string } => {
+      systems.forEach((code, i) => r.input(`sys${i}`, mssql.VarChar(20), code));
+      return { req: r, inList: systems.map((_, i) => `@sys${i}`).join(', ') };
+    };
+
+    const fromQ = withSystems(ctx.app.request());
     const from = (
-      await ctx.app.request().query<{ v: number }>(
-        `SELECT ISNULL(MIN(transform_version), ${TRANSFORM_VERSION}) v FROM sms.${table} WHERE source_system='ifl_sql'`,
+      await fromQ.req.query<{ v: number }>(
+        `SELECT ISNULL(MIN(transform_version), ${TRANSFORM_VERSION}) v FROM sms.${table} WHERE source_system IN (${fromQ.inList})`,
       )
     ).recordset[0]!.v;
 
@@ -61,12 +87,14 @@ export async function rebuild(argv: string[]): Promise<number> {
       // growing the log by the size of the table — on a plant PC with a modest
       // disk that is how a maintenance command becomes an outage. Small
       // batches keep each statement short and let the log wrap between them.
-      // `table` is checked against ALLOWED above, so the interpolation is safe.
+      // `table` is checked against ALLOWED above, so the interpolation is safe;
+      // the system code is a bound parameter.
       let cleared = 0;
       for (;;) {
-        const del = await ctx.app
-          .request()
-          .query(`DELETE TOP (5000) FROM sms.${table} WHERE source_system='ifl_sql'`);
+        const delQ = withSystems(ctx.app.request());
+        const del = await delQ.req.query(
+          `DELETE TOP (5000) FROM sms.${table} WHERE source_system IN (${delQ.inList})`,
+        );
         const n = del.rowsAffected[0] ?? 0;
         cleared += n;
         if (n === 0) break;

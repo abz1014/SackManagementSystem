@@ -1,6 +1,6 @@
 /**
- * Setup — accounts, stations, the rules this system applies, the plant
- * connection, and the audit log. Admin only, behind the gear.
+ * Setup — the line and what is on it, the rules this system applies, the
+ * plant connection, accounts, and the audit log. Admin only, behind the gear.
  *
  * One page with sections rather than five tabs. The old Setup was an admin
  * area that read as project documentation: six question numbers in the copy,
@@ -12,16 +12,28 @@
  * to 10:34" sentence links straight to it. It states the source in plain words
  * too, so requirement 1's real status — SQL only, no PLC — is visible in the
  * product rather than only in a document.
+ *
+ * THE ORDER AFTER IT is roadmap Phase 1's (14 Sep 2026): what the line IS —
+ * Line, Machines, Stations, Sources — then what this system applies to it —
+ * Rules, Reject codes — then who may change any of that, and the record of
+ * every change. Each section is its own file under ./setup/; the two that
+ * were here before (Stations, Rules) moved out when they grew forms.
  */
 import { useEffect, useState } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { Block, Details, Empty, Failed, SkelLines } from '../ui/bits';
-import { fmtG, fmtKg, fmtSpan } from '../lib/fmt';
+import { fmtSpan } from '../lib/fmt';
 import {
-  adminGetAudit, adminGetRules, adminListUsers, adminCreateUser, adminUpdateUser, adminSetStation, getStations,
-  getOperations, ApiError, type AdminUser, type AuditEntry, type Rules, type StationRow,
+  adminGetAudit, adminListUsers, adminCreateUser, adminUpdateUser, getOperations, ApiError,
+  type AdminUser, type AuditEntry,
 } from '../api';
+import { LineBlock } from './setup/LineBlock';
+import { MachinesBlock } from './setup/MachinesBlock';
+import { StationsBlock } from './setup/StationsBlock';
+import { SourcesBlock } from './setup/SourcesBlock';
+import { RulesBlock } from './setup/RulesBlock';
+import { RejectCodesBlock } from './setup/RejectCodesBlock';
 
 /** The four ranks, lowest first — matches api's ROLE_RANK / requireRole. */
 const ROLES = ['operator', 'supervisor', 'manager', 'admin'] as const;
@@ -34,8 +46,12 @@ export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
         <h1 className="wide">Setup</h1>
       </div>
       <SyncHealth />
-      <Stations />
+      <LineBlock />
+      <MachinesBlock />
+      <StationsBlock />
+      <SourcesBlock />
       <RulesBlock />
+      <RejectCodesBlock />
       <People currentUsername={currentUsername} />
       <AuditLog />
     </>
@@ -148,123 +164,6 @@ function SyncHealth() {
           </p>
         )}
       </Details>
-    </Block>
-  );
-}
-
-/* ---------------------------------------------------------------- stations */
-
-function Stations() {
-  const [rows, setRows] = useState<StationRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState('');
-
-  const load = () =>
-    getStations()
-      .then((r) => setRows(r.stations))
-      .catch((e) => setError(String(e.message ?? e)));
-  useEffect(() => {
-    void load();
-  }, []);
-
-  if (error) return <Block label={W.setupTabs.stations}><Failed error={error} onRetry={load} /></Block>;
-  if (!rows) return <Block label={W.setupTabs.stations}><SkelLines n={4} short /></Block>;
-
-  return (
-    <Block label={W.setupTabs.stations} note="the names every screen uses">
-      <div className="tw">
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: '4em' }}>#</th>
-              <th>Name</th>
-              <th>Machine</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.stationId}>
-                <td>{s.stationId}</td>
-                <td>
-                  {editing === s.stationId ? (
-                    <input
-                      type="text"
-                      value={draft}
-                      autoFocus
-                      aria-label={`Name for station ${s.stationId}`}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key === 'Escape') setEditing(null);
-                        if (e.key === 'Enter') {
-                          await adminSetStation(s.stationId, { name: draft.trim() || null, machine: s.machine, description: s.description });
-                          setEditing(null);
-                          void load();
-                        }
-                      }}
-                    />
-                  ) : (
-                    s.name ?? <span className="mut">not named</span>
-                  )}
-                </td>
-                <td>{s.machine ?? <span className="mut">—</span>}</td>
-                <td className="n">
-                  <button type="button" className="linkish sm" onClick={() => { setEditing(s.stationId); setDraft(s.name ?? ''); }}>
-                    Rename
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Block>
-  );
-}
-
-/* ------------------------------------------------------------------ rules */
-
-function RulesBlock() {
-  const [rules, setRules] = useState<Rules | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = () => {
-    setError(null);
-    adminGetRules()
-      .then(setRules)
-      .catch((e) => setError(String(e.message ?? e)));
-  };
-  useEffect(() => {
-    void load();
-  }, []);
-
-  // Finding H14 (Sep 2026 audit): this used to swallow a fetch failure into
-  // `rules: null`, which renders identically to "still loading" — a
-  // persistent failure here looked exactly like a slow connection forever.
-  if (error) return <Block label={W.setupTabs.rules}><Failed error={error} onRetry={load} /></Block>;
-  if (!rules) return <Block label={W.setupTabs.rules}><SkelLines n={4} short /></Block>;
-
-  return (
-    <Block label={W.setupTabs.rules} note="what this system applies when it reads the plant's numbers">
-      <dl className="kv">
-        <dt>Weight basis</dt>
-        <dd>
-          {rules.weight?.basis ?? '—'}
-          {rules.weight?.basis === 'as_recorded' && (
-            <span className="mut sm">
-              {' '}— until this is confirmed, the Weight screen states the average and the target as two facts rather
-              than as a difference.
-            </span>
-          )}
-        </dd>
-        <dt>Shift boundaries</dt>
-        <dd>{rules.shift ? `${rules.shift.morningStart} · ${rules.shift.eveningStart} · ${rules.shift.nightStart} (${rules.shift.mode})` : '—'}</dd>
-        <dt>Plausible cone</dt>
-        <dd>{rules.plausibility ? `${fmtG(rules.plausibility.coneLoG)} to ${fmtG(rules.plausibility.coneHiG)}` : '—'}</dd>
-        <dt>Plausible sack</dt>
-        <dd>{rules.plausibility ? `${fmtKg(rules.plausibility.sackLoKg)} to ${fmtKg(rules.plausibility.sackHiKg)}` : '—'}</dd>
-      </dl>
     </Block>
   );
 }

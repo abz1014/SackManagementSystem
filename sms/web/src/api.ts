@@ -71,12 +71,28 @@ export class ApiError extends Error {
   /** Seconds from the server's Retry-After, so a lockout can state a number
    *  rather than saying "try again later" and leaving the reader guessing. */
   readonly retryAfter: number | null;
-  constructor(status: number, message: string, retryAfter: number | null = null) {
+  /**
+   * The server's `detail` when it sent one — the plausibility and shift
+   * rule routes answer 400 with `error: 'invalid'` and put the actual reason
+   * ("morning must start before evening") here. Without it a Setup form
+   * could only say "invalid", which is the word the admin already knew.
+   */
+  readonly detail: string | null;
+  constructor(status: number, message: string, retryAfter: number | null = null, detail: string | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.retryAfter = retryAfter;
+    this.detail = detail;
   }
+}
+
+/** A 4xx body's `detail`, flattened to one sentence, or null. */
+function detailOf(body: unknown): string | null {
+  const d = (body as { detail?: unknown }).detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) return d.map(String).join('; ') || null;
+  return null;
 }
 
 /** Retry-After, in whole seconds, when the server sent one. */
@@ -91,7 +107,7 @@ async function get<T>(path: string): Promise<T> {
   if (!res.ok) {
     handleStatus(res, path);
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`, null, detailOf(body));
   }
   return res.json() as Promise<T>;
 }
@@ -105,7 +121,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) {
     handleStatus(res, path);
     const b = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (b as { error?: string }).error ?? `HTTP ${res.status}`, retryAfterOf(res));
+    throw new ApiError(res.status, (b as { error?: string }).error ?? `HTTP ${res.status}`, retryAfterOf(res), detailOf(b));
   }
   return res.json() as Promise<T>;
 }
@@ -133,14 +149,30 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
   if (!res.ok) {
     handleStatus(res, path);
     const b = await res.json().catch(() => ({}));
-    throw new Error((b as { error?: string }).error ?? `HTTP ${res.status}`);
+    // ApiError, not Error, since 14 Sep 2026: every Setup write goes through
+    // here, and a form must tell a 409 ("machine number 3 already exists")
+    // from a 403 from a dropped connection — three different sentences.
+    throw new ApiError(res.status, (b as { error?: string }).error ?? `HTTP ${res.status}`, retryAfterOf(res), detailOf(b));
   }
   return res.json() as Promise<T>;
 }
 
 // ---- admin ----
 export interface AdminUser { userId: number; username: string; displayName: string | null; role: string; active: boolean; createdAtUtc: string; }
-export interface StationRow { stationId: number; name: string | null; machine: string | null; description: string | null; }
+/** How a station came to be linked to its machine (migration 028). */
+export type StationLinkSource = 'default_by_number' | 'admin';
+export interface StationRow {
+  stationId: number; name: string | null; machine: string | null; description: string | null;
+  /* The machine link and the active flag, since roadmap Phase 1 (14 Sep
+     2026). Optional: /api/stations is read by every screen, and a screen
+     built before these existed must keep working against an API that has
+     not yet been redeployed with them. */
+  machineId?: number | null;
+  machineNo?: number | null;
+  machineName?: string | null;
+  linkSource?: StationLinkSource | null;
+  isActive?: boolean;
+}
 export interface Rules {
   weight: { basis: string; coneTubeWeightG: number; sackTareKg: number } | null;
   shift: { morningStart: string; eveningStart: string; nightStart: string; mode: string; nightBelongsTo: string } | null;
@@ -150,11 +182,133 @@ export function adminListUsers(): Promise<{ users: AdminUser[] }> { return get('
 export function adminCreateUser(u: { username: string; password: string; role: string; displayName?: string }): Promise<{ ok: boolean }> { return post('/api/admin/users', u); }
 export function adminUpdateUser(id: number, patch: { active?: boolean; role?: string }): Promise<{ ok: boolean }> { return send('PATCH', `/api/admin/users/${id}`, patch); }
 export function adminListStations(): Promise<{ stations: StationRow[] }> { return get('/api/admin/stations'); }
-export function adminSetStation(id: number, s: { name: string | null; machine: string | null; description: string | null }): Promise<{ ok: boolean }> { return send('PUT', `/api/admin/stations/${id}`, s); }
+/**
+ * PUT /api/admin/stations/:id. `name`/`machine`/`description` are the route's
+ * original, required-nullable body; `machineId` (null unlinks, and marks the
+ * link as set here) and `isActive` are Phase 1's additions and are sent only
+ * when the caller means to change them.
+ */
+export function adminSetStation(id: number, s: {
+  name: string | null; machine: string | null; description: string | null;
+  machineId?: number | null; isActive?: boolean;
+}): Promise<{ ok: boolean }> { return send('PUT', `/api/admin/stations/${id}`, s); }
 export function adminGetRules(): Promise<Rules> { return get('/api/admin/rules'); }
-export function adminSetWeightRule(r: { basis: string; coneTubeWeightG: number; sackTareKg: number; reason?: string }): Promise<{ ok: boolean }> { return post('/api/admin/rules/weight', r); }
-export function adminSetShiftRule(r: { mode: string; nightBelongsTo: string; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/shift', r); }
+
+/* The three rule writers below were declared on 3 Sep 2026 and never called:
+   Setup showed the rules as a read-only list, so the only way to change one
+   was SQL on the plant PC. Wired to real forms in roadmap Phase 1 (14 Sep
+   2026). The shift body carries the three boundary times now — the server
+   used to hold '06:00','14:00','22:00' as literals. */
+export type ShiftMode = 'corrected' | 'legacy';
+export type NightBelongsTo = 'start_day' | 'calendar_day';
+export function adminSetWeightRule(r: { basis: Basis; coneTubeWeightG: number; sackTareKg: number; reason?: string }): Promise<{ ok: boolean }> { return post('/api/admin/rules/weight', r); }
+export function adminSetShiftRule(r: {
+  morningStart: string; eveningStart: string; nightStart: string;
+  mode: ShiftMode; nightBelongsTo: NightBelongsTo; reason?: string;
+}): Promise<{ ok: boolean; rebuildRequired: boolean; note?: string }> { return post('/api/admin/rules/shift', r); }
 export function adminSetPlausibilityRule(r: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number; reason?: string }): Promise<{ ok: boolean; note?: string }> { return post('/api/admin/rules/plausibility', r); }
+
+// ---- roadmap Phase 1: the configurable platform (14 Sep 2026) ----
+// Until migration 028 the installation's identity lived in an env string
+// (LINE_NAME, parsed on '·' by two screens), a const array in the sync worker
+// and `SELECT TOP (14)` in the station seed. Each of these is now a row an
+// admin can edit in Setup; the functions below are that surface.
+
+/** The line, with the unit and plant it belongs to. */
+export interface ConfigLine {
+  lineId: number; code: string; name: string; displayName: string; isActive: boolean;
+  unit: { unitId: number; code: string; name: string };
+  plant: { plantId: number; code: string; name: string };
+}
+export type MachineKind = 'winder' | 'packer' | 'other';
+export interface MachineRow {
+  machineId: number;
+  /** The number the plant writes in MachineNo; null for a machine the readings never name (the packer). */
+  machineNo: number | null;
+  kind: MachineKind;
+  make: string | null;
+  model: string | null;
+  name: string;
+  isActive: boolean;
+  notes: string | null;
+}
+/** /api/config's station: the same row as StationRow with the link fields guaranteed. */
+export interface ConfigStation {
+  stationId: number; name: string | null; description: string | null;
+  machineId: number | null; machineNo: number | null; machineName: string | null;
+  linkSource: StationLinkSource | null; isActive: boolean;
+}
+export interface ConfigData {
+  line: ConfigLine;
+  lines: { lineId: number; displayName: string; isActive: boolean }[];
+  machines: MachineRow[];
+  stations: ConfigStation[];
+}
+/** Any signed-in account. */
+export function getConfig(): Promise<ConfigData> { return get('/api/config'); }
+
+export function adminGetLine(): Promise<{ line: ConfigLine }> { return get('/api/admin/line'); }
+export function adminSetLine(p: { plantName?: string; unitName?: string; lineName?: string; displayName?: string }): Promise<{ ok: boolean }> {
+  return send('PUT', '/api/admin/line', p);
+}
+
+export function adminListMachines(): Promise<{ machines: MachineRow[] }> { return get('/api/admin/machines'); }
+/**
+ * 201 `{ machineId, stationCreated }`; 409 when the number is taken on this
+ * line. A winder or 'other' WITH a number also gets its station row, linked,
+ * when none exists — `stationCreated` says whether that happened.
+ */
+export function adminCreateMachine(m: {
+  machineNo: number | null; kind: MachineKind; name: string; make?: string | null; model?: string | null; notes?: string | null;
+}): Promise<{ machineId: number; stationCreated: boolean }> { return post('/api/admin/machines', m); }
+export function adminUpdateMachine(id: number, patch: {
+  name?: string; make?: string | null; model?: string | null; notes?: string | null; isActive?: boolean;
+}): Promise<{ ok: boolean }> { return send('PUT', `/api/admin/machines/${id}`, patch); }
+
+/** 201 `{ ok }`; 409 when the station exists; 400 when machineId is not a machine on this line. */
+export function adminCreateStation(s: { stationId: number; name?: string | null; machineId?: number | null }): Promise<{ ok: boolean }> {
+  return post('/api/admin/stations', s);
+}
+
+export type DataSourceRole = 'acquisition' | 'product_master' | 'sack_packing';
+export interface DataSourceRow {
+  dataSourceId: number; systemCode: string; role: DataSourceRole; label: string;
+  /** Which .env block holds the connection — the server, database and login never leave the file. */
+  connectionKey: string;
+  isEnabled: boolean; notes: string | null;
+}
+export type SourceTableKind = 'cone' | 'sack' | 'reject_qcs' | 'reject_weight';
+export interface SourceTableRow {
+  sourceTableId: number; kind: SourceTableKind;
+  /** dbo.<name> in the source database — IFL's names carry the line: pack1_TP1U2. */
+  sourceTable: string;
+  /** sms_raw.<name> it is copied into. Read-only: the raw shape is the vendor's schema, fingerprinted per generation. */
+  rawTable: string;
+  isEnabled: boolean; dataSourceId: number;
+}
+export function adminGetSources(): Promise<{ sources: DataSourceRow[]; tables: SourceTableRow[] }> { return get('/api/admin/sources'); }
+export function adminUpdateSource(id: number, patch: { label?: string; isEnabled?: boolean; notes?: string | null }): Promise<{ ok: boolean }> {
+  return send('PUT', `/api/admin/sources/${id}`, patch);
+}
+/** A SQL identifier: what the server accepts for a source table name. */
+export const SOURCE_TABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+/** The `note` says what happens next (the worker's next pass; a halt on a new generation) and is shown verbatim. */
+export function adminUpdateSourceTable(id: number, patch: { sourceTable?: string; isEnabled?: boolean }): Promise<{ ok: boolean; note?: string }> {
+  return send('PUT', `/api/admin/sources/tables/${id}`, patch);
+}
+
+export type RejectSeverity = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+export interface RejectCodeRow {
+  rejectCodeId: number; rejectType: 'quality' | 'weight';
+  tubeCode: number | null; materialCode: number | null;
+  label: string | null; isPass: boolean | null; severity: RejectSeverity | null;
+}
+/** Any signed-in account. */
+export function getRejectCodes(): Promise<{ codes: RejectCodeRow[] }> { return get('/api/reject-codes'); }
+/** Manager and above. Only the fields present are changed; null clears one. */
+export function setRejectCode(id: number, patch: { label?: string | null; isPass?: boolean | null; severity?: RejectSeverity | null }): Promise<{ updated: number }> {
+  return send('PUT', `/api/reject-codes/${id}`, patch);
+}
 
 export interface AuditEntry {
   auditId: number; atUtc: string; actorId: number | null; actorName: string | null;
@@ -801,7 +955,17 @@ export interface LiveHealth {
 
 export interface LiveLine {
   lineId: number;
+  /**
+   * sms.line.display_name — what the screens print for this line, editable
+   * in Setup › Line. (LINE_NAME in .env is only the fallback when the row is
+   * missing.) The plant and unit come as their own names since 14 Sep 2026:
+   * two screens used to recover them by parsing this string on '·'.
+   */
   lineName: string;
+  /** sms.line.name — what a headline calls the line ("Line 3"). */
+  lineShortName: string;
+  plantName: string;
+  unitName: string;
   /** Plant wall clock at generation, in the production_ts convention (render in UTC). */
   plantNowUtc: string;
   /** True when the server clock was moved by ?asOf — a replay, never live. */

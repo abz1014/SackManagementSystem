@@ -48,8 +48,17 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import { SHIFT_BOUNDARIES, shiftCodeFromMinutes, type NightBelongsTo, type ShiftCode } from '@sms/shared';
+import {
+  DEFAULT_SHIFT_BOUNDARIES,
+  parseShiftTime,
+  shiftCodeFromMinutes,
+  type NightBelongsTo,
+  type ShiftBoundaries,
+  type ShiftCode,
+} from '@sms/shared';
+import { TtlCache } from '../cache.js';
 import { plantNowMs } from './plantClock.js';
+import { getLineIdentity } from './lineConfig.js';
 
 export const STOP_THRESHOLD_SECONDS = 120;
 export const IDLE_THRESHOLD_SECONDS = 8 * 3600;
@@ -80,7 +89,19 @@ export const STALE_CADENCE_MULTIPLE = 3;
 export const DEFAULT_STALE_AFTER_SECONDS = 180;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
-const SHIFT_MS = 8 * HOUR_MS;
+
+/**
+ * How long the line's identity and shift rule are held between reads.
+ *
+ * /api/live is polled every ten seconds by every floor PC and wall screen,
+ * and until 14 Sep 2026 the line name came from .env for free. Now it is a
+ * row (sms.line, migration 028) and the shift boundaries are a row
+ * (sms.shift_rule) — both change a few times a year, so re-reading them per
+ * poll would add two queries per viewer per ten seconds for nothing. Sixty
+ * seconds; and the admin routes call invalidateLiveConfigCache() on a
+ * write, so a rename or a new rule shows on the next poll, not a minute on.
+ */
+export const CONFIG_CACHE_MS = 60_000;
 
 export interface ShiftWindow {
   code: ShiftCode;
@@ -92,20 +113,38 @@ export interface ShiftWindow {
 
 /**
  * The shift in progress at plant time `tMs`, with its bounds and shift_date.
- * Pure. Boundaries are the confirmed 06/14/22 (Q8); shift_date follows the
- * same night rule the transform stamps on every row, so "this shift" and
- * "today" on the floor screens agree with the Records they open into.
+ * Pure. The boundaries are the line's shift rule (06/14/22 by default, the
+ * values IFL confirmed under Q8 — since roadmap Phase 1 a row in
+ * sms.shift_rule, editable in Setup); shift_date follows the same night rule
+ * the transform stamps on every row, so "this shift" and "today" on the floor
+ * screens agree with the Records they open into.
+ *
+ * Each shift ends where the next begins, so the three need not be eight
+ * hours each — the old `start + 8h` was only true of the default. The night
+ * shift is the one that wraps midnight: before morningStart it began on the
+ * previous calendar day.
  */
-export function shiftWindowAt(tMs: number, rule: NightBelongsTo): ShiftWindow {
+export function shiftWindowAt(tMs: number, rule: NightBelongsTo, b: ShiftBoundaries = DEFAULT_SHIFT_BOUNDARIES): ShiftWindow {
   const d = new Date(tMs);
   const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
-  const code = shiftCodeFromMinutes(mins);
+  const code = shiftCodeFromMinutes(mins, b);
   const midnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const at = (dayMs: number, minutes: number) => dayMs + minutes * 60_000;
   let startMs: number;
-  if (code === 'morning') startMs = midnight + SHIFT_BOUNDARIES.morningStart * 60_000;
-  else if (code === 'evening') startMs = midnight + SHIFT_BOUNDARIES.eveningStart * 60_000;
-  else if (mins >= SHIFT_BOUNDARIES.nightStart) startMs = midnight + SHIFT_BOUNDARIES.nightStart * 60_000;
-  else startMs = midnight - DAY_MS + SHIFT_BOUNDARIES.nightStart * 60_000;
+  let endMs: number;
+  if (code === 'morning') {
+    startMs = at(midnight, b.morningStart);
+    endMs = at(midnight, b.eveningStart);
+  } else if (code === 'evening') {
+    startMs = at(midnight, b.eveningStart);
+    endMs = at(midnight, b.nightStart);
+  } else if (mins >= b.nightStart) {
+    startMs = at(midnight, b.nightStart);
+    endMs = at(midnight + DAY_MS, b.morningStart);
+  } else {
+    startMs = at(midnight - DAY_MS, b.nightStart);
+    endMs = at(midnight, b.morningStart);
+  }
   // Under start_day a 02:00 night reading belongs to the day the shift began,
   // which is the date of startMs; morning and evening start on t's own date,
   // so the same expression is right for all three codes.
@@ -114,8 +153,59 @@ export function shiftWindowAt(tMs: number, rule: NightBelongsTo): ShiftWindow {
     code,
     shiftDate: new Date(dateAnchor).toISOString().slice(0, 10),
     startMs,
-    endMs: startMs + SHIFT_MS,
+    endMs,
   };
+}
+
+/** The newest shift rule for a line, in the shape the window arithmetic takes. */
+export interface LiveShiftRule {
+  boundaries: ShiftBoundaries;
+  nightBelongsTo: NightBelongsTo;
+}
+
+const shiftRuleCache = new TtlCache<LiveShiftRule>(CONFIG_CACHE_MS);
+const lineIdentityCache = new TtlCache<{ lineName: string; lineShortName: string; plantName: string; unitName: string }>(CONFIG_CACHE_MS);
+
+/** Called by the admin routes after a line rename or a new shift rule. */
+export function invalidateLiveConfigCache(): void {
+  shiftRuleCache.clear();
+  lineIdentityCache.clear();
+}
+
+/**
+ * The line's shift rule: the newest sms.shift_rule row, its TIME columns read
+ * back as 'HH:MM' (CONVERT style 108) and parsed into minutes. Falls back to
+ * DEFAULT_SHIFT_BOUNDARIES / start_day ONLY when the line has no rule row —
+ * a fresh database before its first Setup save — never over a row that
+ * exists. The transform reads the same row the same way (runTransform.ts),
+ * so the shift a floor screen names is the shift the Records carry.
+ */
+export async function loadShiftRule(pool: ConnectionPool, lineId: number): Promise<LiveShiftRule> {
+  const key = String(lineId);
+  const hit = shiftRuleCache.get(key);
+  if (hit) return hit;
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ ms: string | null; es: string | null; ns: string | null; night_belongs_to: string | null }>(
+      `SELECT TOP 1 CONVERT(varchar(5), morning_start, 108) AS ms, CONVERT(varchar(5), evening_start, 108) AS es,
+              CONVERT(varchar(5), night_start, 108) AS ns, night_belongs_to
+         FROM sms.shift_rule WHERE line_id = @line ORDER BY effective_from DESC`,
+    );
+  const row = r.recordset[0];
+  const ms = row?.ms == null ? null : parseShiftTime(row.ms);
+  const es = row?.es == null ? null : parseShiftTime(row.es);
+  const ns = row?.ns == null ? null : parseShiftTime(row.ns);
+  const boundaries: ShiftBoundaries =
+    ms != null && es != null && ns != null && ms < es && es < ns
+      ? { morningStart: ms, eveningStart: es, nightStart: ns }
+      : DEFAULT_SHIFT_BOUNDARIES;
+  const rule: LiveShiftRule = {
+    boundaries,
+    nightBelongsTo: row?.night_belongs_to === 'calendar_day' ? 'calendar_day' : 'start_day',
+  };
+  shiftRuleCache.set(key, rule);
+  return rule;
 }
 
 export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
@@ -258,7 +348,16 @@ export function classifyLineState(lastReadingMs: number | null, nowMs: number, l
 
 export interface LiveLine {
   lineId: number;
+  /** sms.line.display_name — what every screen prints for this line. */
   lineName: string;
+  /** sms.line.name — the short name a headline uses ("Line 3 is running");
+   *  lineName is the full display name ("TP1 · Line 3 · Unit 2") for the bar
+   *  and the report. Before Phase 1 the screens derived the short name by
+   *  splitting the env string on '·'; now it is a column. */
+  lineShortName: string;
+  /** sms.plant.name / sms.plant_unit.name, so no screen parses lineName on '·' again. */
+  plantName: string;
+  unitName: string;
   /** Plant wall clock at generation, in the production_ts convention. */
   plantNowUtc: string;
   /** True when the clock was moved by an `asOf` override — never live. */
@@ -337,24 +436,49 @@ export interface LiveData {
 const num = (v: unknown): number => (v == null ? 0 : Number(v));
 const iso = (d: Date | string | null | undefined): string | null => (d == null ? null : new Date(d).toISOString());
 
+/**
+ * What the line is called, from sms.line (migration 028). `fallbackName` is
+ * the env LINE_NAME, used only when the row is missing — a database that
+ * predates 028 — so the wall display keeps its title through the upgrade.
+ * Plant and unit have no env equivalent (the screens used to PARSE them out
+ * of the name, which is the hack 028 retires), so they are empty then.
+ */
+async function loadLineIdentity(pool: ConnectionPool, lineId: number, fallbackName: string) {
+  const key = String(lineId);
+  const hit = lineIdentityCache.get(key);
+  if (hit) return hit;
+  const row = await getLineIdentity(pool, lineId);
+  const id = row
+    ? { lineName: row.displayName, lineShortName: row.name, plantName: row.plant.name, unitName: row.unit.name }
+    // Pre-028 database: the env string is all there is, so the short name is
+    // recovered the way the screens used to do it — the segment that says
+    // "Line", else the whole string.
+    : {
+        lineName: fallbackName,
+        lineShortName:
+          fallbackName.split('·').map((p) => p.trim()).filter(Boolean).find((p) => /line/i.test(p)) ?? fallbackName,
+        plantName: '',
+        unitName: '',
+      };
+  lineIdentityCache.set(key, id);
+  return id;
+}
+
 export async function getLive(
   pool: ConnectionPool,
   lineId: number,
+  /** Env LINE_NAME: the fallback title for a database without an sms.line row. */
   lineName: string,
   opts: { asOfMs?: number } = {},
 ): Promise<LiveData> {
   const replay = opts.asOfMs != null;
   const nowMs = opts.asOfMs ?? plantNowMs();
 
-  const ruleRes = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .query<{ night_belongs_to: string | null }>(
-      `SELECT TOP 1 night_belongs_to FROM sms.shift_rule WHERE line_id = @line ORDER BY effective_from DESC`,
-    );
-  const rule: NightBelongsTo =
-    ruleRes.recordset[0]?.night_belongs_to === 'calendar_day' ? 'calendar_day' : 'start_day';
-  const shift = shiftWindowAt(nowMs, rule);
+  const [identity, shiftRule] = await Promise.all([
+    loadLineIdentity(pool, lineId, lineName),
+    loadShiftRule(pool, lineId),
+  ]);
+  const shift = shiftWindowAt(nowMs, shiftRule.nightBelongsTo, shiftRule.boundaries);
 
   /**
    * Measure IFL's acquisition lag from their own two timestamps, over the most
@@ -538,7 +662,10 @@ export async function getLive(
 
   const line: LiveLine = {
     lineId,
-    lineName,
+    lineName: identity.lineName,
+    lineShortName: identity.lineShortName,
+    plantName: identity.plantName,
+    unitName: identity.unitName,
     plantNowUtc: new Date(nowMs).toISOString(),
     replay,
     shift: {

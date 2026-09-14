@@ -4,6 +4,18 @@
  * `src` is the IFL column, `raw` the sms_raw column, `type` drives fingerprint
  * + bulk-insert typing. `id` is always the source row key (SCHEMA rule).
  *
+ * ROADMAP PHASE 1 (14 Sep 2026): the NAMES are configuration, the SHAPES are
+ * code. Until this change `IFL_TABLES` was a const the runner iterated, so the
+ * four table names — which carry the line in their suffix, `pack1_TP1U2` —
+ * were a source-code fact, and a second line's tables were a code change.
+ * They now come from `sms.source_table` (migration 028) through
+ * `loadSourceTables()` in sourceTables.ts. What stays here is the per-kind
+ * column shape: it is the vendor's schema, fingerprinted per generation, and
+ * a table of a given kind looks the same whichever line it belongs to.
+ *
+ * `DEFAULT_IFL_TABLES` is the installation migration 028 seeds for line 1,
+ * kept for tests and documentation only. Nothing in the worker iterates it.
+ *
  * SEPTEMBER 2026 SCHEMA. IFL rebuilt these tables on 2026-08-05 and changed two
  * things that reach us:
  *
@@ -32,19 +44,42 @@ export interface RawColumn {
   type: ColType;
 }
 
+/** The kinds of source table the raw layer has a shape for (sms.source_table.kind). */
+export type TableKind = 'cone' | 'sack' | 'reject_qcs' | 'reject_weight';
+export const TABLE_KINDS: readonly TableKind[] = ['cone', 'sack', 'reject_qcs', 'reject_weight'];
+
 export interface IflTableDef {
-  key: 'cone' | 'sack' | 'reject_qcs' | 'reject_weight';
-  sourceTable: string; // in DATA_TP1U2
+  key: TableKind;
+  sourceTable: string; // in the acquisition database (DATA_TP1U2 today)
   rawTable: string; // sms_raw.*
+  /**
+   * `system_code` of the sms.data_source this table is read through — the value
+   * every raw and canonical row's `source_system` carries, and `sync_run.adapter`.
+   * Was the literal 'ifl_sql' at six code sites; now a fact of the row.
+   */
+  systemCode: string;
   columns: RawColumn[]; // excludes the id key, which is handled explicitly
+}
+
+/** What a kind of source table looks like, and which raw table holds it verbatim. */
+export interface TableShape {
+  rawTable: string;
+  columns: RawColumn[];
 }
 
 const idCol: RawColumn = { src: 'id', raw: 'src_id', type: 'int' };
 
-export const IFL_TABLES: IflTableDef[] = [
-  {
-    key: 'cone',
-    sourceTable: 'pack1_TP1U2',
+/**
+ * The column shape of each kind. The raw table is part of the shape, not of
+ * the configuration: migration 005/024 created one raw table per kind, and the
+ * transform (runTransform.ts) reads each kind's raw table by name. A source
+ * table of kind 'cone' can therefore only ever land in sms_raw.cone_raw —
+ * `loadSourceTables` refuses a row that says otherwise, because rows written to
+ * any other table would sync and never be transformed, which is the exact
+ * silent-success failure this project keeps finding.
+ */
+export const TABLE_SHAPES: Record<TableKind, TableShape> = {
+  cone: {
     rawTable: 'sms_raw.cone_raw',
     columns: [
       idCol,
@@ -60,9 +95,7 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
-  {
-    key: 'sack',
-    sourceTable: 'sack1_TP1U2',
+  sack: {
     rawTable: 'sms_raw.sack_raw',
     columns: [
       idCol,
@@ -75,9 +108,7 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
-  {
-    key: 'reject_qcs',
-    sourceTable: 'rejectQCS1_TP1U2',
+  reject_qcs: {
     rawTable: 'sms_raw.reject_qcs_raw',
     columns: [
       idCol,
@@ -93,9 +124,7 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
-  {
-    key: 'reject_weight',
-    sourceTable: 'rejectWeight1_TP1U2',
+  reject_weight: {
     rawTable: 'sms_raw.reject_weight_raw',
     columns: [
       idCol,
@@ -110,4 +139,40 @@ export const IFL_TABLES: IflTableDef[] = [
       { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
     ],
   },
+};
+
+/** `sms_raw.cone_raw` → `cone_raw`: the form sync_run.target_table and dq_finding.subject_table use. */
+export const rawShortName = (rawTable: string): string => rawTable.replace('sms_raw.', '');
+
+/**
+ * `sync_run.adapter` for a halt row written when the configuration itself could
+ * not be read — nothing is configured, or the app database is not migrated.
+ * Written in place of a system code so the row does not claim an adapter that
+ * was never resolved.
+ */
+export const UNKNOWN_ADAPTER = 'unknown';
+
+/**
+ * The raw tables a pre-read halt owes a row to when `loadSourceTables` cannot
+ * answer: every kind the schema has. Setup counts "did not sync" per
+ * target_table, so a pass that could not even read its configuration must
+ * still leave one 'halted' row per raw table — otherwise the last good rows
+ * stay 'success' and quietly age (the defect 478c456 closed for every other
+ * pre-read halt).
+ */
+export function fallbackHaltTargets(): { targetTable: string; adapter: string }[] {
+  return TABLE_KINDS.map((k) => ({ targetTable: rawShortName(TABLE_SHAPES[k].rawTable), adapter: UNKNOWN_ADAPTER }));
+}
+
+/**
+ * The installation migration 028 seeds for line 1 — the four *_TP1U2 tables of
+ * IFL's acquisition database, read through the 'ifl_sql' adapter. For tests
+ * and documentation only: the worker and the CLI load theirs from
+ * sms.source_table at the start of every pass and command.
+ */
+export const DEFAULT_IFL_TABLES: IflTableDef[] = [
+  { key: 'cone', sourceTable: 'pack1_TP1U2', systemCode: 'ifl_sql', ...TABLE_SHAPES.cone },
+  { key: 'sack', sourceTable: 'sack1_TP1U2', systemCode: 'ifl_sql', ...TABLE_SHAPES.sack },
+  { key: 'reject_qcs', sourceTable: 'rejectQCS1_TP1U2', systemCode: 'ifl_sql', ...TABLE_SHAPES.reject_qcs },
+  { key: 'reject_weight', sourceTable: 'rejectWeight1_TP1U2', systemCode: 'ifl_sql', ...TABLE_SHAPES.reject_weight },
 ];

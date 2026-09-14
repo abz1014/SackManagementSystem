@@ -262,16 +262,16 @@ function Headline({ line, knowable }: { line: LiveLine; knowable: boolean }) {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
- * What to call the line in a sentence.
+ * What to call the line in a sentence: its short name, verbatim.
  *
- * LINE_NAME is configured as "TP1 · Line 3 · Unit 2" — a full address, too long
- * for a headline. Taking the last segment gave "Unit 2 is running", which names
- * the building rather than the line, so the segment that actually says "Line"
- * is preferred and the whole name is the fallback.
+ * Until roadmap Phase 1 (14 Sep 2026) this split LINE_NAME on '·' and kept
+ * the segment that said "Line" — the env string was a whole address, "TP1 ·
+ * Line 3 · Unit 2", and "Unit 2 is running" names the building. The name is
+ * a row now (sms.line.name, edited in Setup › Line), the full display name
+ * stays on the bar and the report, and nothing is parsed.
  */
 function lineTitle(line: LiveLine): string {
-  const parts = line.lineName.split('·').map((p) => p.trim()).filter(Boolean);
-  return parts.find((p) => /line/i.test(p)) ?? parts[parts.length - 1] ?? line.lineName;
+  return line.lineShortName || line.lineName;
 }
 
 /* ----------------------------------------------------------------- figures */

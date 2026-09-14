@@ -25,21 +25,29 @@ import type { ConnectionPool } from 'mssql';
 // the "not read this pass" row a halt owes it can be asserted. The fake epoch
 // layer and adapter are per-call, not per-table, so the second table sees
 // exactly what the first did — which is why every halt test halts on cone.
-vi.mock('./reader/iflTables.js', () => ({
-  IFL_TABLES: [
-    {
-      key: 'cone',
-      sourceTable: 'pack1_TP1U2',
-      rawTable: 'sms_raw.cone_raw',
-      columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
-    },
-    {
-      key: 'sack',
-      sourceTable: 'sack1_TP1U2',
-      rawTable: 'sms_raw.sack_raw',
-      columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
-    },
-  ],
+//
+// Since roadmap Phase 1 the runner loads its tables from sms.source_table
+// (loadSourceTables) at the start of every pass; the fake answers with these
+// two, or throws when a test says the line has none configured.
+const TABLES = [
+  {
+    key: 'cone',
+    sourceTable: 'pack1_TP1U2',
+    rawTable: 'sms_raw.cone_raw',
+    systemCode: 'ifl_sql',
+    columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
+  },
+  {
+    key: 'sack',
+    sourceTable: 'sack1_TP1U2',
+    rawTable: 'sms_raw.sack_raw',
+    systemCode: 'ifl_sql',
+    columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
+  },
+];
+const loadSourceTables = vi.fn(async (_p: unknown, _line: number) => TABLES);
+vi.mock('./reader/sourceTables.js', () => ({
+  loadSourceTables: (p: unknown, line: number) => loadSourceTables(p, line),
 }));
 
 const EPOCH = {
@@ -79,9 +87,10 @@ vi.mock('./reader/IflSqlAdapter.js', () => ({
 }));
 
 let watermark: number | null = 0;
-const startSyncRun = vi.fn(async (_p: unknown, _s: { sourceEpoch: number }) => 1);
+const startSyncRun = vi.fn(async (_p: unknown, _s: { sourceEpoch: number; adapter: string }) => 1);
 interface Halt {
   runId: string;
+  adapter: string;
   targetTable: string;
   sourceEpoch: number | null;
   watermarkFrom: number | null;
@@ -91,7 +100,7 @@ const recordHaltedRun = vi.fn(async (_p: unknown, _h: Halt): Promise<void> => un
 const finishSyncRun = vi.fn(async (_p: unknown, _id: number, _f: { outcome: string }): Promise<void> => undefined);
 vi.mock('./store.js', () => ({
   getWatermark: async () => watermark,
-  startSyncRun: (p: unknown, s: { sourceEpoch: number }) => startSyncRun(p, s),
+  startSyncRun: (p: unknown, s: { sourceEpoch: number; adapter: string }) => startSyncRun(p, s),
   finishSyncRun: (p: unknown, id: number, f: { outcome: string }) => finishSyncRun(p, id, f),
   recordHaltedRun: (p: unknown, h: Halt) => recordHaltedRun(p, h),
 }));
@@ -124,6 +133,8 @@ beforeEach(() => {
   world.maxId = 999_999;
   world.rows = [{ src_id: 1 }];
   watermark = 142_511;
+  loadSourceTables.mockClear();
+  loadSourceTables.mockResolvedValue(TABLES);
   readSince.mockClear();
   startSyncRun.mockClear();
   finishSyncRun.mockClear();
@@ -170,6 +181,17 @@ describe('runOnce — generation gates', () => {
     expect(startSyncRun.mock.calls[0]![1].sourceEpoch).toBe(EPOCH.epoch_id);
     // A healthy pass writes no halt row for anyone.
     expect(recordHaltedRun).not.toHaveBeenCalled();
+    // The tables came from configuration, for this line, once per pass.
+    expect(loadSourceTables).toHaveBeenCalledTimes(1);
+    expect(loadSourceTables).toHaveBeenCalledWith(pool, 1);
+  });
+
+  it("the sync_run adapter is the table's configured system code, not a literal", async () => {
+    watermark = 100;
+    world.maxId = 5_000;
+    loadSourceTables.mockResolvedValue(TABLES.map((t) => ({ ...t, systemCode: 'plant_sql' })));
+    await runOnce(pool, pool, cfg);
+    expect(startSyncRun.mock.calls.map((c) => c[1].adapter)).toEqual(['plant_sql', 'plant_sql']);
   });
 
   it('never blocks a freshly accepted generation that has no rows yet', async () => {
@@ -211,6 +233,40 @@ describe('runOnce — generation gates', () => {
     persistRaw.mockResolvedValueOnce({ read: 500, written: 0 });
     await expect(runOnce(pool, pool, cfg)).resolves.toHaveLength(2);
     expect(persistFindings).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Roadmap Phase 1: a line with no enabled source tables must not read
+ * anything — and must not fall back to line 1's tables, which is the
+ * cross-contamination a LINE_ID=2 worker pointed at the wrong rows would
+ * cause. It halts with the message that names the screen to fix it in.
+ */
+describe('runOnce — configuration gate', () => {
+  it('halts with the "no source tables" message, before touching the source', async () => {
+    loadSourceTables.mockRejectedValue(
+      new Error('No source tables are configured for line 1. Add them in Setup › Sources (sms.source_table).'),
+    );
+    await expect(runOnce(pool, pool, cfg)).rejects.toThrow(/No source tables are configured for line 1/);
+    expect(readSince).not.toHaveBeenCalled();
+    expect(persistRaw).not.toHaveBeenCalled();
+    expect(startSyncRun).not.toHaveBeenCalled();
+  });
+
+  it('leaves a halt row for every raw table the schema has, since none is configured', async () => {
+    loadSourceTables.mockRejectedValue(new Error('No source tables are configured for line 1. Add them in Setup › Sources (sms.source_table).'));
+    await runOnce(pool, pool, cfg).catch(() => {});
+    const h = halts();
+    // Not the two the fake would have configured — the configuration is
+    // exactly what could not be read, so the halt owes a row per raw table.
+    expect(h.map((x) => x.targetTable)).toEqual(['cone_raw', 'sack_raw', 'reject_qcs_raw', 'reject_weight_raw']);
+    expect(new Set(h.map((x) => x.runId)).size).toBe(1);
+    for (const x of h) {
+      expect(x.error).toMatch(/Setup › Sources/);
+      expect(x.adapter).toBe('unknown');
+      expect(x.sourceEpoch).toBeNull();
+      expect(x.watermarkFrom).toBeNull();
+    }
   });
 });
 

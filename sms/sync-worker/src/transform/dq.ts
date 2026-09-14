@@ -2,12 +2,52 @@
  * Data-quality checks over canonical rows (ARCHITECTURE §8). Pure computation
  * → summary findings (one per check with a count), so the Operations roll-up
  * isn't flooded. Raw offending rows stay queryable in canonical regardless.
+ *
+ * Every check the worker can raise, by name (CAPABILITIES.md carries the same
+ * table for the reader):
+ *
+ *   future_timestamp        ERROR     production time more than an hour ahead of the plant wall clock
+ *   stale_timestamp         WARNING   a reading hours behind the readings around it — a station clock fault
+ *   nonpositive_weight      ERROR     weight <= 0
+ *   outlier_weight          WARNING   below the plausibility floor
+ *   no_station              WARNING   no usable station id (the source sent 0)
+ *   station_not_in_roster   WARNING   a machine number that is not a station on the line — one per
+ *                                     (machine, source table, generation), see stationRosterFindings
+ *   merge_key_collision     INFO      rows sharing a non-unique merge key (DQ-2)
+ *   raw_read_without_write  ERROR     runner.ts: a beyond-overlap batch that wrote nothing (id reuse)
+ *   transform_zero_write    CRITICAL  runTransform.ts: fresh rows the insert did not land
+ *   product_mirror_failed   ERROR     pipeline.ts (state): the PDAS mirror is failing; cleared when it succeeds
+ *   transform_failed        CRITICAL  pipeline.ts (state): raw arrives, canonical does not; cleared on success
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { plantNowMs } from '@sms/shared';
 
 export type Severity = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+
+/** The check names above, so a screen or a test can enumerate them without a grep. */
+export const CHECK_NAMES = [
+  'future_timestamp',
+  'stale_timestamp',
+  'nonpositive_weight',
+  'outlier_weight',
+  'no_station',
+  'station_not_in_roster',
+  'merge_key_collision',
+  'raw_read_without_write',
+  'transform_zero_write',
+  'product_mirror_failed',
+  'transform_failed',
+] as const;
+export type CheckName = (typeof CHECK_NAMES)[number];
+
+/**
+ * Checks that raise one finding PER SUBJECT (a machine number, say) rather than
+ * one per check with a count. mergeByCheck in runTransform.ts must not fold
+ * these into one row, or "once per (machine, table, generation)" becomes "once
+ * per pass with every subject in the detail".
+ */
+export const PER_SUBJECT_CHECKS: ReadonlySet<string> = new Set(['station_not_in_roster']);
 
 export interface Finding {
   check_name: string;
@@ -115,6 +155,63 @@ export function computeFindings<T extends Weighted>(
   );
   add('merge_key_collision', 'INFO', collision, `${collision} rows share a non-unique merge key (DQ-2)`);
   return findings;
+}
+
+/** What the roster check needs: the line, and the station ids it knows. */
+export interface StationRoster {
+  lineId: number;
+  stations: ReadonlySet<number>;
+}
+
+/**
+ * `station_not_in_roster` — a reading from a machine number the line has no
+ * station for (roadmap Phase 1, 14 Sep 2026).
+ *
+ * WHY. Machines are configuration now (sms.machine, Setup › Machines) and a
+ * station row follows a numbered winder (seedReference.ts). A row from a
+ * number with no station is therefore one of two things: a machine IFL added
+ * that nobody has added in Setup yet, or a source table that belongs to a
+ * different line than LINE_ID says (the cross-contamination transform.ts
+ * warns about). Either way the reading is kept — nothing is dropped — but no
+ * station-wise screen can show it, and the finding says which number, in
+ * which table, under which generation, so the fix is one Setup action.
+ *
+ * ONE FINDING PER (machine number, source table, generation), not one per
+ * pass: persistFindings dedups on (check, subject_table, detail), and every
+ * one of those three facts is in the detail, so a standing fault is recorded
+ * once when its rows are first ingested and the count is the batch that raised
+ * it. `no_station` (a null id, the source sent 0) is a different fault and
+ * stays a separate check.
+ *
+ * `subject_table` is the RAW table's short name ('cone_raw'), by contract: the
+ * finding is about what the source sent, not about the canonical row.
+ */
+export function stationRosterFindings<T extends { source_station?: number | null; source_epoch: number }>(
+  rows: T[],
+  roster: StationRoster,
+  rawTableShort: string,
+  sourceTable: string,
+): Finding[] {
+  const counts = new Map<string, { machine: number; epoch: number; n: number }>();
+  for (const r of rows) {
+    const m = r.source_station;
+    if (m == null || roster.stations.has(m)) continue;
+    const k = `${r.source_epoch}|${m}`;
+    const c = counts.get(k) ?? { machine: m, epoch: r.source_epoch, n: 0 };
+    c.n += 1;
+    counts.set(k, c);
+  }
+  return [...counts.values()]
+    .sort((a, b) => a.epoch - b.epoch || a.machine - b.machine)
+    .map((c) => ({
+      check_name: 'station_not_in_roster',
+      severity: 'WARNING' as const,
+      subject_table: rawTableShort,
+      count: c.n,
+      detail:
+        `machine number ${c.machine} observed in ${sourceTable} (generation ${c.epoch}) is not a ` +
+        `station on line ${roster.lineId} — add it in Setup › Machines`,
+    }));
 }
 
 /**

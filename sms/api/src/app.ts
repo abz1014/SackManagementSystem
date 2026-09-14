@@ -9,7 +9,7 @@ import type { ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
 import { getOperations } from './services/operations.js';
 import { getProduction, type GroupBy } from './services/production.js';
-import { getRejectPareto, setRejectLabel } from './services/rejects.js';
+import { getRejectPareto, listRejectCodes, updateRejectCode, REJECT_SEVERITIES } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
 import {
@@ -19,7 +19,7 @@ import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
-import { getLive } from './services/live.js';
+import { getLive, invalidateLiveConfigCache } from './services/live.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, limitsOf, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
@@ -33,7 +33,12 @@ import {
   getRules, setWeightRule, setShiftRule,
   getPlausibilityRule, setPlausibilityRule,
 } from './services/admin.js';
-import { recordAudit, listAudit } from './services/audit.js';
+import {
+  getLineConfig, getLineIdentity, listMachines, createMachine, updateMachine, createStation,
+  updateLine, listSources, updateDataSource, updateSourceTable, SOURCE_TABLE_NAME,
+} from './services/lineConfig.js';
+import { recordAudit, recordAuditIn, auditedWrite, listAudit } from './services/audit.js';
+import { shiftBoundariesFrom } from '@sms/shared';
 import {
   authMiddleware,
   authenticate,
@@ -118,11 +123,20 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   const prodCache = new TtlCache<Envelope<unknown>>(cfg.cacheTtlSeconds * 1000);
   const loginLimiter = new LoginRateLimiter();
 
-  // Fire-and-forget audit write: the primary action has already succeeded by
-  // the time this is called, and there is no transaction spanning both, so a
-  // logging failure must never fail the request that triggered it. It must
-  // also never vanish silently — a broken audit trail is itself a finding —
-  // so failures go to stderr instead of a swallowed catch.
+  // Fire-and-forget audit write, for events that are NOT configuration: a
+  // product changeover or a calibration entry already versioned in its own
+  // table, an export. The primary action has already succeeded by the time
+  // this is called, and there is no transaction spanning both, so a logging
+  // failure must never fail the request that triggered it. It must also never
+  // vanish silently — a broken audit trail is itself a finding — so failures
+  // go to stderr instead of a swallowed catch.
+  //
+  // CONFIGURATION writes do not use this. Rules, the line, machines, stations,
+  // sources, reject codes and users go through auditedWrite() (services/
+  // audit.ts), which commits the change and its audit row in one transaction:
+  // the gap analysis found that with this helper "a rule change can commit
+  // while its audit row fails", and roadmap Phase 1 accepts only changes that
+  // are audited where they affect production calculations.
   function audit(req: Request, action: string, targetType: string, targetId: string | number | null, detail: string | null): void {
     const actorId = (req as AuthedRequest).user?.userId;
     if (actorId == null) return;
@@ -130,6 +144,12 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       console.error(`[audit] failed to record ${action}:`, e),
     );
   }
+  const actorId = (req: Request): number => (req as AuthedRequest).user!.userId;
+  /** SQL Server unique-key violation (2627 = unique constraint, 2601 = unique index). */
+  const isUniqueViolation = (e: unknown): boolean => {
+    const n = (e as { number?: number }).number;
+    return n === 2627 || n === 2601;
+  };
   // Off unless explicitly enabled: X-Forwarded-For is client-supplied, so
   // trusting it with no proxy in front makes req.ip attacker-controlled and the
   // login lockout bypassable. Enable only behind a proxy you control (DEPLOY.md).
@@ -325,6 +345,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.get('/api/stations', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       res.json({ stations: await listStations(pool, cfg.lineId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * The installation as configured (roadmap Phase 1, migration 028): the line
+   * with its unit and plant, every line known (one today — Q14), the line's
+   * machines, and its stations with the machine each is linked to. Read by
+   * every signed-in account, because the names on every screen come from
+   * here; edited only through /api/admin/*.
+   */
+  app.get('/api/config', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await getLineConfig(pool, cfg.lineId));
     } catch (err) {
       next(err);
     }
@@ -853,25 +888,52 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  // set a reject-reason label (entering Q10 answers) — manager+ only
+  // the line's reject codes, for the Setup table and the Rejects screen's labels
+  app.get('/api/reject-codes', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ codes: await listRejectCodes(pool, cfg.lineId) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // set a reject code's label / pass flag / severity (entering Q10 answers) —
+  // manager+ only. Only the fields sent are changed; the audit row names each.
   app.put('/api/reject-codes/:id', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = Number(req.params.id);
       const body = z
-        .object({ label: z.string().max(128).nullable(), isPass: z.boolean().nullable().optional() })
+        .object({
+          label: z.string().max(128).nullable().optional(),
+          // z.boolean(), not z.coerce.boolean(): "false" must not become true (a473d4d).
+          isPass: z.boolean().nullable().optional(),
+          severity: z.enum(REJECT_SEVERITIES).nullable().optional(),
+        })
         .safeParse(req.body);
       if (!Number.isInteger(id) || !body.success) {
         res.status(400).json({ error: 'invalid request' });
         return;
       }
-      const newLabel = body.data.label || null;
-      // isPass is passed through as-is: undefined means "not this time".
-      const { rowsAffected, oldLabel, oldIsPass } = await setRejectLabel(pool, id, newLabel, body.data.isPass);
-      if (rowsAffected > 0) {
-        const passNote = body.data.isPass === undefined ? '' : `, is_pass ${String(oldIsPass)} -> ${String(body.data.isPass)}`;
-        audit(req, 'reject_code.label', 'reject_code', id, `label "${oldLabel ?? '(none)'}" -> "${newLabel ?? '(none)'}"${passNote}`);
+      const p = body.data;
+      if (p.label === undefined && p.isPass === undefined && p.severity === undefined) {
+        res.status(400).json({ error: 'nothing to change' });
+        return;
       }
-      res.json({ updated: rowsAffected });
+      // An empty label is "no label", never the empty string.
+      const patch = { ...p, ...(p.label !== undefined ? { label: p.label || null } : {}) };
+      const updated = await auditedWrite(
+        pool, actorId(req), { action: 'reject_code.update', targetType: 'reject_code', targetId: id, detail: null },
+        async (tx) => {
+          const r = await updateRejectCode(tx, cfg.lineId, id, patch);
+          if (r.rowsAffected === 0) return { result: 0, noop: true };
+          const parts: string[] = [];
+          if (patch.label !== undefined) parts.push(`label "${r.oldLabel ?? '(none)'}" -> "${patch.label ?? '(none)'}"`);
+          if (patch.isPass !== undefined) parts.push(`is_pass ${String(r.oldIsPass)} -> ${String(patch.isPass)}`);
+          if (patch.severity !== undefined) parts.push(`severity ${r.oldSeverity ?? '(none)'} -> ${patch.severity ?? '(none)'}`);
+          return { result: r.rowsAffected, detail: parts.join(', ') };
+        },
+      );
+      res.json({ updated });
     } catch (err) {
       next(err);
     }
@@ -1153,7 +1215,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
 
   // ---- Admin (admin only, rank 4) ----
+  // Every write below is a CONFIGURATION change and goes through
+  // auditedWrite(): the change and its audit row are one transaction.
   const ROLE_NAMES = z.enum(['operator', 'supervisor', 'manager', 'admin']);
+  const optText = (max: number) => z.string().max(max).nullable().optional();
 
   app.get('/api/admin/users', requireRole(4), async (_req, res, next) => {
     try { res.json({ users: await listUsers(pool) }); } catch (e) { next(e); }
@@ -1163,17 +1228,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const b = z.object({ username: z.string().min(1).max(64), password: z.string().min(6), role: ROLE_NAMES, displayName: z.string().max(128).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid user' }); return; }
       try {
-        await createUser(pool, b.data.username, b.data.password, b.data.role, b.data.displayName ?? null);
+        await auditedWrite(
+          pool, actorId(req), { action: 'user.create', targetType: 'user', targetId: b.data.username, detail: `role ${b.data.role}` },
+          async (tx) => {
+            await createUser(tx, b.data.username, b.data.password, b.data.role, b.data.displayName ?? null);
+            return { result: undefined };
+          },
+        );
       } catch (e) {
         // unique-key violation on username → a clear 409, not a generic 500
-        const n = (e as { number?: number }).number;
-        if (n === 2627 || n === 2601) {
+        if (isUniqueViolation(e)) {
           res.status(409).json({ error: `username "${b.data.username}" already exists` });
           return;
         }
         throw e;
       }
-      audit(req, 'user.create', 'user', b.data.username, `role ${b.data.role}`);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -1182,36 +1251,218 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = Number(req.params.id);
       const b = z.object({ active: z.boolean().optional(), role: ROLE_NAMES.optional() }).safeParse(req.body);
       if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid' }); return; }
-      const { oldActive, oldRole } = await updateUser(pool, id, b.data.active, b.data.role);
-      const changes: string[] = [];
-      if (b.data.active != null) changes.push(`active ${oldActive ?? '?'} -> ${b.data.active}`);
-      if (b.data.role) changes.push(`role ${oldRole ?? '?'} -> ${b.data.role}`);
-      audit(req, 'user.update', 'user', id, changes.join('; ') || null);
+      await auditedWrite(pool, actorId(req), { action: 'user.update', targetType: 'user', targetId: id, detail: null }, async (tx) => {
+        const { oldActive, oldRole } = await updateUser(tx, id, b.data.active, b.data.role);
+        const changes: string[] = [];
+        if (b.data.active != null) changes.push(`active ${oldActive ?? '?'} -> ${b.data.active}`);
+        if (b.data.role) changes.push(`role ${oldRole ?? '?'} -> ${b.data.role}`);
+        return { result: undefined, detail: changes.join('; ') || null };
+      });
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
 
+  // ---- line identity: plant › unit › line (migration 028) ----
+  app.get('/api/admin/line', requireRole(4), async (_req, res, next) => {
+    try {
+      const line = await getLineIdentity(pool, cfg.lineId);
+      if (!line) { res.status(404).json({ error: `no sms.line row for line ${cfg.lineId} — apply migration 028` }); return; }
+      res.json({ line });
+    } catch (e) { next(e); }
+  });
+  app.put('/api/admin/line', requireRole(4), async (req, res, next) => {
+    try {
+      const name = z.string().min(1).max(128).optional();
+      const b = z.object({ plantName: name, unitName: name, lineName: name, displayName: name }).safeParse(req.body);
+      if (!b.success) { res.status(400).json({ error: 'invalid', detail: b.error.flatten().fieldErrors }); return; }
+      if (Object.values(b.data).every((v) => v === undefined)) { res.status(400).json({ error: 'nothing to change' }); return; }
+      const found = await updateLine(pool, actorId(req), cfg.lineId, b.data);
+      if (!found) { res.status(404).json({ error: `no sms.line row for line ${cfg.lineId}` }); return; }
+      // The wall display's title comes from the same row, cached for a minute.
+      invalidateLiveConfigCache();
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // ---- machines: the winders and the packer (migration 028) ----
+  // Adding one here, with a number, also creates its station — the roadmap's
+  // "adding a second machine does not require source-code modification".
+  // Whether a machine IS a station on this line is clarification Q3.
+  app.get('/api/admin/machines', requireRole(4), async (_req, res, next) => {
+    try { res.json({ machines: await listMachines(pool, cfg.lineId) }); } catch (e) { next(e); }
+  });
+  app.post('/api/admin/machines', requireRole(4), async (req, res, next) => {
+    try {
+      const b = z
+        .object({
+          // null (or absent) = the source never identifies it, like the packer.
+          machineNo: z.number().int().min(0).nullable().optional(),
+          kind: z.enum(['winder', 'packer', 'other']),
+          name: z.string().min(1).max(64),
+          make: optText(64),
+          model: optText(64),
+          notes: optText(255),
+        })
+        .safeParse(req.body);
+      if (!b.success) { res.status(400).json({ error: 'invalid machine', detail: b.error.flatten().fieldErrors }); return; }
+      let r;
+      try {
+        r = await createMachine(pool, actorId(req), cfg.lineId, { ...b.data, machineNo: b.data.machineNo ?? null });
+      } catch (e) {
+        // Two admins adding the same number at once: the filtered unique
+        // index UX_machine_no wins the race the pre-check cannot.
+        if (isUniqueViolation(e)) { res.status(409).json({ error: `machine number ${b.data.machineNo} already exists on this line` }); return; }
+        throw e;
+      }
+      if (!r.ok) { res.status(409).json({ error: r.message }); return; }
+      res.status(201).json({ machineId: r.machineId, stationCreated: r.stationCreated });
+    } catch (e) { next(e); }
+  });
+  app.put('/api/admin/machines/:id', requireRole(4), async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      const b = z
+        .object({
+          name: z.string().min(1).max(64).optional(),
+          make: optText(64),
+          model: optText(64),
+          notes: optText(255),
+          // z.boolean(): a coerced "false" would re-activate a retired machine.
+          isActive: z.boolean().optional(),
+        })
+        .safeParse(req.body);
+      if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid', detail: b.success ? undefined : b.error.flatten().fieldErrors }); return; }
+      if (Object.values(b.data).every((v) => v === undefined)) { res.status(400).json({ error: 'nothing to change' }); return; }
+      const found = await updateMachine(pool, actorId(req), cfg.lineId, id, b.data);
+      if (!found) { res.status(404).json({ error: `no machine ${id} on this line` }); return; }
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
+  // ---- stations ----
   app.get('/api/admin/stations', requireRole(4), async (_req, res, next) => {
     try { res.json({ stations: await listStations(pool, cfg.lineId) }); } catch (e) { next(e); }
+  });
+  app.post('/api/admin/stations', requireRole(4), async (req, res, next) => {
+    try {
+      const b = z
+        .object({
+          // The number MachineNo on a cone row is matched against — chosen, not assigned.
+          stationId: z.number().int().min(0),
+          name: optText(64),
+          machineId: z.number().int().positive().nullable().optional(),
+        })
+        .safeParse(req.body);
+      if (!b.success) { res.status(400).json({ error: 'invalid station', detail: b.error.flatten().fieldErrors }); return; }
+      let r;
+      try {
+        r = await createStation(pool, actorId(req), cfg.lineId, {
+          stationId: b.data.stationId, name: b.data.name ?? null, machineId: b.data.machineId ?? null,
+        });
+      } catch (e) {
+        if (isUniqueViolation(e)) { res.status(409).json({ error: `station ${b.data.stationId} already exists on this line` }); return; }
+        throw e;
+      }
+      if (!r.ok) { res.status(r.code === 'EXISTS' ? 409 : 400).json({ error: r.message }); return; }
+      res.status(201).json({ ok: true });
+    } catch (e) { next(e); }
   });
   app.put('/api/admin/stations/:id', requireRole(4), async (req, res, next) => {
     try {
       const id = Number(req.params.id);
-      const b = z.object({ name: z.string().max(64).nullable(), machine: z.string().max(64).nullable(), description: z.string().max(255).nullable() }).safeParse(req.body);
+      const b = z
+        .object({
+          name: z.string().max(64).nullable(),
+          machine: z.string().max(64).nullable(),
+          description: z.string().max(255).nullable(),
+          /** Present (including null) = set the link; absent = leave it. */
+          machineId: z.number().int().positive().nullable().optional(),
+          isActive: z.boolean().optional(),
+        })
+        .safeParse(req.body);
       if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid' }); return; }
       const newName = b.data.name || null;
-      const { updated, oldName } = await setStation(pool, cfg.lineId, id, newName, b.data.machine || null, b.data.description || null);
-      // a nonexistent station used to return ok:true AND write a phantom
-      // audit entry — found live in the Aug 2026 audit (PUT /stations/999)
+      // A link must point at a machine on THIS line; the FK alone would let
+      // a station borrow another line's winder (Q14).
+      if (b.data.machineId != null) {
+        const known = await pool.request().input('line', mssql.Int, cfg.lineId).input('id', mssql.Int, b.data.machineId)
+          .query<{ n: number }>(`SELECT COUNT(*) n FROM sms.machine WHERE line_id=@line AND machine_id=@id`);
+        if (!Number(known.recordset[0]?.n ?? 0)) { res.status(400).json({ error: `no machine ${b.data.machineId} on this line` }); return; }
+      }
+      const updated = await auditedWrite(
+        pool, actorId(req), { action: 'station.rename', targetType: 'station', targetId: id, detail: null },
+        async (tx) => {
+          const r = await setStation(tx, cfg.lineId, id, {
+            name: newName, machine: b.data.machine || null, description: b.data.description || null,
+            machineId: b.data.machineId, isActive: b.data.isActive,
+          });
+          // a nonexistent station used to return ok:true AND write a phantom
+          // audit entry — found live in the Aug 2026 audit (PUT /stations/999)
+          if (!r.updated) return { result: false, noop: true };
+          // One change, two events when the link moved: the rename row the
+          // Setup screen has always written, and a station.link row so the
+          // Q3 question ("which machine is station 7?") has its own history.
+          if (b.data.machineId !== undefined && b.data.machineId !== r.oldMachineId) {
+            await recordAuditIn(tx, actorId(req), {
+              action: 'station.link', targetType: 'station', targetId: id,
+              detail: `machine_id ${r.oldMachineId ?? '(none)'} -> ${b.data.machineId ?? '(none)'}`,
+            });
+          }
+          const activeNote = b.data.isActive !== undefined && b.data.isActive !== r.oldIsActive
+            ? `; active ${String(r.oldIsActive)} -> ${String(b.data.isActive)}` : '';
+          return { result: true, detail: `name "${r.oldName ?? '(none)'}" -> "${newName ?? '(none)'}"${activeNote}` };
+        },
+      );
       if (!updated) {
         res.status(404).json({ error: `no station ${id} on this line` });
         return;
       }
-      audit(req, 'station.rename', 'station', id, `name "${oldName ?? '(none)'}" -> "${newName ?? '(none)'}"`);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
 
+  // ---- data sources and the line's source tables (migration 028) ----
+  // Connection details are NOT here: a data_source row names which .env
+  // block it uses (connection_key); server, database and login stay in .env.
+  app.get('/api/admin/sources', requireRole(4), async (_req, res, next) => {
+    try { res.json(await listSources(pool, cfg.lineId)); } catch (e) { next(e); }
+  });
+  app.put('/api/admin/sources/:id', requireRole(4), async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      const b = z.object({ label: z.string().min(1).max(128).optional(), isEnabled: z.boolean().optional(), notes: optText(255) }).safeParse(req.body);
+      if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid', detail: b.success ? undefined : b.error.flatten().fieldErrors }); return; }
+      if (Object.values(b.data).every((v) => v === undefined)) { res.status(400).json({ error: 'nothing to change' }); return; }
+      const found = await updateDataSource(pool, actorId(req), id, b.data);
+      if (!found) { res.status(404).json({ error: `no data source ${id}` }); return; }
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+  app.put('/api/admin/sources/tables/:id', requireRole(4), async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      const b = z
+        .object({
+          // A plain SQL Server identifier, so the worker can bracket-quote it.
+          // "pack1; DROP TABLE x" stops here, not in the worker's SELECT.
+          sourceTable: z.string().regex(SOURCE_TABLE_NAME, 'must be a plain SQL Server identifier').optional(),
+          isEnabled: z.boolean().optional(),
+        })
+        .safeParse(req.body);
+      if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid', detail: b.success ? undefined : b.error.flatten().fieldErrors }); return; }
+      if (Object.values(b.data).every((v) => v === undefined)) { res.status(400).json({ error: 'nothing to change' }); return; }
+      const found = await updateSourceTable(pool, actorId(req), cfg.lineId, id, b.data);
+      if (!found) { res.status(404).json({ error: `no source table ${id} on this line` }); return; }
+      res.json({
+        ok: true,
+        note:
+          "Applies on the sync worker's next pass. A different table is a different source generation: " +
+          'the worker will halt on it until `sms epoch:accept` registers it.',
+      });
+    } catch (e) { next(e); }
+  });
+
+  // ---- versioned rules ----
   app.get('/api/admin/rules', requireRole(4), async (_req, res, next) => {
     try { res.json(await getRules(pool, cfg.lineId)); } catch (e) { next(e); }
   });
@@ -1219,22 +1470,61 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     try {
       const b = z.object({ basis: z.enum(['as_recorded', 'gross', 'net']), coneTubeWeightG: z.coerce.number().nonnegative(), sackTareKg: z.coerce.number().nonnegative(), reason: z.string().max(255).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid' }); return; }
-      await setWeightRule(pool, cfg.lineId, b.data.basis, b.data.coneTubeWeightG, b.data.sackTareKg, (req as AuthedRequest).user!.userId, b.data.reason ?? null);
-      audit(req, 'rule.weight', 'weight_rule', cfg.lineId, `basis ${b.data.basis}, tube ${b.data.coneTubeWeightG}g, tare ${b.data.sackTareKg}kg`);
+      await auditedWrite(
+        pool, actorId(req),
+        { action: 'rule.weight', targetType: 'weight_rule', targetId: cfg.lineId, detail: `basis ${b.data.basis}, tube ${b.data.coneTubeWeightG}g, tare ${b.data.sackTareKg}kg` },
+        async (tx) => {
+          await setWeightRule(tx, cfg.lineId, b.data.basis, b.data.coneTubeWeightG, b.data.sackTareKg, actorId(req), b.data.reason ?? null);
+          return { result: undefined };
+        },
+      );
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
+  const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM');
   app.post('/api/admin/rules/shift', requireRole(4), async (req, res, next) => {
     try {
-      const b = z.object({ mode: z.enum(['corrected', 'legacy']), nightBelongsTo: z.enum(['start_day', 'calendar_day']), reason: z.string().max(255).optional() }).safeParse(req.body);
-      if (!b.success) { res.status(400).json({ error: 'invalid' }); return; }
-      await setShiftRule(pool, cfg.lineId, b.data.mode, b.data.nightBelongsTo, (req as AuthedRequest).user!.userId, b.data.reason ?? null);
-      audit(req, 'rule.shift', 'shift_rule', cfg.lineId, `mode ${b.data.mode}, night belongs to ${b.data.nightBelongsTo}`);
+      const b = z
+        .object({
+          morningStart: hhmm,
+          eveningStart: hhmm,
+          nightStart: hhmm,
+          mode: z.enum(['corrected', 'legacy']),
+          nightBelongsTo: z.enum(['start_day', 'calendar_day']),
+          reason: z.string().max(255).optional(),
+        })
+        .safeParse(req.body);
+      if (!b.success) { res.status(400).json({ error: 'invalid', detail: b.error.flatten().fieldErrors }); return; }
+      // The three starts must be in order within one calendar day: the night
+      // shift is the one that wraps midnight, so it is always last. The same
+      // function the worker uses to read the rule back decides, so nothing
+      // can be stored that the transform could not interpret.
+      const boundaries = shiftBoundariesFrom(b.data.morningStart, b.data.eveningStart, b.data.nightStart);
+      if (!boundaries) {
+        res.status(400).json({
+          error: 'invalid shift boundaries',
+          detail: 'morningStart, eveningStart and nightStart must be HH:MM and strictly increasing (the night shift is the one that crosses midnight)',
+        });
+        return;
+      }
+      await auditedWrite(
+        pool, actorId(req),
+        {
+          action: 'rule.shift', targetType: 'shift_rule', targetId: cfg.lineId,
+          detail: `starts ${b.data.morningStart}/${b.data.eveningStart}/${b.data.nightStart}, mode ${b.data.mode}, night belongs to ${b.data.nightBelongsTo}`,
+        },
+        async (tx) => {
+          await setShiftRule(tx, cfg.lineId, boundaries, b.data.mode, b.data.nightBelongsTo, actorId(req), b.data.reason ?? null);
+          return { result: undefined };
+        },
+      );
+      // /api/live names the current shift from the same row, cached a minute.
+      invalidateLiveConfigCache();
       // Finding H5 (Sep 2026 audit): this note used to say "rebuild canonical
       // to apply" while the transform actually read a static env var and
       // never this table at all — a rebuild silently re-derived the OLD
-      // rule. runTransform.ts now resolves night_belongs_to from this table
-      // fresh every pass, so the note is now true: new syncs pick it up
+      // rule. runTransform.ts now resolves the rule from this table fresh
+      // every pass, so the note is now true: new syncs pick it up
       // immediately, and a rebuild is only needed to recompute what is
       // already stored. The corrected/legacy `mode` itself remains recorded
       // but not yet applied anywhere — Q7 (fix vs reproduce) is still open.
@@ -1242,7 +1532,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         ok: true,
         rebuildRequired: true,
         note:
-          'Night-attribution rule stored. The transform picks it up on its NEXT pass, so from now on new rows ' +
+          'Shift rule stored. The transform picks it up on its NEXT pass, so from now on new rows ' +
           'are stamped under the new rule while everything already in canonical keeps the old one — until you ' +
           'rebuild, one table holds two attribution regimes and every shift_date figure blends them. ' +
           'Run: sms rebuild --table=cone_event --snapshot-id=<id> (and the same for sack_event and reject_event). ' +
@@ -1264,11 +1554,17 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         .refine((v) => v.sackLoKg < v.sackHiKg, { message: 'sackLoKg must be less than sackHiKg' })
         .safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid', detail: b.error.issues.map((i) => i.message) }); return; }
-      await setPlausibilityRule(
-        pool, cfg.lineId, b.data.coneLoG, b.data.coneHiG, b.data.sackLoKg, b.data.sackHiKg,
-        (req as AuthedRequest).user!.userId, b.data.reason ?? null,
+      await auditedWrite(
+        pool, actorId(req),
+        { action: 'rule.plausibility', targetType: 'plausibility_rule', targetId: cfg.lineId, detail: `cone ${b.data.coneLoG}-${b.data.coneHiG}g, sack ${b.data.sackLoKg}-${b.data.sackHiKg}kg` },
+        async (tx) => {
+          await setPlausibilityRule(
+            tx, cfg.lineId, b.data.coneLoG, b.data.coneHiG, b.data.sackLoKg, b.data.sackHiKg,
+            actorId(req), b.data.reason ?? null,
+          );
+          return { result: undefined };
+        },
       );
-      audit(req, 'rule.plausibility', 'plausibility_rule', cfg.lineId, `cone ${b.data.coneLoG}-${b.data.coneHiG}g, sack ${b.data.sackLoKg}-${b.data.sackHiKg}kg`);
       res.json({ ok: true, note: 'applies immediately to every SPC/weight query — read-time, not a rebuild' });
     } catch (e) { next(e); }
   });

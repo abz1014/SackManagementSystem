@@ -324,6 +324,15 @@ h1, .headline {
 }
 h1.wide, .headline.wide { max-width: none; }
 h1 .acc, .headline .acc { color: var(--acc); }
+/* SMS edit (14 Sep 2026, roadmap Phase 1): the three utility classes the
+   screens have used since the redesign — .mut (a muted note), .sm (small
+   type), .acc (accent ink for a warning or a failure) — had no global rule;
+   only scoped forms existed (.bars .sm, h1 .acc, .login .acc). Eighty-odd
+   call sites rendered as plain body ink, so a failure line and its
+   explanation looked the same. Declarations mirror the scoped ones. */
+.mut { color: var(--muted); }
+.sm { font-size: var(--fs-small); }
+.acc { color: var(--acc); }
 
 /* [SPEC 5] Blocks become a two-column grid so the label hangs in a left
    margin instead of sitting on top of the content. Two things follow: the
@@ -520,7 +529,11 @@ tr.rej.click:hover td { background: #f8ded7; }
 
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field > span { font-size: var(--fs-small); color: var(--muted); }
-input[type='text'], input[type='date'], input[type='number'], input[type='password'], select, textarea {
+/* input[type='time'] joined the list on 14 Sep 2026 (roadmap Phase 1): the
+   shift rule's three start times are time inputs, and the bundle had never
+   met one — it rendered in browser chrome beside three styled selects. The
+   declarations are untouched. */
+input[type='text'], input[type='date'], input[type='time'], input[type='number'], input[type='password'], select, textarea {
   font: inherit; font-size: var(--fs-body); padding: 6px 10px;
   border: 1px solid var(--rule-2); border-radius: var(--radius);
   background: var(--paper); color: var(--ink);

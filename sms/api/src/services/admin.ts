@@ -2,10 +2,17 @@
  * Admin surface (admin-only): users, station labels (Q11), and versioned rule
  * config (weight basis Q4/Q5, shift mode Q7). Rules are append-only — a change
  * writes a new effective row; changing them is auditable, never destructive.
+ *
+ * Every write here takes a `Db` (a pool OR a transaction) rather than a pool:
+ * since 14 Sep 2026 (roadmap Phase 1) the routes run them inside
+ * auditedWrite(), so the change and its audit row commit together. Reads take
+ * the pool.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import argon2 from 'argon2';
+import { formatShiftTime, type ShiftBoundaries } from '@sms/shared';
+import type { Db } from './audit.js';
 
 // ---- users ----
 export interface UserRow {
@@ -21,9 +28,9 @@ export async function listUsers(pool: ConnectionPool): Promise<UserRow[]> {
     active: Boolean(x.active), createdAtUtc: new Date(x.created).toISOString(),
   }));
 }
-export async function createUser(pool: ConnectionPool, username: string, password: string, role: string, display: string | null): Promise<void> {
+export async function createUser(db: Db, username: string, password: string, role: string, display: string | null): Promise<void> {
   const hash = await argon2.hash(password);
-  await pool.request()
+  await db.request()
     .input('u', mssql.NVarChar(64), username).input('h', mssql.NVarChar(256), hash)
     .input('d', mssql.NVarChar(128), display ?? username).input('r', mssql.VarChar(20), role)
     .query(`INSERT INTO sms.app_user (username, password_hash, display_name, role_id)
@@ -33,7 +40,7 @@ export async function createUser(pool: ConnectionPool, username: string, passwor
  *  "old -> new" — this table has no version history of its own, unlike the
  *  rule tables below, so the audit log is the only place that trail exists. */
 export async function updateUser(
-  pool: ConnectionPool,
+  db: Db,
   userId: number,
   active?: boolean,
   role?: string,
@@ -41,21 +48,21 @@ export async function updateUser(
   let oldActive: boolean | null = null;
   let oldRole: string | null = null;
   if (active != null) {
-    const r = await pool.request().input('id', mssql.Int, userId).input('a', mssql.Bit, active)
+    const r = await db.request().input('id', mssql.Int, userId).input('a', mssql.Bit, active)
       .query<{ old_active: boolean }>(
         `UPDATE sms.app_user SET active=@a OUTPUT deleted.active AS old_active WHERE user_id=@id`,
       );
     oldActive = r.recordset[0]?.old_active ?? null;
   }
   if (role) {
-    const r = await pool.request().input('id', mssql.Int, userId).input('r', mssql.VarChar(20), role)
+    const r = await db.request().input('id', mssql.Int, userId).input('r', mssql.VarChar(20), role)
       .query<{ old_role: number }>(
         `UPDATE sms.app_user SET role_id=(SELECT role_id FROM sms.role WHERE name=@r)
          OUTPUT deleted.role_id AS old_role WHERE user_id=@id`,
       );
     const oldRoleId = r.recordset[0]?.old_role;
     if (oldRoleId != null) {
-      const rr = await pool.request().input('id', mssql.Int, oldRoleId).query<{ name: string }>(
+      const rr = await db.request().input('id', mssql.Int, oldRoleId).query<{ name: string }>(
         `SELECT name FROM sms.role WHERE role_id=@id`,
       );
       oldRole = rr.recordset[0]?.name ?? null;
@@ -65,25 +72,79 @@ export async function updateUser(
 }
 
 // ---- stations (Q11) ----
-export interface StationRow { stationId: number; name: string | null; machine: string | null; description: string | null; }
+/**
+ * `machine` is the free-text column Phase 1 gave the station ("Winder-5",
+ * typed by an admin); `machineId`/`machineNo`/`machineName` are the row in
+ * sms.machine it is linked to since migration 028. Both are returned: the
+ * text is what existing screens print, the link is what Setup edits. Whether
+ * a station and a machine are the same thing on this line is clarification
+ * Q3 for IFL — the link is a row, so their answer edits data, not code.
+ */
+export interface StationRow {
+  stationId: number;
+  name: string | null;
+  machine: string | null;
+  description: string | null;
+  machineId: number | null;
+  machineNo: number | null;
+  machineName: string | null;
+  linkSource: string | null;
+  isActive: boolean;
+}
 export async function listStations(pool: ConnectionPool, lineId: number): Promise<StationRow[]> {
-  const r = await pool.request().input('line', mssql.Int, lineId).query<{ station_id: number; name: string | null; machine: string | null; description: string | null }>(
-    `SELECT station_id, name, machine, description FROM sms.station WHERE line_id=@line ORDER BY station_id`,
+  const r = await pool.request().input('line', mssql.Int, lineId).query<{
+    station_id: number; name: string | null; machine: string | null; description: string | null;
+    machine_id: number | null; machine_no: number | null; machine_name: string | null; link_source: string | null; is_active: boolean | null;
+  }>(
+    `SELECT s.station_id, s.name, s.machine, s.description,
+            s.machine_id, m.machine_no, m.name AS machine_name, s.link_source, s.is_active
+       FROM sms.station s
+       LEFT JOIN sms.machine m ON m.machine_id = s.machine_id
+      WHERE s.line_id=@line ORDER BY s.station_id`,
   );
-  return r.recordset.map((x) => ({ stationId: x.station_id, name: x.name, machine: x.machine, description: x.description }));
+  return r.recordset.map((x) => ({
+    stationId: x.station_id, name: x.name, machine: x.machine, description: x.description,
+    machineId: x.machine_id == null ? null : Number(x.machine_id),
+    machineNo: x.machine_no == null ? null : Number(x.machine_no),
+    machineName: x.machine_name,
+    linkSource: x.link_source,
+    isActive: x.is_active == null ? true : Boolean(x.is_active),
+  }));
+}
+export interface StationPatch {
+  name: string | null;
+  machine: string | null;
+  description: string | null;
+  /** undefined = leave the link alone; null = unlink; a number = link (link_source becomes 'admin'). */
+  machineId?: number | null;
+  /** undefined = leave alone. */
+  isActive?: boolean;
 }
 export async function setStation(
-  pool: ConnectionPool, lineId: number, stationId: number,
-  name: string | null, machine: string | null, description: string | null,
-): Promise<{ updated: boolean; oldName: string | null }> {
-  const r = await pool.request().input('line', mssql.Int, lineId).input('id', mssql.Int, stationId)
-    .input('n', mssql.NVarChar(64), name).input('m', mssql.NVarChar(64), machine).input('d', mssql.NVarChar(255), description)
-    .query<{ old_name: string | null }>(
-      `UPDATE sms.station SET name=@n, machine=@m, description=@d
-       OUTPUT deleted.name AS old_name
+  db: Db, lineId: number, stationId: number, p: StationPatch,
+): Promise<{ updated: boolean; oldName: string | null; oldMachineId: number | null; oldIsActive: boolean | null }> {
+  const setLink = p.machineId !== undefined;
+  const setActive = p.isActive !== undefined;
+  const r = await db.request().input('line', mssql.Int, lineId).input('id', mssql.Int, stationId)
+    .input('n', mssql.NVarChar(64), p.name).input('m', mssql.NVarChar(64), p.machine).input('d', mssql.NVarChar(255), p.description)
+    .input('setLink', mssql.Bit, setLink).input('mid', mssql.Int, p.machineId ?? null)
+    .input('setActive', mssql.Bit, setActive).input('active', mssql.Bit, p.isActive ?? null)
+    .query<{ old_name: string | null; old_machine_id: number | null; old_is_active: boolean | null }>(
+      `UPDATE sms.station
+          SET name=@n, machine=@m, description=@d,
+              machine_id  = CASE WHEN @setLink = 1 THEN @mid ELSE machine_id END,
+              link_source = CASE WHEN @setLink = 1 THEN 'admin' ELSE link_source END,
+              is_active   = CASE WHEN @setActive = 1 THEN @active ELSE is_active END
+       OUTPUT deleted.name AS old_name, deleted.machine_id AS old_machine_id, deleted.is_active AS old_is_active
        WHERE line_id=@line AND station_id=@id`,
     );
-  return { updated: (r.rowsAffected[0] ?? 0) > 0, oldName: r.recordset[0]?.old_name ?? null };
+  const row = r.recordset[0];
+  return {
+    updated: (r.rowsAffected[0] ?? 0) > 0,
+    oldName: row?.old_name ?? null,
+    oldMachineId: row?.old_machine_id == null ? null : Number(row.old_machine_id),
+    oldIsActive: row?.old_is_active == null ? null : Boolean(row.old_is_active),
+  };
 }
 
 // ---- versioned rules ----
@@ -129,7 +190,7 @@ export async function getPlausibilityRule(pool: ConnectionPool, lineId: number):
   return { coneLoG: Number(row.cl), coneHiG: Number(row.ch), sackLoKg: Number(row.sl), sackHiKg: Number(row.sh) };
 }
 export async function setPlausibilityRule(
-  pool: ConnectionPool,
+  db: Db,
   lineId: number,
   coneLoG: number,
   coneHiG: number,
@@ -138,23 +199,39 @@ export async function setPlausibilityRule(
   by: number,
   reason: string | null,
 ): Promise<void> {
-  await pool.request().input('line', mssql.Int, lineId)
+  await db.request().input('line', mssql.Int, lineId)
     .input('cl', mssql.Decimal(10, 2), coneLoG).input('ch', mssql.Decimal(10, 2), coneHiG)
     .input('sl', mssql.Decimal(10, 3), sackLoKg).input('sh', mssql.Decimal(10, 3), sackHiKg)
     .input('by', mssql.Int, by).input('reason', mssql.NVarChar(255), reason)
     .query(`INSERT INTO sms.plausibility_rule (line_id, cone_lo_g, cone_hi_g, sack_lo_kg, sack_hi_kg, effective_from, changed_by, reason)
             VALUES (@line, @cl, @ch, @sl, @sh, SYSUTCDATETIME(), @by, @reason)`);
 }
-export async function setWeightRule(pool: ConnectionPool, lineId: number, basis: string, tube: number, tare: number, by: number, reason: string | null): Promise<void> {
-  await pool.request().input('line', mssql.Int, lineId).input('b', mssql.VarChar(12), basis)
+export async function setWeightRule(db: Db, lineId: number, basis: string, tube: number, tare: number, by: number, reason: string | null): Promise<void> {
+  await db.request().input('line', mssql.Int, lineId).input('b', mssql.VarChar(12), basis)
     .input('tube', mssql.Decimal(10, 2), tube).input('tare', mssql.Decimal(10, 3), tare)
     .input('by', mssql.Int, by).input('reason', mssql.NVarChar(255), reason)
     .query(`INSERT INTO sms.weight_rule (line_id, basis, cone_tube_weight_g, sack_tare_kg, effective_from, changed_by, reason)
             VALUES (@line, @b, @tube, @tare, SYSUTCDATETIME(), @by, @reason)`);
 }
-export async function setShiftRule(pool: ConnectionPool, lineId: number, mode: string, nightBelongsTo: string, by: number, reason: string | null): Promise<void> {
-  await pool.request().input('line', mssql.Int, lineId).input('mode', mssql.VarChar(10), mode)
+/**
+ * The three start times are PARAMETERS. Until 14 Sep 2026 this INSERT carried
+ * '06:00','14:00','22:00' as literals — the only three values the table could
+ * ever hold, which made the shift_rule columns decoration and the boundary a
+ * source-code constant (roadmap Phase 1: "avoid hard-coded … shift"). The
+ * caller validates order (morning < evening < night) through
+ * shiftBoundariesFrom before this runs; the worker and /api/live read the
+ * newest row back into the same ShiftBoundaries shape. 06/14/22 remains the
+ * DEFAULT (IFL, Q8) for a line with no rule row, not the rule.
+ */
+export async function setShiftRule(
+  db: Db, lineId: number, boundaries: ShiftBoundaries, mode: string, nightBelongsTo: string, by: number, reason: string | null,
+): Promise<void> {
+  await db.request().input('line', mssql.Int, lineId)
+    .input('ms', mssql.VarChar(5), formatShiftTime(boundaries.morningStart))
+    .input('es', mssql.VarChar(5), formatShiftTime(boundaries.eveningStart))
+    .input('ns', mssql.VarChar(5), formatShiftTime(boundaries.nightStart))
+    .input('mode', mssql.VarChar(10), mode)
     .input('nb', mssql.VarChar(15), nightBelongsTo).input('by', mssql.Int, by).input('reason', mssql.NVarChar(255), reason)
     .query(`INSERT INTO sms.shift_rule (line_id, morning_start, evening_start, night_start, mode, night_belongs_to, effective_from, changed_by, reason)
-            VALUES (@line, '06:00','14:00','22:00', @mode, @nb, SYSUTCDATETIME(), @by, @reason)`);
+            VALUES (@line, CAST(@ms AS TIME(0)), CAST(@es AS TIME(0)), CAST(@ns AS TIME(0)), @mode, @nb, SYSUTCDATETIME(), @by, @reason)`);
 }

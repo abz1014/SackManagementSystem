@@ -448,12 +448,191 @@ export const W = {
   } as const,
 
   /* ------------------------------------------------------------------ setup */
+  /* In the order the page shows them: the connection first, then what the
+     line IS (line, machines, stations, sources), then what this system
+     applies to it (rules, reject codes), then who may change any of it. */
   setupTabs: {
-    people: 'People',
-    stations: 'Stations',
-    rules: 'Rules',
     sync: 'Sync health',
+    line: 'Line',
+    machines: 'Machines',
+    stations: 'Stations',
+    sources: 'Sources',
+    rules: 'Rules',
+    rejectCodes: 'Reject codes',
+    people: 'People',
     audit: 'Audit log',
+  } as const,
+
+  /* Roadmap Phase 1 (14 Sep 2026): the configuration sections. The same
+     rules as everywhere else — plain words, no question numbers in the copy
+     (the number an IFL answer is waiting on goes in the code comment beside
+     the string, never on the screen), and a seeded default that an answer
+     could change says so in a sentence. */
+  config: {
+    save: 'Save',
+    cancel: 'Cancel',
+    add: 'Add',
+    edit: 'Edit',
+    saved: 'Saved.',
+    noChange: 'Nothing has changed.',
+    why: 'Why (optional)',
+    yes: 'yes',
+    no: 'no',
+    notKnown: 'not known',
+    none: 'none',
+    active: 'Active',
+    inactive: 'inactive',
+    /* A write that failed for a reason the server did not name. Distinct from
+       couldNotLoad: the admin's change was NOT made, and the sentence must
+       say so rather than talk about loading. */
+    couldNotSave: 'Could not save this. The plant connection may be down.',
+
+    line: {
+      note: 'the names every screen prints',
+      plant: 'Plant',
+      unit: 'Unit',
+      lineName: 'Line',
+      displayName: 'Display name',
+      code: (code: string) => `code ${code}`,
+      /* The display name is also the subject of the headline sentence, so an
+         admin choosing one needs to know it will be read as "<name> is
+         running" on a wall display. */
+      displayNameNote:
+        'Printed in the top bar, on the report, and as the subject of the headline — “… is running” — so keep it short.',
+      // Q14 (single vs multi-line) is still open with IFL; the screens serve
+      // one line and say so rather than pretend otherwise.
+      oneLine:
+        'This installation serves one line. IFL has not yet said whether a second line is wanted; the screens are built for one.',
+    } as const,
+
+    machines: {
+      note: 'the winders and the packer on this line',
+      // Q3: seeded link station N ↔ winder N (migration 028). If IFL says a
+      // machine and a station are different things, the links are edited
+      // here, not the code — and this sentence says the default is a default.
+      defaultLink:
+        'Stations are linked to the winder with the same number by default. IFL has not yet confirmed whether a machine and a station are the same thing.',
+      colNo: 'No.',
+      colKind: 'Kind',
+      colMake: 'Make',
+      colModel: 'Model',
+      colName: 'Name',
+      colActive: 'Active',
+      colStation: 'Linked station',
+      /** The packer: no reading ever names it. */
+      noNumber: 'no number',
+      notLinked: 'none',
+      kinds: { winder: 'winder', packer: 'packer', other: 'other' } as const,
+      add: 'Add a machine',
+      number: 'Machine number (optional)',
+      numberNote: 'The number the plant writes on each reading. Leave it blank for a machine the readings never name, such as the packer.',
+      kind: 'Kind',
+      name: 'Name',
+      make: 'Make',
+      model: 'Model',
+      notes: 'Notes',
+      added: (name: string) => `${name} added.`,
+      addedWithStation: (name: string, no: number) => `${name} added, and station ${no} with it, linked to it.`,
+    } as const,
+
+    stations: {
+      note: 'the names every screen uses',
+      colNo: '#',
+      colName: 'Name',
+      colMachine: 'Machine',
+      colActive: 'Active',
+      notNamed: 'not named',
+      noMachine: 'no machine',
+      /* How the link was made — the seeded default by number, or set here. */
+      linkedByNumber: 'linked by number',
+      linkedHere: 'linked here',
+      rename: 'Rename',
+      add: 'Add a station',
+      number: 'Station number',
+      name: 'Name (optional)',
+      machine: 'Machine',
+      added: (id: number) => `Station ${id} added.`,
+    } as const,
+
+    sources: {
+      note: 'where the readings come from',
+      /* Secrets stay in the file on the plant PC; the table says what each
+         connection is FOR. An admin who expects to type a password here
+         should learn at once that this is not where it goes. */
+      intro: 'Server, database and login stay in the .env file on the plant PC. This lists what each connection is for, and which tables this line reads.',
+      colSource: 'Source',
+      colRole: 'Role',
+      colConnection: 'Connection',
+      colEnabled: 'Enabled',
+      colNotes: 'Notes',
+      roles: { acquisition: 'weighing acquisition', product_master: 'product master', sack_packing: 'sack packing' } as const,
+      // Seeded disabled (migration 028): the roadmap names a sack-packing
+      // database, IFL has not identified one, and sack rows come from the
+      // acquisition database. Enabling it here changes nothing until a
+      // connection block for it exists.
+      packingUnknown: 'A separate sack-packing database has not been identified by IFL; sack readings come from the acquisition database.',
+      tablesTitle: 'Tables this line reads',
+      colKind: 'Kind',
+      colTable: 'Table in the source database',
+      colRaw: 'Copied into',
+      kinds: { cone: 'cones', sack: 'sacks', reject_qcs: 'quality rejects', reject_weight: 'weight rejects' } as const,
+      tableNameInvalid: 'A table name is letters, digits and underscores, starting with a letter or underscore.',
+    } as const,
+
+    rules: {
+      note: "what this system applies when it reads the plant's numbers",
+      weight: 'Weight',
+      basis: 'Weight basis',
+      bases: { as_recorded: 'as recorded', gross: 'gross', net: 'net' } as const,
+      basisUnconfirmed:
+        'Until this is confirmed, the Weight screen states the average and the target as two facts rather than as a difference.',
+      tubeG: 'Cone tube weight (g)',
+      tareKg: 'Sack tare (kg)',
+      shifts: 'Shifts',
+      morningStart: 'Morning starts',
+      eveningStart: 'Evening starts',
+      nightStart: 'Night starts',
+      /* Said BEFORE submitting, in the form, the moment the three times stop
+         being in order — the server refuses the same thing, but a round trip
+         to learn it is a round trip too many. */
+      shiftOrder: 'Morning must start before evening, and evening before night.',
+      shiftTimeInvalid: 'Each start is a time of day, as HH:MM.',
+      mode: 'Shift attribution',
+      modes: { corrected: 'corrected — from the weighing time', legacy: 'legacy — as the plant recorded it' } as const,
+      // Q7 (fix vs reproduce the plant's Shift column) is still open; the
+      // mode is stored for the day it is answered and changes nothing yet.
+      modeNote: "Recorded for when IFL says whether the plant's own shift column should be corrected or reproduced. It does not change anything yet.",
+      nightBelongsTo: 'A night shift belongs to',
+      nights: { start_day: 'the day it starts', calendar_day: 'the calendar day of each reading' } as const,
+      plausibility: 'Plausible readings',
+      plausibilityNote: 'Readings outside these bounds are treated as scale faults and left out of every average.',
+      coneLoG: 'Lightest plausible cone (g)',
+      coneHiG: 'Heaviest plausible cone (g)',
+      sackLoKg: 'Lightest plausible sack (kg)',
+      sackHiKg: 'Heaviest plausible sack (kg)',
+      loBeforeHi: 'Each lower bound must be below its upper bound.',
+      /** The rule table is empty: the form shows what the system applies in that case. */
+      noRuleYet: 'No rule has been recorded yet; the values shown are what this system applies until one is.',
+    } as const,
+
+    rejectCodes: {
+      note: 'what each inspection code means',
+      /* IFL has not supplied the meanings (the same state Rejects reports).
+         Naming one here applies to history: the label is joined at read
+         time, never stamped on rows. */
+      intro: 'IFL has not supplied the meaning of the codes. A name given here applies to every reading, past and future.',
+      colType: 'Type',
+      colTube: 'Tube code',
+      colMaterial: 'Material code',
+      colLabel: 'Name',
+      colPass: 'Pass?',
+      colSeverity: 'Severity',
+      types: { quality: 'quality', weight: 'weight' } as const,
+      pass: { yes: 'yes', no: 'no', unknown: 'not known' } as const,
+      severities: { none: 'none', INFO: 'info', WARNING: 'warning', ERROR: 'error', CRITICAL: 'critical' } as const,
+      none: 'No reject codes have been seen in the readings yet.',
+      unnamed: 'not yet named',
+    } as const,
   } as const,
   sync: {
     ok: 'The plant connection is healthy.',

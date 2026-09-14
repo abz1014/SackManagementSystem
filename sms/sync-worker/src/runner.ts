@@ -6,7 +6,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ConnectionPool } from 'mssql';
 import type { SyncConfig } from './config.js';
-import { IFL_TABLES } from './reader/iflTables.js';
+import { fallbackHaltTargets, rawShortName, type IflTableDef } from './reader/iflTables.js';
+import { loadSourceTables } from './reader/sourceTables.js';
 import { IflSqlAdapter } from './reader/IflSqlAdapter.js';
 import { persistRaw } from './raw/persistRaw.js';
 import { persistFindings } from './transform/dq.js';
@@ -30,10 +31,36 @@ export async function runOnce(
   const runId = randomUUID();
   const outcomes: TableOutcome[] = [];
 
-  for (let i = 0; i < IFL_TABLES.length; i++) {
-    const def = IFL_TABLES[i]!;
+  // ---- configuration gate ------------------------------------------------------
+  // Which tables this line reads is a fact of sms.source_table, loaded fresh
+  // every pass so a change in Setup › Sources applies on the next tick
+  // (roadmap Phase 1, 14 Sep 2026). A line with nothing configured halts here,
+  // before any source is touched, and the halt leaves a row per raw table the
+  // schema has — the configuration being unreadable is precisely the case in
+  // which the tables it would have named are unknown.
+  let tables: IflTableDef[];
+  try {
+    tables = await loadSourceTables(appPool, cfg.lineId);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    for (const t of fallbackHaltTargets()) {
+      await recordHaltedRun(appPool, {
+        runId,
+        adapter: t.adapter,
+        targetTable: t.targetTable,
+        lineId: cfg.lineId,
+        sourceEpoch: null,
+        watermarkFrom: null,
+        error: reason,
+      });
+    }
+    throw err;
+  }
+
+  for (let i = 0; i < tables.length; i++) {
+    const def = tables[i]!;
     const adapter = new IflSqlAdapter(iflPool, def);
-    const targetTable = def.rawTable.replace('sms_raw.', '');
+    const targetTable = rawShortName(def.rawTable);
 
     // What the halt writer knows so far. Both are filled in as the gates pass,
     // so a halt row carries exactly as much as had been established when it
@@ -82,7 +109,7 @@ export async function runOnce(
       const afterId = Math.max(-1, (watermark ?? 0) - cfg.overlapRows);
       const syncRunId = await startSyncRun(appPool, {
         runId,
-        adapter: 'ifl_sql',
+        adapter: def.systemCode,
         targetTable,
         lineId: cfg.lineId,
         watermarkFrom: watermark ?? 0,
@@ -124,7 +151,7 @@ export async function runOnce(
             {
               check_name: 'raw_read_without_write',
               severity: 'ERROR',
-              subject_table: def.rawTable.replace('sms_raw.', ''),
+              subject_table: targetTable,
               count: read,
               detail,
             },
@@ -162,7 +189,7 @@ export async function runOnce(
       if (!runRowOpen) {
         await recordHaltedRun(appPool, {
           runId,
-          adapter: 'ifl_sql',
+          adapter: def.systemCode,
           targetTable,
           lineId: cfg.lineId,
           sourceEpoch: epoch?.epoch_id ?? null,
@@ -170,11 +197,11 @@ export async function runOnce(
           error: reason,
         });
       }
-      for (const later of IFL_TABLES.slice(i + 1)) {
+      for (const later of tables.slice(i + 1)) {
         await recordHaltedRun(appPool, {
           runId,
-          adapter: 'ifl_sql',
-          targetTable: later.rawTable.replace('sms_raw.', ''),
+          adapter: later.systemCode,
+          targetTable: rawShortName(later.rawTable),
           lineId: cfg.lineId,
           sourceEpoch: null,
           watermarkFrom: null,

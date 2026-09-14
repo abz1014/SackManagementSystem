@@ -9,9 +9,14 @@ const schema = z.object({
   port: z.coerce.number().int().positive().default(4000),
   lineId: z.coerce.number().int().positive().default(1),
   cacheTtlSeconds: z.coerce.number().nonnegative().default(5),
-  /** Name of the single configured line, shown on the floor and wall screens.
-   *  Multi-line (Q14, still open) would move this into a table; one env value
-   *  keeps the display honest without inventing a line registry. */
+  /**
+   * FALLBACK name for the line, used by /api/live only when sms.line has no
+   * row for LINE_ID — a database that predates migration 028. Since roadmap
+   * Phase 1 (14 Sep 2026) the name every screen prints is
+   * sms.line.display_name, edited in Setup › Line; this env value seeds
+   * nothing and overrides nothing once that row exists. Multi-line (Q14) is
+   * rows in that table, not more env values.
+   */
   lineName: z.string().min(1).default('TP1 · Line 3 · Unit 2'),
   /**
    * Whether /api/live accepts an `asOf` timestamp that moves the plant clock,

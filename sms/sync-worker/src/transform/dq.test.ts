@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { plantNowMs } from '@sms/shared';
-import { computeFindings } from './dq.js';
+import { computeFindings, stationRosterFindings, CHECK_NAMES, PER_SUBJECT_CHECKS } from './dq.js';
 
 const ms = (iso: string) => new Date(iso + 'Z').getTime();
 
@@ -146,5 +146,56 @@ describe('stale_timestamp across an incremental batch boundary (initialMaxMs)', 
     expect(seeded.find((f) => f.check_name === 'stale_timestamp')).toBeDefined();
     const unseeded = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g);
     expect(unseeded.find((f) => f.check_name === 'stale_timestamp')).toBeUndefined();
+  });
+});
+
+/**
+ * `station_not_in_roster` (roadmap Phase 1, 14 Sep 2026): a machine number
+ * the line has no station row for. One finding per (machine, source table,
+ * generation) — every one of those facts is in the detail, which is what
+ * persistFindings dedups on — so a standing fault is recorded once and a
+ * fifteenth winder shows up as one line on Setup, not one per pass.
+ */
+describe('station_not_in_roster (machines the line has no station for)', () => {
+  const roster = { lineId: 1, stations: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) };
+  const row = (station: number | null, epoch = 9) => ({
+    production_ts_utc_ms: ms('2026-09-01T11:00:00'),
+    source_station: station,
+    source_epoch: epoch,
+  });
+
+  it('raises one WARNING for an unknown machine number, naming table, generation and line', () => {
+    const f = stationRosterFindings([row(7), row(15), row(15)], roster, 'cone_raw', 'pack1_TP1U2');
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ check_name: 'station_not_in_roster', severity: 'WARNING', subject_table: 'cone_raw', count: 2 });
+    expect(f[0]!.detail).toBe(
+      'machine number 15 observed in pack1_TP1U2 (generation 9) is not a station on line 1 — add it in Setup › Machines',
+    );
+  });
+
+  it('raises nothing for a known machine number', () => {
+    expect(stationRosterFindings([row(1), row(14)], roster, 'cone_raw', 'pack1_TP1U2')).toEqual([]);
+  });
+
+  it('ignores rows with no station at all — that is no_station, a different fault', () => {
+    expect(stationRosterFindings([row(null)], roster, 'cone_raw', 'pack1_TP1U2')).toEqual([]);
+  });
+
+  it('is one finding per (machine, generation), ordered, so the same fault under a new generation is a new line', () => {
+    const f = stationRosterFindings([row(16, 9), row(15, 10), row(15, 9)], roster, 'reject_qcs_raw', 'rejectQCS1_TP1U2');
+    expect(f.map((x) => x.detail)).toEqual([
+      'machine number 15 observed in rejectQCS1_TP1U2 (generation 9) is not a station on line 1 — add it in Setup › Machines',
+      'machine number 16 observed in rejectQCS1_TP1U2 (generation 9) is not a station on line 1 — add it in Setup › Machines',
+      'machine number 15 observed in rejectQCS1_TP1U2 (generation 10) is not a station on line 1 — add it in Setup › Machines',
+    ]);
+  });
+
+  it('is registered as a check name and as a per-subject check', () => {
+    expect(CHECK_NAMES).toContain('station_not_in_roster');
+    expect(PER_SUBJECT_CHECKS.has('station_not_in_roster')).toBe(true);
+    // the count-style checks computeFindings raises are all registered too
+    for (const f of computeFindings([cone('2026-06-22T11:00:00', 0, null)], 'cone', 'cone_event', (r) => r.weight_g)) {
+      expect(CHECK_NAMES).toContain(f.check_name);
+    }
   });
 });

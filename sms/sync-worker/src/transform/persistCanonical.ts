@@ -25,14 +25,20 @@ export interface ColSpec {
  * unique on canonical by UX_*_raw_id (migration 026). It also keeps the scan
  * bound meaningful — `source_row_id >= 1` is no bound at all at every epoch
  * boundary, whereas raw_id only ever grows.
+ *
+ * `sourceSystem` is the rows' configured system code (sms.data_source, roadmap
+ * Phase 1) — the probe is scoped to the adapter the batch came through, as it
+ * always was, but the value is a bound parameter now rather than the literal
+ * 'ifl_sql'.
  */
 export async function existingRawIds(
   pool: ConnectionPool,
   table: string,
+  sourceSystem: string,
   extraFilter = '',
   minRawId?: number,
 ): Promise<Set<number>> {
-  const req = pool.request();
+  const req = pool.request().input('sys', mssql.VarChar(20), sourceSystem);
   // Bound the scan to ids the batch could actually collide with. Without this
   // the scan is O(total history) per pass, the same unbounded-growth shape the
   // transform watermark was added to remove.
@@ -42,7 +48,7 @@ export async function existingRawIds(
     bound = 'AND raw_id >= @minId';
   }
   const r = await req.query<{ raw_id: number }>(
-    `SELECT raw_id FROM ${table} WHERE source_system = 'ifl_sql' ${bound} ${extraFilter}`,
+    `SELECT raw_id FROM ${table} WHERE source_system = @sys ${bound} ${extraFilter}`,
   );
   // NB: raw_id is BIGINT — mssql returns it as a STRING. Normalise to Number
   // so the has(Number(...)) lookup in the caller matches (idempotency).
@@ -54,10 +60,10 @@ export async function persistCanonical<T extends { raw_id: number }>(
   table: string,
   cols: ColSpec[],
   rows: T[],
-  opts: { extraExistingFilter?: string; minRawId?: number } = {},
+  opts: { sourceSystem: string; extraExistingFilter?: string; minRawId?: number },
 ): Promise<{ read: number; written: number }> {
   if (rows.length === 0) return { read: 0, written: 0 };
-  const seen = await existingRawIds(pool, table, opts.extraExistingFilter ?? '', opts.minRawId);
+  const seen = await existingRawIds(pool, table, opts.sourceSystem, opts.extraExistingFilter ?? '', opts.minRawId);
   const fresh = rows.filter((r) => !seen.has(Number(r.raw_id)));
   if (fresh.length === 0) return { read: rows.length, written: 0 };
 

@@ -50,8 +50,10 @@ describe('seedReference', () => {
     expect(shift!.sql).toMatch(/IF NOT EXISTS \(SELECT 1 FROM sms\.shift_rule WHERE line_id = @line\)/);
     expect(shift!.inputs.get('mode')).toBe('corrected');
     expect(shift!.inputs.get('night')).toBe('start_day');
-    // Q8: the boundaries are confirmed constants, not config.
-    expect(shift!.sql).toMatch(/'06:00', '14:00', '22:00'/);
+    // Q8: the seed boundaries are the shared default (06/14/22), bound as
+    // parameters — the first rule row only; Setup › Rules appends the rest.
+    expect([shift!.inputs.get('ms'), shift!.inputs.get('es'), shift!.inputs.get('ns')]).toEqual(['06:00', '14:00', '22:00']);
+    expect(shift!.sql).toMatch(/VALUES \(@line, @ms, @es, @ns, @mode, @night/);
 
     expect(weight!.sql).toMatch(/IF NOT EXISTS \(SELECT 1 FROM sms\.weight_rule WHERE line_id = @line\)/);
     expect(weight!.inputs.get('basis')).toBe('as_recorded');
@@ -61,9 +63,37 @@ describe('seedReference', () => {
     expect(plaus!.sql).toMatch(/VALUES \(@line, 1500, 2100, 40, 60/);
 
     expect(stations!.sql).toMatch(/INSERT INTO sms\.station/);
-    expect(stations!.sql).toMatch(/TOP \(14\)/);
-    expect(stations!.sql).toMatch(/WHERE NOT EXISTS/);
+    expect(stations!.sql).toMatch(/NOT EXISTS/);
     for (const s of pool.statements) expect(s.inputs.get('line')).toBe(1);
+  });
+
+  /**
+   * Roadmap Phase 1: stations are reconciled from sms.machine, not counted to
+   * 14. The reconciliation is one INSERT ... SELECT, so what a fake pool can
+   * pin is its shape: a winder numbered 15 with no station row is exactly a
+   * row of `sms.machine` that the SELECT's predicates admit and the NOT EXISTS
+   * does not exclude. (The statement was also run against the development
+   * sidecar inside a rolled-back transaction with such a machine: station 15
+   * appeared, linked to it, 14 Sep 2026.)
+   */
+  it('inserts a station for a winder with machine_no 15 that has none — from sms.machine, no TOP (14)', async () => {
+    const pool = fakePool();
+    await seedReference(pool, cfg);
+    const stations = pool.statements.find((s) => s.sql.includes('INSERT INTO sms.station'))!;
+    expect(stations.sql).not.toMatch(/TOP \(14\)/);
+    expect(stations.sql).not.toMatch(/sys\.all_objects/);
+    // the station takes the machine's number and is linked to the machine
+    expect(stations.sql).toMatch(/INSERT INTO sms\.station \(station_id, line_id, machine_id, link_source\)/);
+    expect(stations.sql).toMatch(/SELECT m\.machine_no, @line, m\.machine_id, 'default_by_number'/);
+    expect(stations.sql).toMatch(/FROM sms\.machine m/);
+    // only the line's active, numbered winders/others — the packer has no number
+    expect(stations.sql).toMatch(/m\.line_id = @line/);
+    expect(stations.sql).toMatch(/m\.is_active = 1/);
+    expect(stations.sql).toMatch(/m\.kind IN \('winder', 'other'\)/);
+    expect(stations.sql).toMatch(/m\.machine_no IS NOT NULL/);
+    // and only where no station of that number exists yet
+    expect(stations.sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM sms\.station s WHERE s\.line_id = @line AND s\.station_id = m\.machine_no/);
+    expect(stations.inputs.get('line')).toBe(1);
   });
 });
 

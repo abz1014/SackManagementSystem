@@ -12,7 +12,7 @@
  * opposite responses — so the worker halts and a human looks.
  */
 import mssql from 'mssql';
-import { IFL_TABLES, readSourceIdentity, openEpoch } from '@sms/sync-worker';
+import { loadSourceTables, readSourceIdentity, openEpoch } from '@sms/sync-worker';
 import { openContext, parseArgs } from '../context.js';
 
 const asList = (v: unknown): string[] =>
@@ -83,14 +83,21 @@ export async function epochAccept(argv: string[]): Promise<number> {
     console.error('specify --all or --table=<sourceTable>');
     return 2;
   }
-  const defs = wantAll ? IFL_TABLES : IFL_TABLES.filter((d) => d.sourceTable === table);
-  if (defs.length === 0) {
-    console.error(`unknown table: ${table}. Known: ${IFL_TABLES.map((d) => d.sourceTable).join(', ')}`);
-    return 2;
-  }
-
   const ctx = await openContext({ needIfl: true });
   try {
+    // The tables a generation can be accepted for are the line's configured
+    // ones (sms.source_table, roadmap Phase 1) — a table renamed in Setup ›
+    // Sources is a new generation, and this is the command that registers it.
+    const configured = await loadSourceTables(ctx.app, ctx.cfg.lineId);
+    const defs = wantAll ? configured : configured.filter((d) => d.sourceTable === table);
+    if (defs.length === 0) {
+      console.error(
+        `unknown table: ${table}. Configured for line ${ctx.cfg.lineId}: ` +
+          `${configured.map((d) => d.sourceTable).join(', ')}`,
+      );
+      return 2;
+    }
+
     const provenance = typeof args.provenance === 'string' ? args.provenance : 'ifl_copy';
     if (!['ifl_live', 'ifl_copy', 'simulator'].includes(provenance)) {
       console.error(`--provenance must be ifl_live | ifl_copy | simulator`);

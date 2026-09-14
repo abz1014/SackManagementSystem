@@ -28,8 +28,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import type { NightBelongsTo } from '@sms/shared';
+import { shiftBoundariesFrom, DEFAULT_SHIFT_BOUNDARIES, type NightBelongsTo, type ShiftMode } from '@sms/shared';
 import type { SyncConfig } from '../config.js';
+import { rawShortName, TABLE_SHAPES } from '../reader/iflTables.js';
+import { loadSourceStreams } from '../reader/sourceTables.js';
 import {
   mapCone,
   mapSack,
@@ -38,6 +40,8 @@ import {
   coneKey,
   sackKey,
   rejectKey,
+  type ShiftRule,
+  type TransformRules,
 } from './transform.js';
 import {
   persistCanonical,
@@ -77,14 +81,22 @@ export const __minRawIdForTest = minRawId;
 async function onlyFresh<T extends { raw_id: number }>(
   pool: ConnectionPool,
   table: string,
+  sourceSystem: string,
   rows: T[],
   extraFilter = '',
 ): Promise<T[]> {
   if (rows.length === 0) return rows;
-  const seen = await existingRawIds(pool, table, extraFilter, minRawId(rows));
+  const seen = await existingRawIds(pool, table, sourceSystem, extraFilter, minRawId(rows));
   return rows.filter((r) => !seen.has(Number(r.raw_id)));
 }
-import { computeFindings, persistFindings, type Finding } from './dq.js';
+import {
+  computeFindings,
+  persistFindings,
+  stationRosterFindings,
+  PER_SUBJECT_CHECKS,
+  type Finding,
+  type StationRoster,
+} from './dq.js';
 import { seedRejectCodes } from './seedRejectCodes.js';
 
 type Raw = Record<string, unknown>;
@@ -146,20 +158,6 @@ export async function resetTransformWatermarks(pool: ConnectionPool, table: stri
 }
 
 /**
- * The night-attribution rule currently on file (Q8's still-open half), read
- * fresh from sms.shift_rule at the start of every pass.
- *
- * Fixes finding H5 (Sep 2026 audit): admin.ts's /api/admin/rules/shift wrote
- * this table and told the caller "rebuild canonical to apply" — but this
- * module is a pure, DB-free mapping (by design: see the file header) that
- * only ever read cfg.appConfig.shift.nightBelongsTo, itself frozen from the
- * SHIFT_NIGHT_BELONGS_TO env var at process startup. A rebuild after using
- * that endpoint re-derived the OLD rule, silently. Falls back to the env
- * default when the table is empty (a fresh install, or before anyone has
- * ever changed it), matching the fallback pattern already used for the
- * plausibility rule in api/src/services/admin.ts.
- */
-/**
  * One row per check per pass, not one per reject stream.
  *
  * The quality and weight streams are checked separately (each has its own
@@ -168,10 +166,19 @@ export async function resetTransformWatermarks(pool: ConnectionPool, table: stri
  * `no_station` rows for `reject_event` on the same pass, and Operations
  * counts dq_finding ROWS by severity — so a single fault was reported twice.
  * Counts are summed and both details kept, so the split stays visible.
+ *
+ * Per-subject checks (PER_SUBJECT_CHECKS) pass through untouched: a
+ * `station_not_in_roster` finding is one per (machine, source table,
+ * generation) by design, and the two reject streams are two source tables.
  */
 function mergeByCheck(...groups: Finding[][]): Finding[] {
   const out = new Map<string, Finding>();
+  const passThrough: Finding[] = [];
   for (const f of groups.flat()) {
+    if (PER_SUBJECT_CHECKS.has(f.check_name)) {
+      passThrough.push(f);
+      continue;
+    }
     const prev = out.get(f.check_name);
     if (!prev) {
       out.set(f.check_name, { ...f });
@@ -180,17 +187,78 @@ function mergeByCheck(...groups: Finding[][]): Finding[] {
     prev.count += f.count;
     prev.detail = `${prev.detail} | ${f.detail}`;
   }
-  return [...out.values()];
+  return [...out.values(), ...passThrough];
 }
 
-async function resolveNightBelongsTo(pool: ConnectionPool, lineId: number, fallback: NightBelongsTo): Promise<NightBelongsTo> {
+/**
+ * The shift rule currently on file, read fresh from sms.shift_rule at the
+ * start of every pass: the three boundaries, the night-attribution rule and
+ * the mode (Q7, still open — carried, not applied).
+ *
+ * Fixes finding H5 (Sep 2026 audit) and finishes it (roadmap Phase 1, 14 Sep
+ * 2026): admin.ts's /api/admin/rules/shift wrote this table and told the
+ * caller "rebuild canonical to apply" — but the transform is a pure, DB-free
+ * mapping (by design: see transform.ts) that only ever read
+ * cfg.appConfig.shift.nightBelongsTo, itself frozen from the
+ * SHIFT_NIGHT_BELONGS_TO env var at process startup. A rebuild after using
+ * that endpoint re-derived the OLD rule, silently. The first fix read the
+ * night rule from the row; the boundaries stayed a shared constant, so a
+ * rule with different start times was half-applied. Now the whole row is
+ * the rule.
+ *
+ * TIME columns come back as 'HH:MM' (CONVERT style 108, five characters) and
+ * go through the shared validator, so a row whose times are not
+ * morning < evening < night — impossible through the API, possible in SSMS —
+ * stops the pass with a message rather than stamping rows with a rule that
+ * has no night. Falls back to the env default with the seed boundaries only
+ * when the table has no row for the line (a fresh install before
+ * seedReference has run), matching the plausibility rule's fallback in
+ * api/src/services/admin.ts.
+ */
+export async function resolveShiftRule(
+  pool: ConnectionPool,
+  lineId: number,
+  fallback: { nightBelongsTo: NightBelongsTo; mode: ShiftMode },
+): Promise<ShiftRule> {
   const r = await pool
     .request()
     .input('line', mssql.Int, lineId)
-    .query<{ nb: NightBelongsTo }>(
-      `SELECT TOP 1 night_belongs_to nb FROM sms.shift_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+    .query<{ ms: string; es: string; ns: string; nb: NightBelongsTo; mode: ShiftMode }>(
+      `SELECT TOP 1 CONVERT(varchar(5), morning_start, 108) ms,
+              CONVERT(varchar(5), evening_start, 108) es,
+              CONVERT(varchar(5), night_start, 108) ns,
+              night_belongs_to nb, mode
+         FROM sms.shift_rule WHERE line_id=@line ORDER BY effective_from DESC`,
     );
-  return r.recordset[0]?.nb ?? fallback;
+  const row = r.recordset[0];
+  if (!row) {
+    // Seed values (Q8, confirmed 06/14/22) — the fallback only until
+    // seedReference writes the first rule row for this line.
+    return { boundaries: DEFAULT_SHIFT_BOUNDARIES, nightBelongsTo: fallback.nightBelongsTo, mode: fallback.mode };
+  }
+  const boundaries = shiftBoundariesFrom(row.ms, row.es, row.ns);
+  if (!boundaries) {
+    throw new Error(
+      `The shift rule on file for line ${lineId} is not usable: morning ${row.ms}, evening ${row.es}, ` +
+        `night ${row.ns} must be three HH:MM times in increasing order. Fix it in Setup › Rules ` +
+        `(sms.shift_rule) — nothing is transformed under a rule that has no night.`,
+    );
+  }
+  return { boundaries, nightBelongsTo: row.nb ?? fallback.nightBelongsTo, mode: row.mode ?? fallback.mode };
+}
+
+/**
+ * The line's station ids, once per pass, for the roster check. Every station
+ * row on the line counts, active or not: a reading from a station marked
+ * inactive in Setup is still a reading from a station the line HAS, and
+ * telling an operator to "add it in Setup › Machines" would be wrong advice.
+ */
+async function loadStationRoster(pool: ConnectionPool, lineId: number): Promise<StationRoster> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ station_id: number }>(`SELECT station_id FROM sms.station WHERE line_id = @line`);
+  return { lineId, stations: new Set(r.recordset.map((x) => Number(x.station_id))) };
 }
 
 // ---- batch helpers ----------------------------------------------------------
@@ -311,30 +379,40 @@ export async function runTransform(
   const runId = randomUUID();
   const out: TransformOutcome[] = [];
 
-  // The DB-recorded rule wins over the env default (finding H5) — resolved
-  // once per pass and threaded through as an override, since mapCone/mapSack/
-  // mapReject stay pure functions of their arguments.
-  const nightBelongsTo = await resolveNightBelongsTo(appPool, cfg.lineId, cfg.appConfig.shift.nightBelongsTo);
-  const cfgForMapping: SyncConfig =
-    nightBelongsTo === cfg.appConfig.shift.nightBelongsTo
-      ? cfg
-      : { ...cfg, appConfig: { ...cfg.appConfig, shift: { ...cfg.appConfig.shift, nightBelongsTo } } };
+  // Configuration, resolved once per pass (roadmap Phase 1): the shift rule
+  // on file wins over the env default (finding H5), each kind's system code
+  // and source table name come from sms.source_table, and the station roster
+  // is what the line has rows for. All three are threaded through as
+  // arguments, since mapCone/mapSack/mapReject stay pure functions.
+  const shift = await resolveShiftRule(appPool, cfg.lineId, cfg.appConfig.shift);
+  const streams = await loadSourceStreams(appPool, cfg.lineId);
+  const roster = await loadStationRoster(appPool, cfg.lineId);
+  const rulesFor = (kind: keyof typeof streams): TransformRules => ({
+    lineId: cfg.lineId,
+    shift,
+    sourceSystem: streams[kind].systemCode,
+  });
 
   // cones ---------------------------------------------------------------------
   {
     const wm = await getWatermark(appPool, WM_KEYS.cone, `SELECT MAX(raw_id) m FROM sms.cone_event`);
-    const raw = await readRawSince(appPool, 'sms_raw.cone_raw', wm);
+    const raw = await readRawSince(appPool, TABLE_SHAPES.cone.rawTable, wm);
     if (raw.length === 0) {
       out.push({ table: 'cone_event', read: 0, written: 0, findings: [] });
     } else {
+      const rules = rulesFor('cone');
       const rows = await onlyFresh(
-        appPool, 'sms.cone_event',
-        assignMergeKeys(raw.map((r) => mapCone(r, cfgForMapping, runId)), coneKey),
+        appPool, 'sms.cone_event', rules.sourceSystem,
+        assignMergeKeys(raw.map((r) => mapCone(r, rules, runId)), coneKey),
       );
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
-      const findings = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs);
+      const findings = [
+        ...computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs),
+        ...stationRosterFindings(rows, roster, rawShortName(TABLE_SHAPES.cone.rawTable), streams.cone.sourceTable),
+      ];
       const res = await persistCanonical(appPool, 'sms.cone_event', CONE_COLS, rows, {
+        sourceSystem: rules.sourceSystem,
         minRawId: rows.length ? minRawId(rows) : undefined,
       });
       await persistFindings(appPool, runId, findings);
@@ -347,18 +425,21 @@ export async function runTransform(
   // sacks ---------------------------------------------------------------------
   {
     const wm = await getWatermark(appPool, WM_KEYS.sack, `SELECT MAX(raw_id) m FROM sms.sack_event`);
-    const raw = await readRawSince(appPool, 'sms_raw.sack_raw', wm);
+    const raw = await readRawSince(appPool, TABLE_SHAPES.sack.rawTable, wm);
     if (raw.length === 0) {
       out.push({ table: 'sack_event', read: 0, written: 0, findings: [] });
     } else {
+      const rules = rulesFor('sack');
       const rows = await onlyFresh(
-        appPool, 'sms.sack_event',
-        assignMergeKeys(raw.map((r) => mapSack(r, cfgForMapping, runId)), sackKey),
+        appPool, 'sms.sack_event', rules.sourceSystem,
+        assignMergeKeys(raw.map((r) => mapSack(r, rules, runId)), sackKey),
       );
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
+      // No roster check: sack rows carry no machine number (iflTables.ts).
       const findings = computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs);
       const res = await persistCanonical(appPool, 'sms.sack_event', SACK_COLS, rows, {
+        sourceSystem: rules.sourceSystem,
         minRawId: rows.length ? minRawId(rows) : undefined,
       });
       await persistFindings(appPool, runId, findings);
@@ -372,27 +453,30 @@ export async function runTransform(
   {
     const wmQ = await getWatermark(appPool, WM_KEYS.reject_qcs, `SELECT MAX(raw_id) m FROM sms.reject_event WHERE reject_type='quality'`);
     const wmW = await getWatermark(appPool, WM_KEYS.reject_weight, `SELECT MAX(raw_id) m FROM sms.reject_event WHERE reject_type='weight'`);
-    const qcs = await readRawSince(appPool, 'sms_raw.reject_qcs_raw', wmQ);
-    const wt = await readRawSince(appPool, 'sms_raw.reject_weight_raw', wmW);
+    const qcs = await readRawSince(appPool, TABLE_SHAPES.reject_qcs.rawTable, wmQ);
+    const wt = await readRawSince(appPool, TABLE_SHAPES.reject_weight.rawTable, wmW);
     if (qcs.length === 0 && wt.length === 0) {
       out.push({ table: 'reject_event', read: 0, written: 0, findings: [] });
     } else {
+      // Two raw streams, two source tables: each keeps its own system code.
+      const qRules = rulesFor('reject_qcs');
+      const wRules = rulesFor('reject_weight');
       const mapped = assignMergeKeys(
         [
-          ...qcs.map((r) => mapReject(r, 'quality', cfgForMapping, runId)),
-          ...wt.map((r) => mapReject(r, 'weight', cfgForMapping, runId)),
+          ...qcs.map((r) => mapReject(r, 'quality', qRules, runId)),
+          ...wt.map((r) => mapReject(r, 'weight', wRules, runId)),
         ],
         rejectKey,
       );
       // quality and weight rejects share source_row_id spaces → freshness and
       // persistence are per type
       const qFresh = await onlyFresh(
-        appPool, 'sms.reject_event',
+        appPool, 'sms.reject_event', qRules.sourceSystem,
         mapped.filter((r) => r.reject_type === 'quality'),
         "AND reject_type = 'quality'",
       );
       const wFresh = await onlyFresh(
-        appPool, 'sms.reject_event',
+        appPool, 'sms.reject_event', wRules.sourceSystem,
         mapped.filter((r) => r.reject_type === 'weight'),
         "AND reject_type = 'weight'",
       );
@@ -403,10 +487,12 @@ export async function runTransform(
       const q = qFresh;
       const w = wFresh;
       const rq = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, q, {
+        sourceSystem: qRules.sourceSystem,
         extraExistingFilter: "AND reject_type = 'quality'",
         minRawId: q.length ? minRawId(q) : undefined,
       });
       const rw = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, w, {
+        sourceSystem: wRules.sourceSystem,
         extraExistingFilter: "AND reject_type = 'weight'",
         minRawId: w.length ? minRawId(w) : undefined,
       });
@@ -421,6 +507,8 @@ export async function runTransform(
       const findings = mergeByCheck(
         computeFindings(q, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs),
         computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs),
+        stationRosterFindings(q, roster, rawShortName(TABLE_SHAPES.reject_qcs.rawTable), streams.reject_qcs.sourceTable),
+        stationRosterFindings(w, roster, rawShortName(TABLE_SHAPES.reject_weight.rawTable), streams.reject_weight.sourceTable),
       );
       await persistFindings(appPool, runId, findings);
       await guardZeroWrite(appPool, runId, 'reject_event', q.length, rq.written);

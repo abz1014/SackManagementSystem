@@ -39,12 +39,28 @@ class FakeRequest {
   }
 }
 
+/**
+ * Stands in for mssql.Transaction. auditedWrite() (services/audit.ts) runs
+ * every configuration write through `pool.transaction()`, so the fake pool
+ * must hand one out; it answers queries exactly as the pool does.
+ */
+class FakeTransaction {
+  constructor(private readonly db: FakeDb) {}
+  async begin(): Promise<this> { return this; }
+  async commit(): Promise<void> {}
+  async rollback(): Promise<void> {}
+  request(): FakeRequest { return new FakeRequest(this.db); }
+}
+
 class FakeDb {
   users: FakeUser[] = [];
   sessions = new Map<string, { userId: number; expiresAtUtc: Date }>();
 
   request(): FakeRequest {
     return new FakeRequest(this);
+  }
+  transaction(): FakeTransaction {
+    return new FakeTransaction(this);
   }
 
   async handle<T>(sql: string, inputs: Map<string, unknown>): Promise<{ recordset: T[]; rowsAffected: number[] }> {
@@ -211,6 +227,8 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/product-timeline', minRank: 1 },
   { method: 'GET', path: '/api/calibration?from=2026-07-09&to=2026-07-09', minRank: 1 },
   { method: 'GET', path: '/api/calibration/adjustments', minRank: 1 },
+  { method: 'GET', path: '/api/config', minRank: 1 },
+  { method: 'GET', path: '/api/reject-codes', minRank: 1 },
   // route-specific gates
   { method: 'GET', path: '/api/events/export?type=cone', minRank: 3 },
   { method: 'PUT', path: '/api/reject-codes/1', minRank: 3, body: { label: 'x' } },
@@ -221,9 +239,19 @@ const ROUTES: RouteCase[] = [
   { method: 'PATCH', path: '/api/admin/users/1', minRank: 4, body: { active: true } },
   { method: 'GET', path: '/api/admin/stations', minRank: 4 },
   { method: 'PUT', path: '/api/admin/stations/1', minRank: 4, body: { name: 'x', machine: null, description: null } },
+  { method: 'POST', path: '/api/admin/stations', minRank: 4, body: { stationId: 15 } },
+  // roadmap Phase 1 (14 Sep 2026): line identity, machines, sources
+  { method: 'GET', path: '/api/admin/line', minRank: 4 },
+  { method: 'PUT', path: '/api/admin/line', minRank: 4, body: { displayName: 'x' } },
+  { method: 'GET', path: '/api/admin/machines', minRank: 4 },
+  { method: 'POST', path: '/api/admin/machines', minRank: 4, body: { machineNo: 15, kind: 'winder', name: 'Winder 15' } },
+  { method: 'PUT', path: '/api/admin/machines/1', minRank: 4, body: { name: 'x' } },
+  { method: 'GET', path: '/api/admin/sources', minRank: 4 },
+  { method: 'PUT', path: '/api/admin/sources/1', minRank: 4, body: { isEnabled: true } },
+  { method: 'PUT', path: '/api/admin/sources/tables/1', minRank: 4, body: { isEnabled: true } },
   { method: 'GET', path: '/api/admin/rules', minRank: 4 },
   { method: 'POST', path: '/api/admin/rules/weight', minRank: 4, body: { basis: 'as_recorded', coneTubeWeightG: 5, sackTareKg: 1 } },
-  { method: 'POST', path: '/api/admin/rules/shift', minRank: 4, body: { mode: 'corrected', nightBelongsTo: 'start_day' } },
+  { method: 'POST', path: '/api/admin/rules/shift', minRank: 4, body: { morningStart: '06:00', eveningStart: '14:00', nightStart: '22:00', mode: 'corrected', nightBelongsTo: 'start_day' } },
   { method: 'POST', path: '/api/admin/rules/plausibility', minRank: 4, body: { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 } },
   { method: 'GET', path: '/api/admin/audit', minRank: 4 },
 ];

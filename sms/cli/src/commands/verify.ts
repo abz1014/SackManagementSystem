@@ -37,10 +37,15 @@
  */
 import mssql from 'mssql';
 import type { ConnectionPool } from 'mssql';
-import { IFL_TABLES, readSourceIdentity, type SourceIdentity } from '@sms/sync-worker';
+import {
+  loadSourceTables,
+  readSourceIdentity,
+  type IflTableDef,
+  type SourceIdentity,
+} from '@sms/sync-worker';
 import { openContext } from '../context.js';
 
-type TableDef = (typeof IFL_TABLES)[number];
+type TableDef = IflTableDef;
 
 /** Where each raw table lands in canonical. reject_event is fed by TWO raw tables. */
 const CANONICAL: Record<TableDef['key'], { table: string; typeFilter: string }> = {
@@ -183,6 +188,12 @@ export async function verify(): Promise<number> {
     console.log(`  source   ${ctx.cfg.iflData.server}/${ctx.cfg.iflData.database}`);
     console.log(`  app      ${ctx.cfg.app.server}/${ctx.cfg.app.database}   (line ${line})`);
 
+    // The tables this line reads are configuration (sms.source_table, roadmap
+    // Phase 1), loaded here as the worker loads them at the start of a pass.
+    // A line with none is the same halt the worker records: there is nothing
+    // to reconcile, and saying so is the verdict.
+    const tables = await loadSourceTables(ctx.app, line);
+
     // (b) The generations this line knows about.
     const epochs = (
       await ctx.app.request().input('line', mssql.Int, line).query<EpochRow>(
@@ -199,9 +210,9 @@ export async function verify(): Promise<number> {
       `   ${'id'.padStart(3)}  ${'table'.padEnd(20)} ${'provenance'.padEnd(10)} ${'state'.padEnd(6)} ${'raw rows'.padStart(9)}  label`,
     );
     const rawStats = new Map<TableDef['key'], Map<number, IdStats>>();
-    for (const def of IFL_TABLES) rawStats.set(def.key, await rawStatsByEpoch(ctx.app, def, line));
+    for (const def of tables) rawStats.set(def.key, await rawStatsByEpoch(ctx.app, def, line));
     for (const e of epochs) {
-      const def = IFL_TABLES.find((d) => d.sourceTable === e.source_table);
+      const def = tables.find((d) => d.sourceTable === e.source_table);
       const rows = def ? (rawStats.get(def.key)?.get(e.epoch_id)?.n ?? 0) : 0;
       console.log(
         `   ${String(e.epoch_id).padStart(3)}  ${e.source_table.padEnd(20)} ${e.provenance.padEnd(10)} ` +
@@ -211,7 +222,7 @@ export async function verify(): Promise<number> {
     if (epochs.length === 0) console.log('   (none registered for this line)');
 
     console.log('\nReconciliation');
-    for (const def of IFL_TABLES) {
+    for (const def of tables) {
       const canon = CANONICAL[def.key];
       const mine = epochs.filter((e) => e.source_table === def.sourceTable);
       const stats = rawStats.get(def.key) ?? new Map<number, IdStats>();

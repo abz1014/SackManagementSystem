@@ -15,16 +15,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 
-// One table keeps every assertion unambiguous.
+// One table keeps every assertion unambiguous. Since roadmap Phase 1 verify
+// loads it from sms.source_table (loadSourceTables), as the worker does.
+const TABLES = [
+  {
+    key: 'cone',
+    sourceTable: 'pack1_TP1U2',
+    rawTable: 'sms_raw.cone_raw',
+    systemCode: 'ifl_sql',
+    columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
+  },
+];
 vi.mock('@sms/sync-worker', () => ({
-  IFL_TABLES: [
-    {
-      key: 'cone',
-      sourceTable: 'pack1_TP1U2',
-      rawTable: 'sms_raw.cone_raw',
-      columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
-    },
-  ],
+  loadSourceTables: () => world.tables(),
   readSourceIdentity: () => world.identity(),
 }));
 
@@ -118,6 +121,7 @@ const world = {
   app: undefined as unknown as Pool,
   ifl: undefined as unknown as Pool,
   identity: async () => IDENTITY_OF_OPEN,
+  tables: async () => TABLES,
 };
 
 const { verify } = await import('./verify.js');
@@ -129,6 +133,7 @@ beforeEach(() => {
     out.push(a.join(' '));
   });
   world.identity = async () => IDENTITY_OF_OPEN;
+  world.tables = async () => TABLES;
 });
 afterEach(() => vi.restoreAllMocks());
 const printed = () => out.join('\n');
@@ -203,6 +208,20 @@ describe('sms verify — per-generation reconciliation', () => {
     expect(printed()).toContain('not the generation this epoch describes');
     expect(printed()).toContain('sms epoch:accept --table=pack1_TP1U2 --confirm');
     // Counts are not compared against a source that is not this generation.
+    expect(world.ifl.calls).toHaveLength(0);
+  });
+});
+
+describe('sms verify — the tables come from configuration', () => {
+  it('stops on the same "no source tables" halt as the worker, before asking either database anything', async () => {
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    world.tables = async () => {
+      throw new Error('No source tables are configured for line 1. Add them in Setup › Sources (sms.source_table).');
+    };
+
+    await expect(verify()).rejects.toThrow(/No source tables are configured for line 1/);
+    expect(world.app.calls).toHaveLength(0);
     expect(world.ifl.calls).toHaveLength(0);
   });
 });

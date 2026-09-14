@@ -130,7 +130,10 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
     <div className="wall" onDoubleClick={onExit}>
       <div className="w-head">
         <div>
-          <div className="w-line">{line.lineName}</div>
+          {/* The address, from the line's own row: plant and unit here, the
+              line in the sentence beneath. Two screens used to recover
+              these by parsing lineName on '·' (roadmap Phase 1, 14 Sep 2026). */}
+          <div className="w-line">{[line.plantName, line.unitName].filter(Boolean).join(' · ')}</div>
           <div className={`w-state${knowable ? '' : ' acc'}`}>{stateSentence(line, knowable, anchor)}</div>
         </div>
         <div className="w-clock">
@@ -237,12 +240,14 @@ function lagSentence(line: LiveLine, health: ReturnType<typeof assessHealth>): s
 }
 
 /**
- * LINE_NAME is a full address — "TP1 · Line 3 · Unit 2" — which is right above
- * the state sentence but too long inside it. The segment that says "Line" is
- * what a person calls the line.
+ * What to call the line in the state sentence: its display name, verbatim.
+ *
+ * Until roadmap Phase 1 (14 Sep 2026) this split LINE_NAME on '·' to find
+ * the segment that said "Line", because the env string was a whole address.
+ * The name is a row now (sms.line.display_name, edited in Setup › Line), the
+ * plant and unit are their own fields and are printed in the board's header
+ * above this sentence, so the sentence carries only the line.
  */
 function lineTitle(line: LiveLine): string {
-  const parts = line.lineName.split('·').map((p) => p.trim()).filter(Boolean);
-  return parts.find((p) => /line/i.test(p)) ?? parts[parts.length - 1] ?? line.lineName;
+  return line.lineShortName || line.lineName;
 }
-

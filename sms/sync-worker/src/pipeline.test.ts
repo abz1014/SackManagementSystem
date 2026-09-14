@@ -10,12 +10,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 
-vi.mock('./reader/iflTables.js', () => ({
-  IFL_TABLES: [
-    { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', columns: [] },
-    { key: 'sack', sourceTable: 'sack1_TP1U2', rawTable: 'sms_raw.sack_raw', columns: [] },
-  ],
-}));
+// Roadmap Phase 1: the tables come from sms.source_table. The fake answers
+// with two, or throws when a test says the configuration cannot be read.
+const loadSourceTables = vi.fn(async () => [
+  { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] },
+  { key: 'sack', sourceTable: 'sack1_TP1U2', rawTable: 'sms_raw.sack_raw', systemCode: 'ifl_sql', columns: [] },
+]);
+vi.mock('./reader/sourceTables.js', () => ({ loadSourceTables: () => loadSourceTables() }));
 
 const seedReference = vi.fn(async (): Promise<void> => undefined);
 vi.mock('./seed/seedReference.js', () => ({ seedReference: () => seedReference() }));
@@ -31,7 +32,7 @@ vi.mock('./transform/runTransform.js', () => ({ runTransform: () => runTransform
 
 vi.mock('./lock.js', () => ({ withTransformLock: (_c: unknown, fn: () => Promise<unknown>) => fn() }));
 
-interface Halt { runId: string; targetTable: string; error: string }
+interface Halt { runId: string; adapter: string; targetTable: string; error: string }
 const recordHaltedRun = vi.fn(async (_p: unknown, _h: Halt): Promise<void> => undefined);
 vi.mock('./store.js', () => ({ recordHaltedRun: (p: unknown, h: Halt) => recordHaltedRun(p, h) }));
 
@@ -49,9 +50,13 @@ const pool = {} as ConnectionPool;
 const cfg = { lineId: 1, overlapRows: 500, pdasDbName: 'PDAS_TP1U2', app: {} } as never;
 
 beforeEach(() => {
-  for (const m of [seedReference, seedProducts, runOnce, runTransform, recordHaltedRun, persistFindings, clearFindings]) m.mockClear();
+  for (const m of [seedReference, seedProducts, runOnce, runTransform, recordHaltedRun, persistFindings, clearFindings, loadSourceTables]) m.mockClear();
   seedReference.mockResolvedValue(undefined);
   seedProducts.mockResolvedValue(undefined);
+  loadSourceTables.mockResolvedValue([
+    { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] },
+    { key: 'sack', sourceTable: 'sack1_TP1U2', rawTable: 'sms_raw.sack_raw', systemCode: 'ifl_sql', columns: [] },
+  ]);
 });
 
 describe('runFullSync — the product mirror is isolated from ingestion', () => {
@@ -93,7 +98,22 @@ describe('runFullSync — halts before the reader leave a row per table', () => 
     expect(h.map((x) => x.targetTable)).toEqual(['cone_raw', 'sack_raw']);
     expect(new Set(h.map((x) => x.runId)).size).toBe(1);
     expect(h[0]!.error).toMatch(/^Pass halted at reference seed, before any table was read\. Invalid object name/);
+    expect(h.map((x) => x.adapter)).toEqual(['ifl_sql', 'ifl_sql']);
     expect(runOnce).not.toHaveBeenCalled();
+  });
+
+  it('when the configuration itself cannot be read, the halt still owes a row per raw table the schema has', async () => {
+    // A seed failure on an unmigrated database: sms.source_table is missing
+    // too, so the tables the halt would name are unknown. Writing nothing is
+    // the silence 478c456 ended; the fallback is every kind, adapter unknown.
+    seedReference.mockRejectedValueOnce(new Error('Invalid object name sms.shift_rule'));
+    loadSourceTables.mockRejectedValueOnce(new Error("Invalid object name 'sms.source_table'"));
+    await expect(runFullSync(pool, pool, cfg)).rejects.toThrow(/shift_rule/);
+    const h = recordHaltedRun.mock.calls.map((c) => c[1]);
+    expect(h.map((x) => x.targetTable)).toEqual(['cone_raw', 'sack_raw', 'reject_qcs_raw', 'reject_weight_raw']);
+    expect(h.every((x) => x.adapter === 'unknown')).toBe(true);
+    // The reason recorded is the seed's, not the fallback's.
+    expect(h[0]!.error).toMatch(/reference seed.*shift_rule/);
   });
 });
 

@@ -35,13 +35,26 @@ class FakeRequest {
 const ADMIN = { userId: 4, username: 'admin', role: 'admin', rank: 4 };
 const MANAGER = { userId: 3, username: 'manager', role: 'manager', rank: 3 };
 
+/** Stands in for mssql.Transaction; records begin/commit/rollback on the db. */
+class FakeTransaction {
+  constructor(private readonly db: FakeDb) {}
+  async begin(): Promise<this> { this.db.txLog.push('begin'); return this; }
+  async commit(): Promise<void> { this.db.txLog.push('commit'); }
+  async rollback(): Promise<void> { this.db.txLog.push('rollback'); }
+  request(): FakeRequest { return new FakeRequest(this.db); }
+}
+
 class FakeDb {
   statements: Stmt[] = [];
+  txLog: string[] = [];
   hash = '';
   sessions = new Map<string, number>();
 
   request(): FakeRequest {
     return new FakeRequest(this);
+  }
+  transaction(): FakeTransaction {
+    return new FakeTransaction(this);
   }
 
   async handle<T>(sql: string, inputs: Map<string, unknown>): Promise<{ recordset: T[]; rowsAffected: number[] }> {
@@ -138,6 +151,7 @@ afterAll(() => {
 
 beforeEach(() => {
   db.statements = [];
+  db.txLog = [];
 });
 
 async function call(role: 'admin' | 'manager', method: string, path: string, body?: unknown) {
@@ -251,21 +265,30 @@ describe('POST /api/admin/rules/* — what reaches the database', () => {
     expect(stmt('INSERT INTO sms.weight_rule')).toBeUndefined();
   });
 
-  it('shift: inserts the rule with the confirmed 06/14/22 boundaries and says a rebuild is due', async () => {
-    const r = await call('admin', 'POST', '/api/admin/rules/shift', { mode: 'corrected', nightBelongsTo: 'calendar_day' });
+  it('shift: inserts the three start times as PARAMETERS and says a rebuild is due', async () => {
+    // Until 14 Sep 2026 the INSERT carried '06:00','14:00','22:00' as
+    // literals; roadmap Phase 1 makes the boundaries a rule, not a constant.
+    const r = await call('admin', 'POST', '/api/admin/rules/shift', {
+      morningStart: '06:00', eveningStart: '14:00', nightStart: '22:00', mode: 'corrected', nightBelongsTo: 'calendar_day',
+    });
     expect(r.status).toBe(200);
     expect(r.json.rebuildRequired).toBe(true);
     const ins = stmt('INSERT INTO sms.shift_rule')!;
+    expect(ins.inputs.get('ms')).toBe('06:00');
+    expect(ins.inputs.get('es')).toBe('14:00');
+    expect(ins.inputs.get('ns')).toBe('22:00');
     expect(ins.inputs.get('mode')).toBe('corrected');
     expect(ins.inputs.get('nb')).toBe('calendar_day');
     expect(ins.inputs.get('by')).toBe(ADMIN.userId);
     expect(ins.inputs.get('reason')).toBeNull();
-    expect(ins.sql).toMatch(/'06:00','14:00','22:00'/);
+    expect(ins.sql).not.toMatch(/'06:00'|'14:00'|'22:00'/);
     expect(audits()[0]!.inputs.get('action')).toBe('rule.shift');
   });
 
   it('shift: refuses a value outside the two enums', async () => {
-    expect((await call('admin', 'POST', '/api/admin/rules/shift', { mode: 'corrected', nightBelongsTo: 'next_day' })).status).toBe(400);
+    expect((await call('admin', 'POST', '/api/admin/rules/shift', {
+      morningStart: '06:00', eveningStart: '14:00', nightStart: '22:00', mode: 'corrected', nightBelongsTo: 'next_day',
+    })).status).toBe(400);
     expect(stmt('INSERT INTO sms.shift_rule')).toBeUndefined();
   });
 

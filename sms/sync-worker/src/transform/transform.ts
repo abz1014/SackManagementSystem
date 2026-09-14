@@ -3,14 +3,46 @@
  * function is a deterministic mapping so it can be unit-tested and re-run to
  * rebuild canonical from raw. Stamps transform_version.
  */
-import { TRANSFORM_VERSION } from '@sms/shared';
-import type { SyncConfig } from '../config.js';
+import { TRANSFORM_VERSION, type NightBelongsTo, type ShiftBoundaries, type ShiftMode } from '@sms/shared';
 import {
   wallClockOf,
   shiftCodeOf,
   shiftDateOf,
   normalizeLegacyShift,
 } from './wallClock.js';
+
+/**
+ * The shift rule in force for a line — the newest sms.shift_rule row, as the
+ * transform needs it. Resolved by `resolveShiftRule` (runTransform.ts) once per
+ * pass; this module only consumes it. Q7 (fix-vs-reproduce, `mode`) is still
+ * open with IFL, which is why both the corrected and the legacy code are
+ * stored on every row and `mode` is carried but not applied here.
+ */
+export interface ShiftRule {
+  boundaries: ShiftBoundaries;
+  nightBelongsTo: NightBelongsTo;
+  mode: ShiftMode;
+}
+
+/**
+ * Everything a mapper needs that is not on the row. Roadmap Phase 1 (14 Sep
+ * 2026): the mappers used to take the whole SyncConfig and read two things
+ * from it — the line id, and a night rule frozen from the env at startup (the
+ * H5 defect). Both are now resolved from configuration at the start of the
+ * pass and handed in, so the mappers remain pure functions of their
+ * arguments and a rule edited in Setup applies to the next pass and to a
+ * rebuild alike.
+ */
+export interface TransformRules {
+  lineId: number;
+  shift: ShiftRule;
+  /**
+   * `system_code` of the data source the rows' table is read through
+   * (sms.source_table → sms.data_source) — stamped as `source_system`. Was
+   * the literal 'ifl_sql'.
+   */
+  sourceSystem: string;
+}
 
 type Raw = Record<string, unknown>;
 const num = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -123,7 +155,6 @@ export interface RejectRow {
 }
 
 const BASE = {
-  source_system: 'ifl_sql',
   lot_code: null as string | null,
 };
 
@@ -164,39 +195,42 @@ function attribution(rawMaterialId: unknown): {
 }
 
 /**
- * EVERY mapper below stamps `line_id: cfg.lineId` — this PROCESS's configured
+ * EVERY mapper below stamps `line_id: rules.lineId` — this PROCESS's configured
  * line, never anything read from the row itself (finding M3, Sep 2026 audit).
  * This is not a shortcut: IFL's source tables carry NO line-identifying
  * column at all (see iflTables.ts) — line identity is encoded entirely in
  * WHICH table you read (the `_TP1U2` suffix is Plant 1 / Unit 2), which
  * correlates with the deploying process's own config. There is nothing in a
- * row to check cfg.lineId against, so no code-level verification is possible
+ * row to check rules.lineId against, so no code-level verification is possible
  * with today's data model.
  *
- * Dormant with one line. The moment a second line is added (CLAUDE.md
- * explicitly anticipates this — `line_id` is threaded everywhere for it),
- * EVERY row that second sync-worker instance reads will be stamped with
- * WHATEVER LINE_ID that instance's own .env says — correct only if that
- * instance is also pointed at that second line's own, differently-named
- * source tables. Getting LINE_ID or the source table names wrong on a second
- * deployment silently cross-contaminates canonical data between lines, with
- * nothing in this code able to detect it. This is a deployment-discipline
- * requirement to document loudly at that point (DEPLOY.md), not a bug fixable
- * here — there is no ground truth in the row to verify against.
+ * Dormant with one line. The moment a second line is added (Q14, still open
+ * with IFL — `line_id` is threaded everywhere for it), EVERY row that second
+ * sync-worker instance reads will be stamped with WHATEVER LINE_ID that
+ * instance's own .env says — correct only if that line's own sms.source_table
+ * rows name its own, differently-named source tables (roadmap Phase 1 moved
+ * the names from code to those rows; the pairing of LINE_ID with them is
+ * still a deployment fact). Getting LINE_ID or the source table rows wrong on
+ * a second deployment silently cross-contaminates canonical data between
+ * lines, with nothing in this code able to detect it. This is a
+ * deployment-discipline requirement to document loudly at that point
+ * (DEPLOY.md), not a bug fixable here — there is no ground truth in the row
+ * to verify against.
  */
-export function mapCone(raw: Raw, cfg: SyncConfig, runId: string): ConeRow {
+export function mapCone(raw: Raw, rules: TransformRules, runId: string): ConeRow {
   const eventDt = (raw.src_ProductionDate ?? raw.src_Date) as Date;
   const wc = wallClockOf(eventDt);
+  const { boundaries, nightBelongsTo } = rules.shift;
   return {
-    line_id: cfg.lineId,
+    line_id: rules.lineId,
     source_epoch: Number(raw.source_epoch),
     production_ts_utc: eventDt,
     production_ts_utc_ms: wc.ms,
     ingest_ts_utc: (raw.src_Date as Date) ?? null,
-    shift_code: shiftCodeOf(wc),
-    shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
+    shift_code: shiftCodeOf(wc, boundaries),
+    shift_date: shiftDateOf(wc, nightBelongsTo, boundaries),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
-    night_belongs_to: cfg.appConfig.shift.nightBelongsTo,
+    night_belongs_to: nightBelongsTo,
     hanger_num: num(raw.src_HangerNum),
     source_station: station(raw.src_MachineNo),
     lifter_station: station(raw.src_Lifter),
@@ -205,6 +239,7 @@ export function mapCone(raw: Raw, cfg: SyncConfig, runId: string): ConeRow {
     cone_id: null,
     cone_id_source: null,
     ...BASE,
+    source_system: rules.sourceSystem,
     ...attribution(raw.src_MaterialId),
     source_row_id: Number(raw.src_id),
     raw_id: Number(raw.raw_id),
@@ -215,25 +250,27 @@ export function mapCone(raw: Raw, cfg: SyncConfig, runId: string): ConeRow {
   };
 }
 
-export function mapSack(raw: Raw, cfg: SyncConfig, runId: string): SackRow {
+export function mapSack(raw: Raw, rules: TransformRules, runId: string): SackRow {
   // sacks have no independent event time (DQ-5): use insert time, flag it.
   const eventDt = raw.src_Date as Date;
   const wc = wallClockOf(eventDt);
+  const { boundaries, nightBelongsTo } = rules.shift;
   return {
-    line_id: cfg.lineId,
+    line_id: rules.lineId,
     source_epoch: Number(raw.source_epoch),
     production_ts_utc: eventDt,
     production_ts_utc_ms: wc.ms,
     ingest_ts_utc: eventDt ?? null,
     production_ts_is_insert_time: true,
-    shift_code: shiftCodeOf(wc),
-    shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
+    shift_code: shiftCodeOf(wc, boundaries),
+    shift_date: shiftDateOf(wc, nightBelongsTo, boundaries),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
-    night_belongs_to: cfg.appConfig.shift.nightBelongsTo,
+    night_belongs_to: nightBelongsTo,
     sack_num: num(raw.src_SackNum),
     weight_kg: num(raw.src_Weight),
     in_range: bit(raw.src_inRange),
     ...BASE,
+    source_system: rules.sourceSystem,
     ...attribution(raw.src_MaterialId),
     source_row_id: Number(raw.src_id),
     raw_id: Number(raw.raw_id),
@@ -247,22 +284,23 @@ export function mapSack(raw: Raw, cfg: SyncConfig, runId: string): SackRow {
 export function mapReject(
   raw: Raw,
   kind: 'quality' | 'weight',
-  cfg: SyncConfig,
+  rules: TransformRules,
   runId: string,
 ): RejectRow {
   const eventDt = (raw.src_ProductionDate ?? raw.src_Date) as Date;
   const wc = wallClockOf(eventDt);
+  const { boundaries, nightBelongsTo } = rules.shift;
   return {
-    line_id: cfg.lineId,
+    line_id: rules.lineId,
     source_epoch: Number(raw.source_epoch),
     reject_type: kind,
     production_ts_utc: eventDt,
     production_ts_utc_ms: wc.ms,
     ingest_ts_utc: (raw.src_Date as Date) ?? null,
-    shift_code: shiftCodeOf(wc),
-    shift_date: shiftDateOf(wc, cfg.appConfig.shift.nightBelongsTo),
+    shift_code: shiftCodeOf(wc, boundaries),
+    shift_date: shiftDateOf(wc, nightBelongsTo, boundaries),
     shift_code_legacy: normalizeLegacyShift(raw.src_Shift),
-    night_belongs_to: cfg.appConfig.shift.nightBelongsTo,
+    night_belongs_to: nightBelongsTo,
     hanger_num: num(raw.src_HangerNum),
     source_station: station(raw.src_MachineNo),
     lifter_station: station(raw.src_Lifter),
@@ -271,7 +309,7 @@ export function mapReject(
     weight_g: kind === 'weight' ? num(raw.src_Weight) : null,
     // A reject rate is only meaningful per product, so rejects carry the key too.
     material_id: attribution(raw.src_MaterialId).material_id,
-    source_system: 'ifl_sql',
+    source_system: rules.sourceSystem,
     source_row_id: Number(raw.src_id),
     raw_id: Number(raw.raw_id),
     ingest_run_id: runId,

@@ -36,7 +36,7 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - No `SESSION_SECRET` to set — sessions are server-side random UUIDs, not signed cookies (see `.env.example`).
    - `WEB_DIST=./web/dist`.
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
-   - `LINE_ID` (default `1`) and `LINE_NAME` → the line every row is stamped with, and the name the screens show (default `TP1 · Line 3 · Unit 2`). Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested.
+   - `LINE_ID` (default `1`) → the line this worker and this API serve; every row is stamped with it. Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested. `LINE_NAME` is only the **seed** for that line's display name on a fresh database; afterwards the plant, unit and line names live in `sms.line` and are edited in **Setup › Line** (roadmap Phase 1, migration 028).
    - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
@@ -334,6 +334,27 @@ Both boot with the machine and restart on crash. The sync-worker also self-heals
 **`AppStderr` for `SMS-Api` is not optional.** Every warning the API writes goes to stderr — the `COOKIE_SECURE` cookie-drop warning, the plant-clock offset mismatch, the access log of non-2xx requests, audit-write failures, and the stack of every 500. Without `AppStderr` the documented install discards all of them. **`DependOnService`** names the SQL Server service — `MSSQL$SQLEXPRESS` for a default Express install; check `sc query` for the instance name — because the API exits with code 1 if the app database is not reachable at startup, which at boot would otherwise put it into NSSM's restart loop until SQL Server finishes starting. The rotation settings replace the absence of any log rotation in the application itself.
 
 ---
+
+## Configuring the installation (roadmap Phase 1)
+
+Since migration 028 the installation is described by rows, not by source code, and every one of them is edited in **Setup** (admin only) and written to the audit log in the same transaction as the change:
+
+| Entity | Where it lives | Edited in | Notes |
+|---|---|---|---|
+| Plant · Unit · Line | `sms.plant`, `sms.plant_unit`, `sms.line` | Setup › Line | `LINE_ID` in `.env` names which line this worker/API serves; the names are data. |
+| Machine | `sms.machine` | Setup › Machines | `machine_no` is the number the acquisition layer writes in `MachineNo`; the sack packer has none. |
+| Station | `sms.station` | Setup › Stations | Linked to a machine; the default link is *by number* (station N ↔ winder N) until IFL answers whether a machine and a station are the same thing (Q3). |
+| Data source · Source table | `sms.data_source`, `sms.source_table` | Setup › Sources | Which physical table feeds each raw table. Connection details (server, database, login) stay in `.env` — the row says which `.env` block it uses. |
+| Shift rule (boundaries, night rule, mode) | `sms.shift_rule` | Setup › Rules | Versioned; the worker reads the newest row at the start of every pass, the API per request. Changing the boundaries or the night rule changes how NEW rows are stamped; a rebuild restamps history. |
+| Weight rule · Plausibility rule | `sms.weight_rule`, `sms.plausibility_rule` | Setup › Rules | Versioned; read-time. |
+| Product · Product limits | `sms.product` (mirror of PDAS), `sms.product_limit_version` | Line › Change / History; PDAS writes off | IFL's product master is PDAS by their own arrangement. |
+| Reject code | `sms.reject_code` | Setup › Reject codes | Discovered from the data; label, pass flag and severity are configuration. |
+
+**Adding a machine (no code change).** Setup › Machines › *Add a machine*: number (as the PLC writes it), kind, name, make. A numbered winder gets its station row at once, linked to it. The next worker pass reads its rows; until then a row with an unknown machine number raises a `station_not_in_roster` warning on Setup › Sync health rather than being dropped.
+
+**Adding a line (Q14 — IFL has not said whether a second line shares the database).** The schema allows it: a `sms.line` row, its machines and stations, and four `sms.source_table` rows naming that line's tables. Each line is served by its own worker process (`LINE_ID=<n>` in that worker's `.env`). The API serves one line per process today (`LINE_ID`); serving several lines from one API is Phase 1 follow-on work that waits on IFL's answer.
+
+**Renaming a source table** (Setup › Sources) applies on the worker's next pass and is a new source generation: the worker halts on it until `sms epoch:accept` registers it — exactly the cutover procedure below.
 
 ## Dev → Live cutover
 

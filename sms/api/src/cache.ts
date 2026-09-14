@@ -10,7 +10,8 @@ export class TtlCache<V> {
   get(key: string): V | undefined {
     const hit = this.store.get(key);
     if (!hit) return undefined;
-    if (hit.expires < Date.now()) {
+    // <=, so a TTL of zero never serves a hit — "expires now" is expired.
+    if (hit.expires <= Date.now()) {
       this.store.delete(key);
       return undefined;
     }
@@ -19,5 +20,10 @@ export class TtlCache<V> {
 
   set(key: string, value: V): void {
     this.store.set(key, { expires: Date.now() + this.ttlMs, value });
+  }
+
+  /** Drop everything — for a configuration write that must show on the next read. */
+  clear(): void {
+    this.store.clear();
   }
 }

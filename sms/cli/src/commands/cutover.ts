@@ -35,17 +35,14 @@
  * `source_epoch` column has no FK and the old ids simply stop resolving.
  */
 import mssql from 'mssql';
-import { resetTransformWatermarks } from '@sms/sync-worker';
+import { loadSourceTables, resetTransformWatermarks, TABLE_KINDS, TABLE_SHAPES } from '@sms/sync-worker';
 import { openContext, parseArgs } from '../context.js';
 
 /** Canonical + raw tables, cleared in FK-free dependency order (canonical first). */
 const CANONICAL = ['sms.cone_event', 'sms.sack_event', 'sms.reject_event'] as const;
-const RAW = [
-  'sms_raw.cone_raw',
-  'sms_raw.sack_raw',
-  'sms_raw.reject_qcs_raw',
-  'sms_raw.reject_weight_raw',
-] as const;
+// Every raw table the schema has, by kind — the raw layer is fixed by
+// migration, so it is cleared whole, whatever sms.source_table says today.
+const RAW = TABLE_KINDS.map((k) => TABLE_SHAPES[k].rawTable);
 const WM_TABLES = ['cone_event', 'sack_event', 'reject_event'] as const;
 
 /** Preserved on purpose — app-owned data that exists in no other system. */
@@ -63,6 +60,11 @@ export async function cutover(argv: string[]): Promise<number> {
   const ctx = await openContext();
 
   try {
+    // Same halt as the worker's: a line with no configured source tables has
+    // nothing to cut over TO, and the next step this command prints,
+    // `sms epoch:accept --all`, would find nothing to register.
+    const tables = await loadSourceTables(ctx.app, ctx.cfg.lineId);
+
     // Report the damage BEFORE doing anything, so --confirm is an informed act.
     const counts: { name: string; rows: number }[] = [];
     for (const t of [...CANONICAL, ...RAW]) {
@@ -73,6 +75,7 @@ export async function cutover(argv: string[]): Promise<number> {
     const gens = await ctx.app.request().query<{ n: number }>(`SELECT COUNT(*) n FROM sms.source_epoch`);
 
     console.log('cutover — clears the reproducible layers, keeps everything app-owned\n');
+    console.log(`  line ${ctx.cfg.lineId} reads: ${tables.map((t) => t.sourceTable).join(', ')}`);
     for (const c of counts) console.log(`  ${c.name.padEnd(28)} ${String(c.rows).padStart(9)} rows`);
     console.log(`  ${'TOTAL'.padEnd(28)} ${String(total).padStart(9)} rows`);
     console.log(

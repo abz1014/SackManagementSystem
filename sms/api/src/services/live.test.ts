@@ -49,6 +49,45 @@ describe('shiftWindowAt', () => {
     expect(shiftWindowAt(t('2026-07-10T05:59:00Z'), 'start_day').code).toBe('night');
     expect(shiftWindowAt(t('2026-07-10T06:00:00Z'), 'start_day').code).toBe('morning');
   });
+
+  /**
+   * Roadmap Phase 1 (14 Sep 2026): the boundaries are the line's shift rule,
+   * not the 06/14/22 constant. With starts at 08:00 / 16:00 / 22:00 the
+   * shifts are no longer equal, so each must end where the next begins.
+   */
+  describe('with a configured rule of 08:00 / 16:00 / 22:00', () => {
+    const b = { morningStart: 8 * 60, eveningStart: 16 * 60, nightStart: 22 * 60 };
+
+    it('07:30 is night, and its window began at 22:00 the previous day', () => {
+      const w = shiftWindowAt(t('2026-07-10T07:30:00Z'), 'start_day', b);
+      expect(w.code).toBe('night');
+      expect(new Date(w.startMs).toISOString()).toBe('2026-07-09T22:00:00.000Z');
+      expect(new Date(w.endMs).toISOString()).toBe('2026-07-10T08:00:00.000Z');
+      expect(w.shiftDate).toBe('2026-07-09');
+      expect(shiftWindowAt(t('2026-07-10T07:30:00Z'), 'calendar_day', b).shiftDate).toBe('2026-07-10');
+    });
+
+    it('morning runs 08:00–16:00 and evening 16:00–22:00 (six hours, not eight)', () => {
+      const m = shiftWindowAt(t('2026-07-10T08:00:00Z'), 'start_day', b);
+      expect(m.code).toBe('morning');
+      expect(new Date(m.startMs).toISOString()).toBe('2026-07-10T08:00:00.000Z');
+      expect(new Date(m.endMs).toISOString()).toBe('2026-07-10T16:00:00.000Z');
+      const e = shiftWindowAt(t('2026-07-10T21:59:00Z'), 'start_day', b);
+      expect(e.code).toBe('evening');
+      expect(new Date(e.startMs).toISOString()).toBe('2026-07-10T16:00:00.000Z');
+      expect(new Date(e.endMs).toISOString()).toBe('2026-07-10T22:00:00.000Z');
+    });
+
+    it('night after 22:00 ends at the next morning start', () => {
+      const w = shiftWindowAt(t('2026-07-10T23:00:00Z'), 'start_day', b);
+      expect(w.code).toBe('night');
+      expect(new Date(w.endMs).toISOString()).toBe('2026-07-11T08:00:00.000Z');
+    });
+
+    it('07:30 under the DEFAULT rule is morning — the same instant, a different shift', () => {
+      expect(shiftWindowAt(t('2026-07-10T07:30:00Z'), 'start_day').code).toBe('morning');
+    });
+  });
 });
 
 describe('classifyLineState', () => {

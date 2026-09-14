@@ -124,7 +124,7 @@ describe('persistCanonical — dedupes on raw_id, not source_row_id', () => {
       { line_id: 1, source_epoch: 1, source_row_id: 5, raw_id: 1001 },
       { line_id: 1, source_epoch: 9, source_row_id: 5, raw_id: 2001 },
     ];
-    const res = await persistCanonical(pool, 'sms.cone_event', COLS, rows, { minRawId: 1001 });
+    const res = await persistCanonical(pool, 'sms.cone_event', COLS, rows, { sourceSystem: 'ifl_sql', minRawId: 1001 });
 
     expect(res).toEqual({ read: 2, written: 1 });
     const rawIdx = bulkLog[0]!.columns.indexOf('raw_id');
