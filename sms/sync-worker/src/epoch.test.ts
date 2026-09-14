@@ -18,19 +18,25 @@ import type { ConnectionPool } from 'mssql';
 const source = {
   createdKey: '2026-08-05T19:03:16.353Z' as string | null,
   fingerprint: 'bf17df27200feeb21ac65c2e5dfc39e7',
+  columns: ['id int', 'Date datetime', 'MaterialId int'] as string[],
 };
+// The registry (createAdapter) hands out this class for 'ifl_sql'.
 vi.mock('./reader/IflSqlAdapter.js', () => ({
   IflSqlAdapter: class {
+    constructor(_pool: unknown, readonly def: unknown) {}
     async sourceEpoch() {
       return source.createdKey;
     }
     async fingerprint() {
       return source.fingerprint;
     }
+    async columnList() {
+      return source.columns;
+    }
   },
 }));
 
-const { resolveEpoch } = await import('./epoch.js');
+const { resolveEpoch, checkColumnDrift, readSourceIdentity } = await import('./epoch.js');
 
 const OPEN = {
   epoch_id: 9,
@@ -54,7 +60,7 @@ const appPool = {
   },
 } as unknown as ConnectionPool;
 const iflPool = {} as ConnectionPool;
-const def = { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', columns: [] } as never;
+const def = { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] } as never;
 const iflDb = { server: 'localhost', database: 'DATA_TP1U2_SEP07' } as never;
 
 beforeEach(() => {
@@ -97,5 +103,80 @@ describe('resolveEpoch', () => {
   it('halts, rather than defaulting, when the source reports no create_date at all', async () => {
     source.createdKey = null;
     await expect(resolveEpoch(appPool, iflPool, def, 1, iflDb)).rejects.toThrow(/Cannot read create_date/);
+  });
+});
+
+describe('readSourceIdentity', () => {
+  it('carries the FULL column list, so epoch:accept can record the baseline', async () => {
+    const id = await readSourceIdentity(iflPool, def, iflDb);
+    expect(id.columnList).toEqual(['id int', 'Date datetime', 'MaterialId int']);
+    expect(id.createdKey).toBe(OPEN.source_created_key);
+  });
+});
+
+/**
+ * Column-list drift (roadmap Phase 2 item 4): the fingerprint sees only the
+ * columns SMS reads, so this is how a column IFL ADDS becomes visible. Stored
+ * on first sight (the migration's contract for generations accepted before
+ * 029), compared afterwards; a difference is one WARNING finding and never
+ * a halt.
+ */
+describe('checkColumnDrift', () => {
+  interface Stmt { sql: string; inputs: Map<string, unknown> }
+  function pool(recorded: string | null) {
+    const statements: Stmt[] = [];
+    const p = {
+      statements,
+      request() {
+        const inputs = new Map<string, unknown>();
+        const req = {
+          input(name: string, _t: unknown, value: unknown) {
+            inputs.set(name, value);
+            return req;
+          },
+          async query(sql: string) {
+            statements.push({ sql, inputs: new Map(inputs) });
+            if (/SELECT column_list/.test(sql)) return { recordset: [{ column_list: recorded }] };
+            return { recordset: [], rowsAffected: [1] };
+          },
+        };
+        return req;
+      },
+    };
+    return p as unknown as ConnectionPool & { statements: Stmt[] };
+  }
+  const adapter = {
+    systemCode: 'ifl_sql',
+    def: { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] },
+    async columnList() {
+      return source.columns;
+    },
+  } as never;
+
+  it('first sight: stores the list on the epoch row (guarded IS NULL) and raises nothing', async () => {
+    const p = pool(null);
+    expect(await checkColumnDrift(p, adapter, OPEN as never)).toBeNull();
+    const upd = p.statements.find((s) => /UPDATE sms\.source_epoch SET column_list = @json/.test(s.sql))!;
+    expect(upd).toBeDefined();
+    expect(upd.sql).toMatch(/WHERE epoch_id = @id AND column_list IS NULL/);
+    expect(upd.inputs.get('id')).toBe(9);
+    expect(JSON.parse(String(upd.inputs.get('json')))).toEqual(['id int', 'Date datetime', 'MaterialId int']);
+  });
+
+  it('same list afterwards: nothing stored, nothing raised', async () => {
+    const p = pool(JSON.stringify(['id int', 'Date datetime', 'MaterialId int']));
+    expect(await checkColumnDrift(p, adapter, OPEN as never)).toBeNull();
+    expect(p.statements.some((s) => /UPDATE/.test(s.sql))).toBe(false);
+  });
+
+  it('a different list: one WARNING naming what was added and removed, on the raw table, and the row is NOT overwritten', async () => {
+    const p = pool(JSON.stringify(['id int', 'Date datetime', 'Source int']));
+    const f = await checkColumnDrift(p, adapter, OPEN as never);
+    expect(f).toMatchObject({ check_name: 'source_columns_changed', severity: 'WARNING', subject_table: 'cone_raw', count: 2 });
+    expect(f!.detail).toBe(
+      'columns added: [MaterialId int]; removed: [Source int] on pack1_TP1U2 (generation 9) — the fingerprint of ' +
+        'the columns SMS reads is unchanged, so ingestion continues; review whether SMS should read the new columns',
+    );
+    expect(p.statements.some((s) => /UPDATE/.test(s.sql))).toBe(false);
   });
 });

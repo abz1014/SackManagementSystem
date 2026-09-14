@@ -28,8 +28,9 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import type { DbConfig } from './config.js';
-import type { IflTableDef } from './reader/iflTables.js';
-import { IflSqlAdapter } from './reader/IflSqlAdapter.js';
+import { rawShortName, type IflTableDef } from './reader/iflTables.js';
+import { createAdapter, type SourceAdapter } from './reader/SourceAdapter.js';
+import type { Finding } from './transform/dq.js';
 
 export interface EpochRow {
   epoch_id: number;
@@ -50,6 +51,9 @@ export interface SourceIdentity {
   fingerprint: string;
   server: string;
   database: string;
+  /** The FULL column list, "name type" in ordinal order (Phase 2): stored on
+   *  the epoch row at accept, compared on every pass by checkColumnDrift. */
+  columnList: string[];
 }
 
 export async function readSourceIdentity(
@@ -57,7 +61,9 @@ export async function readSourceIdentity(
   def: IflTableDef,
   iflDb: DbConfig,
 ): Promise<SourceIdentity> {
-  const adapter = new IflSqlAdapter(iflPool, def);
+  // Through the registry, never `new IflSqlAdapter` (roadmap Phase 2): the
+  // system code on the configured row decides which reader answers.
+  const adapter = createAdapter(def.systemCode, iflPool, def);
   const createdKey = await adapter.sourceEpoch();
   if (createdKey === null) {
     throw new Error(
@@ -72,6 +78,7 @@ export async function readSourceIdentity(
     fingerprint: await adapter.fingerprint(),
     server: iflDb.server,
     database: iflDb.database,
+    columnList: await adapter.columnList(),
   };
 }
 
@@ -149,4 +156,81 @@ export async function resolveEpoch(
   }
 
   return open;
+}
+
+/** The dq check a column-list difference raises. Non-fatal, by design — see checkColumnDrift. */
+export const SOURCE_COLUMNS_CHANGED = 'source_columns_changed';
+
+/**
+ * Column-list drift within an open generation (roadmap Phase 2 item 4,
+ * 14 Sep 2026). NON-FATAL, and that is the point.
+ *
+ * The schema fingerprint hashes only the columns the reader DEPENDS ON, and
+ * halts on a change to any of them — the right response, because a changed
+ * dependency means the rows we would read are not the rows we think. But a
+ * column IFL ADDS and we do not read is invisible to it: `MaterialId` itself,
+ * the product key SCHEMA.md OQ-1 recorded as non-existent, would have arrived
+ * unnoticed in August 2026 had IFL not also recreated the table. So every pass
+ * reads the FULL list and compares it to what the generation had when it was
+ * accepted (`sms.source_epoch.column_list`).
+ *
+ * On first sight the list is STORED, not compared: generations accepted
+ * before migration 029 have no recorded list, and the worker filling it in on
+ * its next pass is the migration's stated contract. The UPDATE is guarded
+ * `AND column_list IS NULL` so two overlapping passes cannot each store a
+ * different list, and a filled row is never overwritten by a later pass —
+ * the recorded list is the generation's baseline, and only `epoch:accept`
+ * sets a new one.
+ *
+ * On difference: one WARNING finding, deduplicated by its detail (which names
+ * the added and removed columns, the table and the generation), so it is
+ * recorded once and stands until someone reviews it. Ingestion continues,
+ * because the fingerprint of the depended-on columns is unchanged — the rows
+ * we read are still the rows we think — and the honest message is "there is
+ * something new here you may want", not "stop".
+ */
+export async function checkColumnDrift(
+  appPool: ConnectionPool,
+  adapter: SourceAdapter,
+  epoch: EpochRow,
+): Promise<Finding | null> {
+  const live = await adapter.columnList();
+  const stored = await appPool
+    .request()
+    .input('id', mssql.Int, epoch.epoch_id)
+    .query<{ column_list: string | null }>(`SELECT column_list FROM sms.source_epoch WHERE epoch_id = @id`);
+  const recorded = stored.recordset[0]?.column_list ?? null;
+
+  if (recorded === null) {
+    await appPool
+      .request()
+      .input('id', mssql.Int, epoch.epoch_id)
+      .input('json', mssql.NVarChar(mssql.MAX), JSON.stringify(live))
+      .query(`UPDATE sms.source_epoch SET column_list = @json WHERE epoch_id = @id AND column_list IS NULL`);
+    return null;
+  }
+
+  let baseline: string[];
+  try {
+    const parsed: unknown = JSON.parse(recorded);
+    baseline = Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    baseline = [];
+  }
+  const liveSet = new Set(live);
+  const baseSet = new Set(baseline);
+  const added = live.filter((c) => !baseSet.has(c));
+  const removed = baseline.filter((c) => !liveSet.has(c));
+  if (added.length === 0 && removed.length === 0) return null;
+
+  return {
+    check_name: SOURCE_COLUMNS_CHANGED,
+    severity: 'WARNING',
+    subject_table: rawShortName(adapter.def.rawTable),
+    count: added.length + removed.length,
+    detail:
+      `columns added: [${added.join(', ')}]; removed: [${removed.join(', ')}] on ${adapter.def.sourceTable} ` +
+      `(generation ${epoch.epoch_id}) — the fingerprint of the columns SMS reads is unchanged, so ingestion ` +
+      `continues; review whether SMS should read the new columns`,
+  };
 }

@@ -238,7 +238,9 @@ let db: FakeDb;
 const cookies: Record<string, string> = {};
 
 beforeAll(async () => {
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  // The API logs every refused request and every 500 as a JSON line on
+  // stdout (api/src/log.ts, 14 Sep 2026); quiet it here, as app.rbac.test.ts does.
+  vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as typeof process.stdout.write);
   db = new FakeDb();
   db.hash = await argon2.hash(PASSWORD);
   const cfg: ApiConfig = {

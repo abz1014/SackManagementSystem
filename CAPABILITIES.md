@@ -665,6 +665,7 @@ faults were 2.)
 | `outlier_weight` | WARNING | below the plausibility floor |
 | `stale_timestamp` | WARNING | station clock faults — a reading stamped hours behind the readings around it, checked across ingest batches, not just within one |
 | `no_station` | WARNING | readings with no usable station id |
+| `source_columns_changed` | WARNING | the source table's full column list differs from the one recorded when its generation was accepted — a column IFL added or removed that SMS does not read (the fingerprint of the columns SMS reads is unchanged, so ingestion continues); the finding names the columns (roadmap Phase 2, 14 Sep 2026) |
 | `station_not_in_roster` | WARNING | readings from a machine number the line has no station for — a winder added at the plant but not yet in Setup › Machines, or a source table that belongs to another line. One finding per (machine number, source table, generation); the readings are kept, not dropped (roadmap Phase 1, 14 Sep 2026) |
 | `merge_key_collision` | INFO | rows sharing a non-unique merge key, checked against already-ingested history as well as within the batch |
 

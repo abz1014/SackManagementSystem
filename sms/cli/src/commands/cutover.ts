@@ -36,7 +36,7 @@
  */
 import mssql from 'mssql';
 import { loadSourceTables, resetTransformWatermarks, TABLE_KINDS, TABLE_SHAPES } from '@sms/sync-worker';
-import { openContext, parseArgs } from '../context.js';
+import { openContext, parseArgs, cliLog } from '../context.js';
 
 /** Canonical + raw tables, cleared in FK-free dependency order (canonical first). */
 const CANONICAL = ['sms.cone_event', 'sms.sack_event', 'sms.reject_event'] as const;
@@ -137,6 +137,7 @@ export async function cutover(argv: string[]): Promise<number> {
     return 0;
   } catch (err) {
     console.error(`cutover failed: ${err instanceof Error ? err.message : String(err)}`);
+    cliLog.error('cutover failed', { error: err instanceof Error ? err.message : String(err) });
     return 1;
   } finally {
     await ctx.close();

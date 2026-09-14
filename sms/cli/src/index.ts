@@ -7,6 +7,7 @@ import { rebuild } from './commands/rebuild.js';
 import { cutover } from './commands/cutover.js';
 import { epochList, epochAccept, epochPurge, epochDrop } from './commands/epoch.js';
 import { userCreate } from './commands/user.js';
+import { cliLog } from './context.js';
 
 function help(): void {
   console.log(`sms — Sack Management System CLI
@@ -68,6 +69,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  // Human-readable on stderr as before, AND one structured line (Phase 2
+  // item 6) so a CLI failure in a scheduled task lands in the same log
+  // shape as the worker's.
   console.error('cli error:', err instanceof Error ? err.message : err);
+  cliLog.error('cli command failed', { command: process.argv[2] ?? null, error: err instanceof Error ? err.message : String(err) });
   process.exit(1);
 });

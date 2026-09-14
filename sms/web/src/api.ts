@@ -547,6 +547,42 @@ export interface RegisterRow {
   lot_code: string | null;
   merge_key_is_unique: boolean;
   production_ts_is_insert_time?: boolean;
+  /**
+   * Where the row came from (roadmap Phase 3, 14 Sep 2026). Optional because
+   * an API built before it answers without one, and the sheet then says "not
+   * available" rather than reconstructing lineage from the loose columns.
+   */
+  provenance?: Provenance;
+}
+
+/* Roadmap Phase 3 (14 Sep 2026): lineage reachable by a person. The canonical
+   row already held every one of these facts, but `ingest_run_id` was a UUID
+   minted per transform pass that joined to nothing, and no endpoint exposed
+   raw_id — so "where did this reading come from" was answerable only in SQL
+   on the plant PC. Mirrors shared/src/domain/canonical.ts's Provenance plus
+   the joined epoch label and source table, by name. */
+export type AttributionMethod = 'none' | 'source_column' | 'manual_entry';
+export type AttributionConfidence = 'high' | 'low' | 'ambiguous';
+export interface Provenance {
+  /** sms.data_source.system_code the row was read through — 'ifl_sql' today. */
+  sourceSystem: string;
+  /** dbo.<name> in the source database, e.g. pack1_TP1U2. */
+  sourceTable: string;
+  /** The generation of that table the row was read from. Beside sourceRowId on purpose: the id alone names two rows since 5 Aug 2026. */
+  epochLabel: string | null;
+  sourceRowId: number | string | null;
+  rawId: number | string | null;
+  /** IFL's own insert time (their `Date` column) — PLANT clock labelled UTC, like every production timestamp. */
+  sourceInsertUtc: string | null;
+  /** When the sync worker read the raw row — a GENUINE UTC instant, five hours from the plant clock here. */
+  ingestedAtUtc: string | null;
+  /** sms.sync_run.run_id of the pass that read it. */
+  ingestRunId: string | null;
+  transformVersion: number | null;
+  attributionMethod: AttributionMethod | null;
+  attributionConfidence: AttributionConfidence | null;
+  /** The night rule the row's shift_date was stamped under (migration 023). */
+  nightBelongsTo: NightBelongsTo | null;
 }
 
 export interface RegisterPage {
@@ -923,6 +959,25 @@ export interface ShiftRuleRegimes {
   mixed: boolean;
 }
 
+/**
+ * The acquisition source as the worker last saw it (roadmap Phase 2, 14 Sep
+ * 2026). Derived server-side from sync_run rows: the worker probes the plant
+ * connection once at the start of every pass, and a halted table's row
+ * carries the reason in the worker's own words — which name the fix (the
+ * `sms epoch:accept` line for a new generation, the .env keys for a wrong
+ * database). The screen prints that reason verbatim rather than translating
+ * it, because the translation is what used to lose the command.
+ */
+export interface OperationsSource {
+  /** null = no pass has recorded a probe yet. */
+  lastProbeOk: boolean | null;
+  lastProbeAtUtc: string | null;
+  lastProbeMs?: number | null;
+  lastHalt: { table: string; reason: string; atUtc: string } | null;
+  /** Target tables whose latest pass halted (outcome 'halted', not 'failed'). */
+  halted: string[];
+}
+
 export interface OperationsData {
   sync: SyncStatus[];
   /** Non-empty only when a rebuild is due — see Setup's Sync health block. */
@@ -934,6 +989,8 @@ export interface OperationsData {
     bySeverity: Record<string, number>;
     findings: DqFinding[];
   };
+  /** Absent from an API built before Phase 2; the screen then says nothing about the probe. */
+  source?: OperationsSource;
 }
 export function getOperations(): Promise<Envelope<OperationsData>> {
   return get('/api/operations');

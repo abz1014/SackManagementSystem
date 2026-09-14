@@ -53,6 +53,10 @@ export function SourcesBlock() {
           </tbody>
         </table>
       </div>
+      {/* What the Enabled toggle does, once, under the table — beside each
+          switch it would be the overflow IFL objected to (roadmap Phase 2,
+          14 Sep 2026). */}
+      <p className="mut sm" style={{ marginTop: 10, maxWidth: '78ch' }}>{W.config.sources.disabledNotRead}</p>
 
       <p style={{ marginTop: 24, marginBottom: 10, fontWeight: 500 }}>{W.config.sources.tablesTitle}</p>
       <div className="tw">

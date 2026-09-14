@@ -5,10 +5,10 @@ import { randomUUID } from 'node:crypto';
 import type { SyncConfig } from './config.js';
 import { seedReference } from './seed/seedReference.js';
 import { seedProducts } from './seed/seedProducts.js';
-import { runOnce, type TableOutcome } from './runner.js';
+import { runOnce, probeSource, TableHaltsError, type TableOutcome } from './runner.js';
 import { runTransform, type TransformOutcome } from './transform/runTransform.js';
 import { withTransformLock } from './lock.js';
-import { fallbackHaltTargets, rawShortName } from './reader/iflTables.js';
+import { fallbackHaltTargets, rawShortName, type IflTableDef } from './reader/iflTables.js';
 import { loadSourceTables } from './reader/sourceTables.js';
 import { recordHaltedRun } from './store.js';
 import { clearFindings, persistFindings } from './transform/dq.js';
@@ -18,6 +18,8 @@ export interface FullSyncResult {
   transform: TransformOutcome[];
   /** Set when the PDAS product mirror failed this pass. Ingestion still ran. */
   productMirrorError: string | null;
+  /** Round trip of the source probe that opened the pass (roadmap Phase 2 item 5). */
+  sourceProbeMs: number;
 }
 
 /** Check names of the worker's own state findings, cleared when the state clears. */
@@ -72,6 +74,31 @@ export async function runFullSync(
   iflPool: ConnectionPool,
   cfg: SyncConfig,
 ): Promise<FullSyncResult> {
+  // ---- source probe (roadmap Phase 2 item 5) ---------------------------------
+  // One round trip before any table is approached: is the source there, does
+  // the login work, can it see the catalogue. A failure here is a PASS-level
+  // halt — every table gets the row, with the classification in front of the
+  // driver's message — because nothing per-table has been established yet.
+  // The tables are loaded only to know which adapter to probe through; if
+  // they cannot be loaded, runOnce records that halt itself, so the probe is
+  // skipped rather than duplicating it.
+  let sourceProbeMs = 0;
+  let configured: IflTableDef[] | null = null;
+  try {
+    configured = await loadSourceTables(appPool, cfg.lineId);
+  } catch {
+    configured = null;
+  }
+  if (configured) {
+    const probe = await probeSource(iflPool, configured);
+    if (!probe.ok) {
+      const err = new Error(`[${probe.classification}] source probe failed: ${probe.error}`);
+      await recordPassHalt(appPool, cfg, 'source probe', err);
+      throw err;
+    }
+    sourceProbeMs = probe.roundTripMs;
+  }
+
   try {
     await seedReference(appPool, cfg);
   } catch (err) {
@@ -109,7 +136,20 @@ export async function runFullSync(
     ]);
   }
 
-  const reader = await runOnce(appPool, iflPool, cfg);
+  // ---- reader, with per-table isolation (roadmap Phase 2 item 3) -------------
+  // A halted table no longer stops the pass: runOnce writes its halt row,
+  // reads the rest, and throws TableHaltsError carrying what DID sync. The
+  // transform runs on that, and the aggregate is rethrown afterwards so the
+  // log and the CLI still report the pass as not clean.
+  let reader: TableOutcome[];
+  let readerHalts: TableHaltsError | null = null;
+  try {
+    reader = await runOnce(appPool, iflPool, cfg);
+  } catch (err) {
+    if (!(err instanceof TableHaltsError) || err.outcomes.length === 0) throw err;
+    reader = err.outcomes;
+    readerHalts = err;
+  }
 
   // Mutually exclusive with `sms rebuild` (finding C1, Sep 2026 audit): both
   // write the same canonical tables and transform watermarks, and nothing
@@ -140,5 +180,10 @@ export async function runFullSync(
     ]);
     throw err;
   }
-  return { reader, transform, productMirrorError };
+  const result: FullSyncResult = { reader, transform, productMirrorError, sourceProbeMs };
+  if (readerHalts) {
+    readerHalts.partial = result;
+    throw readerHalts;
+  }
+  return result;
 }

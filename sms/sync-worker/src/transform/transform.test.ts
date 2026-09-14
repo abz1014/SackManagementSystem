@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_SHIFT_BOUNDARIES, type ShiftBoundaries } from '@sms/shared';
 import { wallClockOf, shiftCodeOf, shiftDateOf, normalizeLegacyShift } from './wallClock.js';
-import { assignMergeKeys, mapCone, mapSack, mapReject, type TransformRules } from './transform.js';
+import { assignMergeKeys, attribution, mapCone, mapSack, mapReject, type TransformRules } from './transform.js';
 
 // mssql with useUTC=true returns a stored '2026-07-10 11:23:10' as this Date:
 const dt = (iso: string) => new Date(iso + 'Z'); // wall clock as UTC
@@ -57,6 +57,8 @@ describe('wallClock (tz-safe shift derivation)', () => {
 describe('mappers stamp the shift from the rule they are handed', () => {
   const raw = {
     raw_id: 7,
+    ingest_run_id: '2f1c9e1a-6f1b-4a3c-9d2e-1c0b4a8e7f00',
+    read_at_utc: dt('2026-07-10T02:50:00'),
     src_id: 7,
     source_epoch: 9,
     src_Date: dt('2026-07-10T07:48:00'),
@@ -77,11 +79,11 @@ describe('mappers stamp the shift from the rule they are handed', () => {
   const eightOclock: ShiftBoundaries = { morningStart: 8 * 60, eveningStart: 16 * 60, nightStart: 23 * 60 };
 
   it("a 07:30 cone is 'morning' under 06/14/22 and 'night' under a rule whose morning starts at 08:00", () => {
-    const seed = mapCone(raw, rulesWith(B), 'run');
+    const seed = mapCone(raw, rulesWith(B));
     expect(seed.shift_code).toBe('morning');
     expect(seed.shift_date.toISOString().slice(0, 10)).toBe('2026-07-10');
 
-    const late = mapCone(raw, rulesWith(eightOclock), 'run');
+    const late = mapCone(raw, rulesWith(eightOclock));
     expect(late.shift_code).toBe('night');
     // start_day: the night that began on the 9th
     expect(late.shift_date.toISOString().slice(0, 10)).toBe('2026-07-09');
@@ -89,20 +91,82 @@ describe('mappers stamp the shift from the rule they are handed', () => {
   });
 
   it('sacks and rejects follow the same rule', () => {
-    expect(mapSack(raw, rulesWith(B), 'run').shift_code).toBe('morning');
-    expect(mapSack(raw, rulesWith(eightOclock), 'run').shift_code).toBe('night');
-    expect(mapReject(raw, 'quality', rulesWith(B), 'run').shift_code).toBe('morning');
-    expect(mapReject(raw, 'weight', rulesWith(eightOclock), 'run').shift_code).toBe('night');
+    expect(mapSack(raw, rulesWith(B)).shift_code).toBe('morning');
+    expect(mapSack(raw, rulesWith(eightOclock)).shift_code).toBe('night');
+    expect(mapReject(raw, 'quality', rulesWith(B)).shift_code).toBe('morning');
+    expect(mapReject(raw, 'weight', rulesWith(eightOclock)).shift_code).toBe('night');
   });
 
   it("source_system is the configured system code, not a literal", () => {
-    expect(mapCone(raw, rulesWith(B, 'plant_sql'), 'run').source_system).toBe('plant_sql');
-    expect(mapSack(raw, rulesWith(B, 'plant_sql'), 'run').source_system).toBe('plant_sql');
-    expect(mapReject(raw, 'quality', rulesWith(B, 'plant_sql'), 'run').source_system).toBe('plant_sql');
+    expect(mapCone(raw, rulesWith(B, 'plant_sql')).source_system).toBe('plant_sql');
+    expect(mapSack(raw, rulesWith(B, 'plant_sql')).source_system).toBe('plant_sql');
+    expect(mapReject(raw, 'quality', rulesWith(B, 'plant_sql')).source_system).toBe('plant_sql');
   });
 
   it('line_id is the configured line, never read from the row (finding M3)', () => {
-    expect(mapCone({ ...raw, line_id: 99 }, { ...rulesWith(B), lineId: 2 }, 'run').line_id).toBe(2);
+    expect(mapCone({ ...raw, line_id: 99 }, { ...rulesWith(B), lineId: 2 }).line_id).toBe(2);
+  });
+
+  /**
+   * Provenance is COPIED from the raw row (roadmap Phase 3 item 2): the raw
+   * row's ingest_run_id IS sms.sync_run.run_id, and its read_at_utc is when
+   * SMS read it. A transform-minted UUID joined to nothing (migration 029).
+   */
+  describe('provenance comes from the raw row, never minted', () => {
+    it('ingest_run_id and ingested_at_utc are the raw row\'s own, on all three kinds', () => {
+      for (const row of [mapCone(raw, rulesWith(B)), mapSack(raw, rulesWith(B)), mapReject(raw, 'quality', rulesWith(B))]) {
+        expect(row.ingest_run_id).toBe('2f1c9e1a-6f1b-4a3c-9d2e-1c0b4a8e7f00');
+        expect(row.ingested_at_utc).toEqual(dt('2026-07-10T02:50:00'));
+        expect(row.raw_id).toBe(7);
+        expect(row.source_row_id).toBe(7);
+        expect(row.transform_version).toBe(2);
+      }
+    });
+
+    it('ingest_ts_utc stays IFL\'s insert time — a different clock from ingested_at_utc', () => {
+      const c = mapCone(raw, rulesWith(B));
+      expect(c.ingest_ts_utc).toEqual(dt('2026-07-10T07:48:00'));
+      expect(c.ingested_at_utc).not.toEqual(c.ingest_ts_utc);
+    });
+
+    it('refuses a raw row without ingest_run_id rather than inventing one', () => {
+      const { ingest_run_id: _omit, ...noRun } = raw;
+      expect(() => mapCone(noRun, rulesWith(B))).toThrow(/raw row 7 has no ingest_run_id/);
+      expect(() => mapReject(noRun, 'weight', rulesWith(B))).toThrow(/ingest_run_id/);
+    });
+
+    it('a raw row read before migration 029\'s columns existed cannot occur, but a null read_at_utc is carried as null', () => {
+      expect(mapSack({ ...raw, read_at_utc: null }, rulesWith(B)).ingested_at_utc).toBeNull();
+    });
+  });
+
+  /**
+   * Attribution (roadmap Phase 3 item 2): from the row's own MaterialId,
+   * 'source_column'/'high'; without one, honestly 'none'. Rejects follow the
+   * same rule as cones since migration 029 — they carried the material id
+   * and no method for three weeks.
+   */
+  describe('attribution from MaterialId, on cones AND rejects', () => {
+    it("a MaterialId gives 'source_column' with 'high' confidence", () => {
+      expect(attribution(21)).toEqual({ material_id: 21, attribution_method: 'source_column', attribution_confidence: 'high' });
+      const cone = mapCone(raw, rulesWith(B));
+      expect([cone.material_id, cone.attribution_method, cone.attribution_confidence]).toEqual([21, 'source_column', 'high']);
+      const q = mapReject(raw, 'quality', rulesWith(B));
+      expect([q.material_id, q.attribution_method, q.attribution_confidence]).toEqual([21, 'source_column', 'high']);
+      const w = mapReject(raw, 'weight', rulesWith(B));
+      expect([w.material_id, w.attribution_method, w.attribution_confidence]).toEqual([21, 'source_column', 'high']);
+    });
+
+    it("no MaterialId (a pre-August row), or the 0 the clock-fault row carries, is 'none' with no confidence", () => {
+      for (const id of [null, undefined, 0, -1]) {
+        expect(attribution(id)).toEqual({ material_id: null, attribution_method: 'none', attribution_confidence: null });
+      }
+      const cone = mapCone({ ...raw, src_MaterialId: null }, rulesWith(B));
+      expect([cone.material_id, cone.attribution_method, cone.attribution_confidence]).toEqual([null, 'none', null]);
+      const rej = mapReject({ ...raw, src_MaterialId: 0 }, 'quality', rulesWith(B));
+      expect([rej.material_id, rej.attribution_method, rej.attribution_confidence]).toEqual([null, 'none', null]);
+      expect(mapSack({ ...raw, src_MaterialId: undefined }, rulesWith(B)).attribution_method).toBe('none');
+    });
   });
 });
 

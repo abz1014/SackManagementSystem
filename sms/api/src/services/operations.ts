@@ -100,18 +100,64 @@ export interface ShiftRuleRegimes {
   mixed: boolean;
 }
 
+/**
+ * The state of the SOURCE connection as the worker last reported it, read
+ * from `sms.sync_run` (roadmap Phase 2 item 5, 14 Sep 2026). This API has no
+ * connection to IFL's database at all, so everything here is second-hand:
+ * the worker probes the source at the start of every pass and, when the
+ * probe fails, writes one pass-level 'halted' row per table whose error_text
+ * names the probe. Until this block the Setup screen could show that four
+ * tables did not sync but not whether it was the connection or one table's
+ * generation that stopped them.
+ *
+ *  - `lastProbeOk`: false when the newest pass carries a probe-failure halt,
+ *    true when the newest pass has rows and none of them is one, null when
+ *    sync_run is empty (nothing has ever run). The newest pass is the run_id
+ *    of the newest row by started_at_utc.
+ *  - `lastProbeAtUtc`: when that pass began — the probe runs first.
+ *  - `lastProbeMs`: always null from this API — the worker logs the probe's
+ *    round-trip in its pass summary (`sourceProbeMs`) but sync_run has no
+ *    column for it, and inventing one is a schema change for a number the
+ *    log already holds. Kept in the shape so the screen's type matches the
+ *    build contract.
+ *  - `lastHalt`: the newest 'halted' or 'failed' row — table, reason, when.
+ *  - `halted`: every table whose LATEST row is 'halted' or 'failed', i.e. the
+ *    tables that are not currently syncing. Empty when all are healthy.
+ */
+export interface SourceStatus {
+  lastProbeOk: boolean | null;
+  lastProbeAtUtc: string | null;
+  lastProbeMs: number | null;
+  lastHalt: { table: string; reason: string; atUtc: string } | null;
+  halted: string[];
+}
+
 export interface OperationsData {
   sync: SyncStatus[];
   /** Non-empty only when at least one table is mixed — a rebuild is due. */
   shiftRuleRegimes: ShiftRuleRegimes[];
   lifetime: SyncLifetime;
   schema: SchemaEpoch[];
+  source: SourceStatus;
   dq: {
     latestRunId: string | null;
     bySeverity: Record<string, number>;
     findings: { checkName: string; severity: string; subjectTable: string | null; detail: string | null }[];
   };
 }
+
+/**
+ * How a probe-failure halt row is recognised. The worker writes the reason
+ * as `source probe failed: <classification>: <message>`; when it goes through
+ * the pass-level halt helper the text is framed as "Pass halted at source
+ * probe, before any table was read. …" instead. A contains-match catches
+ * both framings; a starts-with would silently miss the second and report the
+ * probe as fine while every table sat halted on it.
+ */
+export const PROBE_HALT_PATTERN = '%source probe%';
+
+/** Outcomes that mean "this table is not syncing" — see store.ts's recordHaltedRun for the distinction. */
+const NOT_SYNCING = new Set(['halted', 'failed']);
 
 export async function getOperations(pool: ConnectionPool, lineId: number): Promise<OperationsData> {
   // latest sync_run per target_table
@@ -128,6 +174,8 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     rows_written: number;
     finished_at_utc: Date | null;
     age_seconds: number | null;
+    started_at_utc: Date;
+    error_text: string | null;
   }>(`
     WITH latest AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY target_table ORDER BY sync_run_id DESC) rn
@@ -135,10 +183,52 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     )
     SELECT l.target_table, l.outcome, l.watermark_from, l.watermark_to, l.source_epoch, ep.label AS epoch_label,
            l.rows_read, l.rows_written, l.finished_at_utc,
-           DATEDIFF(SECOND, l.finished_at_utc, SYSUTCDATETIME()) AS age_seconds
+           DATEDIFF(SECOND, l.finished_at_utc, SYSUTCDATETIME()) AS age_seconds,
+           l.started_at_utc, l.error_text
     FROM latest l LEFT JOIN sms.source_epoch ep ON ep.epoch_id = l.source_epoch
     WHERE l.rn=1 ORDER BY l.target_table
   `);
+
+  // The source block (SourceStatus). Two more reads over sync_run, both
+  // seeks on IX_sync_run_line_started: the newest pass's rows, and the newest
+  // row that is a halt. `halted` needs no query of its own — it is the latest
+  // rows above whose outcome says the table is not syncing.
+  const probe = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('probe', mssql.NVarChar(64), PROBE_HALT_PATTERN)
+    .query<{ n: number; probe_failed: number; started_at_utc: Date | null }>(`
+    WITH newest AS (
+      SELECT TOP 1 run_id FROM sms.sync_run WHERE line_id = @line
+      ORDER BY started_at_utc DESC, sync_run_id DESC
+    )
+    SELECT COUNT(*) AS n,
+           SUM(CASE WHEN r.outcome = 'halted' AND r.error_text LIKE @probe THEN 1 ELSE 0 END) AS probe_failed,
+           MIN(r.started_at_utc) AS started_at_utc
+    FROM sms.sync_run r JOIN newest ON newest.run_id = r.run_id
+    WHERE r.line_id = @line
+  `);
+  const pr = probe.recordset[0];
+  const halt = await pool.request().input('line', mssql.Int, lineId).query<{
+    target_table: string;
+    started_at_utc: Date;
+    error_text: string | null;
+  }>(`
+    SELECT TOP 1 target_table, started_at_utc, error_text
+    FROM sms.sync_run WHERE line_id = @line AND outcome IN ('halted', 'failed')
+    ORDER BY sync_run_id DESC
+  `);
+  const h0 = halt.recordset[0];
+  const newestPassRows = Number(pr?.n ?? 0);
+  const source: SourceStatus = {
+    lastProbeOk: newestPassRows === 0 ? null : Number(pr?.probe_failed ?? 0) === 0,
+    lastProbeAtUtc: newestPassRows > 0 && pr?.started_at_utc ? new Date(pr.started_at_utc).toISOString() : null,
+    lastProbeMs: null,
+    lastHalt: h0
+      ? { table: h0.target_table, reason: h0.error_text ?? '', atUtc: new Date(h0.started_at_utc).toISOString() }
+      : null,
+    halted: sync.recordset.filter((r) => NOT_SYNCING.has(r.outcome)).map((r) => r.target_table),
+  };
 
   // Lifetime roll-up: one pass writes one row per table, so passes and
   // table-runs are counted separately rather than conflated. Plain aggregates
@@ -295,6 +385,7 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
       ageSeconds: r.age_seconds,
     })),
     schema,
+    source,
     dq: { latestRunId, bySeverity, findings },
   };
 }

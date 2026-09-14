@@ -13,11 +13,19 @@
  *   no_station              WARNING   no usable station id (the source sent 0)
  *   station_not_in_roster   WARNING   a machine number that is not a station on the line — one per
  *                                     (machine, source table, generation), see stationRosterFindings
+ *   source_columns_changed  WARNING   epoch.ts: the source table's FULL column list differs from the
+ *                                     one recorded when the generation was accepted; non-fatal
  *   merge_key_collision     INFO      rows sharing a non-unique merge key (DQ-2)
  *   raw_read_without_write  ERROR     runner.ts: a beyond-overlap batch that wrote nothing (id reuse)
  *   transform_zero_write    CRITICAL  runTransform.ts: fresh rows the insert did not land
  *   product_mirror_failed   ERROR     pipeline.ts (state): the PDAS mirror is failing; cleared when it succeeds
  *   transform_failed        CRITICAL  pipeline.ts (state): raw arrives, canonical does not; cleared on success
+ *
+ * `subject_ref` (roadmap Phase 3 item 3, 14 Sep 2026): a finding about ROWS
+ * names the raw_id of the first offending one, so an operator can go from
+ * "2 rows timestamped 27h behind" to the reading itself without re-running
+ * the check by hand. The count stays in `count`; the ref is one row, the
+ * first in ingest order, which for a clock fault is the one to look at.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
@@ -33,6 +41,7 @@ export const CHECK_NAMES = [
   'outlier_weight',
   'no_station',
   'station_not_in_roster',
+  'source_columns_changed',
   'merge_key_collision',
   'raw_read_without_write',
   'transform_zero_write',
@@ -56,12 +65,16 @@ export interface Finding {
   subject_table: string | null;
   count: number;
   detail: string;
+  /** raw_id of the first offending row, when the finding concerns rows. */
+  subject_ref?: number | null;
 }
 
 interface Weighted {
   production_ts_utc_ms: number;
   merge_key_is_unique?: boolean;
   source_station?: number | null;
+  /** Present on transform rows; the first offender's is written as subject_ref. */
+  raw_id?: number;
 }
 
 /**
@@ -110,31 +123,60 @@ export function computeFindings<T extends Weighted>(
   let outlier = 0;
   let collision = 0;
   const outlierThreshold = kind === 'sack' ? 40 : 1500; // kg for sacks, g for cones
+  // The first offending row of each check, by raw_id — subject_ref (Phase 3).
+  const first: Record<string, number | null> = {};
+  const note = (check: string, r: Weighted) => {
+    if (!(check in first)) first[check] = r.raw_id == null ? null : Number(r.raw_id);
+  };
 
   for (const r of rows) {
-    if (r.production_ts_utc_ms > nowMs) future++;
+    if (r.production_ts_utc_ms > nowMs) {
+      future++;
+      note('future_timestamp', r);
+    }
     // rows arrive in source-id order, so a reading far behind the running
     // maximum is a clock fault rather than ordinary buffering jitter
     if (runningMaxMs > -Infinity && runningMaxMs - r.production_ts_utc_ms > STALE_TS_LAG_MS) {
       stale++;
       worstLagMs = Math.max(worstLagMs, runningMaxMs - r.production_ts_utc_ms);
+      note('stale_timestamp', r);
     }
     if (r.production_ts_utc_ms > runningMaxMs) runningMaxMs = r.production_ts_utc_ms;
-    if (r.merge_key_is_unique === false) collision++;
+    if (r.merge_key_is_unique === false) {
+      collision++;
+      note('merge_key_collision', r);
+    }
     // normalised to null upstream when the source sent 0 or negative; counted
     // so a run of unattributable readings is visible rather than just absent
     // from every station chart
-    if ('source_station' in r && r.source_station == null) noStation++;
+    if ('source_station' in r && r.source_station == null) {
+      noStation++;
+      note('no_station', r);
+    }
     const w = weightOf(r);
     if (w != null) {
-      if (w <= 0) nonPositive++;
-      else if (w < outlierThreshold) outlier++;
+      if (w <= 0) {
+        nonPositive++;
+        note('nonpositive_weight', r);
+      } else if (w < outlierThreshold) {
+        outlier++;
+        note('outlier_weight', r);
+      }
     }
   }
 
   const findings: Finding[] = [];
   const add = (check: string, sev: Severity, count: number, detail: string) => {
-    if (count > 0) findings.push({ check_name: check, severity: sev, subject_table: table, count, detail });
+    if (count > 0) {
+      findings.push({
+        check_name: check,
+        severity: sev,
+        subject_table: table,
+        count,
+        detail,
+        subject_ref: first[check] ?? null,
+      });
+    }
   };
   add('future_timestamp', 'ERROR', future, `${future} rows with production time in the future`);
   add(
@@ -186,18 +228,21 @@ export interface StationRoster {
  * `subject_table` is the RAW table's short name ('cone_raw'), by contract: the
  * finding is about what the source sent, not about the canonical row.
  */
-export function stationRosterFindings<T extends { source_station?: number | null; source_epoch: number }>(
+export function stationRosterFindings<
+  T extends { source_station?: number | null; source_epoch: number; raw_id?: number },
+>(
   rows: T[],
   roster: StationRoster,
   rawTableShort: string,
   sourceTable: string,
 ): Finding[] {
-  const counts = new Map<string, { machine: number; epoch: number; n: number }>();
+  const counts = new Map<string, { machine: number; epoch: number; n: number; first: number | null }>();
   for (const r of rows) {
     const m = r.source_station;
     if (m == null || roster.stations.has(m)) continue;
     const k = `${r.source_epoch}|${m}`;
-    const c = counts.get(k) ?? { machine: m, epoch: r.source_epoch, n: 0 };
+    const c =
+      counts.get(k) ?? { machine: m, epoch: r.source_epoch, n: 0, first: r.raw_id == null ? null : Number(r.raw_id) };
     c.n += 1;
     counts.set(k, c);
   }
@@ -211,6 +256,7 @@ export function stationRosterFindings<T extends { source_station?: number | null
       detail:
         `machine number ${c.machine} observed in ${sourceTable} (generation ${c.epoch}) is not a ` +
         `station on line ${roster.lineId} — add it in Setup › Machines`,
+      subject_ref: c.first,
     }));
 }
 
@@ -239,16 +285,20 @@ export async function persistFindings(
     // the table by thousands of identical rows a day (4 tables x 1,440 passes).
     // Migration 016 cleaned that up once; this stops it recurring. The
     // standing state is what the Operations screen shows, not a tally.
+    // subject_ref is written but NOT part of the dedupe key: the finding is
+    // about a standing condition ("rows behind their neighbours"), and the
+    // first row that raised it is a pointer, not a second identity.
     await pool
       .request()
       .input('run', mssql.UniqueIdentifier, runId)
       .input('check', mssql.VarChar(64), f.check_name)
       .input('sev', mssql.VarChar(10), f.severity)
       .input('tbl', mssql.VarChar(40), f.subject_table)
+      .input('ref', mssql.BigInt, f.subject_ref ?? null)
       .input('detail', mssql.NVarChar(500), f.detail)
       .query(
-        `INSERT INTO sms.dq_finding (run_id, check_name, severity, subject_table, detail)
-         SELECT @run, @check, @sev, @tbl, @detail
+        `INSERT INTO sms.dq_finding (run_id, check_name, severity, subject_table, subject_ref, detail)
+         SELECT @run, @check, @sev, @tbl, @ref, @detail
           WHERE NOT EXISTS (
             SELECT 1 FROM sms.dq_finding
              WHERE check_name = @check

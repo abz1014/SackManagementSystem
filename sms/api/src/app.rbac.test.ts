@@ -153,9 +153,11 @@ beforeAll(async () => {
   // doesn't fully understand (e.g. getWeights expects a populated stats
   // shape) and 500 via app.ts's error handler — expected and asserted on
   // (500 is neither 401 nor 403, which is the only thing this file checks),
-  // but it logs via console.error. Quiet that expected noise; a genuine
+  // but it logs — one JSON line on stdout per refused request and per 500
+  // since 14 Sep 2026 (api/src/log.ts). Quiet that expected noise; a genuine
   // assertion failure still surfaces through vitest's own reporting, not this.
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  // The logger's own shape is asserted in app.log.test.ts.
+  vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as typeof process.stdout.write);
 
   const db = new FakeDb();
   const hash = await argon2.hash(PASSWORD);

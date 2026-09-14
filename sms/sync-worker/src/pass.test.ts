@@ -3,9 +3,13 @@
  * before its try/finally, so when the IFL open threw the app pool was never
  * closed — once per tick, for as long as the source stayed unreachable.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { runPass, type PassDeps } from './pass.js';
+
+beforeEach(() => {
+  vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as never);
+});
 
 const cfg = { app: { database: 'sms' }, iflData: { database: 'DATA_TP1U2' } } as never;
 
@@ -25,7 +29,7 @@ function deps(over: Partial<PassDeps> = {}): PassDeps & { app: FakePool; ifl: Fa
     app,
     ifl,
     createPool: vi.fn(async (c: { database: string }) => asPool(c.database === 'sms' ? app : ifl)),
-    runFullSync: vi.fn(async () => ({ reader: [], transform: [], productMirrorError: null })),
+    runFullSync: vi.fn(async () => ({ reader: [], transform: [], productMirrorError: null, sourceProbeMs: 1 })),
     recordPassHalt: vi.fn(async () => undefined),
     ...over,
   };
@@ -98,4 +102,42 @@ describe('runPass — pools are closed on every path', () => {
     const order = (d.createPool as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[0] as { database: string }).database);
     expect(order).toEqual(['sms', 'DATA_TP1U2']);
   });
+});
+
+/**
+ * The source connect has the reader's retry policy (roadmap Phase 2 item 2):
+ * three attempts for a transient failure, one for anything else — and the
+ * halt row carries the failure's class in front of the message.
+ */
+describe('runPass — the source connection is retried only when transient', () => {
+  it('a refused login is tried once and recorded as [auth]', async () => {
+    const d = deps();
+    const app = d.app;
+    const connect = vi.fn(async (c: { database: string }) => {
+      if (c.database === 'sms') return asPool(app);
+      throw Object.assign(new Error('Login failed for user sms_readonly'), { code: 'ELOGIN' });
+    });
+    d.createPool = connect;
+    await expect(runPass(cfg, d)).rejects.toThrow(/Login failed/);
+    expect(connect.mock.calls.filter((c) => c[0].database === 'DATA_TP1U2')).toHaveLength(1);
+    const err = (d.recordPassHalt as ReturnType<typeof vi.fn>).mock.calls[0]![3] as Error;
+    expect(err.message).toBe('[auth] Login failed for user sms_readonly');
+  });
+
+  it('a dropped socket is retried and the pass proceeds once it connects', async () => {
+    const d = deps();
+    const app = d.app;
+    const ifl = d.ifl;
+    let iflAttempts = 0;
+    d.createPool = vi.fn(async (c: { database: string }) => {
+      if (c.database === 'sms') return asPool(app);
+      iflAttempts++;
+      if (iflAttempts < 2) throw Object.assign(new Error('socket hang up'), { code: 'ESOCKET' });
+      return asPool(ifl);
+    });
+    await runPass(cfg, d);
+    expect(iflAttempts).toBe(2);
+    expect(d.runFullSync).toHaveBeenCalledTimes(1);
+    expect(d.recordPassHalt).not.toHaveBeenCalled();
+  }, 10_000);
 });

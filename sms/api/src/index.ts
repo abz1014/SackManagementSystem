@@ -5,6 +5,7 @@ import { loadDotEnv, createPool } from '@sms/sync-worker';
 import { loadApiConfig } from './config.js';
 import { createApp } from './app.js';
 import { plantOffsetMinutes } from './services/plantClock.js';
+import { log } from './log.js';
 
 /**
  * Cross-checks PLANT_UTC_OFFSET_MINUTES (if set) against this process's own
@@ -18,11 +19,14 @@ function checkPlantOffset(expectedMinutes: number | undefined): void {
   if (expectedMinutes == null) return;
   const actual = plantOffsetMinutes();
   if (actual !== expectedMinutes) {
-    console.error(
-      `[plantClock] WARNING: this host's OS timezone reports a UTC offset of ${actual} minutes, ` +
+    // One JSON line since 14 Sep 2026 (roadmap Phase 2 item 6); the three
+    // numbers are fields so a monitor can alert on `offsetMismatchMinutes`.
+    log.warn(
+      `plantClock: this host's OS timezone reports a UTC offset of ${actual} minutes, ` +
         `but PLANT_UTC_OFFSET_MINUTES says the plant is at ${expectedMinutes}. Every production/app-time ` +
         `comparison in this app (product changeovers, calibration adjustments, live status) will be off by ` +
         `${actual - expectedMinutes} minutes until this host's timezone matches the plant's.`,
+      { hostOffsetMinutes: actual, plantOffsetMinutes: expectedMinutes, offsetMismatchMinutes: actual - expectedMinutes },
     );
   }
 }
@@ -43,16 +47,16 @@ async function main(): Promise<void> {
       : null;
   if (tlsOptions) {
     createHttpsServer(tlsOptions, app).listen(cfg.port, () => {
-      console.log(`api listening on https://localhost:${cfg.port} (db=${cfg.appDb.database})`);
+      log.info(`api listening on https://localhost:${cfg.port} (db=${cfg.appDb.database})`, { port: cfg.port, tls: true, db: cfg.appDb.database });
     });
   } else {
     app.listen(cfg.port, () => {
-      console.log(`api listening on http://localhost:${cfg.port} (db=${cfg.appDb.database})`);
+      log.info(`api listening on http://localhost:${cfg.port} (db=${cfg.appDb.database})`, { port: cfg.port, tls: false, db: cfg.appDb.database });
     });
   }
 }
 
 main().catch((err) => {
-  console.error('api failed to start:', err instanceof Error ? err.message : err);
+  log.error('api failed to start', { err: err instanceof Error ? err : { message: String(err) } });
   process.exit(1);
 });

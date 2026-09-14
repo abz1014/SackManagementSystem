@@ -18,16 +18,21 @@
  *    the count between two consecutive sacks has been measured anywhere from
  *    0 to 254.
  *  - Provenance lives behind a disclosure, for the one reader in a hundred who
- *    wants to know where the row came from.
+ *    wants to know where the row came from — and since roadmap Phase 3 (14
+ *    Sep 2026) it answers the question in full: source table and generation,
+ *    the plant's row id, when the plant wrote it and when this system read
+ *    it, the transform version, and how the product was determined. Every
+ *    line prints a field the server sent; nothing is reconstructed here.
  */
 import { useEffect, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Details, Loading } from '../ui/bits';
 import { W } from '../lib/words';
-import { fmtClock, fmtDayLong, fmtG, fmtKg } from '../lib/fmt';
+import { fmtAppInstant, fmtClock, fmtClockSec, fmtDayLong, fmtG, fmtKg } from '../lib/fmt';
+import { describeAttribution } from '../lib/provenance';
 import {
   getEventDetail, getEvents, getProductAt, getStations, stationLabel,
-  type ProductAtData, type RegisterRow, type RegisterType, type StationRow,
+  type ProductAtData, type Provenance, type RegisterRow, type RegisterType, type StationRow,
 } from '../api';
 
 interface State {
@@ -212,16 +217,86 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
       )}
 
       <Details summary={W.readings.provenance}>
-        <p>{W.readings.provenanceNote}</p>
-        <dl className="kv">
-          <dt>Source row</dt>
-          <dd>{row.source_row_id == null ? '—' : String(row.source_row_id)}</dd>
-          <dt>Plant-stored shift</dt>
-          <dd>{row.shift_code_legacy ?? '—'}</dd>
-          <dt>Production day</dt>
-          <dd>{String(row.shift_date).slice(0, 10)}</dd>
-        </dl>
+        <ProvenanceBlock row={row} />
       </Details>
+    </>
+  );
+}
+
+/**
+ * Where the reading came from, line by line (roadmap Phase 3, 14 Sep 2026).
+ *
+ * Reads ONLY `row.provenance`. The row also carries `source_row_id`,
+ * `source_epoch_label`, `ingest_ts_utc` and `transform_version` as loose
+ * columns, and the block could be pieced together from them when the object
+ * is missing — it is not, on purpose: an API from before Phase 3 answers
+ * without the object, and the honest rendering of that is "not available",
+ * not a partial reconstruction that looks complete.
+ *
+ * Two clocks, both labelled (CLAUDE.md). `sourceInsertUtc` is IFL's own
+ * `Date` — the plant's wall clock labelled UTC, so it takes the same UTC-
+ * pinned formatters as every production time. `ingestedAtUtc` is the raw
+ * row's read_at_utc, a genuine UTC instant, so it takes the app-instant
+ * formatter Setup's audit log uses. Format either with the other's helper
+ * and it lands five hours out.
+ */
+function ProvenanceBlock({ row }: { row: RegisterRow }) {
+  const p: Provenance | undefined = row.provenance;
+  const L = W.readings.prov;
+  const dash = '—';
+  const id = (v: number | string | null | undefined) => (v == null ? dash : String(v));
+
+  return (
+    <>
+      <p>{W.readings.provenanceNote}</p>
+      {/* One sentence, not a column of dashes: a column of dashes reads as
+          "every one of these is unknown", which is not what happened. */}
+      {p == null && <p className="mut">{L.notAvailable}</p>}
+      <dl className="kv">
+        {p != null && (
+          <>
+            <dt>{L.sourceTable}</dt>
+            <dd>{p.sourceTable || dash}</dd>
+            <dt>{L.sourceSystem}</dt>
+            <dd>{p.sourceSystem || dash}</dd>
+            {/* The generation sits NEXT to the row id: since IFL's 5 Aug 2026
+                rebuild the id alone names two rows, and until Phase 3 the
+                label was on Setup, three screens away from the id. */}
+            <dt>{L.generation}</dt>
+            <dd>{p.epochLabel ?? dash}</dd>
+            <dt>{L.sourceRow}</dt>
+            <dd>{id(p.sourceRowId)}</dd>
+            <dt>{L.insertedAt}</dt>
+            <dd>{p.sourceInsertUtc == null ? dash : `${fmtDayLong(p.sourceInsertUtc)}, ${fmtClockSec(p.sourceInsertUtc)}`}</dd>
+            <dt>{L.readAt}</dt>
+            <dd>{p.ingestedAtUtc == null ? dash : fmtAppInstant(p.ingestedAtUtc)}</dd>
+            <dt>{L.transform}</dt>
+            <dd>{p.transformVersion == null ? dash : String(p.transformVersion)}</dd>
+            <dt>{L.product}</dt>
+            <dd>{describeAttribution(p.attributionMethod, p.attributionConfidence)}</dd>
+            {/* The two keys that make the chain followable in the database:
+                raw_id → sms_raw row, run_id → sms.sync_run. Ids, under the
+                disclosure, where this file's rules allow them. */}
+            <dt>{L.rawRow}</dt>
+            <dd>{id(p.rawId)}</dd>
+            <dt>{L.syncPass}</dt>
+            <dd>{p.ingestRunId ?? dash}</dd>
+            {p.nightBelongsTo != null && (
+              <>
+                <dt>{L.nightRule}</dt>
+                <dd>{W.config.rules.nights[p.nightBelongsTo] ?? p.nightBelongsTo}</dd>
+              </>
+            )}
+          </>
+        )}
+        {/* Two facts that were here before Phase 3 and stay: what the plant's
+            own Shift column said, and the production day this system filed
+            the reading under. */}
+        <dt>{L.plantShift}</dt>
+        <dd>{row.shift_code_legacy ?? dash}</dd>
+        <dt>{L.productionDay}</dt>
+        <dd>{String(row.shift_date).slice(0, 10)}</dd>
+      </dl>
     </>
   );
 }

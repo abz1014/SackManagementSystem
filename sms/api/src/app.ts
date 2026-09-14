@@ -54,6 +54,7 @@ import {
 } from './auth.js';
 import { TtlCache } from './cache.js';
 import { securityHeaders } from './security.js';
+import { requestId, requestLog } from './log.js';
 
 const dateStr = z
   .string()
@@ -90,6 +91,9 @@ const productionQuery = z.object({
 
 export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   const app = express();
+  // First, so every later line about this request — access log, 500, auth
+  // warning — carries the same correlationId (roadmap Phase 2 item 6).
+  app.use(requestId());
   app.use(securityHeaders());
   app.use(express.json());
   app.use(authMiddleware(pool)); // attaches req.user (or null) from session cookie
@@ -108,14 +112,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // would bury real events under thousands of lines a day. Every other 3xx —
   // a genuine redirect — IS logged, because those are rare here and a
   // redirect nobody expected is exactly the kind of thing worth a trace.
+  //
+  // One JSON line since 14 Sep 2026 (roadmap Phase 2 item 6): the sentence is
+  // still the `msg`, and the same facts are fields beside it so a refused
+  // request can be found by status or by user without parsing prose. A 4xx is
+  // `warn` (something was refused), a 3xx `info` (something was redirected).
   app.use((req: Request, res: Response, next: NextFunction) => {
     const startedAt = Date.now();
     res.on('finish', () => {
       if (res.statusCode < 300 || res.statusCode >= 500 || res.statusCode === 304) return;
-      const user = (req as AuthedRequest).user;
-      console.error(
-        `[http] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - startedAt}ms) user=${user?.username ?? 'anonymous'}`,
-      );
+      const user = (req as AuthedRequest).user?.username ?? 'anonymous';
+      const durationMs = Date.now() - startedAt;
+      const fields = { method: req.method, url: req.originalUrl, status: res.statusCode, durationMs, user };
+      const msg = `${req.method} ${req.originalUrl} -> ${res.statusCode} (${durationMs}ms) user=${user}`;
+      if (res.statusCode >= 400) requestLog(req).warn(msg, fields);
+      else requestLog(req).info(msg, fields);
     });
     next();
   });
@@ -129,7 +140,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // this is called, and there is no transaction spanning both, so a logging
   // failure must never fail the request that triggered it. It must also never
   // vanish silently — a broken audit trail is itself a finding — so failures
-  // go to stderr instead of a swallowed catch.
+  // go to the log instead of a swallowed catch.
   //
   // CONFIGURATION writes do not use this. Rules, the line, machines, stations,
   // sources, reject codes and users go through auditedWrite() (services/
@@ -141,7 +152,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     const actorId = (req as AuthedRequest).user?.userId;
     if (actorId == null) return;
     void recordAudit(pool, actorId, action, targetType, targetId, detail).catch((e) =>
-      console.error(`[audit] failed to record ${action}:`, e),
+      requestLog(req).error(`audit: failed to record ${action}`, { action, targetType, targetId, actorId, err: e }),
     );
   }
   const actorId = (req: Request): number => (req as AuthedRequest).user!.userId;
@@ -343,8 +354,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
    * stays admin; reading them cannot be.
    */
   app.get('/api/stations', async (_req: Request, res: Response, next: NextFunction) => {
+    // Every screen's station list: ACTIVE stations only. A station retired in
+    // Setup (is_active = 0, roadmap Phase 1) must leave the filters and the
+    // station table without a code change; the admin listing under
+    // /api/admin/stations still shows it so it can be reactivated.
     try {
-      res.json({ stations: await listStations(pool, cfg.lineId) });
+      const all = await listStations(pool, cfg.lineId);
+      res.json({ stations: all.filter((s) => s.isActive) });
     } catch (err) {
       next(err);
     }
@@ -1596,13 +1612,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // on-call engineer needs at 2am. Previously logged only err.message with no
   // request, no path and no stack (finding H10, Sep 2026 audit) — the entire
   // diagnostic artifact for a 500 was a bare one-line message.
+  //
+  // One JSON line since 14 Sep 2026 (roadmap Phase 2 item 6): `err` carries
+  // name, message and stack; `correlationId` is the request id, which the
+  // body returns as `requestId` so a user's "it said internal error" can be
+  // matched to the one line that says why. Still nothing about the cause in
+  // the response.
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
-    const user = (req as AuthedRequest).user;
-    console.error(
-      `api error: ${req.method} ${req.originalUrl} user=${user?.username ?? 'anonymous'}`,
-      err instanceof Error ? (err.stack ?? err.message) : err,
-    );
-    res.status(500).json({ error: 'internal error' });
+    const user = (req as AuthedRequest).user?.username ?? 'anonymous';
+    requestLog(req).error(`api error: ${req.method} ${req.originalUrl} user=${user}`, {
+      method: req.method,
+      url: req.originalUrl,
+      user,
+      err: err instanceof Error ? err : { message: String(err) },
+    });
+    res.status(500).json({ error: 'internal error', requestId: res.locals.requestId ?? null });
   });
 
   return app;

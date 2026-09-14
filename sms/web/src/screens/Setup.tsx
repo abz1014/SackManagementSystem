@@ -23,11 +23,13 @@ import { useEffect, useState } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { Block, Details, Empty, Failed, SkelLines } from '../ui/bits';
-import { fmtSpan } from '../lib/fmt';
+import { fmtAppInstant, fmtSpan } from '../lib/fmt';
+import { noOpenEpochs } from '../lib/syncHealth';
 import {
-  adminGetAudit, adminListUsers, adminCreateUser, adminUpdateUser, getOperations, ApiError,
+  adminGetAudit, adminGetSources, adminListUsers, adminCreateUser, adminUpdateUser, getOperations, ApiError,
   type AdminUser, type AuditEntry,
 } from '../api';
+import { useResource } from './setup/shared';
 import { LineBlock } from './setup/LineBlock';
 import { MachinesBlock } from './setup/MachinesBlock';
 import { StationsBlock } from './setup/StationsBlock';
@@ -63,6 +65,12 @@ export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
 function SyncHealth() {
   const { line } = useLive();
   const ops = usePolling(() => getOperations(), 60_000, 'operations');
+  // The line's source tables, for one join only: /api/operations names a
+  // sync row by its RAW table (cone_raw) and an epoch status by its SOURCE
+  // table (pack1_TP1U2), and sms.source_table is the bridge. Setup is
+  // admin-only (App.tsx, rank >= 4), the same rank the sources route needs.
+  // A failed load costs nothing but the placement: see lib/syncHealth.ts.
+  const sources = useResource(() => adminGetSources());
   const h = line?.health ?? null;
 
   const verdict =
@@ -84,6 +92,25 @@ function SyncHealth() {
   const blocking = ops.data?.data.dq.findings.filter((f) => f.severity === 'ERROR' || f.severity === 'CRITICAL') ?? [];
   const mixedRules = ops.data?.data.shiftRuleRegimes?.filter((r) => r.mixed) ?? [];
 
+  // Roadmap Phase 2 (14 Sep 2026): the source block. Absent from an API
+  // built before it, in which case the probe line says so and the halted
+  // sentence does not appear — `halted` read defensively for the same reason.
+  const src = ops.data?.data.source ?? null;
+  const halted = src?.halted ?? [];
+  const lastFailure = ops.data?.data.lifetime.lastFailure ?? null;
+  // The newest failed row and the newest halted row are usually the same
+  // row; when they carry the same text it is printed once, under the halted
+  // sentence, which is the one that says what to do.
+  const failureIsTheHalt = lastFailure?.error != null && src?.lastHalt != null && lastFailure.error === src.lastHalt.reason;
+
+  // Per source table, from the epoch register, placed on the sync row of the
+  // raw table it feeds; whatever cannot be placed is listed under the table.
+  const epochs = noOpenEpochs(
+    ops.data?.data.schema ?? [],
+    sources.data?.tables ?? null,
+    (ops.data?.data.sync ?? []).map((s) => s.targetTable),
+  );
+
   return (
     <Block first label={W.setupTabs.sync}>
       <p className={h && h.kind !== 'ok' ? 'acc' : ''} style={{ fontSize: 'var(--fs-qual)' }}>{verdict}</p>
@@ -94,6 +121,21 @@ function SyncHealth() {
         <dd>{h?.ageSeconds == null ? '—' : `${fmtSpan(h.ageSeconds)} ${W.ago}`}</dd>
         <dt>{W.sync.oldestTable}</dt>
         <dd>{h?.oldestTable ?? '—'}</dd>
+        {/* What the worker found when it last tried the plant — not what this
+            API can see, which is nothing: it never opens the plant connection.
+            The probe instant is app-UTC, so it takes the app-instant format. */}
+        {src != null && (
+          <>
+            <dt>{W.sync.probe}</dt>
+            <dd className={src.lastProbeOk === false ? 'acc' : ''}>
+              {src.lastProbeOk == null || src.lastProbeAtUtc == null
+                ? W.sync.probeNotMeasured
+                : src.lastProbeOk
+                  ? W.sync.probeOk(fmtAppInstant(src.lastProbeAtUtc))
+                  : W.sync.probeFailed(fmtAppInstant(src.lastProbeAtUtc))}
+            </dd>
+          </>
+        )}
         <dt>{W.sync.findings}</dt>
         <dd>{blocking.length === 0 ? W.sync.none : `${blocking.length}`}</dd>
       </dl>
@@ -106,11 +148,24 @@ function SyncHealth() {
       {/* The worker's own words for why. A generation halt says which command
           to run; a connection halt names the host; a "not read this pass" row
           points at the table that stopped it. */}
-      {failures.length > 0 && ops.data?.data.lifetime.lastFailure?.error && (
+      {failures.length > 0 && lastFailure?.error && !failureIsTheHalt && (
         <p className="mut sm" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
-          {W.sync.lastFailure(ops.data.data.lifetime.lastFailure.targetTable)}{' '}
-          {ops.data.data.lifetime.lastFailure.error}
+          {W.sync.lastFailure(lastFailure.targetTable)}{' '}
+          {lastFailure.error}
         </p>
+      )}
+      {/* Halted, as distinct from failed: the worker refused to read these
+          tables and said why. The reason is printed verbatim and pre-wrapped
+          because it carries the command line that clears it. */}
+      {halted.length > 0 && (
+        <>
+          <p className="acc" style={{ marginTop: 14 }}>{W.sync.halted(halted.length, halted.join(', '))}</p>
+          {src?.lastHalt && (
+            <p className="mut sm" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+              {W.sync.lastReason} {src.lastHalt.reason}
+            </p>
+          )}
+        </>
       )}
 
       {/* Only appears when a table genuinely holds two regimes, which can
@@ -138,25 +193,46 @@ function SyncHealth() {
                 </tr>
               </thead>
               <tbody>
-                {(ops.data?.data.sync ?? []).map((s) => (
-                  <tr key={s.targetTable}>
-                    <td>{s.targetTable}</td>
-                    <td className={s.outcome === 'success' ? '' : 'acc'}>{s.outcome}</td>
-                    {/* The watermark is IFL's own id and IFL restarts it (their
-                        2026-08-05 rebuild). Without the generation beside it
-                        the number just jumps from 204,076 to 1 for no reason. */}
-                    <td>{s.epochLabel ?? W.sync.preEpochPass}</td>
-                    <td className="n">{s.rowsWritten}</td>
-                    <td className="n">
-                      {s.watermarkFrom == null || s.watermark == null ? '—' : `${s.watermarkFrom} → ${s.watermark}`}
-                    </td>
-                    <td className="n">{s.ageSeconds == null ? '—' : fmtSpan(s.ageSeconds)}</td>
-                  </tr>
-                ))}
+                {(ops.data?.data.sync ?? []).map((s) => {
+                  // The epoch register's verdict on the SOURCE table this row
+                  // copies, when it has one worth a sentence: no open
+                  // generation means the worker halts here before reading.
+                  // 'enforced-by-worker' says nothing extra — it is the normal
+                  // state of every table.
+                  const noEpochOn = epochs.byTarget.get(s.targetTable);
+                  return (
+                    <tr key={s.targetTable}>
+                      <td>{s.targetTable}</td>
+                      <td className={s.outcome === 'success' ? '' : 'acc'}>
+                        {s.outcome}
+                        {noEpochOn != null && (
+                          <span className="acc sm" style={{ display: 'block', maxWidth: '44ch' }}>
+                            {W.sync.noOpenEpoch(noEpochOn)}
+                          </span>
+                        )}
+                      </td>
+                      {/* The watermark is IFL's own id and IFL restarts it (their
+                          2026-08-05 rebuild). Without the generation beside it
+                          the number just jumps from 204,076 to 1 for no reason. */}
+                      <td>{s.epochLabel ?? W.sync.preEpochPass}</td>
+                      <td className="n">{s.rowsWritten}</td>
+                      <td className="n">
+                        {s.watermarkFrom == null || s.watermark == null ? '—' : `${s.watermarkFrom} → ${s.watermark}`}
+                      </td>
+                      <td className="n">{s.ageSeconds == null ? '—' : fmtSpan(s.ageSeconds)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
+        {/* A halted source table with no sync row to sit on — or none that
+            could be matched, when the sources list did not load — is listed
+            here by name rather than dropped. */}
+        {epochs.unplaced.map((table) => (
+          <p key={table} className="acc sm" style={{ marginTop: 10 }}>{W.sync.noOpenEpoch(table)}</p>
+        ))}
         {h?.cadenceSeconds != null && (
           <p style={{ marginTop: 12 }}>
             Passes arrive about every {fmtSpan(h.cadenceSeconds)}; the connection is called stale after{' '}
@@ -403,7 +479,7 @@ function AuditLog() {
           <tbody>
             {rows.slice(0, 40).map((e) => (
               <tr key={e.auditId}>
-                <td>{new Date(e.atUtc).toLocaleString('en-GB')}</td>
+                <td>{fmtAppInstant(e.atUtc)}</td>
                 <td>{e.actorName ?? '—'}</td>
                 <td>{e.action}</td>
                 <td className="mut">{e.detail ?? '—'}</td>

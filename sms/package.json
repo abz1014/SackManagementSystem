@@ -20,6 +20,7 @@
     "typecheck": "tsc -b shared sync-worker cli api web",
     "test": "vitest run",
     "db:migrate": "node scripts/migrate.mjs",
+    "dictionary": "node scripts/data-dictionary.mjs",
     "build": "npm run build --workspace @sms/shared && npm run build --workspace @sms/sync-worker && npm run build --workspace @sms/cli && npm run build --workspace @sms/api && npm run build --workspace @sms/web",
     "verify:release": "npm run typecheck && npm test && npm run build"
   },

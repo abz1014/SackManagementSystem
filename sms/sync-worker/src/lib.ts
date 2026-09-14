@@ -1,8 +1,17 @@
 /** Public library surface of the sync-worker, consumed by @sms/cli. */
 export { loadDotEnv, loadSyncConfig, type SyncConfig, type DbConfig } from './config.js';
-export { createPool } from './db.js';
+export { createPool, connectSource } from './db.js';
 export { seedReference } from './seed/seedReference.js';
-export { runOnce, type TableOutcome } from './runner.js';
+export { runOnce, probeSource, TableHaltsError, type TableOutcome, type TableHalt } from './runner.js';
+export {
+  createAdapter,
+  classifyError,
+  isTransient,
+  REGISTERED_SYSTEM_CODES,
+  type SourceAdapter,
+  type ErrorClass,
+  type ProbeResult,
+} from './reader/SourceAdapter.js';
 export {
   runTransform,
   resetTransformWatermarks,
@@ -31,6 +40,8 @@ export {
   resolveEpoch,
   readSourceIdentity,
   openEpoch,
+  checkColumnDrift,
+  SOURCE_COLUMNS_CHANGED,
   type EpochRow,
   type SourceIdentity,
 } from './epoch.js';

@@ -207,8 +207,87 @@ const REJECT_COLS = `e.reject_event_id AS event_id, ${IDENTITY_COLS}, e.reject_t
   e.hanger_num, e.source_station, e.lifter_station,
   e.tube_inspect_code, e.material_inspect_code, e.weight_g, e.material_id,
   e.production_ts_utc_ms, c.label AS reject_label, c.is_pass AS reject_is_pass`;
+/**
+ * Provenance — where a reading came from, on every row (roadmap Phase 3 item
+ * 4, 14 Sep 2026). Selected under a `prov_` prefix and folded by
+ * foldProvenance() into one `provenance` object on the JSON row, so the
+ * twelve lineage columns do not sit loose among the reading's own facts and
+ * a screen can render "Where this reading came from" from one field.
+ *
+ * Every value is the row's own or its epoch's; nothing is looked up
+ * elsewhere and nothing is invented:
+ *  - `source_table` and `label` come from the epoch row the reading was
+ *    ingested under (the join every query already makes). The epoch label
+ *    sat on Setup alone until now; since 5 Aug 2026 `source_row_id` names
+ *    two rows, and the label beside it is what makes the number meaningful.
+ *  - `ingest_ts_utc` is IFL's OWN insert time (their `Date` column — the
+ *    naming trap migration 029 documents), surfaced as `sourceInsertUtc`;
+ *    `ingested_at_utc` is when SMS read the row, from migration 029.
+ *  - `attribution_method` / `attribution_confidence` exist on reject_event
+ *    only since migration 029 and are NULL on rejects transformed before the
+ *    worker's Phase 3 change. They pass through as null — a null here says
+ *    "not recorded", which is the truth, and a fabricated 'none' would not be.
+ * Order matters for the CSV: these are its trailing columns, appended after
+ * every existing one so no existing column moves.
+ */
+const PROVENANCE_COLS = `e.source_system AS prov_source_system, ep.source_table AS prov_source_table,
+  ep.label AS prov_epoch_label, e.source_row_id AS prov_source_row_id, e.raw_id AS prov_raw_id,
+  e.ingest_ts_utc AS prov_source_insert_utc, e.ingested_at_utc AS prov_ingested_at_utc,
+  e.ingest_run_id AS prov_ingest_run_id, e.transform_version AS prov_transform_version,
+  e.attribution_method AS prov_attribution_method, e.attribution_confidence AS prov_attribution_confidence,
+  e.night_belongs_to AS prov_night_belongs_to`;
+
+/** Column alias → JSON key, in the order the CSV's trailing columns take. */
+const PROVENANCE_KEYS: readonly [column: string, key: string][] = [
+  ['prov_source_system', 'sourceSystem'],
+  ['prov_source_table', 'sourceTable'],
+  ['prov_epoch_label', 'epochLabel'],
+  ['prov_source_row_id', 'sourceRowId'],
+  ['prov_raw_id', 'rawId'],
+  ['prov_source_insert_utc', 'sourceInsertUtc'],
+  ['prov_ingested_at_utc', 'ingestedAtUtc'],
+  ['prov_ingest_run_id', 'ingestRunId'],
+  ['prov_transform_version', 'transformVersion'],
+  ['prov_attribution_method', 'attributionMethod'],
+  ['prov_attribution_confidence', 'attributionConfidence'],
+  ['prov_night_belongs_to', 'nightBelongsTo'],
+];
+
+export interface Provenance {
+  sourceSystem: string | null;
+  sourceTable: string | null;
+  epochLabel: string | null;
+  sourceRowId: number | string | null;
+  rawId: number | string | null;
+  sourceInsertUtc: string | null;
+  ingestedAtUtc: string | null;
+  ingestRunId: string | null;
+  transformVersion: number | null;
+  attributionMethod: string | null;
+  attributionConfidence: string | null;
+  nightBelongsTo: string | null;
+}
+
+/**
+ * Moves the `prov_*` columns off a recordset row into `row.provenance`.
+ * Timestamps become ISO strings here rather than in SQL so the value the
+ * screen prints is the same instant express would have serialised anyway,
+ * and a missing column (an older fake, a row from before migration 029)
+ * folds to null rather than throwing.
+ */
+export function foldProvenance(row: Record<string, unknown>): Record<string, unknown> {
+  const provenance: Record<string, unknown> = {};
+  for (const [column, key] of PROVENANCE_KEYS) {
+    const v = row[column];
+    provenance[key] = v == null ? null : v instanceof Date ? v.toISOString() : v;
+    delete row[column];
+  }
+  row.provenance = provenance as unknown as Provenance;
+  return row;
+}
+
 const colsFor = (type: EventType) =>
-  type === 'cone' ? CONE_COLS : type === 'sack' ? SACK_COLS : REJECT_COLS;
+  `${type === 'cone' ? CONE_COLS : type === 'sack' ? SACK_COLS : REJECT_COLS}, ${PROVENANCE_COLS}`;
 
 // source_epoch is a small, PK-keyed reference table (one row per source table
 // per generation), so the join costs a nested-loop seek per row and nothing
@@ -266,7 +345,7 @@ export async function listEvents(
      ORDER BY ${order}
      OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY`,
   );
-  return { rows: res.recordset, total, page: q.page, pageSize: q.pageSize };
+  return { rows: res.recordset.map(foldProvenance), total, page: q.page, pageSize: q.pageSize };
 }
 
 export async function getEventDetail(
@@ -281,6 +360,8 @@ export async function getEventDetail(
   // repeats across epochs, and TOP 1 with no ORDER BY over that non-unique
   // index answered with whichever generation the seek met first.
   const key = `${ALIAS}${idCol(type)}`;
+  // The three loose lineage columns predate `provenance` (which now carries
+  // them and nine more); kept so nothing that read them flat breaks.
   const cols = `${colsFor(type)}, ${ALIAS}source_system, ${ALIAS}ingest_ts_utc, ${ALIAS}transform_version`;
   const res = await pool
     .request()
@@ -289,7 +370,8 @@ export async function getEventDetail(
     .query<Record<string, unknown>>(
       `SELECT TOP 1 ${cols} FROM ${from} WHERE ${ALIAS}line_id=@line AND ${key}=@id`,
     );
-  return res.recordset[0] ?? null;
+  const row = res.recordset[0];
+  return row ? foldProvenance(row) : null;
 }
 
 const CSV_ROW_CAP = 20_000;
@@ -312,10 +394,19 @@ export async function exportEventsCsv(
     `SELECT TOP (@cap) ${cols} FROM ${from} WHERE ${where} ORDER BY ${order}`,
   );
   const truncated = res.recordset.length > CSV_ROW_CAP;
-  const rows = truncated ? res.recordset.slice(0, CSV_ROW_CAP) : res.recordset;
+  const rows = (truncated ? res.recordset.slice(0, CSV_ROW_CAP) : res.recordset).map(foldProvenance);
   if (rows.length === 0) return { csv: '', truncated: false };
 
-  const headers = Object.keys(rows[0]!);
+  // The reading's own columns first, exactly as before; the provenance
+  // fields follow as trailing columns named by their JSON path
+  // (`provenance.epochLabel`), so a sheet built on the old layout still
+  // finds every column where it was and the new ones are unmistakably one
+  // group. `provenance` itself is an object and is never emitted as a cell.
+  const ownHeaders = Object.keys(rows[0]!).filter((h) => h !== 'provenance');
+  const provHeaders = PROVENANCE_KEYS.map(([, key]) => `provenance.${key}`);
+  const headers = [...ownHeaders, ...provHeaders];
+  const cell = (r: Record<string, unknown>, h: string): unknown =>
+    h.startsWith('provenance.') ? (r.provenance as Record<string, unknown>)[h.slice('provenance.'.length)] : r[h];
   const esc = (v: unknown) => {
     if (v == null) return '';
     let s = v instanceof Date ? v.toISOString() : String(v);
@@ -327,6 +418,6 @@ export async function exportEventsCsv(
     if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const lines = [headers.join(','), ...rows.map((r) => headers.map((h) => esc(r[h])).join(','))];
+  const lines = [headers.join(','), ...rows.map((r) => headers.map((h) => esc(cell(r, h))).join(','))];
   return { csv: lines.join('\n'), truncated };
 }

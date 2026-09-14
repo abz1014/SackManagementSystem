@@ -199,3 +199,58 @@ describe('station_not_in_roster (machines the line has no station for)', () => {
     }
   });
 });
+
+/**
+ * subject_ref (roadmap Phase 3 item 3): a finding about rows names the raw_id
+ * of the FIRST offending row, so the reading is one query away; the count
+ * stays in count.
+ */
+describe('subject_ref points at the first offending row', () => {
+  const withRaw = (iso: string, raw_id: number, weight: number | null = 1950, station: number | null = 7) => ({
+    ...cone(iso, weight, station),
+    raw_id,
+  });
+
+  it('stale_timestamp carries the first stale row, not the last, and the count of all of them', () => {
+    const rows = [
+      withRaw('2026-06-22T12:00:00', 100),
+      withRaw('2026-06-22T02:00:00', 101), // 10h behind
+      withRaw('2026-06-22T02:00:30', 102), // also behind the max
+    ];
+    const f = run(rows).find((x) => x.check_name === 'stale_timestamp')!;
+    expect(f.count).toBe(2);
+    expect(f.subject_ref).toBe(101);
+  });
+
+  it('nonpositive_weight, outlier_weight, no_station and future_timestamp each name their first row', () => {
+    const rows = [
+      withRaw('2026-06-22T11:00:00', 1, 0), // impossible
+      withRaw('2026-06-22T11:00:10', 2, -5),
+      withRaw('2026-06-22T11:00:20', 3, 900), // outlier
+      withRaw('2026-06-22T11:00:30', 4, 1950, null), // no station
+      withRaw('2099-01-01T00:00:00', 5), // future
+    ];
+    const by = Object.fromEntries(run(rows).map((f) => [f.check_name, f]));
+    expect(by.nonpositive_weight!.subject_ref).toBe(1);
+    expect(by.nonpositive_weight!.count).toBe(2);
+    expect(by.outlier_weight!.subject_ref).toBe(3);
+    expect(by.no_station!.subject_ref).toBe(4);
+    expect(by.future_timestamp!.subject_ref).toBe(5);
+  });
+
+  it('station_not_in_roster names the first row seen from that machine', () => {
+    const roster = { lineId: 1, stations: new Set([1, 2, 3]) };
+    const rows = [
+      { production_ts_utc_ms: ms('2026-09-01T11:00:00'), source_station: 15, source_epoch: 9, raw_id: 501 },
+      { production_ts_utc_ms: ms('2026-09-01T11:00:05'), source_station: 15, source_epoch: 9, raw_id: 502 },
+    ];
+    const f = stationRosterFindings(rows, roster, 'cone_raw', 'pack1_TP1U2');
+    expect(f[0]!.subject_ref).toBe(501);
+    expect(f[0]!.count).toBe(2);
+  });
+
+  it('is null, not undefined, when the rows carry no raw_id (a pure computation over plain rows)', () => {
+    const f = run([cone('2026-06-22T11:00:00', 0)]).find((x) => x.check_name === 'nonpositive_weight')!;
+    expect(f.subject_ref).toBeNull();
+  });
+});

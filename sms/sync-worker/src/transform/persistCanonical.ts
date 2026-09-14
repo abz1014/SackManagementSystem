@@ -109,6 +109,9 @@ export const CONE_COLS: ColSpec[] = [
   { name: 'source_row_id', type: mssql.BigInt },
   { name: 'raw_id', type: mssql.BigInt },
   { name: 'ingest_run_id', type: mssql.UniqueIdentifier, nullable: false },
+  // When SMS read the raw row (its read_at_utc) — real UTC, unlike
+  // ingest_ts_utc above, which is IFL's insert time (migration 029).
+  { name: 'ingested_at_utc', type: mssql.DateTime2(3) },
   { name: 'ingest_seq', type: mssql.Int, nullable: false },
   { name: 'merge_key_is_unique', type: mssql.Bit, nullable: false },
   { name: 'transform_version', type: mssql.Int, nullable: false },
@@ -136,6 +139,9 @@ export const SACK_COLS: ColSpec[] = [
   { name: 'source_row_id', type: mssql.BigInt },
   { name: 'raw_id', type: mssql.BigInt },
   { name: 'ingest_run_id', type: mssql.UniqueIdentifier, nullable: false },
+  // When SMS read the raw row (its read_at_utc) — real UTC, unlike
+  // ingest_ts_utc above, which is IFL's insert time (migration 029).
+  { name: 'ingested_at_utc', type: mssql.DateTime2(3) },
   { name: 'ingest_seq', type: mssql.Int, nullable: false },
   { name: 'merge_key_is_unique', type: mssql.Bit, nullable: false },
   { name: 'transform_version', type: mssql.Int, nullable: false },
@@ -161,10 +167,14 @@ export const REJECT_COLS: ColSpec[] = [
   // Added by migration 024: IFL now stamps MaterialId on both reject tables, and
   // a reject rate computed per product needs the key on both sides of the ratio.
   { name: 'material_id', type: mssql.Int },
+  // Migration 029: how the material id was resolved, by the same rule as cones.
+  { name: 'attribution_method', type: V(30) },
+  { name: 'attribution_confidence', type: V(10) },
   { name: 'source_system', type: V(20), nullable: false },
   { name: 'source_row_id', type: mssql.BigInt },
   { name: 'raw_id', type: mssql.BigInt },
   { name: 'ingest_run_id', type: mssql.UniqueIdentifier, nullable: false },
+  { name: 'ingested_at_utc', type: mssql.DateTime2(3) },
   { name: 'ingest_seq', type: mssql.Int, nullable: false },
   { name: 'transform_version', type: mssql.Int, nullable: false },
 ];

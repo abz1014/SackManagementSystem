@@ -15,9 +15,13 @@
  * it; only the source outage was.
  */
 import type { ConnectionPool } from 'mssql';
+import { createLogger } from '@sms/shared';
 import type { SyncConfig } from './config.js';
-import { createPool } from './db.js';
+import { connectSource, createPool } from './db.js';
+import { classifyError } from './reader/errorClass.js';
 import { runFullSync, recordPassHalt, type FullSyncResult } from './pipeline.js';
+
+const log = createLogger('sync-worker');
 
 export interface PassDeps {
   createPool: (c: SyncConfig['app']) => Promise<ConnectionPool>;
@@ -32,11 +36,23 @@ export async function runPass(cfg: SyncConfig, deps: PassDeps = realDeps): Promi
   try {
     let ifl: ConnectionPool;
     try {
-      ifl = await deps.createPool(cfg.iflData);
+      // Three attempts, transient failures only (Phase 2): see connectSource.
+      ifl = await connectSource(cfg.iflData, deps.createPool, (attempt, err) =>
+        log.warn('retrying source connection', {
+          attempt,
+          server: cfg.iflData.server,
+          database: cfg.iflData.database,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } catch (err) {
       // The one halt the runner cannot record itself: it never ran. The app
-      // pool is open, so the reason goes where Setup reads it.
-      await deps.recordPassHalt(app, cfg, 'source connection', err).catch(() => {});
+      // pool is open, so the reason goes where Setup reads it — with the
+      // failure's class in front, so "login refused" reads as such.
+      const cls = classifyError(err);
+      const reason = err instanceof Error ? err.message : String(err);
+      const halt = cls === 'unknown' ? err : new Error(`[${cls}] ${reason}`);
+      await deps.recordPassHalt(app, cfg, 'source connection', halt).catch(() => {});
       throw err;
     }
     try {

@@ -271,8 +271,46 @@ export const W = {
        reading was written, which can trail the real event. */
     recorded: 'Recorded',
     insertTimeCaveat: "The plant records no separate weighing time for a sack — this is when the reading was written, which can trail the actual weighing.",
-    provenance: 'Provenance',
-    provenanceNote: 'Where this reading came from and when it arrived.',
+    /* Roadmap Phase 3 (14 Sep 2026): lineage a person can follow. The block
+       lives under a disclosure — transform version and run ids belong there
+       by this file's own rule — but everything in it is stated in words,
+       and nothing in it is worked out on the client: each line prints a
+       field the server sent, or "not available" when it sent none. */
+    provenance: 'Where this reading came from',
+    /* TWO CLOCKS, named (CLAUDE.md). The plant's times are its wall clock;
+       the moment the reading reached this system is a real UTC instant shown
+       in this computer's zone. On the plant PC they sit five hours apart, and
+       a reader who is not told so will read the gap as an 18-minute lag that
+       became five hours. */
+    provenanceNote:
+      "Plant times are shown as the plant records them; the time it reached this system is shown in this computer's own time.",
+    prov: {
+      sourceTable: 'Source table',
+      sourceSystem: 'Source system',
+      generation: 'Generation',
+      sourceRow: 'Source row id',
+      readAt: 'Read into this system',
+      insertedAt: 'Written by the plant',
+      transform: 'Transform version',
+      product: 'Product determined',
+      rawRow: 'Raw row',
+      syncPass: 'Sync pass',
+      nightRule: 'Night shift counted to',
+      plantShift: 'Plant-stored shift',
+      productionDay: 'Production day',
+      /** The server answered without a provenance object — an API from before it existed. */
+      notAvailable: 'Not available for this reading.',
+      /* attribution_method, in words. 'none' is honest for every row from
+         before 5 Aug 2026, when IFL's tables had no MaterialId column; it is
+         not a fault and must not read as one. */
+      attribution: {
+        source_column: "from the reading's own material id",
+        none: 'no product recorded on the reading',
+        manual_entry: 'set by hand on this line',
+        unknown: 'not recorded',
+      } as const,
+      confidence: { high: 'high confidence', low: 'low confidence', ambiguous: 'ambiguous' } as const,
+    } as const,
     /* The plant records no link from a cone to a sack; cones between two
        consecutive sacks range from 0 to 254 in the real data. This may be
        shown on a SACK, once, with the caveat printed — and never on a cone,
@@ -571,6 +609,13 @@ export const W = {
       // acquisition database. Enabling it here changes nothing until a
       // connection block for it exists.
       packingUnknown: 'A separate sack-packing database has not been identified by IFL; sack readings come from the acquisition database.',
+      /* What the toggle does, said once under the table rather than beside
+         each switch (roadmap Phase 2, 14 Sep 2026). The worker loads only
+         tables whose source AND row are enabled (loadSourceTables), so a
+         disabled source is skipped on every pass — nothing is read from it,
+         and nothing already copied is touched. */
+      disabledNotRead:
+        'A source that is disabled is not read by the sync worker: none of its tables are read on any pass until it is enabled again. Readings already copied stay as they are.',
       tablesTitle: 'Tables this line reads',
       colKind: 'Kind',
       colTable: 'Table in the source database',
@@ -658,6 +703,28 @@ export const W = {
     mixedShiftRules: (tables: string) =>
       `${tables} hold readings attributed under two different night-shift rules. Every figure counted by production day blends them until a rebuild is run.`,
     none: 'None',
+    /* Roadmap Phase 2 (14 Sep 2026): the worker probes the plant connection
+       once at the start of every pass and records the result. "At the last
+       pass" is the honest scope — this API cannot reach the plant itself,
+       so it can only report what the worker last found. */
+    probe: 'Plant connection',
+    probeOk: (at: string) => `reachable at the last pass (${at})`,
+    probeFailed: (at: string) => `not reachable at the last pass (${at})`,
+    probeNotMeasured: 'not yet measured',
+    /* Halted is a decision, not a fault: the worker refused to read a table
+       (an unregistered source generation, a source that went backwards) and
+       wrote why. The reason is the worker's own text, printed verbatim,
+       because it names the command that clears it. */
+    halted: (n: number, tables: string) =>
+      n === 1 ? `1 table is halted: ${tables}.` : `${n} tables are halted: ${tables}.`,
+    lastReason: 'Last reason:',
+    /* Per source table, from the epoch register: every generation of the
+       table is closed and none is open, so the worker halts on it before
+       reading. Rare — a table the worker has never seen has no epoch rows at
+       all and does not appear here — but when it happens nothing else on
+       this screen says why the age is climbing. */
+    noOpenEpoch: (sourceTable: string) =>
+      `No source generation is registered for ${sourceTable} — the worker halts on it until sms epoch:accept is run.`,
   } as const,
 
   /* ------------------------------------------------------------- the sheet */

@@ -263,6 +263,13 @@ async function loadStationRoster(pool: ConnectionPool, lineId: number): Promise<
 
 // ---- batch helpers ----------------------------------------------------------
 
+/**
+ * `SELECT *`, deliberately: the mappers need every src_ column, and since
+ * roadmap Phase 3 they also copy the raw row's OWN `ingest_run_id` and
+ * `read_at_utc` onto the canonical row as its provenance. Narrowing this to a
+ * column list would have to keep those two, and transform.ts's
+ * provenanceOfRaw throws if they are missing rather than inventing them.
+ */
 async function readRawSince(pool: ConnectionPool, table: string, watermark: number): Promise<Raw[]> {
   const r = await pool
     .request()
@@ -376,6 +383,10 @@ export async function runTransform(
   appPool: ConnectionPool,
   cfg: SyncConfig,
 ): Promise<TransformOutcome[]> {
+  // The transform pass's own id is for its dq_finding rows only. Canonical
+  // rows carry the RAW row's ingest_run_id (roadmap Phase 3) so that
+  // canonical → sync_run is a join that returns rows; a per-transform UUID
+  // written to no other table was the reason it never did (migration 029).
   const runId = randomUUID();
   const out: TransformOutcome[] = [];
 
@@ -403,7 +414,7 @@ export async function runTransform(
       const rules = rulesFor('cone');
       const rows = await onlyFresh(
         appPool, 'sms.cone_event', rules.sourceSystem,
-        assignMergeKeys(raw.map((r) => mapCone(r, rules, runId)), coneKey),
+        assignMergeKeys(raw.map((r) => mapCone(r, rules)), coneKey),
       );
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
@@ -432,7 +443,7 @@ export async function runTransform(
       const rules = rulesFor('sack');
       const rows = await onlyFresh(
         appPool, 'sms.sack_event', rules.sourceSystem,
-        assignMergeKeys(raw.map((r) => mapSack(r, rules, runId)), sackKey),
+        assignMergeKeys(raw.map((r) => mapSack(r, rules)), sackKey),
       );
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
@@ -463,8 +474,8 @@ export async function runTransform(
       const wRules = rulesFor('reject_weight');
       const mapped = assignMergeKeys(
         [
-          ...qcs.map((r) => mapReject(r, 'quality', qRules, runId)),
-          ...wt.map((r) => mapReject(r, 'weight', wRules, runId)),
+          ...qcs.map((r) => mapReject(r, 'quality', qRules)),
+          ...wt.map((r) => mapReject(r, 'weight', wRules)),
         ],
         rejectKey,
       );

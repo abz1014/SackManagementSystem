@@ -25,7 +25,14 @@ const seedProducts = vi.fn(async (): Promise<void> => undefined);
 vi.mock('./seed/seedProducts.js', () => ({ seedProducts: () => seedProducts() }));
 
 const runOnce = vi.fn(async () => [{ table: 'sms_raw.cone_raw', read: 3, written: 3, watermarkFrom: 0 }]);
-vi.mock('./runner.js', () => ({ runOnce: () => runOnce() }));
+// The probe (Phase 2 item 5) runs before the reader; the fake answers ok
+// unless a test says the source is down.
+type Probe = { ok: true; roundTripMs: number } | { ok: false; error: string; classification: string };
+const probeSource = vi.fn(async (): Promise<Probe> => ({ ok: true, roundTripMs: 7 }));
+vi.mock('./runner.js', async () => {
+  const real = await vi.importActual<typeof import('./runner.js')>('./runner.js');
+  return { TableHaltsError: real.TableHaltsError, runOnce: () => runOnce(), probeSource: () => probeSource() };
+});
 
 const runTransform = vi.fn(async () => [{ table: 'cone_event', read: 3, written: 3, findings: [] }]);
 vi.mock('./transform/runTransform.js', () => ({ runTransform: () => runTransform() }));
@@ -45,14 +52,18 @@ vi.mock('./transform/dq.js', () => ({
 }));
 
 const { runFullSync, PRODUCT_MIRROR_FAILED, TRANSFORM_FAILED } = await import('./pipeline.js');
+const { TableHaltsError } = await import('./runner.js');
 
 const pool = {} as ConnectionPool;
 const cfg = { lineId: 1, overlapRows: 500, pdasDbName: 'PDAS_TP1U2', app: {} } as never;
 
 beforeEach(() => {
-  for (const m of [seedReference, seedProducts, runOnce, runTransform, recordHaltedRun, persistFindings, clearFindings, loadSourceTables]) m.mockClear();
+  for (const m of [seedReference, seedProducts, runOnce, runTransform, recordHaltedRun, persistFindings, clearFindings, loadSourceTables, probeSource]) m.mockClear();
   seedReference.mockResolvedValue(undefined);
   seedProducts.mockResolvedValue(undefined);
+  probeSource.mockResolvedValue({ ok: true, roundTripMs: 7 });
+  runOnce.mockResolvedValue([{ table: 'sms_raw.cone_raw', read: 3, written: 3, watermarkFrom: 0 }]);
+  vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as never);
   loadSourceTables.mockResolvedValue([
     { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] },
     { key: 'sack', sourceTable: 'sack1_TP1U2', rawTable: 'sms_raw.sack_raw', systemCode: 'ifl_sql', columns: [] },
@@ -107,8 +118,11 @@ describe('runFullSync — halts before the reader leave a row per table', () => 
     // too, so the tables the halt would name are unknown. Writing nothing is
     // the silence 478c456 ended; the fallback is every kind, adapter unknown.
     seedReference.mockRejectedValueOnce(new Error('Invalid object name sms.shift_rule'));
-    loadSourceTables.mockRejectedValueOnce(new Error("Invalid object name 'sms.source_table'"));
+    // Persistent, not Once: the probe skips itself on the same unreadable
+    // configuration before the seed ever runs.
+    loadSourceTables.mockRejectedValue(new Error("Invalid object name 'sms.source_table'"));
     await expect(runFullSync(pool, pool, cfg)).rejects.toThrow(/shift_rule/);
+    expect(probeSource).not.toHaveBeenCalled();
     const h = recordHaltedRun.mock.calls.map((c) => c[1]);
     expect(h.map((x) => x.targetTable)).toEqual(['cone_raw', 'sack_raw', 'reject_qcs_raw', 'reject_weight_raw']);
     expect(h.every((x) => x.adapter === 'unknown')).toBe(true);
@@ -133,5 +147,81 @@ describe('runFullSync — a transform failure is a standing CRITICAL finding, no
   it('a completed transform clears it', async () => {
     await runFullSync(pool, pool, cfg);
     expect(clearFindings).toHaveBeenCalledWith(pool, TRANSFORM_FAILED);
+  });
+});
+
+/**
+ * The source probe (roadmap Phase 2 item 5): one round trip before any table
+ * is approached. A failure is a pass-level halt with the classification in
+ * front of the driver's message; a success is logged as sourceProbeMs.
+ */
+describe('runFullSync — the source probe', () => {
+  it('a failed probe writes the pass-level halt rows, classified, and nothing is read', async () => {
+    probeSource.mockResolvedValueOnce({ ok: false, error: 'Login failed for user sms_readonly', classification: 'auth' });
+    await expect(runFullSync(pool, pool, cfg)).rejects.toThrow(/\[auth\] source probe failed: Login failed/);
+    const h = recordHaltedRun.mock.calls.map((c) => c[1]);
+    expect(h.map((x) => x.targetTable)).toEqual(['cone_raw', 'sack_raw']);
+    expect(h[0]!.error).toMatch(/^Pass halted at source probe, before any table was read\. \[auth\] source probe failed/);
+    expect(runOnce).not.toHaveBeenCalled();
+    expect(runTransform).not.toHaveBeenCalled();
+  });
+
+  it('a successful probe reports its round trip on the result', async () => {
+    const r = await runFullSync(pool, pool, cfg);
+    expect(r.sourceProbeMs).toBe(7);
+    expect(probeSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('is skipped, not duplicated, when the configuration cannot be read — runOnce records that halt', async () => {
+    loadSourceTables.mockRejectedValue(new Error('No source tables are configured for line 1.'));
+    runOnce.mockRejectedValueOnce(new Error('No source tables are configured for line 1.'));
+    await expect(runFullSync(pool, pool, cfg)).rejects.toThrow(/No source tables/);
+    expect(probeSource).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Per-table isolation (roadmap Phase 2 item 3): when some tables halted and
+ * some synced, the transform still runs for what arrived, and the aggregate
+ * is thrown AFTER it — carrying the partial result for the log.
+ */
+describe('runFullSync — a partly halted reader still transforms what arrived', () => {
+  const partial = () =>
+    new TableHaltsError(
+      [{ sourceTable: 'rejectWeight1_TP1U2', targetTable: 'reject_weight_raw', reason: 'Source generation changed' }],
+      [{ table: 'sms_raw.cone_raw', read: 3, written: 3, watermarkFrom: 0 }],
+    );
+
+  it('runs the transform on the healthy tables, then rethrows the aggregate with the result attached', async () => {
+    runOnce.mockRejectedValueOnce(partial());
+    let thrown: unknown;
+    try {
+      await runFullSync(pool, pool, cfg);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(TableHaltsError);
+    expect(runTransform).toHaveBeenCalledTimes(1);
+    expect(clearFindings).toHaveBeenCalledWith(pool, TRANSFORM_FAILED);
+    const e = thrown as InstanceType<typeof TableHaltsError> & { partial: { reader: unknown[]; transform: unknown[]; sourceProbeMs: number } };
+    expect(e.partial.reader).toHaveLength(1);
+    expect(e.partial.transform).toHaveLength(1);
+    expect(e.partial.sourceProbeMs).toBe(7);
+    // the transform ran BEFORE the aggregate was thrown: the order is what
+    // makes "the screens still get cones" true
+    expect(runTransform.mock.invocationCallOrder[0]).toBeGreaterThan(runOnce.mock.invocationCallOrder[0]!);
+  });
+
+  it('every table halted: no transform, the aggregate is thrown as is', async () => {
+    runOnce.mockRejectedValueOnce(new TableHaltsError([{ sourceTable: 'pack1_TP1U2', targetTable: 'cone_raw', reason: 'x' }], []));
+    await expect(runFullSync(pool, pool, cfg)).rejects.toThrow(/1 of 1 source table/);
+    expect(runTransform).not.toHaveBeenCalled();
+  });
+
+  it('a transform failure after a partial read is still the CRITICAL standing finding, and wins the throw', async () => {
+    runOnce.mockRejectedValueOnce(partial());
+    runTransform.mockRejectedValueOnce(new Error('Could not acquire the transform/rebuild lock'));
+    await expect(runFullSync(pool, pool, cfg)).rejects.toThrow(/rebuild lock/);
+    expect(persistFindings.mock.calls.some((c) => c[2][0]!.check_name === TRANSFORM_FAILED)).toBe(true);
   });
 });

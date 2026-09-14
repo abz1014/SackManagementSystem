@@ -3,6 +3,23 @@
  * raw at the current transform_version (ARCHITECTURE §18).
  * HARD GATE: refuses to run without --snapshot-id (proof a pre-rebuild snapshot
  * was taken). Records rebuild_audit. Deletes then re-transforms (idempotent).
+ *
+ * TWO MORE GATES (roadmap Phase 3 item 5, 14 Sep 2026):
+ *
+ *  - The snapshot id must LOOK like one. `--snapshot-id=x` satisfied the old
+ *    check, and the audit row then said a snapshot named "x" existed. The
+ *    pattern below asks for at least eight characters of the kind a backup
+ *    name or a timestamp has (backup-appdb.ps1 produces `sms_20260914_1530`),
+ *    which is not proof a snapshot was taken but is proof the operator typed
+ *    the name of one rather than a placeholder. The id is recorded as given.
+ *
+ *  - No worker pass may be in progress. The transform lock already keeps the
+ *    rebuild's DELETE and re-transform apart from the worker's TRANSFORM, but
+ *    the worker's READER runs outside that lock: a reader pass mid-flight
+ *    (a `sync_run` row with no finished_at_utc) is writing raw rows and
+ *    advancing watermarks that this rebuild is about to reset. Refuse, name
+ *    the rows, and let the operator retry once the pass has settled — the
+ *    pass is 60 s apart and takes seconds; the rebuild takes minutes.
  */
 import mssql from 'mssql';
 import { TRANSFORM_VERSION } from '@sms/shared';
@@ -13,9 +30,12 @@ import {
   withTransformLock,
   type TableKind,
 } from '@sms/sync-worker';
-import { openContext, parseArgs } from '../context.js';
+import { openContext, parseArgs, cliLog } from '../context.js';
 
 const ALLOWED = new Set(['cone_event', 'sack_event', 'reject_event']);
+
+/** A plausible snapshot name: a backup file stem, a timestamp, a tag — eight characters or more. */
+export const SNAPSHOT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:\-]{7,}$/;
 
 /** Which raw kinds feed each canonical table — reject_event is fed by two. */
 const KINDS_OF: Record<string, TableKind[]> = {
@@ -39,10 +59,33 @@ export async function rebuild(argv: string[]): Promise<number> {
     );
     return 2;
   }
+  if (!SNAPSHOT_ID.test(snapshotId)) {
+    console.error(
+      `REFUSED: --snapshot-id=${JSON.stringify(snapshotId)} does not look like a snapshot name. ` +
+        `Give the backup's own name (e.g. sms_20260914_1530): letters, digits, _ . : - only, at least eight characters.`,
+    );
+    return 2;
+  }
 
   const ctx = await openContext();
   let rebuildId: number | undefined;
   try {
+    // A reader pass in flight: refuse before touching anything. (The row a
+    // crashed worker leaves behind — 'running' forever — also trips this;
+    // that row is a real fault to look at, not one to rebuild past.)
+    const inFlight = await ctx.app
+      .request()
+      .query<{ n: number }>(`SELECT COUNT(*) n FROM sms.sync_run WHERE finished_at_utc IS NULL`);
+    const running = Number(inFlight.recordset[0]?.n ?? 0);
+    if (running > 0) {
+      console.error(
+        `REFUSED: ${running} sync_run row(s) have no finished_at_utc — a worker pass is in progress ` +
+          `(or one crashed and left its row open). The reader runs outside the transform lock, so a ` +
+          `rebuild now would race it. Wait for the pass to finish and re-run; if the row is stale, ` +
+          `investigate sms.sync_run before rebuilding.`,
+      );
+      return 2;
+    }
     // The rows this rebuild owns are the ones stamped with the system code(s)
     // of the source(s) this line's tables are read through (sms.data_source,
     // roadmap Phase 1) — was the literal 'ifl_sql'. Bound as parameters; the
@@ -126,6 +169,7 @@ export async function rebuild(argv: string[]): Promise<number> {
     // deleted, indistinguishable from a rebuild still in progress.
     const message = err instanceof Error ? err.message : String(err);
     console.error(`rebuild failed: ${message}`);
+    cliLog.error('rebuild failed', { table, snapshotId, error: message });
     if (rebuildId !== undefined) {
       try {
         await ctx.app

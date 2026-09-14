@@ -2,8 +2,35 @@
  * Pure raw → canonical transform (ARCHITECTURE §3). No DB access here; every
  * function is a deterministic mapping so it can be unit-tested and re-run to
  * rebuild canonical from raw. Stamps transform_version.
+ *
+ * TYPED AGAINST THE CANONICAL CONTRACTS (roadmap Phase 3, 14 Sep 2026). Each
+ * builder returns the `*Insert` shape of `@sms/shared`'s canonical.ts — the
+ * table's columns minus the identity — so a column added to a table and not
+ * here, or here and not there, is a compile error. The old `ConeRow`/
+ * `SackRow`/`RejectRow` interfaces this file declared were a second, private
+ * copy of the same facts, which is how the two drifted (rejects carried a
+ * material id and no attribution method for three weeks, and nothing said so).
+ *
+ * PROVENANCE IS COPIED FROM THE RAW ROW, NEVER MINTED. `ingest_run_id` used to
+ * be a UUID made up per transform pass and written to no other table, so the
+ * join the design promised — canonical → sync_run — returned nothing
+ * (migration 029). It is now the raw row's own `ingest_run_id`, which IS
+ * `sms.sync_run.run_id`, and `ingested_at_utc` is the raw row's `read_at_utc`.
+ * A raw row without them cannot be transformed honestly, so the builders
+ * throw rather than invent — see provenanceOfRaw.
  */
-import { TRANSFORM_VERSION, type NightBelongsTo, type ShiftBoundaries, type ShiftMode } from '@sms/shared';
+import {
+  TRANSFORM_VERSION,
+  type AttributionConfidence,
+  type AttributionMethod,
+  type ConeReadingInsert,
+  type NightBelongsTo,
+  type RejectEventInsert,
+  type RejectType,
+  type SackReadingInsert,
+  type ShiftBoundaries,
+  type ShiftMode,
+} from '@sms/shared';
 import {
   wallClockOf,
   shiftCodeOf,
@@ -65,94 +92,13 @@ const bit = (v: unknown): boolean | null => (v == null ? null : Boolean(v));
 /** Exposed for tests: 0 is the PLC's zero-value, never a winding position. */
 export const __stationForTest = station;
 
-export interface ConeRow {
-  line_id: number;
-  /** Source generation (sms.source_epoch). Part of the merge key: two cones nine
-   *  weeks apart in different generations must never be mistaken for a collision. */
-  source_epoch: number;
-  production_ts_utc: Date;
-  production_ts_utc_ms: number;
-  ingest_ts_utc: Date | null;
-  shift_code: string;
-  shift_date: Date;
-  shift_code_legacy: string | null;
-  /** Which night-attribution rule produced this row's shift_date. */
-  night_belongs_to: string;
-  hanger_num: number | null;
-  source_station: number | null;
-  lifter_station: number | null;
-  weight_g: number | null;
-  in_range: boolean | null;
-  cone_id: string | null;
-  cone_id_source: string | null;
-  material_id: number | null;
-  lot_code: string | null;
-  attribution_method: string;
-  attribution_confidence: string | null;
-  source_system: string;
-  source_row_id: number;
-  raw_id: number;
-  ingest_run_id: string;
-  ingest_seq: number;
-  merge_key_is_unique: boolean;
-  transform_version: number;
-}
-
-export interface SackRow {
-  line_id: number;
-  source_epoch: number;
-  production_ts_utc: Date;
-  production_ts_utc_ms: number;
-  ingest_ts_utc: Date | null;
-  production_ts_is_insert_time: boolean;
-  shift_code: string;
-  shift_date: Date;
-  shift_code_legacy: string | null;
-  /** Which night-attribution rule produced this row's shift_date. */
-  night_belongs_to: string;
-  sack_num: number | null;
-  weight_kg: number | null;
-  in_range: boolean | null;
-  material_id: number | null;
-  lot_code: string | null;
-  attribution_method: string;
-  attribution_confidence: string | null;
-  source_system: string;
-  source_row_id: number;
-  raw_id: number;
-  ingest_run_id: string;
-  ingest_seq: number;
-  merge_key_is_unique: boolean;
-  transform_version: number;
-}
-
-export interface RejectRow {
-  line_id: number;
-  source_epoch: number;
-  reject_type: 'quality' | 'weight';
-  production_ts_utc: Date;
-  production_ts_utc_ms: number;
-  ingest_ts_utc: Date | null;
-  shift_code: string;
-  shift_date: Date;
-  shift_code_legacy: string | null;
-  /** Which night-attribution rule produced this row's shift_date. */
-  night_belongs_to: string;
-  hanger_num: number | null;
-  source_station: number | null;
-  lifter_station: number | null;
-  tube_inspect_code: number | null;
-  material_inspect_code: number | null;
-  weight_g: number | null;
-  /** IFL's own product key (Sep 2026); null for rows read before it existed. */
-  material_id: number | null;
-  source_system: string;
-  source_row_id: number;
-  raw_id: number;
-  ingest_run_id: string;
-  ingest_seq: number;
-  transform_version: number;
-}
+/**
+ * The rows the builders produce, named as the rest of the worker knows them.
+ * Aliases of the shared contracts, not copies: see the header.
+ */
+export type ConeRow = ConeReadingInsert;
+export type SackRow = SackReadingInsert;
+export type RejectRow = RejectEventInsert;
 
 const BASE = {
   lot_code: null as string | null,
@@ -180,10 +126,10 @@ const BASE = {
  * product to readings taken weeks before it existed, which is precisely the
  * class of bug CLAUDE.md rule 1 was written to stop.
  */
-function attribution(rawMaterialId: unknown): {
+export function attribution(rawMaterialId: unknown): {
   material_id: number | null;
-  attribution_method: string;
-  attribution_confidence: string | null;
+  attribution_method: AttributionMethod;
+  attribution_confidence: AttributionConfidence | null;
 } {
   const id = num(rawMaterialId);
   // MaterialId 0 is not a product: it appears only on the single 1970-01-01
@@ -192,6 +138,37 @@ function attribution(rawMaterialId: unknown): {
     return { material_id: null, attribution_method: 'none', attribution_confidence: null };
   }
   return { material_id: id, attribution_method: 'source_column', attribution_confidence: 'high' };
+}
+
+/**
+ * The provenance every canonical row copies from its raw row (Phase 3 item 2).
+ *
+ * `ingest_run_id` is NOT NULL on every canonical table and `raw_id` is the
+ * dedupe key, so a raw row that lacks either would either fail the bulk insert
+ * with a driver message or, worse, be written under a value made up here. The
+ * check names the row and the function that should have selected the column
+ * (readRawSince does `SELECT *`, so this only fires if someone narrows it).
+ */
+function provenanceOfRaw(raw: Raw): {
+  raw_id: number;
+  source_row_id: number;
+  ingest_run_id: string;
+  ingested_at_utc: Date | null;
+} {
+  const rawId = num(raw.raw_id);
+  const runId = raw.ingest_run_id;
+  if (rawId === null || Number.isNaN(rawId)) {
+    throw new Error(`raw row (src_id ${String(raw.src_id)}) has no raw_id — readRawSince must select it`);
+  }
+  if (typeof runId !== 'string' || runId.length === 0) {
+    throw new Error(`raw row ${rawId} has no ingest_run_id — readRawSince must select it; nothing is invented here`);
+  }
+  return {
+    raw_id: rawId,
+    source_row_id: Number(raw.src_id),
+    ingest_run_id: runId,
+    ingested_at_utc: raw.read_at_utc instanceof Date ? raw.read_at_utc : null,
+  };
 }
 
 /**
@@ -217,7 +194,7 @@ function attribution(rawMaterialId: unknown): {
  * (DEPLOY.md), not a bug fixable here — there is no ground truth in the row
  * to verify against.
  */
-export function mapCone(raw: Raw, rules: TransformRules, runId: string): ConeRow {
+export function mapCone(raw: Raw, rules: TransformRules): ConeRow {
   const eventDt = (raw.src_ProductionDate ?? raw.src_Date) as Date;
   const wc = wallClockOf(eventDt);
   const { boundaries, nightBelongsTo } = rules.shift;
@@ -241,16 +218,14 @@ export function mapCone(raw: Raw, rules: TransformRules, runId: string): ConeRow
     ...BASE,
     source_system: rules.sourceSystem,
     ...attribution(raw.src_MaterialId),
-    source_row_id: Number(raw.src_id),
-    raw_id: Number(raw.raw_id),
-    ingest_run_id: runId,
+    ...provenanceOfRaw(raw),
     ingest_seq: 0,
     merge_key_is_unique: true,
     transform_version: TRANSFORM_VERSION,
   };
 }
 
-export function mapSack(raw: Raw, rules: TransformRules, runId: string): SackRow {
+export function mapSack(raw: Raw, rules: TransformRules): SackRow {
   // sacks have no independent event time (DQ-5): use insert time, flag it.
   const eventDt = raw.src_Date as Date;
   const wc = wallClockOf(eventDt);
@@ -272,21 +247,14 @@ export function mapSack(raw: Raw, rules: TransformRules, runId: string): SackRow
     ...BASE,
     source_system: rules.sourceSystem,
     ...attribution(raw.src_MaterialId),
-    source_row_id: Number(raw.src_id),
-    raw_id: Number(raw.raw_id),
-    ingest_run_id: runId,
+    ...provenanceOfRaw(raw),
     ingest_seq: 0,
     merge_key_is_unique: true,
     transform_version: TRANSFORM_VERSION,
   };
 }
 
-export function mapReject(
-  raw: Raw,
-  kind: 'quality' | 'weight',
-  rules: TransformRules,
-  runId: string,
-): RejectRow {
+export function mapReject(raw: Raw, kind: RejectType, rules: TransformRules): RejectRow {
   const eventDt = (raw.src_ProductionDate ?? raw.src_Date) as Date;
   const wc = wallClockOf(eventDt);
   const { boundaries, nightBelongsTo } = rules.shift;
@@ -307,12 +275,12 @@ export function mapReject(
     tube_inspect_code: kind === 'quality' ? num(raw.src_TubeInspectResult) : null,
     material_inspect_code: kind === 'quality' ? num(raw.src_MaterialInspectResult) : null,
     weight_g: kind === 'weight' ? num(raw.src_Weight) : null,
-    // A reject rate is only meaningful per product, so rejects carry the key too.
-    material_id: attribution(raw.src_MaterialId).material_id,
+    // A reject rate is only meaningful per product, so rejects carry the key —
+    // and, since migration 029, HOW it was resolved, by the same rule as
+    // cones: the row's own MaterialId, or honestly 'none'.
     source_system: rules.sourceSystem,
-    source_row_id: Number(raw.src_id),
-    raw_id: Number(raw.raw_id),
-    ingest_run_id: runId,
+    ...attribution(raw.src_MaterialId),
+    ...provenanceOfRaw(raw),
     ingest_seq: 0,
     transform_version: TRANSFORM_VERSION,
   };

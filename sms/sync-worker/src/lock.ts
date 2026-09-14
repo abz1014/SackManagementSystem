@@ -25,8 +25,10 @@
  * rather than merely usually doing so.
  */
 import mssql from 'mssql';
+import { createLogger } from '@sms/shared';
 import { toMssqlConfig, type DbConfig } from './config.js';
 
+const log = createLogger('sync-worker');
 const RESOURCE = 'sms_transform_rebuild';
 const LOCK_POOL = { max: 1, min: 1, idleTimeoutMillis: 24 * 60 * 60 * 1000 } as const;
 
@@ -94,19 +96,19 @@ export async function acquireTransformLock(
         // operator ever saw. Closing the connection below ends the session,
         // which releases a session-scoped lock regardless, so the explicit
         // release failing is not itself a correctness problem.
-        console.error(
-          `[lock] sp_releaseapplock failed (the lock still releases when this connection closes): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
+        log.warn('sp_releaseapplock failed (the lock still releases when this connection closes)', {
+          lock: RESOURCE,
+          error: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         // Guarded for the same reason as the catch above: this sits in
         // withTransformLock's `finally`, so a rejecting close() would replace
         // the real error from the work it was protecting.
         await conn.close().catch((err) => {
-          console.error(
-            `[lock] closing the lock connection failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          log.warn('closing the lock connection failed', {
+            lock: RESOURCE,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
       }
     },

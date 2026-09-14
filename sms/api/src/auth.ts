@@ -7,6 +7,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
+import { requestLog } from './log.js';
 
 export const SESSION_COOKIE = 'sms_session';
 const SESSION_DAYS = 7;
@@ -194,10 +195,13 @@ function warnIfCookieWillBeDropped(req: Request): void {
   if (req.secure) return; // real TLS (or a trusted proxy reported https)
   const host = (req.hostname ?? '').toLowerCase();
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return;
-  console.warn(
-    `[auth] COOKIE_SECURE=true but this login arrived over plain HTTP for host "${host}". ` +
+  // One JSON line since 14 Sep 2026 (roadmap Phase 2 item 6), with the host
+  // as a field so a log search for the offending address needs no prose parse.
+  requestLog(req).warn(
+    `auth: COOKIE_SECURE=true but this login arrived over plain HTTP for host "${host}". ` +
       `The browser will DISCARD the session cookie and the user will appear unable to log in. ` +
       `For a plain-HTTP intranet set COOKIE_SECURE=false; keep it true only behind TLS.`,
+    { host, cookieSecure: true, secure: false },
   );
 }
 
@@ -223,7 +227,7 @@ export function authMiddleware(pool: ConnectionPool) {
     (req as AuthedRequest).user = found?.user ?? null;
     if (id && found?.expiresAtUtc && found.expiresAtUtc.getTime() - Date.now() < RENEW_BELOW_MS) {
       // Best-effort: a failed renewal must never fail the request it rode on.
-      await renewSession(pool, id, res, req).catch((e) => console.error('[auth] session renewal failed:', e));
+      await renewSession(pool, id, res, req).catch((e) => requestLog(req).error('auth: session renewal failed', { err: e }));
     }
     next();
   };

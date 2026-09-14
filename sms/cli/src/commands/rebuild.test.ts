@@ -35,6 +35,7 @@ function fakePool() {
             return { recordset: [], rowsAffected: [n] };
           }
           if (/MIN\(transform_version\)/.test(sql)) return { recordset: [{ v: 2 }], rowsAffected: [1] };
+          if (/FROM sms\.sync_run WHERE finished_at_utc IS NULL/.test(sql)) return { recordset: [{ n: world.inFlight }], rowsAffected: [1] };
           if (/INSERT INTO sms\.rebuild_audit/.test(sql)) return { recordset: [{ id: 41 }], rowsAffected: [1] };
           return { recordset: [], rowsAffected: [1] };
         },
@@ -47,6 +48,8 @@ function fakePool() {
 
 const world = {
   app: undefined as unknown as ReturnType<typeof fakePool>,
+  /** sync_run rows with no finished_at_utc — a worker pass in progress. */
+  inFlight: 0,
   streams: {
     cone: { systemCode: 'plant_sql', sourceTable: 'pack1_TP1U2' },
     sack: { systemCode: 'plant_sql', sourceTable: 'sack1_TP1U2' },
@@ -80,6 +83,8 @@ const { rebuild } = await import('./rebuild.js');
 
 beforeEach(() => {
   world.app = fakePool();
+  world.inFlight = 0;
+  vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as never);
   runTransform.mockClear();
   resetTransformWatermarks.mockClear();
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -89,7 +94,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('sms rebuild — deletes by the configured system code', () => {
   it('binds the code as a parameter on the DELETE and on the from-version probe; no literal anywhere', async () => {
-    expect(await rebuild(['--table=cone_event', '--snapshot-id=snap-1'])).toBe(0);
+    expect(await rebuild(['--table=cone_event', '--snapshot-id=sms_20260914_1530'])).toBe(0);
     const stmts = world.app.statements;
     const deletes = stmts.filter((s) => /^DELETE TOP/.test(s.sql.trim()));
     expect(deletes.length).toBeGreaterThan(0);
@@ -108,7 +113,7 @@ describe('sms rebuild — deletes by the configured system code', () => {
   });
 
   it('reject_event is fed by two kinds: both codes, distinct, in one IN list', async () => {
-    await rebuild(['--table=reject_event', '--snapshot-id=snap-2']);
+    await rebuild(['--table=reject_event', '--snapshot-id=sms_20260914_1531']);
     const d = world.app.statements.find((s) => /^DELETE TOP/.test(s.sql.trim()))!;
     expect(d.sql).toMatch(/WHERE source_system IN \(@sys0, @sys1\)/);
     expect([d.inputs.get('sys0'), d.inputs.get('sys1')]).toEqual(['plant_sql', 'legacy_sql']);
@@ -117,5 +122,39 @@ describe('sms rebuild — deletes by the configured system code', () => {
   it('still refuses without a snapshot id, before opening anything', async () => {
     expect(await rebuild(['--table=cone_event'])).toBe(2);
     expect(world.app.statements).toHaveLength(0);
+  });
+});
+
+/**
+ * The two Phase 3 gates (roadmap item 5, 14 Sep 2026): a snapshot id must
+ * look like the name of a snapshot, and no worker pass may be in flight —
+ * the transform lock covers the transform, this covers the reader.
+ */
+describe('sms rebuild — snapshot id and in-flight pass gates', () => {
+  it('refuses a snapshot id that is not a plausible name, before opening anything', async () => {
+    for (const bad of ['x', 'snap-1', '-20260914', 'a b c d e f g h', 'sms/2026']) {
+      expect(await rebuild(['--table=cone_event', `--snapshot-id=${bad}`])).toBe(2);
+    }
+    expect(world.app.statements).toHaveLength(0);
+    expect(runTransform).not.toHaveBeenCalled();
+  });
+
+  it('accepts the names a backup or a tag would have, recording the id as given', async () => {
+    expect(await rebuild(['--table=cone_event', '--snapshot-id=sms_20260914_1530'])).toBe(0);
+    const audit = world.app.statements.find((s) => /INSERT INTO sms\.rebuild_audit/.test(s.sql))!;
+    expect(audit.inputs.get('snap')).toBe('sms_20260914_1530');
+    world.app = fakePool();
+    expect(await rebuild(['--table=cone_event', '--snapshot-id=v0.1.0-baseline:2026-09-14T15.30'])).toBe(0);
+  });
+
+  it('refuses while a worker pass is in progress, before the audit row or any DELETE', async () => {
+    world.inFlight = 2;
+    expect(await rebuild(['--table=cone_event', '--snapshot-id=sms_20260914_1530'])).toBe(2);
+    const sqls = world.app.statements.map((s) => s.sql);
+    expect(sqls.some((q) => /finished_at_utc IS NULL/.test(q))).toBe(true);
+    expect(sqls.some((q) => /rebuild_audit/.test(q))).toBe(false);
+    expect(sqls.some((q) => /^DELETE/.test(q.trim()))).toBe(false);
+    expect(runTransform).not.toHaveBeenCalled();
+    expect(resetTransformWatermarks).not.toHaveBeenCalled();
   });
 });

@@ -35,6 +35,21 @@ export function fmtDayLong(date: string): string {
   });
 }
 
+/**
+ * "14/09/2026, 10:34:12" — an instant THIS SYSTEM wrote (a sync pass, an
+ * audit row, the moment a raw row was read), in the viewer's own zone.
+ *
+ * The one formatter here that does NOT pin UTC, on purpose: these are the
+ * app's genuine UTC instants, not the plant's wall clock labelled UTC (the
+ * two clocks in CLAUDE.md), and pinning UTC would show a plant-PC viewer a
+ * time five hours off their own wall clock. Setup's audit log rendered this
+ * inline; named when the reading sheet needed the same thing (roadmap
+ * Phase 3, 14 Sep 2026) so the two cannot drift.
+ */
+export function fmtAppInstant(iso: string): string {
+  return new Date(iso).toLocaleString('en-GB');
+}
+
 /** "6 min", "3 h 12 min", "2 days" — a length of time. */
 export function fmtSpan(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));

@@ -2,19 +2,38 @@
  * Sync runner (Step 2 scope: Reader -> raw). Source-agnostic orchestration:
  * fingerprint gate -> read since (watermark - overlap) -> idempotent raw insert
  * -> sync_run audit. Transform->canonical is Step 3.
+ *
+ * PER-TABLE ISOLATION (roadmap Phase 2 item 3, 14 Sep 2026). A halt on one
+ * table used to end the pass: the tables after it were not read, each got a
+ * "Not read this pass" row, and the transform did not run — so one stale
+ * generation on rejectWeight1_TP1U2 (a table the plant writes a few rows an
+ * hour to) stopped every cone and sack from reaching a screen. Now each
+ * table's gates and read run inside their own try; a halt writes THAT table's
+ * halt row and the loop carries on. At the end, if anything halted, one
+ * aggregate error names every halted table and why, thrown AFTER the healthy
+ * tables' rows were written — so the log and the CLI's exit code still say
+ * the pass was not clean, and pipeline.ts still runs the transform for what
+ * did arrive.
+ *
+ * Two halts remain pass-level, because there is nothing per-table to isolate:
+ * the configuration itself being unreadable (no rows, unmigrated database),
+ * and the source probe failing before any table is approached (pipeline.ts).
  */
 import { randomUUID } from 'node:crypto';
 import type { ConnectionPool } from 'mssql';
+import { createLogger, type Logger } from '@sms/shared';
 import type { SyncConfig } from './config.js';
 import { fallbackHaltTargets, rawShortName, type IflTableDef } from './reader/iflTables.js';
 import { loadSourceTables } from './reader/sourceTables.js';
-import { IflSqlAdapter } from './reader/IflSqlAdapter.js';
+import { createAdapter, classifyError, isTransient, type ProbeResult } from './reader/SourceAdapter.js';
 import { persistRaw } from './raw/persistRaw.js';
 import { persistFindings } from './transform/dq.js';
-import { resolveEpoch } from './epoch.js';
+import { resolveEpoch, checkColumnDrift } from './epoch.js';
 import { withRetry } from './util/retry.js';
 import { getWatermark, startSyncRun, finishSyncRun, recordHaltedRun } from './store.js';
 import type { EpochRow } from './epoch.js';
+
+const log: Logger = createLogger('sync-worker');
 
 export interface TableOutcome {
   table: string;
@@ -23,13 +42,57 @@ export interface TableOutcome {
   watermarkFrom: number;
 }
 
+/** One table that did not sync this pass, and the reason its halt row carries. */
+export interface TableHalt {
+  sourceTable: string;
+  targetTable: string;
+  reason: string;
+}
+
+/**
+ * Thrown by runOnce when at least one table halted. Carries the outcomes of
+ * the tables that DID sync so the caller (pipeline.ts) can still transform
+ * them, and the halts so the log can list them. `message` is the aggregate:
+ * one line per halted table.
+ */
+export class TableHaltsError extends Error {
+  /** Set by pipeline.ts once the transform has run on the healthy tables, so the
+   *  worker can log the pass summary as well as the halts. */
+  partial: unknown = null;
+
+  constructor(
+    readonly halts: TableHalt[],
+    readonly outcomes: TableOutcome[],
+  ) {
+    super(
+      `${halts.length} of ${halts.length + outcomes.length} source table(s) did not sync this pass:\n` +
+        halts.map((h) => `  - ${h.sourceTable} → ${h.targetTable}: ${h.reason}`).join('\n'),
+    );
+    this.name = 'TableHaltsError';
+  }
+}
+
+/**
+ * The source probe (roadmap Phase 2 item 5): one round trip through the
+ * first configured table's adapter before any table is read. The adapter
+ * classifies the failure; the caller (pipeline.ts) turns a failed probe into
+ * the pass-level halt rows. Exposed so the pipeline can log the round trip.
+ */
+export async function probeSource(iflPool: ConnectionPool, tables: IflTableDef[]): Promise<ProbeResult> {
+  const first = tables[0];
+  if (!first) return { ok: false, error: 'no source tables to probe', classification: 'unknown' };
+  return createAdapter(first.systemCode, iflPool, first).probe();
+}
+
 export async function runOnce(
   appPool: ConnectionPool,
   iflPool: ConnectionPool,
   cfg: SyncConfig,
 ): Promise<TableOutcome[]> {
   const runId = randomUUID();
+  const passLog = log.child({ correlationId: runId });
   const outcomes: TableOutcome[] = [];
+  const halts: TableHalt[] = [];
 
   // ---- configuration gate ------------------------------------------------------
   // Which tables this line reads is a fact of sms.source_table, loaded fresh
@@ -57,9 +120,7 @@ export async function runOnce(
     throw err;
   }
 
-  for (let i = 0; i < tables.length; i++) {
-    const def = tables[i]!;
-    const adapter = new IflSqlAdapter(iflPool, def);
+  for (const def of tables) {
     const targetTable = rawShortName(def.rawTable);
 
     // What the halt writer knows so far. Both are filled in as the gates pass,
@@ -70,6 +131,10 @@ export async function runOnce(
     let runRowOpen = false;
 
     try {
+      // Through the registry (Phase 2): an unregistered system code is a
+      // halt for THIS table with a message naming it, not a crash of the pass.
+      const adapter = createAdapter(def.systemCode, iflPool, def);
+
       // ---- generation gate ------------------------------------------------------
       // Resolve WHICH generation of this source table we are reading before doing
       // anything else. resolveEpoch halts on an unknown generation, on a changed
@@ -80,6 +145,17 @@ export async function runOnce(
       // Order matters: the watermark is meaningless until the generation is known,
       // since `id` restarts with each one.
       epoch = await resolveEpoch(appPool, iflPool, def, cfg.lineId, cfg.iflData);
+
+      // ---- column-list drift (non-fatal) ---------------------------------------
+      // The fingerprint above sees only the columns we READ. This compares the
+      // FULL list to the one recorded for the generation and raises a WARNING
+      // finding on a difference — a column IFL added that SMS might want, the
+      // way MaterialId arrived. Stored on first sight; never a halt.
+      const drift = await checkColumnDrift(appPool, adapter, epoch);
+      if (drift) {
+        await persistFindings(appPool, runId, [drift]);
+        passLog.warn('source column list changed', { table: def.sourceTable, epoch: epoch.epoch_id, detail: drift.detail });
+      }
 
       watermark = await getWatermark(appPool, def.rawTable, cfg.lineId, epoch.epoch_id);
 
@@ -118,9 +194,19 @@ export async function runOnce(
       runRowOpen = true;
 
       try {
+        // Retry ONLY what a retry can cure (Phase 2 item 2). A refused login or
+        // a missing table fails on the first attempt, and the halt row below
+        // carries its classification; the old behaviour retried those four
+        // times with backoff and logged the same fact four times.
         const records = await withRetry(() => adapter.readSince(afterId), {
+          retryOn: isTransient,
           onRetry: (n, err) =>
-            console.warn(`  retry ${n} reading ${def.sourceTable}: ${String(err)}`),
+            passLog.warn('retrying source read', {
+              attempt: n,
+              table: def.sourceTable,
+              classification: classifyError(err),
+              error: err instanceof Error ? err.message : String(err),
+            }),
         });
         const { read, written } = await persistRaw(
           appPool,
@@ -173,19 +259,19 @@ export async function runOnce(
           rowsRead: 0,
           rowsWritten: 0,
           outcome: 'failed',
-          error: String(err),
+          error: describe(err),
         });
         throw err;
       }
     } catch (err) {
-      // ---- leave a row for every table this pass owes one -------------------
-      // Whatever stopped this table, the pass is over: the tables after it are
-      // not read, and the transform does not run. Each of them gets a 'halted'
-      // row naming the table that stopped the pass, so Setup counts them all
-      // as "did not sync" instead of showing them as successes that are quietly
-      // ageing. The halting table itself gets a row only if it had not already
-      // opened one — the in-run failure above finishes its own as 'failed'.
-      const reason = err instanceof Error ? err.message : String(err);
+      // ---- leave a row for THIS table, then carry on ----------------------
+      // Whatever stopped this table, the others are still read (Phase 2
+      // per-table isolation). The halting table gets a 'halted' row only if
+      // it had not already opened one — the in-run failure above finishes its
+      // own as 'failed'. The reason carries the error's classification
+      // (transient / auth / schema / unknown) in front of the driver's text,
+      // so Setup can say "permission" rather than quoting SQL Server.
+      const reason = describe(err);
       if (!runRowOpen) {
         await recordHaltedRun(appPool, {
           runId,
@@ -197,19 +283,24 @@ export async function runOnce(
           error: reason,
         });
       }
-      for (const later of tables.slice(i + 1)) {
-        await recordHaltedRun(appPool, {
-          runId,
-          adapter: later.systemCode,
-          targetTable: rawShortName(later.rawTable),
-          lineId: cfg.lineId,
-          sourceEpoch: null,
-          watermarkFrom: null,
-          error: `Not read this pass: ${def.sourceTable} halted the pass first. ${reason}`,
-        });
-      }
-      throw err;
+      halts.push({ sourceTable: def.sourceTable, targetTable, reason });
+      passLog.warn('source table did not sync', { table: def.sourceTable, target: targetTable, reason });
     }
   }
+
+  if (halts.length > 0) throw new TableHaltsError(halts, outcomes);
   return outcomes;
+}
+
+/**
+ * A halt reason as the sync_run row and the log carry it: the classification
+ * first, when the error is a driver/server failure whose class is known, then
+ * the message. A gate's own Error (generation changed, gone backwards) has no
+ * driver code and classifies 'unknown'; those messages already say what to
+ * do, so the prefix is left off rather than adding noise to them.
+ */
+function describe(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const cls = classifyError(err);
+  return cls === 'unknown' ? message : `[${cls}] ${message}`;
 }

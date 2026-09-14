@@ -12,8 +12,8 @@
  * opposite responses — so the worker halts and a human looks.
  */
 import mssql from 'mssql';
-import { loadSourceTables, readSourceIdentity, openEpoch } from '@sms/sync-worker';
-import { openContext, parseArgs } from '../context.js';
+import { loadSourceTables, readSourceIdentity, openEpoch, createAdapter } from '@sms/sync-worker';
+import { openContext, parseArgs, cliLog } from '../context.js';
 
 const asList = (v: unknown): string[] =>
   typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -110,9 +110,9 @@ export async function epochAccept(argv: string[]): Promise<number> {
     for (const def of defs) {
       const now = await readSourceIdentity(ctx.ifl, def, ctx.cfg.iflData);
       const open = await openEpoch(ctx.app, ctx.cfg.lineId, def.sourceTable);
-      const maxRes = await ctx.ifl
-        .request()
-        .query<{ hi: number | null }>(`SELECT MAX([id]) hi FROM [${def.sourceTable}]`);
+      // Through the registry, like the worker (Phase 2) — the only reader of
+      // the source this command has is the configured adapter.
+      const sourceMax = await createAdapter(def.systemCode, ctx.ifl, def).maxSourceId();
       const ord = await ctx.app
         .request()
         .input('line', mssql.Int, ctx.cfg.lineId)
@@ -139,7 +139,7 @@ export async function epochAccept(argv: string[]): Promise<number> {
         now,
         openId: open?.epoch_id ?? null,
         ordinal: Number(ord.recordset[0]?.n ?? 1),
-        max: maxRes.recordset[0]?.hi == null ? null : Number(maxRes.recordset[0].hi),
+        max: sourceMax,
       });
 
       console.log(`  ${def.sourceTable}`);
@@ -187,12 +187,15 @@ export async function epochAccept(argv: string[]): Promise<number> {
         .input('prov', mssql.VarChar(20), provenance)
         .input('ord', mssql.Int, p.ordinal)
         .input('lbl', mssql.NVarChar(64), label || `${p.def.sourceTable} gen ${p.ordinal}`)
+        // The FULL column list at acceptance (migration 029, Phase 2): the
+        // baseline the worker compares the live table against on every pass.
+        .input('cols', mssql.NVarChar(mssql.MAX), JSON.stringify(p.now.columnList))
         .query<{ id: number }>(
           `INSERT INTO sms.source_epoch
              (line_id, source_table, source_server, source_db, source_created_key,
-              schema_fingerprint, provenance, generation_ordinal, label, registered_by)
+              schema_fingerprint, provenance, generation_ordinal, label, registered_by, column_list)
            OUTPUT INSERTED.epoch_id id
-           VALUES (@line, @tbl, @srv, @db, @key, @fp, @prov, @ord, @lbl, 'cli:epoch-accept')`,
+           VALUES (@line, @tbl, @srv, @db, @key, @fp, @prov, @ord, @lbl, 'cli:epoch-accept', @cols)`,
         );
       console.log(`  registered epoch ${ins.recordset[0]!.id} for ${p.def.sourceTable}`);
     }
@@ -200,6 +203,7 @@ export async function epochAccept(argv: string[]): Promise<number> {
     return 0;
   } catch (err) {
     console.error(`epoch:accept failed: ${err instanceof Error ? err.message : String(err)}`);
+    cliLog.error('epoch:accept failed', { error: err instanceof Error ? err.message : String(err) });
     return 1;
   } finally {
     await ctx.close();
@@ -293,6 +297,7 @@ export async function epochPurge(argv: string[]): Promise<number> {
     return 0;
   } catch (err) {
     console.error(`epoch:purge failed: ${err instanceof Error ? err.message : String(err)}`);
+    cliLog.error('epoch:purge failed', { error: err instanceof Error ? err.message : String(err) });
     return 1;
   } finally {
     await ctx.close();
