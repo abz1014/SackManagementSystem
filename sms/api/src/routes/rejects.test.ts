@@ -33,7 +33,7 @@ class FakeRequest {
   }
 }
 
-const OPERATOR = { userId: 1, username: 'operator', role: 'operator', rank: 1 };
+const OPERATOR = { userId: 1, username: 'viewer', role: 'viewer', rank: 1 };
 
 class FakeDb {
   statements: Stmt[] = [];

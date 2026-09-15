@@ -290,7 +290,8 @@ export interface Station {
   machine: string | null;
   description: string | null;
   machine_id: number | null;
-  link_source: 'default_by_number' | 'admin' | null;
+  /** 'confirmed_by_ifl' since migration 035: IFL confirmed machine = station (Q1/Q3, 15 Sep 2026). */
+  link_source: 'default_by_number' | 'confirmed_by_ifl' | 'admin' | null;
   is_active: boolean;
 }
 

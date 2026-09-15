@@ -36,7 +36,7 @@ interface User { userId: number; username: string; role: string; rank: number; a
 const ADMIN: User = { userId: 4, username: 'admin', role: 'admin', rank: 4, active: true };
 const ADMIN2: User = { userId: 5, username: 'admin2', role: 'admin', rank: 4, active: true };
 const MANAGER: User = { userId: 3, username: 'manager', role: 'manager', rank: 3, active: true };
-const OPERATOR: User = { userId: 1, username: 'operator', role: 'operator', rank: 1, active: true };
+const OPERATOR: User = { userId: 1, username: 'viewer', role: 'viewer', rank: 1, active: true };
 
 class FakeDb {
   statements: Stmt[] = [];
@@ -204,33 +204,33 @@ const sessionIdOf = (cookie: string) => decodeURIComponent(cookie.split('=')[1]!
 
 describe('POST /api/auth/password — self-service change', () => {
   it('refuses a wrong current password with 403 and writes nothing', async () => {
-    const r = await call('operator', 'POST', '/api/auth/password', { currentPassword: 'nope-not-it', newPassword: 'a-new-password-1' });
+    const r = await call('viewer', 'POST', '/api/auth/password', { currentPassword: 'nope-not-it', newPassword: 'a-new-password-1' });
     expect(r.status).toBe(403);
     expect(stmt('UPDATE sms.app_user SET password_hash')).toBeUndefined();
     expect(db.txLog).toEqual([]);
   });
 
   it('applies PASSWORD_MIN_LENGTH (10) before touching the database', async () => {
-    const r = await call('operator', 'POST', '/api/auth/password', { currentPassword: PASSWORD, newPassword: 'short' });
+    const r = await call('viewer', 'POST', '/api/auth/password', { currentPassword: PASSWORD, newPassword: 'short' });
     expect(r.status).toBe(400);
     expect(r.json.detail).toMatch(/at least 10 characters/);
     expect(db.statements.filter((s) => !s.sql.includes('FROM sms.session s'))).toHaveLength(0);
   });
 
   it('refuses reusing the current password', async () => {
-    const r = await call('operator', 'POST', '/api/auth/password', { currentPassword: PASSWORD, newPassword: PASSWORD });
+    const r = await call('viewer', 'POST', '/api/auth/password', { currentPassword: PASSWORD, newPassword: PASSWORD });
     expect(r.status).toBe(400);
     expect(r.json.detail).toMatch(/differ/);
   });
 
   it('on success: new hash, every OTHER session revoked (own kept), audit row, one transaction', async () => {
-    // Give the operator a second session that must be revoked.
-    const second = await login('operator');
+    // Give the viewer a second session that must be revoked.
+    const second = await login('viewer');
     const secondCookie = second.headers.get('set-cookie')!.split(';')[0]!;
     db.statements = [];
     db.txLog = [];
 
-    const r = await call('operator', 'POST', '/api/auth/password', { currentPassword: PASSWORD, newPassword: 'a-new-password-1' });
+    const r = await call('viewer', 'POST', '/api/auth/password', { currentPassword: PASSWORD, newPassword: 'a-new-password-1' });
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ ok: true, otherSessionsRevoked: 1 });
 
@@ -240,10 +240,10 @@ describe('POST /api/auth/password — self-service change', () => {
 
     const rev = stmt('DELETE FROM sms.session WHERE user_id = @u')!;
     expect(rev.inputs.get('u')).toBe(OPERATOR.userId);
-    expect(rev.inputs.get('keep')).toBe(sessionIdOf(cookies['operator']!));
+    expect(rev.inputs.get('keep')).toBe(sessionIdOf(cookies['viewer']!));
     // the second session is gone, the caller's own survives
     expect(db.sessions.has(sessionIdOf(secondCookie))).toBe(false);
-    expect(db.sessions.has(sessionIdOf(cookies['operator']!))).toBe(true);
+    expect(db.sessions.has(sessionIdOf(cookies['viewer']!))).toBe(true);
 
     const a = audits().find((s) => s.inputs.get('action') === 'auth.password_change')!;
     expect(a).toBeDefined();
@@ -346,7 +346,7 @@ describe('GET /api/health — shape, redaction, status', () => {
   });
 
   it('signed in (any rank): the details are filled in', async () => {
-    const r = await call('operator', 'GET', '/api/health');
+    const r = await call('viewer', 'GET', '/api/health');
     expect(r.status).toBe(200);
     expect(r.json.database.sizeMb).toBe(512);
     expect(r.json.database.pctOfCap).toBe(5);
@@ -356,7 +356,7 @@ describe('GET /api/health — shape, redaction, status', () => {
 
   it('a data file past 80 % of the cap degrades the status', async () => {
     db.sizeMb = 9000;
-    const r = await call('operator', 'GET', '/api/health');
+    const r = await call('viewer', 'GET', '/api/health');
     expect(r.json.status).toBe('degraded');
     expect(r.json.database.pctOfCap).toBe(87.9);
   });
@@ -375,7 +375,7 @@ describe('GET /api/health — shape, redaction, status', () => {
 
 describe('auth and export events are audited', () => {
   it('a successful login writes auth.login with the user as actor', async () => {
-    const res = await login('operator');
+    const res = await login('viewer');
     await new Promise((r) => setTimeout(r, 15));
     expect(res.status).toBe(200);
     const a = audits().find((s) => s.inputs.get('action') === 'auth.login')!;
@@ -384,18 +384,18 @@ describe('auth and export events are audited', () => {
   });
 
   it('a failed login writes auth.login_failed naming the username, no actor, never the password', async () => {
-    const res = await login('operator', 'the-wrong-password');
+    const res = await login('viewer', 'the-wrong-password');
     await new Promise((r) => setTimeout(r, 15));
     expect(res.status).toBe(401);
     const a = audits().find((s) => s.inputs.get('action') === 'auth.login_failed')!;
     expect(a).toBeDefined();
     expect(a.inputs.get('actor')).toBeNull();
-    expect(a.inputs.get('target')).toBe('operator');
+    expect(a.inputs.get('target')).toBe('viewer');
     for (const v of a.inputs.values()) expect(String(v)).not.toContain('the-wrong-password');
   });
 
   it('logout writes auth.logout', async () => {
-    const extra = await login('operator');
+    const extra = await login('viewer');
     const c = extra.headers.get('set-cookie')!.split(';')[0]!;
     db.statements = [];
     await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Cookie: c } });

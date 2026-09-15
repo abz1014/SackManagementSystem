@@ -35,9 +35,40 @@
  * table; no schema change. Every write goes through the vendor's proc where
  * one exists, and is never a raw INSERT.
  *
- * WE DO NOT WRITE TO MACHINES. Q22 stands. Whether the PLC reads these values
- * live or only when a product is next selected is §6.2's first open question;
- * until answered, treat a limits change as a process-control write.
+ * WE DO NOT WRITE TO MACHINES. Q22 stands. IFL answered §6.2's first question
+ * on 15 Sep 2026: the QCS panel fetches a material's setpoint and offsets at
+ * the moment the operator selects it on the machine (FuncGetConeWeight in the
+ * panel's own event log), so a limits change reaches a machine on the next
+ * reselect. It is still a process-control write and is treated as one.
+ *
+ * THE WHOLE PROCEDURE, NOT THREE OPERATIONS OF IT (roadmap Phase 6 completed,
+ * Wave F, 15 Sep 2026). IFL's SOP "QCS ID Creation by P-DAS" runs, in SSMS:
+ * GetAllBlends/Counts/TubeTypes → AddBlend/AddCount/AddTubeType for anything
+ * missing → CreateMaterial → CreatePallet (material, pack schema 1, lot,
+ * active, PalletDesc1 = sack colour) → SetMaterialStatusActive 0 /
+ * SetPalletStatusActive 0 on what it replaces. The panel then lists active
+ * materials AND active pallets, and the operator selects both on the machine.
+ * Five operations were added for the steps this file did not cover, each the
+ * same shape as the first three: flag check first, the vendor's proc with its
+ * OUTPUT @error/@errorMsg, an echo-back read of the row PDAS now holds, the
+ * app-side mirror refreshed, and one sms.product_change row whatever happened.
+ * Verified from the proc bodies in PDAS_TP1U2_SEP07 (read-only, 15 Sep 2026):
+ *   - AddBlend / AddCount: INSERT, duplicate check `name LIKE @name` (so the
+ *     vendor's own compare is case-insensitive and treats '_' and '%' as
+ *     wildcards), -4001/-6001 "already exist", -4004/-6004 "empty" — a check
+ *     written `= NULL` that can never fire; the empty case is refused here.
+ *   - AddTubeType: OUTPUT parameter is literally `@typeTypeId` (vendor typo),
+ *     `@tubeForm int = 0` whose own validation refuses 0 (-5002: must be 1 or
+ *     2), so a form is always passed; -5001 duplicate (name AND form), -5003
+ *     weight <= 0. 26 of the 27 tube types on this line are form 2.
+ *   - CreatePallet: INSERT keyed on (MaterialId, PackSchemaId, Lot), -8001
+ *     "Pallet already exist" regardless of PalletActive, -8004 when material,
+ *     schema or lot is empty, -8002 bad active bit; @labelType defaults to 1
+ *     and every real pallet on this line has 1.
+ *   - SetPalletStatusActive: UPDATE PalletActive only; -8001 = no such pallet
+ *     (the same code CreatePallet uses for a duplicate — explained per proc).
+ * The orchestration of those steps is services/changeover.ts; this file only
+ * knows how to perform one step safely.
  */
 import { randomUUID } from 'node:crypto';
 import type { ConnectionPool } from 'mssql';
@@ -73,6 +104,39 @@ export type CreateResult = { ok: true; productId: number } | WriteFailure;
 export type ActiveResult = { ok: true; productId: number; active: boolean } | WriteFailure;
 export type LimitsResult = { ok: true; productId: number; observedAfter: ProductFields } | WriteFailure;
 
+/* ---- Phase 6: the reference rows and the pallet (Wave F, 15 Sep 2026) ---- */
+
+export type AddBlendResult = { ok: true; blendId: number } | WriteFailure;
+export type AddCountResult = { ok: true; countId: number } | WriteFailure;
+export type AddTubeTypeResult = { ok: true; tubeTypeId: number } | WriteFailure;
+export type CreatePalletResult = { ok: true; palletId: number } | WriteFailure;
+export type PalletActiveResult = { ok: true; palletId: number; active: boolean } | WriteFailure;
+
+/** PDAS TubeTypes.TubeForm: the proc accepts 1 or 2 and nothing else. What the two codes mean is not in the database. */
+export type TubeForm = 1 | 2;
+
+/** What CreatePallet takes. Defaults match the proc's own and every real pallet on this line. */
+export interface PalletFields {
+  productId: number;
+  packSchemaId: number;
+  lot: string;
+  active: boolean;
+  /** PalletDesc1 = the sack colour, per IFL's SOP. */
+  desc1: string | null;
+  desc2?: string | null;
+  desc3?: string | null;
+  desc4?: string | null;
+  desc5?: string | null;
+  steamProg?: number;
+  labelType?: number;
+  routing?: number;
+}
+
+/** A writer pool can be injected so the proc calls run over a fake in tests; production opens the real one lazily. */
+export interface PdasWriterOptions {
+  writerPool?: () => Promise<ConnectionPool>;
+}
+
 /** Setpoint must be a plausible cone weight; each offset 0 .. setpoint/2. */
 export interface SetpointBounds {
   setpointLoG: number;
@@ -95,9 +159,54 @@ function explainPdasError(proc: string, code: number, raw: string | null): strin
       return 'PDAS rejected the weights: the setpoint and both offsets must be present and not negative.';
     case -7004:
       return 'PDAS rejected the blend, count or tube type: all three must be chosen.';
+    // AddBlend (-4xxx), AddTubeType (-5xxx), AddCount (-6xxx) — each proc's own
+    // range, verified from the bodies. Their duplicate check is `LIKE`, so a
+    // name that differs only in case, or by a character where the existing
+    // name has '_', is "already there" to PDAS.
+    case -4001:
+      return 'PDAS already has a blend with this name (it compares names case-insensitively, and an underscore matches any one character). Choose the existing blend instead.';
+    case -4004:
+      return 'PDAS rejected the blend: the name is empty.';
+    case -6001:
+      return 'PDAS already has a count with this name (compared case-insensitively). Choose the existing count instead.';
+    case -6004:
+      return 'PDAS rejected the count: the name is empty.';
+    case -5001:
+      return 'PDAS already has a tube type with this name and form (compared case-insensitively). Choose the existing tube type instead.';
+    case -5002:
+      return 'PDAS rejected the tube form: it must be 1 or 2.';
+    case -5003:
+      return 'PDAS rejected the tube weight: it must be more than zero.';
+    case -5004:
+      return 'PDAS rejected the tube type: the name is empty.';
+    // CreatePallet and SetPalletStatusActive share -8001 with opposite meanings.
+    case -8001:
+      return proc === 'CreatePallet'
+        ? 'PDAS already has a pallet for this material, pack schema and lot. It allows only one, active or not — ' +
+            'change the lot, or activate the existing pallet instead.'
+        : 'PDAS has no pallet with that number.';
+    case -8002:
+      return 'PDAS rejected the active flag.';
+    case -8004:
+      return 'PDAS rejected the pallet: the material, the pack schema and the lot are all required.';
     default:
       return raw ? `PDAS refused: ${raw}` : `PDAS refused with code ${code}.`;
   }
+}
+
+/** The operations sms.product_change records (migration 027, widened by 036). */
+export type ChangeOperation =
+  | 'create' | 'set_active' | 'update_limits'
+  | 'add_blend' | 'add_count' | 'add_tube_type' | 'create_pallet' | 'set_pallet_active';
+export type ChangeOutcome = 'ok' | 'conflict' | 'implausible' | 'not_found' | 'disabled' | 'pdas_error' | 'error' | 'mismatch';
+
+/** The vendor's duplicate checks use LIKE; a '%' or '[' in a name would match anything. Refused here, never sent. */
+function checkName(what: string, value: string): string | null {
+  const v = value.trim();
+  if (v.length === 0) return `The ${what} is empty.`;
+  if (v.length > 255) return `The ${what} is longer than 255 characters.`;
+  if (/[%[]/.test(v)) return `The ${what} must not contain '%' or '[' — PDAS compares names with LIKE, and either would match everything.`;
+  return null;
 }
 
 export class PdasWriter {
@@ -107,6 +216,7 @@ export class PdasWriter {
     private readonly appPool: ConnectionPool,
     private readonly cfg: PdasWriteConfig,
     private readonly lineId: number,
+    private readonly opts: PdasWriterOptions = {},
   ) {}
 
   get enabled(): boolean {
@@ -120,6 +230,7 @@ export class PdasWriter {
   /** Lazily opened: nothing connects to PDAS until a write is attempted. */
   private pool(): Promise<ConnectionPool> {
     if (!this.cfg.db) throw new Error('PDAS write path is disabled');
+    if (this.opts.writerPool) return this.opts.writerPool();
     if (!this.writer) {
       const db = this.cfg.db;
       this.writer = new mssql.ConnectionPool({
@@ -148,20 +259,25 @@ export class PdasWriter {
   /** Append-only record of every attempt, successful or not. */
   private async recordChange(c: {
     productId: number | null;
-    operation: 'create' | 'set_active' | 'update_limits';
+    operation: ChangeOperation;
     before: unknown;
     after: unknown;
     observedAfter: unknown;
-    outcome: 'ok' | 'conflict' | 'implausible' | 'not_found' | 'disabled' | 'pdas_error' | 'error';
+    outcome: ChangeOutcome;
     pdasErrorCode: number | null;
     message: string | null;
     effectiveFrom: Date | null;
     actor: Actor;
     reason: string | null;
+    /** Phase 6 (migration 036): the pallet a pallet row is about, and the vendor proc executed. */
+    palletId?: number | null;
+    procName?: string | null;
   }): Promise<void> {
     await this.appPool
       .request()
       .input('pid', mssql.Int, c.productId)
+      .input('pallet', mssql.Int, c.palletId ?? null)
+      .input('proc', mssql.VarChar(40), c.procName ?? null)
       .input('op', mssql.VarChar(20), c.operation)
       .input('before', mssql.NVarChar(mssql.MAX), c.before == null ? null : JSON.stringify(c.before))
       .input('after', mssql.NVarChar(mssql.MAX), c.after == null ? null : JSON.stringify(c.after))
@@ -174,9 +290,9 @@ export class PdasWriter {
       .input('reason', mssql.NVarChar(255), c.reason)
       .query(
         `INSERT INTO sms.product_change
-           (product_id, operation, before_json, after_json, observed_after_json, outcome,
+           (product_id, pallet_id, proc_name, operation, before_json, after_json, observed_after_json, outcome,
             pdas_error_code, message, effective_from, changed_by, reason)
-         VALUES (@pid, @op, @before, @after, @obs, @outcome, @code, @msg, @eff, @by, @reason)`,
+         VALUES (@pid, @pallet, @proc, @op, @before, @after, @obs, @outcome, @code, @msg, @eff, @by, @reason)`,
       );
   }
 
@@ -526,21 +642,11 @@ export class PdasWriter {
     const observed = (await PdasWriter.readFields(pool.request(), p.productId)) ?? p.after;
     const echoOk = PdasWriter.sameFields(observed, p.after);
     if (!echoOk) {
-      const detail =
+      await this.raiseEchoMismatch(
+        'product',
         `Product ${p.productId}: PDAS holds ${JSON.stringify(observed)} after a change that requested ` +
-        `${JSON.stringify(p.after)}. The write committed but the row does not read back as written.`;
-      await this.appPool
-        .request()
-        .input('run', mssql.UniqueIdentifier, randomUUID())
-        .input('check', mssql.VarChar(64), 'pdas_write_echo_mismatch')
-        .input('sev', mssql.VarChar(10), 'CRITICAL')
-        .input('tbl', mssql.VarChar(40), 'product')
-        .input('detail', mssql.NVarChar(500), detail.slice(0, 500))
-        .query(
-          `INSERT INTO sms.dq_finding (run_id, check_name, severity, subject_table, detail)
-           SELECT @run, @check, @sev, @tbl, @detail
-            WHERE NOT EXISTS (SELECT 1 FROM sms.dq_finding WHERE check_name = @check AND detail = @detail)`,
-        );
+          `${JSON.stringify(p.after)}. The write committed but the row does not read back as written.`,
+      );
     }
 
     await this.mirrorProductFields(p.productId, observed);
@@ -582,6 +688,440 @@ export class PdasWriter {
                 description = @d, color = @col
           WHERE product_id = @id`,
       );
+  }
+
+  /* ================================================================== Phase 6
+   * The reference rows (blend, count, tube type) and the pallet — the steps
+   * of IFL's procedure the three operations above did not cover. Same rails:
+   * flag first, plausibility before any connection, the vendor's proc and
+   * never a raw INSERT, an echo-back read, the mirror refreshed, and one
+   * product_change row for every attempt. See the file header for what each
+   * proc was verified to do.
+   */
+
+  /**
+   * A CRITICAL finding when the row PDAS holds after a committed write is not
+   * what was requested. Deduped on the detail text, like every other finding.
+   */
+  private async raiseEchoMismatch(subjectTable: 'product' | 'pallet' | 'blend' | 'yarn_count' | 'tube_type', detail: string): Promise<void> {
+    await this.appPool
+      .request()
+      .input('run', mssql.UniqueIdentifier, randomUUID())
+      .input('check', mssql.VarChar(64), 'pdas_write_echo_mismatch')
+      .input('sev', mssql.VarChar(10), 'CRITICAL')
+      .input('tbl', mssql.VarChar(40), subjectTable)
+      .input('detail', mssql.NVarChar(500), detail.slice(0, 500))
+      .query(
+        `INSERT INTO sms.dq_finding (run_id, check_name, severity, subject_table, detail)
+         SELECT @run, @check, @sev, @tbl, @detail
+          WHERE NOT EXISTS (SELECT 1 FROM sms.dq_finding WHERE check_name = @check AND detail = @detail)`,
+      );
+  }
+
+  /**
+   * Execute one vendor proc that answers through OUTPUT @error/@errorMsg and
+   * (for the creates) an OUTPUT id. `idParam` is the proc's own name for that
+   * parameter — AddTubeType's is `typeTypeId`, the vendor's typo, and mssql
+   * binds by name so it must be spelled the vendor's way.
+   */
+  private async execProc(
+    proc: string,
+    bind: (r: mssql.Request) => mssql.Request,
+    idParam: string | null,
+  ): Promise<{ code: number; raw: string | null; id: number | null }> {
+    const pool = await this.pool();
+    let req = pool.request().output('error', mssql.Int, 0).output('errorMsg', mssql.NVarChar(255));
+    if (idParam) req = req.output(idParam, mssql.Int);
+    const r = await bind(req).execute(`dbo.${proc}`);
+    const code = Number(r.output.error ?? 0);
+    const raw = (r.output.errorMsg as string | null) ?? null;
+    // The creates RETURN the new id as well as setting the OUTPUT; either is fine.
+    const outId = idParam ? r.output[idParam] : undefined;
+    const id = outId != null && Number(outId) > 0 ? Number(outId) : r.returnValue != null && Number(r.returnValue) > 0 ? Number(r.returnValue) : null;
+    return { code, raw, id };
+  }
+
+  // ------------------------------------------------------------- add blend
+
+  async addBlend(p: { blend: string; reason: string; actor: Actor }): Promise<AddBlendResult> {
+    const base = { productId: null, operation: 'add_blend' as const, procName: 'AddBlend', before: null, after: { blend: p.blend }, actor: p.actor, reason: p.reason };
+    if (!this.enabled) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'disabled', pdasErrorCode: null, message: this.cfg.disabledReason, effectiveFrom: null });
+      return this.disabled();
+    }
+    const bad = PdasWriter.checkReason(p.reason) ?? checkName('blend name', p.blend);
+    if (bad) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'implausible', pdasErrorCode: null, message: bad, effectiveFrom: null });
+      return { ok: false, code: 'IMPLAUSIBLE', message: bad };
+    }
+    const blend = p.blend.trim();
+    try {
+      const r = await this.execProc('AddBlend', (q) => q.input('blend', mssql.NVarChar(255), blend), 'blendId');
+      if (r.code !== 0 || r.id == null) {
+        const message = explainPdasError('AddBlend', r.code, r.raw);
+        await this.recordChange({ ...base, observedAfter: null, outcome: 'pdas_error', pdasErrorCode: r.code, message, effectiveFrom: null });
+        return { ok: false, code: 'PDAS_ERROR', message, pdasErrorCode: r.code };
+      }
+      const now = new Date();
+      const pool = await this.pool();
+      const echo = await pool.request().input('id', mssql.Int, r.id).query<{ Blend: string }>(`SELECT Blend FROM dbo.Blends WHERE BlendId = @id`);
+      const observed = echo.recordset[0]?.Blend ?? null;
+      const echoOk = observed != null && observed.trim() === blend;
+      if (!echoOk) {
+        await this.raiseEchoMismatch('blend', `Blend ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddBlend requested ${JSON.stringify(blend)}.`);
+      }
+      await this.appPool
+        .request()
+        .input('id', mssql.Int, r.id)
+        .input('v', mssql.NVarChar(255), observed ?? blend)
+        .query(
+          `MERGE sms.blend t USING (SELECT @id id) s ON t.blend_id=s.id
+           WHEN MATCHED THEN UPDATE SET blend=@v
+           WHEN NOT MATCHED THEN INSERT (blend_id, blend) VALUES (@id, @v);`,
+        );
+      await this.recordChange({
+        ...base, observedAfter: { blendId: r.id, blend: observed }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+      });
+      await recordAudit(this.appPool, p.actor.userId, 'product.add_blend', 'blend', r.id, `Added blend ${r.id} "${blend}" — ${p.reason}`);
+      return { ok: true, blendId: r.id };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'error', pdasErrorCode: null, message, effectiveFrom: null });
+      return { ok: false, code: 'ERROR', message };
+    }
+  }
+
+  // ------------------------------------------------------------- add count
+
+  async addCount(p: { count: string; reason: string; actor: Actor }): Promise<AddCountResult> {
+    const base = { productId: null, operation: 'add_count' as const, procName: 'AddCount', before: null, after: { count: p.count }, actor: p.actor, reason: p.reason };
+    if (!this.enabled) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'disabled', pdasErrorCode: null, message: this.cfg.disabledReason, effectiveFrom: null });
+      return this.disabled();
+    }
+    const bad = PdasWriter.checkReason(p.reason) ?? checkName('count', p.count);
+    if (bad) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'implausible', pdasErrorCode: null, message: bad, effectiveFrom: null });
+      return { ok: false, code: 'IMPLAUSIBLE', message: bad };
+    }
+    const count = p.count.trim();
+    try {
+      const r = await this.execProc('AddCount', (q) => q.input('count', mssql.NVarChar(255), count), 'countId');
+      if (r.code !== 0 || r.id == null) {
+        const message = explainPdasError('AddCount', r.code, r.raw);
+        await this.recordChange({ ...base, observedAfter: null, outcome: 'pdas_error', pdasErrorCode: r.code, message, effectiveFrom: null });
+        return { ok: false, code: 'PDAS_ERROR', message, pdasErrorCode: r.code };
+      }
+      const now = new Date();
+      const pool = await this.pool();
+      const echo = await pool.request().input('id', mssql.Int, r.id).query<{ Count: string }>(`SELECT [Count] FROM dbo.Counts WHERE CountId = @id`);
+      const observed = echo.recordset[0]?.Count == null ? null : String(echo.recordset[0].Count);
+      const echoOk = observed != null && observed.trim() === count;
+      if (!echoOk) {
+        await this.raiseEchoMismatch('yarn_count', `Count ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddCount requested ${JSON.stringify(count)}.`);
+      }
+      // Same cast rule as the sync's seed: the int where the text is one, the text always.
+      const text = observed ?? count;
+      const asInt = Number.parseInt(text, 10);
+      await this.appPool
+        .request()
+        .input('id', mssql.Int, r.id)
+        .input('iv', mssql.Int, Number.isNaN(asInt) ? null : asInt)
+        .input('v', mssql.NVarChar(255), text)
+        .query(
+          `MERGE sms.yarn_count t USING (SELECT @id id) s ON t.count_id=s.id
+           WHEN MATCHED THEN UPDATE SET count_val=@iv, count_text=@v
+           WHEN NOT MATCHED THEN INSERT (count_id, count_val, count_text) VALUES (@id, @iv, @v);`,
+        );
+      await this.recordChange({
+        ...base, observedAfter: { countId: r.id, count: observed }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+      });
+      await recordAudit(this.appPool, p.actor.userId, 'product.add_count', 'yarn_count', r.id, `Added count ${r.id} "${count}" — ${p.reason}`);
+      return { ok: true, countId: r.id };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'error', pdasErrorCode: null, message, effectiveFrom: null });
+      return { ok: false, code: 'ERROR', message };
+    }
+  }
+
+  // --------------------------------------------------------- add tube type
+
+  async addTubeType(p: { tubeType: string; tubeWeightG: number; tubeForm?: TubeForm; reason: string; actor: Actor }): Promise<AddTubeTypeResult> {
+    // 2 unless told otherwise: 26 of the 27 tube types on this line are form
+    // 2, and the proc's own default (0) is refused by its own check.
+    const tubeForm: TubeForm = p.tubeForm ?? 2;
+    const after = { tubeType: p.tubeType, tubeWeightG: p.tubeWeightG, tubeForm };
+    const base = { productId: null, operation: 'add_tube_type' as const, procName: 'AddTubeType', before: null, after, actor: p.actor, reason: p.reason };
+    if (!this.enabled) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'disabled', pdasErrorCode: null, message: this.cfg.disabledReason, effectiveFrom: null });
+      return this.disabled();
+    }
+    const bad =
+      PdasWriter.checkReason(p.reason) ??
+      checkName('tube type name', p.tubeType) ??
+      (Number.isFinite(p.tubeWeightG) && p.tubeWeightG > 0 && p.tubeWeightG <= 1000
+        ? null
+        : `The tube weight ${p.tubeWeightG} g must be more than 0 and at most 1000 g.`) ??
+      (tubeForm === 1 || tubeForm === 2 ? null : 'The tube form must be 1 or 2.');
+    if (bad) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'implausible', pdasErrorCode: null, message: bad, effectiveFrom: null });
+      return { ok: false, code: 'IMPLAUSIBLE', message: bad };
+    }
+    const name = p.tubeType.trim();
+    try {
+      const r = await this.execProc(
+        'AddTubeType',
+        (q) => q.input('tubeType', mssql.NVarChar(255), name).input('tubeForm', mssql.Int, tubeForm).input('tubeWeight', mssql.Float, p.tubeWeightG),
+        'typeTypeId', // sic — the vendor's parameter name
+      );
+      if (r.code !== 0 || r.id == null) {
+        const message = explainPdasError('AddTubeType', r.code, r.raw);
+        await this.recordChange({ ...base, observedAfter: null, outcome: 'pdas_error', pdasErrorCode: r.code, message, effectiveFrom: null });
+        return { ok: false, code: 'PDAS_ERROR', message, pdasErrorCode: r.code };
+      }
+      const now = new Date();
+      const pool = await this.pool();
+      const echo = await pool
+        .request()
+        .input('id', mssql.Int, r.id)
+        .query<{ TubeType: string; TubeWeight: number; TubeForm: number | null }>(`SELECT TubeType, TubeWeight, TubeForm FROM dbo.TubeTypes WHERE TubeTypeId = @id`);
+      const row = echo.recordset[0];
+      const observed = row ? { tubeType: row.TubeType, tubeWeightG: Number(row.TubeWeight), tubeForm: row.TubeForm == null ? null : Number(row.TubeForm) } : null;
+      const echoOk = observed != null && observed.tubeType.trim() === name && observed.tubeWeightG === p.tubeWeightG && observed.tubeForm === tubeForm;
+      if (!echoOk) {
+        await this.raiseEchoMismatch('tube_type', `Tube type ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddTubeType requested ${JSON.stringify(after)}.`);
+      }
+      await this.appPool
+        .request()
+        .input('id', mssql.Int, r.id)
+        .input('v', mssql.NVarChar(255), observed?.tubeType ?? name)
+        .input('w', mssql.Decimal(10, 2), observed?.tubeWeightG ?? p.tubeWeightG)
+        .query(
+          `MERGE sms.tube_type t USING (SELECT @id id) s ON t.tube_type_id=s.id
+           WHEN MATCHED THEN UPDATE SET tube_type=@v, tube_weight_g=@w
+           WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g) VALUES (@id, @v, @w);`,
+        );
+      await this.recordChange({
+        ...base, observedAfter: observed == null ? null : { tubeTypeId: r.id, ...observed }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+      });
+      await recordAudit(this.appPool, p.actor.userId, 'product.add_tube_type', 'tube_type', r.id, `Added tube type ${r.id} "${name}" ${p.tubeWeightG} g form ${tubeForm} — ${p.reason}`);
+      return { ok: true, tubeTypeId: r.id };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'error', pdasErrorCode: null, message, effectiveFrom: null });
+      return { ok: false, code: 'ERROR', message };
+    }
+  }
+
+  // --------------------------------------------------------- create pallet
+
+  /** Read the pallet row as the QCS panel would see it, for echo-back and the mirror. */
+  private static async readPallet(req: mssql.Request, palletId: number): Promise<(PalletFields & { palletId: number; pdasCreatedAt: Date | null }) | null> {
+    const r = await req.input('id', mssql.Int, palletId).query<{
+      MaterialId: number; PackSchemaId: number; Lot: string; SteamProg: number | null; LabelType: number | null; Routing: number | null;
+      PalletActive: boolean; PalletDesc1: string | null; PalletDesc2: string | null; PalletDesc3: string | null; PalletDesc4: string | null;
+      PalletDesc5: string | null; Timestamp: Date | null;
+    }>(
+      `SELECT MaterialId, PackSchemaId, Lot, SteamProg, LabelType, Routing, PalletActive,
+              PalletDesc1, PalletDesc2, PalletDesc3, PalletDesc4, PalletDesc5, Timestamp
+         FROM dbo.Pallets WHERE PalletId = @id`,
+    );
+    const x = r.recordset[0];
+    if (!x) return null;
+    return {
+      palletId,
+      productId: Number(x.MaterialId),
+      packSchemaId: Number(x.PackSchemaId),
+      lot: x.Lot ?? '',
+      active: Boolean(x.PalletActive),
+      desc1: x.PalletDesc1 || null,
+      desc2: x.PalletDesc2 || null,
+      desc3: x.PalletDesc3 || null,
+      desc4: x.PalletDesc4 || null,
+      desc5: x.PalletDesc5 || null,
+      steamProg: x.SteamProg == null ? 0 : Number(x.SteamProg),
+      labelType: x.LabelType == null ? 1 : Number(x.LabelType),
+      routing: x.Routing == null ? 0 : Number(x.Routing),
+      pdasCreatedAt: x.Timestamp ? new Date(x.Timestamp) : null,
+    };
+  }
+
+  /** Keep the pallet mirror current now rather than on the next sync pass (migration 036). */
+  private async mirrorPallet(f: PalletFields & { palletId: number; pdasCreatedAt: Date | null }): Promise<void> {
+    await this.appPool
+      .request()
+      .input('id', mssql.Int, f.palletId)
+      .input('pid', mssql.Int, f.productId)
+      .input('ps', mssql.Int, f.packSchemaId)
+      .input('lot', mssql.NVarChar(255), f.lot)
+      .input('steam', mssql.Int, f.steamProg ?? 0)
+      .input('label', mssql.Int, f.labelType ?? 1)
+      .input('routing', mssql.Int, f.routing ?? 0)
+      .input('a', mssql.Bit, f.active)
+      .input('d1', mssql.NVarChar(255), f.desc1)
+      .input('d2', mssql.NVarChar(255), f.desc2 ?? null)
+      .input('d3', mssql.NVarChar(255), f.desc3 ?? null)
+      .input('d4', mssql.NVarChar(255), f.desc4 ?? null)
+      .input('d5', mssql.NVarChar(255), f.desc5 ?? null)
+      .input('ts', mssql.DateTime2(3), f.pdasCreatedAt)
+      .query(
+        `MERGE sms.pallet t USING (SELECT @id id) s ON t.pallet_id = s.id
+         WHEN MATCHED THEN UPDATE SET product_id=@pid, pack_schema_id=@ps, lot=@lot, steam_prog=@steam, label_type=@label,
+                                      routing=@routing, active_flag=@a, desc1=@d1, desc2=@d2, desc3=@d3, desc4=@d4, desc5=@d5,
+                                      pdas_created_at=COALESCE(@ts, t.pdas_created_at)
+         WHEN NOT MATCHED THEN INSERT (pallet_id, product_id, pack_schema_id, lot, steam_prog, label_type, routing, active_flag,
+                                       desc1, desc2, desc3, desc4, desc5, pdas_created_at)
+              VALUES (@id, @pid, @ps, @lot, @steam, @label, @routing, @a, @d1, @d2, @d3, @d4, @d5, @ts);`,
+      );
+  }
+
+  private static samePallet(a: PalletFields, b: PalletFields): boolean {
+    return (
+      a.productId === b.productId &&
+      a.packSchemaId === b.packSchemaId &&
+      a.lot.trim() === b.lot.trim() &&
+      a.active === b.active &&
+      (a.desc1 ?? '') === (b.desc1 ?? '') &&
+      (a.desc2 ?? '') === (b.desc2 ?? '') &&
+      (a.desc3 ?? '') === (b.desc3 ?? '') &&
+      (a.desc4 ?? '') === (b.desc4 ?? '') &&
+      (a.desc5 ?? '') === (b.desc5 ?? '') &&
+      (a.steamProg ?? 0) === (b.steamProg ?? 0) &&
+      (a.labelType ?? 1) === (b.labelType ?? 1) &&
+      (a.routing ?? 0) === (b.routing ?? 0)
+    );
+  }
+
+  async createPallet(p: { fields: PalletFields; reason: string; actor: Actor }): Promise<CreatePalletResult> {
+    const f: PalletFields = {
+      ...p.fields,
+      lot: p.fields.lot.trim(),
+      steamProg: p.fields.steamProg ?? 0,
+      labelType: p.fields.labelType ?? 1,
+      routing: p.fields.routing ?? 0,
+    };
+    const base = { productId: f.productId, operation: 'create_pallet' as const, procName: 'CreatePallet', before: null, after: f, actor: p.actor, reason: p.reason };
+    if (!this.enabled) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'disabled', pdasErrorCode: null, message: this.cfg.disabledReason, effectiveFrom: null });
+      return this.disabled();
+    }
+    const bad =
+      PdasWriter.checkReason(p.reason) ??
+      (Number.isInteger(f.productId) && f.productId > 0 ? null : 'A material (product) number is required.') ??
+      (Number.isInteger(f.packSchemaId) && f.packSchemaId >= 0 ? null : 'The pack schema number must be 0 or more.') ??
+      checkName('lot', f.lot) ??
+      ([f.desc1, f.desc2, f.desc3, f.desc4, f.desc5].every((d) => (d ?? '').length <= 255) ? null : 'A pallet description is longer than 255 characters.');
+    if (bad) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'implausible', pdasErrorCode: null, message: bad, effectiveFrom: null });
+      return { ok: false, code: 'IMPLAUSIBLE', message: bad };
+    }
+    try {
+      const r = await this.execProc(
+        'CreatePallet',
+        (q) =>
+          q
+            .input('materialId', mssql.Int, f.productId)
+            .input('packSchemaId', mssql.Int, f.packSchemaId)
+            .input('lot', mssql.NVarChar(255), f.lot)
+            .input('steamProg', mssql.Int, f.steamProg)
+            .input('labelType', mssql.Int, f.labelType)
+            .input('routing', mssql.Int, f.routing)
+            .input('palletActive', mssql.Bit, f.active)
+            .input('palletDesc1', mssql.NVarChar(255), f.desc1 ?? '')
+            .input('palletDesc2', mssql.NVarChar(255), f.desc2 ?? '')
+            .input('palletDesc3', mssql.NVarChar(255), f.desc3 ?? '')
+            .input('palletDesc4', mssql.NVarChar(255), f.desc4 ?? '')
+            .input('palletDesc5', mssql.NVarChar(255), f.desc5 ?? ''),
+        'palletId',
+      );
+      if (r.code !== 0 || r.id == null) {
+        const message = explainPdasError('CreatePallet', r.code, r.raw);
+        await this.recordChange({ ...base, observedAfter: null, outcome: 'pdas_error', pdasErrorCode: r.code, message, effectiveFrom: null });
+        return { ok: false, code: 'PDAS_ERROR', message, pdasErrorCode: r.code };
+      }
+      const now = new Date();
+      const pool = await this.pool();
+      const observed = await PdasWriter.readPallet(pool.request(), r.id);
+      const echoOk = observed != null && PdasWriter.samePallet(observed, f);
+      if (!echoOk) {
+        await this.raiseEchoMismatch('pallet', `Pallet ${r.id}: PDAS holds ${JSON.stringify(observed)} after CreatePallet requested ${JSON.stringify(f)}.`);
+      }
+      await this.mirrorPallet(observed ?? { ...f, palletId: r.id, pdasCreatedAt: null });
+      await this.recordChange({
+        ...base, palletId: r.id, observedAfter: observed, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+      });
+      await recordAudit(
+        this.appPool, p.actor.userId, 'pallet.create', 'pallet', r.id,
+        `Created pallet ${r.id} for product ${f.productId}, schema ${f.packSchemaId}, lot "${f.lot}"${f.desc1 ? `, ${f.desc1}` : ''} — ${p.reason}`,
+      );
+      return { ok: true, palletId: r.id };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'error', pdasErrorCode: null, message, effectiveFrom: null });
+      return { ok: false, code: 'ERROR', message };
+    }
+  }
+
+  // ----------------------------------------------------- set pallet active
+
+  async setPalletActive(p: { palletId: number; active: boolean; reason: string; actor: Actor }): Promise<PalletActiveResult> {
+    const base = {
+      productId: null, palletId: p.palletId, operation: 'set_pallet_active' as const, procName: 'SetPalletStatusActive',
+      before: null, after: { active: p.active }, actor: p.actor, reason: p.reason,
+    };
+    if (!this.enabled) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'disabled', pdasErrorCode: null, message: this.cfg.disabledReason, effectiveFrom: null });
+      return this.disabled();
+    }
+    const bad = PdasWriter.checkReason(p.reason) ?? (Number.isInteger(p.palletId) && p.palletId > 0 ? null : 'A pallet number is required.');
+    if (bad) {
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'implausible', pdasErrorCode: null, message: bad, effectiveFrom: null });
+      return { ok: false, code: 'IMPLAUSIBLE', message: bad };
+    }
+    try {
+      const r = await this.execProc(
+        'SetPalletStatusActive',
+        (q) => q.input('palletId', mssql.Int, p.palletId).input('palletActive', mssql.Bit, p.active),
+        null,
+      );
+      if (r.code !== 0) {
+        const message = explainPdasError('SetPalletStatusActive', r.code, r.raw);
+        await this.recordChange({
+          ...base, observedAfter: null, outcome: r.code === -8001 ? 'not_found' : 'pdas_error', pdasErrorCode: r.code, message, effectiveFrom: null,
+        });
+        return { ok: false, code: r.code === -8001 ? 'NOT_FOUND' : 'PDAS_ERROR', message, pdasErrorCode: r.code };
+      }
+      const now = new Date();
+      const pool = await this.pool();
+      const observed = await PdasWriter.readPallet(pool.request(), p.palletId);
+      const echoOk = observed != null && observed.active === p.active;
+      if (!echoOk) {
+        await this.raiseEchoMismatch('pallet', `Pallet ${p.palletId}: PDAS holds active=${observed?.active ?? 'missing'} after SetPalletStatusActive requested ${p.active}.`);
+      }
+      if (observed) {
+        await this.mirrorPallet(observed);
+      } else {
+        await this.appPool.request().input('id', mssql.Int, p.palletId).input('a', mssql.Bit, p.active).query(`UPDATE sms.pallet SET active_flag = @a WHERE pallet_id = @id`);
+      }
+      await this.recordChange({
+        ...base, observedAfter: observed == null ? null : { active: observed.active }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+      });
+      await recordAudit(
+        this.appPool, p.actor.userId, p.active ? 'pallet.activate' : 'pallet.retire', 'pallet', p.palletId,
+        `${p.active ? 'Activated' : 'Retired'} pallet ${p.palletId} — ${p.reason}`,
+      );
+      return { ok: true, palletId: p.palletId, active: p.active };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordChange({ ...base, observedAfter: null, outcome: 'error', pdasErrorCode: null, message, effectiveFrom: null });
+      return { ok: false, code: 'ERROR', message };
+    }
   }
 
   /** For tests and shutdown. */

@@ -137,9 +137,10 @@ class FakeDb {
 // ---- test fixture --------------------------------------------------------
 
 const PASSWORD = 'rbac-test-password-not-real';
+// The four names since migration 035 (15 Sep 2026): viewer / engineer / manager / admin.
 const ROLES: { role: string; rank: number }[] = [
-  { role: 'operator', rank: 1 },
-  { role: 'supervisor', rank: 2 },
+  { role: 'viewer', rank: 1 },
+  { role: 'engineer', rank: 2 },
   { role: 'manager', rank: 3 },
   { role: 'admin', rank: 4 },
 ];
@@ -201,7 +202,10 @@ afterAll(() => {
 });
 
 // ---- route table: mirrors app.ts's actual requireRole placements --------
-// (operator=1, supervisor=2, manager=3, admin=4)
+// (viewer=1, engineer=2, manager=3, admin=4). The write matrix is IFL's of
+// 15 Sep 2026 (DEPLOY.md, "Roles and the write matrix"): engineer sets the
+// product, its limits, reject-code names, calibration and sack movements;
+// manager exports and reads the management summary; admin owns Setup.
 
 interface RouteCase {
   method: string;
@@ -244,11 +248,15 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/rejects/reason?day=2026-09-07&code=1-3', minRank: 1 },
   // route-specific gates
   { method: 'GET', path: '/api/events/export?type=cone', minRank: 3 },
-  { method: 'PUT', path: '/api/reject-codes/1', minRank: 3, body: { label: 'x' } },
+  { method: 'PUT', path: '/api/reject-codes/1', minRank: 2, body: { label: 'x' } },
   { method: 'POST', path: '/api/current-product', minRank: 2, body: { productId: 1 } },
   { method: 'POST', path: '/api/calibration/adjustments', minRank: 2, body: { reason: 'test' } },
+  // the PDAS write path (flag off here, so an allowed rank answers 503 or 400 — never 401/403)
+  { method: 'POST', path: '/api/products', minRank: 2, body: {} },
+  { method: 'POST', path: '/api/products/21/active', minRank: 2, body: { active: false, reason: 'rbac boundary test' } },
+  { method: 'POST', path: '/api/products/21/limits', minRank: 2, body: {} },
   { method: 'GET', path: '/api/admin/users', minRank: 4 },
-  { method: 'POST', path: '/api/admin/users', minRank: 4, body: { username: 'x', password: 'abcdef', role: 'operator' } },
+  { method: 'POST', path: '/api/admin/users', minRank: 4, body: { username: 'x', password: 'abcdef', role: 'viewer' } },
   { method: 'PATCH', path: '/api/admin/users/1', minRank: 4, body: { active: true } },
   { method: 'GET', path: '/api/admin/stations', minRank: 4 },
   { method: 'PUT', path: '/api/admin/stations/1', minRank: 4, body: { name: 'x', machine: null, description: null } },
@@ -334,7 +342,7 @@ describe('Session lifecycle', () => {
     const login = await fetch(`${base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'operator', password: PASSWORD }),
+      body: JSON.stringify({ username: 'viewer', password: PASSWORD }),
     });
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     expect(await hit({ method: 'GET', path: '/api/range', minRank: 1 }, cookie)).not.toBe(401);

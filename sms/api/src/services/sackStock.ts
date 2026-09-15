@@ -11,9 +11,10 @@
  *      reading is stated on the response (`receiptMeaning`) and on screen.
  *   2. MANUAL MOVEMENTS — sms.sack_stock_movement (migration 033): an opening
  *      count, issues out of stock, consumption, corrections, or a receipt
- *      the scale never saw. Recorded by a person at rank 3 (Q43 says IFL sets
- *      the rank; 3 is the developer's default, matching the other decisions
- *      a manager makes here), every row through auditedWrite.
+ *      the scale never saw. Recorded by a person at rank 2, an engineer
+ *      (IFL's answer to Q43, 15 Sep 2026: the process engineer on the floor
+ *      makes sack adjustments; rank 3 was the developer's default before
+ *      it), every row through auditedWrite.
  *
  * THE ARITHMETIC, in one place (buildLedger, pure, tested):
  *

@@ -61,10 +61,14 @@ export function csvDocument(headers: readonly string[], rows: readonly CsvRow[],
   return `${toCsv(headers, rows)}\n\n${toCsv([], attributionRows(header))}`;
 }
 
-/** `sms-report-<type>-<from>[_to_<to>].csv` — the filename does the everyday attribution work. */
-export function csvFilename(h: ReportHeader): string {
+/** `sms-report-<type>-<from>[_to_<to>].<ext>` — the filename does the everyday attribution work. */
+export function reportFilename(h: ReportHeader, ext: 'csv' | 'xlsx'): string {
   const span = h.period.from === h.period.to ? h.period.from : `${h.period.from}_to_${h.period.to}`;
-  return `sms-report-${h.reportType}-${span}.csv`;
+  return `sms-report-${h.reportType}-${span}.${ext}`;
+}
+
+export function csvFilename(h: ReportHeader): string {
+  return reportFilename(h, 'csv');
 }
 
 /**

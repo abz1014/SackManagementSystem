@@ -1,5 +1,5 @@
 /**
- *   sms user:create   --username=<u> --password=<p> --role=<operator|supervisor|manager|admin>
+ *   sms user:create   --username=<u> --password=<p> --role=<viewer|engineer|manager|admin>
  *   sms user:password --username=<u> --password=<p>
  *
  * The second is the recovery path for a forgotten admin password (roadmap
@@ -19,7 +19,11 @@ import mssql from 'mssql';
 import argon2 from 'argon2';
 import { openContext, parseArgs } from '../context.js';
 
-const ROLES = new Set(['operator', 'supervisor', 'manager', 'admin']);
+// viewer 1 · engineer 2 · manager 3 · admin 4 — the names sms.role carries since
+// migration 035 (15 Sep 2026); `operator`/`supervisor` are refused, not aliased,
+// so a stale runbook fails loudly rather than creating an account under a name
+// the database no longer has.
+const ROLES = new Set(['viewer', 'engineer', 'manager', 'admin']);
 
 /** PASSWORD_MIN_LENGTH from the environment (loadDotEnv has run by the time openContext returns), default 10. */
 export function passwordMinLength(env: NodeJS.ProcessEnv = process.env): number {
@@ -38,7 +42,7 @@ export async function userCreate(argv: string[]): Promise<number> {
   const a = parseArgs(argv);
   const username = String(a.username ?? '');
   const password = String(a.password ?? '');
-  const role = String(a.role ?? 'operator');
+  const role = String(a.role ?? 'viewer');
   const display = typeof a.display === 'string' ? a.display : username;
 
   if (!username || !password) {

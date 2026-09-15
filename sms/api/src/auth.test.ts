@@ -38,7 +38,7 @@ describe('requireRole', () => {
   });
 
   it('403s a user below minRank and never calls next()', () => {
-    const req = fakeReq(user(1)); // operator
+    const req = fakeReq(user(1)); // viewer
     const res = fakeRes();
     const next = vi.fn();
     requireRole(4)(req, res, next); // admin-only route
@@ -47,7 +47,7 @@ describe('requireRole', () => {
   });
 
   it('calls next() and sets no status for a user at exactly minRank', () => {
-    const req = fakeReq(user(2)); // supervisor
+    const req = fakeReq(user(2)); // engineer
     const res = fakeRes();
     const next = vi.fn();
     requireRole(2)(req, res, next);
@@ -56,15 +56,15 @@ describe('requireRole', () => {
   });
 
   it('calls next() for a user above minRank', () => {
-    const req = fakeReq(user(4)); // admin hitting an operator-rank route
+    const req = fakeReq(user(4)); // admin hitting a viewer-rank route
     const res = fakeRes();
     const next = vi.fn();
     requireRole(1)(req, res, next);
     expect(next).toHaveBeenCalledOnce();
   });
 
-  // The full rank matrix, mirroring the four app.ts tiers (operator=1,
-  // supervisor=2, manager=3, admin=4) x every route's minRank. If a route's
+  // The full rank matrix, mirroring the four app.ts tiers (viewer=1,
+  // engineer=2, manager=3, admin=4 since migration 035) x every route's minRank. If a route's
   // requireRole(N) argument is ever fat-fingered, this is what would still
   // catch it even though app.ts itself was never imported.
   it.each([

@@ -12,12 +12,12 @@
  *                                exact path and shape.
  *   GET  /api/sacks/movements  — the manual movements in a period, with who
  *                                recorded each, when and why (the stock sheet).
- *   POST /api/sacks/movements  — record one manual movement. Rank 3: the
- *                                roadmap says IFL sets the rank (Q43); 3 is
- *                                the developer's default, the rank of the
- *                                other decisions a manager records here
- *                                (naming a reject code, exporting the
- *                                register). Written through auditedWrite.
+ *   POST /api/sacks/movements  — record one manual movement. Rank 2
+ *                                (engineer) since 15 Sep 2026: IFL's answer
+ *                                to Q43 puts sack adjustments with the
+ *                                process engineer on the floor. Was rank 3,
+ *                                the developer's default while Q43 was open.
+ *                                Written through auditedWrite.
  *
  * NO ROUTE HERE ACCEPTS OR SETS A MACHINE. The request schema has no machine
  * field, the INSERT has no machine column, and migration 033's CHECK refuses
@@ -112,7 +112,7 @@ export function mountSacksRoutes(ctx: RouteContext): void {
     }
   });
 
-  app.post('/api/sacks/movements', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+  app.post('/api/sacks/movements', requireRole(2), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const v = validateMovement(req.body);
       if (!v.ok) {

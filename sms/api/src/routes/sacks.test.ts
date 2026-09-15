@@ -48,8 +48,8 @@ class FakeTransaction {
 
 interface User { userId: number; username: string; role: string; rank: number }
 const USERS: User[] = [
-  { userId: 1, username: 'operator', role: 'operator', rank: 1 },
-  { userId: 2, username: 'supervisor', role: 'supervisor', rank: 2 },
+  { userId: 1, username: 'viewer', role: 'viewer', rank: 1 },
+  { userId: 2, username: 'engineer', role: 'engineer', rank: 2 },
   { userId: 3, username: 'manager', role: 'manager', rank: 3 },
   { userId: 4, username: 'admin', role: 'admin', rank: 4 },
 ];
@@ -162,7 +162,8 @@ describe('RBAC rows for the Phase 7 routes', () => {
     { method: 'GET', path: '/api/sacks/summary?from=2026-09-01&to=2026-09-07', minRank: 1 },
     { method: 'GET', path: '/api/sacks/stock?from=2026-09-01&to=2026-09-07', minRank: 1 },
     { method: 'GET', path: '/api/sacks/movements?from=2026-09-01&to=2026-09-07', minRank: 1 },
-    { method: 'POST', path: '/api/sacks/movements', minRank: 3, body: MOVE },
+    // rank 2 since 15 Sep 2026 (IFL Q43: the process engineer makes sack adjustments)
+    { method: 'POST', path: '/api/sacks/movements', minRank: 2, body: MOVE },
   ])('$method $path (needs rank $minRank)', async (route) => {
     expect((await call(null, route.method, route.path, route.body)).status).toBe(401);
     for (const u of USERS) {
@@ -178,7 +179,7 @@ describe('RBAC rows for the Phase 7 routes', () => {
 
 describe('the period reads', () => {
   it('/api/sacks/stock answers the shape the report reads: basis line, no machine level, a day per day', async () => {
-    const r = await call('operator', 'GET', '/api/sacks/stock?from=2026-09-01&to=2026-09-03');
+    const r = await call('viewer', 'GET', '/api/sacks/stock?from=2026-09-01&to=2026-09-03');
     expect(r.status).toBe(200);
     expect(r.json.data.basis).toBe('line');
     expect(r.json.data.machineLevel).toEqual({ enabled: false, reason: expect.stringMatching(/no machine or station/) });
@@ -189,16 +190,16 @@ describe('the period reads', () => {
   });
 
   it('validates from/to and caps the range at 366 days', async () => {
-    expect((await call('operator', 'GET', '/api/sacks/stock?from=2026-09-01')).status).toBe(400);
-    expect((await call('operator', 'GET', '/api/sacks/summary?from=2026-09-07&to=2026-09-01')).status).toBe(400);
-    const wide = await call('operator', 'GET', '/api/sacks/movements?from=2025-01-01&to=2026-09-01');
+    expect((await call('viewer', 'GET', '/api/sacks/stock?from=2026-09-01')).status).toBe(400);
+    expect((await call('viewer', 'GET', '/api/sacks/summary?from=2026-09-07&to=2026-09-01')).status).toBe(400);
+    const wide = await call('viewer', 'GET', '/api/sacks/movements?from=2025-01-01&to=2026-09-01');
     expect(wide.status).toBe(400);
     expect(wide.json.error).toMatch(/range too large/);
-    expect((await call('operator', 'GET', '/api/sacks/summary?from=2026-09-01&to=2026-09-07&shift=day')).status).toBe(400);
+    expect((await call('viewer', 'GET', '/api/sacks/summary?from=2026-09-01&to=2026-09-07&shift=day')).status).toBe(400);
   });
 
   it('/api/sacks/summary carries the caveats every consumer prints', async () => {
-    const r = await call('operator', 'GET', '/api/sacks/summary?from=2026-09-01&to=2026-09-07');
+    const r = await call('viewer', 'GET', '/api/sacks/summary?from=2026-09-01&to=2026-09-07');
     expect(r.status).toBe(200);
     expect(r.json.data.sackTimeIsInsertTime).toBe(true);
     expect(r.json.data.conesPerSackApproximate).toBe(true);

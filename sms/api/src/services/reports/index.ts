@@ -16,6 +16,7 @@ import { getConeWeightReport, coneWeightCsv, type ConeWeightReportData } from '.
 import { getSackReport, sackCsv, type SackReportData } from './sack.js';
 import { getCalibrationReport, calibrationCsv, type CalibrationReportData } from './calibration.js';
 import { getManagementSummary, summaryCsv, type ManagementSummaryData } from './summary.js';
+import { getMachineProductReport, machineProductCsv, type MachineProductReportData } from './machineProduct.js';
 
 export interface ReportDataByType {
   daily: DailyReportData;
@@ -27,6 +28,7 @@ export interface ReportDataByType {
   sack: SackReportData;
   calibration: CalibrationReportData;
   'management-summary': ManagementSummaryData;
+  'machine-product': MachineProductReportData;
 }
 
 export type AnyReportData = ReportDataByType[ReportType];
@@ -48,6 +50,7 @@ const BUILDERS: { [T in ReportType]: Builder<T> } = {
   sack: getSackReport,
   calibration: getCalibrationReport,
   'management-summary': getManagementSummary,
+  'machine-product': getMachineProductReport,
 };
 
 const CSV: { [T in ReportType]: (d: ReportDataByType[T]) => CsvTable } = {
@@ -60,6 +63,7 @@ const CSV: { [T in ReportType]: (d: ReportDataByType[T]) => CsvTable } = {
   sack: sackCsv,
   calibration: calibrationCsv,
   'management-summary': summaryCsv,
+  'machine-product': machineProductCsv,
 };
 
 export function buildReport<T extends ReportType>(

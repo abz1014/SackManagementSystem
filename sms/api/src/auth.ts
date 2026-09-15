@@ -293,7 +293,17 @@ export interface RoleGate {
   minRank: number;
 }
 
-/** Gate: require an authenticated user with at least `minRank`. */
+/**
+ * Gate: require an authenticated user with at least `minRank`.
+ *
+ * Ranks, and the names sms.role gives them since migration 035 (15 Sep
+ * 2026): 1 viewer · 2 engineer · 3 manager · 4 admin. The names were
+ * operator / supervisor until IFL's answers of that date put the process
+ * engineer in charge of products, limits, reject-code names and sack
+ * movements — rank 2 is an engineer, and rank 1 only looks. Gates compare
+ * RANKS, never names, so the rename touched no route; the write matrix
+ * itself is in DEPLOY.md ("Roles and the write matrix").
+ */
 export function requireRole(minRank: number): RoleGate {
   const gate = ((req: Request, res: Response, next: NextFunction) => {
     const user = (req as AuthedRequest).user;
