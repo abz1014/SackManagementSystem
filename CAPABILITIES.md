@@ -668,6 +668,8 @@ faults were 2.)
 | `source_columns_changed` | WARNING | the source table's full column list differs from the one recorded when its generation was accepted — a column IFL added or removed that SMS does not read (the fingerprint of the columns SMS reads is unchanged, so ingestion continues); the finding names the columns (roadmap Phase 2, 14 Sep 2026) |
 | `station_not_in_roster` | WARNING | readings from a machine number the line has no station for — a winder added at the plant but not yet in Setup › Machines, or a source table that belongs to another line. One finding per (machine number, source table, generation); the readings are kept, not dropped (roadmap Phase 1, 14 Sep 2026) |
 | `merge_key_collision` | INFO | rows sharing a non-unique merge key, checked against already-ingested history as well as within the batch |
+| `sack_num_reset` | INFO | the packer's SackNum went backwards within one generation — one finding per reset, naming the row where it happened and the time. Nothing is dropped: SackNum is not a key (roadmap Phase 7, 15 Sep 2026) |
+| `sack_blackout` | WARNING | no sack row for more than `SACK_BLACKOUT_HOURS` (default 4, the developer's threshold) while cones were being weighed — anchored on the cones, not the clock, so a stoppage is not a fault. IFL's sack trigger needs all four sack tags, so one missing tag stops every sack row; an open blackout is detected on every pass without a new sack row and recorded once (roadmap Phase 7, 15 Sep 2026) |
 
 **Verification tool.** A CLI (`sync`, `verify`, `summary`, `rebuild`,
 `user:create`) that re-checks canonical against raw independently of the API.

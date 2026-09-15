@@ -24,6 +24,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import type { ShiftCode } from '@sms/shared';
 import { getProduction, type ProductionRow, type ProductionStates } from './production.js';
 import { getStoppagePatterns } from './downtime.js';
 import { getShiftCheck } from './shiftCheck.js';
@@ -120,15 +121,27 @@ export interface ReportCoverage {
 
 export interface ReportData {
   period: ResolvedPeriod;
+  /**
+   * The shift the report is narrowed to, or null for the whole production
+   * day (roadmap Phase 8, 15 Sep 2026 — the shift report). With a shift set,
+   * `byShift` holds that one shift and `byDay` is that shift on each day.
+   */
+  shift: ShiftCode | null;
   coverage: ReportCoverage;
   totals: ReportLine;
   byShift: ReportLine[];
   byDay: ReportLine[];
+  /**
+   * Null when a shift is set: stoppages are found from the gaps between
+   * consecutive cones over the whole day (downtime.ts), and a gap that
+   * straddles a shift boundary belongs to neither shift. Splitting it would
+   * be an invention; the shift report says time lost is not split by shift.
+   */
   downtime: {
     stoppageCount: number;
     stoppedSeconds: number;
     thresholdSeconds: number;
-  };
+  } | null;
   /**
    * Cones by the one classification state, and how many the population rule
    * excluded as implausible (roadmap Phase 4, 14 Sep 2026) — so the report
@@ -185,26 +198,31 @@ export async function getReport(
   pool: ConnectionPool,
   lineId: number,
   resolved: ResolvedPeriod,
+  /** Narrow every count to one shift (roadmap Phase 8). Coverage counts days with readings IN that shift. */
+  shift: ShiftCode | null = null,
 ): Promise<ReportData> {
   const { from, to } = resolved;
+  const shiftArg = shift ?? undefined;
+
+  const coverageReq = pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('from', mssql.Date, from)
+    .input('to', mssql.Date, to);
+  if (shift) coverageReq.input('shift', mssql.VarChar(10), shift);
 
   const [totalRes, shiftRes, dayRes, coverageRes, stops, shiftCheck] = await Promise.all([
-    getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true }),
-    getProduction(pool, lineId, { from, to, groupBy: 'shift' }),
-    getProduction(pool, lineId, { from, to, groupBy: 'day' }),
-    pool
-      .request()
-      .input('line', mssql.Int, lineId)
-      .input('from', mssql.Date, from)
-      .input('to', mssql.Date, to)
-      .query<{ n: number; firstDay: string | null; lastDay: string | null }>(
-        `SELECT COUNT(DISTINCT shift_date) AS n,
+    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'none', withStates: true }),
+    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'shift' }),
+    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'day' }),
+    coverageReq.query<{ n: number; firstDay: string | null; lastDay: string | null }>(
+      `SELECT COUNT(DISTINCT shift_date) AS n,
                 CONVERT(varchar(10), MIN(shift_date), 120) AS firstDay,
                 CONVERT(varchar(10), MAX(shift_date), 120) AS lastDay
            FROM sms.cone_event
-          WHERE line_id = @line AND shift_date BETWEEN @from AND @to`,
-      ),
-    getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS),
+          WHERE line_id = @line AND shift_date BETWEEN @from AND @to${shift ? ' AND shift_code = @shift' : ''}`,
+    ),
+    shift ? Promise.resolve(null) : getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS),
     getShiftCheck(pool, lineId, from, to),
   ]);
 
@@ -219,6 +237,7 @@ export async function getReport(
 
   return {
     period: resolved,
+    shift,
     coverage: {
       daysInPeriod,
       daysWithData,
@@ -229,11 +248,13 @@ export async function getReport(
     totals: totalRes.rows[0] ? toReportLine(totalRes.rows[0]) : EMPTY_LINE,
     byShift,
     byDay: dayRes.rows.map(toReportLine),
-    downtime: {
-      stoppageCount: stops.stoppages.length,
-      stoppedSeconds: stops.stoppages.reduce((s, g) => s + g.durationSeconds, 0),
-      thresholdSeconds: REPORT_STOP_THRESHOLD_SECONDS,
-    },
+    downtime: stops
+      ? {
+          stoppageCount: stops.stoppages.length,
+          stoppedSeconds: stops.stoppages.reduce((s, g) => s + g.durationSeconds, 0),
+          thresholdSeconds: REPORT_STOP_THRESHOLD_SECONDS,
+        }
+      : null,
     readings: totalRes.states == null ? null : { states: totalRes.states, implausible: totalRes.implausible ?? 0 },
     shiftCheck:
       shiftCheck.cones - shiftCheck.noLegacyShift > 0

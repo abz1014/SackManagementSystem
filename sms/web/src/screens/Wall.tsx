@@ -63,9 +63,14 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
 
   // The board marks a station the drift test has flagged, so it can be
   // identified from the doorway. Same finding the Line screen names in words.
-  const shiftDate = line?.shift.shiftDate;
+  // Not asked for until the plant's shift date is known (roadmap Phase 8,
+  // 15 Sep 2026, gap analysis §10): on first render `line` is null, and the
+  // call went out with from=undefined — answered for whatever day the API
+  // defaulted to, cached under 'none', and thrown away when the real date
+  // arrived. One request that could only ever be wrong.
+  const shiftDate = line?.shift.shiftDate ?? null;
   const attention = usePolling(
-    () => getAttention({ from: shiftDate!, to: shiftDate! }),
+    () => (shiftDate ? getAttention({ from: shiftDate, to: shiftDate }) : Promise.resolve(null)),
     5 * 60_000,
     `wall-attention:${shiftDate ?? 'none'}`,
   );

@@ -10,7 +10,17 @@ import {
   type StateContext, type StateCounts,
 } from './coneState.js';
 
-export type GroupBy = 'day' | 'shift' | 'station' | 'none';
+/**
+ * 'product' since roadmap Phase 8 (15 Sep 2026): the product report. The key
+ * is the reading's OWN material_id (cones, rejects and sacks all carry one
+ * since IFL's 2026-08-05 rebuild); rows from before it group under 'none',
+ * which is how the report says "readings before product recording" from the
+ * same query rather than a second one.
+ */
+export type GroupBy = 'day' | 'shift' | 'station' | 'product' | 'none';
+
+/** The group key for readings with no product. */
+export const NO_PRODUCT_GROUP = 'none';
 
 export interface ProductionParams {
   from?: string; // YYYY-MM-DD (shift_date)
@@ -58,6 +68,8 @@ function groupExpr(g: GroupBy, stationCol = 'source_station'): string {
       return 'shift_code';
     case 'station':
       return `CAST(${stationCol} AS varchar(12))`;
+    case 'product':
+      return `ISNULL(CAST(material_id AS varchar(12)), '${NO_PRODUCT_GROUP}')`;
     case 'none':
       return "'total'";
   }
@@ -263,12 +275,15 @@ export async function getProduction(
     r.sackWeightKg = Math.round(kg * 10) / 10;
   }
 
-  // 'station' groups are numeric strings (varchar-cast for the shared group
-  // key) — a plain string sort orders them "1,10,11,...,2,3" alphabetically.
-  // Sort numerically for that dimension; string sort is correct for the rest
-  // (day = ISO date, shift = already a fixed short list, none = single row).
+  // 'station' and 'product' groups are numeric strings (varchar-cast for the
+  // shared group key) — a plain string sort orders them "1,10,11,...,2,3"
+  // alphabetically. Sort numerically for those dimensions, with the
+  // no-product group last; string sort is correct for the rest (day = ISO
+  // date, shift = already a fixed short list, none = single row).
+  const numericKey = byStation || p.groupBy === 'product';
+  const num = (g: string) => (g === NO_PRODUCT_GROUP ? Number.POSITIVE_INFINITY : Number(g));
   const rows = [...map.values()].sort((a, b) =>
-    byStation ? Number(a.group) - Number(b.group) : a.group.localeCompare(b.group),
+    numericKey ? num(a.group) - num(b.group) : a.group.localeCompare(b.group),
   );
   return {
     groupBy: p.groupBy, rows, unattributed,

@@ -35,14 +35,15 @@ import {
   getEvents, eventsExportUrl, getStations, stationLabel, CONE_STATES,
   type ConeState, type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,
 } from '../api';
+import { RegisterPrintHead } from './report/PrintHead';
 
-const PAGE_SIZE = 100;
+export const PAGE_SIZE = 100;
 
 // 'inspectionRejects' added for finding H4 (Sep 2026 audit): a different
 // population from 'rejected' (the scale's own in_range=0) — these are
 // reject_event rows, cones the inspection stations threw out before they
 // were ever weighed as a cone_event row at all.
-type Listing = 'cones' | 'sacks' | 'rejected' | 'inspectionRejects';
+export type Listing = 'cones' | 'sacks' | 'rejected' | 'inspectionRejects';
 
 /** What each listing asks the register for. */
 function queryFor(
@@ -120,7 +121,7 @@ export function ReadingsScreen({
   useEffect(() => {
     setPage(1);
   }, [period.from, period.to, period.shift]);
-  const { line } = useLive();
+  const { line, asOf } = useLive();
   const health = assessHealth(line);
   const stale = health.kind !== 'ok';
   const lagText =
@@ -165,6 +166,17 @@ export function ReadingsScreen({
 
   return (
     <>
+      {/* The same print header the reports carry (roadmap Phase 8, 15 Sep
+          2026): the line, the period, generated when on the plant's clock,
+          by whom, from which version. Print used to output whatever 100
+          rows were on screen with none of it (gap analysis §10). Hidden on
+          screen; first on paper. */}
+      <RegisterPrintHead
+        from={period.from}
+        to={period.to}
+        at={asOf}
+        title={`${W.nav.readings} · ${listingTitle(listing)}${station != null ? ` · ${stationLabel(stationList.find((s) => s.stationId === station), station)}` : ''}`}
+      />
       <div className="page">
         <p className="q">{W.question.readings}</p>
         <h1 className="wide">{countLine(period, listing, total, rejectedTotal, outsideOnly, states)}</h1>
@@ -272,6 +284,16 @@ export function ReadingsScreen({
 
 /* -------------------------------------------------------------- the count */
 
+/** The listing's own name, for the print header's title line. */
+function listingTitle(listing: Listing): string {
+  switch (listing) {
+    case 'cones': return W.readings.cones;
+    case 'sacks': return W.readings.sacks;
+    case 'rejected': return W.readings.rejectedCones;
+    case 'inspectionRejects': return W.readings.inspectionRejects;
+  }
+}
+
 function countLine(period: Period, listing: Listing, total: number, rejected: number, outsideOnly: boolean, states: ConeState[]): string {
   const what = fmtDayLong(period.from) === fmtDayLong(period.to) ? fmtDayLong(period.from) : `${period.from} to ${period.to}`;
   if (listing === 'sacks') return `${what}: ${fmtInt(total)} sacks weighed.`;
@@ -348,7 +370,7 @@ function StateChips({ value, onChange }: { value: ConeState[]; onChange: (v: Con
   );
 }
 
-function Pager({ page, total, onPage }: { page: number; total: number; onPage: (p: number) => void }) {
+export function Pager({ page, total, onPage }: { page: number; total: number; onPage: (p: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (pages <= 1) return null;
   return (
@@ -367,7 +389,7 @@ function Pager({ page, total, onPage }: { page: number; total: number; onPage: (
 
 /* -------------------------------------------------------------- the table */
 
-function ReadingTable({
+export function ReadingTable({
   rows,
   listing,
   onOpen,

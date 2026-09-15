@@ -20,9 +20,15 @@ import { fmtClockSec, fmtClock, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
 import { AccountSheet } from '../screens/Account';
 
-export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'report';
+export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'sacks' | 'report';
 
-export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'report'] as const;
+/**
+ * In time-window order, as the redesign laid them out. 'sacks' (roadmap
+ * Phase 7, 15 Sep 2026) sits after Rejects: it is the sack half of
+ * requirement 6 and the line-level stock ledger of requirement 7, and
+ * Report — which prints its figures — stays last.
+ */
+export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'sacks', 'report'] as const;
 
 /**
  * What Readings should be narrowed to when a link elsewhere promises a

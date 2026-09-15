@@ -11,7 +11,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 
 const heavy = (date: string) => ({ date, n: 200, mean: 1968, nelson: [2] as number[] });
-vi.mock('./calibration.js', () => ({
+// Partial mock (roadmap Phase 9, 15 Sep 2026): the pure helpers the table
+// now calls (adjustmentRestarts, latestRestart, projectDaysToLimit) are the
+// real ones; only the two DB-backed functions are stubbed.
+vi.mock('./calibration.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./calibration.js')>()),
   getStationDrift: async () => ({
     days: 2,
     stations: [

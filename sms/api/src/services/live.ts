@@ -57,7 +57,7 @@ import {
   type ShiftCode,
 } from '@sms/shared';
 import { TtlCache } from '../cache.js';
-import { plantNowMs } from './plantClock.js';
+import { plantNowMs, plantOffsetMinutes } from './plantClock.js';
 import { getLineIdentity } from './lineConfig.js';
 
 export const STOP_THRESHOLD_SECONDS = 120;
@@ -360,6 +360,15 @@ export interface LiveLine {
   unitName: string;
   /** Plant wall clock at generation, in the production_ts convention. */
   plantNowUtc: string;
+  /**
+   * The plant's offset from UTC in minutes at that instant, as this server
+   * sees it (roadmap Phase 9 item 4, 15 Sep 2026). The web converts every
+   * app-written UTC instant it must compare with a production day using
+   * THIS figure, never the browser's own zone: a phone on the plant Wi-Fi
+   * set to another timezone would otherwise place an adjustment on the
+   * wrong production day (web/src/lib/plantClock.ts).
+   */
+  plantOffsetMinutes: number;
   /** True when the clock was moved by an `asOf` override — never live. */
   replay: boolean;
   shift: {
@@ -667,6 +676,10 @@ export async function getLive(
     plantName: identity.plantName,
     unitName: identity.unitName,
     plantNowUtc: new Date(nowMs).toISOString(),
+    // Taken now, not at the replay instant: the plant observes no daylight
+    // saving, and the value is what a viewer needs to place today's
+    // app-written instants on production days.
+    plantOffsetMinutes: plantOffsetMinutes(),
     replay,
     shift: {
       code: shift.code,

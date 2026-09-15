@@ -33,6 +33,10 @@ export const W = {
     readings: 'Readings',
     weight: 'Weight',
     rejects: 'Rejects',
+    /* Roadmap Phase 7 (15 Sep 2026): the sack screen joins the top bar after
+       Rejects — the one edit outside the `sacks` namespace, because the bar
+       indexes this object by screen. */
+    sacks: 'Sacks',
     report: 'Report',
   } as const,
   wall: 'Wall',
@@ -960,6 +964,322 @@ export const W = {
     shiftFormNote: (n: string, m: string, pct: string) =>
       `Over the last 7 days the plant\u2019s stored shift differs from the derived shift on ${n} of ${m} readings (${pct}). That is what the mode above would change.`,
     shiftFormNone: 'Over the last 7 days there are no readings to compare the plant\u2019s stored shift against.',
+  } as const,
+
+  /* ------------------------------------------- roadmap Phase 9: calibration */
+  /* Calibration analytics (15 Sep 2026). The projection is a PROJECTION from
+     recent readings under a stated assumption \u2014 never "prediction", never
+     "AI" \u2014 and the assumption is printed beside the figure, not in Details,
+     so the number cannot travel without it. */
+  calibration: {
+    /* Weight \u203a the figure row and the station table. */
+    medianNote: (median: string) => `median ${median}`,
+    colMedian: 'Median',
+    colSd: 'SD',
+    sdNote: 'within-day spread of this station\u2019s readings',
+    /* The pattern rules, named. The labels come from the API's rule table. */
+    patternOn: (rules: string) => `pattern: ${rules}`,
+    flaggedDays: 'Days the pattern test fired',
+    noFlaggedDays: 'The pattern test did not fire on any day in the window.',
+    rulesRun:
+      'The drift test runs the eight Nelson rules on this station\u2019s daily averages, measured from the centreline and the day-to-day sigma below.',
+    cannotFire: (rules: string, points: number) =>
+      `On a series of ${points} consecutive days ${rules} cannot complete, so their absence says nothing.`,
+    allCanFire: (points: number) => `Every rule can complete on a series of ${points} consecutive days.`,
+    centreline: (g: string, sigma: string) => `centreline ${g}, day-to-day sigma ${sigma}`,
+    restartedOn: (day: string) => `restarted at the adjustment logged on ${day}`,
+    notApproved: 'Which rules apply, and their use on daily averages, has not yet been confirmed by IFL.',
+    /* The projection sentence. `rate` is "+0.8 g/day", `limitG` is "+40 g".
+       The assumption is IN the sentence — "if it continues at that rate" —
+       so it cannot be quoted without it. */
+    projection: (rate: string, days: number, limitG: string, k: number) =>
+      `At the current drift (${rate} over ${days} days) this station reaches the action limit (${limitG} from target) in about ${k} ${k === 1 ? 'day' : 'days'}, if it continues at that rate.`,
+    projectionFar: (rate: string, days: number, limitG: string) =>
+      `At the current drift (${rate} over ${days} days) this station would not reach the action limit (${limitG} from target) within 90 days, if it continues at that rate.`,
+    projectionNow: (rate: string, days: number, limitG: string) =>
+      `At the current drift (${rate} over ${days} days) this station is already past the action limit (${limitG} from target).`,
+    projectionAway: (rate: string, days: number) =>
+      `The daily average is moving back toward the target (${rate} over ${days} days).`,
+    projectionAssumption:
+      'A projection from recent readings: a straight line through the run\u2019s daily averages, assumed to continue at the same rate. It is not a forecast of what the scale will do.',
+    projectionNoLimits: 'No product limits were in force, so there is no action limit to project to.',
+    gPerDay: (g: string) => `${g}/day`,
+    /* The adjustment ledger form and list. */
+    adjustedAt: 'Adjusted at (plant time)',
+    note: 'Note',
+    beforeG: 'Reference read before (g)',
+    afterG: 'Reference read after (g)',
+    referenceG: 'Reference weight (g)',
+    productInForce: 'Product in force',
+    productFromMachine: (name: string) => `${name} \u2014 from the machine\u2019s newest cones`,
+    productQuiet: 'nothing on this machine in the last 2 h — left blank',
+    productClear: 'clear',
+    lineWide: 'whole line',
+    colWhen: 'When',
+    colAmount: 'Amount',
+    colBeforeAfter: 'Before \u2192 after',
+    colProduct: 'Product',
+    colWhy: 'Why',
+    allAdjustments: (n: number) =>
+      n === 1
+        ? '1 adjustment on record for this station, including line-wide ones.'
+        : `${n} adjustments on record for this station, including line-wide ones.`,
+    adjustedAtNote: 'Plant time. Stored as an app instant and converted with the offset the server reports, never the browser\u2019s.',
+  } as const,
+
+  /* ------------------------------------ sacks and the stock ledger (Phase 7) */
+  /* Roadmap Phase 7 (15 Sep 2026). One screen for the sack half of
+     requirement 6 and the LINE-level half of requirement 7. The words obey
+     three facts the data forces, and each is printed once as a footnote:
+     a sack's time is when the plant wrote it, not when it was weighed; no
+     sack is attributed to a machine because the source records none and
+     this system will not infer one; the cone count around a sack is an
+     approximation. What a "receipt" is, and which unit the ledger is kept
+     in, are the developer's reading until IFL confirms \u2014 said where the
+     ledger is shown, not hidden in a tooltip. */
+  sacks: {
+    question: 'How many sacks were weighed, how heavy, how many the scale passed \u2014 and what is in line stock.',
+    headline: (period: string, sacks: string, kg: string, pct: string | null) =>
+      `${period}: ${sacks} sacks weighed, ${kg} kg` + (pct ? `, ${pct} within the scale\u2019s range.` : '.'),
+    headlineNone: (period: string) => `${period}: no sacks weighed.`,
+    figSacks: 'sacks',
+    figKg: 'kg',
+    figInRange: 'within range',
+    figConesPerSack: 'cones per sack',
+    avgNote: (avg: string) => `${avg} average`,
+    avgExcluded: (n: string) => `${n} implausible excluded from the average`,
+    inRangeNote: (n: string, of: string) => `${n} of ${of} the scale passed`,
+    noFlagNote: (n: string) => `${n} carry no verdict`,
+    conesPerSackNote: 'approximate',
+    unattributed: (n: string, of: string) => `${n} of ${of} sacks in this period carry no product.`,
+    /* The by-shift and by-product tables. */
+    byShift: 'By shift',
+    byProduct: 'By product',
+    colShift: 'Shift',
+    colProduct: 'Product',
+    colSacks: 'Sacks',
+    colKg: 'kg',
+    colAvg: 'Average',
+    colInRange: 'Within range',
+    noProduct: 'No product on the reading',
+    /* The ledger. */
+    ledger: 'Stock ledger',
+    ledgerNote: 'line stock, not per machine',
+    unit: { sacks: 'Sacks', kg: 'kg' } as const,
+    colDay: 'Day',
+    colOpening: 'Opening',
+    colReceipts: 'Receipts',
+    colIssues: 'Issues',
+    colConsumption: 'Consumption',
+    colAdjustments: 'Adjustments',
+    colClosing: 'Closing',
+    colCount: 'Stock count',
+    ledgerEmpty: 'No sacks and no movements in this period.',
+    openingBefore: (n: string) => `${n} in stock before this period.`,
+    closingNow: (n: string) => `${n} in stock at the end of it.`,
+    kgIncomplete: (n: number) =>
+      n === 1
+        ? 'The kg column is short by one recorded movement that had no weight.'
+        : `The kg column is short by ${n} recorded movements that had no weight.`,
+    /* The three facts, as one footnote under the ledger. */
+    ledgerCaveat:
+      'Every sack weighed at the packing scale counts as a receipt into line stock; that reading of \u201creceipt\u201d, and whether the ledger is kept in sacks or kg, are not yet confirmed by IFL. ' +
+      'Stock is for the line, not per machine: the plant\u2019s sack record carries no machine, the sack scale publishes none, and this system does not infer one from which cones were weighed around a sack. ' +
+      'A sack\u2019s time is when the plant wrote the reading, which can trail the weighing.',
+    perMachine: 'Per machine',
+    perMachineNone: 'not available',
+    /* Recording a movement (rank 3). */
+    record: 'Record a movement',
+    recordNote: 'A correction is a new row that says why; nothing recorded here is edited or deleted.',
+    type: 'What happened',
+    typeName: {
+      opening: 'Stock count (opening)',
+      receipt: 'Received',
+      issue: 'Issued out',
+      consumption: 'Consumed',
+      adjustment: 'Correction',
+    } as const,
+    typeShort: {
+      opening: 'Count',
+      receipt: 'Receipt',
+      issue: 'Issue',
+      consumption: 'Consumption',
+      adjustment: 'Correction',
+    } as const,
+    quantity: 'Sacks',
+    quantityKg: 'kg (if known)',
+    product: 'Product',
+    anyProduct: 'Not stated',
+    when: 'When (plant time)',
+    why: 'Why',
+    save: 'Record',
+    cancel: 'Cancel',
+    saved: 'Recorded.',
+    saveFailed: 'Could not record this movement.',
+    /* The stock sheet: one day's movements. */
+    sheetTitle: 'Stock movements',
+    sheetEyebrow: (day: string) => `${day} \u00b7 production day`,
+    sheetWeighed: (n: string, kg: string) => `${n} sacks weighed this day (${kg} kg) count as receipts.`,
+    sheetWeighedNone: 'No sacks were weighed this day.',
+    sheetEmpty: 'No movements were recorded by hand this day.',
+    colTime: 'Time',
+    colWhat: 'What',
+    colWho: 'Recorded by',
+    colRecorded: 'Recorded at',
+    colWhy: 'Why',
+    /* The sack history list under the ledger. */
+    history: 'Sack history',
+    historyNote: (n: string) => `${n} in this period, newest first`,
+  } as const,
+  /* ---------------------------------------------------------------- reports */
+  /* Roadmap Phase 8 (15 Sep 2026): the nine report types on one surface.
+     Plain words; the definitions themselves live in KPI-DEFINITIONS.md and
+     every figure is "awaiting IFL's approval" until they sign it. No
+     question numbers on screen. */
+  reports: {
+    selectorLabel: 'Report',
+    type: {
+      daily: 'Daily',
+      shift: 'Shift',
+      product: 'Product',
+      station: 'Machine / station',
+      reject: 'Rejects',
+      'cone-weight': 'Cone weight',
+      sack: 'Sacks',
+      calibration: 'Calibration',
+      'management-summary': 'Management summary',
+    } as const,
+    /* The one-line question each report answers, under its title. */
+    question: {
+      daily: 'What did the line make each day of this period.',
+      shift: 'What each shift made, day by day.',
+      product: 'What was made of each product, and how it weighed.',
+      station: 'What each station weighed, how it sat against the line, and what it rejected.',
+      reject: 'Why cones were rejected, on which days, and whether it is getting worse.',
+      'cone-weight': 'How the cones weighed: the mean, the median, the spread and the shape.',
+      sack: 'How many sacks, how heavy, and what the stock ledger says.',
+      calibration: 'Which stations drifted, and what was adjusted.',
+      'management-summary': 'The figures that matter, beside the period before.',
+    } as const,
+    /* The print header. */
+    generated: 'Generated',
+    generatedBy: 'by',
+    version: 'SMS',
+    definitionsNote: 'Definitions: KPI-DEFINITIONS.md — awaiting IFL’s approval.',
+    /* Filters. */
+    filterShift: 'Shift',
+    filterStation: 'Station',
+    filterProduct: 'Product',
+    all: 'All',
+    notAccepted: (what: string) => `This report does not narrow by ${what}.`,
+    /* The two reject populations, named apart (the gap analysis found them one word). */
+    rejectedByScale: 'Rejected by the scale',
+    rejectedAtInspection: 'Rejected at inspection',
+    ofConesWeighed: (p: string) => `${p} of cones weighed`,
+    ofInspected: (p: string) => `${p} of cones plus rejects`,
+    timeLostNotSplit: 'Time lost is not split by shift.',
+    /* Shift report. */
+    shiftSection: (name: string) => `${name} shift`,
+    /* Product report. */
+    unattributedSentence: (cones: string, ofCones: string, rejects: string, ofRejects: string) =>
+      `${cones} of ${ofCones} cone readings and ${rejects} of ${ofRejects} rejects in this period predate product recording and carry no product.`,
+    colProduct: 'Product',
+    colWeighed: 'Weighed',
+    colMean: 'Mean',
+    colMedian: 'Median',
+    colSpread: 'Spread',
+    colInRange: 'In range',
+    colWithin: 'Within',
+    colLow: 'Low',
+    colHigh: 'High',
+    colRejected: 'Rejected',
+    colNotJudged: 'Not judged',
+    colExcluded: 'Excluded',
+    /* Station report. */
+    colStation: 'Station',
+    colVsLine: 'vs line',
+    colVsTarget: 'vs target',
+    colDaysHeld: 'Days held',
+    colFlagged: 'Flagged',
+    colRejectRate: 'Reject rate',
+    colLastAdjusted: 'Last adjusted',
+    flaggedYes: 'yes',
+    flaggedNo: '—',
+    lineMean: (g: string) => `Line mean ${g}`,
+    target: (g: string, label: string) => `target ${g} (${label})`,
+    noTarget: 'no product target recorded',
+    /* Reject report. */
+    reasons: 'Reasons',
+    byDayCode: 'By day and reason',
+    trend: 'Daily rate with its control band',
+    colDay: 'Day',
+    colReason: 'Reason',
+    colCount: 'Count',
+    colShare: 'Share',
+    colCones: 'Cones',
+    colInspected: 'Inspected',
+    colRate: 'Rate',
+    colBand: 'Band',
+    outOfControl: 'out of band',
+    pBar: (p: string) => `Usual rate ${p}`,
+    spansGenerations: 'The period spans a source rebuild; the band is the newest generation’s.',
+    rejectUnattributed: (n: string, of: string) => `${n} of ${of} rejects in this period predate product recording.`,
+    /* Cone weight report. */
+    meanLabel: 'mean',
+    medianLabel: 'median',
+    spreadLabel: 'spread (SD)',
+    minMax: (lo: string, hi: string) => `${lo} to ${hi}`,
+    readingsExcluded: (n: string, m: string) => `${n} readings, of which ${m} implausible excluded`,
+    states: 'By state',
+    histogram: (g: number) => `Distribution, ${g} g buckets`,
+    histogramKg: (kg: number) => `Distribution, ${kg} kg buckets`,
+    byStation: 'By station',
+    medianFromReport: 'The median is computed by the report over the same readings as the mean.',
+    /* Sack report. */
+    sacks: 'sacks',
+    kg: 'kg',
+    perSackApprox: 'cones per sack (approx.)',
+    inRangeShare: (p: string) => `${p} in range by the scale`,
+    sackRejected: (n: string) => `${n} rejected by the scale`,
+    byProduct: 'By product',
+    stock: 'Stock ledger',
+    stockNotStarted: 'Stock ledger not started.',
+    stockNotAvailable: 'Stock ledger not available yet.',
+    stockColOpening: 'Opening',
+    stockColReceipts: 'Receipts',
+    stockColIssues: 'Issues',
+    stockColConsumption: 'Consumption',
+    stockColAdjustments: 'Adjustments',
+    stockColClosing: 'Closing',
+    stockBasis: 'Line-level stock; no sack is attributed to a machine.',
+    /* Calibration report. */
+    stationsFlagged: (n: number) => (n === 1 ? '1 station flagged for drift' : `${n} stations flagged for drift`),
+    colDaysFlagged: 'Days flagged',
+    colAdjustments: 'Adjustments',
+    adjustments: 'Adjustments in the period',
+    noAdjustments: 'No adjustments were logged in this period.',
+    adjustmentsNotAvailable: 'Adjustment details not available yet.',
+    colWhen: 'When',
+    colAmount: 'Amount',
+    colBefore: 'Before',
+    colAfter: 'After',
+    colReasonAdj: 'Reason',
+    colBy: 'By',
+    wholeLine: 'whole line',
+    /* Management summary. */
+    kpi: 'Figure',
+    thisPeriod: 'This period',
+    priorPeriod: 'Period before',
+    change: 'Change',
+    priorSpan: (from: string, to: string) => `compared with ${from} to ${to}`,
+    priorCoverage: (withData: number, of: number) => `${withData} of ${of} days there hold readings`,
+    priorNoData: 'The period before holds no readings, so there is nothing to compare with.',
+    betterHigher: 'higher is better',
+    betterLower: 'lower is better',
+    betterNeither: '',
+    approval: 'awaiting IFL’s approval',
+    /* Errors. */
+    notAllowed: 'This report is for managers and above.',
   } as const,
 } as const;
 

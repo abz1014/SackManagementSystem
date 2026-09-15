@@ -56,6 +56,14 @@ export interface SyncConfig {
    * the same shift. Floor 1.
    */
   failureCriticalAfter: number;
+  /**
+   * Hours without a sack row, while cones are being weighed, before the
+   * transform raises the `sack_blackout` WARNING (roadmap Phase 7, 15 Sep
+   * 2026; dq.ts sackBlackoutFindings). SACK_BLACKOUT_HOURS, default 4 — the
+   * developer's threshold: IFL has not said how long the packer may stand
+   * while winding runs. Floor 1.
+   */
+  sackBlackoutHours: number;
   app: DbConfig;
   iflData: DbConfig;
   pdasDbName: string;
@@ -107,6 +115,7 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
     overlapRows: intEnv(env, 'SYNC_OVERLAP_ROWS', 500, 0),
     intervalSeconds: intEnv(env, 'SYNC_INTERVAL_SECONDS', 60, 5),
     failureCriticalAfter: intEnv(env, 'SYNC_FAILURE_CRITICAL_AFTER', 5, 1),
+    sackBlackoutHours: intEnv(env, 'SACK_BLACKOUT_HOURS', 4, 1),
     app,
     iflData,
     pdasDbName: env.IFL_DB_NAME_PDAS ?? 'PDAS_TP1U2',

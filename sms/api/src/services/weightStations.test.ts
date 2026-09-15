@@ -15,7 +15,11 @@ import type { ConnectionPool } from 'mssql';
 
 // The dependencies getWeightStations pulls in are all DB-backed; stub them so
 // the test exercises the rate arithmetic and nothing else.
-vi.mock('./calibration.js', () => ({
+// Partial mock (roadmap Phase 9, 15 Sep 2026): the pure helpers the table
+// now calls (adjustmentRestarts, latestRestart, projectDaysToLimit) are the
+// real ones; only the two DB-backed functions are stubbed.
+vi.mock('./calibration.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./calibration.js')>()),
   getStationDrift: async () => ({
     days: 5,
     stations: [

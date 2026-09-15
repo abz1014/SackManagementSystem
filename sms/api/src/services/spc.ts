@@ -122,6 +122,10 @@ export interface SpcData {
    */
   implausible: number;
   mean: number;
+  /** Median of the same population as `mean` (roadmap Phase 9 item 1, 15 Sep
+   *  2026) — the Weight screen prints the two side by side, so they must come
+   *  from one query surface with one predicate. Null for an empty period. */
+  median: number | null;
   stdevOverall: number; // long-term σ (all points) → Pp/Ppk
   stdevWithin: number; // short-term σ (pooled within-subgroup) → Cp/Cpk
   bucketMinutes: number;
@@ -342,6 +346,22 @@ export async function getWeightSpc(
   const summ = sumRes.recordset[0]!;
   const count = summ.n;
   const mean = summ.mean ?? 0;
+
+  // The median of the same population (Phase 9): its own statement, because
+  // PERCENTILE_CONT is a window function and cannot sit beside the aggregates.
+  const medReq = pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('from', mssql.Date, from)
+    .input('to', mssql.Date, to);
+  if (shift) medReq.input('shift', mssql.VarChar(10), shift);
+  if (stationFilter) medReq.input('station', mssql.Int, station);
+  const medWhere = whereOn(medReq);
+  const medRes = await medReq.query<{ med: number | null }>(
+    `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(${col} AS float)) OVER () med
+     FROM ${table} WHERE ${medWhere}`,
+  );
+  const median = medRes.recordset?.[0]?.med == null ? null : Number(medRes.recordset[0]!.med);
   const stdevOverall = summ.sd ?? 0;
   const implausible = Number(summ.excluded ?? 0);
 
@@ -559,6 +579,7 @@ export async function getWeightSpc(
     count,
     implausible,
     mean: round(mean, 2),
+    median: median == null ? null : round(median, 2),
     stdevOverall: round(stdevOverall, 3),
     stdevWithin: round(stdevWithin, 3),
     bucketMinutes,

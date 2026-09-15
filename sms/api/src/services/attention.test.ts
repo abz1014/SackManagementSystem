@@ -14,8 +14,12 @@ const station = (id: number, days: StationDriftDay[]): StationDrift => {
     station: id,
     n,
     grandMean: n ? days.reduce((s, d) => s + d.n * d.mean, 0) / n : 0,
+    medianG: null,
     stdevWithin: 4,
     sigmaDayToDay: 1.2,
+    centrelineG: n ? days.reduce((s, d) => s + d.n * d.mean, 0) / n : 0,
+    restartedOn: null,
+    longestRun: days.length,
     days,
     flagged: days.some((d) => d.nelson.length > 0),
   };
@@ -28,6 +32,7 @@ const cal = (stations: StationDrift[]): CalibrationData => ({
   days: 14,
   stations,
   flaggedStationCount: stations.filter((s) => s.flagged).length,
+  rules: [],
 });
 
 /** Six flat days at the line mean — a station nobody should hear about. */
@@ -160,6 +165,26 @@ describe('stationDriftFindings', () => {
 
   it('exposes its minimum run as a constant so the screen can state the rule', () => {
     expect(MIN_DAYS_HELD).toBeGreaterThanOrEqual(2);
+  });
+
+  it('carries the projection over the run it names when limits are in force, and none otherwise (roadmap Phase 9)', () => {
+    // Station 7 climbs 2 g/day for six days above a 1950 line, the pattern having fired.
+    const climbing = station(
+      7,
+      ['2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01'].map((d, i) => day(d, 1962 + 2 * i, i >= 3 ? [3] : [])),
+    );
+    const data = cal([flat(1, 1950), flat(2, 1950), climbing]);
+    const withLimits = stationDriftFindings(data, {
+      toleranceWidthG: 80,
+      adjustedAtMsByStation: noAdjustments,
+      limitsG: { loG: 1910, hiG: 1990, targetG: 1950 },
+    });
+    expect(withLimits[0]!.projection).toMatchObject({ slopeGPerDay: 2, overDays: 6, towards: 'upper', limitG: 1990, targetG: 1950, assumption: 'linear_over_run' });
+    // Last mean 1972, 18 g to the limit at 2 g/day.
+    expect(withLimits[0]!.projection!.daysToLimit).toBe(9);
+    // No limits in force: the sentence stops at the observation.
+    const without = stationDriftFindings(data, { toleranceWidthG: 80, adjustedAtMsByStation: noAdjustments });
+    expect(without[0]!.projection).toBeNull();
   });
 });
 

@@ -38,7 +38,7 @@ import {
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtG, fmtInt, fmtPct1 } from '../lib/fmt';
 import {
-  getSpc, getWeightStations, getStations, getProduction, stationLabel,
+  getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
   type SpcData, type StationRow, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
@@ -109,10 +109,15 @@ export function WeightScreen({
   // The share the SCALE rejected, taken from the register rather than derived
   // from the control chart: the chart excludes implausible readings, and this
   // figure has to agree with the count the Readings screen shows.
+  // `tsTo` since roadmap Phase 8 (15 Sep 2026, gap analysis §10): without
+  // it this count covered the whole shift under a replay (?at=) while Line
+  // and Wall stopped at the replay instant, so the same shift read two
+  // different reject counts on two screens. The key carries it too, or a
+  // replay moved to a new instant would keep the old answer.
   const prod = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, groupBy: 'none' }),
+    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: 'none' }),
     period.live ? 60_000 : 5 * 60_000,
-    `prod:${period.from}:${period.to}:${period.shift ?? 'all'}`,
+    `prod:${period.from}:${period.to}:${period.shift ?? 'all'}:${period.tsTo}`,
   );
 
   if (st.error && !st.data) return <Failed error={st.error} onRetry={st.refresh} />;
@@ -146,6 +151,9 @@ export function WeightScreen({
               <span className="fig-unit">{W.fig.gAverage}</span>
             </b>
             <span className="fig-note">
+              {/* The median beside the mean (roadmap Phase 9 item 1): the same
+                  population, the same period and shift, from the same call. */}
+              {sLine && sLine.count > 0 && sLine.median != null ? `${W.calibration.medianNote(fmtG(sLine.median))} · ` : ''}
               {d.targetG != null ? `product target ${fmtG(d.targetG)}` : W.weight.noTarget}
             </span>
           </div>
@@ -251,9 +259,25 @@ export function WeightScreen({
           {d.minDaysHeld} production days or more and the pattern test has fired inside that run. The threshold is a
           tenth of the product&apos;s tolerance when one is recorded.
         </p>
+        {/* Which rules could not have fired on this window's series (roadmap
+            Phase 9 item 3): the longest run any station had, against each
+            rule's minimum, so an absence of rules 4 and 7 is never read as
+            evidence. The station sheet states the same for one station. */}
+        {(d.rules ?? []).length > 0 && (() => {
+          const longest = Math.max(0, ...d.stations.map((r) => r.longestRun ?? 0));
+          const cannot = d.rules.filter((r) => r.minPoints > longest).map((r) => r.id);
+          const list = cannot.length === 1 ? `rule ${cannot[0]}` : `rules ${cannot.slice(0, -1).join(', ')} and ${cannot[cannot.length - 1]}`;
+          return (
+            <p>
+              {cannot.length > 0 ? W.calibration.cannotFire(list, longest) : W.calibration.allCanFire(longest)}{' '}
+              {W.calibration.notApproved}
+            </p>
+          );
+        })()}
         {s && (
           <p>
-            Over this period: {fmtInt(s.count)} cones, mean {fmtG(s.mean)}, standard deviation{' '}
+            Over this period: {fmtInt(s.count)} cones, mean {fmtG(s.mean)}
+            {s.median != null ? `, median ${fmtG(s.median)}` : ''}, standard deviation{' '}
             {s.stdevOverall.toFixed(2)} g overall and {s.stdevWithin.toFixed(2)} g within{' '}
             {s.bucketLabel} groups. {s.xbarOutOfControl} group averages fell outside the control band and{' '}
             {s.nelsonFlagged} carried a non-random pattern.
@@ -340,7 +364,12 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
       <Readout
         hovered={
           h
-            ? `${tickLabel(h.ts, multiDay)} · ${fmtG(h.mean)}, the average of ${fmtInt(h.n)} cones${h.nelson.length ? ' · non-random pattern' : ''}`
+            // The pattern named on hover (roadmap Phase 9 item 3): the rule
+            // labels were defined for the UI and never rendered — this read
+            // "non-random pattern" for every one of the eight.
+            ? `${tickLabel(h.ts, multiDay)} · ${fmtG(h.mean)}, the average of ${fmtInt(h.n)} cones${
+                h.nelson.length ? ` · ${W.calibration.patternOn(h.nelson.map((id) => NELSON_RULE_LABEL[id]).join(', '))}` : h.xViolates ? ` · ${W.calibration.patternOn(NELSON_RULE_LABEL[1])}` : ''
+              }`
             : null
         }
         resting={`${g.length} groups of about ${fmtInt(Math.round(spc.count / Math.max(1, g.length)))} cones`}
@@ -473,6 +502,10 @@ function StationTable({
         <tr>
           <th>{W.weight.colStation}</th>
           <th className="n">{W.weight.colAverage}</th>
+          {/* Median and SD (roadmap Phase 9 items 1-2): the SD was computed
+              for every station and rendered nowhere; the median nowhere at all. */}
+          <th className="n">{W.calibration.colMedian}</th>
+          <th className="n">{W.calibration.colSd}</th>
           <th className="n">{W.weight.colVsLine}</th>
           <th className="n">{W.weight.colVsTarget}</th>
           <th style={{ paddingLeft: 28 }}>{W.weight.colPattern}</th>
@@ -494,6 +527,8 @@ function StationTable({
               <Chevron label={W.openRecord} />
             </td>
             <td className="n">{fmtG(r.meanG)}</td>
+            <td className="n">{r.medianG == null ? '—' : fmtG(r.medianG)}</td>
+            <td className="n">{r.sdG == null ? '—' : `${r.sdG.toFixed(1)} g`}</td>
             <td className="n">{signed(r.vsLineG)}</td>
             <td className="n">{signed(r.vsTargetG)}</td>
             <td style={{ paddingLeft: 28, whiteSpace: 'nowrap' }} className={r.flagged ? 'acc' : ''}>

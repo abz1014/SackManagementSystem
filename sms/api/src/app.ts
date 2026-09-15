@@ -18,14 +18,14 @@ import {
 import { loadStateContext, parseStates } from './services/coneState.js';
 import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
-import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
+import { adjustmentRestarts, getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getLive, invalidateLiveConfigCache } from './services/live.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
 import { PdasWriter } from './services/pdasWrite.js';
-import { plantNowMs } from './services/plantClock.js';
+import { plantNowMs, plantOffsetMinutes } from './services/plantClock.js';
 import { getWeightStations } from './services/weightStations.js';
 import { getReport, resolvePeriod, REPORT_PERIODS, type ReportPeriod } from './services/report.js';
 import {
@@ -61,6 +61,9 @@ import { requestId, requestLog } from './log.js';
 import { mountConeRoutes } from './routes/cone.js';
 import { mountRejectsRoutes } from './routes/rejects.js';
 import { mountOpsRoutes } from './routes/ops.js';
+import { mountReportsRoutes } from './routes/reports.js';
+import { mountCalibrationRoutes } from './routes/calibration.js';
+import { mountSacksRoutes } from './routes/sacks.js';
 
 const dateStr = z
   .string()
@@ -642,6 +645,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     anchor: dateStr,
     from: dateStr,
     to: dateStr,
+    /** Roadmap Phase 8 (15 Sep 2026): one shift across the period's days; "This shift" used to print the whole day. */
+    shift: z.enum(['morning', 'evening', 'night']).optional(),
   });
   app.get('/api/report', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -672,13 +677,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: spanBad });
         return;
       }
-      const key = `report:${JSON.stringify(resolved)}`;
+      const key = `report:${JSON.stringify(resolved)}:${q.data.shift ?? 'all'}`;
       const cached = prodCache.get(key);
       if (cached) {
         res.setHeader('X-Cache', 'HIT').json(cached);
         return;
       }
-      const data = await getReport(pool, cfg.lineId, resolved);
+      const data = await getReport(pool, cfg.lineId, resolved, q.data.shift ?? null);
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
       res.setHeader('X-Cache', 'MISS').json(env);
@@ -1063,17 +1068,59 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
-      const plausibility = await getPlausibilityRule(pool, cfg.lineId);
-      const data = await getStationDrift(pool, cfg.lineId, q.data.from, q.data.to, plausibility);
+      // Roadmap Phase 9 (15 Sep 2026): a logged adjustment restarts the
+      // station's centreline and sigma, so the ledger is passed in here as
+      // it is by the station table and the attention list.
+      const [plausibility, adjustments] = await Promise.all([
+        getPlausibilityRule(pool, cfg.lineId),
+        listCalibrationAdjustments(pool, cfg.lineId),
+      ]);
+      const data = await getStationDrift(pool, cfg.lineId, q.data.from, q.data.to, plausibility, {
+        restarts: adjustmentRestarts(adjustments),
+      });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
     }
   });
 
-  app.get('/api/calibration/adjustments', async (_req: Request, res: Response, next: NextFunction) => {
+  // Roadmap Phase 9 item 5 (15 Sep 2026): `from`/`to` are production days
+  // compared on the plant clock; `station` returns that station's rows PLUS
+  // the line-wide rows (station NULL), which apply to every station. The
+  // Calibration report (Phase 8) calls this with from/to.
+  const adjustmentsQuery = z.object({
+    from: dateStr,
+    to: dateStr,
+    station: z.coerce.number().int().positive().optional(),
+  });
+  app.get('/api/calibration/adjustments', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.json({ adjustments: await listCalibrationAdjustments(pool, cfg.lineId) });
+      const q = adjustmentsQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      if (q.data.from && q.data.to) {
+        const bad = validateRange(q.data.from, q.data.to);
+        if (bad) {
+          res.status(400).json({ error: bad });
+          return;
+        }
+      }
+      const adjustments = await listCalibrationAdjustments(pool, cfg.lineId, {
+        from: q.data.from,
+        to: q.data.to,
+        station: q.data.station ?? null,
+      });
+      res.json({
+        adjustments,
+        // The offset the plant-time fields were converted with — the web
+        // uses this, never the browser's zone (the two clocks, CLAUDE.md).
+        plantOffsetMinutes: plantOffsetMinutes(),
+        from: q.data.from ?? null,
+        to: q.data.to ?? null,
+        station: q.data.station ?? null,
+      });
     } catch (err) {
       next(err);
     }
@@ -1091,6 +1138,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           // Signed grams the scale was moved by (finding M9) — positive =
           // now reads heavier, negative = lighter.
           amountG: z.coerce.number().optional(),
+          // Roadmap Phase 9 item 5 (migration 034): reference readings and
+          // the product in force, all optional. `adjustedAt` above is a
+          // genuine-UTC instant; the web converts the plant-time the person
+          // typed with the offset this API reports.
+          beforeG: z.coerce.number().finite().optional(),
+          afterG: z.coerce.number().finite().optional(),
+          referenceG: z.coerce.number().finite().optional(),
+          productId: z.coerce.number().int().positive().optional(),
         })
         .safeParse(req.body);
       if (!body.success) {
@@ -1107,17 +1162,39 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           return;
         }
       }
+      // Same gate for the product: sms.product carries no FK from the ledger
+      // (the mirror can lag), so an unknown id is refused here instead.
+      if (body.data.productId != null) {
+        const known = await pool.request().input('id', mssql.Int, body.data.productId)
+          .query<{ n: number }>(`SELECT COUNT(*) n FROM sms.product WHERE product_id=@id`);
+        if (!known.recordset[0]?.n) {
+          res.status(400).json({ error: `no product ${body.data.productId}` });
+          return;
+        }
+      }
       const user = (req as AuthedRequest).user!;
       const adjustedAt = body.data.adjustedAt ? new Date(body.data.adjustedAt) : new Date();
-      const id = await recordCalibrationAdjustment(
-        pool, cfg.lineId, body.data.stationId ?? null, adjustedAt, user.userId,
-        body.data.reason ?? null, body.data.note ?? null, body.data.amountG ?? null,
-      );
+      const id = await recordCalibrationAdjustment(pool, cfg.lineId, {
+        stationId: body.data.stationId ?? null,
+        adjustedAtUtc: adjustedAt,
+        recordedBy: user.userId,
+        reason: body.data.reason ?? null,
+        note: body.data.note ?? null,
+        amountG: body.data.amountG ?? null,
+        beforeG: body.data.beforeG ?? null,
+        afterG: body.data.afterG ?? null,
+        referenceG: body.data.referenceG ?? null,
+        productId: body.data.productId ?? null,
+      });
       audit(
         req, 'calibration.adjustment', 'station', body.data.stationId ?? 'line-wide',
         body.data.reason ?? body.data.note ?? null,
       );
-      res.json({ adjustmentId: id, adjustments: await listCalibrationAdjustments(pool, cfg.lineId) });
+      res.json({
+        adjustmentId: id,
+        adjustments: await listCalibrationAdjustments(pool, cfg.lineId),
+        plantOffsetMinutes: plantOffsetMinutes(),
+      });
     } catch (err) {
       next(err);
     }
@@ -1698,6 +1775,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   mountConeRoutes(routeCtx);
   mountRejectsRoutes(routeCtx);
   mountOpsRoutes(routeCtx);
+  mountReportsRoutes(routeCtx);
+  mountCalibrationRoutes(routeCtx);
+  mountSacksRoutes(routeCtx);
 
   // JSON 404 for unmatched API routes
   app.use('/api', (_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));

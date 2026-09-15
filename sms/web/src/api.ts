@@ -392,16 +392,6 @@ export function getRange(): Promise<RangeData> {
   return get('/api/range');
 }
 
-export interface ShiftCount {
-  shift: string;
-  cones: number;
-}
-export interface ShiftAnalysisData {
-  corrected: ShiftCount[];
-  legacy: ShiftCount[];
-  mismatch: { differing: number; total: number; pct: number };
-}
-
 export interface RejectReason {
   rejectCodeId: number | null;
   rejectType: string;
@@ -469,12 +459,11 @@ export function getWeights(basis: Basis, from?: string, to?: string): Promise<En
   return get(`/api/weights?${p.toString()}`);
 }
 
-export function getShiftAnalysis(from?: string, to?: string): Promise<Envelope<ShiftAnalysisData>> {
-  const p = new URLSearchParams();
-  if (from) p.set('from', from);
-  if (to) p.set('to', to);
-  return get(`/api/shift-analysis?${p.toString()}`);
-}
+// getShiftAnalysis, getStoppagePatterns and getOee were deleted here on
+// 15 Sep 2026 (roadmap Phase 8 item 3): their endpoints went with the
+// Output/Shifts screens at f4b941a and the three wrappers had targeted 404s
+// since. /api/shift-check (getShiftCheck, below) is the shift statistic's
+// replacement.
 
 export function getProduction(q: ProductionQuery): Promise<Envelope<ProductionData>> {
   const p = new URLSearchParams();
@@ -660,18 +649,6 @@ export interface DowntimeData {
 export function getDowntime(date: string, thresholdSeconds: number): Promise<Envelope<DowntimeData>> {
   const p = new URLSearchParams({ date, thresholdSeconds: String(thresholdSeconds) });
   return get(`/api/downtime?${p.toString()}`);
-}
-
-export interface StoppagePatternData {
-  from: string;
-  to: string;
-  thresholdSeconds: number;
-  dayCount: number;
-  stoppages: Stoppage[];
-}
-export function getStoppagePatterns(from: string, to: string, thresholdSeconds: number): Promise<Envelope<StoppagePatternData>> {
-  const p = new URLSearchParams({ from, to, thresholdSeconds: String(thresholdSeconds) });
-  return get(`/api/stoppage-patterns?${p.toString()}`);
 }
 
 // ---- Weight SPC ----
@@ -876,47 +853,6 @@ export function getRejectSpc(from: string, to: string, rejectType: RejectTypeFil
   const p = new URLSearchParams({ from, to, rejectType });
   if (bucket) p.set('bucket', bucket);
   return get(`/api/reject-spc?${p.toString()}`);
-}
-
-// ---- Inferred OEE ----
-export interface OeeData {
-  from: string;
-  to: string;
-  thresholdSeconds: number;
-  plannedHoursPerDay: number;
-  plannedSeconds: number;
-  downSeconds: number;
-  runSeconds: number;
-  availabilityPct: number;
-  idealCycleSeconds: number;
-  idealCycleSource: 'inferred' | 'manual';
-  producedCount: number;
-  rejectedCount: number;
-  performancePct: number;
-  qualityPct: number;
-  oeePct: number;
-  stoppageCount: number;
-  firstTs: string | null;
-  lastTs: string | null;
-  headGapSeconds: number;
-  tailGapSeconds: number;
-  possiblyPartial: boolean;
-}
-export interface OeeQuery {
-  from: string;
-  to: string;
-  thresholdSeconds?: number;
-  plannedHoursPerDay?: number;
-  idealCycleSeconds?: number;
-  shift?: string;
-}
-export function getOee(q: OeeQuery): Promise<Envelope<OeeData>> {
-  const p = new URLSearchParams({ from: q.from, to: q.to });
-  if (q.thresholdSeconds != null) p.set('thresholdSeconds', String(q.thresholdSeconds));
-  if (q.plannedHoursPerDay != null) p.set('plannedHoursPerDay', String(q.plannedHoursPerDay));
-  if (q.idealCycleSeconds != null) p.set('idealCycleSeconds', String(q.idealCycleSeconds));
-  if (q.shift) p.set('shift', q.shift);
-  return get(`/api/oee?${p.toString()}`);
 }
 
 // ---- Operations: sync health, schema-drift guard, data-quality roll-up ----
@@ -1585,4 +1521,582 @@ export function getReconciliation(from: string, to: string, shift?: string | nul
   const p = new URLSearchParams({ from, to });
   if (shift) p.set('shift', shift);
   return get(`/api/reconciliation?${p.toString()}`);
+}
+
+// ---- roadmap Phase 9: calibration analytics (15 Sep 2026) ----
+// Appended, not edited in place (the three-agent collision rule). The
+// existing interfaces above are EXTENDED here by declaration merging: a
+// second `export interface X { … }` in the same module adds its members to
+// the first, so every screen sees the new fields on the same types.
+
+/** Median of the same population as `avg` — /api/weights, cones (g) and sacks (kg). */
+export interface WeightStats {
+  median: number | null;
+}
+
+/** Median of the same population as `mean` — /api/spc, the figure Weight prints beside the mean. */
+export interface SpcData {
+  median: number | null;
+}
+
+/** The plant's UTC offset in minutes as the server sees it — the one the client converts with. */
+export interface LiveLine {
+  plantOffsetMinutes: number;
+}
+
+/** One pattern rule, with the run length it needs (nelson.ts). */
+export interface NelsonRuleInfo {
+  id: NelsonRuleId;
+  label: string;
+  minPoints: number;
+}
+
+/**
+ * Where a flagged station's run reaches the product's limit if it keeps its
+ * rate — a projection from recent readings under a stated linear assumption
+ * (`assumption`), never a prediction. Null when no limits were in force or
+ * the run is flat.
+ */
+export interface DriftProjection {
+  slopeGPerDay: number;
+  overDays: number;
+  towards: 'upper' | 'lower';
+  limitG: number;
+  distanceG: number;
+  /** 0 = already beyond the limit; null = not moving toward one. */
+  daysToLimit: number | null;
+  assumption: 'linear_over_run';
+}
+
+export interface WeightStationRow {
+  medianG: number | null;
+  /** Within-day standard deviation, pooled over the window — rendered at last (it was computed and dropped). */
+  sdG: number;
+  restartedOn: string | null;
+  centrelineG: number;
+  sigmaDayToDay: number;
+  /** Longest calendar-contiguous run of days the pattern rules had; a rule needing more could never have fired. */
+  longestRun: number;
+  projection: DriftProjection | null;
+}
+
+export interface WeightStationsData {
+  limits: { loG: number; hiG: number } | null;
+  rules: NelsonRuleInfo[];
+}
+
+export interface AttentionFinding {
+  projection?: DriftProjection | null;
+}
+
+export interface CalibrationAdjustment {
+  /** The same instant on the production-time convention — render with the UTC formatters. */
+  adjustedAtPlant: string;
+  beforeG: number | null;
+  afterG: number | null;
+  referenceG: number | null;
+  productId: number | null;
+  productLabel: string | null;
+}
+
+export interface AdjustmentList {
+  adjustments: CalibrationAdjustment[];
+  /** The offset the plant-time fields were converted with — use it, never the browser's zone. */
+  plantOffsetMinutes: number;
+  from: string | null;
+  to: string | null;
+  station: number | null;
+}
+
+/**
+ * The ledger with filters: production days on the plant clock, and one
+ * station's rows PLUS the line-wide rows (station null), which apply to it.
+ * The Calibration report (Phase 8) calls this with from/to.
+ */
+export function listAdjustments(q: { from?: string; to?: string; station?: number | null } = {}): Promise<AdjustmentList> {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.station != null) p.set('station', String(q.station));
+  const qs = p.toString();
+  return get(qs ? `/api/calibration/adjustments?${qs}` : '/api/calibration/adjustments');
+}
+
+export interface AdjustmentInput {
+  stationId?: number;
+  /** Genuine UTC — convert a typed plant time with lib/plantClock.fromPlantLocal. */
+  adjustedAt?: string;
+  reason?: string;
+  note?: string;
+  amountG?: number;
+  beforeG?: number;
+  afterG?: number;
+  referenceG?: number;
+  productId?: number;
+}
+
+/** Supervisor+ (rank 2), the same gate as setting the running product. */
+export function recordAdjustment(a: AdjustmentInput): Promise<{ adjustmentId: number } & AdjustmentList> {
+  return post('/api/calibration/adjustments', a);
+}
+
+export interface CalibrationRulesData {
+  rules: NelsonRuleInfo[];
+  points: number | null;
+  cannotFire: NelsonRuleId[] | null;
+  approvedByIfl: boolean;
+}
+export function getCalibrationRules(points?: number): Promise<CalibrationRulesData> {
+  return get(points == null ? '/api/calibration/rules' : `/api/calibration/rules?points=${points}`);
+}
+
+/** The product's target the projection's limit is relative to (null when the limit is stated absolutely). */
+export interface DriftProjection {
+  targetG: number | null;
+}
+
+// ---- roadmap Phase 7: sacks and the stock ledger (15 Sep 2026) ----
+// Everything below mirrors api/src/services/sacks.ts and sackStock.ts. The
+// ledger is LINE-level: `machineLevel.enabled` is false on every response and
+// its `reason` is printed, never assumed away.
+
+export interface SackGroup {
+  sacks: number;
+  /** Under the weight rule on file (basis + tare), like production.ts. */
+  kg: number;
+  /** Over the plausible population; null when none. */
+  avgKg: number | null;
+  /** Share the scale's own bit passed, of those carrying a bit. */
+  inRangePct: number | null;
+  inRange: number;
+  noFlag: number;
+  implausible: number;
+}
+export interface SackSummaryData {
+  from: string;
+  to: string;
+  shift: string | null;
+  product: number | null;
+  totals: SackGroup & { cones: number; conesPerSack: number | null };
+  byShift: (SackGroup & { shift: string })[];
+  byProduct: (SackGroup & { materialId: number | null; productName: string | null })[];
+  unattributed: { rows: number; of: number };
+  weightBasis: string;
+  tareKg: number;
+  plausibility: { loKg: number; hiKg: number };
+  sackTimeIsInsertTime: true;
+  conesPerSackApproximate: true;
+  machineLevel: { enabled: false; reason: string };
+}
+export interface SackSummaryQuery {
+  from: string;
+  to: string;
+  shift?: string;
+  tsTo?: string;
+  product?: number;
+}
+export function getSackSummary(q: SackSummaryQuery): Promise<Envelope<SackSummaryData>> {
+  const p = new URLSearchParams({ from: q.from, to: q.to });
+  if (q.shift) p.set('shift', q.shift);
+  if (q.tsTo) p.set('tsTo', q.tsTo);
+  if (q.product != null) p.set('product', String(q.product));
+  return get(`/api/sacks/summary?${p.toString()}`);
+}
+
+export interface LedgerFlow { sacks: number; kg: number }
+export interface LedgerDay {
+  day: string;
+  opening: LedgerFlow;
+  openingEntries: LedgerFlow;
+  receipts: LedgerFlow;
+  weighed: LedgerFlow;
+  issues: LedgerFlow;
+  consumption: LedgerFlow;
+  adjustments: LedgerFlow;
+  closing: LedgerFlow;
+  movements: number;
+}
+export interface MaterialLedger {
+  materialId: number | null;
+  productName: string | null;
+  opening: LedgerFlow;
+  openingEntries: LedgerFlow;
+  receipts: LedgerFlow;
+  weighed: LedgerFlow;
+  issues: LedgerFlow;
+  consumption: LedgerFlow;
+  adjustments: LedgerFlow;
+  closing: LedgerFlow;
+  kgMissing: number;
+}
+export interface StockLedgerData {
+  from: string;
+  to: string;
+  product: number | null;
+  basis: 'line';
+  machineLevel: { enabled: false; reason: string };
+  dayBasis: 'production_day';
+  sackTimeIsInsertTime: true;
+  receiptMeaning: string;
+  weightBasis: string;
+  tareKg: number;
+  opening: LedgerFlow;
+  closing: LedgerFlow;
+  totals: {
+    openingEntries: LedgerFlow;
+    receipts: LedgerFlow;
+    weighed: LedgerFlow;
+    issues: LedgerFlow;
+    consumption: LedgerFlow;
+    adjustments: LedgerFlow;
+  };
+  days: LedgerDay[];
+  byMaterial: MaterialLedger[];
+  kgMissing: number;
+}
+export function getSackStock(q: { from: string; to: string; product?: number; tsTo?: string }): Promise<Envelope<StockLedgerData>> {
+  const p = new URLSearchParams({ from: q.from, to: q.to });
+  if (q.product != null) p.set('product', String(q.product));
+  if (q.tsTo) p.set('tsTo', q.tsTo);
+  return get(`/api/sacks/stock?${p.toString()}`);
+}
+
+export const MOVEMENT_TYPES = ['opening', 'receipt', 'issue', 'consumption', 'adjustment'] as const;
+export type MovementType = (typeof MOVEMENT_TYPES)[number];
+export interface SackMovement {
+  movementId: number;
+  materialId: number | null;
+  productName: string | null;
+  /** Always null: the ledger is line-level (migration 033). */
+  machineId: null;
+  movementType: MovementType;
+  quantitySacks: number;
+  quantityKg: number | null;
+  /** Plant wall clock labelled UTC — the production-time formatters (fmtClock) apply. */
+  occurredAtPlant: string;
+  productionDay: string;
+  /** Genuine UTC — fmtAppInstant. */
+  recordedAtUtc: string;
+  recordedBy: { userId: number; name: string } | null;
+  source: 'derived' | 'manual';
+  reason: string | null;
+}
+export interface SackMovementsData {
+  from: string;
+  to: string;
+  movements: SackMovement[];
+  weighed: { day: string; sacks: number; kg: number }[];
+  machineLevel: { enabled: false; reason: string };
+}
+export function getSackMovements(from: string, to: string, product?: number): Promise<Envelope<SackMovementsData>> {
+  const p = new URLSearchParams({ from, to });
+  if (product != null) p.set('product', String(product));
+  return get(`/api/sacks/movements?${p.toString()}`);
+}
+export interface SackMovementInput {
+  movementType: MovementType;
+  quantitySacks: number;
+  quantityKg?: number | null;
+  materialId?: number | null;
+  /** Plant time as typed, "YYYY-MM-DDTHH:MM" — never converted from the browser's zone. */
+  occurredAtPlant: string;
+  reason?: string | null;
+}
+/** Manager+ (rank 3) — the developer's default until IFL sets the rank. */
+export function recordSackMovement(m: SackMovementInput): Promise<{ movementId: number; productionDay: string; recordedAtUtc: string }> {
+  return post('/api/sacks/movements', m);
+}
+
+// ---- roadmap Phase 8: dashboards and reports (15 Sep 2026) ----
+// Appended, not edited in place (the three-agent collision rule). The nine
+// report types on one surface: one composed response per type from
+// /api/reports/<type>, one CSV from /api/reports/<type>/export (rank 3,
+// audited), and the print header every report and the register print carry.
+// Every KPI these print is defined in the repository-root KPI-DEFINITIONS.md,
+// the sheet IFL signs; every row of it is "awaiting" until they do.
+
+export type ReportType =
+  | 'daily' | 'shift' | 'product' | 'station' | 'reject' | 'cone-weight' | 'sack' | 'calibration' | 'management-summary';
+export const REPORT_TYPES: readonly ReportType[] = [
+  'daily', 'shift', 'product', 'station', 'reject', 'cone-weight', 'sack', 'calibration', 'management-summary',
+];
+
+export interface ReportFilters {
+  shift?: 'morning' | 'evening' | 'night';
+  product?: number;
+  station?: number;
+}
+
+/** What every report carries at the top, and every CSV in its trailing rows, and every printed page in its header. */
+export interface ReportHeader {
+  reportType: ReportType | 'register';
+  title: string;
+  lineName: string;
+  plantName: string | null;
+  unitName: string | null;
+  period: { period: string; from: string; to: string; days: number };
+  filters: ReportFilters;
+  /** Plant wall clock on the production-time convention — render in UTC, like every reading time. */
+  generatedAtPlantUtc: string;
+  generatedBy: string;
+  smsVersion: string;
+  definitions: 'KPI-DEFINITIONS.md';
+  approval: 'awaiting';
+}
+
+export interface ReportQuery {
+  period?: ReportPeriod;
+  anchor?: string;
+  from?: string;
+  to?: string;
+  shift?: string | null;
+  product?: number | null;
+  station?: number | null;
+  /** Replay instant — the header is stamped with it when the server allows replays. */
+  at?: string | null;
+}
+
+function reportParams(q: ReportQuery): URLSearchParams {
+  const p = new URLSearchParams();
+  if (q.period) p.set('period', q.period);
+  if (q.anchor) p.set('anchor', q.anchor);
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.shift) p.set('shift', q.shift);
+  if (q.product != null) p.set('product', String(q.product));
+  if (q.station != null) p.set('station', String(q.station));
+  if (q.at) p.set('at', q.at);
+  return p;
+}
+
+/* The report shapes, as api/src/services/reports/*.ts emit them. */
+
+export interface RejectPopulations {
+  byScale: number;
+  byScalePct: number | null;
+  atInspection: number;
+  atInspectionPct: number | null;
+  note: string;
+}
+/** report.ts gained `shift` in the same wave; `downtime` is null under a shift filter (report.ts says why). */
+export interface ReportData {
+  shift: 'morning' | 'evening' | 'night' | null;
+}
+export interface DailyReportData extends Omit<ReportData, 'downtime'> {
+  downtime: ReportData['downtime'] | null;
+  rejectPopulations: RejectPopulations;
+}
+
+export interface ShiftSection {
+  shift: 'morning' | 'evening' | 'night';
+  coverage: ReportData['coverage'];
+  totals: ReportLine;
+  byDay: ReportLine[];
+  readings: ReportData['readings'];
+}
+export interface ShiftReportData {
+  period: ReportData['period'];
+  shift: 'morning' | 'evening' | 'night' | null;
+  shifts: ShiftSection[];
+  shiftCheck: ReportData['shiftCheck'];
+  timeLostNote: string;
+}
+
+export interface ProductReportRow extends ReportLine {
+  productId: number | null;
+  productLabel: string;
+  weight: { n: number; avgG: number | null; sdG: number | null; minG: number | null; maxG: number | null };
+  states: StateCounts;
+  implausible: number;
+}
+export interface ProductReportData {
+  period: ReportData['period'];
+  filters: ReportFilters;
+  rows: ProductReportRow[];
+  unattributed: { cones: number; rejects: number; sacks: number; ofCones: number; ofRejects: number; ofSacks: number };
+  note: string;
+}
+
+export interface StationReportRow {
+  station: number;
+  cones: number;
+  weighedPlausible: number;
+  meanG: number | null;
+  vsLineG: number | null;
+  vsTargetG: number | null;
+  daysHeld: number;
+  flagged: boolean;
+  rejectedAtInspection: number;
+  rejectRatePct: number | null;
+  conesInRangePct: number | null;
+  lastAdjustedUtc: string | null;
+  states: StateCounts;
+}
+export interface StationReportData {
+  period: ReportData['period'];
+  lineMeanG: number | null;
+  targetG: number | null;
+  productLabel: string | null;
+  thresholdG: number;
+  minDaysHeld: number;
+  lineRejectRatePct: number | null;
+  rows: StationReportRow[];
+  note: string;
+}
+
+export interface RejectTrendPoint {
+  day: string;
+  produced: number;
+  inspected: number;
+  rejects: number;
+  ratePct: number | null;
+  uclPct: number | null;
+  lclPct: number | null;
+  outOfControl: boolean;
+}
+export interface RejectReportData {
+  period: ReportData['period'];
+  filters: ReportFilters;
+  total: number;
+  reasons: RejectReason[];
+  unattributed: { rows: number; of: number } | null;
+  dayBasis: 'production_day';
+  denominator: 'cones_plus_rejects';
+  byDayCode: RejectDayCodeRow[];
+  trend: RejectTrendPoint[];
+  pBarPct: number | null;
+  spansGenerations: boolean;
+  note: string;
+}
+
+export interface ConeWeightReportData {
+  period: ReportData['period'];
+  basis: 'as_recorded';
+  cones: number;
+  weighed: number;
+  implausible: number;
+  meanG: number | null;
+  medianG: number | null;
+  medianSource: 'weights_service' | 'report_query';
+  sdG: number | null;
+  minG: number | null;
+  maxG: number | null;
+  states: StateCounts | null;
+  bucketSizeG: number;
+  histogram: Bucket[];
+  target: { setpointG: number; source: 'current_product' | 'fallback'; label: string | null };
+  byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
+  lineMeanG: number | null;
+  plausibility: { loG: number; hiG: number };
+  note: string;
+}
+
+export interface SackReportData {
+  period: ReportData['period'];
+  filters: ReportFilters;
+  weightBasis: string;
+  totals: ReportLine;
+  rejectedByScale: number;
+  inRangePct: number | null;
+  conesPerSack: number | null;
+  byShift: ReportLine[];
+  byDay: ReportLine[];
+  byProduct: { productId: number | null; productLabel: string; sacks: number; sackWeightKg: number; avgSackKg: number | null }[];
+  distribution: { count: number; implausible: number; avg: number | null; min: number | null; max: number | null; stdev: number | null; bucketSize: number; histogram: Bucket[] } | null;
+  caveats: { time: string; machine: string; conesPerSack: string };
+}
+
+export interface CalibrationStationRow {
+  station: number;
+  n: number;
+  meanG: number;
+  vsLineG: number;
+  vsTargetG: number | null;
+  daysHeld: number;
+  flagged: boolean;
+  daysFlagged: number;
+  daysWithData: number;
+  lastAdjustedUtc: string | null;
+  adjustmentsInPeriod: number;
+}
+export interface CalibrationAdjustmentRow {
+  adjustmentId: number;
+  stationId: number | null;
+  adjustedAtUtc: string;
+  recordedAtUtc: string;
+  recordedBy: string | null;
+  reason: string | null;
+  note: string | null;
+  amountG: number | null;
+}
+export interface CalibrationReportData {
+  period: ReportData['period'];
+  filters: ReportFilters;
+  lineMeanG: number | null;
+  targetG: number | null;
+  productLabel: string | null;
+  thresholdG: number;
+  minDaysHeld: number;
+  stations: CalibrationStationRow[];
+  flaggedStationCount: number;
+  adjustments: CalibrationAdjustmentRow[];
+  note: string;
+}
+
+export interface KpiRow {
+  key: string;
+  label: string;
+  unit: 'cones' | 'sacks' | 'kg' | 'g' | '%' | 'days' | 'stations' | 'seconds' | 'stops' | 'readings';
+  betterWhen: 'higher' | 'lower' | 'neither';
+  definition: string;
+  current: number | null;
+  prior: number | null;
+  delta: { abs: number; pct: number | null } | null;
+  approval: 'awaiting';
+}
+export interface ManagementSummaryData {
+  period: ReportData['period'];
+  prior: { from: string; to: string };
+  coverage: { current: ReportData['coverage']; prior: ReportData['coverage'] };
+  kpis: KpiRow[];
+  verdict: { cones: number; sacks: number; sackWeightKg: number };
+  approval: 'awaiting';
+  note: string;
+}
+
+export interface ReportDataByType {
+  daily: DailyReportData;
+  shift: ShiftReportData;
+  product: ProductReportData;
+  station: StationReportData;
+  reject: RejectReportData;
+  'cone-weight': ConeWeightReportData;
+  sack: SackReportData;
+  calibration: CalibrationReportData;
+  'management-summary': ManagementSummaryData;
+}
+
+export interface ReportResponse<T extends ReportType> {
+  header: ReportHeader;
+  report: ReportDataByType[T];
+}
+
+/** One composed report. Rank 1; the management summary rank 3. */
+export function getReportOf<T extends ReportType>(type: T, q: ReportQuery): Promise<Envelope<ReportResponse<T>>> {
+  return get(`/api/reports/${type}?${reportParams(q).toString()}`);
+}
+
+/** The CSV's address — rank 3 on the server, audited `export.csv`. A link, so the browser downloads it. */
+export function reportExportUrl(type: ReportType, q: ReportQuery): string {
+  return `/api/reports/${type}/export?${reportParams(q).toString()}`;
+}
+
+/** The print header on its own, for the register's Print button. */
+export function getReportHeader(q: { from?: string; to?: string; at?: string | null }): Promise<{ header: ReportHeader }> {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.at) p.set('at', q.at);
+  const qs = p.toString();
+  return get(qs ? `/api/reports/header?${qs}` : '/api/reports/header');
 }

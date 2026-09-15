@@ -21,6 +21,11 @@
  *   transform_zero_write    CRITICAL  runTransform.ts: fresh rows the insert did not land
  *   product_mirror_failed   ERROR     pipeline.ts (state): the PDAS mirror is failing; cleared when it succeeds
  *   transform_failed        CRITICAL  pipeline.ts (state): raw arrives, canonical does not; cleared on success
+ *   sack_num_reset          INFO      SackNum went backwards within a generation — one per reset, naming
+ *                                     the source row id and the time (roadmap Phase 7); see sackNumResetFindings
+ *   sack_blackout           WARNING   no sack row for more than SACK_BLACKOUT_HOURS while cones were being
+ *                                     weighed — the sack trigger's four-tag guard makes this a real failure
+ *                                     mode (roadmap Phase 7); see sackBlackoutFindings
  *
  * `subject_ref` (roadmap Phase 3 item 3, 14 Sep 2026): a finding about ROWS
  * names the raw_id of the first offending one, so an operator can go from
@@ -48,6 +53,8 @@ export const CHECK_NAMES = [
   'transform_zero_write',
   'product_mirror_failed',
   'transform_failed',
+  'sack_num_reset',
+  'sack_blackout',
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];
 
@@ -56,8 +63,11 @@ export type CheckName = (typeof CHECK_NAMES)[number];
  * one per check with a count. mergeByCheck in runTransform.ts must not fold
  * these into one row, or "once per (machine, table, generation)" becomes "once
  * per pass with every subject in the detail".
+ *
+ * The two sack checks (roadmap Phase 7, 15 Sep 2026) are per subject too: one
+ * row per SackNum reset, one per silent gap.
  */
-export const PER_SUBJECT_CHECKS: ReadonlySet<string> = new Set(['station_not_in_roster']);
+export const PER_SUBJECT_CHECKS: ReadonlySet<string> = new Set(['station_not_in_roster', 'sack_num_reset', 'sack_blackout']);
 
 /**
  * The bounds outside which a weight is a scale fault, not a reading — the
@@ -356,4 +366,252 @@ export async function persistFindings(
                AND ISNULL(detail, '') = ISNULL(@detail, ''))`,
       );
   }
+}
+
+/* ------------------------------------------------- sack checks (roadmap Phase 7, 15 Sep 2026) */
+
+/**
+ * `sack_num_reset` — SackNum went backwards within one generation.
+ *
+ * WHY. SackNum is the packer's own counter and it resets (SCHEMA DQ-3: one
+ * observed reset, 5,462 distinct values over a 0-9,652 range), which is why
+ * no row is ever addressed by it. The gap analysis (§9) found the reset was
+ * known and recorded nowhere: an engineer reconciling the plant's sack log
+ * against SMS would meet two sacks with one number and no note saying the
+ * counter had restarted. This names the row where it did, and the time.
+ *
+ * One finding PER RESET (PER_SUBJECT_CHECKS), deduped by detail: the detail
+ * carries the source row id and the generation, so a retry of the same batch
+ * records nothing new. INFO, because nothing is wrong with the data — the
+ * counter did what counters do, and the row is ingested and addressed by its
+ * own id. `subject_ref` is the raw_id of the row that went backwards.
+ *
+ * Rows are compared in source-id order WITHIN a generation, never across
+ * two: a September id restarting at 1 after July's 5,462 is a new generation
+ * (source_epoch), not a reset. The tracker is seeded from the newest
+ * canonical row of each generation in the batch (loadPriorSackNums) so a
+ * reset that lands on the first row of an incremental batch is still seen.
+ */
+export interface SackNumPrior {
+  sackNum: number | null;
+  sourceRowId: number;
+}
+
+/** Plant wall clock (labelled UTC) as "YYYY-MM-DD HH:MM:SS", for a detail sentence. */
+const plantTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+
+export function sackNumResetFindings<
+  T extends { sack_num: number | null; source_row_id: number; source_epoch: number; production_ts_utc: Date; raw_id?: number },
+>(rows: T[], prior: ReadonlyMap<number, SackNumPrior>): Finding[] {
+  const ordered = [...rows].sort((a, b) => a.source_epoch - b.source_epoch || a.source_row_id - b.source_row_id);
+  const last = new Map<number, SackNumPrior>(prior);
+  const out: Finding[] = [];
+  for (const r of ordered) {
+    if (r.sack_num == null) continue;
+    const prev = last.get(r.source_epoch);
+    if (prev && prev.sackNum != null && r.sack_num < prev.sackNum) {
+      out.push({
+        check_name: 'sack_num_reset',
+        severity: 'INFO',
+        subject_table: 'sack_event',
+        count: 1,
+        detail:
+          `SackNum went backwards from ${prev.sackNum} (source row id ${prev.sourceRowId}) to ${r.sack_num} ` +
+          `at source row id ${r.source_row_id}, ${plantTime(r.production_ts_utc.getTime())} plant time ` +
+          `(generation ${r.source_epoch}) — the packer's counter restarted; SackNum is not a key and the row is ` +
+          `ingested and addressed by its own id`,
+        subject_ref: r.raw_id == null ? null : Number(r.raw_id),
+      });
+    }
+    last.set(r.source_epoch, { sackNum: r.sack_num, sourceRowId: r.source_row_id });
+  }
+  return out;
+}
+
+/** The newest canonical sack of each generation in a batch, for the reset tracker's seed. */
+export async function loadPriorSackNums(
+  pool: ConnectionPool,
+  lineId: number,
+  epochs: Iterable<number>,
+): Promise<Map<number, SackNumPrior>> {
+  const out = new Map<number, SackNumPrior>();
+  for (const epoch of new Set(epochs)) {
+    const r = await pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .input('epoch', mssql.Int, epoch)
+      .query<{ sack_num: number | null; source_row_id: number }>(
+        `SELECT TOP 1 sack_num, source_row_id FROM sms.sack_event
+          WHERE line_id = @line AND source_epoch = @epoch
+          ORDER BY source_row_id DESC`,
+      );
+    const row = r.recordset[0];
+    if (row) out.set(epoch, { sackNum: row.sack_num == null ? null : Number(row.sack_num), sourceRowId: Number(row.source_row_id) });
+  }
+  return out;
+}
+
+/**
+ * `sack_blackout` — no sack row for more than N hours while cones were being
+ * weighed.
+ *
+ * WHY THIS IS A REAL FAILURE MODE. IFL's acquisition trigger writes a sack
+ * row only when all four sack tags are present; if any one tag stops
+ * arriving, EVERY sack row stops, while the cone tables carry on. Nothing on
+ * the cone side says anything is wrong, and a line that packs no sacks for
+ * hours would otherwise show only as a quiet register. The check is anchored
+ * on cones, not on the clock: a silent sack table during a stoppage is not a
+ * fault, a silent sack table under a running line is.
+ *
+ * WHAT IS COMPARED. Sack times are IFL's insert times (DQ-5) and cone times
+ * are weighing times, both on the plant's wall clock; the threshold is
+ * hours, so the minutes of acquisition lag between them do not matter.
+ * A gap is the span between two consecutive sack rows — the newest canonical
+ * sack and the batch's first, then each pair in the batch — and, when the
+ * newest cone is more than N hours past the newest sack, the OPEN gap from
+ * that sack to now. Only a gap with cones inside it is a finding.
+ *
+ * ONE FINDING PER GAP, deduped by detail, and the detail names only where the
+ * gap STARTS: an open gap re-detected on every pass while it lasts produces
+ * the same sentence, and the same gap seen closed when sacks resume produces
+ * it again and is dropped. `count` is the cones inside the gap when it was
+ * first recorded; `subject_ref` is the raw_id of the last sack before it.
+ * WARNING, not ERROR: the rows that exist are right; rows are missing.
+ *
+ * N is SACK_BLACKOUT_HOURS (default 4), the developer's threshold. IFL has
+ * not said how long the packer can legitimately stand while winding runs.
+ * Anchors before 2000 are clock-fault rows (both IFL copies carry one) and
+ * are skipped, or the first real sack would open a 56-year gap.
+ */
+export interface SackAnchor {
+  ms: number;
+  rawId: number | null;
+  sourceRowId: number | null;
+}
+
+export interface SackGap {
+  fromMs: number;
+  fromRawId: number | null;
+  fromSourceRowId: number | null;
+  toMs: number;
+  /** True when the gap ends at the newest cone rather than at a later sack. */
+  open: boolean;
+}
+
+const CLOCK_FAULT_BEFORE_MS = Date.UTC(2000, 0, 1);
+
+/** Pure: the gaps longer than the threshold in the sack sequence, the open one last. */
+export function sackGaps(
+  sacks: SackAnchor[],
+  prior: SackAnchor | null,
+  newestConeMs: number | null,
+  thresholdMs: number,
+): SackGap[] {
+  const anchors = [...(prior ? [prior] : []), ...sacks]
+    .filter((a) => a.ms >= CLOCK_FAULT_BEFORE_MS)
+    .sort((a, b) => a.ms - b.ms);
+  const gaps: SackGap[] = [];
+  for (let i = 0; i + 1 < anchors.length; i++) {
+    const a = anchors[i]!;
+    const b = anchors[i + 1]!;
+    if (b.ms - a.ms > thresholdMs) {
+      gaps.push({ fromMs: a.ms, fromRawId: a.rawId, fromSourceRowId: a.sourceRowId, toMs: b.ms, open: false });
+    }
+  }
+  const last = anchors[anchors.length - 1];
+  if (last && newestConeMs != null && newestConeMs - last.ms > thresholdMs) {
+    gaps.push({ fromMs: last.ms, fromRawId: last.rawId, fromSourceRowId: last.sourceRowId, toMs: newestConeMs, open: true });
+  }
+  return gaps;
+}
+
+/** Pure: one WARNING per gap that had cones inside it. `conesPerGap[i]` pairs with `gaps[i]`. */
+export function sackBlackoutFindings(gaps: SackGap[], conesPerGap: number[], thresholdHours: number): Finding[] {
+  const out: Finding[] = [];
+  gaps.forEach((g, i) => {
+    const cones = conesPerGap[i] ?? 0;
+    if (cones <= 0) return;
+    out.push({
+      check_name: 'sack_blackout',
+      severity: 'WARNING',
+      subject_table: 'sack_event',
+      count: cones,
+      detail:
+        `no sack row after ${plantTime(g.fromMs)} plant time` +
+        (g.fromSourceRowId != null ? ` (source row id ${g.fromSourceRowId})` : '') +
+        ` for more than ${thresholdHours} h while cones were being weighed — the sack acquisition trigger needs ` +
+        `all four sack tags, so one missing tag stops every sack row, not one`,
+      subject_ref: g.fromRawId,
+    });
+  });
+  return out;
+}
+
+/** Cones weighed inside each gap (after its start, up to and including its end). */
+export async function countConesInGaps(pool: ConnectionPool, lineId: number, gaps: SackGap[]): Promise<number[]> {
+  const out: number[] = [];
+  for (const g of gaps) {
+    const r = await pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .input('a', mssql.BigInt, g.fromMs)
+      .input('b', mssql.BigInt, g.toMs)
+      .query<{ n: number }>(
+        `SELECT COUNT(*) n FROM sms.cone_event
+          WHERE line_id = @line AND production_ts_utc_ms > @a AND production_ts_utc_ms <= @b`,
+      );
+    out.push(Number(r.recordset[0]?.n ?? 0));
+  }
+  return out;
+}
+
+/** The newest canonical sack on the line, as a gap anchor; null on an empty table. */
+export async function loadNewestSack(pool: ConnectionPool, lineId: number): Promise<SackAnchor | null> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ ms: number; raw_id: number | null; source_row_id: number | null }>(
+      `SELECT TOP 1 production_ts_utc_ms AS ms, raw_id, source_row_id FROM sms.sack_event
+        WHERE line_id = @line ORDER BY production_ts_utc_ms DESC`,
+    );
+  const row = r.recordset[0];
+  if (!row) return null;
+  return {
+    ms: Number(row.ms),
+    rawId: row.raw_id == null ? null : Number(row.raw_id),
+    sourceRowId: row.source_row_id == null ? null : Number(row.source_row_id),
+  };
+}
+
+/** The newest cone weighing time on the line; null on an empty table. */
+export async function loadNewestConeMs(pool: ConnectionPool, lineId: number): Promise<number | null> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ m: number | null }>(`SELECT MAX(production_ts_utc_ms) m FROM sms.cone_event WHERE line_id = @line`);
+  return r.recordset[0]?.m == null ? null : Number(r.recordset[0].m);
+}
+
+/**
+ * The whole check for one pass: the batch's sacks (may be empty — the open
+ * gap is what catches a total blackout, and it needs no new sack row),
+ * anchored on the newest canonical sack BEFORE this batch was persisted.
+ */
+export async function detectSackBlackouts<T extends { production_ts_utc_ms: number; raw_id?: number; source_row_id: number }>(
+  pool: ConnectionPool,
+  lineId: number,
+  batch: T[],
+  priorSack: SackAnchor | null,
+  thresholdHours: number,
+): Promise<Finding[]> {
+  const newestConeMs = await loadNewestConeMs(pool, lineId);
+  const sacks: SackAnchor[] = batch.map((r) => ({
+    ms: r.production_ts_utc_ms,
+    rawId: r.raw_id == null ? null : Number(r.raw_id),
+    sourceRowId: r.source_row_id,
+  }));
+  const gaps = sackGaps(sacks, priorSack, newestConeMs, thresholdHours * 3_600_000);
+  if (gaps.length === 0) return [];
+  const cones = await countConesInGaps(pool, lineId, gaps);
+  return sackBlackoutFindings(gaps, cones, thresholdHours);
 }

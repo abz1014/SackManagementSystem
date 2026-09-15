@@ -35,6 +35,8 @@ import { ReasonSheet, reasonIdOf } from './screens/ReasonSheet';
 import { WallScreen } from './screens/Wall';
 import { SetupScreen } from './screens/Setup';
 import { HealthScreen } from './screens/Health';
+import { SacksScreen } from './screens/Sacks';
+import { StockSheet } from './screens/StockSheet';
 import { LoginScreen } from './screens/Login';
 import './app.css';
 
@@ -43,8 +45,9 @@ import './app.css';
 type View = Screen | 'setup' | 'wall' | 'health';
 
 export interface Sheet {
-  /** 'reason' (roadmap Phase 5): one day's rejects of one code, id `<day>|<type>|<tube>|<material>`. */
-  kind: 'station' | 'cone' | 'sack' | 'reject' | 'product' | 'reason';
+  /** 'reason' (roadmap Phase 5): one day's rejects of one code, id `<day>|<type>|<tube>|<material>`.
+   *  'stock' (roadmap Phase 7): one production day's stock movements, id `<day>`. */
+  kind: 'station' | 'cone' | 'sack' | 'reject' | 'product' | 'reason' | 'stock';
   id: string;
 }
 
@@ -74,7 +77,7 @@ function parseRoute(): Route {
   const raw = p.get('s');
   const view: View = (VIEWS as readonly string[]).includes(raw ?? '') ? (raw as View) : 'line';
   const sheetRaw = p.get('sheet');
-  const m = sheetRaw?.match(/^(station|cone|sack|reject|product|reason):(.+)$/);
+  const m = sheetRaw?.match(/^(station|cone|sack|reject|product|reason|stock):(.+)$/);
   const rf = p.get('rf');
   return {
     view,
@@ -261,6 +264,17 @@ function Chrome({
           />
         )}
 
+        {/* Roadmap Phase 7 (15 Sep 2026): open to every account; recording a
+            movement is rank 3 server-side, so the form is offered at 3. */}
+        {route.view === 'sacks' && (
+          <SacksScreen
+            period={period}
+            canRecord={rank >= 3}
+            onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+            onOpenDay={(day) => go({ sheet: { kind: 'stock', id: day } })}
+          />
+        )}
+
         {/* Hiding the gear is decluttering, not access control: a typed URL
             would otherwise render a page of panels that each fail with 403.
             The API enforces the same rank server-side. */}
@@ -302,7 +316,8 @@ function Chrome({
           onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
         />
       )}
-      {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && route.sheet.kind !== 'reason' && (
+      {route.sheet?.kind === 'stock' && <StockSheet day={route.sheet.id} onClose={() => go({ sheet: null })} />}
+      {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && route.sheet.kind !== 'reason' && route.sheet.kind !== 'stock' && (
         <ReadingSheet
           type={route.sheet.kind}
           id={route.sheet.id}

@@ -28,6 +28,13 @@ export interface WeightStats {
    */
   implausible: number;
   avg: number | null;
+  /**
+   * The median of the same population as `avg` (roadmap Phase 9 item 1,
+   * 15 Sep 2026). Printed beside the mean because the two disagree exactly
+   * when the distribution is skewed â€” a tail of heavy cones pulls the mean
+   * up while the typical cone sits where the median says.
+   */
+  median: number | null;
   min: number | null;
   max: number | null;
   stdev: number | null;
@@ -152,6 +159,13 @@ export async function getWeights(
             (SELECT COUNT(*) FROM sms.cone_event WHERE ${dateWhere()} AND weight_g IS NOT NULL AND NOT (${csPlaus})) excluded
      FROM sms.cone_event WHERE ${dateWhere()} AND ${csPlaus}`,
   );
+  // The median, from the SAME population predicate as the statistics above.
+  // PERCENTILE_CONT is a window function; TOP 1 keeps one row of the constant.
+  const [cmReq, cmPlaus] = coneReq();
+  const coneMed = await cmReq.query<{ med: number | null }>(
+    `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight_g - @coneAdj) OVER () med
+     FROM sms.cone_event WHERE ${dateWhere()} AND ${cmPlaus}`,
+  );
   const [chReq, chPlaus] = coneReq();
   const coneHist = await chReq.query<{ bucket: number; count: number }>(
     `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket bucket, COUNT(*) count
@@ -171,6 +185,11 @@ export async function getWeights(
             MAX(weight_kg - @sackAdj) mx, STDEV(weight_kg - @sackAdj) sd,
             (SELECT COUNT(*) FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg IS NOT NULL AND NOT (${ssPlaus})) excluded
      FROM sms.sack_event WHERE ${dateWhere()} AND ${ssPlaus}`,
+  );
+  const [smReq, smPlaus] = sackReq();
+  const sackMed = await smReq.query<{ med: number | null }>(
+    `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight_kg - @sackAdj) OVER () med
+     FROM sms.sack_event WHERE ${dateWhere()} AND ${smPlaus}`,
   );
   const [shReq, shPlaus] = sackReq();
   const sackHist = await shReq.query<{ bucket: number; count: number }>(
@@ -238,7 +257,7 @@ export async function getWeights(
   return {
     basis,
     cone: {
-      count: cs.n, implausible: Number(cs.excluded ?? 0), avg: coneAvg, min: num(cs.mn), max: num(cs.mx), stdev: num(cs.sd),
+      count: cs.n, implausible: Number(cs.excluded ?? 0), avg: coneAvg, median: num(coneMed.recordset?.[0]?.med), min: num(cs.mn), max: num(cs.mx), stdev: num(cs.sd),
       unit: 'g', bucketSize: CONE_BUCKET,
       histogram: coneHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
       outliers: mapOut(coneOut.recordset),
@@ -246,7 +265,7 @@ export async function getWeights(
       giveawayPerConeG, giveawayTotalKg,
     },
     sack: {
-      count: ss.n, implausible: Number(ss.excluded ?? 0), avg: num(ss.avg), min: num(ss.mn), max: num(ss.mx), stdev: num(ss.sd),
+      count: ss.n, implausible: Number(ss.excluded ?? 0), avg: num(ss.avg), median: num(sackMed.recordset?.[0]?.med), min: num(ss.mn), max: num(ss.mx), stdev: num(ss.sd),
       unit: 'kg', bucketSize: SACK_BUCKET,
       histogram: sackHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
       outliers: mapOut(sackOut.recordset),

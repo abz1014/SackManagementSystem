@@ -95,6 +95,10 @@ import {
   persistFindings,
   stationRosterFindings,
   PER_SUBJECT_CHECKS,
+  detectSackBlackouts,
+  loadNewestSack,
+  loadPriorSackNums,
+  sackNumResetFindings,
   type Finding,
   type StationRoster,
 } from './dq.js';
@@ -442,8 +446,17 @@ export async function runTransform(
   {
     const wm = await getWatermark(appPool, WM_KEYS.sack, `SELECT MAX(raw_id) m FROM sms.sack_event`);
     const raw = await readRawSince(appPool, TABLE_SHAPES.sack.rawTable, wm);
+    // The newest canonical sack BEFORE this batch lands: the anchor the
+    // blackout check measures the batch's first gap from, and — when the
+    // batch is empty — the start of the open gap that catches a total sack
+    // blackout (roadmap Phase 7, 15 Sep 2026; dq.ts sackBlackoutFindings).
+    const priorSack = await loadNewestSack(appPool, cfg.lineId);
     if (raw.length === 0) {
-      out.push({ table: 'sack_event', read: 0, written: 0, findings: [] });
+      // No new sack rows is exactly the case the blackout check exists for:
+      // it is judged against the cones, which the block above just persisted.
+      const findings = await detectSackBlackouts(appPool, cfg.lineId, [], priorSack, cfg.sackBlackoutHours);
+      await persistFindings(appPool, runId, findings);
+      out.push({ table: 'sack_event', read: 0, written: 0, findings });
     } else {
       const rules = rulesFor('sack');
       const rows = await onlyFresh(
@@ -453,7 +466,15 @@ export async function runTransform(
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
       // No roster check: sack rows carry no machine number (iflTables.ts).
-      const findings = computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs, plausibility);
+      // The two sack checks (Phase 7): a SackNum reset within a generation,
+      // seeded from each generation's newest canonical row; and a gap in the
+      // sack stream while cones were being weighed.
+      const priorSackNums = await loadPriorSackNums(appPool, cfg.lineId, rows.map((r) => r.source_epoch));
+      const findings = [
+        ...computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs, plausibility),
+        ...sackNumResetFindings(rows, priorSackNums),
+        ...(await detectSackBlackouts(appPool, cfg.lineId, rows, priorSack, cfg.sackBlackoutHours)),
+      ];
       const res = await persistCanonical(appPool, 'sms.sack_event', SACK_COLS, rows, {
         sourceSystem: rules.sourceSystem,
         minRawId: rows.length ? minRawId(rows) : undefined,

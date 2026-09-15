@@ -18,6 +18,14 @@
  * (4, 7) can never fire and rule 2's 9-in-a-row is close to the entire
  * series — that is a fact about the data, not a bug in the engine, and the
  * UI says so rather than hiding which rules are realistically live.
+ *
+ * WHICH RULES CAN FIRE IS NOW STATED, NOT LEFT TO THE READER (roadmap Phase 9
+ * item 3, 15 Sep 2026). NELSON_RULE_MIN_POINTS holds the run length each rule
+ * needs, and nelsonRuleTable() pairs every rule with its label and that
+ * length so a screen can print "rules 4 and 7 cannot fire on a 12-day
+ * series" from the series it actually has. Both the label and the minimum
+ * reach the web through the API response (the web bundle does not import
+ * from the api package), so there is one copy of each.
  */
 
 export type NelsonRuleId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
@@ -32,6 +40,40 @@ export const NELSON_RULE_LABEL: Record<NelsonRuleId, string> = {
   7: '15 in a row within 1σ',
   8: '8 in a row beyond 1σ, both sides',
 };
+
+/**
+ * The shortest series each rule can complete on: the point that completes the
+ * pattern is the Nth in a row, so a series shorter than N can never carry the
+ * flag. Rule 1 is a single point; rules 5 and 6 are "2 of 3" and "4 of 5".
+ */
+export const NELSON_RULE_MIN_POINTS: Record<NelsonRuleId, number> = {
+  1: 1,
+  2: 9,
+  3: 6,
+  4: 14,
+  5: 3,
+  6: 5,
+  7: 15,
+  8: 8,
+};
+
+export const NELSON_RULE_IDS: readonly NelsonRuleId[] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+export interface NelsonRuleInfo {
+  id: NelsonRuleId;
+  label: string;
+  minPoints: number;
+}
+
+/** Every rule with its label and the run length it needs — what a Details block prints. */
+export function nelsonRuleTable(): NelsonRuleInfo[] {
+  return NELSON_RULE_IDS.map((id) => ({ id, label: NELSON_RULE_LABEL[id], minPoints: NELSON_RULE_MIN_POINTS[id] }));
+}
+
+/** The rules a series of `points` calendar-contiguous days can never complete. */
+export function rulesThatCannotFire(points: number): NelsonRuleId[] {
+  return NELSON_RULE_IDS.filter((id) => NELSON_RULE_MIN_POINTS[id] > points);
+}
 
 export interface NelsonPoint {
   value: number;

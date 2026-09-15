@@ -34,13 +34,13 @@
  * words file so an Urdu set can be added without touching the API.
  */
 import type { ConnectionPool } from 'mssql';
-import type { CalibrationData } from './calibration.js';
-import { getStationDrift, listCalibrationAdjustments } from './calibration.js';
+import type { CalibrationData, DriftProjection } from './calibration.js';
+import { adjustmentRestarts, getStationDrift, latestRestart, listCalibrationAdjustments, projectDaysToLimit } from './calibration.js';
 import { getRejectSpc, type RejectSpcData, type RejectTypeFilter } from './rejectSpc.js';
 import { getPlausibilityRule } from './admin.js';
 import { loadProductTimeline, limitsOf, productDisagreement, type DayRange } from './productAt.js';
 import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
-import { consecutiveProductionDays, toPlantMs } from './plantClock.js';
+import { consecutiveProductionDays } from './plantClock.js';
 
 /** At most three sentences; the rest are counted and linked. */
 export const MAX_SHOWN = 3;
@@ -66,6 +66,13 @@ export interface AttentionFinding {
   deltaG?: number;
   /** Calendar-consecutive production days the station has held that side. */
   days?: number;
+  /**
+   * Where the run's straight line reaches the product's limit at its current
+   * rate (roadmap Phase 9 item 6, 15 Sep 2026) — a projection from recent
+   * readings under a stated linear assumption, only when limits were in
+   * force. Null otherwise; the sentence then stops at the observation.
+   */
+  projection?: DriftProjection | null;
   /* reject_rise */
   rejectKind?: 'quality' | 'weight';
   sinceUtc?: string;
@@ -118,6 +125,8 @@ export interface DriftOptions {
   /** Station id -> the moment it was last adjusted, on the PRODUCTION clock. */
   adjustedAtMsByStation: Map<number, number>;
   minDaysHeld?: number;
+  /** The product's limits in force now, the edges the projection extends to; null = no projection. */
+  limitsG?: { loG: number; hiG: number; targetG?: number | null } | null;
 }
 
 /**
@@ -181,6 +190,8 @@ export function stationDriftFindings(cal: CalibrationData, opts: DriftOptions): 
       station: st.station,
       deltaG,
       days: run.length,
+      // The same line the station table draws, over the same run.
+      projection: projectDaysToLimit(run, opts.limitsG ?? null),
     });
   }
 
@@ -245,25 +256,32 @@ export async function getAttention(
   const limits = cur ? (limitsFromVersion(catalogue.latest(cur.productId)) ?? limitsOf(cur)) : null;
   const toleranceWidthG = limits ? limits.hiG - limits.loG : null;
 
-  const adjustedAtMsByStation = new Map<number, number>();
-  for (const a of adjustments) {
-    if (a.stationId == null) continue;
-    // The ledger stores genuine UTC; the daily means are production days.
-    const ms = toPlantMs(a.adjustedAtUtc);
-    const prev = adjustedAtMsByStation.get(a.stationId);
-    if (prev == null || ms > prev) adjustedAtMsByStation.set(a.stationId, ms);
-  }
+  // Every logged adjustment (a station's own and the line-wide ones) restarts
+  // that station's run, centreline and sigma — calibration.ts, Phase 9.
+  const restarts = adjustmentRestarts(adjustments);
 
   const [cal, quality, weight, disagreement] = await Promise.all([
-    getStationDrift(pool, lineId, trailing.from, trailing.to, plausibility),
+    getStationDrift(pool, lineId, trailing.from, trailing.to, plausibility, { restarts }),
     getRejectSpc(pool, lineId, trailing.from, trailing.to, 'day', 'quality' as RejectTypeFilter),
     getRejectSpc(pool, lineId, trailing.from, trailing.to, 'day', 'weight' as RejectTypeFilter),
     productDisagreement(pool, lineId, timeline, period, catalogue),
   ]);
 
+  // The newest restart per station in the window's roster (a line-wide
+  // adjustment counts for every station), for the run count.
+  const adjustedAtMsByStation = new Map<number, number>();
+  for (const st of cal.stations) {
+    const ms = latestRestart(restarts, st.station);
+    if (ms != null) adjustedAtMsByStation.set(st.station, ms);
+  }
+
   const stationMeans = cal.stations.filter((s) => s.n > 0).map((s) => s.grandMean);
   const findings: AttentionFinding[] = [
-    ...stationDriftFindings(cal, { toleranceWidthG, adjustedAtMsByStation }),
+    ...stationDriftFindings(cal, {
+      toleranceWidthG,
+      adjustedAtMsByStation,
+      limitsG: limits ? { loG: limits.loG, hiG: limits.hiG, targetG: limits.targetG } : null,
+    }),
   ];
 
   const rises = [rejectRiseFinding(quality, 'quality'), rejectRiseFinding(weight, 'weight')].filter(

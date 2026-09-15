@@ -229,6 +229,9 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/product-timeline', minRank: 1 },
   { method: 'GET', path: '/api/calibration?from=2026-07-09&to=2026-07-09', minRank: 1 },
   { method: 'GET', path: '/api/calibration/adjustments', minRank: 1 },
+  // roadmap Phase 9 (15 Sep 2026): the ledger filters and the rule table
+  { method: 'GET', path: '/api/calibration/adjustments?from=2026-09-01&to=2026-09-07&station=7', minRank: 1 },
+  { method: 'GET', path: '/api/calibration/rules?points=12', minRank: 1 },
   { method: 'GET', path: '/api/config', minRank: 1 },
   { method: 'GET', path: '/api/reject-codes', minRank: 1 },
   // roadmap Phase 4 (routes/cone.ts)

@@ -13,31 +13,50 @@
  *    from the line", which reads "Fine" for all fourteen stations on a line
  *    that is twelve grams heavy everywhere — the exact case a process engineer
  *    most needs to see.
+ *  - MEDIAN and SD beside the mean (roadmap Phase 9 items 1 and 2, 15 Sep
+ *    2026). The SD was computed all along and rendered nowhere; the median
+ *    was computed nowhere. A station whose mean and median disagree has a
+ *    skewed day, not a biased scale, and the SD says how tight the scale
+ *    reads regardless of where it sits.
  *  - DAYS HELD, counted over the run the figure describes, not the window.
  *  - REJECT RATE per station, so the cross-reference ("high rejects AND a
  *    weight bias — look here first") lives in the same row.
  *  - LAST ADJUSTED, because a recommendation with no record of what was
  *    already done about it is one an engineer cannot act on.
+ *  - A PROJECTION for a flagged station (Phase 9 item 6): the straight line
+ *    through its run's daily means, extended to the product's limit — "at
+ *    N g/day over D days, reaches the limit in about K days". It is a
+ *    projection from recent readings under a stated linear assumption, not a
+ *    prediction, and it is only offered when a product with limits was in
+ *    force. The screen prints the assumption beside it.
  *
- * WHAT IT DELIBERATELY DOES NOT REPORT: grams to adjust by, or days until a
- * limit is reached. Weighing data cannot tell a scale that reads nine grams
- * heavy from cones that genuinely are nine grams heavy, and those two need
- * opposite actions. The row states what was measured and stops.
+ * WHAT IT DELIBERATELY DOES NOT REPORT: grams to adjust by. Weighing data
+ * cannot tell a scale that reads nine grams heavy from cones that genuinely
+ * are nine grams heavy, and those two need opposite actions. The row states
+ * what was measured, projects the measured trend, and stops.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import { getStationDrift, listCalibrationAdjustments, type StationDriftDay } from './calibration.js';
+import {
+  adjustmentRestarts, getStationDrift, latestRestart, listCalibrationAdjustments, projectDaysToLimit,
+  type DriftProjection, type StationDriftDay,
+} from './calibration.js';
+import type { NelsonRuleInfo } from './nelson.js';
 import { getPlausibilityRule } from './admin.js';
 import { loadProductTimeline, limitsOf } from './productAt.js';
 import { loadProductCatalogue } from './productLimits.js';
 import { driftThresholdG, MIN_DAYS_HELD } from './attention.js';
-import { consecutiveProductionDays, toPlantMs } from './plantClock.js';
+import { consecutiveProductionDays } from './plantClock.js';
 
 export interface WeightStationRow {
   station: number;
   /** Cones weighed at this station in the window. */
   n: number;
   meanG: number;
+  /** Median of the same population as meanG (Phase 9). */
+  medianG: number | null;
+  /** Within-day standard deviation of the station's cone weights, pooled over the window (Phase 9). */
+  sdG: number;
   /** Signed grams against the line's own mean. */
   vsLineG: number;
   /** Signed grams against the product target, or null when none was recorded. */
@@ -48,6 +67,16 @@ export interface WeightStationRow {
   flagged: boolean;
   rejectRatePct: number | null;
   lastAdjustedUtc: string | null;
+  /** Production day the pattern test restarted from (a logged adjustment inside the window), or null. */
+  restartedOn: string | null;
+  /** The centreline the pattern test measured this station's days from (see calibration.ts). */
+  centrelineG: number;
+  /** Day-to-day sigma of the daily mean, the width the pattern zones used. */
+  sigmaDayToDay: number;
+  /** Longest calendar-contiguous run of days the pattern rules had; rules needing more can never have fired. */
+  longestRun: number;
+  /** Only for a flagged station with product limits in force; see calibration.ts. */
+  projection: DriftProjection | null;
   /** Daily means, for the station sheet's trend. */
   days: StationDriftDay[];
 }
@@ -59,6 +88,8 @@ export interface WeightStationsData {
   days: number;
   lineMeanG: number | null;
   targetG: number | null;
+  /** The product's limits in force at the window's end, the edges the projection extends to. */
+  limits: { loG: number; hiG: number } | null;
   productId: number | null;
   productLabel: string | null;
   /** How far from the line a station must sit to be worth acting on. */
@@ -66,6 +97,8 @@ export interface WeightStationsData {
   minDaysHeld: number;
   lineRejectRatePct: number | null;
   stations: WeightStationRow[];
+  /** The pattern rules, with the run length each needs, for naming a flag and stating which could not fire. */
+  rules: NelsonRuleInfo[];
 }
 
 const sign = (n: number) => (n > 0 ? 1 : n < 0 ? -1 : 0);
@@ -94,8 +127,12 @@ export async function getWeightStations(
   const product = timeline.at(endMs);
   const limits = product ? (catalogue.limitsAt(product.productId, endMs) ?? limitsOf(product)) : null;
 
+  // Every logged adjustment restarts the station's centreline and sigma as
+  // well as its run (calibration.ts header, Phase 9).
+  const restarts = adjustmentRestarts(adjustments);
+
   const [drift, rejectStats] = await Promise.all([
-    getStationDrift(pool, lineId, from, to, plausibility),
+    getStationDrift(pool, lineId, from, to, plausibility, { restarts }),
     rejectRatesByStation(pool, lineId, from, to),
   ]);
   const rejects = rejectStats.rates;
@@ -116,7 +153,7 @@ export async function getWeightStations(
   }
 
   const stations: WeightStationRow[] = active.map((st) => {
-    const adjustedAtMs = lastAdjusted.has(st.station) ? toPlantMs(lastAdjusted.get(st.station)!) : null;
+    const adjustedAtMs = latestRestart(restarts, st.station);
     // A logged adjustment restarts the station: days before it say nothing
     // about the scale as it stands now.
     const days =
@@ -127,9 +164,9 @@ export async function getWeightStations(
     let daysHeld = 0;
     let flagged = false;
     let runMean = st.grandMean;
+    let run: StationDriftDay[] = [];
     if (days.length > 0 && lineMeanG != null) {
       const side = sign(days[days.length - 1]!.mean - lineMeanG);
-      const run: StationDriftDay[] = [];
       for (let i = days.length - 1; i >= 0; i--) {
         if (sign(days[i]!.mean - lineMeanG) !== side) break;
         // A hole in the calendar ends the run as surely as a change of side.
@@ -152,18 +189,28 @@ export async function getWeightStations(
         run.length >= MIN_DAYS_HELD &&
         Math.abs(runMean - lineMeanG) >= thresholdG;
     }
+    if (!flagged) run = [];
 
     const r = rejects.get(st.station);
     return {
       station: st.station,
       n: st.n,
       meanG: round(st.grandMean),
+      medianG: st.medianG == null ? null : round(st.medianG),
+      sdG: round(st.stdevWithin ?? 0),
       vsLineG: lineMeanG == null ? 0 : round(runMean - lineMeanG),
       vsTargetG: limits == null ? null : round(runMean - limits.targetG),
       daysHeld,
       flagged,
       rejectRatePct: r == null ? null : round(r, 2),
       lastAdjustedUtc: lastAdjusted.get(st.station) ?? null,
+      restartedOn: st.restartedOn ?? null,
+      centrelineG: round(st.centrelineG ?? st.grandMean),
+      sigmaDayToDay: st.sigmaDayToDay ?? 0,
+      longestRun: st.longestRun ?? 0,
+      // Only a flagged station is projected: the line is fitted over the run
+      // the finding names, and a station with no finding has no run.
+      projection: flagged ? projectDaysToLimit(run, limits ? { loG: limits.loG, hiG: limits.hiG, targetG: limits.targetG } : null) : null,
       days: st.days,
     };
   });
@@ -186,12 +233,14 @@ export async function getWeightStations(
     days: drift.days,
     lineMeanG: lineMeanG == null ? null : round(lineMeanG),
     targetG: limits?.targetG ?? null,
+    limits: limits ? { loG: limits.loG, hiG: limits.hiG } : null,
     productId: product?.productId ?? null,
     productLabel: product?.label ?? null,
     thresholdG,
     minDaysHeld: MIN_DAYS_HELD,
     lineRejectRatePct,
     stations,
+    rules: drift.rules ?? [],
   };
 }
 

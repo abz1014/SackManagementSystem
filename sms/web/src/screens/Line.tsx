@@ -38,6 +38,7 @@ import {
   type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
 } from '../api';
 import type { Screen, ReadingsFilter } from '../ui/Bar';
+import { projectionSentence } from './StationSheet';
 
 /**
  * How long a station must be silent before it is worth saying so — measured
@@ -389,7 +390,12 @@ function sentence(f: AttentionFinding, stations: Map<number, StationRow>): strin
       const name = stationLabel(stations.get(f.station ?? 0), f.station ?? 0);
       const g = fmtG(Math.abs(f.deltaG ?? 0));
       const days = f.days ?? 0;
-      return `${name} ${(f.deltaG ?? 0) > 0 ? W.weight.readsHeavier(g, days) : W.weight.readsLighter(g, days)}`;
+      const said = `${name} ${(f.deltaG ?? 0) > 0 ? W.weight.readsHeavier(g, days) : W.weight.readsLighter(g, days)}`;
+      // The projection (roadmap Phase 9 item 6): the same line the station
+      // sheet draws, in the same words. Only when the API computed one — it
+      // needs product limits in force — and never without its assumption.
+      if (!f.projection) return said;
+      return `${said} ${projectionSentence(f.projection, { targetG: f.projection.targetG })}`;
     }
     case 'reject_rise': {
       const kind = f.rejectKind === 'weight' ? W.rejects.weightKind : W.rejects.quality;
