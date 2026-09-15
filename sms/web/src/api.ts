@@ -130,7 +130,11 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 // ---- auth ----
 export interface AuthUser { username: string; displayName: string | null; role: string; }
-export const ROLE_RANK: Record<string, number> = { operator: 1, supervisor: 2, manager: 3, admin: 4 };
+/** The four roles by rank — the names sms.role carries since migration 035
+ *  (15 Sep 2026): viewer 1 · engineer 2 · manager 3 · admin 4. A name this
+ *  map does not know ranks as 1 (view only), which is what an unmigrated
+ *  database's old names now get — apply 035 before deploying this build. */
+export const ROLE_RANK: Record<string, number> = { viewer: 1, engineer: 2, manager: 3, admin: 4 };
 
 export function getMe(): Promise<{ user: AuthUser | null }> {
   return get('/api/auth/me');
@@ -162,7 +166,7 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 // ---- admin ----
 export interface AdminUser { userId: number; username: string; displayName: string | null; role: string; active: boolean; createdAtUtc: string; }
 /** How a station came to be linked to its machine (migration 028). */
-export type StationLinkSource = 'default_by_number' | 'admin';
+export type StationLinkSource = 'default_by_number' | 'confirmed_by_ifl' | 'admin';
 export interface StationRow {
   stationId: number; name: string | null; machine: string | null; description: string | null;
   /* The machine link and the active flag, since roadmap Phase 1 (14 Sep
@@ -1680,6 +1684,12 @@ export interface SackSummaryData {
   totals: SackGroup & { cones: number; conesPerSack: number | null };
   byShift: (SackGroup & { shift: string })[];
   byProduct: (SackGroup & { materialId: number | null; productName: string | null })[];
+  /* Production by day and by day × shift (IFL Q28, 15 Sep 2026: "sack stock
+     per machine" means sack production per machine by shift and day).
+     Optional: a screen built with them must keep working against an API
+     deployed without them. */
+  byDay?: (SackGroup & { day: string })[];
+  byDayShift?: (SackGroup & { day: string; shift: string })[];
   unattributed: { rows: number; of: number };
   weightBasis: string;
   tareKg: number;

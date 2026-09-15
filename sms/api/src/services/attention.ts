@@ -239,10 +239,21 @@ export async function getAttention(
   trailing: { from: string; to: string },
   period: DayRange,
 ): Promise<AttentionData> {
+  // T3 (15 Sep 2026): bound to `{ to: trailing.to }` — `trailing.to` is
+  // already a parameter of this function, so unlike weightStations.ts this
+  // needed no signature change. Today the two are equivalent regardless: the
+  // trailing window is always the fixed 14 production days anchored on the
+  // newest reading (see the file header), so no adjustment can be logged
+  // after `trailing.to` in the first place and an unfiltered ledger would
+  // return the same rows. This keeps `getAttention` correct if that ever
+  // changes (a replay via `?at=`, or a future non-"now"-anchored window)
+  // rather than relying on that coincidence, and matches weightStations.ts
+  // and app.ts's `GET /api/calibration` so all three read the ledger the
+  // same way.
   const [plausibility, timeline, adjustments, catalogue] = await Promise.all([
     getPlausibilityRule(pool, lineId),
     loadProductTimeline(pool, lineId),
-    listCalibrationAdjustments(pool, lineId),
+    listCalibrationAdjustments(pool, lineId, { to: trailing.to }),
     loadProductCatalogue(pool),
   ]);
 

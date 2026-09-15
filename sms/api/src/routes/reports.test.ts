@@ -38,8 +38,8 @@ class FakeRequest {
 
 interface User { userId: number; username: string; role: string; rank: number }
 const ROLES: User[] = [
-  { userId: 1, username: 'operator', role: 'operator', rank: 1 },
-  { userId: 2, username: 'supervisor', role: 'supervisor', rank: 2 },
+  { userId: 1, username: 'viewer', role: 'viewer', rank: 1 },
+  { userId: 2, username: 'engineer', role: 'engineer', rank: 2 },
   { userId: 3, username: 'manager', role: 'manager', rank: 3 },
   { userId: 4, username: 'admin', role: 'admin', rank: 4 },
 ];
@@ -172,16 +172,55 @@ describe('RBAC — every report route, all four roles, against the real app', ()
   });
 });
 
+/**
+ * The regression this wave closes: the manager-only gate on management-summary
+ * used to be a literal route registered ahead of the generic `/api/reports/:type`
+ * route, so it only fired when the path string matched exactly. A percent-encoded
+ * hyphen (`%2D`) still decodes to `management-summary` by the time Express hands
+ * `req.params.type` to the handler, missed the literal route, fell through to the
+ * rank-1 generic route, and was served to a viewer. The gate now lives in `parse()`,
+ * keyed off the decoded type, so no encoding of the same type string can bypass it.
+ */
+describe('the percent-encoding bypass on management-summary is closed', () => {
+  it('GET /api/reports/management%2Dsummary as a viewer (rank 1) is refused, not served', async () => {
+    const r = await get(`/api/reports/management%2Dsummary?${Q}`, 'viewer');
+    expect(r.status).toBe(403);
+    expect(r.json).toEqual({ error: 'insufficient role' });
+  });
+
+  it('GET /api/reports/management%2Dsummary signed out is 401, not 403 or 200', async () => {
+    const r = await get(`/api/reports/management%2Dsummary?${Q}`, null);
+    expect(r.status).toBe(401);
+    expect(r.json).toEqual({ error: 'authentication required' });
+  });
+
+  it('GET /api/reports/management%2Dsummary as a manager (rank 3) still serves the report', async () => {
+    const r = await get(`/api/reports/management%2Dsummary?${Q}`, 'manager');
+    expect(r.status).toBe(200);
+    expect(r.json.data.header.reportType).toBe('management-summary');
+  });
+});
+
+describe('every rank-1 report type is actually reachable at rank 1', () => {
+  const rank1Types = REPORT_TYPES.filter((t) => t !== 'management-summary');
+  it.each(rank1Types)('GET /api/reports/%s as viewer (rank 1) is not refused', async (t) => {
+    const r = await get(`/api/reports/${t}?${Q}`, 'viewer');
+    expect(r.status).not.toBe(403);
+    expect(r.status).not.toBe(401);
+    expect(r.status).toBe(200);
+  });
+});
+
 /* ------------------------------------------------------------------ shapes */
 
 describe('GET /api/reports/:type', () => {
   it('answers the header and the report inside the envelope, stamped for the caller', async () => {
-    const r = await get(`/api/reports/daily?${Q}`, 'operator');
+    const r = await get(`/api/reports/daily?${Q}`, 'viewer');
     expect(r.status).toBe(200);
     expect(r.json.metadata).toBeDefined();
     expect(r.json.data.header).toMatchObject({
       reportType: 'daily', title: 'Daily production report', lineName: 'TP1 · Line 3 · Unit 2', plantName: 'TP1',
-      period: { from: '2026-09-01', to: '2026-09-07', days: 7 }, filters: {}, generatedBy: 'operator',
+      period: { from: '2026-09-01', to: '2026-09-07', days: 7 }, filters: {}, generatedBy: 'viewer',
       definitions: 'KPI-DEFINITIONS.md', approval: 'awaiting',
     });
     expect(r.json.data.report.rejectPopulations).toBeDefined();
@@ -225,9 +264,9 @@ describe('GET /api/reports/:type', () => {
 
 describe('GET /api/reports/header', () => {
   it('is the print header on its own, for the register', async () => {
-    const r = await get(`/api/reports/header?${Q}`, 'operator');
+    const r = await get(`/api/reports/header?${Q}`, 'viewer');
     expect(r.status).toBe(200);
-    expect(r.json.header).toMatchObject({ reportType: 'register', title: 'Register', lineName: 'TP1 · Line 3 · Unit 2', generatedBy: 'operator' });
+    expect(r.json.header).toMatchObject({ reportType: 'register', title: 'Register', lineName: 'TP1 · Line 3 · Unit 2', generatedBy: 'viewer' });
     expect(typeof r.json.header.smsVersion).toBe('string');
   });
 });
@@ -262,7 +301,7 @@ describe('GET /api/reports/:type/export', () => {
 
 describe('GET /api/report gains shift (app.ts)', () => {
   it('binds shift_code = @shift on the production queries and drops downtime', async () => {
-    const r = await get('/api/report?period=custom&from=2026-09-01&to=2026-09-07&shift=evening', 'operator');
+    const r = await get('/api/report?period=custom&from=2026-09-01&to=2026-09-07&shift=evening', 'viewer');
     expect(r.status).toBe(200);
     expect(r.json.data.shift).toBe('evening');
     expect(r.json.data.downtime).toBeNull();
@@ -272,7 +311,7 @@ describe('GET /api/report gains shift (app.ts)', () => {
     expect(db.statements.some((s) => s.sql.includes('COUNT(DISTINCT shift_date)') && s.sql.includes('shift_code = @shift'))).toBe(true);
   });
   it('without a shift, downtime is computed and the shift is null', async () => {
-    const r = await get('/api/report?period=custom&from=2026-09-01&to=2026-09-07', 'operator');
+    const r = await get('/api/report?period=custom&from=2026-09-01&to=2026-09-07', 'viewer');
     expect(r.status).toBe(200);
     expect(r.json.data.shift).toBeNull();
     expect(r.json.data.downtime).toEqual({ stoppageCount: 0, stoppedSeconds: 0, thresholdSeconds: 120 });

@@ -64,10 +64,17 @@ const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall', 'health'] as const;
 
 /**
  * The register export is requireRole(3) on the server. Offering it at rank 2
- * put a button in front of a supervisor that could only ever answer 403 — and
+ * put a button in front of an engineer that could only ever answer 403 — and
  * a 403 is a bug, not a state. A control a role cannot use is absent.
  */
 const EXPORT_RANK = 3;
+/**
+ * The engineer's writes (rank 2) since IFL's answers of 15 Sep 2026: naming a
+ * reject code (Q12) and recording a sack movement (Q43) moved down from
+ * manager, matching the server's requireRole(2) on both routes. The names
+ * are viewer / engineer / manager / admin (migration 035).
+ */
+const ENGINEER_RANK = 2;
 
 function parseRoute(): Route {
   if (typeof window === 'undefined') {
@@ -260,16 +267,17 @@ function Chrome({
             onSeeCones={() => go({ view: 'readings', readingsFilter: 'inspectionRejects' })}
             onSeeStations={() => go({ view: 'weight' })}
             onOpenReason={(r) => go({ sheet: { kind: 'reason', id: reasonIdOf({ ...r, rejectType: r.rejectType as 'quality' | 'weight' }) } })}
-            canName={rank >= 3}
+            canName={rank >= ENGINEER_RANK}
           />
         )}
 
         {/* Roadmap Phase 7 (15 Sep 2026): open to every account; recording a
-            movement is rank 3 server-side, so the form is offered at 3. */}
+            movement is rank 2 server-side (IFL's Q43 answer, 15 Sep 2026),
+            so the form is offered at ENGINEER_RANK. */}
         {route.view === 'sacks' && (
           <SacksScreen
             period={period}
-            canRecord={rank >= 3}
+            canRecord={rank >= ENGINEER_RANK}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
             onOpenDay={(day) => go({ sheet: { kind: 'stock', id: day } })}
           />
@@ -308,7 +316,7 @@ function Chrome({
       {route.sheet?.kind === 'reason' && (
         <ReasonSheet
           id={route.sheet.id}
-          canName={rank >= 3}
+          canName={rank >= ENGINEER_RANK}
           onClose={() => go({ sheet: null })}
           // Readings has no reason filter (Phase 5): the link narrows to the
           // day and the inspection-reject listing, and says so on the sheet.

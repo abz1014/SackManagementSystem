@@ -347,3 +347,16 @@ describe('GET /api/product-at — the verdict is computed server-side', () => {
     expect((await call('manager', 'GET', '/api/product-at?weightG=heavy')).status).toBe(400);
   });
 });
+
+describe('GET /api/weight-stations — `to` resolves `from` without asking for the newest production day (T3)', () => {
+  it('to=2026-08-31&trailingDays=14 resolves from=2026-08-18 and never issues the MAX(shift_date) query', async () => {
+    const r = await call('manager', 'GET', '/api/weight-stations?to=2026-08-31&trailingDays=14');
+    expect(r.status).toBe(200);
+    expect(r.json.data.from).toBe('2026-08-18');
+    expect(r.json.data.to).toBe('2026-08-31');
+    // Before the fix this ran unconditionally and threw its answer away
+    // whenever `to` was already given — a wasted round trip on every call
+    // that names an explicit window, including every report.
+    expect(db.statements.some((s) => s.sql.includes('MAX(shift_date)'))).toBe(false);
+  });
+});

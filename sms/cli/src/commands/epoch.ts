@@ -12,7 +12,7 @@
  * opposite responses — so the worker halts and a human looks.
  */
 import mssql from 'mssql';
-import { loadSourceTables, readSourceIdentity, openEpoch, createAdapter, withTransformLock } from '@sms/sync-worker';
+import { loadSourceTables, readSourceIdentity, openEpoch, withTransformLock } from '@sms/sync-worker';
 import { openContext, parseArgs, cliLog } from '../context.js';
 import { inFlightProblem, passesInFlight, requireBackupFlag } from '../guards.js';
 
@@ -76,6 +76,32 @@ export async function epochList(): Promise<number> {
   }
 }
 
+interface RegisterPlan {
+  kind: 'register';
+  def: Awaited<ReturnType<typeof loadSourceTables>>[number];
+  now: Awaited<ReturnType<typeof readSourceIdentity>>;
+  openId: number | null;
+  ordinal: number;
+}
+interface UpdatePlan {
+  kind: 'update';
+  def: Awaited<ReturnType<typeof loadSourceTables>>[number];
+  now: Awaited<ReturnType<typeof readSourceIdentity>>;
+  openId: number;
+}
+type AcceptPlan = RegisterPlan | UpdatePlan;
+
+/** Parse a `column_list` JSON blob the same defensive way checkColumnDrift does. */
+function parseColumnList(raw: string | null): string[] {
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function epochAccept(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const wantAll = args.all === true;
@@ -106,14 +132,55 @@ export async function epochAccept(argv: string[]): Promise<number> {
     }
 
     console.log(`\nsource: ${ctx.cfg.iflData.server}/${ctx.cfg.iflData.database}\n`);
-    const plan: { def: (typeof defs)[number]; now: Awaited<ReturnType<typeof readSourceIdentity>>; openId: number | null; ordinal: number; max: number | null }[] = [];
+    const plan: AcceptPlan[] = [];
 
     for (const def of defs) {
       const now = await readSourceIdentity(ctx.ifl, def, ctx.cfg.iflData);
       const open = await openEpoch(ctx.app, ctx.cfg.lineId, def.sourceTable);
-      // Through the registry, like the worker (Phase 2) — the only reader of
-      // the source this command has is the configured adapter.
-      const sourceMax = await createAdapter(def.systemCode, ctx.ifl, def).maxSourceId();
+
+      // The identity check `resolveEpoch` makes (server/db/created_key). A
+      // fingerprint or column-list difference under the SAME identity is the
+      // documented in-generation drift case: the physical table was not
+      // recreated, so it must be updated in place, never closed+inserted —
+      // inserting would collide on UX_source_epoch_identity and, because the
+      // close half commits before the insert is attempted, leave NO open
+      // generation behind. A different identity is a genuine new generation
+      // and takes the close+insert path, same as before.
+      const sameIdentity =
+        open !== null &&
+        open.source_server === now.server &&
+        open.source_db === now.database &&
+        open.source_created_key === now.createdKey;
+
+      if (sameIdentity && open) {
+        const stored = await ctx.app
+          .request()
+          .input('id', mssql.Int, open.epoch_id)
+          .query<{ column_list: string | null }>(`SELECT column_list FROM sms.source_epoch WHERE epoch_id = @id`);
+        const baseline = parseColumnList(stored.recordset[0]?.column_list ?? null);
+        const liveSet = new Set(now.columnList);
+        const baseSet = new Set(baseline);
+        const added = now.columnList.filter((c) => !baseSet.has(c));
+        const removed = baseline.filter((c) => !liveSet.has(c));
+        const fpChanged = open.schema_fingerprint !== now.fingerprint;
+        const colsChanged = added.length > 0 || removed.length > 0;
+
+        if (!fpChanged && !colsChanged) {
+          console.log(`  ${def.sourceTable.padEnd(22)} already open as epoch ${open.epoch_id} — nothing to do`);
+          continue;
+        }
+
+        console.log(`  ${def.sourceTable}`);
+        console.log(
+          `      same generation (epoch ${open.epoch_id}, "${open.label}") — updating in place, NOT closing/registering`,
+        );
+        console.log(`        fingerprint: ${open.schema_fingerprint} -> ${now.fingerprint}${fpChanged ? '' : ' (unchanged)'}`);
+        console.log(`        columns added: [${added.join(', ')}]; removed: [${removed.join(', ')}]`);
+
+        plan.push({ kind: 'update', def, now, openId: open.epoch_id });
+        continue;
+      }
+
       const ord = await ctx.app
         .request()
         .input('line', mssql.Int, ctx.cfg.lineId)
@@ -123,35 +190,22 @@ export async function epochAccept(argv: string[]): Promise<number> {
             WHERE line_id = @line AND source_table = @tbl`,
         );
 
-      // Already registered and open? Then there is nothing to accept.
-      if (
-        open &&
-        open.source_server === now.server &&
-        open.source_db === now.database &&
-        open.source_created_key === now.createdKey &&
-        open.schema_fingerprint === now.fingerprint
-      ) {
-        console.log(`  ${def.sourceTable.padEnd(22)} already open as epoch ${open.epoch_id} — nothing to do`);
-        continue;
-      }
-
-      plan.push({
-        def,
-        now,
-        openId: open?.epoch_id ?? null,
-        ordinal: Number(ord.recordset[0]?.n ?? 1),
-        max: sourceMax,
-      });
-
       console.log(`  ${def.sourceTable}`);
       if (open) {
-        console.log(`      closing epoch ${open.epoch_id} ("${open.label}")`);
+        console.log(`      closing epoch ${open.epoch_id} ("${open.label}") — different source generation`);
         console.log(`        was: ${open.source_server}/${open.source_db} created ${open.source_created_key} fp ${open.schema_fingerprint}`);
       } else {
         console.log(`      no open generation (first registration)`);
       }
       console.log(`        new: ${now.server}/${now.database} created ${now.createdKey} fp ${now.fingerprint}`);
-      console.log(`        source MAX(id) = ${plan[plan.length - 1]!.max ?? 'none (empty)'}`);
+
+      plan.push({
+        kind: 'register',
+        def,
+        now,
+        openId: open?.epoch_id ?? null,
+        ordinal: Number(ord.recordset[0]?.n ?? 1),
+      });
     }
 
     if (plan.length === 0) {
@@ -170,37 +224,91 @@ export async function epochAccept(argv: string[]): Promise<number> {
       console.error('--label needs an equals sign: --label="September copy". Registering with the default name.');
     }
     const label = typeof args.label === 'string' ? args.label : '';
+
     for (const p of plan) {
-      if (p.openId !== null) {
+      if (p.kind === 'update') {
         await ctx.app
           .request()
           .input('id', mssql.Int, p.openId)
-          .query(`UPDATE sms.source_epoch SET closed_utc = SYSUTCDATETIME() WHERE epoch_id = @id`);
+          .input('fp', mssql.Char(32), p.now.fingerprint)
+          .input('cols', mssql.NVarChar(mssql.MAX), JSON.stringify(p.now.columnList))
+          // NULL when --label was not given, so COALESCE leaves the existing
+          // label untouched — relabelling is only a side effect of a real
+          // fingerprint/column change, never triggered on its own.
+          .input('lbl', mssql.NVarChar(64), label || null)
+          .query(
+            `UPDATE sms.source_epoch
+                SET schema_fingerprint = @fp,
+                    column_list = @cols,
+                    label = COALESCE(@lbl, label)
+              WHERE epoch_id = @id`,
+          );
+        console.log(`  updated epoch ${p.openId} for ${p.def.sourceTable} in place (same generation)`);
+        continue;
       }
-      const ins = await ctx.app
-        .request()
-        .input('line', mssql.Int, ctx.cfg.lineId)
-        .input('tbl', mssql.VarChar(64), p.def.sourceTable)
-        .input('srv', mssql.NVarChar(128), p.now.server)
-        .input('db', mssql.NVarChar(128), p.now.database)
-        .input('key', mssql.VarChar(40), p.now.createdKey)
-        .input('fp', mssql.Char(32), p.now.fingerprint)
-        .input('prov', mssql.VarChar(20), provenance)
-        .input('ord', mssql.Int, p.ordinal)
-        .input('lbl', mssql.NVarChar(64), label || `${p.def.sourceTable} gen ${p.ordinal}`)
-        // The FULL column list at acceptance (migration 029, Phase 2): the
-        // baseline the worker compares the live table against on every pass.
-        .input('cols', mssql.NVarChar(mssql.MAX), JSON.stringify(p.now.columnList))
-        .query<{ id: number }>(
-          `INSERT INTO sms.source_epoch
-             (line_id, source_table, source_server, source_db, source_created_key,
-              schema_fingerprint, provenance, generation_ordinal, label, registered_by, column_list)
-           OUTPUT INSERTED.epoch_id id
-           VALUES (@line, @tbl, @srv, @db, @key, @fp, @prov, @ord, @lbl, 'cli:epoch-accept', @cols)`,
-        );
-      console.log(`  registered epoch ${ins.recordset[0]!.id} for ${p.def.sourceTable}`);
+
+      // Close-then-register for ONE table, in ONE transaction: the close
+      // committing while the insert fails is exactly the wedge this fixes
+      // (the identity index rejects a second open row, and by then there is
+      // no way back to an open generation short of hand SQL). One transaction
+      // per table, not one across --all, so a partial --all leaves the tables
+      // it already did correctly registered.
+      const tableName = p.def.sourceTable;
+      const tx = ctx.app.transaction();
+      await tx.begin();
+      try {
+        await tx.request().query('SET XACT_ABORT ON');
+        if (p.openId !== null) {
+          await tx
+            .request()
+            .input('id', mssql.Int, p.openId)
+            .query(`UPDATE sms.source_epoch SET closed_utc = SYSUTCDATETIME() WHERE epoch_id = @id`);
+        }
+        const ins = await tx
+          .request()
+          .input('line', mssql.Int, ctx.cfg.lineId)
+          .input('tbl', mssql.VarChar(64), tableName)
+          .input('srv', mssql.NVarChar(128), p.now.server)
+          .input('db', mssql.NVarChar(128), p.now.database)
+          .input('key', mssql.VarChar(40), p.now.createdKey)
+          .input('fp', mssql.Char(32), p.now.fingerprint)
+          .input('prov', mssql.VarChar(20), provenance)
+          .input('ord', mssql.Int, p.ordinal)
+          .input('lbl', mssql.NVarChar(64), label || `${tableName} gen ${p.ordinal}`)
+          // The FULL column list at acceptance (migration 029, Phase 2): the
+          // baseline the worker compares the live table against on every pass.
+          .input('cols', mssql.NVarChar(mssql.MAX), JSON.stringify(p.now.columnList))
+          .query<{ id: number }>(
+            `INSERT INTO sms.source_epoch
+               (line_id, source_table, source_server, source_db, source_created_key,
+                schema_fingerprint, provenance, generation_ordinal, label, registered_by, column_list)
+             OUTPUT INSERTED.epoch_id id
+             VALUES (@line, @tbl, @srv, @db, @key, @fp, @prov, @ord, @lbl, 'cli:epoch-accept', @cols)`,
+          );
+        await tx.commit();
+        console.log(`  registered epoch ${ins.recordset[0]!.id} for ${tableName}`);
+      } catch (err) {
+        // The rollback gets its own try/catch, and it must never replace
+        // `err` — a batch-aborting error can leave the transaction already
+        // rolled back server-side, and node-mssql then rejects rollback()
+        // with TransactionError('Transaction has been aborted.', 'EABORT').
+        // Letting that escape would hide the real cause (almost always
+        // UX_source_epoch_identity) behind a generic abort message.
+        try {
+          await tx.rollback();
+        } catch (rollbackErr) {
+          const code = (rollbackErr as { code?: string } | undefined)?.code;
+          if (code !== 'EABORT') {
+            console.error(
+              `  (rollback also failed for ${tableName}: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)})`,
+            );
+          }
+        }
+        console.error(`  epoch:accept failed on ${tableName}: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
     }
-    console.log(`\ndone. Run 'sms sync' to backfill the new generation.`);
+    console.log(`\ndone. Run 'sms sync' to backfill any newly registered generation.`);
     return 0;
   } catch (err) {
     console.error(`epoch:accept failed: ${err instanceof Error ? err.message : String(err)}`);

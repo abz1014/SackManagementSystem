@@ -25,6 +25,7 @@ import { Block, Empty, Failed, SkelLines } from '../ui/bits';
 import { fmtAppInstant } from '../lib/fmt';
 import {
   adminListUsers, adminCreateUser, adminUpdateUser, adminResetPassword, adminGetAuditPage, ApiError,
+  ROLE_RANK,
   type AdminUser, type AuditEntry,
 } from '../api';
 import { SyncHealthBlock } from './health/SyncHealthBlock';
@@ -35,8 +36,12 @@ import { SourcesBlock } from './setup/SourcesBlock';
 import { RulesBlock } from './setup/RulesBlock';
 import { RejectCodesBlock } from './setup/RejectCodesBlock';
 
-/** The four ranks, lowest first — matches api's ROLE_RANK / requireRole. */
-const ROLES = ['operator', 'supervisor', 'manager', 'admin'] as const;
+/**
+ * The four roles, lowest rank first — derived from api's ROLE_RANK rather
+ * than a fourth copy of the names, so a rename (the bottom two rank names
+ * changed in migration 035) only has to happen in one place.
+ */
+const ROLES = (Object.keys(ROLE_RANK) as string[]).sort((a, b) => ROLE_RANK[a]! - ROLE_RANK[b]!);
 
 export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
   return (
@@ -143,7 +148,7 @@ function People({ currentUsername }: { currentUsername?: string }) {
                       <select
                         // defaultValue + commit on blur, NOT onChange: a
                         // <select> fires change on every arrow key, so
-                        // keyboard-stepping admin→operator wrote three PATCHes
+                        // keyboard-stepping admin→viewer wrote three PATCHes
                         // and three audit rows on the way past.
                         defaultValue={u.role}
                         key={`${u.userId}:${u.role}`}

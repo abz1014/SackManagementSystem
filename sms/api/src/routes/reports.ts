@@ -4,16 +4,19 @@
  * already behind "signed in"; requireRole raises the bar where the contract
  * says so.
  *
- *   GET /api/reports/header                  rank 1   the print header (line, plant time, who, version)
- *   GET /api/reports/management-summary      rank 3   the KPI set beside the prior period
- *   GET /api/reports/:type                   rank 1   one composed report (services/reports/*)
- *   GET /api/reports/:type/export            rank 3   the same report as one CSV, audited `export.csv`
+ *   GET /api/reports/header                  rank 1        the print header (line, plant time, who, version)
+ *   GET /api/reports/:type                    REPORT_RANK[type]  one composed report (services/reports/*)
+ *   GET /api/reports/:type/export            rank 3        the same report as one CSV, audited `export.csv`
  *
- * The query is the one /api/report takes (period · anchor · from · to) plus
- * the filters a report type accepts (shift · product · station — a filter a
- * type cannot honour is refused, never ignored). The management summary is
- * registered BEFORE the parameterised route so its higher gate is the one
- * Express reaches first.
+ * There is no per-type route: every type, including management-summary,
+ * is served by the single parameterised handler. The gate lives in `parse()`,
+ * which checks the caller's rank against `REPORT_RANK[type]` for EVERY type
+ * before it does anything else — not in route registration order. A gate
+ * that depends on Express reaching one literal route before the generic
+ * `:type` route is defeated by any path encoding that still decodes to the
+ * same type string (e.g. `management%2Dsummary`); checking the rank inside
+ * the handler that already knows the decoded type closes that off by
+ * construction.
  */
 import type { NextFunction, Request, Response } from 'express';
 import mssql from 'mssql';
@@ -85,6 +88,21 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     const raw = fixedType ?? String(req.params.type ?? '');
     if (!isReportType(raw)) {
       res.status(404).json({ error: `unknown report type "${raw}"` });
+      return null;
+    }
+    // The rank gate for EVERY report type, management-summary included. This
+    // runs before any query validation or DB read, and it is keyed off the
+    // already-decoded `raw` type — so `management%2Dsummary` is judged the
+    // same as `management-summary`, unlike a route registered on the literal
+    // path string. Same status codes and body shapes as requireRole so a
+    // client sees one error shape regardless of which gate answered.
+    const user = (req as AuthedRequest).user;
+    if (!user) {
+      res.status(401).json({ error: 'authentication required' });
+      return null;
+    }
+    if (user.rank < REPORT_RANK[raw]) {
+      res.status(403).json({ error: 'insufficient role' });
       return null;
     }
     const q = reportQuery.safeParse(req.query);
@@ -184,8 +202,6 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     }
   };
 
-  // Registered first so the manager gate wins over the rank-1 parameterised route.
-  app.get('/api/reports/management-summary', requireRole(REPORT_RANK['management-summary']), serveReport('management-summary'));
   app.get('/api/reports/:type', serveReport());
 
   // Rank 3 like the register export, and audited the same way: which report

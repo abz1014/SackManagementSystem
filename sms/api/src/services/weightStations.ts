@@ -110,10 +110,22 @@ export async function getWeightStations(
   from: string,
   to: string,
 ): Promise<WeightStationsData> {
+  // T3 (15 Sep 2026): bound the ledger fetch to `{ to }`, never `from`. This
+  // used to call listCalibrationAdjustments with no window filter at all, so
+  // TOP (500) ORDER BY adjusted_at_utc DESC returned the newest 500
+  // adjustments on the LINE — whatever period this function is reporting. An
+  // adjustment logged AFTER `to` (an August report run after a September
+  // recalibration) then became `latestRestart`'s answer below, and the days
+  // filter at line ~156 dropped EVERY day of the window for every station: an
+  // August report read "0 days held" for all fourteen stations, and
+  // reports/summary.ts's prior-period comparison inherited the same
+  // fabricated zero. An adjustment AT OR BEFORE `to` is still the correct
+  // restart marker (that is the whole point of the ledger), so only `to` is
+  // bound — `from` is deliberately omitted.
   const [plausibility, timeline, adjustments, catalogue] = await Promise.all([
     getPlausibilityRule(pool, lineId),
     loadProductTimeline(pool, lineId),
-    listCalibrationAdjustments(pool, lineId),
+    listCalibrationAdjustments(pool, lineId, { to }),
     loadProductCatalogue(pool),
   ]);
 

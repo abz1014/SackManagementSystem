@@ -286,7 +286,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     res.json({ user: user ? { username: user.username, displayName: user.displayName, role: user.role } : null });
   });
 
-  // ---- everything below requires an authenticated user (operator+) ----
+  // ---- everything below requires an authenticated user (viewer+) ----
   app.use('/api', requireRole(1));
 
   /**
@@ -595,8 +595,12 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
         return;
       }
-      const newest = await newestProductionDay();
-      const to = q.data.to ?? newest;
+      // Lazy: only ask the database for the newest production day when the
+      // caller did not supply `to` — this used to run unconditionally and
+      // throw the answer away whenever `to` was already given (T3, 15 Sep
+      // 2026; app.routes.test.ts pins this: with `to` explicit, the
+      // MAX(shift_date) query must never be issued).
+      const to = q.data.to ?? (await newestProductionDay());
       const from =
         q.data.from ??
         new Date(new Date(`${to}T12:00:00Z`).getTime() - (q.data.trailingDays - 1) * 86_400_000)
@@ -997,8 +1001,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
 
   // set a reject code's label / pass flag / severity (entering Q10 answers) —
-  // manager+ only. Only the fields sent are changed; the audit row names each.
-  app.put('/api/reject-codes/:id', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+  // engineer+ (rank 2) since 15 Sep 2026: IFL said reject-code meanings are
+  // set in settings by the engineer (Q12), the same person who sets limits.
+  // Was manager+. Only the fields sent are changed; the audit row names each.
+  app.put('/api/reject-codes/:id', requireRole(2), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = Number(req.params.id);
       const body = z
@@ -1071,9 +1077,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // Roadmap Phase 9 (15 Sep 2026): a logged adjustment restarts the
       // station's centreline and sigma, so the ledger is passed in here as
       // it is by the station table and the attention list.
+      // T3 (15 Sep 2026): bound to `{ to: q.data.to }` — same defect and same
+      // fix as weightStations.ts, see the comment there. Without it, an
+      // adjustment logged after this route's own `to` would still come back
+      // as the newest row and wrongly restart every station's run.
       const [plausibility, adjustments] = await Promise.all([
         getPlausibilityRule(pool, cfg.lineId),
-        listCalibrationAdjustments(pool, cfg.lineId),
+        listCalibrationAdjustments(pool, cfg.lineId, { to: q.data.to }),
       ]);
       const data = await getStationDrift(pool, cfg.lineId, q.data.from, q.data.to, plausibility, {
         restarts: adjustmentRestarts(adjustments),
@@ -1218,7 +1228,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
 
   // full changeover history — same rank as reading "current", since seeing
-  // what ran when is a read, not a decision; setting it stays supervisor+ below
+  // what ran when is a read, not a decision; setting it stays engineer+ below
   app.get('/api/product-timeline', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       res.json({ timeline: await listTimeline(pool, cfg.lineId) });
@@ -1227,7 +1237,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  // set the running product — supervisor+ (append-only timeline)
+  // set the running product — engineer+ (rank 2; IFL Q19/Q41, 15 Sep 2026: the process engineer on the floor changes products) (append-only timeline)
   app.post('/api/current-product', requireRole(2), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = z
@@ -1262,16 +1272,20 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
 
   // ---- PDAS write path: product Add / Retire / Change limits (§5) ----
-  // Rank 3 (manager). These change what the scale ACCEPTS, not what a report
-  // is labelled — heavier than /api/current-product's rank 2. The status
-  // endpoint is open to any signed-in user so the screen can be read-only and
-  // say why, instead of offering a button that can only answer 503.
+  // Rank 2 (engineer) since 15 Sep 2026. Was rank 3 (manager) on the
+  // developer's reasoning that these change what the scale ACCEPTS, not what
+  // a report is labelled; IFL's answers (Q10/Q19/Q40/Q41) put products and
+  // limits in the hands of the process engineer on the floor, so the gate
+  // matches — one rank for every product write, here and in routes/products.ts.
+  // The status endpoint is open to any signed-in user so the screen can be
+  // read-only and say why, instead of offering a button that can only answer 503.
+  const PDAS_WRITE_RANK = 2;
   app.get('/api/product-write/status', async (req: Request, res: Response) => {
     const user = (req as AuthedRequest).user;
     res.json({
       enabled: pdas.enabled,
       reason: pdas.disabledReason,
-      canWrite: Boolean(user) && (user?.rank ?? 0) >= 3 && pdas.enabled,
+      canWrite: Boolean(user) && (user?.rank ?? 0) >= PDAS_WRITE_RANK && pdas.enabled,
     });
   });
 
@@ -1314,7 +1328,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   const writeStatus = (code: string): number =>
     code === 'DISABLED' ? 503 : code === 'CONFLICT' ? 409 : code === 'IMPLAUSIBLE' ? 400 : code === 'NOT_FOUND' ? 404 : code === 'PDAS_ERROR' ? 422 : 500;
 
-  app.post('/api/products', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+  app.post('/api/products', requireRole(PDAS_WRITE_RANK), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const b = z
         .object({
@@ -1340,7 +1354,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  app.post('/api/products/:id/active', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+  app.post('/api/products/:id/active', requireRole(PDAS_WRITE_RANK), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = z.coerce.number().int().positive().safeParse(req.params.id);
       const b = z.object({ active: z.boolean(), reason: writeReason }).safeParse(req.body);
@@ -1359,7 +1373,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  app.post('/api/products/:id/limits', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+  app.post('/api/products/:id/limits', requireRole(PDAS_WRITE_RANK), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = z.coerce.number().int().positive().safeParse(req.params.id);
       const b = z.object({ before: productFields, after: productFields, reason: writeReason }).safeParse(req.body);
@@ -1388,7 +1402,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // ---- Admin (admin only, rank 4) ----
   // Every write below is a CONFIGURATION change and goes through
   // auditedWrite(): the change and its audit row are one transaction.
-  const ROLE_NAMES = z.enum(['operator', 'supervisor', 'manager', 'admin']);
+  // viewer 1 · engineer 2 · manager 3 · admin 4 — the names since migration 035 (15 Sep 2026).
+  const ROLE_NAMES = z.enum(['viewer', 'engineer', 'manager', 'admin']);
   const optText = (max: number) => z.string().max(max).nullable().optional();
 
   app.get('/api/admin/users', requireRole(4), async (_req, res, next) => {
