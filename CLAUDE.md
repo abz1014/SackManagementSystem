@@ -16,6 +16,8 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+**Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
+
 ### Roadmap execution — the IFL requirement (from 14 Sep 2026)
 
 `IFL_SMS_Claude_Code_Development_Roadmap.md` is **the requirement** from IFL's

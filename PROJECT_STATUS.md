@@ -1,5 +1,7 @@
 # PROJECT_STATUS.md — IFL Sack Management System
 
+**Full session handover: [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — read it first if resuming cold; it covers the dirty working tree this file's §3 does not yet reflect.
+
 **As of:** 15 September 2026, end of Wave C/D (Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
