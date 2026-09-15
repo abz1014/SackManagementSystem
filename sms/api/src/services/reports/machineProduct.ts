@@ -139,7 +139,9 @@ export async function getMachineProductReport(
     r.cones += cell.cones;
     columns[i]!.cones += cell.cones;
     const set = materialsOfRow.get(cell.station) ?? new Set<string>();
-    for (const m of cell.materials) set.add(String(m.materialId ?? 'none'));
+    // An unattributed reading (no material_id) is the absence of a product,
+    // not a product in its own right — do not count it toward `materials`.
+    for (const m of cell.materials) if (m.materialId != null) set.add(String(m.materialId));
     materialsOfRow.set(cell.station, set);
   }
   const rows = [...rowOf.values()].sort((a, b) => a.station - b.station);

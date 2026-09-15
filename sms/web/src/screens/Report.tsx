@@ -4,7 +4,9 @@
  * The reporting half of requirement 8 and the sack log of requirement 6.
  * Since roadmap Phase 8 (15 Sep 2026) it is ONE surface for the NINE report
  * types IFL's quotation names — Daily · Shift · Product · Machine/station ·
- * Rejects · Cone weight · Sacks · Calibration · Management summary — each
+ * Rejects · Cone weight · Sacks · Calibration · Management summary — plus a
+ * TENTH, Product by machine, added on IFL's 15 Sep 2026 answer to Q28 (the
+ * per-machine, per-shift changeover view Hassan asked for by name). Each
  * one composed response from `/api/reports/<type>`, one section set under
  * `screens/report/`, one CSV from the server (rank 3, audited), and one
  * printed page with a header naming the line, the period, when it was
@@ -43,6 +45,7 @@ import { ConeWeightSection } from './report/ConeWeight';
 import { SackSection } from './report/Sack';
 import { CalibrationSection } from './report/Calibration';
 import { SummarySection } from './report/Summary';
+import { MachineProductSection } from './report/MachineProduct';
 
 export function ReportScreen({ period, user }: { period: Period; user: AuthUser }) {
   const { line, asOf } = useLive();
@@ -205,6 +208,7 @@ function Sections({ type, data, names, products }: { type: ReportType; data: Rep
     case 'sack': return <SackSection d={(data as ReportResponse<'sack'>).report} products={products} />;
     case 'calibration': return <CalibrationSection d={(data as ReportResponse<'calibration'>).report} names={names} />;
     case 'management-summary': return <SummarySection d={(data as ReportResponse<'management-summary'>).report} />;
+    case 'machine-product': return <MachineProductSection d={(data as ReportResponse<'machine-product'>).report} />;
   }
 }
 

@@ -5,6 +5,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { acceptsFilter, digitsFor, filtersFor, fmtDelta, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_MIN_RANK } from './model';
+import { REPORT_TYPES } from '../../api';
+import { W } from '../../lib/words';
 import type { Period } from '../../lib/period';
 
 const shiftPeriod: Period = {
@@ -28,6 +30,12 @@ describe('queryFor', () => {
     expect(queryFor('calibration', week, { shift: 'night', station: 7 }, null)).toEqual({
       period: 'custom', from: '2026-09-01', to: '2026-09-07', at: null, station: 7,
     });
+    // The tenth type takes shift and station like product, but never product
+    // (common.ts:114 — a cell that hid the other product a machine ran in the
+    // same shift would misreport the shift).
+    expect(queryFor('machine-product', week, { shift: 'night', station: 7, product: 21 }, null)).toEqual({
+      period: 'custom', from: '2026-09-01', to: '2026-09-07', at: null, shift: 'night', station: 7,
+    });
   });
 });
 
@@ -36,6 +44,7 @@ describe('filtersFor', () => {
     expect(filtersFor('station', { shift: 'night', station: 7, product: 21 })).toEqual({});
     expect(filtersFor('sack', { shift: 'night', station: 7 })).toEqual({ shift: 'night' });
     expect(filtersFor('reject', { shift: 'night', station: 7, product: 21 })).toEqual({ shift: 'night', station: 7, product: 21 });
+    expect(filtersFor('machine-product', { shift: 'night', station: 7, product: 21 })).toEqual({ shift: 'night', station: 7 });
   });
 });
 
@@ -45,12 +54,31 @@ describe('the filter table and the ranks', () => {
     expect(Object.entries(REPORT_MIN_RANK).filter(([, r]) => r === 3).map(([k]) => k)).toEqual(['management-summary']);
     expect(acceptsFilter('reject', 'product')).toBe(true);
     expect(acceptsFilter('daily', 'product')).toBe(false);
+    expect(acceptsFilter('machine-product', 'shift')).toBe(true);
+    expect(acceptsFilter('machine-product', 'station')).toBe(true);
+    expect(acceptsFilter('machine-product', 'product')).toBe(false);
   });
   it('the poll key changes with every part of the query', () => {
     const a = pollKey('daily', queryFor('daily', week, {}, null));
     const b = pollKey('daily', queryFor('daily', week, { shift: 'night' }, null));
     expect(a).not.toBe(b);
     expect(pollKey('reject', queryFor('reject', week, {}, null))).not.toBe(a);
+  });
+  // The parity check that would have caught this tenth type's half-
+  // registration: every report type api.ts names must have an entry in
+  // every client-side registry, or a screen renders a silently empty
+  // section for a type it cannot filter, rank-check or label.
+  it('every registry — REPORT_TYPES, FILTERS_BY_TYPE, REPORT_MIN_RANK, the words — names exactly the same set of types', () => {
+    expect(Object.keys(FILTERS_BY_TYPE).length).toBe(REPORT_TYPES.length);
+    expect(Object.keys(REPORT_MIN_RANK).length).toBe(REPORT_TYPES.length);
+    expect(Object.keys(W.reports.type).length).toBe(REPORT_TYPES.length);
+    expect(Object.keys(W.reports.question).length).toBe(REPORT_TYPES.length);
+    for (const t of REPORT_TYPES) {
+      expect(FILTERS_BY_TYPE[t]).toBeDefined();
+      expect(REPORT_MIN_RANK[t]).toBeDefined();
+      expect(W.reports.type[t]).toBeDefined();
+      expect(W.reports.question[t]).toBeDefined();
+    }
   });
 });
 

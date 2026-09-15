@@ -1831,11 +1831,18 @@ export function recordSackMovement(m: SackMovementInput): Promise<{ movementId: 
 // audited), and the print header every report and the register print carry.
 // Every KPI these print is defined in the repository-root KPI-DEFINITIONS.md,
 // the sheet IFL signs; every row of it is "awaiting" until they do.
+//
+// The tenth type — product by machine and shift — added on IFL's answer of
+// 15 Sep 2026 to Q28. Registered LAST, matching the server's order in
+// api/src/services/reports/common.ts REPORT_TYPES, so the nine existing
+// CSV/RBAC pins hold.
 
 export type ReportType =
-  | 'daily' | 'shift' | 'product' | 'station' | 'reject' | 'cone-weight' | 'sack' | 'calibration' | 'management-summary';
+  | 'daily' | 'shift' | 'product' | 'station' | 'reject' | 'cone-weight' | 'sack' | 'calibration' | 'management-summary'
+  | 'machine-product';
 export const REPORT_TYPES: readonly ReportType[] = [
   'daily', 'shift', 'product', 'station', 'reject', 'cone-weight', 'sack', 'calibration', 'management-summary',
+  'machine-product',
 ];
 
 export interface ReportFilters {
@@ -2081,6 +2088,88 @@ export interface ManagementSummaryData {
   note: string;
 }
 
+/*
+ * Product by machine and shift — mirrors api/src/services/reports/
+ * machineProduct.ts MachineProductReportData exactly (field for field: no
+ * `totals` or `coverage` block exists on the server's response — the
+ * per-product rollup is `products`, and there is no coverage block at all,
+ * unlike the other nine types).
+ */
+export interface ShiftMaterial {
+  /** material_id from the reading; null when the reading predates product recording (before 2026-08-05). */
+  materialId: number | null;
+  productName: string | null;
+  cones: number;
+  /** Plant wall clock labelled UTC, like every production time — fmtClock, never fmtAppInstant. */
+  firstUtc: string;
+  lastUtc: string;
+}
+export interface MachineShiftCell {
+  station: number;
+  stationName: string | null;
+  machineName: string | null;
+  day: string;
+  shift: 'morning' | 'evening' | 'night';
+  /** In order of first reading: materials[0] started the shift, materials[at(-1)] ended it. */
+  materials: ShiftMaterial[];
+  dominantMaterialId: number | null;
+  cones: number;
+  changedDuringShift: boolean;
+}
+export interface MachineProductColumn {
+  day: string;
+  shift: 'morning' | 'evening' | 'night';
+  /** Cones across every machine in this day × shift. */
+  cones: number;
+}
+export interface MachineProductRow {
+  station: number;
+  stationName: string | null;
+  machineName: string | null;
+  /** Indexed like `columns`; null where the machine weighed nothing (absence, not zero). */
+  cells: (MachineShiftCell | null)[];
+  cones: number;
+  /** Distinct materials this machine ran in the period. */
+  materials: number;
+}
+export interface MachineProductChange {
+  station: number;
+  machineName: string | null;
+  /** The day and shift the NEW material was first read in. */
+  day: string;
+  shift: 'morning' | 'evening' | 'night';
+  fromMaterialId: number | null;
+  fromProductName: string | null;
+  toMaterialId: number | null;
+  toProductName: string | null;
+  /** First reading of the new material at this station. */
+  firstUtc: string;
+  kind: 'within_shift' | 'between_shifts';
+}
+export interface MachineProductTotal {
+  materialId: number | null;
+  label: string;
+  cones: number;
+  /** Machines that ran it at least once in the period. */
+  machines: number;
+  /** (machine, day, shift) cells it appears in. */
+  cells: number;
+  firstUtc: string;
+  lastUtc: string;
+}
+export interface MachineProductReportData {
+  period: ReportData['period'];
+  filters: ReportFilters;
+  columns: MachineProductColumn[];
+  rows: MachineProductRow[];
+  changes: MachineProductChange[];
+  products: MachineProductTotal[];
+  /** materialId → the label the report prints (unique names plain, shared names with the id appended). */
+  labels: Record<string, string>;
+  conesWithoutStation: number;
+  note: string;
+}
+
 export interface ReportDataByType {
   daily: DailyReportData;
   shift: ShiftReportData;
@@ -2091,6 +2180,7 @@ export interface ReportDataByType {
   sack: SackReportData;
   calibration: CalibrationReportData;
   'management-summary': ManagementSummaryData;
+  'machine-product': MachineProductReportData;
 }
 
 export interface ReportResponse<T extends ReportType> {

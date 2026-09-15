@@ -23,11 +23,16 @@ export const FILTERS_BY_TYPE: Record<ReportType, readonly FilterName[]> = {
   sack: ['shift'],
   calibration: ['station'],
   'management-summary': [],
+  // Shift narrows the columns to one shift per day, station the rows to one
+  // machine. No product filter: a cell that hid the other product a machine
+  // ran in the same shift would misreport the shift (common.ts:114).
+  'machine-product': ['shift', 'station'],
 };
 
 /** The management summary is rank 3 on the server; every other report rank 1. */
 export const REPORT_MIN_RANK: Record<ReportType, number> = {
   daily: 1, shift: 1, product: 1, station: 1, reject: 1, 'cone-weight': 1, sack: 1, calibration: 1, 'management-summary': 3,
+  'machine-product': 1,
 };
 export const EXPORT_MIN_RANK = 3;
 

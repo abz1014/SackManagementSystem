@@ -1148,6 +1148,7 @@ export const W = {
       sack: 'Sacks',
       calibration: 'Calibration',
       'management-summary': 'Management summary',
+      'machine-product': 'Product by machine',
     } as const,
     /* The one-line question each report answers, under its title. */
     question: {
@@ -1160,6 +1161,7 @@ export const W = {
       sack: 'How many sacks, how heavy, and what the stock ledger says.',
       calibration: 'Which stations drifted, and what was adjusted.',
       'management-summary': 'The figures that matter, beside the period before.',
+      'machine-product': 'Which product ran on which machine, in which shift.',
     } as const,
     /* The print header. */
     generated: 'Generated',
@@ -1278,6 +1280,17 @@ export const W = {
     betterLower: 'lower is better',
     betterNeither: '',
     approval: 'awaiting IFL’s approval',
+    /* Product by machine and shift — the tenth type (15 Sep 2026). */
+    colMachine: 'Machine',
+    colFrom: 'From',
+    colTo: 'To',
+    colFirst: 'First reading',
+    colLast: 'Last reading',
+    colMachinesCount: 'Machines',
+    machineProductSummary: (machines: string, products: string) => `${machines} machines, ${products} products this period.`,
+    conesWithoutStation: (n: string) => `${n} cones carry no machine and are not on this matrix.`,
+    changeovers: 'Changeovers',
+    noChangeovers: 'No changeovers were read in this period.',
     /* Errors. */
     notAllowed: 'This report is for managers and above.',
   } as const,
