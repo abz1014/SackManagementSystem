@@ -219,3 +219,91 @@ export async function appendLimitVersion(
        VALUES (@pid, @sp, @om, @op, @eff, @lb, @src, @by, @reason)`,
     );
 }
+
+/* ------------------------------------------------- the history, readable */
+
+export interface LimitHistoryVersion {
+  versionId: number;
+  setpointG: number | null;
+  offsetMinusG: number | null;
+  offsetPlusG: number | null;
+  /** The stored UTC instant, as written — an app instant, not plant time. */
+  effectiveFromUtc: string;
+  /** "No later than": first SEEN at effectiveFrom, not known to have started then. */
+  effectiveIsLowerBound: boolean;
+  source: LimitSource;
+  changedBy: string | null;
+  reason: string | null;
+  recordedAtUtc: string;
+  /** Ready to print: "1,960 ± 30 g", or null when the version has no usable limits. */
+  label: string | null;
+}
+
+export interface LimitHistoryProduct {
+  productId: number;
+  label: string;
+  activeFlag: boolean | null;
+  /** Newest first. */
+  versions: LimitHistoryVersion[];
+}
+
+/**
+ * Every product's versioned limits, for Setup › Rules › Product limits
+ * (roadmap Phase 4 item 2, 14 Sep 2026). The catalogue above is the lookup
+ * the classification uses; this is the same table read back for a person,
+ * with the author and reason the catalogue has no use for. Nothing in
+ * `sms.product_limit_version` had a reader before this — the history was
+ * written since migration 027 and shown nowhere.
+ *
+ * Products with no version at all are still listed (with an empty history)
+ * so the screen can say "no limits recorded" rather than omit the product.
+ */
+export async function listLimitHistory(pool: ConnectionPool): Promise<LimitHistoryProduct[]> {
+  const prod = await pool.request().query<{
+    product_id: number; description: string | null; lot_code: string | null; active_flag: boolean | null;
+  }>(`SELECT product_id, description, lot_code, active_flag FROM sms.product ORDER BY product_id`);
+
+  const ver = await pool.request().query<{
+    version_id: number; product_id: number; setpoint_g: number | null; offset_minus_g: number | null;
+    offset_plus_g: number | null; effective_from: Date; effective_is_lower_bound: boolean; source: LimitSource;
+    changed_by: string | null; reason: string | null; recorded_at: Date;
+  }>(
+    `SELECT v.version_id, v.product_id, v.setpoint_g, v.offset_minus_g, v.offset_plus_g, v.effective_from,
+            v.effective_is_lower_bound, v.source, u.username AS changed_by, v.reason, v.recorded_at
+       FROM sms.product_limit_version v
+       LEFT JOIN sms.app_user u ON u.user_id = v.changed_by
+      ORDER BY v.product_id, v.effective_from DESC, v.version_id DESC`,
+  );
+
+  const byProduct = new Map<number, LimitHistoryVersion[]>();
+  for (const v of ver.recordset) {
+    const row: LimitHistoryVersion = {
+      versionId: Number(v.version_id),
+      setpointG: v.setpoint_g == null ? null : Number(v.setpoint_g),
+      offsetMinusG: v.offset_minus_g == null ? null : Number(v.offset_minus_g),
+      offsetPlusG: v.offset_plus_g == null ? null : Number(v.offset_plus_g),
+      effectiveFromUtc: new Date(v.effective_from).toISOString(),
+      effectiveIsLowerBound: Boolean(v.effective_is_lower_bound),
+      source: v.source,
+      changedBy: v.changed_by ?? null,
+      reason: v.reason ?? null,
+      recordedAtUtc: new Date(v.recorded_at).toISOString(),
+      label: null,
+    };
+    row.label =
+      limitsFromVersion({
+        productId: Number(v.product_id), setpointG: row.setpointG, offsetMinusG: row.offsetMinusG, offsetPlusG: row.offsetPlusG,
+        effectiveFromMs: 0, effectiveFromUtc: row.effectiveFromUtc, effectiveIsLowerBound: row.effectiveIsLowerBound, source: v.source,
+      })?.label ?? null;
+    const list = byProduct.get(Number(v.product_id)) ?? [];
+    list.push(row);
+    byProduct.set(Number(v.product_id), list);
+  }
+
+  return prod.recordset.map((p) => ({
+    productId: Number(p.product_id),
+    label: p.description || p.lot_code || `Product ${p.product_id}`,
+    activeFlag: p.active_flag == null ? null : Boolean(p.active_flag),
+    versions: byProduct.get(Number(p.product_id)) ?? [],
+  }));
+}

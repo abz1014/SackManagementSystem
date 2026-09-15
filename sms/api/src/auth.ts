@@ -41,9 +41,32 @@ export class LoginRateLimiter {
 
   /** Returns seconds to wait if locked out, else 0. */
   retryAfter(key: string, now: number): number {
+    this.prune(now);
     const a = this.map.get(key);
     if (a && a.lockedUntil > now) return Math.ceil((a.lockedUntil - now) / 1000);
     return 0;
+  }
+
+  /** How many keys are being tracked — for the test that proves pruning happens. */
+  get size(): number {
+    return this.map.size;
+  }
+
+  /**
+   * Drop entries that can no longer affect a decision: the failure window
+   * has passed AND any lockout has expired. "Bounded map" above was a claim,
+   * not a fact, until roadmap Phase 11 (14 Sep 2026): every distinct IP or
+   * username that ever failed a login stayed in the map for the life of the
+   * process. A scan against the login form adds one key per guess; on a
+   * service that runs for months that is a slow leak with no ceiling. Cheap
+   * (the map holds at most a few hundred entries on this LAN) and run on
+   * every check rather than on a timer, so there is nothing to forget to
+   * schedule.
+   */
+  private prune(now: number): void {
+    for (const [k, a] of this.map) {
+      if (now - a.first > WINDOW_MS && a.lockedUntil <= now) this.map.delete(k);
+    }
   }
 
   recordFailure(key: string, now: number): void {
@@ -124,6 +147,31 @@ export async function pruneExpiredSessions(pool: ConnectionPool): Promise<void> 
 
 export async function destroySession(pool: ConnectionPool, id: string): Promise<void> {
   await pool.request().input('id', mssql.UniqueIdentifier, id).query(`DELETE FROM sms.session WHERE session_id=@id`);
+}
+
+/**
+ * End every session of one user except (optionally) the one making the
+ * request — roadmap Phase 11 item 1 (14 Sep 2026). A password change or an
+ * admin reset must log the account out everywhere else: the point of
+ * changing a password is that whoever held the old one loses access, and a
+ * session they already hold would otherwise outlive the change by up to
+ * seven days. `keepSessionId` is the caller's own cookie on a self-service
+ * change (they should not be thrown out by their own action); null on an
+ * admin reset, where every session goes. Takes a `Db` so it runs inside
+ * auditedWrite's transaction with the hash update.
+ */
+export async function revokeSessions(db: { request(): mssql.Request }, userId: number, keepSessionId: string | null): Promise<number> {
+  const r = await db
+    .request()
+    .input('u', mssql.Int, userId)
+    .input('keep', mssql.UniqueIdentifier, keepSessionId)
+    .query(`DELETE FROM sms.session WHERE user_id = @u AND (@keep IS NULL OR session_id <> @keep)`);
+  return r.rowsAffected[0] ?? 0;
+}
+
+/** The session id this request rides on, or null. Exported for the password routes. */
+export function sessionIdOf(req: Request): string | null {
+  return readCookie(req, SESSION_COOKIE);
 }
 
 async function userFromSession(

@@ -1,0 +1,39 @@
+{
+  "_header": {
+    "title": "Cone weight classification — acceptance fixture",
+    "status": "developer-proposed; awaiting IFL approval (Phase 4 acceptance)",
+    "rule": "shared/src/domain/classification.ts — (1) no weight or implausible -> unknown; (2) scale bit 0 -> rejected; (3) no limits in force at the reading's own time -> unknown; (4) else low / high / within by those limits, inclusive at both ends.",
+    "disagreement": "When the scale passed a cone the product tolerance would not, the state is low/high and scalePassed stays true so both facts are shown. When the scale rejected a cone the tolerance would accept, the state is rejected. Which judgement governs is a clarification for IFL; this is the developer's rule until they answer.",
+    "plausibility": "Every case uses the plausibility window 1500-2100 g (the developer's measured defaults on file in sms.plausibility_rule; not yet confirmed by IFL).",
+    "limits": "Unless a case says otherwise, the limits in force are setpoint 1960 g, -30 g / +30 g, i.e. 1930-1990 g inclusive.",
+    "date": "14 Sep 2026"
+  },
+  "plausibility": { "loG": 1500, "hiG": 2100 },
+  "defaultLimits": { "setpointG": 1960, "minusG": 30, "plusG": 30 },
+  "cases": [
+    { "id": 1, "weightG": 1960, "inRange": true, "expected": "within", "why": "on the setpoint, scale passed" },
+    { "id": 2, "weightG": 1930, "inRange": true, "expected": "within", "why": "exactly on the lower limit is within (inclusive)" },
+    { "id": 3, "weightG": 1990, "inRange": true, "expected": "within", "why": "exactly on the upper limit is within (inclusive)" },
+    { "id": 4, "weightG": 1929, "inRange": true, "expected": "low", "why": "1 g under the lower limit", "expectedScalePassed": true, "expectedOutsideByG": -1 },
+    { "id": 5, "weightG": 1991, "inRange": true, "expected": "high", "why": "1 g over the upper limit", "expectedScalePassed": true, "expectedOutsideByG": 1 },
+    { "id": 6, "weightG": 1931, "inRange": true, "expected": "within", "why": "1 g inside the lower limit" },
+    { "id": 7, "weightG": 1989, "inRange": true, "expected": "within", "why": "1 g inside the upper limit" },
+    { "id": 8, "weightG": 1929.5, "inRange": true, "expected": "low", "why": "half a gram under the lower limit is still low, not rounded to within", "expectedOutsideByG": -0.5 },
+    { "id": 9, "weightG": 1960, "inRange": false, "expected": "rejected", "why": "scale rejected although the weight is inside the tolerance — the scale's bit governs 'rejected'", "expectedScalePassed": false },
+    { "id": 10, "weightG": 1900, "inRange": false, "expected": "rejected", "why": "scale rejected and the weight is also under the limits — rejected, not low" },
+    { "id": 11, "weightG": 2050, "inRange": false, "expected": "rejected", "why": "scale rejected and the weight is also over the limits — rejected, not high" },
+    { "id": 12, "weightG": 1900, "inRange": true, "expected": "low", "why": "scale passed but 30 g under the product's lower limit — the disagreement case; both facts kept", "expectedScalePassed": true, "expectedOutsideByG": -30 },
+    { "id": 13, "weightG": 2020, "inRange": true, "expected": "high", "why": "scale passed but 30 g over the product's upper limit — the disagreement case", "expectedScalePassed": true, "expectedOutsideByG": 30 },
+    { "id": 14, "weightG": 1960, "inRange": true, "limits": null, "expected": "unknown", "why": "no product recorded at the reading's time — nothing to judge against", "expectedUnknownReason": "no_limits" },
+    { "id": 15, "weightG": 1900, "inRange": true, "limits": null, "expected": "unknown", "why": "no limits: a light-looking weight is not called low without a tolerance", "expectedUnknownReason": "no_limits" },
+    { "id": 16, "weightG": 1960, "inRange": false, "limits": null, "expected": "rejected", "why": "the scale's bit needs no product limits to mean rejected", "expectedScalePassed": false },
+    { "id": 17, "weightG": null, "inRange": true, "expected": "unknown", "why": "no weight recorded", "expectedUnknownReason": "no_weight" },
+    { "id": 18, "weightG": 824, "inRange": true, "expected": "unknown", "why": "below the plausibility floor — a scale fault seen in the real data, not a light cone", "expectedUnknownReason": "implausible" },
+    { "id": 19, "weightG": 2300, "inRange": true, "expected": "unknown", "why": "above the plausibility ceiling — the 2200-2354 g fault population, not a heavy cone", "expectedUnknownReason": "implausible" },
+    { "id": 20, "weightG": 824, "inRange": false, "expected": "unknown", "why": "implausible beats rejected: a non-reading is not a rejected cone either", "expectedUnknownReason": "implausible" },
+    { "id": 21, "weightG": 1500, "inRange": true, "limits": { "setpointG": 1520, "minusG": 30, "plusG": 30 }, "expected": "within", "why": "exactly on the plausibility floor is plausible (inclusive) and judged" },
+    { "id": 22, "weightG": 2100, "inRange": true, "limits": { "setpointG": 2080, "minusG": 30, "plusG": 30 }, "expected": "within", "why": "exactly on the plausibility ceiling is plausible (inclusive) and judged" },
+    { "id": 23, "weightG": 1945, "inRange": true, "limits": { "setpointG": 1950, "minusG": 30, "plusG": 50 }, "expected": "within", "why": "asymmetric offsets (1920-2000 g) — inside" },
+    { "id": 24, "weightG": 1960, "inRange": null, "expected": "within", "why": "no scale bit recorded: judged by the product alone, scalePassed stays null", "expectedScalePassed": null }
+  ]
+}

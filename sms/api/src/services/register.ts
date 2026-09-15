@@ -32,23 +32,12 @@
  */
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
+import type { ConeState } from '@sms/shared';
+import { bindStateCase, type StateContext } from './coneState.js';
 
 export type EventType = 'cone' | 'sack' | 'reject';
 export type SortField = 'time' | 'weight';
 export type SortDir = 'asc' | 'desc';
-
-/**
- * One stretch of the product timeline with usable limits — the caller (the
- * `/api/events` route) resolves these via productAt.ts's ProductTimeline
- * before calling in here, because limits vary by WHEN a cone was weighed and
- * this module has no DB access of its own for that lookup.
- */
-export interface OutsideLimitsSegment {
-  fromMs: number | null;
-  toMs: number | null;
-  loG: number;
-  hiG: number;
-}
 
 export interface RegisterFilters {
   from?: string;
@@ -62,16 +51,25 @@ export interface RegisterFilters {
   tsFrom?: string; // fine-grained deep-link window, ANDed with the day-level from/to
   tsTo?: string;
   /**
-   * cone only: restrict to cones the scale PASSED but a product's own limits
-   * would not — the specific population Weight's disagreement banner and the
-   * Home attention list's "outside product limits" finding both promise and,
-   * until finding H4 (Sep 2026 audit), both actually opened an unfiltered
-   * register instead of this. An empty array means no product in the window
-   * ever carried usable limits, and must match nothing, not fall back to
-   * unfiltered — that would silently show cones from before the register
-   * even existed.
+   * cone + reject: the reading's own product (material_id). Rows from before
+   * IFL's 2026-08-05 rebuild carry none and are dropped by this filter — the
+   * screen says so from /api/production's `unattributed`.
    */
-  outsideLimitsSegments?: OutsideLimitsSegment[];
+  product?: number;
+  /**
+   * cone only: the five-state classification (roadmap Phase 4, 14 Sep 2026).
+   * `states` names the states to keep; `classification` is the context the
+   * CASE is built from (plausibility window + limit windows), loaded by the
+   * route. With a context every cone row also carries a `state` column,
+   * whether or not a filter is on. Replaces the `outsideLimitsSegments`
+   * filter finding H4 added: "passed by the scale but outside the product's
+   * limits" is exactly the 'low' + 'high' population, since the scale's bit
+   * governs 'rejected' (shared/src/domain/classification.ts).
+   *
+   * An empty `states` list matches nothing — never falls back to unfiltered.
+   */
+  states?: ConeState[];
+  classification?: StateContext;
 }
 
 export interface RegisterQuery extends RegisterFilters {
@@ -155,25 +153,23 @@ function bindFilters(
     w.push(`${c('production_ts_utc')} <= @tsTo`);
     req.input('tsTo', mssql.DateTime2(3), new Date(f.tsTo));
   }
-  if (f.outsideLimitsSegments != null && type === 'cone') {
-    if (f.outsideLimitsSegments.length === 0) {
+  // sack_event is never product-filtered in the register (production.ts
+  // makes the same choice), so a sack listing cannot silently shrink under a
+  // product filter meant for cones.
+  if (f.product != null && type !== 'sack') {
+    w.push(`${c('material_id')} = @product`);
+    req.input('product', mssql.Int, f.product);
+  }
+  if (f.states != null && type === 'cone') {
+    if (f.states.length === 0 || !f.classification) {
       w.push('1 = 0');
     } else {
-      const segs = f.outsideLimitsSegments.map((seg, i) => {
-        const parts = [`${c('in_range')} = 1`, `(${c('weight_g')} < @segLo${i} OR ${c('weight_g')} > @segHi${i})`];
-        req.input(`segLo${i}`, mssql.Float, seg.loG);
-        req.input(`segHi${i}`, mssql.Float, seg.hiG);
-        if (seg.fromMs != null) {
-          parts.push(`${c('production_ts_utc_ms')} >= @segFrom${i}`);
-          req.input(`segFrom${i}`, mssql.BigInt, seg.fromMs);
-        }
-        if (seg.toMs != null) {
-          parts.push(`${c('production_ts_utc_ms')} < @segTo${i}`);
-          req.input(`segTo${i}`, mssql.BigInt, seg.toMs);
-        }
-        return `(${parts.join(' AND ')})`;
+      const stateCase = bindStateCase(req, f.classification, alias, 'fs');
+      const names = f.states.map((st, i) => {
+        req.input(`state${i}`, mssql.VarChar(10), st);
+        return `@state${i}`;
       });
-      w.push(`(${segs.join(' OR ')})`);
+      w.push(`(${stateCase}) IN (${names.join(', ')})`);
     }
   }
   return w.join(' AND ');
@@ -186,10 +182,14 @@ function bindFilters(
 // against the plant's tables; since the 2026-08-05 rebuild the number alone
 // names two rows. The event table is always aliased `e`, the epoch `ep`.
 const IDENTITY_COLS = `e.source_row_id, e.source_epoch, ep.label AS source_epoch_label`;
+// `product_name` (roadmap Phase 4, 14 Sep 2026): the reading's OWN product
+// by name, from the mirror — null for every row from before the column
+// existed at source, which is the truth and not a fault.
+const PRODUCT_NAME_COL = `COALESCE(p.description, p.lot_code) AS product_name`;
 const CONE_COLS = `e.cone_event_id AS event_id, ${IDENTITY_COLS},
   e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
   e.hanger_num, e.source_station, e.lifter_station, e.weight_g, e.in_range, e.cone_id, e.material_id, e.lot_code,
-  e.merge_key_is_unique, e.production_ts_utc_ms`;
+  e.merge_key_is_unique, e.production_ts_utc_ms, ${PRODUCT_NAME_COL}`;
 const SACK_COLS = `e.sack_event_id AS event_id, ${IDENTITY_COLS},
   e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
   e.sack_num, e.weight_kg, e.in_range, e.material_id, e.lot_code, e.merge_key_is_unique,
@@ -206,7 +206,7 @@ const REJECT_COLS = `e.reject_event_id AS event_id, ${IDENTITY_COLS}, e.reject_t
   e.production_ts_utc, e.shift_code, e.shift_date, e.shift_code_legacy,
   e.hanger_num, e.source_station, e.lifter_station,
   e.tube_inspect_code, e.material_inspect_code, e.weight_g, e.material_id,
-  e.production_ts_utc_ms, c.label AS reject_label, c.is_pass AS reject_is_pass`;
+  e.production_ts_utc_ms, c.label AS reject_label, c.is_pass AS reject_is_pass, ${PRODUCT_NAME_COL}`;
 /**
  * Provenance — where a reading came from, on every row (roadmap Phase 3 item
  * 4, 14 Sep 2026). Selected under a `prov_` prefix and folded by
@@ -289,22 +289,45 @@ export function foldProvenance(row: Record<string, unknown>): Record<string, unk
 const colsFor = (type: EventType) =>
   `${type === 'cone' ? CONE_COLS : type === 'sack' ? SACK_COLS : REJECT_COLS}, ${PROVENANCE_COLS}`;
 
+/**
+ * The cone's `state` column (roadmap Phase 4): the one five-state
+ * classification, computed in SQL by the CASE coneState.ts builds from the
+ * same rule every other consumer uses. Emitted whenever the route supplied a
+ * context; a cone listing without one carries no state rather than a guess.
+ * It follows the reading's own columns, so the CSV gains one column there
+ * and nothing before it moves.
+ */
+function stateColumn(req: SqlRequest, type: EventType, f: RegisterFilters): string {
+  if (type !== 'cone' || !f.classification) return '';
+  return `, (${bindStateCase(req, f.classification, ALIAS, 'sc')}) AS state`;
+}
+
 // source_epoch is a small, PK-keyed reference table (one row per source table
 // per generation), so the join costs a nested-loop seek per row and nothing
 // more. LEFT rather than INNER only so a row can never vanish from the
 // register because its epoch row was dropped underneath it.
 const EPOCH_JOIN = `LEFT JOIN sms.source_epoch ep ON ep.epoch_id = e.source_epoch`;
+// sms.product is PK-keyed and a few dozen rows: a seek per row. LEFT so a
+// material the mirror has not seen yet still lists, with no name.
+const PRODUCT_JOIN = `LEFT JOIN sms.product p ON p.product_id = e.material_id`;
 const fromFor = (type: EventType) =>
   type === 'cone'
-    ? `sms.cone_event e ${EPOCH_JOIN}`
+    ? `sms.cone_event e ${EPOCH_JOIN} ${PRODUCT_JOIN}`
     : type === 'sack'
       ? `sms.sack_event e ${EPOCH_JOIN}`
       : `sms.reject_event e
   LEFT JOIN sms.reject_code c
-    ON c.reject_type = e.reject_type
+    ON c.line_id = e.line_id
+   AND c.reject_type = e.reject_type
    AND ISNULL(c.tube_code, -999)     = ISNULL(e.tube_inspect_code, -999)
    AND ISNULL(c.material_code, -999) = ISNULL(e.material_inspect_code, -999)
-  ${EPOCH_JOIN}`;
+  ${EPOCH_JOIN} ${PRODUCT_JOIN}`;
+// `c.line_id = e.line_id` (roadmap Phase 5, 14 Sep 2026): reject codes are
+// per line since migration 028 — a second line's scale may use the same pair
+// for a different fault — and rejects.ts's Pareto join and the transform's
+// seed both match on the line. This join did not, so on the day a second
+// line is configured every reject row here would have joined to BOTH lines'
+// code rows and listed twice, under the other line's label.
 // ISNULL(..., -999) on both sides, as rejects.ts already did: a WEIGHT reject
 // carries no inspection codes, so both columns are NULL on the event and on
 // its reject_code row, and `NULL = NULL` is never true in SQL. Until 14 Sep
@@ -339,9 +362,10 @@ export async function listEvents(
 
   const rowsReq = pool.request();
   bindFilters(rowsReq, lineId, type, q, ALIAS);
+  const stateCol = stateColumn(rowsReq, type, q);
   rowsReq.input('offset', mssql.Int, offset).input('take', mssql.Int, q.pageSize);
   const res = await rowsReq.query<Record<string, unknown>>(
-    `SELECT ${cols} FROM ${from} WHERE ${where}
+    `SELECT ${cols}${stateCol} FROM ${from} WHERE ${where}
      ORDER BY ${order}
      OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY`,
   );
@@ -353,6 +377,8 @@ export async function getEventDetail(
   lineId: number,
   type: EventType,
   rowId: number,
+  /** With it, a cone's row carries its `state` (roadmap Phase 4). */
+  classification?: StateContext,
 ): Promise<Record<string, unknown> | null> {
   const from = fromFor(type);
   // Addressed by the canonical PK on every type (idCol). For cone and sack
@@ -363,13 +389,11 @@ export async function getEventDetail(
   // The three loose lineage columns predate `provenance` (which now carries
   // them and nine more); kept so nothing that read them flat breaks.
   const cols = `${colsFor(type)}, ${ALIAS}source_system, ${ALIAS}ingest_ts_utc, ${ALIAS}transform_version`;
-  const res = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('id', mssql.BigInt, rowId)
-    .query<Record<string, unknown>>(
-      `SELECT TOP 1 ${cols} FROM ${from} WHERE ${ALIAS}line_id=@line AND ${key}=@id`,
-    );
+  const req = pool.request().input('line', mssql.Int, lineId).input('id', mssql.BigInt, rowId);
+  const stateCol = stateColumn(req, type, { classification });
+  const res = await req.query<Record<string, unknown>>(
+    `SELECT TOP 1 ${cols}${stateCol} FROM ${from} WHERE ${ALIAS}line_id=@line AND ${key}=@id`,
+  );
   const row = res.recordset[0];
   return row ? foldProvenance(row) : null;
 }
@@ -389,9 +413,10 @@ export async function exportEventsCsv(
 
   const req = pool.request();
   const where = bindFilters(req, lineId, type, f, ALIAS);
+  const stateCol = stateColumn(req, type, f);
   req.input('cap', mssql.Int, CSV_ROW_CAP + 1);
   const res = await req.query<Record<string, unknown>>(
-    `SELECT TOP (@cap) ${cols} FROM ${from} WHERE ${where} ORDER BY ${order}`,
+    `SELECT TOP (@cap) ${cols}${stateCol} FROM ${from} WHERE ${where} ORDER BY ${order}`,
   );
   const truncated = res.recordset.length > CSV_ROW_CAP;
   const rows = (truncated ? res.recordset.slice(0, CSV_ROW_CAP) : res.recordset).map(foldProvenance);

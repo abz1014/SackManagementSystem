@@ -46,6 +46,16 @@ export interface SyncConfig {
   overlapRows: number;
   /** Seconds between passes in loop mode. Floor 5. */
   intervalSeconds: number;
+  /**
+   * Consecutive halted/failed passes before the worker raises the
+   * `persistent_sync_failure` CRITICAL finding (roadmap Phase 11 item 3,
+   * 14 Sep 2026; ARCHITECTURE §14 promised the finding and no check_name
+   * existed). SYNC_FAILURE_CRITICAL_AFTER, default 5 — five minutes of
+   * failure at the default cadence, long enough to outlast a SQL Server
+   * restart and short enough that a dead plant link shows on Setup within
+   * the same shift. Floor 1.
+   */
+  failureCriticalAfter: number;
   app: DbConfig;
   iflData: DbConfig;
   pdasDbName: string;
@@ -96,6 +106,7 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
     lineId: intEnv(env, 'LINE_ID', 1, 1),
     overlapRows: intEnv(env, 'SYNC_OVERLAP_ROWS', 500, 0),
     intervalSeconds: intEnv(env, 'SYNC_INTERVAL_SECONDS', 60, 5),
+    failureCriticalAfter: intEnv(env, 'SYNC_FAILURE_CRITICAL_AFTER', 5, 1),
     app,
     iflData,
     pdasDbName: env.IFL_DB_NAME_PDAS ?? 'PDAS_TP1U2',

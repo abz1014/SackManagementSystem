@@ -70,6 +70,21 @@ const schema = z.object({
    * new required variable on an existing deployment.
    */
   plantUtcOffsetMinutes: z.coerce.number().int().optional(),
+  /**
+   * Password policy (roadmap Phase 11 item 1, 14 Sep 2026): the shortest
+   * password the self-change, the admin reset, the admin create route and
+   * the CLI will accept. Default 10, replacing the 6 the create route and
+   * the CLI used to hard-code (the CLI accepted any non-empty string). IFL
+   * has not stated a password policy (Phase 11 clarifications); this is the
+   * developer default until they do, and it is configuration, not code.
+   */
+  passwordMinLength: z.coerce.number().int().min(6).max(128).default(10),
+  /**
+   * Where scripts/backup-appdb.ps1 writes its .bak files. The Health screen
+   * reads the newest file's age from here — read-only, never written to by
+   * the API. Default matches the backup script's own -OutDir default.
+   */
+  backupDir: z.string().min(1).default('C:\\sms-backups'),
   appDb: z.object({
     server: z.string().min(1),
     port: z.coerce.number().int().positive(),
@@ -133,6 +148,9 @@ export interface ApiConfig {
   tlsPfxPath?: string;
   tlsPfxPassphrase?: string;
   plantUtcOffsetMinutes?: number;
+  /** Optional on the type so the test fixtures that build an ApiConfig by hand keep compiling; the loader always sets both. */
+  passwordMinLength?: number;
+  backupDir?: string;
   appDb: DbConfig;
   pdasWrite: PdasWriteConfig;
 }
@@ -196,6 +214,8 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     tlsPfxPath: env.TLS_PFX_PATH,
     tlsPfxPassphrase: env.TLS_PFX_PASSPHRASE,
     plantUtcOffsetMinutes: env.PLANT_UTC_OFFSET_MINUTES,
+    passwordMinLength: env.PASSWORD_MIN_LENGTH,
+    backupDir: env.BACKUP_DIR,
     appDb: {
       server: env.APP_DB_SERVER,
       port: env.APP_DB_PORT,

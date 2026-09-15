@@ -91,6 +91,7 @@ async function onlyFresh<T extends { raw_id: number }>(
 }
 import {
   computeFindings,
+  loadPlausibilityRule,
   persistFindings,
   stationRosterFindings,
   PER_SUBJECT_CHECKS,
@@ -398,6 +399,10 @@ export async function runTransform(
   const shift = await resolveShiftRule(appPool, cfg.lineId, cfg.appConfig.shift);
   const streams = await loadSourceStreams(appPool, cfg.lineId);
   const roster = await loadStationRoster(appPool, cfg.lineId);
+  // The plausibility window for the outlier finding, from the same rule the
+  // API's statistics exclude by (roadmap Phase 4, 14 Sep 2026) — dq.ts used
+  // to hard-code 1500 g / 40 kg with no ceiling.
+  const plausibility = await loadPlausibilityRule(appPool, cfg.lineId);
   const rulesFor = (kind: keyof typeof streams): TransformRules => ({
     lineId: cfg.lineId,
     shift,
@@ -419,7 +424,7 @@ export async function runTransform(
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
       const findings = [
-        ...computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs),
+        ...computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs, plausibility),
         ...stationRosterFindings(rows, roster, rawShortName(TABLE_SHAPES.cone.rawTable), streams.cone.sourceTable),
       ];
       const res = await persistCanonical(appPool, 'sms.cone_event', CONE_COLS, rows, {
@@ -448,7 +453,7 @@ export async function runTransform(
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
       // No roster check: sack rows carry no machine number (iflTables.ts).
-      const findings = computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs);
+      const findings = computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs, plausibility);
       const res = await persistCanonical(appPool, 'sms.sack_event', SACK_COLS, rows, {
         sourceSystem: rules.sourceSystem,
         minRawId: rows.length ? minRawId(rows) : undefined,
@@ -516,8 +521,8 @@ export async function runTransform(
       // assumes rows arrive in that order — interleaving two differently-
       // ordered streams would produce false positives, not a stricter check.
       const findings = mergeByCheck(
-        computeFindings(q, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs),
-        computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs),
+        computeFindings(q, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs, plausibility),
+        computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs, plausibility),
         stationRosterFindings(q, roster, rawShortName(TABLE_SHAPES.reject_qcs.rawTable), streams.reject_qcs.sourceTable),
         stationRosterFindings(w, roster, rawShortName(TABLE_SHAPES.reject_weight.rawTable), streams.reject_weight.sourceTable),
       );
@@ -535,8 +540,9 @@ export async function runTransform(
     }
   }
 
-  // keep the reject-code lookup populated with any new code pairs (labels pending Q10)
-  await seedRejectCodes(appPool);
+  // keep the reject-code lookup populated with any new code pairs (labels
+  // pending Q10) — for THIS line only, since migration 028 keyed codes per line.
+  await seedRejectCodes(appPool, cfg.lineId);
 
   return out;
 }

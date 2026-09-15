@@ -106,6 +106,24 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
               <span className="mut sm">({W.report.timeLostCaveat})</span>.
             </p>
             <p className="mut sm" style={{ marginTop: 10 }}>{W.report.noSackStock}</p>
+            {/* Roadmap Phase 4 (14 Sep 2026): the population every weight
+                figure was computed over, and the shift-attribution check —
+                the same two facts Weight and Setup › Rules state, in the
+                same words, so the printed page agrees with the screens. */}
+            {d.readings && (
+              <p className="mut sm" style={{ marginTop: 6 }}>
+                {W.cone.readingsSentence(fmtInt(d.totals.cones), fmtInt(d.readings.implausible))}
+              </p>
+            )}
+            {d.shiftCheck && (
+              <p className="mut sm" style={{ marginTop: 6 }}>
+                {W.cone.shiftSentence(
+                  fmtInt(d.shiftCheck.mismatched),
+                  fmtInt(d.shiftCheck.compared),
+                  d.shiftCheck.topHour == null ? null : `${String(d.shiftCheck.topHour).padStart(2, '0')}:00`,
+                )}
+              </p>
+            )}
           </Block>
 
           <Block>

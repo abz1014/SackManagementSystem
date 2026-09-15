@@ -16,6 +16,12 @@
  * readings weighed weeks earlier. Here the scale's verdict is the single flag,
  * named as the scale's; the product comparison appears only when a product was
  * actually in force at that reading's time, and says so when none was.
+ *
+ * Since roadmap Phase 4 (14 Sep 2026) the column is the ONE five-state
+ * classification the server computes for every cone (within / under / over
+ * the limit / rejected by the scale / not judged), filterable by state, with
+ * the reading's own product beside it. Nothing about a cone's state is
+ * decided in this file.
  */
 import { useEffect, useState } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
@@ -26,8 +32,8 @@ import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
 import type { ReadingsFilter } from '../ui/Bar';
 import {
-  getEvents, eventsExportUrl, getStations, stationLabel,
-  type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,
+  getEvents, eventsExportUrl, getStations, stationLabel, CONE_STATES,
+  type ConeState, type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,
 } from '../api';
 
 const PAGE_SIZE = 100;
@@ -45,6 +51,7 @@ function queryFor(
   station: number | null,
   page: number,
   outsideLimitsOnly: boolean,
+  states: ConeState[] = [],
 ): RegisterQuery {
   const type: RegisterType = listing === 'sacks' ? 'sack' : listing === 'inspectionRejects' ? 'reject' : 'cone';
   const base: RegisterQuery = {
@@ -64,8 +71,13 @@ function queryFor(
   // the inspection stations threw out before they were ever weighed as cones.
   if (listing === 'rejected') base.inRange = false;
   if (station != null && type !== 'sack') base.station = station;
-  // cone only — see the H4 fix note on ReadingsScreen below.
-  if (outsideLimitsOnly && type === 'cone') base.outsideProductLimits = true;
+  // cone only — see the H4 fix note on ReadingsScreen below. Since Phase 4
+  // "outside product limits" is the 'low' + 'high' states of the one
+  // classification, and any chip selection is sent the same way.
+  if (type === 'cone') {
+    const wanted = outsideLimitsOnly ? (['low', 'high'] as ConeState[]) : states;
+    if (wanted.length > 0) base.state = wanted;
+  }
   return base;
 }
 
@@ -97,6 +109,9 @@ export function ReadingsScreen({
   // reapplied a filter the header no longer mentioned.
   const outsideOnly = initialFilter === 'outsideLimits';
   const [station, setStation] = useState<number | null>(null);
+  // The state chips (Phase 4). Empty = every state. Cones only; the other
+  // listings have no classification and the chips are not shown for them.
+  const [states, setStates] = useState<ConeState[]>([]);
   const [page, setPage] = useState(1);
   // Finding H12 (Sep 2026 audit): narrowing the global period while parked on
   // a later page used to show a truthful, nonzero header count over a
@@ -115,9 +130,9 @@ export function ReadingsScreen({
         ? W.lag.late(fmtSpan(health.lagSeconds))
         : W.lag.noData;
 
-  const key = `${listing}:${period.from}:${period.to}:${period.shift ?? 'all'}:${station ?? 'any'}:${outsideOnly}:${page}`;
+  const key = `${listing}:${period.from}:${period.to}:${period.shift ?? 'all'}:${station ?? 'any'}:${outsideOnly}:${states.join('+')}:${page}`;
   const rows = usePolling(
-    () => getEvents(queryFor(listing, period, station, page, outsideOnly)),
+    () => getEvents(queryFor(listing, period, station, page, outsideOnly, states)),
     // Only a live period can gain rows while it is open; a closed one is
     // polled at a slow heartbeat rather than never, so a re-sync still shows.
     period.live ? LIST_POLL_MS : 5 * 60_000,
@@ -152,7 +167,7 @@ export function ReadingsScreen({
     <>
       <div className="page">
         <p className="q">{W.question.readings}</p>
-        <h1 className="wide">{countLine(period, listing, total, rejectedTotal, outsideOnly)}</h1>
+        <h1 className="wide">{countLine(period, listing, total, rejectedTotal, outsideOnly, states)}</h1>
       </div>
 
       <Block first tight>
@@ -180,6 +195,15 @@ export function ReadingsScreen({
                   }}
                 />
               )}
+              {listing === 'cones' && !outsideOnly && (
+                <StateChips
+                  value={states}
+                  onChange={(v) => {
+                    setStates(v);
+                    setPage(1);
+                  }}
+                />
+              )}
               {outsideOnly && (
                 <span className="chip">
                   {W.readings.filterOutsideLimits}{' '}
@@ -200,7 +224,7 @@ export function ReadingsScreen({
           right={
             <>
               {canExport && (
-                <a className="btn" href={eventsExportUrl(queryFor(listing, period, station, 1, outsideOnly))}>
+                <a className="btn" href={eventsExportUrl(queryFor(listing, period, station, 1, outsideOnly, states))}>
                   {W.report.exportCsv}
                 </a>
               )}
@@ -248,10 +272,16 @@ export function ReadingsScreen({
 
 /* -------------------------------------------------------------- the count */
 
-function countLine(period: Period, listing: Listing, total: number, rejected: number, outsideOnly: boolean): string {
+function countLine(period: Period, listing: Listing, total: number, rejected: number, outsideOnly: boolean, states: ConeState[]): string {
   const what = fmtDayLong(period.from) === fmtDayLong(period.to) ? fmtDayLong(period.from) : `${period.from} to ${period.to}`;
   if (listing === 'sacks') return `${what}: ${fmtInt(total)} sacks weighed.`;
   if (listing === 'inspectionRejects') return `${what}: ${fmtInt(total)} cones rejected before weighing.`;
+  // With state chips on, `total` is the filtered count — the same reason the
+  // outside-limits sentence below does not reuse the "N weighed, M rejected
+  // (P%)" form.
+  if (listing === 'cones' && states.length > 0) {
+    return `${what}: ${W.cone.countLineState(fmtInt(total), states.map((st) => W.cone.state[st].toLowerCase()).join(' or '))}`;
+  }
   // With the outside-limits filter on, `total` counts only the filtered cones
   // while `rejected` counts every scale-rejected cone in the period — two
   // different populations. Stating them as "N weighed, M rejected (P%)" made
@@ -294,6 +324,30 @@ function StationChip({
   );
 }
 
+/**
+ * The five states as toggle chips — any combination, none meaning all. The
+ * words are the state's own (W.cone.state), so the chip, the column and the
+ * sheet never name one state three ways.
+ */
+function StateChips({ value, onChange }: { value: ConeState[]; onChange: (v: ConeState[]) => void }) {
+  const toggle = (st: ConeState) => onChange(value.includes(st) ? value.filter((x) => x !== st) : [...value, st]);
+  return (
+    <span className="chip" role="group" aria-label={W.cone.filterState}>
+      {W.cone.filterState}{' '}
+      <button type="button" className="linkish" aria-pressed={value.length === 0} onClick={() => onChange([])}
+              style={{ fontWeight: value.length === 0 ? 600 : 400 }}>
+        {W.cone.anyState}
+      </button>
+      {CONE_STATES.map((st) => (
+        <button key={st} type="button" className="linkish" aria-pressed={value.includes(st)} onClick={() => toggle(st)}
+                style={{ marginLeft: 8, fontWeight: value.includes(st) ? 600 : 400 }}>
+          {W.cone.stateShort[st]}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function Pager({ page, total, onPage }: { page: number; total: number; onPage: (p: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (pages <= 1) return null;
@@ -333,7 +387,8 @@ function ReadingTable({
           <th style={{ width: '9em' }}>{W.readings.time}</th>
           <th style={{ width: '11em' }}>{isSack ? W.readings.sackNo : W.readings.record}</th>
           <th className="n" style={{ width: '7em' }}>{W.readings.weight}</th>
-          <th style={{ paddingLeft: 32 }}>{W.readings.status}</th>
+          <th style={{ paddingLeft: 32 }}>{isSack ? W.readings.status : W.cone.colState}</th>
+          {!isSack && <th style={{ paddingLeft: 24 }}>{W.cone.colProduct}</th>}
           <th className="n" style={{ width: '2em' }} />
         </tr>
       </thead>
@@ -360,12 +415,18 @@ function ReadingTable({
               <td style={{ paddingLeft: 32 }}>
                 {isInspectionReject ? (
                   <span className="acc">{r.reject_label ?? (r.reject_type === 'weight' ? 'Weight reject' : 'Quality reject')}</span>
+                ) : r.state ? (
+                  // The one classification, in its own words. Low/high are
+                  // accented like a rejection: the product's tolerance is the
+                  // second fact, and a cone outside it is worth a glance.
+                  <span className={r.state === 'within' ? '' : r.state === 'unknown' ? 'mut' : 'acc'}>{W.cone.state[r.state]}</span>
                 ) : rejectedByScale ? (
                   <span className="acc">{W.rejectedByScale}</span>
                 ) : (
                   W.passed
                 )}
               </td>
+              {!isSack && <td style={{ paddingLeft: 24 }} className={r.product_name ? '' : 'mut'}>{r.product_name ?? W.cone.noProductOnRow}</td>}
               <td className="n">
                 <Chevron label={W.openRecord} />
               </td>

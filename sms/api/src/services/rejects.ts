@@ -2,10 +2,123 @@
  * Reject analysis (Q10). Pareto of reject reasons using the RAW codes, joined
  * to the reject_code lookup for labels (NULL until IFL provides the code list).
  * Total counts/trend work now; only the reason *labels* wait on Q10.
+ *
+ * FILTERS (roadmap Phase 5, 14 Sep 2026). The gap analysis found the Pareto
+ * accepted a date range and nothing else: shift lived on /api/production
+ * only, product on /api/production only, station on the register rows only,
+ * and the reject code was a grouping that could never be a WHERE. Every
+ * reject query in this file now takes one `RejectFilters` and binds it
+ * through one function, so the Pareto, the per-day breakdown and the reason
+ * sheet cannot disagree about which rejects a filter selects — and
+ * rejectSpc.ts binds the same shape, so the trend agrees with them too.
+ *
+ * `tsTo` is the replay guard period.ts documents: an upper bound on the
+ * production INSTANT so `?at=` shows only what existed at that moment. Line
+ * had it (through /api/production) and this screen did not, which is why the
+ * two disagreed on the same shift under replay.
  */
-import type { ConnectionPool } from 'mssql';
+import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { Db } from './audit.js';
+
+/**
+ * One reject code, as a filter. `quality` codes are a (tube, material) pair
+ * from the inspection station; `weight` rejects carry no code at all (the
+ * scale threw them out, rejectWeight1_TP1U2 has no code column). Null codes
+ * are legal on a quality reject and are matched as such, never dropped.
+ */
+export type RejectCodeFilter =
+  | { kind: 'weight' }
+  | { kind: 'quality'; tube: number | null; material: number | null };
+
+/**
+ * The URL form: `code=weight`, or `code=<tube>-<material>` with `null` for a
+ * missing half (`code=null-3`). Returns null for anything else so the route
+ * can answer 400 rather than silently matching nothing.
+ */
+export function parseCodeParam(raw: string): RejectCodeFilter | null {
+  if (raw === 'weight') return { kind: 'weight' };
+  const m = /^(\d{1,9}|null)-(\d{1,9}|null)$/.exec(raw);
+  if (!m) return null;
+  const part = (s: string) => (s === 'null' ? null : Number(s));
+  return { kind: 'quality', tube: part(m[1]!), material: part(m[2]!) };
+}
+
+/** The URL form of a code, the inverse of parseCodeParam. */
+export function codeParamOf(c: { rejectType: string; tubeCode: number | null; materialCode: number | null }): string {
+  return c.rejectType === 'weight' ? 'weight' : `${c.tubeCode ?? 'null'}-${c.materialCode ?? 'null'}`;
+}
+
+export interface RejectFilters {
+  /** Production-day bounds (shift_date), inclusive. */
+  from?: string;
+  to?: string;
+  shift?: 'morning' | 'evening' | 'night';
+  /** ISO instant; caps production_ts_utc_ms so a replay counts only what existed then. */
+  tsTo?: string;
+  station?: number;
+  /** material_id. NULL on every row from before the 2026-08-05 rebuild — see `unattributed`. */
+  product?: number;
+  code?: RejectCodeFilter;
+}
+
+/**
+ * Binds every filter onto `req` and returns the WHERE fragment, columns
+ * qualified with `alias`. `withCode` is false where the code is the thing
+ * being grouped or where the population is the DENOMINATOR (every reject,
+ * whatever its code) — the same rule rejectSpc.ts applies to reject_type.
+ *
+ * The code predicate uses ISNULL(..., -999) on the event side exactly as the
+ * reject_code join does: `NULL = NULL` is never true in SQL, so a quality
+ * reject with a null half of its pair would otherwise be unselectable.
+ */
+export function bindRejectFilters(
+  req: SqlRequest,
+  lineId: number,
+  f: RejectFilters,
+  alias = '',
+  withCode = true,
+): string {
+  const c = (name: string) => `${alias}${name}`;
+  const w: string[] = [`${c('line_id')} = @line`];
+  req.input('line', mssql.Int, lineId);
+  if (f.from) { w.push(`${c('shift_date')} >= @from`); req.input('from', mssql.Date, f.from); }
+  if (f.to) { w.push(`${c('shift_date')} <= @to`); req.input('to', mssql.Date, f.to); }
+  if (f.shift) { w.push(`${c('shift_code')} = @shift`); req.input('shift', mssql.VarChar(10), f.shift); }
+  if (f.tsTo) { w.push(`${c('production_ts_utc_ms')} <= @tsTo`); req.input('tsTo', mssql.BigInt, new Date(f.tsTo).getTime()); }
+  if (f.station != null) { w.push(`${c('source_station')} = @station`); req.input('station', mssql.Int, f.station); }
+  if (f.product != null) { w.push(`${c('material_id')} = @product`); req.input('product', mssql.Int, f.product); }
+  if (withCode && f.code) {
+    w.push(`${c('reject_type')} = @codeType`);
+    req.input('codeType', mssql.VarChar(10), f.code.kind);
+    if (f.code.kind === 'quality') {
+      w.push(`ISNULL(${c('tube_inspect_code')}, -999) = @codeTube`);
+      w.push(`ISNULL(${c('material_inspect_code')}, -999) = @codeMaterial`);
+      req.input('codeTube', mssql.Int, f.code.tube ?? -999);
+      req.input('codeMaterial', mssql.Int, f.code.material ?? -999);
+    }
+  }
+  return w.join(' AND ');
+}
+
+/**
+ * The same filters applied to cone_event, for a denominator. Cones have no
+ * reject type or code, so those never bind; everything else is the same
+ * column under the same name on both tables.
+ */
+export function bindConeFilters(req: SqlRequest, lineId: number, f: RejectFilters, alias = ''): string {
+  return bindRejectFilters(req, lineId, { ...f, code: undefined }, alias, false);
+}
+
+/**
+ * The reject_code lookup join, per line since migration 028. ISNULL on both
+ * sides: a weight reject's pair is NULL/NULL on the event AND on its code row.
+ */
+const CODE_JOIN = `LEFT JOIN sms.reject_code rc
+      ON rc.line_id = re.line_id
+     AND rc.reject_type = re.reject_type
+     AND ISNULL(rc.tube_code, -999)     = ISNULL(re.tube_inspect_code, -999)
+     AND ISNULL(rc.material_code, -999) = ISNULL(re.material_inspect_code, -999)`;
 
 export interface RejectReason {
   rejectCodeId: number | null;
@@ -19,22 +132,52 @@ export interface RejectReason {
   cumulativePct: number;
 }
 
+/**
+ * Present only on a product-filtered call, and for the same reason
+ * production.ts carries one: product attribution is asymmetric across the
+ * 2026-08-05 rebuild. Every July-generation reject has material_id NULL
+ * because the source column did not exist, so `?product=` silently answers
+ * with September rows only. `rows` is the count of rejects in the requested
+ * range with NO attribution, `of` every reject in it — both WITHOUT the
+ * product filter — so the screen can say "N of M rejects in this period
+ * predate product recording".
+ */
+export interface UnattributedRejects {
+  rows: number;
+  of: number;
+}
+
+export interface RejectParetoResult {
+  total: number;
+  reasons: RejectReason[];
+  unattributed: UnattributedRejects | null;
+}
+
 function displayFor(r: { rejectType: string; tubeCode: number | null; materialCode: number | null; label: string | null }): string {
   if (r.label) return r.label;
   if (r.rejectType === 'weight') return 'Weight out of range';
   return `Tube ${r.tubeCode ?? '—'} · Mat ${r.materialCode ?? '—'}`;
 }
 
+async function countUnattributed(pool: ConnectionPool, lineId: number, f: RejectFilters): Promise<UnattributedRejects | null> {
+  if (f.product == null) return null;
+  const req = pool.request();
+  const where = bindRejectFilters(req, lineId, { ...f, product: undefined }, 're.');
+  const r = await req.query<{ n: number; no_attr: number }>(
+    `SELECT COUNT(*) n, SUM(CASE WHEN re.material_id IS NULL THEN 1 ELSE 0 END) no_attr
+       FROM sms.reject_event re WHERE ${where}`,
+  );
+  const row = r.recordset[0];
+  return { rows: Number(row?.no_attr ?? 0), of: Number(row?.n ?? 0) };
+}
+
 export async function getRejectPareto(
   pool: ConnectionPool,
   lineId: number,
-  from?: string,
-  to?: string,
-): Promise<{ total: number; reasons: RejectReason[] }> {
-  const req = pool.request().input('line', mssql.Int, lineId);
-  const where = ['re.line_id = @line'];
-  if (from) { where.push('re.shift_date >= @from'); req.input('from', mssql.Date, from); }
-  if (to) { where.push('re.shift_date <= @to'); req.input('to', mssql.Date, to); }
+  f: RejectFilters = {},
+): Promise<RejectParetoResult> {
+  const req = pool.request();
+  const where = bindRejectFilters(req, lineId, f, 're.');
 
   const r = await req.query<{
     reject_code_id: number | null;
@@ -47,20 +190,17 @@ export async function getRejectPareto(
     SELECT rc.reject_code_id, re.reject_type, re.tube_inspect_code, re.material_inspect_code,
            rc.label, COUNT(*) AS n
     FROM sms.reject_event re
-    LEFT JOIN sms.reject_code rc
-      ON rc.line_id = re.line_id
-     AND rc.reject_type = re.reject_type
-     AND ISNULL(rc.tube_code, -999)     = ISNULL(re.tube_inspect_code, -999)
-     AND ISNULL(rc.material_code, -999) = ISNULL(re.material_inspect_code, -999)
-    WHERE ${where.join(' AND ')}
+    ${CODE_JOIN}
+    WHERE ${where}
     GROUP BY rc.reject_code_id, re.reject_type, re.tube_inspect_code, re.material_inspect_code, rc.label
     ORDER BY n DESC
   `);
 
-  const total = r.recordset.reduce((s, x) => s + x.n, 0);
+  const total = r.recordset.reduce((s, x) => s + Number(x.n), 0);
   let cum = 0;
   const reasons: RejectReason[] = r.recordset.map((x) => {
-    cum += x.n;
+    const n = Number(x.n);
+    cum += n;
     const base = {
       rejectType: x.reject_type,
       tubeCode: x.tube_inspect_code,
@@ -71,13 +211,259 @@ export async function getRejectPareto(
       rejectCodeId: x.reject_code_id == null ? null : Number(x.reject_code_id),
       ...base,
       displayLabel: displayFor(base),
-      count: x.n,
-      pct: total > 0 ? Math.round((1000 * x.n) / total) / 10 : 0,
+      count: n,
+      pct: total > 0 ? Math.round((1000 * n) / total) / 10 : 0,
       cumulativePct: total > 0 ? Math.round((1000 * cum) / total) / 10 : 0,
     };
   });
-  return { total, reasons };
+  const unattributed = await countUnattributed(pool, lineId, f);
+  return { total, reasons, unattributed };
 }
+
+/* ------------------------------------------------------- per day, per code */
+
+/**
+ * The day axis is the PRODUCTION day — `shift_date`, 06:00 to 06:00 under
+ * the line's shift rule, the same key every other day-grained figure in the
+ * application uses. IFL has not confirmed whether their reject reporting
+ * counts by production day or by calendar date (gap analysis §7); the
+ * response says which this is so a screen can print it rather than imply it.
+ */
+export const REJECT_DAY_BASIS = 'production_day' as const;
+
+export interface RejectDayCodeRow {
+  /** YYYY-MM-DD production day. */
+  day: string;
+  rejectType: string;
+  tubeCode: number | null;
+  materialCode: number | null;
+  rejectCodeId: number | null;
+  label: string | null;
+  displayLabel: string;
+  isPass: boolean | null;
+  /** Rejects of this code on this day, under the filters. */
+  count: number;
+  /** Cones weighed that day, under the same shift/station/product/tsTo filters. */
+  cones: number;
+  /**
+   * Cones + rejects of EVERY code that day — the rate's denominator, the one
+   * rule the whole application uses (a rejected cone was still an inspected
+   * unit; rejectSpc.ts header). Never divide `count` by `cones` alone.
+   */
+  inspected: number;
+  ratePct: number | null;
+}
+
+export interface RejectDayCodeResult {
+  dayBasis: typeof REJECT_DAY_BASIS;
+  denominator: 'cones_plus_rejects';
+  /** Distinct production days with at least one reject (or cone) in range. */
+  days: number;
+  total: number;
+  rows: RejectDayCodeRow[];
+}
+
+/**
+ * Rejects grouped by (production day, code), each with that day's own cone
+ * count so the row can carry a rate. Three grouped queries and a merge in JS,
+ * the same shape production.ts uses; the denominator population is the day's
+ * cones plus ALL of the day's rejects under the non-code filters, so a code
+ * that is 3% of a day's rejects reads as 3% × (rejects ÷ inspected), not as
+ * 3% of the cones.
+ */
+export async function getRejectsByDayCode(
+  pool: ConnectionPool,
+  lineId: number,
+  f: RejectFilters = {},
+): Promise<RejectDayCodeResult> {
+  const codeReq = pool.request();
+  const codeWhere = bindRejectFilters(codeReq, lineId, f, 're.');
+  const byCode = await codeReq.query<{
+    day: string; reject_type: string; tube_inspect_code: number | null; material_inspect_code: number | null;
+    reject_code_id: number | null; label: string | null; is_pass: boolean | null; n: number;
+  }>(`
+    SELECT CONVERT(varchar(10), re.shift_date, 120) AS day, re.reject_type, re.tube_inspect_code, re.material_inspect_code,
+           rc.reject_code_id, rc.label, rc.is_pass, COUNT(*) AS n
+    FROM sms.reject_event re
+    ${CODE_JOIN}
+    WHERE ${codeWhere}
+    GROUP BY CONVERT(varchar(10), re.shift_date, 120), re.reject_type, re.tube_inspect_code, re.material_inspect_code,
+             rc.reject_code_id, rc.label, rc.is_pass
+  `);
+
+  // Every reject of the day, whatever its code, for the denominator — the
+  // same query as above without the code predicate and the code grouping.
+  const allReq = pool.request();
+  const allWhere = bindRejectFilters(allReq, lineId, f, 're.', false);
+  const allRejects = await allReq.query<{ day: string; n: number }>(
+    `SELECT CONVERT(varchar(10), re.shift_date, 120) AS day, COUNT(*) AS n
+       FROM sms.reject_event re WHERE ${allWhere}
+      GROUP BY CONVERT(varchar(10), re.shift_date, 120)`,
+  );
+
+  const coneReq = pool.request();
+  const coneWhere = bindConeFilters(coneReq, lineId, f, 'ce.');
+  const cones = await coneReq.query<{ day: string; n: number }>(
+    `SELECT CONVERT(varchar(10), ce.shift_date, 120) AS day, COUNT(*) AS n
+       FROM sms.cone_event ce WHERE ${coneWhere}
+      GROUP BY CONVERT(varchar(10), ce.shift_date, 120)`,
+  );
+
+  const dayKey = (d: unknown) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+  const conesOf = new Map(cones.recordset.map((x) => [dayKey(x.day), Number(x.n)]));
+  const rejectsOf = new Map(allRejects.recordset.map((x) => [dayKey(x.day), Number(x.n)]));
+
+  const rows: RejectDayCodeRow[] = byCode.recordset.map((x) => {
+    const day = dayKey(x.day);
+    const n = Number(x.n);
+    const dayCones = conesOf.get(day) ?? 0;
+    const inspected = dayCones + (rejectsOf.get(day) ?? 0);
+    const base = {
+      rejectType: x.reject_type,
+      tubeCode: x.tube_inspect_code == null ? null : Number(x.tube_inspect_code),
+      materialCode: x.material_inspect_code == null ? null : Number(x.material_inspect_code),
+      label: x.label,
+    };
+    return {
+      day,
+      ...base,
+      rejectCodeId: x.reject_code_id == null ? null : Number(x.reject_code_id),
+      displayLabel: displayFor(base),
+      isPass: x.is_pass == null ? null : Boolean(x.is_pass),
+      count: n,
+      cones: dayCones,
+      inspected,
+      ratePct: inspected > 0 ? Math.round((1000 * n) / inspected) / 10 : null,
+    };
+  });
+  // Day ascending, then the biggest reason first within the day.
+  rows.sort((a, b) => a.day.localeCompare(b.day) || b.count - a.count);
+  const days = new Set([...rows.map((r) => r.day), ...conesOf.keys()]).size;
+  return {
+    dayBasis: REJECT_DAY_BASIS,
+    denominator: 'cones_plus_rejects',
+    days,
+    total: rows.reduce((s, r) => s + r.count, 0),
+    rows,
+  };
+}
+
+/* ------------------------------------------------------------ reason sheet */
+
+export interface RejectReasonRow {
+  eventId: number;
+  productionTsUtc: string;
+  shiftCode: string;
+  station: number | null;
+  materialId: number | null;
+  productLabel: string | null;
+  weightG: number | null;
+  /** IFL's own row id and the generation it belongs to — one id, labelled. */
+  sourceRowId: number | null;
+  epochLabel: string | null;
+  attributionMethod: string | null;
+}
+
+export interface RejectReasonResult {
+  day: string;
+  dayBasis: typeof REJECT_DAY_BASIS;
+  code: { rejectType: string; tubeCode: number | null; materialCode: number | null };
+  /** null until the transform has seeded a lookup row for this pair. */
+  rejectCodeId: number | null;
+  label: string | null;
+  displayLabel: string;
+  isPass: boolean | null;
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: RejectReasonRow[];
+}
+
+/**
+ * One day's rejects of one code, for the reason sheet: when, which station,
+ * which product (the row's own material_id, never today's), the weight when
+ * the row has one (weight rejects only), and the source row with its
+ * generation label — since the 2026-08-05 rebuild the number alone names two
+ * rows. Paged, oldest first, so the sheet reads as the day unfolded.
+ */
+export async function listRejectsOfDayCode(
+  pool: ConnectionPool,
+  lineId: number,
+  q: { day: string; code: RejectCodeFilter; station?: number; product?: number; shift?: RejectFilters['shift']; page: number; pageSize: number },
+): Promise<RejectReasonResult> {
+  const f: RejectFilters = { from: q.day, to: q.day, code: q.code, station: q.station, product: q.product, shift: q.shift };
+
+  const codeRow = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('type', mssql.VarChar(10), q.code.kind)
+    .input('tube', mssql.Int, q.code.kind === 'quality' ? (q.code.tube ?? -999) : -999)
+    .input('material', mssql.Int, q.code.kind === 'quality' ? (q.code.material ?? -999) : -999)
+    .query<{ reject_code_id: number; label: string | null; is_pass: boolean | null }>(
+      `SELECT reject_code_id, label, is_pass FROM sms.reject_code
+        WHERE line_id = @line AND reject_type = @type
+          AND ISNULL(tube_code, -999) = @tube AND ISNULL(material_code, -999) = @material`,
+    );
+  const code = codeRow.recordset[0];
+
+  const countReq = pool.request();
+  const where = bindRejectFilters(countReq, lineId, f, 'e.');
+  const count = await countReq.query<{ n: number }>(`SELECT COUNT(*) n FROM sms.reject_event e WHERE ${where}`);
+
+  const rowsReq = pool.request();
+  bindRejectFilters(rowsReq, lineId, f, 'e.');
+  rowsReq.input('offset', mssql.Int, (q.page - 1) * q.pageSize).input('take', mssql.Int, q.pageSize);
+  const rows = await rowsReq.query<{
+    event_id: number; production_ts_utc: Date; shift_code: string; source_station: number | null;
+    material_id: number | null; description: string | null; lot_code: string | null; weight_g: number | null;
+    source_row_id: number | null; epoch_label: string | null; attribution_method: string | null;
+  }>(`
+    SELECT e.reject_event_id AS event_id, e.production_ts_utc, e.shift_code, e.source_station,
+           e.material_id, p.description, p.lot_code, e.weight_g,
+           e.source_row_id, ep.label AS epoch_label, e.attribution_method
+    FROM sms.reject_event e
+    LEFT JOIN sms.product p ON p.product_id = e.material_id
+    LEFT JOIN sms.source_epoch ep ON ep.epoch_id = e.source_epoch
+    WHERE ${where}
+    ORDER BY e.production_ts_utc ASC, e.reject_event_id ASC
+    OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY
+  `);
+
+  const base = {
+    rejectType: q.code.kind,
+    tubeCode: q.code.kind === 'quality' ? q.code.tube : null,
+    materialCode: q.code.kind === 'quality' ? q.code.material : null,
+    label: code?.label ?? null,
+  };
+  return {
+    day: q.day,
+    dayBasis: REJECT_DAY_BASIS,
+    code: { rejectType: base.rejectType, tubeCode: base.tubeCode, materialCode: base.materialCode },
+    rejectCodeId: code == null ? null : Number(code.reject_code_id),
+    label: base.label,
+    displayLabel: displayFor(base),
+    isPass: code?.is_pass == null ? null : Boolean(code.is_pass),
+    total: Number(count.recordset[0]?.n ?? 0),
+    page: q.page,
+    pageSize: q.pageSize,
+    rows: rows.recordset.map((x) => ({
+      eventId: Number(x.event_id),
+      productionTsUtc: x.production_ts_utc instanceof Date ? x.production_ts_utc.toISOString() : String(x.production_ts_utc),
+      shiftCode: x.shift_code,
+      station: x.source_station == null ? null : Number(x.source_station),
+      materialId: x.material_id == null ? null : Number(x.material_id),
+      // The same words currentProduct.ts uses for a product, so the sheet and
+      // the Line screen name it identically.
+      productLabel: x.material_id == null ? null : x.description || x.lot_code || `Product ${x.material_id}`,
+      weightG: x.weight_g == null ? null : Number(x.weight_g),
+      sourceRowId: x.source_row_id == null ? null : Number(x.source_row_id),
+      epochLabel: x.epoch_label ?? null,
+      attributionMethod: x.attribution_method ?? null,
+    })),
+  };
+}
+
+/* ------------------------------------------------------------- dictionary */
 
 export const REJECT_SEVERITIES = ['INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const;
 export type RejectSeverity = (typeof REJECT_SEVERITIES)[number];

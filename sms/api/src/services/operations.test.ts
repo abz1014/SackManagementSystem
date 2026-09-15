@@ -51,12 +51,15 @@ function syncRunPool(runs: Run[], seen: { probeParam?: unknown } = {}): Connecti
         if (sql.includes('AS probe_failed')) {
           seen.probeParam = params.get('probe');
           const pattern = String(params.get('probe')).replace(/%/g, '').toLowerCase();
+          const connect = String(params.get('connect') ?? '%source connection%').replace(/%/g, '').toLowerCase();
           const newest = [...runs].sort(
             (a, b) => b.started_at_utc.getTime() - a.started_at_utc.getTime() || b.sync_run_id - a.sync_run_id,
           )[0];
           const pass = newest ? runs.filter((r) => r.run_id === newest.run_id) : [];
           const probeFailed = pass.filter(
-            (r) => r.outcome === 'halted' && (r.error_text ?? '').toLowerCase().includes(pattern),
+            (r) =>
+              r.outcome === 'halted' &&
+              ((r.error_text ?? '').toLowerCase().includes(pattern) || (r.error_text ?? '').toLowerCase().includes(connect)),
           ).length;
           const started = pass.length ? new Date(Math.min(...pass.map((r) => r.started_at_utc.getTime()))) : null;
           return { recordset: [{ n: pass.length, probe_failed: pass.length ? probeFailed : null, started_at_utc: started }] };
@@ -140,6 +143,15 @@ describe('getOperations().source — derived from sync_run', () => {
     // The pattern reaches SQL as a bound parameter, and is a contains-match.
     expect(seen.probeParam).toBe(PROBE_HALT_PATTERN);
     expect(PROBE_HALT_PATTERN).toBe('%source probe%');
+  });
+
+  it('a source CONNECTION failure (before the probe can run) is a failed probe too', async () => {
+    // 15 Sep 2026 recovery rehearsal: IFL_DB_PORT unreachable → pass.ts halts
+    // at the connection, every table halted, and lastProbeOk read true.
+    const runs = pass(P2, 1, '2026-09-14T06:01:00Z', 'halted',
+      'Pass halted at source connection, before any table was read. [transient] Failed to connect to localhost:1 - Could not connect (sequence)');
+    const { source } = await getOperations(syncRunPool(runs), 1);
+    expect(source.lastProbeOk).toBe(false);
   });
 
   it('a probe failure framed by the pass-level halt helper is still recognised', async () => {

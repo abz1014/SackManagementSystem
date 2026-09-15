@@ -48,9 +48,33 @@
 const MIN_EXPECTED_REJECTS_FOR_VALID_LIMITS = 5;
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { bindConeFilters, bindRejectFilters, type RejectCodeFilter, type RejectFilters } from './rejects.js';
 
 export type RejectBucketSize = 'hour' | 'day';
 export type RejectTypeFilter = 'all' | 'quality' | 'weight';
+
+/**
+ * The trend's filters beyond the date range (roadmap Phase 5, 14 Sep 2026).
+ * The SAME shape rejects.ts binds for the Pareto and the per-day breakdown,
+ * so the three cannot select different rejects for one set of controls.
+ *
+ * `shift` and `tsTo` are what let the Rejects headline count the SAME rejects
+ * Line counts through /api/production: Line asked for one shift capped at the
+ * plant instant and this service could take neither, so it answered for the
+ * whole production day — the same period, two numbers (gap analysis §7).
+ *
+ * `code` narrows the NUMERATOR only, exactly as `rejectType` does: the
+ * denominator is every inspected unit (cones + rejects of every kind) under
+ * the other filters, so a code's rate is its share of what was inspected,
+ * and the per-code series still add up to the combined rate.
+ */
+export interface RejectSpcFilters {
+  shift?: RejectFilters['shift'];
+  tsTo?: string;
+  station?: number;
+  product?: number;
+  code?: RejectCodeFilter;
+}
 
 export interface RejectBucket {
   bucketTs: string;
@@ -132,11 +156,21 @@ export async function getRejectSpc(
   to: string,
   bucketSize: RejectBucketSize,
   rejectType: RejectTypeFilter,
+  filters: RejectSpcFilters = {},
 ): Promise<RejectSpcData> {
   const bucketExprCone =
     bucketSize === 'hour'
       ? 'DATEADD(HOUR, DATEDIFF(HOUR, 0, production_ts_utc), 0)'
       : 'CAST(shift_date AS DATETIME2(3))';
+  // One filter object for all three queries below. The code filter narrows
+  // the numerator only (see RejectSpcFilters); rejectType is folded in as a
+  // second numerator-only predicate rather than a separate clause so both
+  // are bound the same way through rejects.ts.
+  const base: RejectFilters = {
+    from, to, shift: filters.shift, tsTo: filters.tsTo, station: filters.station, product: filters.product,
+  };
+  const numerator: RejectFilters = { ...base, code: filters.code };
+  const numeratorIsNarrowed = rejectType !== 'all' || filters.code != null;
 
   // Epoch id -> generation ordinal. Cones and rejects live in different source
   // tables and so carry DIFFERENT epoch ids for the same rebuild; the ordinal
@@ -148,49 +182,40 @@ export async function getRejectSpc(
     );
   const genOf = new Map(genRes.recordset.map((r) => [Number(r.epoch_id), Number(r.generation_ordinal)]));
 
-  const producedRes = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
-    .query<{ source_epoch: number; bucket_ts: Date; n: number }>(
-      `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
-       FROM sms.cone_event WHERE line_id=@line AND shift_date BETWEEN @from AND @to
-       GROUP BY source_epoch, ${bucketExprCone}`,
-    );
+  const producedReq = pool.request();
+  const producedWhere = bindConeFilters(producedReq, lineId, base);
+  const producedRes = await producedReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
+    `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
+       FROM sms.cone_event WHERE ${producedWhere}
+      GROUP BY source_epoch, ${bucketExprCone}`,
+  );
 
   // parameterised even though rejectType is already enum-validated upstream —
   // "parameterised queries only, no exceptions" per project rules, no literal
   // string-building even when provably safe today.
   const typeClause = rejectType === 'all' ? '' : 'AND reject_type=@rejType';
-  const rejectsReq = pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to);
+  const rejectsReq = pool.request();
+  const rejectsWhere = bindRejectFilters(rejectsReq, lineId, numerator);
   if (rejectType !== 'all') rejectsReq.input('rejType', mssql.VarChar(10), rejectType);
   const rejectsRes = await rejectsReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
     `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
-     FROM sms.reject_event WHERE line_id=@line AND shift_date BETWEEN @from AND @to ${typeClause}
-     GROUP BY source_epoch, ${bucketExprCone}`,
+       FROM sms.reject_event WHERE ${rejectsWhere} ${typeClause}
+      GROUP BY source_epoch, ${bucketExprCone}`,
   );
 
-  // Every reject, whatever its type — the DENOMINATOR population. Only needed
-  // when a type filter is in play; unfiltered it is the same query as above,
-  // so it is not run twice.
-  const allRejectsRes =
-    rejectType === 'all'
-      ? rejectsRes
-      : await pool
-          .request()
-          .input('line', mssql.Int, lineId)
-          .input('from', mssql.Date, from)
-          .input('to', mssql.Date, to)
-          .query<{ source_epoch: number; bucket_ts: Date; n: number }>(
-            `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
-             FROM sms.reject_event WHERE line_id=@line AND shift_date BETWEEN @from AND @to
-             GROUP BY source_epoch, ${bucketExprCone}`,
-          );
+  // Every reject, whatever its type or code — the DENOMINATOR population.
+  // Only needed when the numerator is narrowed; otherwise it is the same
+  // query as above, so it is not run twice.
+  let allRejectsRes = rejectsRes;
+  if (numeratorIsNarrowed) {
+    const allReq = pool.request();
+    const allWhere = bindRejectFilters(allReq, lineId, base, '', false);
+    allRejectsRes = await allReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
+      `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
+         FROM sms.reject_event WHERE ${allWhere}
+        GROUP BY source_epoch, ${bucketExprCone}`,
+    );
+  }
 
   // Cells are (generation, bucket). Keyed on both: the same bucket instant can
   // never hold two generations (they do not overlap in time), but keying on
@@ -200,7 +225,21 @@ export async function getRejectSpc(
   // falls back to its own id, so the maths still closes.
   const epochOf = (r: Cell) => genOf.get(Number(r.source_epoch ?? 0)) ?? Number(r.source_epoch ?? 0);
   const key = (e: number, t: number) => `${e}|${t}`;
-  const toMap = (rows: Cell[]) => new Map(rows.map((r) => [key(epochOf(r), r.bucket_ts.getTime()), r.n]));
+  // SUMMED per (generation, bucket), never `new Map(rows.map(...))`: the two
+  // reject tables carry DIFFERENT epoch ids for the same generation (quality
+  // 11, weight 12 → one ordinal), so with rejectType 'all', and in the
+  // all-rejects denominator under any type filter, a bucket receives one row
+  // per epoch. Until 14 Sep 2026 (roadmap Phase 5) the second row silently
+  // overwrote the first: the combined trend undercounted, and every
+  // type-filtered rate divided by cones + ONE type's rejects instead of both.
+  const toMap = (rows: Cell[]) => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      const k = key(epochOf(r), r.bucket_ts.getTime());
+      m.set(k, (m.get(k) ?? 0) + Number(r.n));
+    }
+    return m;
+  };
   const producedMap = toMap(producedRes.recordset);
   const rejectsMap = toMap(rejectsRes.recordset);
   const allRejectsMap = toMap(allRejectsRes.recordset);

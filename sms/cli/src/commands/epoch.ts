@@ -12,8 +12,9 @@
  * opposite responses — so the worker halts and a human looks.
  */
 import mssql from 'mssql';
-import { loadSourceTables, readSourceIdentity, openEpoch, createAdapter } from '@sms/sync-worker';
+import { loadSourceTables, readSourceIdentity, openEpoch, createAdapter, withTransformLock } from '@sms/sync-worker';
 import { openContext, parseArgs, cliLog } from '../context.js';
+import { inFlightProblem, passesInFlight, requireBackupFlag } from '../guards.js';
 
 const asList = (v: unknown): string[] =>
   typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -216,12 +217,21 @@ export async function epochAccept(argv: string[]): Promise<number> {
  * The tombstone is the point: the record of what was once in this database has
  * to survive the deletion of the rows, or a future operator cannot tell an id
  * range that was purged from one that was never ingested.
+ *
+ * Gated like cutover since roadmap Phase 11 (14 Sep 2026): `--backup=<path>`
+ * naming an existing .bak, no pass in flight, deletes under the transform
+ * lock. See guards.ts for why each.
  */
 export async function epochPurge(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const ids = asList(args.epoch).map(Number).filter((n) => Number.isInteger(n) && n > 0);
   if (ids.length === 0) {
     console.error('specify --epoch=N or --epoch=N,M,...');
+    return 2;
+  }
+  const backup = requireBackupFlag(args, 'sms epoch:purge');
+  if (!backup.ok) {
+    console.error(backup.problem);
     return 2;
   }
 
@@ -255,15 +265,23 @@ export async function epochPurge(argv: string[]): Promise<number> {
       total += Number(c.n);
       console.log(`  ${c.t.padEnd(28)} ${String(c.n).padStart(9)} rows`);
     }
-    console.log(`  ${'TOTAL'.padEnd(28)} ${String(total).padStart(9)} rows\n`);
+    console.log(`  ${'TOTAL'.padEnd(28)} ${String(total).padStart(9)} rows`);
+    console.log(`  backup named: ${backup.path}\n`);
 
     if (args.confirm !== true) {
       console.log('REFUSED: re-run with --confirm to proceed. Nothing has been changed.');
       return 2;
     }
 
+    const inFlight = await passesInFlight(ctx.app);
+    if (inFlight > 0) {
+      console.error(inFlightProblem(inFlight, 'sms epoch:purge'));
+      return 2;
+    }
+
     // Canonical first, then raw: canonical references raw_id. Chunked so the
-    // transaction log stays small on a plant PC.
+    // transaction log stays small on a plant PC. Under the transform lock so
+    // the worker cannot be transforming the raw rows being deleted.
     const targets = [
       'sms.cone_event',
       'sms.sack_event',
@@ -273,26 +291,38 @@ export async function epochPurge(argv: string[]): Promise<number> {
       'sms_raw.reject_qcs_raw',
       'sms_raw.reject_weight_raw',
     ];
-    for (const t of targets) {
-      let cleared = 0;
-      for (;;) {
-        const del = await ctx.app
-          .request()
-          .query(`DELETE TOP (5000) FROM ${t} WHERE source_epoch IN (${list})`);
-        const n = del.rowsAffected[0] ?? 0;
-        cleared += n;
-        if (n === 0) break;
+    await withTransformLock(ctx.cfg.app, async () => {
+      for (const t of targets) {
+        let cleared = 0;
+        for (;;) {
+          const del = await ctx.app
+            .request()
+            .query(`DELETE TOP (5000) FROM ${t} WHERE source_epoch IN (${list})`);
+          const n = del.rowsAffected[0] ?? 0;
+          cleared += n;
+          if (n === 0) break;
+        }
+        if (cleared > 0) console.log(`  cleared ${String(cleared).padStart(9)} from ${t}`);
       }
-      if (cleared > 0) console.log(`  cleared ${String(cleared).padStart(9)} from ${t}`);
-    }
 
-    await ctx.app.request().query(
-      `UPDATE sms.source_epoch
-          SET closed_utc = ISNULL(closed_utc, SYSUTCDATETIME()),
-              note = CONCAT(ISNULL(note, N''), N' Rows purged ',
-                            CONVERT(varchar(19), SYSUTCDATETIME(), 126), N'.')
-        WHERE epoch_id IN (${list})`,
-    );
+      await ctx.app.request().query(
+        `UPDATE sms.source_epoch
+            SET closed_utc = ISNULL(closed_utc, SYSUTCDATETIME()),
+                note = CONCAT(ISNULL(note, N''), N' Rows purged ',
+                              CONVERT(varchar(19), SYSUTCDATETIME(), 126), N'.')
+          WHERE epoch_id IN (${list})`,
+      );
+    });
+    await ctx.app
+      .request()
+      .input('action', mssql.VarChar(40), 'epoch.purge')
+      .input('type', mssql.VarChar(40), 'source_epoch')
+      .input('target', mssql.NVarChar(64), list.slice(0, 64))
+      .input('detail', mssql.NVarChar(1000), `by the CLI (sms epoch:purge), no signed-in actor; ${total} rows purged; backup named: ${backup.path}`)
+      .query(
+        `INSERT INTO sms.audit_log (actor_id, action, target_type, target_id, detail)
+         VALUES (NULL, @action, @type, @target, @detail)`,
+      );
     console.log(`\ndone. Epoch row(s) kept as tombstones — 'sms epoch:list' still shows them.`);
     return 0;
   } catch (err) {

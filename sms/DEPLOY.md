@@ -398,7 +398,7 @@ ALTER ROLE db_backupoperator ADD MEMBER sms_backup;
 
 ### Running it
 
-- **Nightly:** schedule `scripts/backup-appdb.ps1` via Task Scheduler (keeps 30 days).
+- **Nightly:** `scripts\install-scheduled-tasks.ps1` registers it (roadmap Phase 11, 14 Sep 2026) as the task *SMS Nightly Backup* at 02:00, run **as a Windows account holding `db_backupoperator`** so no password appears in the task definition — the script is called with `-User ""`, which makes it connect as that account (`sqlcmd -E`). See *Scheduled tasks* under Operations below. Keeps 30 days. Run it by hand with a SQL login as before: `-User sms_backup -Pass <password>`.
 - **`-OutDir` must be writable by the SQL Server *service account*, not just
   whoever runs the script** — `BACKUP DATABASE` executes on the server
   process, not the client. An arbitrary user-profile folder is often not
@@ -473,11 +473,90 @@ the backup file is good.
 ## Operations & monitoring
 
 - **The top-bar sentence** on every screen states how old the newest data is, measured from the *oldest* of the four source tables (one dead feed cannot hide behind three healthy ones). When it is not "ok", no screen asserts whether the line is running.
-- **Setup › Sync health** (admin only) — verdict, last pass age, per-table outcome with the source *generation* and *watermark* it came from, measured cadence, and the count of blocking data-quality findings. First place to look if a dashboard reads low or zero. Since 14 Sep 2026 **every halt writes a row**: an unknown generation, a source gone backwards, an IFL connection failure or a reference-seed failure each leave one `halted` row per table for that pass, and the screen prints the worker's reason under "N of 4 tables did not sync" (a generation halt names the `sms epoch:accept` command; a connection halt names the host; a table the pass never reached says which table stopped it). Two conditions are *findings* rather than halts, because the raw tables did sync: a PDAS product-mirror failure (`product_mirror_failed`, ERROR — readings still ingest, the product list stops updating) and a transform failure (`transform_failed`, CRITICAL — raw rows arrive, canonical tables fall behind). Both clear themselves on the next pass that succeeds. A third, `source_columns_changed` (WARNING), says IFL added or removed a column SMS does not read — ingestion continues, because the fingerprint of the columns SMS *does* read is unchanged, but someone should look at whether the new column matters (the way `MaterialId` did). Since 14 Sep 2026 a table that halts no longer stops the others: each table's outcome is its own row, the healthy tables still sync and transform, and the pass is reported failed at the end with every halted table named. `logs\sync.log` carries the stack as an `error` line.
+- **Health** (`?s=health`, every signed-in account — roadmap Phase 11, 14 Sep 2026) — the same sync block Setup shows (verdict, last pass age, per-table outcome with the source *generation* and *watermark*, measured cadence, blocking findings, halted tables and the worker's reason), then the database's size against the Express cap, the service's version and uptime, and the age of the newest backup file. The top bar's data-age sentence links here. First place to look if a dashboard reads low or zero. **Setup › Sync health** (admin only) is the same block. Since 14 Sep 2026 **every halt writes a row**: an unknown generation, a source gone backwards, an IFL connection failure or a reference-seed failure each leave one `halted` row per table for that pass, and the screen prints the worker's reason under "N of 4 tables did not sync" (a generation halt names the `sms epoch:accept` command; a connection halt names the host; a table the pass never reached says which table stopped it). Two conditions are *findings* rather than halts, because the raw tables did sync: a PDAS product-mirror failure (`product_mirror_failed`, ERROR — readings still ingest, the product list stops updating) and a transform failure (`transform_failed`, CRITICAL — raw rows arrive, canonical tables fall behind). Both clear themselves on the next pass that succeeds. A third, `source_columns_changed` (WARNING), says IFL added or removed a column SMS does not read — ingestion continues, because the fingerprint of the columns SMS *does* read is unchanged, but someone should look at whether the new column matters (the way `MaterialId` did). Since 14 Sep 2026 a table that halts no longer stops the others: each table's outcome is its own row, the healthy tables still sync and transform, and the pass is reported failed at the end with every halted table named. `logs\sync.log` carries the stack as an `error` line.
 - **`GET /api/operations`** — the JSON behind that section, open to any signed-in account: per-table sync outcome, generation label, watermark range, age, lifetime pass/failure counts, the last failure's error text, DQ roll-up by severity, and mixed shift-rule regimes.
 - **`node cli/dist/index.js verify`** — full reconciliation + DQ findings.
 - **`node cli/dist/index.js summary --date=YYYY-MM-DD`** — spot-check totals from the shell.
 - **Logs** — structured JSON lines in `logs\sync.log` / `logs\api.log`.
+
+### Health
+
+`GET /api/health` (roadmap Phase 11, 14 Sep 2026) is the probe for a monitor. Unauthenticated; answers 200 with `status: "ok" | "degraded"` or **503 with `status: "down"`** when the app database cannot be reached — never a 500. Anonymous callers get `status` and `service` only (database size and acquisition details are `null`); a signed-in browser gets everything, which is what the Health screen renders.
+
+```json
+{ "status": "ok",
+  "service":     { "version": "0.2.0", "uptimeSeconds": 86400, "startedAtUtc": "…", "pid": 1234 },
+  "database":    { "ok": true, "latencyMs": 3, "sizeMb": 512.0, "capMb": 10240, "pctOfCap": 5.0 },
+  "acquisition": { "kind": "ok", "ageSeconds": 30, "cadenceSeconds": 60, "halted": [] },
+  "backup":      { "dir": "C:\\sms-backups", "newestFile": "sms-20260915-020001.bak", "newestAtUtc": "…", "ageDays": 0.4, "warning": false },
+  "degradedReason": null }
+```
+
+`degraded` means one of: the API's pool reported an error since the last good probe (`degradedReason` says which), the acquisition is `stale` or `late` or a table is halted, or the data file is past 80 % of the cap. `acquisition.kind` is the same classification the top bar uses (`api/src/services/live.ts`). A `uptimeSeconds` that resets is a restart: NSSM restarted the process after a crash, and `logs\api.err.log` has the crash. Poll it from whatever the plant already monitors with (a scheduled `curl`, a PRTG/Zabbix HTTP sensor); email is not possible on an air-gapped host, so alerting is IFL's monitoring tool's job — Phase 11 clarification.
+
+**Recovery behaviour (roadmap Phase 11).** Both processes attach `pool.on('error')`: the API logs it and reports `degraded` until the next probe succeeds; the worker logs it and reconnects on the next tick (each pass opens its own pools). Both handle `SIGTERM`/`SIGINT` — `nssm stop`, `Stop-Service`, Ctrl+C — by finishing what is in flight (the API drains open requests, the worker finishes the current pass, each with a deadline) and closing the pool before exiting 0. On start the worker closes any `sms.sync_run` row a previous process left `running` (older than twice `SYNC_INTERVAL_SECONDS`) as `failed` with `orphaned: the worker was restarted mid-pass`; before this, one crash made `sms rebuild` refuse for ever. After `SYNC_FAILURE_CRITICAL_AFTER` consecutive failed passes (default 5) the worker raises the CRITICAL finding `persistent_sync_failure` on Setup › Sync health and the Health screen; the next successful pass clears it. Once an hour it checks the data file and raises the WARNING `database_size` past 80 % of the cap.
+
+### Scheduled tasks
+
+`scripts\install-scheduled-tasks.ps1` registers the three recurring jobs (run as an administrator; `-WhatIf` prints what it would register and registers nothing):
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "PLANT\svc-sms" -BackupDir "C:\sms-backups" -WhatIf
+```
+
+| Task | When | What | Runs as |
+|---|---|---|---|
+| SMS Nightly Backup | 02:00 daily | `scripts\backup-appdb.ps1 -User ""` (trusted connection) | `-RunAs`, holding `db_backupoperator` on `[sms]` |
+| SMS Weekly Maintenance | 03:00 Sunday | `sqlcmd -E -i scripts\db-maintenance.sql` | `-RunAs`, holding `db_owner` on `[sms]` |
+| SMS Daily Retention | 04:00 daily | `node cli\dist\index.js retention` | `-RunAs` (reads `.env`, connects as `sms_app`) |
+
+**No password in any task argument** — that was the gap analysis's objection to "schedule it via Task Scheduler". The run-as account's password is entered once at registration and held by the Task Scheduler service. Create the Windows login on SQL Server first (the SQL is in the script's header). `-BackupDir` must be writable by the SQL Server *service* account and should equal `BACKUP_DIR` in `.env`, so the Health screen looks where the backups land. Verify: `schtasks /query /tn "SMS Nightly Backup" /v /fo LIST`; run one now: `schtasks /run /tn "SMS Nightly Backup"`.
+
+### Retention
+
+`node cli\dist\index.js retention [--dry-run]` (roadmap Phase 11 core function 11; the daily task above runs it) prunes only what this application grows for itself:
+
+| Table | Rule | Setting |
+|---|---|---|
+| `sms.sync_run` | rows older than N days, **always keeping the newest row per (line, table)** — the row every "last pass" reading depends on | `RETENTION_SYNC_RUN_DAYS` (default 90) |
+| `sms.dq_finding` | rows older than N days, **except CRITICAL** | `RETENTION_DQ_FINDING_DAYS` (default 365) |
+| `sms.session` | expired rows | — |
+
+`--dry-run` prints the counts with the same predicates and deletes nothing. A real run writes one audit row, `retention.run` (no actor — the CLI has none), with the counts.
+
+**Never pruned by it: `sms.audit_log` and `sms.product_change`** (the record of who changed what; `audit_log` is append-only at the database since migration 030), **and every raw and canonical reading.** How long readings are kept against the 10 GB Express cap is IFL's decision (Phase 11 clarification: retention of raw and canonical readings; also whether IFL themselves delete within a table or only drop-and-recreate, which sets the longest recoverable outage). Until they answer, readings accumulate and the Health screen states the size; ~1 GB/year at the measured rate means the answer is not urgent, but it is theirs. When it comes, the remedy is a further retention rule, not a change to this command's defaults.
+
+### Database maintenance
+
+`scripts\db-maintenance.sql` — parameter-free T-SQL, run weekly by the task above or by hand as a login holding `db_owner` on `[sms]`:
+
+```
+sqlcmd -S .\SQLEXPRESS -E -d sms -b -i scripts\db-maintenance.sql
+```
+
+1. `DBCC CHECKDB WITH NO_INFOMSGS, ALL_ERRORMSGS` — corruption is found the night it happens; `-b` makes a failure a red task.
+2. Index maintenance by measured fragmentation: `REORGANIZE` above 10 %, `REBUILD` above 30 %, indexes under 1,000 pages skipped. Rebuilds take a brief lock on Express (no `ONLINE`), hence 03:00 Sunday.
+3. `sp_updatestats` — the worker appends ~8,000 rows/day and the auto-update threshold lags that by a week on a 275k-row table.
+
+The recovery model is SIMPLE (set by `db/bootstrap/00_create_app_database.sql`), so the log file does not grow between backups and needs no log backups. Size is watched by the worker (`database_size` finding) and shown on Health; the plan when it approaches the cap is under *Database size* below.
+
+### Configuration backup
+
+The nightly `.bak` holds every row and none of the configuration. `scripts\backup-config.ps1` (roadmap Phase 11; run as an administrator, monthly and after any change to `.env`, TLS, the services or the tasks) copies `.env`, the TLS files `.env` names, `nssm dump SMS-Api` / `SMS-Sync`, and `schtasks /query /xml` for the three tasks into `BACKUP_DIR\config\<stamp>\` with a `manifest.txt`, then **restricts that folder's ACL** (`icacls`, inheritance removed) to the invoking user and Administrators — `.env` holds the database passwords in clear. Keeps the last 10 snapshots. Restoring a host is then: install Node and SQL Server, restore the `.bak`, copy `env` back to `.env`, put the TLS files where `.env` says, replay the `nssm-*.txt` commands, `schtasks /create /xml` each task file.
+
+### Upgrading and rolling back
+
+A release is the `sms/` tree at a version (`CHANGELOG.md` at the repository root; `sms/package.json` and every workspace carry it; `GET /api/health` reports it). Upgrade in place, in this order, as an administrator on the plant PC:
+
+1. `nssm stop SMS-Sync` then `nssm stop SMS-Api` (both handle the stop signal: the worker finishes its pass, the API drains). Confirm nothing is in flight: `SELECT COUNT(*) FROM sms.sync_run WHERE finished_at_utc IS NULL` → 0.
+2. **Back up first:** `scripts\backup-appdb.ps1` (a checksummed `.bak`; note its path — a rollback needs it) and `scripts\backup-config.ps1`.
+3. Unpack the release into a **new** folder beside the current one (`C:\sms-0.2.0` next to `C:\sms-0.1.0`); copy `.env` in. Do not overwrite the running folder — it is the rollback.
+4. In the new folder: `npm ci` (offline: see *Internet access*), `npm run build`.
+5. `npm run db:migrate` — applies only the files not yet recorded in `sms.schema_migration`; each file runs in one transaction.
+6. Repoint the services at the new folder (`nssm set SMS-Api AppDirectory C:\sms-0.2.0` and the `Application` paths, same for `SMS-Sync`; or install fresh from the NSSM block above) and start them: `nssm start SMS-Api`, `nssm start SMS-Sync`.
+7. Verify: `GET /api/health` reports the new `service.version` and `status: ok`; the Health screen's sync block goes green within two passes; `node cli\dist\index.js verify` is clean; the audit log shows nothing unexpected.
+
+**Rolling back.** Migrations are forward-only — there are no down scripts, by design (a migration that drops a column it added is a second way to lose data). So a rollback is a **restore**: stop both services, `RESTORE DATABASE sms FROM DISK = N'<the pre-upgrade .bak from step 2>' WITH REPLACE` (after a scratch restore has proven the file, as *Backup & restore* says), repoint the services at the previous release folder, start them, and confirm `service.version` on `/api/health` is the old one. Readings ingested between the upgrade and the rollback are re-read from IFL by the worker (the watermark is in the restored database), which is why the sidecar can afford this; anything an operator typed in that window (a product changeover, a calibration entry) is lost with the restore and must be re-entered — say so before rolling back.
 
 ### Performance targets (guardrails)
 Dashboard < 300 ms · API < 100 ms · sync pass < 30 s. At the current data volume we are well under; re-check after a few months of accumulation and add indexes on `sms.*` if needed (never on IFL's DB).
@@ -520,7 +599,9 @@ Four database logins exist by design, each for one job. None is ever written int
 | `sms_sim` | **development machines only** | writer on `DATA_TP1U2_SIM` (a database whose name ends `_SIM`; the simulator refuses any other) | the developer, by hand (*Plant simulator*, above) | `scripts/simulate-plant.mjs` — `SIM_DB_NAME/USER/PASSWORD` in `.env`; never created on a plant server |
 | `sms_pdas_writer` | IFL's plant SQL Server | `UPDATE`/`INSERT` on `dbo.Materials`, `EXECUTE` on `CreateMaterial` + `SetMaterialStatusActive`, `INSERT` on `dbo.nhs_events` — **does not exist yet** | IFL's DBA, only after written authority for PDAS writes | API — `PDAS_WRITE_USER/PASSWORD`, behind `PDAS_WRITE_ENABLED` |
 
-Storage: `.env` on the sidecar host, readable by the service account only. Rotation: change the password at the source, update `.env`, restart the affected service. The backup script currently takes its password on the command line; for an unattended Task Scheduler run, store it in a wrapper script with restricted ACLs or run the task as a Windows account holding `db_backupoperator` — do not put it in the task's argument string, which is readable in the task XML.
+**The migration login split (roadmap Phase 11, 14 Sep 2026).** `sms_app` holds `db_ddladmin` only so `npm run db:migrate` can run as it. That right also lets it drop the append-only trigger migration 030 puts on `sms.audit_log` — so the trigger stops accidents and ordinary misuse, but a party holding the app's own login could remove it, delete rows and put it back. Real tamper-evidence needs the migration login separated from the runtime login: create `sms_migrate` with `db_ddladmin` (and `db_datareader`/`db_datawriter`, for the data migrations), run `db:migrate` with `APP_DB_USER=sms_migrate` at upgrade time only, and **revoke `db_ddladmin` from `sms_app`** (`ALTER ROLE db_ddladmin DROP MEMBER sms_app`). `00_create_app_database.sql` does not yet do this — it is an install-time decision for the operator, recorded here so the trigger's guarantee is not overstated. Until it is done, the audit log is append-only against the code and against mistakes, not against the app's own credential.
+
+Storage: `.env` on the sidecar host, readable by the service account only; `scripts\backup-config.ps1` copies it into an ACL-restricted folder under `BACKUP_DIR\config`. Rotation: change the password at the source, update `.env`, restart the affected service. The scheduled backup runs as a Windows account holding `db_backupoperator` (`scripts\install-scheduled-tasks.ps1`), so no SQL password appears in any task argument; `-User sms_backup -Pass …` remains for a by-hand run.
 
 There is no `SESSION_SECRET`: sessions are server-side random UUIDs (`sms.session`), not signed cookies.
 

@@ -320,13 +320,14 @@ describe('GET /api/product-at — the verdict is computed server-side', () => {
     expect(r.status).toBe(200);
     expect(r.json.attribution).toBe('row');
     expect(r.json.limits).toMatchObject({ targetG: 1960, loG: 1910, hiG: 2010 });
-    expect(r.json.verdict).toEqual({ inside: false, outsideByG: -142, reason: null });
+    // roadmap Phase 4: the one classification rides beside the older facts; no scale bit was sent.
+    expect(r.json.verdict).toEqual({ inside: false, outsideByG: -142, reason: null, state: 'low', scalePassed: null, unknownReason: null });
     expect(r.json.limitsAreLowerBound).toBe(false);
   });
 
   it('inside the limits: outsideByG is 0', async () => {
     const r = await call('manager', 'GET', '/api/product-at?at=2026-09-07T11:35:00Z&productId=21&weightG=1965');
-    expect(r.json.verdict).toEqual({ inside: true, outsideByG: 0, reason: null });
+    expect(r.json.verdict).toEqual({ inside: true, outsideByG: 0, reason: null, state: 'within', scalePassed: null, unknownReason: null });
   });
 
   it('without a weight: no verdict, and the rest of the shape is unchanged', async () => {
@@ -339,7 +340,7 @@ describe('GET /api/product-at — the verdict is computed server-side', () => {
   it('without a productId: falls back to the line-wide timeline and says so', async () => {
     const r = await call('manager', 'GET', '/api/product-at?at=2026-09-07T11:35:00Z&weightG=2020');
     expect(r.json.attribution).toBe('timeline');
-    expect(r.json.verdict).toEqual({ inside: false, outsideByG: 10, reason: null });
+    expect(r.json.verdict).toEqual({ inside: false, outsideByG: 10, reason: null, state: 'high', scalePassed: null, unknownReason: null });
   });
 
   it('refuses a non-numeric weight', async () => {

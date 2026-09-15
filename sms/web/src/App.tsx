@@ -31,17 +31,20 @@ import { ProductSheet } from './screens/ProductSheet';
 import { ReportScreen } from './screens/Report';
 import { WeightScreen } from './screens/Weight';
 import { RejectsScreen } from './screens/Rejects';
+import { ReasonSheet, reasonIdOf } from './screens/ReasonSheet';
 import { WallScreen } from './screens/Wall';
 import { SetupScreen } from './screens/Setup';
+import { HealthScreen } from './screens/Health';
 import { LoginScreen } from './screens/Login';
 import './app.css';
 
 /* ------------------------------------------------------------------ route */
 
-type View = Screen | 'setup' | 'wall';
+type View = Screen | 'setup' | 'wall' | 'health';
 
 export interface Sheet {
-  kind: 'station' | 'cone' | 'sack' | 'reject' | 'product';
+  /** 'reason' (roadmap Phase 5): one day's rejects of one code, id `<day>|<type>|<tube>|<material>`. */
+  kind: 'station' | 'cone' | 'sack' | 'reject' | 'product' | 'reason';
   id: string;
 }
 
@@ -54,7 +57,7 @@ interface Route {
   readingsFilter: ReadingsFilter;
 }
 
-const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall'] as const;
+const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall', 'health'] as const;
 
 /**
  * The register export is requireRole(3) on the server. Offering it at rank 2
@@ -71,7 +74,7 @@ function parseRoute(): Route {
   const raw = p.get('s');
   const view: View = (VIEWS as readonly string[]).includes(raw ?? '') ? (raw as View) : 'line';
   const sheetRaw = p.get('sheet');
-  const m = sheetRaw?.match(/^(station|cone|sack|reject|product):(.+)$/);
+  const m = sheetRaw?.match(/^(station|cone|sack|reject|product|reason):(.+)$/);
   const rf = p.get('rf');
   return {
     view,
@@ -201,7 +204,7 @@ function Chrome({
         onPeriod={(p) => go({ period: p })}
         onWall={() => go({ view: 'wall' })}
         onSetup={() => go({ view: 'setup', sheet: null })}
-        onOpenSync={() => go({ view: 'setup', sheet: null })}
+        onOpenSync={() => go({ view: 'health', sheet: null })}
         onSignOut={onSignOut}
       />
 
@@ -253,6 +256,7 @@ function Chrome({
             period={period}
             onSeeCones={() => go({ view: 'readings', readingsFilter: 'inspectionRejects' })}
             onSeeStations={() => go({ view: 'weight' })}
+            onOpenReason={(r) => go({ sheet: { kind: 'reason', id: reasonIdOf({ ...r, rejectType: r.rejectType as 'quality' | 'weight' }) } })}
             canName={rank >= 3}
           />
         )}
@@ -269,6 +273,10 @@ function Chrome({
               <h1 className="wide">{W.notAllowed}</h1>
             </div>
           ))}
+
+        {/* Open to every signed-in account (roadmap Phase 11): the sync's
+            state was admin-only while IFL's accounts are created at manager. */}
+        {route.view === 'health' && <HealthScreen isAdmin={rank >= 4} />}
       </main>
 
       {/* Drill-downs open over the screen and close with Escape, so the reader
@@ -283,7 +291,18 @@ function Chrome({
       {route.sheet?.kind === 'product' && (
         <ProductSheet canWrite={rank >= 2} onClose={() => go({ sheet: null })} />
       )}
-      {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && (
+      {route.sheet?.kind === 'reason' && (
+        <ReasonSheet
+          id={route.sheet.id}
+          canName={rank >= 3}
+          onClose={() => go({ sheet: null })}
+          // Readings has no reason filter (Phase 5): the link narrows to the
+          // day and the inspection-reject listing, and says so on the sheet.
+          onOpenRegister={(day) => go({ view: 'readings', readingsFilter: 'inspectionRejects', period: { key: 'pick', picked: { from: day, to: day } }, sheet: null })}
+          onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+        />
+      )}
+      {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && route.sheet.kind !== 'reason' && (
         <ReadingSheet
           type={route.sheet.kind}
           id={route.sheet.id}

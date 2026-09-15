@@ -155,6 +155,16 @@ export interface OperationsData {
  * probe as fine while every table sat halted on it.
  */
 export const PROBE_HALT_PATTERN = '%source probe%';
+/**
+ * The other way a pass fails before any table is read: the source CONNECTION
+ * itself (pass.ts connects with three transient-only attempts and writes
+ * "Pass halted at source connection, before any table was read. …"). Found
+ * in the 15 Sep 2026 recovery rehearsal — with the source port unreachable
+ * every table sat halted on the connection and lastProbeOk still read true,
+ * because only the probe phrasing was matched. Both mean the same thing to
+ * an operator: the plant database could not be reached.
+ */
+export const CONNECT_HALT_PATTERN = '%source connection%';
 
 /** Outcomes that mean "this table is not syncing" — see store.ts's recordHaltedRun for the distinction. */
 const NOT_SYNCING = new Set(['halted', 'failed']);
@@ -197,13 +207,14 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     .request()
     .input('line', mssql.Int, lineId)
     .input('probe', mssql.NVarChar(64), PROBE_HALT_PATTERN)
+    .input('connect', mssql.NVarChar(64), CONNECT_HALT_PATTERN)
     .query<{ n: number; probe_failed: number; started_at_utc: Date | null }>(`
     WITH newest AS (
       SELECT TOP 1 run_id FROM sms.sync_run WHERE line_id = @line
       ORDER BY started_at_utc DESC, sync_run_id DESC
     )
     SELECT COUNT(*) AS n,
-           SUM(CASE WHEN r.outcome = 'halted' AND r.error_text LIKE @probe THEN 1 ELSE 0 END) AS probe_failed,
+           SUM(CASE WHEN r.outcome = 'halted' AND (r.error_text LIKE @probe OR r.error_text LIKE @connect) THEN 1 ELSE 0 END) AS probe_failed,
            MIN(r.started_at_utc) AS started_at_utc
     FROM sms.sync_run r JOIN newest ON newest.run_id = r.run_id
     WHERE r.line_id = @line

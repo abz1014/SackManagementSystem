@@ -34,6 +34,14 @@
  * few rows ahead of raw at any instant (the acquisition lag is ~18 min, the
  * pass is every 60 s); that is reported as a STOP with the reason, and the cure
  * is to re-run once the pass has settled — never to widen the tolerance.
+ *
+ * `--weights` (roadmap Phase 4 item 3, 14 Sep 2026) adds the WEIGHT
+ * reconciliation the id checksum cannot give: per open generation and per
+ * source table that carries a weight column, COUNT, SUM, AVG, MIN and MAX of
+ * the source's `Weight` against raw's `src_Weight` against canonical's
+ * `weight_g` / `weight_kg` — same units end to end, no conversion in the
+ * transform. Equal ids with a weight altered in flight would pass the checksum
+ * and fail this. Aggregate SELECTs only, on the same read-only pool.
  */
 import mssql from 'mssql';
 import type { ConnectionPool } from 'mssql';
@@ -79,6 +87,121 @@ const num = (v: unknown): number | null => (v == null ? null : Number(v));
 
 const IND = '           '; // continuation indent under "  epoch NN  "
 const fmtN = (v: number | null): string => (v === null ? '–' : String(v)).padStart(12);
+
+/* ------------------------------------------------ weights (--weights) */
+
+/** COUNT, SUM, AVG, MIN, MAX of one weight column on one side. */
+export interface WeightStats {
+  n: number;
+  sum: number | null;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+}
+const NO_WEIGHTS: WeightStats = { n: 0, sum: null, avg: null, min: null, max: null };
+
+/** The source's weight column, when the kind has one; sacks and cones weigh, quality rejects do not. */
+function weightColumns(def: TableDef): { src: string; raw: string; canon: string } | null {
+  const col = def.columns.find((c) => c.src === 'Weight');
+  if (!col) return null;
+  return { src: col.src, raw: col.raw, canon: def.key === 'sack' ? 'weight_kg' : 'weight_g' };
+}
+
+const aggSql = (col: string) =>
+  `COUNT(${col}) n, SUM(CAST(${col} AS DECIMAL(18,3))) s, AVG(CAST(${col} AS DECIMAL(18,3))) a, MIN(${col}) lo, MAX(${col}) hi`;
+
+const readStats = (x: { n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown } | undefined): WeightStats =>
+  x ? { n: Number(x.n), sum: num(x.s), avg: num(x.a), min: num(x.lo), max: num(x.hi) } : NO_WEIGHTS;
+
+async function sourceWeights(ifl: ConnectionPool, def: TableDef, col: string): Promise<WeightStats> {
+  const r = await ifl.request().query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
+    `SELECT ${aggSql(`[${col}]`)} FROM [${def.sourceTable}]`,
+  );
+  return readStats(r.recordset[0]);
+}
+
+async function rawWeights(app: ConnectionPool, def: TableDef, col: string, line: number, epoch: number): Promise<WeightStats> {
+  const r = await app
+    .request()
+    .input('line', mssql.Int, line)
+    .input('e', mssql.Int, epoch)
+    .query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
+      `SELECT ${aggSql(col)} FROM ${def.rawTable} WHERE line_id = @line AND source_epoch = @e`,
+    );
+  return readStats(r.recordset[0]);
+}
+
+async function canonicalWeights(app: ConnectionPool, def: TableDef, col: string, line: number, epoch: number): Promise<WeightStats> {
+  const canon = CANONICAL[def.key];
+  const r = await app
+    .request()
+    .input('line', mssql.Int, line)
+    .input('e', mssql.Int, epoch)
+    .query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
+      `SELECT ${aggSql(`c.${col}`)} FROM ${canon.table} c WHERE c.line_id = @line AND c.source_epoch = @e ${canon.typeFilter}`,
+    );
+  return readStats(r.recordset[0]);
+}
+
+/**
+ * Equal when COUNT, SUM, MIN and MAX agree exactly (they are exact decimals
+ * on every side) and AVG agrees to a thousandth — the one figure that is
+ * computed, and that a driver may hand back with a rounding of its own.
+ */
+export function sameWeights(a: WeightStats, b: WeightStats): boolean {
+  const eq = (x: number | null, y: number | null) => (x === null && y === null) || (x !== null && y !== null && Math.abs(x - y) < 0.0005);
+  return a.n === b.n && eq(a.sum, b.sum) && eq(a.min, b.min) && eq(a.max, b.max) && eq(a.avg, b.avg);
+}
+
+const fmtW = (v: number | null): string => (v === null ? '–' : v.toFixed(3)).padStart(14);
+const weightLine = (label: string, w: WeightStats) =>
+  `${IND}${label.padEnd(10)}${String(w.n).padStart(10)}${fmtW(w.sum)}${fmtW(w.avg)}${fmtW(w.min)}${fmtW(w.max)}`;
+
+/**
+ * The weight reconciliation for one table's generations. Returns how many
+ * comparisons MISMATCHED. Open generations are compared source ⇄ raw ⇄
+ * canonical; closed ones raw ⇄ canonical only, since the source no longer
+ * holds them.
+ */
+export async function verifyWeights(
+  ctx: { app: ConnectionPool; ifl: ConnectionPool },
+  def: TableDef,
+  epochs: { epoch_id: number; closed_utc: Date | null }[],
+  line: number,
+  sourceReadable: boolean,
+): Promise<number> {
+  const cols = weightColumns(def);
+  if (!cols) {
+    console.log(`${IND}weights    no weight column in ${def.sourceTable} — nothing to reconcile`);
+    return 0;
+  }
+  let mismatches = 0;
+  for (const e of epochs) {
+    const raw = await rawWeights(ctx.app, def, cols.raw, line, e.epoch_id);
+    const canon = await canonicalWeights(ctx.app, def, cols.canon, line, e.epoch_id);
+    const open = e.closed_utc === null;
+    console.log(`${IND}weights    epoch ${e.epoch_id} ${open ? 'OPEN' : 'closed'} — ${cols.src} → ${cols.raw} → ${cols.canon}`);
+    console.log(`${IND}${''.padEnd(10)}${'count'.padStart(10)}${'sum'.padStart(14)}${'avg'.padStart(14)}${'min'.padStart(14)}${'max'.padStart(14)}`);
+    if (open && sourceReadable) {
+      const src = await sourceWeights(ctx.ifl, def, cols.src);
+      console.log(weightLine('source', src));
+      const ok = sameWeights(src, raw);
+      console.log(`${weightLine('raw', raw)}   ${ok ? 'OK' : 'MISMATCH'}`);
+      if (!ok) mismatches++;
+    } else {
+      console.log(weightLine('raw', raw) + (open ? '   (source not readable — not compared)' : ''));
+    }
+    const ok2 = sameWeights(raw, canon);
+    console.log(`${weightLine('canonical', canon)}   ${ok2 ? 'OK' : 'MISMATCH'}`);
+    if (!ok2) mismatches++;
+  }
+  return mismatches;
+}
+
+/** `sms verify [--weights]` */
+export function parseVerifyArgs(args: string[]): { weights: boolean } {
+  return { weights: args.includes('--weights') };
+}
 
 async function sourceStats(ifl: ConnectionPool, def: TableDef): Promise<IdStats> {
   const r = await ifl
@@ -171,11 +294,13 @@ function diagnose(src: IdStats, raw: IdStats): string[] {
   return out;
 }
 
-export async function verify(): Promise<number> {
+export async function verify(args: string[] = []): Promise<number> {
+  const { weights } = parseVerifyArgs(args);
   const ctx = await openContext({ needIfl: true });
   const line = ctx.cfg.lineId;
   let stops = 0;
   let gapsChecked = 0;
+  let weightMismatches = 0;
   const stop = (msg: string): void => {
     stops++;
     console.log(msg);
@@ -314,6 +439,11 @@ export async function verify(): Promise<number> {
         else stop(`${text}   STOP`);
       }
 
+      // (f) --weights: the weight aggregates, every generation of this table.
+      if (weights) {
+        weightMismatches += await verifyWeights(ctx, def, mine, line, now !== null);
+      }
+
       if (!mine.some((e) => e.closed_utc === null)) {
         const reports = now
           ? `the source reports ${now.server}/${now.database} created ${now.createdKey} fp ${now.fingerprint}`
@@ -341,13 +471,21 @@ export async function verify(): Promise<number> {
     console.log('DQ findings: ' + order.map((s) => `${s}=${bySev.get(s) ?? 0}`).join('  '));
 
     // (h)
-    if (stops === 0) {
+    if (weights) {
+      console.log(
+        weightMismatches === 0
+          ? 'Weights: every compared generation agrees on count, sum, avg, min and max'
+          : `Weights: ${weightMismatches} MISMATCH — a weight differs between source, raw and canonical; see above`,
+      );
+    }
+    if (stops === 0 && weightMismatches === 0) {
       console.log(
         `\n✓ every open generation reconciles with its source; raw ⇄ canonical clean on ${gapsChecked} epoch(s)`,
       );
       return 0;
     }
-    console.log(`\n✗ ${stops} STOP condition(s) — see above`);
+    if (stops > 0) console.log(`\n✗ ${stops} STOP condition(s) — see above`);
+    else console.log(`\n✗ weight reconciliation failed — see above`);
     return 1;
   } finally {
     await ctx.close();

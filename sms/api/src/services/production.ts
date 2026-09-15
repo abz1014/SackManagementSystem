@@ -5,6 +5,10 @@
  */
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
+import {
+  bindStateCase, foldStateCounts, loadStateContext, plausibleWhere,
+  type StateContext, type StateCounts,
+} from './coneState.js';
 
 export type GroupBy = 'day' | 'shift' | 'station' | 'none';
 
@@ -26,6 +30,14 @@ export interface ProductionParams {
    */
   tsTo?: string;
   groupBy: GroupBy;
+  /**
+   * Also count the cones per classification state (roadmap Phase 4, 14 Sep
+   * 2026). Opt-in because it loads the limits history and the plausibility
+   * rule; the route always asks, the report asks once for its totals.
+   */
+  withStates?: boolean;
+  /** A pre-loaded context, so a caller issuing several calls loads it once. */
+  stateContext?: StateContext;
 }
 
 export interface ProductionRow {
@@ -103,12 +115,34 @@ function bindFilters(
  * requested range with NO attribution at all, `of` every cone in the range —
  * both counted WITHOUT the product filter — so the screen can say "N of M
  * readings in this period predate product recording" instead of narrowing
- * the period without saying so. Cones only: sacks are never product-filtered
- * here (see bindFilters), so they are never silently dropped.
+ * the period without saying so. Sacks are never product-filtered here (see
+ * bindFilters), so they are never silently dropped.
+ *
+ * Cones AND rejects, reported separately (roadmap Phase 5 item 5, 14 Sep
+ * 2026). This used to count cone_event only, so a product-filtered
+ * `rejectedCones` silently dropped every pre-rebuild reject with nothing on
+ * the response to say so — the caveat covered half the figures it stood over.
  */
-export interface Unattributed {
+export interface UnattributedCount {
   rows: number;
   of: number;
+}
+export interface Unattributed {
+  cones: UnattributedCount;
+  rejects: UnattributedCount;
+}
+
+/**
+ * Cones in the range by the ONE classification (roadmap Phase 4): the same
+ * CASE the register's state column is built from, over the same filters the
+ * `cones` count uses, so `states` sums to `cones`. `implausible` is the
+ * readings the population rule excluded from every weight statistic — they
+ * are 'unknown' here, and the report prints "N readings, of which M
+ * implausible excluded" from these two numbers.
+ */
+export interface ProductionStates {
+  states: StateCounts;
+  implausible: number;
 }
 
 export interface ProductionResult {
@@ -116,6 +150,10 @@ export interface ProductionResult {
   rows: ProductionRow[];
   /** null on an unfiltered call — nothing was narrowed, so there is nothing to say. */
   unattributed: Unattributed | null;
+  /** Cones per state — present only when `withStates` was asked for. */
+  states: StateCounts | null;
+  /** Readings the population rule excluded as implausible; with `states`. */
+  implausible: number | null;
 }
 
 export async function getProduction(
@@ -134,14 +172,20 @@ export async function getProduction(
   // caller believes the period covers.
   let unattributed: Unattributed | null = null;
   if (p.product != null) {
-    const uReq = pool.request();
-    const uWhere = bindFilters(uReq, { ...p, product: undefined }, lineId, true);
-    const u = await uReq.query<{ n: number; no_attr: number }>(
-      `SELECT COUNT(*) n, SUM(CASE WHEN material_id IS NULL THEN 1 ELSE 0 END) no_attr
-       FROM sms.cone_event WHERE ${uWhere}`,
-    );
-    const u0 = u.recordset[0];
-    unattributed = { rows: Number(u0?.no_attr ?? 0), of: Number(u0?.n ?? 0) };
+    const countUnattributed = async (table: 'sms.cone_event' | 'sms.reject_event'): Promise<UnattributedCount> => {
+      const uReq = pool.request();
+      const uWhere = bindFilters(uReq, { ...p, product: undefined }, lineId, true);
+      const u = await uReq.query<{ n: number; no_attr: number }>(
+        `SELECT COUNT(*) n, SUM(CASE WHEN material_id IS NULL THEN 1 ELSE 0 END) no_attr
+         FROM ${table} WHERE ${uWhere}`,
+      );
+      const u0 = u.recordset[0];
+      return { rows: Number(u0?.no_attr ?? 0), of: Number(u0?.n ?? 0) };
+    };
+    unattributed = {
+      cones: await countUnattributed('sms.cone_event'),
+      rejects: await countUnattributed('sms.reject_event'),
+    };
   }
 
   // cones (with in-range %)
@@ -151,6 +195,27 @@ export async function getProduction(
     `SELECT ${g} AS grp, COUNT(*) n, SUM(CASE WHEN in_range=1 THEN 1 ELSE 0 END) inr
      FROM sms.cone_event WHERE ${coneWhere} ${groupClause}`,
   );
+
+  // cones per state, over the SAME filters, whatever the grouping (one row
+  // per state for the whole range — the screens ask for the totals).
+  let classification: ProductionStates | null = null;
+  if (p.withStates) {
+    const ctx = p.stateContext ?? (await loadStateContext(pool, lineId));
+    const stReq = pool.request();
+    const stWhere = bindFilters(stReq, p, lineId, true);
+    const stateCase = bindStateCase(stReq, ctx, '', 'cs');
+    const plausible = plausibleWhere(stReq, 'weight_g', ctx.plausibility);
+    const st = await stReq.query<{ state: string; n: number; implausible: number }>(
+      `SELECT ${stateCase} AS state, COUNT(*) n,
+              SUM(CASE WHEN weight_g IS NOT NULL AND NOT (${plausible}) THEN 1 ELSE 0 END) implausible
+       FROM sms.cone_event WHERE ${stWhere}
+       GROUP BY ${stateCase}`,
+    );
+    classification = {
+      states: foldStateCounts(st.recordset),
+      implausible: st.recordset.reduce((acc, r) => acc + Number(r.implausible ?? 0), 0),
+    };
+  }
 
   // rejected cones
   const rejReq = pool.request();
@@ -205,5 +270,9 @@ export async function getProduction(
   const rows = [...map.values()].sort((a, b) =>
     byStation ? Number(a.group) - Number(b.group) : a.group.localeCompare(b.group),
   );
-  return { groupBy: p.groupBy, rows, unattributed };
+  return {
+    groupBy: p.groupBy, rows, unattributed,
+    states: classification?.states ?? null,
+    implausible: classification?.implausible ?? null,
+  };
 }

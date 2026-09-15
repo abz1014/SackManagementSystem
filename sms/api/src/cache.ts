@@ -19,7 +19,23 @@ export class TtlCache<V> {
   }
 
   set(key: string, value: V): void {
-    this.store.set(key, { expires: Date.now() + this.ttlMs, value });
+    const now = Date.now();
+    // Sweep expired entries on every write (roadmap Phase 11, 14 Sep 2026).
+    // Expiry used to be enforced only on re-read of the SAME key, so a key
+    // that was written once and never asked for again — a replay instant
+    // (`live:<asOf>`), a one-off attention window — stayed in the map for the
+    // life of the process. Bounded by the number of distinct keys ever seen,
+    // which for a demo replaying many instants is not bounded at all. Writes
+    // are rare next to reads (one per TTL per key), so the sweep is cheap.
+    for (const [k, hit] of this.store) {
+      if (hit.expires <= now) this.store.delete(k);
+    }
+    this.store.set(key, { expires: now + this.ttlMs, value });
+  }
+
+  /** Entries held — for the test that proves the sweep. */
+  get size(): number {
+    return this.store.size;
   }
 
   /** Drop everything — for a configuration write that must show on the next read. */

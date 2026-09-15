@@ -46,3 +46,4 @@ export {
   type SourceIdentity,
 } from './epoch.js';
 export { acquireTransformLock, withTransformLock, type TransformLock } from './lock.js';
+export { clearPersistentFailure, raisePersistentFailure, PERSISTENT_SYNC_FAILURE } from './housekeeping.js';

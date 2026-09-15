@@ -52,6 +52,10 @@ export function WeightScreen({
   onSeeOutside: () => void;
 }) {
   const [mode, setMode] = useState<'time' | 'dist'>('time');
+  // One station's stream, or the whole line (roadmap Phase 4, 14 Sep 2026).
+  // The chart only: the figures above it and the station table below stay
+  // line-wide, so the selector cannot make the headline describe one scale.
+  const [chartStation, setChartStation] = useState<number | null>(null);
 
   const st = usePolling(
     () =>
@@ -81,6 +85,24 @@ export function WeightScreen({
     period.live ? 60_000 : 5 * 60_000,
     `spc:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
   );
+  // One station's stream for the chart (Phase 4). Fetched only while a station
+  // is chosen; the line-wide `spc` above keeps feeding the headline and the
+  // figures, so choosing a station cannot make them describe one scale.
+  const stationSpc = usePolling(
+    () =>
+      chartStation == null
+        ? Promise.resolve(null)
+        : getSpc({
+            type: 'cone',
+            from: period.from,
+            to: period.to,
+            shift: period.shift ?? undefined,
+            productId: productId ?? undefined,
+            station: chartStation,
+          }),
+    period.live ? 60_000 : 5 * 60_000,
+    `spc-station:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}:${chartStation ?? 'none'}`,
+  );
 
   const names = usePolling(() => getStations(), 10 * 60_000, 'stations');
 
@@ -98,13 +120,19 @@ export function WeightScreen({
   // moves when the figures and the table arrive.
   if (!st.data) return <ScreenSkeleton question={W.question.weight} figures={3} table={8} />;
   const d = st.data.data;
-  const s = spc.data?.data ?? null;
+  // `sLine` is always the line; `s` is what the chart draws — the station's
+  // stream while one is chosen, the line otherwise.
+  const sLine = spc.data?.data ?? null;
+  const s = chartStation == null ? sLine : (stationSpc.data?.data ?? null);
+  const chartLoading = chartStation == null ? spc.loading : stationSpc.loading;
+  const chartError = chartStation == null ? spc.error : stationSpc.error;
+  const chartRefresh = chartStation == null ? spc.refresh : stationSpc.refresh;
 
   return (
     <>
       <div className="page">
         <p className="q">{W.question.weight}</p>
-        <h1 className="wide">{headline(d, s)}</h1>
+        <h1 className="wide">{headline(d, sLine)}</h1>
       </div>
 
       <Block first>
@@ -114,7 +142,7 @@ export function WeightScreen({
               {/* count === 0, not just `!s`: an empty period comes back as a
                   real SpcData with mean 0, which printed a confident "0 g
                   average" for a period in which nothing was weighed. */}
-              {s && s.count > 0 ? fmtInt(Math.round(s.mean)) : '—'}
+              {sLine && sLine.count > 0 ? fmtInt(Math.round(sLine.mean)) : '—'}
               <span className="fig-unit">{W.fig.gAverage}</span>
             </b>
             <span className="fig-note">
@@ -127,8 +155,8 @@ export function WeightScreen({
           </div>
           <div>
             <b className="fig-val small">
-              {s && s.count > 0
-                ? W.weight.spread(fmtInt(Math.round(s.mean - 2 * s.stdevOverall)), fmtInt(Math.round(s.mean + 2 * s.stdevOverall)))
+              {sLine && sLine.count > 0
+                ? W.weight.spread(fmtInt(Math.round(sLine.mean - 2 * sLine.stdevOverall)), fmtInt(Math.round(sLine.mean + 2 * sLine.stdevOverall)))
                 : '—'}
             </b>
             <span className="fig-note">{W.weight.spreadNote}</span>
@@ -155,13 +183,30 @@ export function WeightScreen({
               { key: 'dist', label: W.weight.distribution },
             ]}
           />
+          {/* The station selector (Phase 4): the chart for one scale's stream. */}
+          <label className="chip">
+            {W.cone.stationSelect}
+            <select
+              value={chartStation ?? ''}
+              aria-label={W.cone.stationSelect}
+              onChange={(e) => setChartStation(e.target.value === '' ? null : Number(e.target.value))}
+              style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+            >
+              <option value="">{W.cone.wholeLine}</option>
+              {(names.data?.stations ?? []).map((n) => (
+                <option key={n.stationId} value={n.stationId}>
+                  {stationLabel(n, n.stationId)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        {spc.error && !s ? (
+        {chartError && !s ? (
           // Finding H14 (Sep 2026 audit): this used to fall through to
           // "Nothing recorded in this period" on a fetch failure — a false
           // claim indistinguishable from a genuinely quiet period.
-          <Failed error={spc.error} onRetry={spc.refresh} />
-        ) : spc.loading && !s ? (
+          <Failed error={chartError} onRetry={chartRefresh} />
+        ) : chartLoading && !s ? (
           <SkelChart />
         ) : !s || s.subgroups.length === 0 ? (
           <Empty message={W.nothingHere} />
@@ -178,6 +223,14 @@ export function WeightScreen({
         {s && s.spec.source === 'product' && (s.spec.limitsChangedInPeriod ?? 0) > 0 && (
           <p className="mut sm" style={{ marginTop: 10 }}>
             {W.weight.limitsChanged(s.spec.limitsChangedInPeriod!)}
+          </p>
+        )}
+        {/* The population under the chart, stated once: the same count and
+            the same exclusion the report and the reconciliation print. */}
+        {s && s.count + s.implausible > 0 && (
+          <p className="mut sm" style={{ marginTop: 10 }}>
+            {W.cone.excludedNote(fmtInt(s.count + s.implausible), fmtInt(s.implausible))}
+            {s.station != null ? ` · ${stationLabel(names.data?.stations.find((n) => n.stationId === s.station), s.station)}` : ''}
           </p>
         )}
       </Block>

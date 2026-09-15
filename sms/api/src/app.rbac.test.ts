@@ -231,6 +231,14 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/calibration/adjustments', minRank: 1 },
   { method: 'GET', path: '/api/config', minRank: 1 },
   { method: 'GET', path: '/api/reject-codes', minRank: 1 },
+  // roadmap Phase 4 (routes/cone.ts)
+  { method: 'GET', path: '/api/products/limits/history', minRank: 1 },
+  { method: 'GET', path: '/api/machines/running', minRank: 1 },
+  { method: 'GET', path: '/api/shift-check?from=2026-09-01&to=2026-09-07', minRank: 1 },
+  { method: 'GET', path: '/api/reconciliation?from=2026-09-01&to=2026-09-07', minRank: 3 },
+  // roadmap Phase 5 (routes/rejects.ts) — reads, open to every signed-in account
+  { method: 'GET', path: '/api/rejects/by-day-code?from=2026-09-01&to=2026-09-07', minRank: 1 },
+  { method: 'GET', path: '/api/rejects/reason?day=2026-09-07&code=1-3', minRank: 1 },
   // route-specific gates
   { method: 'GET', path: '/api/events/export?type=cone', minRank: 3 },
   { method: 'PUT', path: '/api/reject-codes/1', minRank: 3, body: { label: 'x' } },

@@ -1,6 +1,13 @@
 /**
- * `sms cutover --confirm` — throw away everything reproducible from the source
- * and start again from an empty raw layer.
+ * `sms cutover --confirm --backup=<path>` — throw away everything reproducible
+ * from the source and start again from an empty raw layer.
+ *
+ * THREE GATES since roadmap Phase 11 (14 Sep 2026), the ones `sms rebuild`
+ * already had and this command — which deletes more — did not (guards.ts):
+ * `--backup` must name an existing .bak file; no worker pass may be in
+ * flight; and the deletes run under the transform lock the worker and the
+ * rebuild take. Checked in that order, cheapest first, and all before any
+ * row goes.
  *
  * WHAT THIS IS NOT. It is no longer the answer to a source rebuild or a
  * repoint. That is `sms epoch:accept`: it registers the generation the source
@@ -35,8 +42,9 @@
  * `source_epoch` column has no FK and the old ids simply stop resolving.
  */
 import mssql from 'mssql';
-import { loadSourceTables, resetTransformWatermarks, TABLE_KINDS, TABLE_SHAPES } from '@sms/sync-worker';
+import { loadSourceTables, resetTransformWatermarks, withTransformLock, TABLE_KINDS, TABLE_SHAPES } from '@sms/sync-worker';
 import { openContext, parseArgs, cliLog } from '../context.js';
+import { inFlightProblem, passesInFlight, requireBackupFlag } from '../guards.js';
 
 /** Canonical + raw tables, cleared in FK-free dependency order (canonical first). */
 const CANONICAL = ['sms.cone_event', 'sms.sack_event', 'sms.reject_event'] as const;
@@ -57,6 +65,13 @@ const PRESERVED = [
 
 export async function cutover(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  // Before opening anything: a missing or nonexistent backup path needs no
+  // database to be refused.
+  const backup = requireBackupFlag(args, 'sms cutover');
+  if (!backup.ok) {
+    console.error(backup.problem);
+    return 2;
+  }
   const ctx = await openContext();
 
   try {
@@ -85,38 +100,52 @@ export async function cutover(argv: string[]): Promise<number> {
     for (const p of PRESERVED) console.log(`    - ${p}`);
     console.log();
 
+    console.log(`  backup named: ${backup.path}\n`);
+
     if (args.confirm !== true) {
       console.log('REFUSED: re-run with --confirm to proceed. Nothing has been changed.');
       return 2;
     }
 
-    // 1. canonical, then raw. Chunked: clearing cone_event is 200k+ rows, and a
-    //    single DELETE holds one transaction open for the whole scan and grows
-    //    the log by the size of the table — on a plant PC that is an outage.
-    for (const t of [...CANONICAL, ...RAW]) {
-      let cleared = 0;
-      for (;;) {
-        const del = await ctx.app.request().query(`DELETE TOP (5000) FROM ${t}`);
-        const n = del.rowsAffected[0] ?? 0;
-        cleared += n;
-        if (n === 0) break;
-      }
-      console.log(`  cleared ${String(cleared).padStart(9)} from ${t}`);
+    // A reader pass in flight would be writing the rows this is about to
+    // delete and advancing the watermarks it is about to reset.
+    const inFlight = await passesInFlight(ctx.app);
+    if (inFlight > 0) {
+      console.error(inFlightProblem(inFlight, 'sms cutover'));
+      return 2;
     }
 
-    // 2. transform watermarks back to zero
-    for (const t of WM_TABLES) await resetTransformWatermarks(ctx.app, t);
-    console.log('  reset transform watermarks');
+    // Under the transform lock (finding C1's fix, extended here): the
+    // worker's transform pass and a rebuild cannot run while this deletes.
+    await withTransformLock(ctx.cfg.app, async () => {
+      // 1. canonical, then raw. Chunked: clearing cone_event is 200k+ rows, and a
+      //    single DELETE holds one transaction open for the whole scan and grows
+      //    the log by the size of the table — on a plant PC that is an outage.
+      for (const t of [...CANONICAL, ...RAW]) {
+        let cleared = 0;
+        for (;;) {
+          const del = await ctx.app.request().query(`DELETE TOP (5000) FROM ${t}`);
+          const n = del.rowsAffected[0] ?? 0;
+          cleared += n;
+          if (n === 0) break;
+        }
+        console.log(`  cleared ${String(cleared).padStart(9)} from ${t}`);
+      }
 
-    // 3. The generation registry, now that nothing references it. Left empty on
-    //    purpose: the next `sms epoch:accept --all --confirm` registers whatever
-    //    the source reports, and the worker halts until it has.
-    const ep = await ctx.app.request().query(`DELETE FROM sms.source_epoch`);
-    console.log(`  cleared ${ep.rowsAffected[0] ?? 0} source generation(s) — registry now empty`);
+      // 2. transform watermarks back to zero
+      for (const t of WM_TABLES) await resetTransformWatermarks(ctx.app, t);
+      console.log('  reset transform watermarks');
 
-    // 4. DQ findings are ingest-scoped: they describe rows that no longer exist.
-    const dq = await ctx.app.request().query(`DELETE FROM sms.dq_finding`);
-    console.log(`  cleared ${dq.rowsAffected[0] ?? 0} DQ findings (they described deleted rows)`);
+      // 3. The generation registry, now that nothing references it. Left empty on
+      //    purpose: the next `sms epoch:accept --all --confirm` registers whatever
+      //    the source reports, and the worker halts until it has.
+      const ep = await ctx.app.request().query(`DELETE FROM sms.source_epoch`);
+      console.log(`  cleared ${ep.rowsAffected[0] ?? 0} source generation(s) — registry now empty`);
+
+      // 4. DQ findings are ingest-scoped: they describe rows that no longer exist.
+      const dq = await ctx.app.request().query(`DELETE FROM sms.dq_finding`);
+      console.log(`  cleared ${dq.rowsAffected[0] ?? 0} DQ findings (they described deleted rows)`);
+    });
 
     // 5. Record it. sync_run history is deliberately KEPT — it is the operational
     //    record of what this worker did, and it survives a source change.
@@ -128,6 +157,18 @@ export async function cutover(argv: string[]): Promise<number> {
         `MERGE sms.app_config AS t USING (SELECT @k k, @v v) s ON t.config_key = s.k
          WHEN MATCHED THEN UPDATE SET config_value = s.v
          WHEN NOT MATCHED THEN INSERT (config_key, config_value) VALUES (s.k, s.v);`,
+      );
+    // The backup this database would be restored from, in the audit log
+    // beside the act — no actor, the CLI has none.
+    await ctx.app
+      .request()
+      .input('action', mssql.VarChar(40), 'cutover.run')
+      .input('type', mssql.VarChar(40), 'database')
+      .input('target', mssql.NVarChar(64), 'sms')
+      .input('detail', mssql.NVarChar(1000), `by the CLI (sms cutover), no signed-in actor; ${total} rows cleared; backup named: ${backup.path}`)
+      .query(
+        `INSERT INTO sms.audit_log (actor_id, action, target_type, target_id, detail)
+         VALUES (NULL, @action, @type, @target, @detail)`,
       );
 
     console.log(`\ndone. The generation registry is empty and migration 025's seed will not re-run.`);

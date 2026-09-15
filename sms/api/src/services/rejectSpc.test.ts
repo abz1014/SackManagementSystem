@@ -53,3 +53,45 @@ describe('getRejectSpc — reject-rate denominator (finding H1)', () => {
     expect(data.pBar).toBeCloseTo(expected, 5);
   });
 });
+
+/**
+ * Two source epochs, one generation, one bucket (roadmap Phase 5, 14 Sep
+ * 2026). The quality and weight reject tables are registered as different
+ * epochs (11 and 12 here) sharing one generation ordinal, so a GROUP BY
+ * source_epoch hands this service TWO rows for the same day. They must be
+ * summed; `new Map(rows.map(...))` kept whichever came last.
+ */
+describe('getRejectSpc — two reject epochs of one generation in one bucket', () => {
+  const bucketTs = new Date('2026-09-07T00:00:00.000Z');
+  const registry = [
+    { epoch_id: 9, generation_ordinal: 3 },
+    { epoch_id: 11, generation_ordinal: 3 },
+    { epoch_id: 12, generation_ordinal: 3 },
+  ];
+
+  it('rejectType all: the combined count is the SUM of both tables, not the last one read', async () => {
+    const pool = fakePool([
+      { recordset: registry },
+      { recordset: [{ source_epoch: 9, bucket_ts: bucketTs, n: 1000 }] },
+      { recordset: [{ source_epoch: 11, bucket_ts: bucketTs, n: 30 }, { source_epoch: 12, bucket_ts: bucketTs, n: 20 }] },
+    ]);
+    const d = await getRejectSpc(pool, 1, '2026-09-07', '2026-09-07', 'day', 'all');
+    expect(d.totalRejects).toBe(50);
+    expect(d.buckets).toHaveLength(1);
+    expect(d.buckets[0]!.inspected).toBe(1050);
+    expect(d.pBar).toBeCloseTo(50 / 1050, 5);
+  });
+
+  it('rejectType quality: the denominator still counts the weight table\'s rejects', async () => {
+    const pool = fakePool([
+      { recordset: registry },
+      { recordset: [{ source_epoch: 9, bucket_ts: bucketTs, n: 1000 }] },
+      { recordset: [{ source_epoch: 11, bucket_ts: bucketTs, n: 30 }] },
+      { recordset: [{ source_epoch: 11, bucket_ts: bucketTs, n: 30 }, { source_epoch: 12, bucket_ts: bucketTs, n: 20 }] },
+    ]);
+    const d = await getRejectSpc(pool, 1, '2026-09-07', '2026-09-07', 'day', 'quality');
+    expect(d.totalRejects).toBe(30);
+    expect(d.buckets[0]!.inspected).toBe(1050);
+    expect(d.buckets[0]!.rate).toBeCloseTo(30 / 1050, 5);
+  });
+});

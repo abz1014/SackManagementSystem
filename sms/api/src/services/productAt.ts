@@ -29,6 +29,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { classifyConeDetail, isPlausibleWeight, type ConeState } from '@sms/shared';
 import { toPlantMs } from './plantClock.js';
 import type { ProductCatalogue } from './productLimits.js';
 
@@ -79,6 +80,18 @@ export interface ProductVerdict {
    * force, not a record of it. Only set when a catalogue was consulted.
    */
   limitsAreLowerBound: boolean;
+  /**
+   * THE classification (roadmap Phase 4, 14 Sep 2026): the five-state answer
+   * from shared/src/domain/classification.ts, the same one the register, the
+   * CSV and /api/production count by. `inside`/`outsideByG` above are the
+   * older two-state facts and are now derived from it. 'unknown' when no
+   * weight was given, the weight is implausible, or there were no limits.
+   */
+  state: ConeState;
+  /** The scale's own bit as the caller passed it: true passed, false rejected, null not given. */
+  scalePassed: boolean | null;
+  /** Why the state is 'unknown', when it is — so a screen prints the reason the server decided, not one it guessed. */
+  unknownReason: 'no_weight' | 'implausible' | 'no_limits' | null;
 }
 
 const fmtG = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -141,11 +154,36 @@ export class ProductTimeline {
   verdict(
     ts: string | number | Date,
     weightG: number | null | undefined,
-    opts: { productId?: number | null; catalogue?: ProductCatalogue } = {},
+    opts: {
+      productId?: number | null;
+      catalogue?: ProductCatalogue;
+      /**
+       * The scale's own in-range bit and the plausibility window, so the
+       * verdict carries the five-state classification (Phase 4). Without
+       * them the state is judged from the limits alone: no bit means "not
+       * rejected by the scale", and without a window every weight is
+       * taken as plausible — callers that have the row pass both.
+       */
+      inRange?: boolean | null;
+      plausibility?: { loG: number; hiG: number } | null;
+    } = {},
   ): ProductVerdict {
     const tsMs = ts instanceof Date ? ts.getTime() : typeof ts === 'number' ? ts : new Date(ts).getTime();
+    const scalePassed = opts.inRange == null ? null : Boolean(opts.inRange);
+    const plausible = opts.plausibility ? isPlausibleWeight(weightG, opts.plausibility) : weightG != null;
+    // One call to the one rule, whatever else this verdict says about the
+    // product: 'rejected' and 'unknown' (implausible / no weight) do not
+    // depend on the limits, so they are decided before the product lookup.
+    const classify = (limits: ProductLimits | null) =>
+      classifyConeDetail({
+        weightG,
+        inRange: opts.inRange,
+        plausible,
+        limits: limits ? { setpointG: limits.targetG, minusG: limits.targetG - limits.loG, plusG: limits.hiG - limits.targetG } : null,
+      });
     const none = (reason: NoProductReason): ProductVerdict => ({
       product: null, limits: null, outsideByG: null, inside: null, reason, attribution: null, limitsAreLowerBound: false,
+      state: classify(null).state, scalePassed, unknownReason: classify(null).unknownReason,
     });
 
     let product: ProductInForce | null = null;
@@ -186,12 +224,23 @@ export class ProductTimeline {
 
     if (!limits) return { ...none('no_setpoint'), product, attribution };
     if (weightG == null) {
-      return { product, limits, outsideByG: null, inside: null, reason: null, attribution, limitsAreLowerBound: lowerBound };
+      return {
+        product, limits, outsideByG: null, inside: null, reason: null, attribution, limitsAreLowerBound: lowerBound,
+        state: classify(limits).state, scalePassed, unknownReason: classify(limits).unknownReason,
+      };
     }
+    const c = classify(limits);
+    // inside/outsideByG keep their pre-Phase-4 meaning — the product
+    // tolerance alone, even for a scale-rejected or implausible reading — so
+    // the sheet can still print "12 g under the lower limit" beside a state
+    // that says 'rejected'. The STATE is the rule; these are the distance.
     const below = limits.loG - weightG;
     const above = weightG - limits.hiG;
     const outsideByG = below > 0 ? -Math.round(below * 100) / 100 : above > 0 ? Math.round(above * 100) / 100 : 0;
-    return { product, limits, outsideByG, inside: outsideByG === 0, reason: null, attribution, limitsAreLowerBound: lowerBound };
+    return {
+      product, limits, outsideByG, inside: outsideByG === 0, reason: null, attribution, limitsAreLowerBound: lowerBound,
+      state: c.state, scalePassed, unknownReason: c.unknownReason,
+    };
   }
 
   /** True when nothing has ever been recorded, so a screen can say so once. */
@@ -238,10 +287,79 @@ export async function loadProductTimeline(pool: ConnectionPool, lineId: number):
   );
 }
 
+/* ------------------------------------------------- limits over time */
+
+/**
+ * One product's limits over one interval of plant time, inclusive at both
+ * weight ends — the unit every set-based judgement works in (roadmap Phase 4,
+ * 14 Sep 2026). `materialId` null means readings that carry NO material_id,
+ * which are attributed by the line-wide timeline instead.
+ */
+export interface LimitWindow {
+  materialId: number | null;
+  /** Plant-clock ms; null = unbounded on that side. */
+  fromMs: number | null;
+  toMs: number | null;
+  loG: number;
+  hiG: number;
+}
+
+/**
+ * Every limits window the record needs, from the same two sources verdict()
+ * consults, in the same priority:
+ *  - readings with their own MaterialId (every row since IFL's 2026-08-05
+ *    rebuild): one window per (product, limits version), from the versioned
+ *    history — never the mirror's current values. The oldest version also
+ *    covers readings that predate it, as a lower bound (productLimits.ts).
+ *  - readings with no MaterialId (July): the hand-entered line-wide timeline,
+ *    each entry from its start to the next entry's start, with the limits as
+ *    they stood when it began.
+ * A reading matching no window has nothing to be judged against, and every
+ * consumer treats it as 'unknown' — never as a pass.
+ */
+export function limitWindowsFor(timeline: ProductTimeline, catalogue: ProductCatalogue): LimitWindow[] {
+  const out: LimitWindow[] = [];
+  for (const pid of catalogue.productIds()) {
+    const versions = catalogue.versionsAscending(pid);
+    for (let i = 0; i < versions.length; i++) {
+      const v = versions[i]!;
+      const lim = limitsFromVersionSafe(v);
+      if (!lim) continue;
+      out.push({
+        materialId: pid,
+        fromMs: i === 0 ? null : v.effectiveFromMs,
+        toMs: versions[i + 1]?.effectiveFromMs ?? null,
+        loG: lim.loG,
+        hiG: lim.hiG,
+      });
+    }
+  }
+  const asc = [...timeline.entries].sort((a, b) => a.effectiveFromMs - b.effectiveFromMs);
+  for (let i = 0; i < asc.length; i++) {
+    const seg = asc[i]!;
+    const lim = catalogue.limitsAt(seg.productId, seg.effectiveFromMs) ?? limitsOf(seg);
+    if (!lim) continue;
+    out.push({
+      materialId: null,
+      fromMs: seg.effectiveFromMs,
+      toMs: asc[i + 1]?.effectiveFromMs ?? null,
+      loG: lim.loG,
+      hiG: lim.hiG,
+    });
+  }
+  return out;
+}
+
+/** limitsFromVersion without a runtime import cycle: the shape is tiny. */
+function limitsFromVersionSafe(v: { setpointG: number | null; offsetMinusG: number | null; offsetPlusG: number | null }): { loG: number; hiG: number } | null {
+  if (v.setpointG == null || v.offsetMinusG == null || v.offsetPlusG == null) return null;
+  return { loG: v.setpointG - Math.abs(v.offsetMinusG), hiG: v.setpointG + Math.abs(v.offsetPlusG) };
+}
+
 /* ------------------------------------------------- scale versus product */
 
 export interface ProductDisagreement {
-  /** Cones the scale passed that sit outside the product's limits. */
+  /** Cones the scale passed that sit outside the product's limits — the 'low' + 'high' states. */
   passedButOutside: number;
   /** Cones the scale rejected that sit inside the product's limits. */
   rejectedButInside: number;
@@ -259,75 +377,29 @@ export interface DayRange {
   shift?: string | null;
 }
 
-/** One judged window: rows in [fromMs, toMs) against one pair of limits. */
-async function judgeWindow(
-  pool: ConnectionPool,
-  lineId: number,
-  range: DayRange,
-  w: { fromMs: number | null; toMs: number | null; loG: number; hiG: number; materialId: number | null },
-): Promise<{ judged: number; passedOut: number; rejectedIn: number }> {
-  const req = pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, range.from)
-    .input('to', mssql.Date, range.to)
-    .input('lo', mssql.Float, w.loG)
-    .input('hi', mssql.Float, w.hiG);
-  if (w.fromMs != null) req.input('segFrom', mssql.BigInt, w.fromMs);
-  if (w.toMs != null) req.input('segTo', mssql.BigInt, w.toMs);
-  if (w.materialId != null) req.input('mat', mssql.Int, w.materialId);
-  if (range.shift) req.input('shift', mssql.VarChar(16), range.shift);
-
-  const r = await req.query<{ judged: number; passedOut: number; rejectedIn: number }>(
-    `SELECT COUNT(*) AS judged,
-            SUM(CASE WHEN in_range = 1 AND (weight_g < @lo OR weight_g > @hi) THEN 1 ELSE 0 END) AS passedOut,
-            SUM(CASE WHEN in_range = 0 AND weight_g >= @lo AND weight_g <= @hi THEN 1 ELSE 0 END) AS rejectedIn
-       FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to
-        ${range.shift ? 'AND shift_code = @shift' : ''}
-        ${w.fromMs != null ? 'AND production_ts_utc_ms >= @segFrom' : ''}
-        ${w.toMs != null ? 'AND production_ts_utc_ms < @segTo' : ''}
-        ${w.materialId != null ? 'AND material_id = @mat' : 'AND material_id IS NULL'}
-        AND weight_g IS NOT NULL AND in_range IS NOT NULL`,
-  );
-  const row = r.recordset[0];
-  return {
-    judged: Number(row?.judged ?? 0),
-    passedOut: Number(row?.passedOut ?? 0),
-    rejectedIn: Number(row?.rejectedIn ?? 0),
-  };
-}
-
 /**
  * How many cones in a period the SCALE passed but the product's own limits
  * would not — the one sentence REDESIGN.md §5.3 puts on the Weight screen
- * whenever it is non-zero.
+ * whenever it is non-zero — and the reverse.
  *
  * Filtered by shift_date, exactly as every other service filters a period, so
  * a "day" here is the same day it is everywhere else.
  *
- * TWO KINDS OF CONE, judged two ways (Sep 2026):
+ * ONE QUERY over the limit windows (Phase 4, 14 Sep 2026). Until then this
+ * walked the catalogue and the timeline issuing one aggregate per window
+ * plus three counts, and judged with its own inline comparison — a fourth
+ * copy of the rule. Now the windows come from limitWindowsFor, the same list
+ * the register's state column and /api/production's counts are built from,
+ * and "passed but outside" IS the 'low' + 'high' population those report.
+ * `rejectedButInside` is not a state — the classification makes the scale's
+ * bit govern 'rejected' — so it is counted here beside the states.
  *
- *  - Cones that carry their OWN product — IFL's `MaterialId`, stamped on every
- *    row since their 2026-08-05 rebuild and populated on 100% of them. These
- *    are judged against THAT product's limits as they stood at the cone's own
- *    time (productLimits.ts), one query per (product, limits version). The
- *    line-wide timeline is not consulted for them: up to six materials run
- *    concurrently on different machines, so "the product in force on the line"
- *    is the wrong question for such a cone.
+ * Readings that cannot be judged — no product recorded, a product with no
+ * usable limits, a MaterialId the mirror does not know, no weight or bit —
+ * are `unjudged`, never assumed to pass.
  *
- *  - Cones with no product on the row — everything from before the column
- *    existed. For these the hand-entered line-wide timeline is the only
- *    attribution there is, walked as half-open segments [start, nextStart),
- *    each judged against the limits in force when the segment began.
- *
- * Readings that cannot be judged either way — no product recorded, a product
- * with no usable limits, a MaterialId the mirror does not know — are counted
- * as `unjudged` rather than assumed to pass: there is nothing to judge them
- * against, and reporting them as zero would imply there was.
- *
- * `catalogue` is optional so older callers keep their exact behaviour (mirror
- * limits, timeline only); every caller should pass one.
+ * `catalogue` is optional so older callers keep their behaviour (timeline
+ * only, applied to every row); every caller should pass one.
  */
 export async function productDisagreement(
   pool: ConnectionPool,
@@ -336,131 +408,75 @@ export async function productDisagreement(
   range: DayRange,
   catalogue?: ProductCatalogue,
 ): Promise<ProductDisagreement> {
-  const out: ProductDisagreement = { passedButOutside: 0, rejectedButInside: 0, judged: 0, unjudged: 0 };
-  const add = (r: { judged: number; passedOut: number; rejectedIn: number }) => {
-    out.judged += r.judged;
-    out.passedButOutside += r.passedOut;
-    out.rejectedButInside += r.rejectedIn;
-  };
-  // With a catalogue, the timeline walk below sees ONLY rows without their own
-  // product; without one (legacy callers) it sees every row, as it always did.
-  const unattributedOnly = catalogue != null;
+  type Win = LimitWindow & { anyMaterial?: boolean };
+  const windows: Win[] = catalogue
+    ? limitWindowsFor(timeline, catalogue)
+    : [...timeline.entries]
+        .sort((a, b) => a.effectiveFromMs - b.effectiveFromMs)
+        .flatMap((seg, i, asc): Win[] => {
+          const lim = limitsOf(seg);
+          // Legacy path (no catalogue): every row in the segment, whatever its material_id.
+          return lim
+            ? [{ materialId: null, fromMs: seg.effectiveFromMs, toMs: asc[i + 1]?.effectiveFromMs ?? null, loG: lim.loG, hiG: lim.hiG, anyMaterial: true }]
+            : [];
+        });
 
-  // ---- 1. cones with their own MaterialId, per product, per limits version --
-  if (catalogue) {
-    let judgedAttributed = 0;
-    for (const pid of catalogue.productIds()) {
-      const versions = catalogue.versionsAscending(pid);
-      for (let i = 0; i < versions.length; i++) {
-        const v = versions[i]!;
-        const lim = limitsFromVersionSafe(v);
-        if (!lim) continue;
-        // The oldest version also covers readings that PREDATE it (a lower
-        // bound on when those limits took effect — see productLimits.ts).
-        const fromMs = i === 0 ? null : v.effectiveFromMs;
-        const toMs = versions[i + 1]?.effectiveFromMs ?? null;
-        const r = await judgeWindow(pool, lineId, range, { fromMs, toMs, loG: lim.loG, hiG: lim.hiG, materialId: pid });
-        add(r);
-        judgedAttributed += r.judged;
-      }
-    }
-    // Attributed cones nothing above could judge: unknown product, or a
-    // product with no usable limits.
-    const attributedTotal = await countCones(pool, lineId, range, null, null, 'attributed');
-    out.unjudged += Math.max(0, attributedTotal - judgedAttributed);
-  }
-
-  // ---- 2. cones with no product on the row: the line-wide timeline ---------
-  if (timeline.isEmpty) {
-    out.unjudged += await countCones(pool, lineId, range, null, null, unattributedOnly ? 'unattributed' : 'all');
-    return out;
-  }
-
-  // Walk the timeline as half-open segments [start, nextStart), each clipped by
-  // the shift_date filter in SQL. One query per product in force, not per cone.
-  const asc = [...timeline.entries].sort((a, b) => a.effectiveFromMs - b.effectiveFromMs);
-  const scope = unattributedOnly ? 'unattributed' : 'all';
-
-  // Anything in the period that predates the first recorded product.
-  out.unjudged += await countCones(pool, lineId, range, null, asc[0]!.effectiveFromMs, scope);
-
-  for (let i = 0; i < asc.length; i++) {
-    const seg = asc[i]!;
-    const segTo = asc[i + 1]?.effectiveFromMs ?? null;
-    // Limits as they stood when this segment began — versioned when a
-    // catalogue is available, the mirror's current values otherwise.
-    const limits = catalogue
-      ? (catalogue.limitsAt(seg.productId, seg.effectiveFromMs) ?? limitsOf(seg))
-      : limitsOf(seg);
-
-    if (!limits) {
-      out.unjudged += await countCones(pool, lineId, range, seg.effectiveFromMs, segTo, scope);
-      continue;
-    }
-    if (unattributedOnly) {
-      add(await judgeWindow(pool, lineId, range, { fromMs: seg.effectiveFromMs, toMs: segTo, loG: limits.loG, hiG: limits.hiG, materialId: null }));
-      continue;
-    }
-    // Legacy path (no catalogue): every row in the segment, as before.
-    const req = pool
-      .request()
-      .input('line', mssql.Int, lineId)
-      .input('from', mssql.Date, range.from)
-      .input('to', mssql.Date, range.to)
-      .input('segFrom', mssql.BigInt, seg.effectiveFromMs)
-      .input('lo', mssql.Float, limits.loG)
-      .input('hi', mssql.Float, limits.hiG);
-    if (segTo != null) req.input('segTo', mssql.BigInt, segTo);
-    if (range.shift) req.input('shift', mssql.VarChar(16), range.shift);
-    const r = await req.query<{ judged: number; passedOut: number; rejectedIn: number }>(
-      `SELECT COUNT(*) AS judged,
-              SUM(CASE WHEN in_range = 1 AND (weight_g < @lo OR weight_g > @hi) THEN 1 ELSE 0 END) AS passedOut,
-              SUM(CASE WHEN in_range = 0 AND weight_g >= @lo AND weight_g <= @hi THEN 1 ELSE 0 END) AS rejectedIn
-         FROM sms.cone_event
-        WHERE line_id = @line AND shift_date BETWEEN @from AND @to
-          ${range.shift ? 'AND shift_code = @shift' : ''}
-          AND production_ts_utc_ms >= @segFrom
-          ${segTo != null ? 'AND production_ts_utc_ms < @segTo' : ''}
-          AND weight_g IS NOT NULL AND in_range IS NOT NULL`,
-    );
-    const row = r.recordset[0];
-    add({ judged: Number(row?.judged ?? 0), passedOut: Number(row?.passedOut ?? 0), rejectedIn: Number(row?.rejectedIn ?? 0) });
-  }
-
-  return out;
-}
-
-/** limitsFromVersion without a runtime import cycle: the shape is tiny. */
-function limitsFromVersionSafe(v: { setpointG: number | null; offsetMinusG: number | null; offsetPlusG: number | null }): { loG: number; hiG: number } | null {
-  if (v.setpointG == null || v.offsetMinusG == null || v.offsetPlusG == null) return null;
-  return { loG: v.setpointG - Math.abs(v.offsetMinusG), hiG: v.setpointG + Math.abs(v.offsetPlusG) };
-}
-
-async function countCones(
-  pool: ConnectionPool,
-  lineId: number,
-  range: DayRange,
-  fromMs: number | null,
-  toMs: number | null,
-  scope: 'all' | 'attributed' | 'unattributed' = 'all',
-): Promise<number> {
   const req = pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, range.from)
     .input('to', mssql.Date, range.to);
-  if (fromMs != null) req.input('segFrom', mssql.BigInt, fromMs);
-  if (toMs != null) req.input('segTo', mssql.BigInt, toMs);
   if (range.shift) req.input('shift', mssql.VarChar(16), range.shift);
 
-  const r = await req.query<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM sms.cone_event
+  // Per window: a match predicate, and the reading's position against it.
+  const matches: string[] = [];
+  const outside: string[] = [];
+  const inside: string[] = [];
+  windows.forEach((w, i) => {
+    const parts: string[] = [];
+    if (!w.anyMaterial) {
+      if (w.materialId == null) parts.push('material_id IS NULL');
+      else {
+        parts.push(`material_id = @mat${i}`);
+        req.input(`mat${i}`, mssql.Int, w.materialId);
+      }
+    }
+    if (w.fromMs != null) {
+      parts.push(`production_ts_utc_ms >= @from${i}`);
+      req.input(`from${i}`, mssql.BigInt, w.fromMs);
+    }
+    if (w.toMs != null) {
+      parts.push(`production_ts_utc_ms < @to${i}`);
+      req.input(`to${i}`, mssql.BigInt, w.toMs);
+    }
+    req.input(`lo${i}`, mssql.Float, w.loG);
+    req.input(`hi${i}`, mssql.Float, w.hiG);
+    const match = parts.length ? parts.join(' AND ') : '1 = 1';
+    matches.push(`(${match})`);
+    outside.push(`(${match} AND (weight_g < @lo${i} OR weight_g > @hi${i}))`);
+    inside.push(`(${match} AND weight_g >= @lo${i} AND weight_g <= @hi${i})`);
+  });
+  const judgeable = matches.length ? `(${matches.join(' OR ')})` : '1 = 0';
+  const isOutside = outside.length ? `(${outside.join(' OR ')})` : '1 = 0';
+  const isInside = inside.length ? `(${inside.join(' OR ')})` : '1 = 0';
+
+  const r = await req.query<{ total: number; judged: number; passedOut: number; rejectedIn: number }>(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN in_range IS NOT NULL AND ${judgeable} THEN 1 ELSE 0 END) AS judged,
+            SUM(CASE WHEN in_range = 1 AND ${isOutside} THEN 1 ELSE 0 END) AS passedOut,
+            SUM(CASE WHEN in_range = 0 AND ${isInside} THEN 1 ELSE 0 END) AS rejectedIn
+       FROM sms.cone_event
       WHERE line_id = @line AND shift_date BETWEEN @from AND @to
         ${range.shift ? 'AND shift_code = @shift' : ''}
-        ${fromMs != null ? 'AND production_ts_utc_ms >= @segFrom' : ''}
-        ${toMs != null ? 'AND production_ts_utc_ms < @segTo' : ''}
-        ${scope === 'attributed' ? 'AND material_id IS NOT NULL' : scope === 'unattributed' ? 'AND material_id IS NULL' : ''}
         AND weight_g IS NOT NULL`,
   );
-  return Number(r.recordset[0]?.n ?? 0);
+  const row = r.recordset[0];
+  const total = Number(row?.total ?? 0);
+  const judged = Number(row?.judged ?? 0);
+  return {
+    passedButOutside: Number(row?.passedOut ?? 0),
+    rejectedButInside: Number(row?.rejectedIn ?? 0),
+    judged,
+    unjudged: Math.max(0, total - judged),
+  };
 }

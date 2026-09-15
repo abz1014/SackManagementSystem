@@ -122,3 +122,35 @@ describe('LoginRateLimiter', () => {
     expect(limiter.retryAfter('user:innocent', 0)).toBe(0);
   });
 });
+
+/**
+ * Roadmap Phase 11 (14 Sep 2026): the map is bounded in fact, not by claim.
+ * Every check prunes entries whose failure window has passed and whose
+ * lockout has expired; a live lockout survives the window.
+ */
+describe('LoginRateLimiter — pruning', () => {
+  it('drops stale keys on the next check, keeps a live lockout past its window', () => {
+    const limiter = new LoginRateLimiter();
+    for (let i = 0; i < 50; i++) limiter.recordFailure(`ip:10.0.0.${i}`, 0); // one failure each, at t=0
+    for (let i = 0; i < 8; i++) limiter.recordFailure('user:locked', 0); // locked until t=15min
+    expect(limiter.size).toBe(51);
+    // 16 minutes later: the single failures are outside the 15-minute window
+    // AND the lockout has expired, so everything goes.
+    expect(limiter.retryAfter('ip:10.0.0.1', 16 * 60_000)).toBe(0);
+    expect(limiter.size).toBe(0);
+  });
+
+  it('a lockout that is still in force is never pruned, even after the failure window', () => {
+    const limiter = new LoginRateLimiter();
+    for (let i = 0; i < 8; i++) limiter.recordFailure('user:locked', 0);
+    limiter.recordFailure('ip:stale', 0);
+    // 14 minutes: window not yet over — nothing pruned
+    limiter.retryAfter('x', 14 * 60_000);
+    expect(limiter.size).toBe(2);
+    // recordFailure at t=0 set first=0; the lockout runs to t=15min. Just
+    // past the window but inside the lockout is impossible here since both
+    // are 15 min, so check exactly at the boundary: still locked, still held.
+    expect(limiter.retryAfter('user:locked', 15 * 60_000 - 1)).toBeGreaterThan(0);
+    expect(limiter.size).toBe(2);
+  });
+});

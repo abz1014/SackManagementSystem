@@ -18,6 +18,7 @@ import { PERIOD_KEYS, type PeriodKey, type PeriodParams } from '../lib/period';
 import type { Health } from '../lib/health';
 import { fmtClockSec, fmtClock, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
+import { AccountSheet } from '../screens/Account';
 
 export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'report';
 
@@ -119,6 +120,9 @@ const SCALES = [
 
 function UserMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
+  // The password sheet (roadmap Phase 11): opened from here, owned here, so
+  // the shell carries no route for it.
+  const [account, setAccount] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState<string>(() => {
     try {
@@ -183,11 +187,15 @@ function UserMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }
               ))}
             </span>
           </div>
+          <button type="button" className="menu-item" role="menuitem" onClick={() => { setOpen(false); setAccount(true); }}>
+            {W.health.changePassword}
+          </button>
           <button type="button" className="menu-item" role="menuitem" onClick={onSignOut}>
             {W.signOut}
           </button>
         </div>
       )}
+      {account && <AccountSheet onClose={() => setAccount(false)} />}
     </div>
   );
 }
@@ -230,10 +238,11 @@ export function HealthLine({ health, onOpen, canOpen }: { health: Health; onOpen
   }
 
   /* A control a role cannot use is absent — the same rule that removed the
-     Export button from rank 2. "details" opens Setup, which is admin-only, so
-     for everyone else it led to "This is only available to an administrator."
-     The sentence itself still shows: the lag matters to every reader, it is
-     only the way IN to Setup that does not. */
+     Export button from rank 2. "details" used to open Setup, which is
+     admin-only, so for everyone else it was a dead end and the sentence was
+     shown bare. Since roadmap Phase 11 (14 Sep 2026) it opens the Health
+     screen, which every signed-in account may read, so `canOpen` is true for
+     everyone; the prop stays so a caller can still withhold the link. */
   if (!canOpen) return <span>{text}</span>;
 
   return (
@@ -262,7 +271,7 @@ export function Bar({
   onOpenSync,
   onSignOut,
 }: {
-  screen: Screen | 'setup';
+  screen: Screen | 'setup' | 'health';
   lineName: string;
   /** The plant's clock, from /api/live. Never the browser's. */
   plantNowUtc: string | null;
@@ -327,7 +336,9 @@ export function Bar({
             </>
           )}
         </span>
-        <HealthLine health={health} onOpen={onOpenSync} canOpen={isAdmin} />
+        {/* Every account may open the Health screen (roadmap Phase 11); the
+            gear above stays admin-only. */}
+        <HealthLine health={health} onOpen={onOpenSync} canOpen />
       </div>
     </>
   );

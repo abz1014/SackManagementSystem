@@ -23,6 +23,7 @@
  */
 
 const nbsp = String.fromCharCode(0xa0);
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export const W = {
   /* ------------------------------------------------------------- the shell */
@@ -751,6 +752,215 @@ export const W = {
   ago: 'ago',
   of: 'of',
   and: 'and',
+
+  /* --------------------------------------------- rejects, roadmap Phase 5 */
+  /* The drilldowns the requirement names (date, shift, product, machine,
+     reject code) and the per-day-per-code breakdown, added 14 Sep 2026. Kept
+     apart from `rejects` so the two can be reviewed as one change. Plain
+     words on the screen; "p-chart" and "control band" stay under Details. */
+  rejectsMore: {
+    /* The chips. */
+    filterStation: 'Station',
+    filterProduct: 'Product',
+    all: 'All',
+    codeChip: (name: string) => `Reason: ${name}`,
+    clearCode: 'clear',
+    clickBarHint: 'Choose a reason to follow it through the trend and the days below.',
+    /* The second figure: the top reason, and that it is the period's. */
+    topReasonThisPeriod: (reason: string) => `${reason} · the top reason this period`,
+    /* Which figures follow the period and which do not. Stated once. */
+    reasonsFollowPeriod: 'Reasons and the days below follow the selected period.',
+    detectorFixed: (days: number) =>
+      `The trend and its "rising" verdict always look at the last ${days} production days, because a rise cannot be seen inside one shift.`,
+    trendTitle: (days: number) => `Reject rate over the last ${days} days · usual range shaded`,
+    trendTitleNoShade: (days: number) => `Reject rate over the last ${days} days`,
+    bandLabel: 'usual range',
+    bandNote: 'The shaded band is the usual range for quality rejects at that day’s volume; the dashed line is the same ceiling for weight rejects. A marked day sits above its ceiling.',
+    bandNoteOneSeries: 'The shaded band is the usual range for this reason at that day’s volume. A marked day sits above it.',
+    aboveUsual: 'above the usual range',
+    /* The per-day-per-code breakdown. */
+    byDayTitle: 'By day and reason',
+    byDayNote: 'Rate is that day’s share of everything inspected. A day here is the production day, 06:00 to 06:00.',
+    /* IFL has not said whether their reject reporting counts by production
+       day or by calendar date. Printed, not implied. */
+    dayBasisCaveat: 'IFL has not confirmed whether reject reports should count by production day or by calendar date; this screen uses the production day.',
+    colDay: 'Day',
+    colReason: 'Reason',
+    colCount: 'Rejects',
+    colCones: 'Cones that day',
+    colRate: 'Rate',
+    noneForFilters: 'No rejects match these filters in this period.',
+    /* The caveat under a product filter — the same sentence Line uses for cones. */
+    predateProduct: (n: string, of: string) =>
+      `${n} of ${of} rejects in this period were recorded before the plant began recording a product, and are not shown under a product filter.`,
+    /* Inline rename failure. The old screen swallowed it. */
+    renameFailed: 'The name was not saved. Try again.',
+    /* The reason sheet. */
+    sheetTitle: 'Rejects for one reason',
+    sheetEyebrow: (day: string) => `${day} · production day`,
+    sheetCount: (n: string, reason: string) => `${n} cones rejected for ${reason}`,
+    sheetCountOne: (reason: string) => `1 cone rejected for ${reason}`,
+    sheetEmpty: 'No rejects of this reason on this day.',
+    sheetMore: (shown: number, total: number) => `Showing the first ${shown} of ${total}.`,
+    colTime: 'Time',
+    colStation: 'Station',
+    colProduct: 'Product',
+    colWeight: 'Weight',
+    colRecord: 'Record',
+    noProductThen: 'not recorded',
+    notWeighed: 'not weighed',
+    openRegister: 'See this day in Readings',
+    openRegisterNote: 'opens Readings on the inspection rejects of this day; the reason itself is listed only here',
+    nameThisReason: 'Name this reason',
+    rename: 'Rename',
+    save: 'Save',
+    cancel: 'Cancel',
+    pass: 'counted as a pass',
+    fail: 'counted as a fail',
+    passUnknown: 'pass or fail not set',
+  } as const,
+
+  /* ------------------------------------------ health & account (Phase 11) */
+  /* Roadmap Phase 11 (14 Sep 2026). The Health screen is open to every
+     signed-in account — IFL's people are created at manager, and until now
+     the only place that said whether the sync was alive was admin-only. The
+     same rules as everywhere: plain words, and a threshold that is the
+     developer's default says so (IFL has not stated a retention or backup
+     regime — Phase 11 clarifications). */
+  health: {
+    nav: 'Health',
+    title: 'Health',
+    question: 'Is this system itself healthy: the plant link, the database, the service, and the backups.',
+    status: { ok: 'Everything is healthy.', degraded: 'Something needs attention.', down: 'The database cannot be reached.' } as const,
+    service: 'Service',
+    version: (v: string) => `Version ${v}`,
+    upSince: (span: string) => `running for ${span}`,
+    restarted: 'A short uptime beside an old "since" means the service restarted — the crash record is in the log.',
+    degradedBecause: (reason: string) => `The service reported a database problem: ${reason}`,
+    database: 'Database',
+    dbLatency: (ms: number) => `answering in ${ms} ms`,
+    dbSize: (mb: string, pct: string, capGb: number) => `${mb} MB used of the ${capGb} GB SQL Server Express allows — ${pct} %.`,
+    dbSizeUnknown: 'The size could not be read.',
+    /* Over 80 %: the one sentence that says what happens and whose decision
+       the remedy is. Raw and canonical retention is IFL's call, not ours. */
+    dbNearCap: 'Past 80 % of the cap. At 100 % every write fails and readings stop arriving. Only removing old readings brings it down, and how long readings are kept is a decision for IFL — it has not been made.',
+    acquisition: 'Plant link',
+    backup: 'Backups',
+    backupLast: (span: string, file: string) => `Last backup ${span} ago (${file}).`,
+    backupNone: 'No backup file was found.',
+    backupWarn: 'Backups run nightly; more than two days without one means the scheduled task has stopped. Check Task Scheduler on the server.',
+    backupDir: (dir: string) => `Looking in ${dir}.`,
+    /* The account menu and the password sheet. */
+    account: 'Account',
+    changePassword: 'Change password',
+    currentPassword: 'Current password',
+    newPassword: 'New password',
+    confirmPassword: 'New password again',
+    mismatch: 'The two new passwords differ.',
+    wrongCurrent: 'The current password is not right.',
+    changed: (n: number) =>
+      n === 0 ? 'Password changed.' : n === 1 ? 'Password changed. One other session of yours was signed out.' : `Password changed. ${n} other sessions of yours were signed out.`,
+    /* Setup › People: the admin reset. */
+    password: 'Password',
+    reset: 'Reset',
+    resetDone: (n: number) => (n === 0 ? 'reset; the account was not signed in anywhere' : `reset; signed out of ${n} session${n === 1 ? '' : 's'}`),
+    ownPasswordHint: 'from the account menu',
+    /* Setup › Audit log paging and the no-actor rows. */
+    older: 'Show older',
+    noActor: 'no one signed in',
+  } as const,
+
+  /* -------------------------------------------- cone weight (Phase 4) */
+  /* Roadmap Phase 4 (14 Sep 2026). The five states are the ONE cone
+     classification (shared/src/domain/classification.ts): the words here are
+     the only words for them, on the register, the sheet, the report and the
+     CSV alike. "Rejected by the scale" is the scale's own verdict, kept in
+     its own words (REDESIGN rule 1); low/high are the product's tolerance,
+     which is the second fact; "not judged" is honest for a reading with no
+     product limits in force at its time or a weight the plausibility rule
+     treats as a scale fault. Which judgement governs when the scale and the
+     tolerance disagree is not yet confirmed by IFL — this is the developer's
+     rule, stated as such where the two facts are printed together. */
+  cone: {
+    state: {
+      within: 'Within limits',
+      low: 'Under the limit',
+      high: 'Over the limit',
+      rejected: 'Rejected by the scale',
+      unknown: 'Not judged',
+    } as const,
+    stateShort: {
+      within: 'Within',
+      low: 'Low',
+      high: 'High',
+      rejected: 'Rejected',
+      unknown: 'Not judged',
+    } as const,
+    filterState: 'State',
+    anyState: 'Any',
+    colState: 'State',
+    colProduct: 'Product',
+    noProductOnRow: '—',
+    /* The sheet's headline, one sentence for each state. `by` is
+       "12 g under the lower limit" from the server's signed distance. */
+    withinOf: (limits: string) => `Within the product's limits, ${limits}.`,
+    lowHigh: (by: string, limits: string, scalePassed: boolean | null) =>
+      scalePassed
+        ? `${cap(by)}, ${limits} — passed by the scale. Which judgement governs is not yet confirmed by IFL.`
+        : `${cap(by)}, ${limits}.`,
+    rejectedInside: (limits: string) =>
+      `Rejected by the scale; the weight sits inside the product's limits, ${limits}. Which judgement governs is not yet confirmed by IFL.`,
+    rejectedOutside: (by: string, limits: string) => `Rejected by the scale; ${by}, ${limits}.`,
+    notJudged: {
+      no_limits: 'Not judged against a tolerance: no product limits were in force at this time.',
+      implausible: (lo: string, hi: string) =>
+        `Not judged: the weight is outside the plausibility window (${lo} to ${hi}), so it is treated as a scale fault rather than a light or heavy cone. The window is not yet confirmed by IFL.`,
+      no_weight: 'Not judged: no weight was recorded.',
+    },
+    /* The count sentence when a state filter is on. */
+    countLineState: (n: string, states: string) => `${n} cones ${states}.`,
+    /* Line › What each machine is running. Anchored on the newest reading,
+       never the clock: the plant writes a cone about a quarter of an hour
+       after it is weighed. */
+    machinesTitle: 'What each machine is running',
+    machinesNote: (n: number) => (n === 1 ? '1 product running' : `${n} products running`),
+    machinesWindow: 'from each machine\u2019s newest cones in the last 2 hours of plant time',
+    quiet2h: 'nothing in the last 2 h',
+    since: (t: string) => `since ${t}`,
+    sinceAtLeast: 'for at least 2 h',
+    conesInWindow: (n: string) => `${n} cones`,
+    noProductName: (id: number) => `Product ${id}`,
+    noMaterial: 'no product on the reading',
+    /* Weight › the station selector beside the chart. */
+    stationSelect: 'Station',
+    wholeLine: 'Whole line',
+    excludedNote: (n: string, m: string) => `${n} readings, of which ${m} implausible excluded`,
+    /* Setup › Rules › Product limits (read-only). */
+    limitsSection: 'Product limits',
+    limitsNote:
+      'The versioned history this system judges every reading by — each reading by the limits in force at its own time. Changing a limit happens through the PDAS write path, when IFL authorises it in writing; nothing here is editable.',
+    limitsNoneYet: 'No limits recorded yet for this product.',
+    limitsNoProducts: 'No products are known yet — the product master has not been mirrored.',
+    colLimits: 'Limits',
+    colEffective: 'In force from',
+    colSource: 'Source',
+    colBy: 'By',
+    colReason: 'Reason',
+    noLaterThan: 'no later than',
+    noLaterThanNote:
+      '\u201cNo later than\u201d marks a version first seen at that instant, not known to have started then: the oldest one is a lower bound.',
+    source: { pdas_observed: 'seen in PDAS', sms_write: 'written by SMS' } as const,
+    retired: 'retired',
+    /* Report and Setup › Rules: the shift attribution check. */
+    readingsSentence: (n: string, m: string) =>
+      `${n} cone readings, of which ${m} implausible were excluded from the weight figures.`,
+    shiftSentence: (n: string, m: string, hour: string | null) =>
+      `SMS re-derives the shift from the weighing time; the plant\u2019s own column disagrees on ${n} of ${m} readings this period` +
+      (hour ? `, mostly around ${hour}.` : '.'),
+    shiftFormNote: (n: string, m: string, pct: string) =>
+      `Over the last 7 days the plant\u2019s stored shift differs from the derived shift on ${n} of ${m} readings (${pct}). That is what the mode above would change.`,
+    shiftFormNone: 'Over the last 7 days there are no readings to compare the plant\u2019s stored shift against.',
+  } as const,
 } as const;
 
 export type Words = typeof W;

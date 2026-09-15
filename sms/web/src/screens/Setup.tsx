@@ -20,16 +20,14 @@
  * were here before (Stations, Rules) moved out when they grew forms.
  */
 import { useEffect, useState } from 'react';
-import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { Block, Details, Empty, Failed, SkelLines } from '../ui/bits';
-import { fmtAppInstant, fmtSpan } from '../lib/fmt';
-import { noOpenEpochs } from '../lib/syncHealth';
+import { Block, Empty, Failed, SkelLines } from '../ui/bits';
+import { fmtAppInstant } from '../lib/fmt';
 import {
-  adminGetAudit, adminGetSources, adminListUsers, adminCreateUser, adminUpdateUser, getOperations, ApiError,
+  adminListUsers, adminCreateUser, adminUpdateUser, adminResetPassword, adminGetAuditPage, ApiError,
   type AdminUser, type AuditEntry,
 } from '../api';
-import { useResource } from './setup/shared';
+import { SyncHealthBlock } from './health/SyncHealthBlock';
 import { LineBlock } from './setup/LineBlock';
 import { MachinesBlock } from './setup/MachinesBlock';
 import { StationsBlock } from './setup/StationsBlock';
@@ -47,7 +45,7 @@ export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
         <p className="q">{W.question.setup}</p>
         <h1 className="wide">Setup</h1>
       </div>
-      <SyncHealth />
+      <SyncHealthBlock first isAdmin />
       <LineBlock />
       <MachinesBlock />
       <StationsBlock />
@@ -61,188 +59,9 @@ export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
 }
 
 /* ------------------------------------------------------------ sync health */
-
-function SyncHealth() {
-  const { line } = useLive();
-  const ops = usePolling(() => getOperations(), 60_000, 'operations');
-  // The line's source tables, for one join only: /api/operations names a
-  // sync row by its RAW table (cone_raw) and an epoch status by its SOURCE
-  // table (pack1_TP1U2), and sms.source_table is the bridge. Setup is
-  // admin-only (App.tsx, rank >= 4), the same rank the sources route needs.
-  // A failed load costs nothing but the placement: see lib/syncHealth.ts.
-  const sources = useResource(() => adminGetSources());
-  const h = line?.health ?? null;
-
-  const verdict =
-    h == null
-      ? W.loading
-      : h.kind === 'stale'
-        ? W.sync.stale
-        : h.kind === 'late'
-          ? W.lag.late(fmtSpan(line?.ingestLagSeconds ?? 0))
-          : W.sync.ok;
-
-  const failures = ops.data?.data.sync.filter((s) => s.outcome !== 'success') ?? [];
-  // The severities are the database's own: CK_dq_severity allows exactly
-  // INFO / WARNING / ERROR / CRITICAL. This compared against 'error' and
-  // 'fault' — neither of which any row can hold — so the count read "None"
-  // no matter what was standing. Found 14 Sep 2026 while making the worker's
-  // halts visible; the transform_failed CRITICAL finding is the first that
-  // would have been hidden by it in practice.
-  const blocking = ops.data?.data.dq.findings.filter((f) => f.severity === 'ERROR' || f.severity === 'CRITICAL') ?? [];
-  const mixedRules = ops.data?.data.shiftRuleRegimes?.filter((r) => r.mixed) ?? [];
-
-  // Roadmap Phase 2 (14 Sep 2026): the source block. Absent from an API
-  // built before it, in which case the probe line says so and the halted
-  // sentence does not appear — `halted` read defensively for the same reason.
-  const src = ops.data?.data.source ?? null;
-  const halted = src?.halted ?? [];
-  const lastFailure = ops.data?.data.lifetime.lastFailure ?? null;
-  // The newest failed row and the newest halted row are usually the same
-  // row; when they carry the same text it is printed once, under the halted
-  // sentence, which is the one that says what to do.
-  const failureIsTheHalt = lastFailure?.error != null && src?.lastHalt != null && lastFailure.error === src.lastHalt.reason;
-
-  // Per source table, from the epoch register, placed on the sync row of the
-  // raw table it feeds; whatever cannot be placed is listed under the table.
-  const epochs = noOpenEpochs(
-    ops.data?.data.schema ?? [],
-    sources.data?.tables ?? null,
-    (ops.data?.data.sync ?? []).map((s) => s.targetTable),
-  );
-
-  return (
-    <Block first label={W.setupTabs.sync}>
-      <p className={h && h.kind !== 'ok' ? 'acc' : ''} style={{ fontSize: 'var(--fs-qual)' }}>{verdict}</p>
-      <p className="mut sm" style={{ marginTop: 8 }}>{W.sync.source}</p>
-
-      <dl className="kv" style={{ marginTop: 20 }}>
-        <dt>{W.sync.lastPass}</dt>
-        <dd>{h?.ageSeconds == null ? '—' : `${fmtSpan(h.ageSeconds)} ${W.ago}`}</dd>
-        <dt>{W.sync.oldestTable}</dt>
-        <dd>{h?.oldestTable ?? '—'}</dd>
-        {/* What the worker found when it last tried the plant — not what this
-            API can see, which is nothing: it never opens the plant connection.
-            The probe instant is app-UTC, so it takes the app-instant format. */}
-        {src != null && (
-          <>
-            <dt>{W.sync.probe}</dt>
-            <dd className={src.lastProbeOk === false ? 'acc' : ''}>
-              {src.lastProbeOk == null || src.lastProbeAtUtc == null
-                ? W.sync.probeNotMeasured
-                : src.lastProbeOk
-                  ? W.sync.probeOk(fmtAppInstant(src.lastProbeAtUtc))
-                  : W.sync.probeFailed(fmtAppInstant(src.lastProbeAtUtc))}
-            </dd>
-          </>
-        )}
-        <dt>{W.sync.findings}</dt>
-        <dd>{blocking.length === 0 ? W.sync.none : `${blocking.length}`}</dd>
-      </dl>
-
-      {failures.length > 0 && (
-        <p className="acc" style={{ marginTop: 14 }}>
-          {failures.length} of {ops.data?.data.sync.length} tables did not sync on the last pass.
-        </p>
-      )}
-      {/* The worker's own words for why. A generation halt says which command
-          to run; a connection halt names the host; a "not read this pass" row
-          points at the table that stopped it. */}
-      {failures.length > 0 && lastFailure?.error && !failureIsTheHalt && (
-        <p className="mut sm" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
-          {W.sync.lastFailure(lastFailure.targetTable)}{' '}
-          {lastFailure.error}
-        </p>
-      )}
-      {/* Halted, as distinct from failed: the worker refused to read these
-          tables and said why. The reason is printed verbatim and pre-wrapped
-          because it carries the command line that clears it. */}
-      {halted.length > 0 && (
-        <>
-          <p className="acc" style={{ marginTop: 14 }}>{W.sync.halted(halted.length, halted.join(', '))}</p>
-          {src?.lastHalt && (
-            <p className="mut sm" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
-              {W.sync.lastReason} {src.lastHalt.reason}
-            </p>
-          )}
-        </>
-      )}
-
-      {/* Only appears when a table genuinely holds two regimes, which can
-          only happen after the night rule was changed without a rebuild. */}
-      {mixedRules.length > 0 && (
-        <p className="acc" style={{ marginTop: 14 }}>
-          {W.sync.mixedShiftRules(mixedRules.map((r) => r.table).join(', '))}
-        </p>
-      )}
-
-      <Details summary={W.sync.perTable}>
-        {ops.loading && !ops.data ? (
-          <SkelLines n={4} short />
-        ) : (
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Table</th>
-                  <th>Outcome</th>
-                  <th>Generation</th>
-                  <th className="n">Rows written</th>
-                  <th className="n">Watermark</th>
-                  <th className="n">Age</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(ops.data?.data.sync ?? []).map((s) => {
-                  // The epoch register's verdict on the SOURCE table this row
-                  // copies, when it has one worth a sentence: no open
-                  // generation means the worker halts here before reading.
-                  // 'enforced-by-worker' says nothing extra — it is the normal
-                  // state of every table.
-                  const noEpochOn = epochs.byTarget.get(s.targetTable);
-                  return (
-                    <tr key={s.targetTable}>
-                      <td>{s.targetTable}</td>
-                      <td className={s.outcome === 'success' ? '' : 'acc'}>
-                        {s.outcome}
-                        {noEpochOn != null && (
-                          <span className="acc sm" style={{ display: 'block', maxWidth: '44ch' }}>
-                            {W.sync.noOpenEpoch(noEpochOn)}
-                          </span>
-                        )}
-                      </td>
-                      {/* The watermark is IFL's own id and IFL restarts it (their
-                          2026-08-05 rebuild). Without the generation beside it
-                          the number just jumps from 204,076 to 1 for no reason. */}
-                      <td>{s.epochLabel ?? W.sync.preEpochPass}</td>
-                      <td className="n">{s.rowsWritten}</td>
-                      <td className="n">
-                        {s.watermarkFrom == null || s.watermark == null ? '—' : `${s.watermarkFrom} → ${s.watermark}`}
-                      </td>
-                      <td className="n">{s.ageSeconds == null ? '—' : fmtSpan(s.ageSeconds)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {/* A halted source table with no sync row to sit on — or none that
-            could be matched, when the sources list did not load — is listed
-            here by name rather than dropped. */}
-        {epochs.unplaced.map((table) => (
-          <p key={table} className="acc sm" style={{ marginTop: 10 }}>{W.sync.noOpenEpoch(table)}</p>
-        ))}
-        {h?.cadenceSeconds != null && (
-          <p style={{ marginTop: 12 }}>
-            Passes arrive about every {fmtSpan(h.cadenceSeconds)}; the connection is called stale after{' '}
-            {fmtSpan(h.staleAfterSeconds)}. Both are measured, not assumed.
-          </p>
-        )}
-      </Details>
-    </Block>
-  );
-}
+/* The block itself lives in ./health/SyncHealthBlock.tsx since 14 Sep 2026
+   (roadmap Phase 11): the Health screen, open to every account, shows the
+   same facts, and one component keeps them the same. */
 
 /* ----------------------------------------------------------------- people */
 
@@ -298,6 +117,7 @@ function People({ currentUsername }: { currentUsername?: string }) {
               <th>Username</th>
               <th>Role</th>
               <th>Active</th>
+              <th>{W.health.password}</th>
             </tr>
           </thead>
           <tbody>
@@ -354,6 +174,12 @@ function People({ currentUsername }: { currentUsername?: string }) {
                       </button>
                     )}
                   </td>
+                  <td>
+                    {/* Your own password is changed from the account menu, which
+                        asks for the current one; the server refuses the reset
+                        route for the actor's own id (roadmap Phase 11). */}
+                    {isSelf ? <span className="mut sm">{W.health.ownPasswordHint}</span> : <ResetPassword user={u} />}
+                  </td>
                 </tr>
               );
             })}
@@ -404,8 +230,14 @@ function NewUserForm({ onCreated }: { onCreated: () => void }) {
           onCreated();
         } catch (e) {
           // A duplicate username is the one failure worth naming specifically
-          // — the server answers 409 with exactly that message.
-          setFailed(e instanceof ApiError && e.status === 409 ? e.message : W.couldNotLoad);
+          // — the server answers 409 with exactly that message — and a
+          // password the policy refuses comes back as 400 with the rule in
+          // `detail` (PASSWORD_MIN_LENGTH, roadmap Phase 11).
+          setFailed(
+            e instanceof ApiError && e.status === 409 ? e.message
+              : e instanceof ApiError && e.status === 400 && e.detail ? e.detail
+                : W.couldNotLoad,
+          );
         } finally {
           setBusy(false);
         }
@@ -421,7 +253,7 @@ function NewUserForm({ onCreated }: { onCreated: () => void }) {
       </label>
       <label className="field">
         <span>Password</span>
-        <input type="password" value={password} required minLength={6} onChange={(e) => setPassword(e.target.value)} />
+        <input type="password" value={password} required autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
       </label>
       <label className="field">
         <span>Role</span>
@@ -440,17 +272,98 @@ function NewUserForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+/**
+ * An administrator's reset of someone else's password (roadmap Phase 11
+ * item 1, 14 Sep 2026). Until this there was no way to recover a forgotten
+ * password except SQL. The server revokes every session of the account and
+ * writes `user.password_reset`; the sentence printed afterwards says so, so
+ * the admin can tell the person what to expect.
+ */
+function ResetPassword({ user }: { user: AdminUser }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <span>
+        <button type="button" className="linkish sm" onClick={() => { setOpen(true); setSaid(null); }}>
+          {W.health.reset}
+        </button>
+        {said && <span className="mut sm"> · {said}</span>}
+      </span>
+    );
+  }
+  return (
+    <form
+      className="row"
+      style={{ gap: 6 }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setFailed(null);
+        try {
+          const r = await adminResetPassword(user.userId, password);
+          setSaid(W.health.resetDone(r.sessionsRevoked));
+          setPassword('');
+          setOpen(false);
+        } catch (err) {
+          setFailed(err instanceof ApiError && (err.status === 400 || err.status === 404) ? (err.detail ?? err.message) : W.notAllowed);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        type="password"
+        value={password}
+        required
+        autoFocus
+        autoComplete="new-password"
+        aria-label={`${W.health.newPassword} for ${user.username}`}
+        placeholder={W.health.newPassword}
+        onChange={(e) => setPassword(e.target.value)}
+        style={{ maxWidth: '14em' }}
+      />
+      <button type="submit" className="btn sm" disabled={busy}>{W.health.reset}</button>
+      <button type="button" className="btn sm" onClick={() => setOpen(false)}>{W.product.cancel}</button>
+      {failed && <span className="acc sm">{failed}</span>}
+    </form>
+  );
+}
+
 /* -------------------------------------------------------------- audit log */
 
 function AuditLog() {
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
+  const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
+  // Keyset paged since roadmap Phase 11 (14 Sep 2026): the newest page
+  // first, "Show older" appends the next. TOP 500 with no way past it used to
+  // be the whole viewer, and with logins audited too that is days, not history.
+  const PAGE = 40;
   const load = () => {
     setError(null);
-    adminGetAudit()
-      .then((r) => setRows(r.entries))
+    adminGetAuditPage(null, PAGE)
+      .then((r) => { setRows(r.entries); setNextBefore(r.nextBefore); })
       .catch((e) => setError(String(e.message ?? e)));
+  };
+  const older = async () => {
+    if (nextBefore == null) return;
+    setBusy(true);
+    try {
+      const r = await adminGetAuditPage(nextBefore, PAGE);
+      setRows((cur) => [...(cur ?? []), ...r.entries]);
+      setNextBefore(r.nextBefore);
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
   };
   useEffect(() => {
     void load();
@@ -477,10 +390,12 @@ function AuditLog() {
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, 40).map((e) => (
+            {rows.map((e) => (
               <tr key={e.auditId}>
                 <td>{fmtAppInstant(e.atUtc)}</td>
-                <td>{e.actorName ?? '—'}</td>
+                {/* No actor: a failed login, or the CLI (retention, cutover,
+                    user:password) — the detail says which. */}
+                <td>{e.actorName ?? <span className="mut">{e.actorId == null ? W.health.noActor : '—'}</span>}</td>
                 <td>{e.action}</td>
                 <td className="mut">{e.detail ?? '—'}</td>
               </tr>
@@ -488,6 +403,11 @@ function AuditLog() {
           </tbody>
         </table>
       </div>
+      {nextBefore != null && (
+        <button type="button" className="btn" style={{ marginTop: 12 }} disabled={busy} onClick={() => void older()}>
+          {W.health.older}
+        </button>
+      )}
     </Block>
   );
 }

@@ -254,3 +254,28 @@ describe('subject_ref points at the first offending row', () => {
     expect(f.subject_ref).toBeNull();
   });
 });
+
+describe('outlier_weight reads the plausibility rule (roadmap Phase 4)', () => {
+  it('flags a reading above the ceiling as well as below the floor — the 2200-2354 g fault population', () => {
+    const rows = [cone('2026-06-22T11:00:00', 2300), cone('2026-06-22T11:00:20', 900), cone('2026-06-22T11:00:40', 1950)];
+    const f = find(rows, 'outlier_weight');
+    expect(f!.count).toBe(2);
+    expect(f!.detail).toMatch(/1500-2100g/);
+    expect(f!.detail).toMatch(/not yet confirmed by IFL/);
+  });
+
+  it('applies the bounds it is given, not the historical constants', () => {
+    const rows = [cone('2026-06-22T11:00:00', 1450), cone('2026-06-22T11:00:20', 2150)];
+    const wide = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, -Infinity, { coneLoG: 1400, coneHiG: 2200, sackLoKg: 40, sackHiKg: 60 });
+    expect(wide.find((f) => f.check_name === 'outlier_weight')).toBeUndefined();
+    const narrow = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, -Infinity, { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 });
+    expect(narrow.find((f) => f.check_name === 'outlier_weight')!.count).toBe(2);
+  });
+
+  it('uses the sack bounds for sacks', () => {
+    const sacks = [{ production_ts_utc_ms: 1, merge_key_is_unique: true, weight_kg: 39 }, { production_ts_utc_ms: 2, merge_key_is_unique: true, weight_kg: 61 }];
+    const f = computeFindings(sacks, 'sack', 'sack_event', (r) => r.weight_kg).find((x) => x.check_name === 'outlier_weight');
+    expect(f!.count).toBe(2);
+    expect(f!.detail).toMatch(/40-60kg/);
+  });
+});

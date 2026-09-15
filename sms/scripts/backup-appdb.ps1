@@ -1,4 +1,4 @@
-# backup-appdb.ps1 — nightly backup of the APP database (ARCHITECTURE §13).
+﻿# backup-appdb.ps1 — nightly backup of the APP database (ARCHITECTURE §13).
 # The app DB holds the only irreplaceable data (product timeline, reject labels,
 # users, config, rules). IFL's DB is not ours to back up.
 # Schedule via Task Scheduler, or use a SQL Agent job on non-Express editions.
@@ -39,9 +39,21 @@ $ErrorActionPreference = "Stop"
 # silently running as the wrong login. sms_backup's password is a separate
 # credential DEPLOY.md never puts in .env, so there is nothing safe to default
 # it to — require it explicitly every run.
-if (-not $Pass) {
-  Write-Error "-Pass is required (the sms_backup login's password, see DEPLOY.md's backup setup). Refusing to guess or fall back to another login's credential."
-  exit 1
+#
+# TRUSTED CONNECTION (roadmap Phase 11 item 6, 14 Sep 2026): -User "" means
+# "connect as the Windows account running this script" (sqlcmd -E), which is
+# how scripts\install-scheduled-tasks.ps1 runs it — a scheduled task whose
+# run-as account holds db_backupoperator, so no password appears in any task
+# argument (they are readable in the task XML). -Pass is required only for a
+# SQL login.
+if ($User -eq "") {
+  $auth = @("-E")
+} else {
+  if (-not $Pass) {
+    Write-Error "-Pass is required with a SQL login (the sms_backup login's password, see DEPLOY.md's backup setup); use -User `"`" for a trusted connection as the current Windows account. Refusing to guess or fall back to another login's credential."
+    exit 1
+  }
+  $auth = @("-U", $User, "-P", $Pass)
 }
 
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
@@ -61,7 +73,7 @@ $file  = Join-Path $OutDir "$Db-$stamp.bak"
 # not — the checksummed baseline backup had been taken by hand. Supported on
 # Express (unlike COMPRESSION, above).
 $sql = "BACKUP DATABASE [$Db] TO DISK = N'$file' WITH INIT, CHECKSUM, STATS = 10;"
-sqlcmd -S $Server -U $User -P $Pass -C -b -Q $sql
+sqlcmd -S $Server @auth -C -b -Q $sql
 if ($LASTEXITCODE -ne 0) {
   Write-Error "BACKUP DATABASE failed (sqlcmd exit $LASTEXITCODE) — see the SQL error above. No backup was written to $file despite any file that may exist at that path (SQL Server pre-creates the device before failing)."
   exit $LASTEXITCODE
@@ -74,7 +86,7 @@ if (-not (Test-Path $file)) {
 # Verify what was just written, the same way the restore rehearsal does. A
 # backup that cannot pass this is not a backup; fail the run so a scheduled
 # task shows red rather than a green run over a file that will not restore.
-sqlcmd -S $Server -U $User -P $Pass -C -b -Q "RESTORE VERIFYONLY FROM DISK = N'$file' WITH CHECKSUM;"
+sqlcmd -S $Server @auth -C -b -Q "RESTORE VERIFYONLY FROM DISK = N'$file' WITH CHECKSUM;"
 if ($LASTEXITCODE -ne 0) {
   Write-Error "RESTORE VERIFYONLY WITH CHECKSUM failed on $file (sqlcmd exit $LASTEXITCODE) — the file was written but did not verify. Not deleting it; investigate before trusting any backup from this host."
   exit $LASTEXITCODE

@@ -24,8 +24,9 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import { getProduction, type ProductionRow } from './production.js';
+import { getProduction, type ProductionRow, type ProductionStates } from './production.js';
 import { getStoppagePatterns } from './downtime.js';
+import { getShiftCheck } from './shiftCheck.js';
 
 /** Same 120 s split the downtime screen uses; see downtime.ts for why. */
 export const REPORT_STOP_THRESHOLD_SECONDS = 120;
@@ -128,6 +129,19 @@ export interface ReportData {
     stoppedSeconds: number;
     thresholdSeconds: number;
   };
+  /**
+   * Cones by the one classification state, and how many the population rule
+   * excluded as implausible (roadmap Phase 4, 14 Sep 2026) — so the report
+   * prints "N readings, of which M implausible excluded" from the same count
+   * every weight statistic was computed over.
+   */
+  readings: ProductionStates | null;
+  /**
+   * Plant-stored shift versus SMS-derived shift over the period (Phase 4
+   * item 5): the count that disagree, of the count compared, and the hour of
+   * day they most often disagree at. Null when nothing could be compared.
+   */
+  shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null } | null;
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -174,8 +188,8 @@ export async function getReport(
 ): Promise<ReportData> {
   const { from, to } = resolved;
 
-  const [totalRes, shiftRes, dayRes, coverageRes, stops] = await Promise.all([
-    getProduction(pool, lineId, { from, to, groupBy: 'none' }),
+  const [totalRes, shiftRes, dayRes, coverageRes, stops, shiftCheck] = await Promise.all([
+    getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true }),
     getProduction(pool, lineId, { from, to, groupBy: 'shift' }),
     getProduction(pool, lineId, { from, to, groupBy: 'day' }),
     pool
@@ -191,6 +205,7 @@ export async function getReport(
           WHERE line_id = @line AND shift_date BETWEEN @from AND @to`,
       ),
     getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS),
+    getShiftCheck(pool, lineId, from, to),
   ]);
 
   const cov = coverageRes.recordset[0];
@@ -219,5 +234,15 @@ export async function getReport(
       stoppedSeconds: stops.stoppages.reduce((s, g) => s + g.durationSeconds, 0),
       thresholdSeconds: REPORT_STOP_THRESHOLD_SECONDS,
     },
+    readings: totalRes.states == null ? null : { states: totalRes.states, implausible: totalRes.implausible ?? 0 },
+    shiftCheck:
+      shiftCheck.cones - shiftCheck.noLegacyShift > 0
+        ? {
+            compared: shiftCheck.cones - shiftCheck.noLegacyShift,
+            mismatched: shiftCheck.mismatched,
+            mismatchPct: shiftCheck.mismatchPct,
+            topHour: shiftCheck.topHours[0]?.hour ?? null,
+          }
+        : null,
   };
 }

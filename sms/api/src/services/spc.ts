@@ -33,6 +33,7 @@
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { PlausibilityRule } from './admin.js';
+import { plausibleWhere } from './coneState.js';
 import { nelsonViolations, type NelsonRuleId } from './nelson.js';
 import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
 
@@ -111,7 +112,15 @@ export interface SpcData {
   specAgreement: SpecAgreement | null;
   type: SpcType;
   unit: 'g' | 'kg';
+  /** The station the chart is drawn for, or null for the whole line (roadmap Phase 4). */
+  station: number | null;
   count: number;
+  /**
+   * Readings the population rule EXCLUDED as implausible (roadmap Phase 4,
+   * 14 Sep 2026), so the screen can say "N readings, of which M excluded"
+   * with the same figure the reconciliation and the report print.
+   */
+  implausible: number;
   mean: number;
   stdevOverall: number; // long-term σ (all points) → Pp/Ppk
   stdevWithin: number; // short-term σ (pooled within-subgroup) → Cp/Cpk
@@ -275,6 +284,11 @@ const HIST_BINS = 32;
  * app-owned versioned rule the caller fetches and passes in — same pattern as
  * `spec` below. Default 1500-2100g cone / 40-60kg sack, matching what was
  * hardcoded before ("sacks < 40 kg, cones < 1500 g" in CLAUDE.md).
+ *
+ * The predicate itself is coneState.ts's plausibleWhere — the ONE population
+ * rule since roadmap Phase 4 (14 Sep 2026), shared with weights.ts,
+ * production.ts and the reconciliation, so every weight statistic in the
+ * application excludes the same readings.
  */
 export async function getWeightSpc(
   pool: ConnectionPool,
@@ -285,57 +299,72 @@ export async function getWeightSpc(
   spec: SpecLimits,
   plausibility: PlausibilityRule,
   shift: string | null = null,
+  /** One station's stream (cone only): the Weight screen's selector (Phase 4). */
+  station: number | null = null,
 ): Promise<SpcData> {
   const table = type === 'cone' ? 'sms.cone_event' : 'sms.sack_event';
   const col = type === 'cone' ? 'weight_g' : 'weight_kg';
   const unit: 'g' | 'kg' = type === 'cone' ? 'g' : 'kg';
   const plaus =
     type === 'cone'
-      ? { lo: plausibility.coneLoG, hi: plausibility.coneHiG }
-      : { lo: plausibility.sackLoKg, hi: plausibility.sackHiKg };
+      ? { loG: plausibility.coneLoG, hiG: plausibility.coneHiG }
+      : { loG: plausibility.sackLoKg, hiG: plausibility.sackHiKg };
+  // sack_event has no station column: a station on a sack query is ignored,
+  // not bound, or it would be a SQL error rather than an empty chart.
+  const stationFilter = type === 'cone' && station != null;
 
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
-  const where =
+  // Everything but the plausibility predicate, which plausibleWhere binds per
+  // request below (its parameters must be on the request that runs).
+  const base =
     `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL` +
-    ` AND ${col} BETWEEN @plausLo AND @plausHi` +
-    (shift ? ' AND shift_code=@shift' : '');
+    (shift ? ' AND shift_code=@shift' : '') +
+    (stationFilter ? ' AND source_station=@station' : '');
+  const whereOn = (r: SqlRequest) => `${base} AND ${plausibleWhere(r, col, plaus)}`;
 
   // 1. Overall summary — one pass, no row transfer. Drives the bucket sizing.
+  //    The implausible count is asked for in the same pass, over the same
+  //    base filter, so "N of which M excluded" is one population split once.
   const sumReq = pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
-    .input('plausLo', mssql.Float, plaus.lo)
-    .input('plausHi', mssql.Float, plaus.hi);
+    .input('to', mssql.Date, to);
   if (shift) sumReq.input('shift', mssql.VarChar(10), shift);
+  if (stationFilter) sumReq.input('station', mssql.Int, station);
+  const sumWhere = whereOn(sumReq);
   const sumRes = await sumReq
-    .query<{ n: number; mean: number | null; sd: number | null }>(
-      `SELECT COUNT(*) n, AVG(CAST(${col} AS float)) mean, STDEV(CAST(${col} AS float)) sd
-       FROM ${table} WHERE ${where}`,
+    .query<{ n: number; mean: number | null; sd: number | null; excluded: number | null }>(
+      `SELECT COUNT(*) n, AVG(CAST(${col} AS float)) mean, STDEV(CAST(${col} AS float)) sd,
+              (SELECT COUNT(*) FROM ${table} WHERE ${base} AND NOT (${col} BETWEEN @plausLo AND @plausHi)) excluded
+       FROM ${table} WHERE ${sumWhere}`,
     );
   const summ = sumRes.recordset[0]!;
   const count = summ.n;
   const mean = summ.mean ?? 0;
   const stdevOverall = summ.sd ?? 0;
+  const implausible = Number(summ.excluded ?? 0);
 
   // Bucket size depends on the event rate (count), not just the time span —
   // so low-rate sacks get wider buckets and stay statistically stable.
   const { minutes: bucketMinutes, label: bucketLabel } = pickBucketMinutes(days, count);
 
+  // Every later query binds the same filter through the same builder; `where`
+  // is the text the builder returns and is identical on every request.
   const req = (extra?: (r: SqlRequest) => void) => {
     const r = pool
       .request()
       .input('line', mssql.Int, lineId)
       .input('from', mssql.Date, from)
       .input('to', mssql.Date, to)
-      .input('bucketMin', mssql.Int, bucketMinutes)
-      .input('plausLo', mssql.Float, plaus.lo)
-      .input('plausHi', mssql.Float, plaus.hi);
+      .input('bucketMin', mssql.Int, bucketMinutes);
     if (shift) r.input('shift', mssql.VarChar(10), shift);
+    if (stationFilter) r.input('station', mssql.Int, station);
+    whereOn(r);
     extra?.(r);
     return r;
   };
+  const where = `${base} AND ${col} BETWEEN @plausLo AND @plausHi`;
 
   // 2. Time-bucketed subgroups — mean & within-subgroup S computed in SQL.
   const bucketExpr =
@@ -526,7 +555,9 @@ export async function getWeightSpc(
     specAgreement,
     type,
     unit,
+    station: stationFilter ? station : null,
     count,
+    implausible,
     mean: round(mean, 2),
     stdevOverall: round(stdevOverall, 3),
     stdevWithin: round(stdevWithin, 3),

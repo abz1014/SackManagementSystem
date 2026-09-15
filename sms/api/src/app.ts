@@ -9,19 +9,20 @@ import type { ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
 import { getOperations } from './services/operations.js';
 import { getProduction, type GroupBy } from './services/production.js';
-import { getRejectPareto, listRejectCodes, updateRejectCode, REJECT_SEVERITIES } from './services/rejects.js';
+import { getRejectPareto, listRejectCodes, updateRejectCode, REJECT_SEVERITIES, parseCodeParam } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
 import {
-  listEvents, getEventDetail, exportEventsCsv, type EventType, type OutsideLimitsSegment,
+  listEvents, getEventDetail, exportEventsCsv, type EventType,
 } from './services/register.js';
+import { loadStateContext, parseStates } from './services/coneState.js';
 import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getLive, invalidateLiveConfigCache } from './services/live.js';
 import { getAttention } from './services/attention.js';
-import { loadProductTimeline, limitsOf, productDisagreement } from './services/productAt.js';
+import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
 import { PdasWriter } from './services/pdasWrite.js';
 import { plantNowMs } from './services/plantClock.js';
@@ -37,7 +38,9 @@ import {
   getLineConfig, getLineIdentity, listMachines, createMachine, updateMachine, createStation,
   updateLine, listSources, updateDataSource, updateSourceTable, SOURCE_TABLE_NAME,
 } from './services/lineConfig.js';
-import { recordAudit, recordAuditIn, auditedWrite, listAudit } from './services/audit.js';
+import { recordAudit, recordAuditIn, auditedWrite, listAuditPage } from './services/audit.js';
+import { getHealth } from './services/health.js';
+import { LastAdminError, passwordPolicyProblem } from './services/admin.js';
 import { shiftBoundariesFrom } from '@sms/shared';
 import {
   authMiddleware,
@@ -55,6 +58,9 @@ import {
 import { TtlCache } from './cache.js';
 import { securityHeaders } from './security.js';
 import { requestId, requestLog } from './log.js';
+import { mountConeRoutes } from './routes/cone.js';
+import { mountRejectsRoutes } from './routes/rejects.js';
+import { mountOpsRoutes } from './routes/ops.js';
 
 const dateStr = z
   .string()
@@ -183,11 +189,19 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     return r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
   }
 
-  // health — no envelope, cheap liveness/DB check
-  app.get('/api/health', async (_req: Request, res: Response, next: NextFunction) => {
+  // health — no envelope; unauthenticated for a monitor probe. Service,
+  // database and acquisition separated since roadmap Phase 11 (14 Sep 2026);
+  // the database size and the acquisition details are nulled for an
+  // anonymous caller (services/health.ts). Never 500: a dead database is
+  // `status: 'down'` with 503, which is the answer a probe is asking for.
+  app.get('/api/health', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await pool.request().query('SELECT 1 AS ok');
-      res.json({ status: 'ok', db: 'up' });
+      const report = await getHealth(pool, {
+        lineId: cfg.lineId,
+        backupDir: cfg.backupDir ?? 'C:\\sms-backups',
+        authenticated: (req as AuthedRequest).user != null,
+      });
+      res.status(report.status === 'down' ? 503 : 200).json(report);
     } catch (err) {
       next(err);
     }
@@ -222,6 +236,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       if (!user) {
         loginLimiter.recordFailure(ipKey, now);
         loginLimiter.recordFailure(userKey, now);
+        // Audited since roadmap Phase 11 (14 Sep 2026): the username tried
+        // and nothing else — never the password, and no actor, because the
+        // name may not be an account at all. Fire-and-forget like every
+        // event row; a failed audit write must not change the 401.
+        void recordAudit(pool, null, 'auth.login_failed', 'user', body.data.username.slice(0, 64), `from ${req.ip ?? 'unknown'}`).catch((e) =>
+          requestLog(req).error('audit: failed to record auth.login_failed', { err: e }),
+        );
         res.status(401).json({ error: 'invalid credentials' });
         return;
       }
@@ -230,6 +251,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const s = await createSession(pool, user.userId);
       setSessionCookie(res, s.id, s.expires, req);
       res.json({ user: { username: user.username, displayName: user.displayName, role: user.role } });
+      // req.user is not set on this request (the session was just minted), so
+      // the actor is passed explicitly rather than through audit().
+      void recordAudit(pool, user.userId, 'auth.login', 'user', user.userId, `from ${req.ip ?? 'unknown'}`).catch((e) =>
+        requestLog(req).error('audit: failed to record auth.login', { err: e }),
+      );
       // opportunistic housekeeping — don't block the response
       void pruneExpiredSessions(pool).catch(() => {});
     } catch (err) {
@@ -243,6 +269,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const m = raw.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`));
       if (m && m[1]) await destroySession(pool, decodeURIComponent(m[1]));
       clearSessionCookie(res);
+      // Before the response: audit() reads req.user, which authMiddleware set
+      // from the cookie this request arrived with (roadmap Phase 11).
+      audit(req, 'auth.logout', 'user', (req as AuthedRequest).user?.userId ?? null, null);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -467,6 +496,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
      * one question" rule REDESIGN.md forbids.
      */
     weightG: z.coerce.number().optional(),
+    /**
+     * The scale's own in-range bit (roadmap Phase 4, 14 Sep 2026). With it and
+     * weightG, the verdict carries the five-state classification
+     * (shared/src/domain/classification.ts) beside the older inside/outsideByG
+     * facts, judged with the plausibility rule on file.
+     */
+    inRange: z.enum(['true', 'false']).optional(),
   });
   app.get('/api/product-at', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -502,18 +538,26 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // history at that instant rather than the mirror's current values.
       // This route used to hand-roll the first two steps itself and leave the
       // third to the browser.
-      const v = timeline.verdict(atMs, q.data.weightG ?? null, { productId: q.data.productId ?? null, catalogue });
+      const plaus = await getPlausibilityRule(pool, cfg.lineId);
+      const v = timeline.verdict(atMs, q.data.weightG ?? null, {
+        productId: q.data.productId ?? null,
+        catalogue,
+        inRange: q.data.inRange == null ? null : q.data.inRange === 'true',
+        plausibility: { loG: plaus.coneLoG, hiG: plaus.coneHiG },
+      });
       res.json({
         at: new Date(atMs).toISOString(),
         product: v.product,
         limits: v.limits,
         /** 'row' = the reading's own MaterialId; 'timeline' = the hand-entered line-wide product. */
         attribution: v.attribution,
-        /** Only when weightG was given: the judgement, or why there is none. */
+        /** Only when weightG was given: the judgement, or why there is none. `state` is the one classification (Phase 4). */
         verdict:
           q.data.weightG == null
             ? null
-            : { inside: v.inside, outsideByG: v.outsideByG, reason: v.reason },
+            : { inside: v.inside, outsideByG: v.outsideByG, reason: v.reason, state: v.state, scalePassed: v.scalePassed, unknownReason: v.unknownReason },
+        /** The plausibility window the state was judged with (the rule on file; not yet confirmed by IFL). */
+        plausibility: { loG: plaus.coneLoG, hiG: plaus.coneHiG },
         /** The limits are the oldest version known and the instant predates it. */
         limitsAreLowerBound: v.limitsAreLowerBound,
         /** True when nothing has ever been recorded, so a screen says it once. */
@@ -674,6 +718,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const data = await getProduction(pool, cfg.lineId, {
         ...parsed.data,
         groupBy: parsed.data.groupBy as GroupBy,
+        // Cones per classification state, always (roadmap Phase 4, 14 Sep 2026).
+        withStates: true,
       });
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
@@ -715,6 +761,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           usl: z.coerce.number().optional(),
           lsl: z.coerce.number().optional(),
           shift: z.enum(['morning', 'evening', 'night']).optional(),
+          /** One station's stream (cone only; roadmap Phase 4, 14 Sep 2026). */
+          station: z.coerce.number().int().positive().optional(),
         })
         .safeParse(req.query);
       if (!q.success) {
@@ -728,7 +776,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type, { from: q.data.from, to: q.data.to });
       const plausibility = await getPlausibilityRule(pool, cfg.lineId);
-      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null);
+      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null, q.data.station ?? null);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -744,6 +792,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
           bucket: z.enum(['hour', 'day']).optional(),
           rejectType: z.enum(['all', 'quality', 'weight']).default('all'),
+          // Roadmap Phase 5 (14 Sep 2026): shift + tsTo so the Rejects headline
+          // counts the SAME rejects Line counts for the same period; station,
+          // product and code are the drilldown dimensions. `code` is
+          // `weight` or `<tube>-<material>` (rejects.ts parseCodeParam).
+          shift: z.enum(['morning', 'evening', 'night']).optional(),
+          tsTo: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp').optional(),
+          station: z.coerce.number().int().positive().optional(),
+          product: z.coerce.number().int().positive().optional(),
+          code: z.string().max(24).optional(),
         })
         .safeParse(req.query);
       if (!q.success) {
@@ -755,8 +812,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
+      const code = q.data.code == null ? undefined : parseCodeParam(q.data.code);
+      if (code === null) {
+        res.status(400).json({ error: 'invalid code — expected weight or <tube>-<material>' });
+        return;
+      }
       const bucket: RejectBucketSize = q.data.bucket ?? (q.data.from === q.data.to ? 'hour' : 'day');
-      const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter);
+      const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter, {
+        shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code,
+      });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -781,41 +845,30 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     tsFrom: isoTs,
     tsTo: isoTs,
     // Finding H4 (Sep 2026 audit): cones the scale passed but a product's own
-    // limits would not — cone only, resolved to segments below.
+    // limits would not — cone only. Since roadmap Phase 4 (14 Sep 2026) an
+    // alias for `state=low,high`: the scale's bit governs 'rejected', so a
+    // passed-but-outside cone is exactly a 'low' or 'high' one.
     outsideProductLimits: z.enum(['true']).optional(),
+    /** Comma list of the five states (cone only): within,low,high,rejected,unknown. */
+    state: z.string().max(64).optional(),
+    /** The reading's own material_id (cone + reject). */
+    product: z.coerce.number().int().positive().optional(),
     sort: z.enum(['time', 'weight']).default('time'),
     dir: z.enum(['asc', 'desc']).default('desc'),
   });
 
   /**
-   * The product timeline's usable-limits stretches, in the shape register.ts's
-   * outsideLimitsSegments filter needs. Segments with no usable limits
-   * (no product recorded, or a product with no setpoint/offsets) are dropped
-   * rather than treated as "anything goes" — an unjudgeable cone is neither
-   * inside nor outside a limit that does not exist.
+   * Cone listings judge every row by the ONE classification (roadmap Phase 4,
+   * 14 Sep 2026): the plausibility rule plus every limits window on record,
+   * loaded once per request and handed to register.ts, which builds the
+   * state column and the state filter from it. Sacks and rejects have no
+   * classification and get none.
    */
-  async function outsideLimitsSegmentsFor(): Promise<OutsideLimitsSegment[]> {
-    const [timeline, catalogue] = await Promise.all([
-      loadProductTimeline(pool, cfg.lineId),
-      loadProductCatalogue(pool),
-    ]);
-    const asc = [...timeline.entries].sort((a, b) => a.effectiveFromMs - b.effectiveFromMs);
-    const segments: OutsideLimitsSegment[] = [];
-    for (let i = 0; i < asc.length; i++) {
-      const seg = asc[i]!;
-      // Limits as they stood when this segment began, not as the mirror holds
-      // them today. Segments follow the line-wide timeline, which is the only
-      // attribution readings from before MaterialId existed can have.
-      const limits = catalogue.limitsAt(seg.productId, seg.effectiveFromMs) ?? limitsOf(seg);
-      if (!limits) continue;
-      segments.push({
-        fromMs: seg.effectiveFromMs,
-        toMs: asc[i + 1]?.effectiveFromMs ?? null,
-        loG: limits.loG,
-        hiG: limits.hiG,
-      });
-    }
-    return segments;
+  async function registerClassification(q: { type: string; state?: string; outsideProductLimits?: 'true' }) {
+    if (q.type !== 'cone') return { classification: undefined, states: undefined };
+    const classification = await loadStateContext(pool, cfg.lineId);
+    const states = parseStates(q.state) ?? (q.outsideProductLimits ? (['low', 'high'] as const) : null);
+    return { classification, states: states == null ? undefined : [...states] };
   }
 
   function parseRegisterQuery(raw: unknown) {
@@ -839,9 +892,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid page/pageSize' });
         return;
       }
-      const outsideLimitsSegments =
-        q.outsideProductLimits && q.type === 'cone' ? await outsideLimitsSegmentsFor() : undefined;
-      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, outsideLimitsSegments });
+      const { classification, states } = await registerClassification(q);
+      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -858,13 +910,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid query' });
         return;
       }
-      const outsideLimitsSegments =
-        q.outsideProductLimits && q.type === 'cone' ? await outsideLimitsSegmentsFor() : undefined;
-      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, outsideLimitsSegments });
+      const { classification, states } = await registerClassification(q);
+      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, classification, states });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${q.type}-events.csv"`);
       if (truncated) res.setHeader('X-Export-Truncated', 'true');
       res.send(csv);
+      // Which register left the building, and for what window (roadmap Phase
+      // 11, 14 Sep 2026). An event, not configuration: fire-and-forget.
+      audit(req, 'export.csv', 'register', q.type, `${q.from ?? '…'} to ${q.to ?? '…'}${truncated ? ' (truncated)' : ''}`);
     } catch (err) {
       next(err);
     }
@@ -878,7 +932,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid type or id' });
         return;
       }
-      const row = await getEventDetail(pool, cfg.lineId, type, id);
+      // A cone's sheet carries its state from the same rule as the list (Phase 4).
+      const classification = type === 'cone' ? await loadStateContext(pool, cfg.lineId) : undefined;
+      const row = await getEventDetail(pool, cfg.lineId, type, id, classification);
       if (!row) {
         res.status(404).json({ error: 'not found' });
         return;
@@ -892,12 +948,34 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // reject Pareto (Q10) — raw codes + lookup labels
   app.get('/api/rejects', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const q = z.object({ from: dateStr, to: dateStr }).safeParse(req.query);
+      // Roadmap Phase 5 (14 Sep 2026): the same filter set as /api/reject-spc
+      // and /api/rejects/by-day-code (routes/rejects.ts), bound by one function.
+      const q = z.object({
+        from: dateStr,
+        to: dateStr,
+        shift: z.enum(['morning', 'evening', 'night']).optional(),
+        tsTo: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp').optional(),
+        station: z.coerce.number().int().positive().optional(),
+        product: z.coerce.number().int().positive().optional(),
+        code: z.string().max(24).optional(),
+      }).safeParse(req.query);
       if (!q.success) {
         res.status(400).json({ error: 'invalid query' });
         return;
       }
-      const data = await getRejectPareto(pool, cfg.lineId, q.data.from, q.data.to);
+      // Capped like every other analytics range (MAX_RANGE_DAYS); this route
+      // had no cap at all until 14 Sep 2026.
+      const rangeErr = q.data.from && q.data.to ? validateRange(q.data.from, q.data.to) : null;
+      if (rangeErr) {
+        res.status(400).json({ error: rangeErr });
+        return;
+      }
+      const code = q.data.code == null ? undefined : parseCodeParam(q.data.code);
+      if (code === null) {
+        res.status(400).json({ error: 'invalid code — expected weight or <tube>-<material>' });
+        return;
+      }
+      const data = await getRejectPareto(pool, cfg.lineId, { ...q.data, code });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -1241,8 +1319,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
   app.post('/api/admin/users', requireRole(4), async (req, res, next) => {
     try {
-      const b = z.object({ username: z.string().min(1).max(64), password: z.string().min(6), role: ROLE_NAMES, displayName: z.string().max(128).optional() }).safeParse(req.body);
+      const b = z.object({ username: z.string().min(1).max(64), password: z.string().min(1), role: ROLE_NAMES, displayName: z.string().max(128).optional() }).safeParse(req.body);
       if (!b.success) { res.status(400).json({ error: 'invalid user' }); return; }
+      // The length policy (PASSWORD_MIN_LENGTH, default 10) replaced the
+      // literal 6 here on 14 Sep 2026 (roadmap Phase 11) — one rule, shared
+      // with the change and reset routes and the CLI.
+      const policy = passwordPolicyProblem(b.data.password, cfg.passwordMinLength ?? 10);
+      if (policy) { res.status(400).json({ error: 'password policy', detail: policy }); return; }
       try {
         await auditedWrite(
           pool, actorId(req), { action: 'user.create', targetType: 'user', targetId: b.data.username, detail: `role ${b.data.role}` },
@@ -1267,13 +1350,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = Number(req.params.id);
       const b = z.object({ active: z.boolean().optional(), role: ROLE_NAMES.optional() }).safeParse(req.body);
       if (!Number.isInteger(id) || !b.success) { res.status(400).json({ error: 'invalid' }); return; }
-      await auditedWrite(pool, actorId(req), { action: 'user.update', targetType: 'user', targetId: id, detail: null }, async (tx) => {
-        const { oldActive, oldRole } = await updateUser(tx, id, b.data.active, b.data.role);
-        const changes: string[] = [];
-        if (b.data.active != null) changes.push(`active ${oldActive ?? '?'} -> ${b.data.active}`);
-        if (b.data.role) changes.push(`role ${oldRole ?? '?'} -> ${b.data.role}`);
-        return { result: undefined, detail: changes.join('; ') || null };
-      });
+      try {
+        await auditedWrite(pool, actorId(req), { action: 'user.update', targetType: 'user', targetId: id, detail: null }, async (tx) => {
+          const { oldActive, oldRole } = await updateUser(tx, id, b.data.active, b.data.role);
+          const changes: string[] = [];
+          if (b.data.active != null) changes.push(`active ${oldActive ?? '?'} -> ${b.data.active}`);
+          if (b.data.role) changes.push(`role ${oldRole ?? '?'} -> ${b.data.role}`);
+          return { result: undefined, detail: changes.join('; ') || null };
+        });
+      } catch (e) {
+        // The last-admin guard lives in updateUser, inside the transaction
+        // (roadmap Phase 11, 14 Sep 2026); it surfaces here as a 409 with the
+        // sentence Setup prints, and auditedWrite has already rolled back.
+        if (e instanceof LastAdminError) { res.status(409).json({ error: 'last administrator', detail: e.message }); return; }
+        throw e;
+      }
       res.json({ ok: true });
     } catch (e) { next(e); }
   });
@@ -1585,10 +1676,28 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     } catch (e) { next(e); }
   });
 
-  // audit log — admin only, read-only view of every write above
-  app.get('/api/admin/audit', requireRole(4), async (_req, res, next) => {
-    try { res.json({ entries: await listAudit(pool) }); } catch (e) { next(e); }
+  // audit log — admin only, read-only view of every write above. Keyset
+  // paged since roadmap Phase 11 (14 Sep 2026): `?before=<audit_id>&limit=`
+  // walks older pages; without `before` the newest page is returned, and the
+  // legacy `entries` shape is kept so an older bundle still renders.
+  app.get('/api/admin/audit', requireRole(4), async (req, res, next) => {
+    try {
+      const q = z
+        .object({ before: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(1000).optional() })
+        .safeParse(req.query);
+      if (!q.success) { res.status(400).json({ error: 'invalid query' }); return; }
+      res.json(await listAuditPage(pool, { before: q.data.before ?? null, limit: q.data.limit ?? 500 }));
+    } catch (e) { next(e); }
   });
+
+  // Routes added per roadmap phase live in their own modules (routes/*.ts);
+  // they mount here, after every gate above and BEFORE the /api 404 below:
+  // mounted after it (as the first stub did, 14 Sep 2026) every one of their
+  // routes was shadowed by `not found` and could never be reached.
+  const routeCtx = { app, pool, cfg, audit };
+  mountConeRoutes(routeCtx);
+  mountRejectsRoutes(routeCtx);
+  mountOpsRoutes(routeCtx);
 
   // JSON 404 for unmatched API routes
   app.use('/api', (_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));

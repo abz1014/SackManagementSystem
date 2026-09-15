@@ -29,13 +29,13 @@ import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import {
-  Block, Chevron, Details, Empty, Failed, Figures, Loading,
+  Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
   SkelFigures, SkelLines, SkelStations,
 } from '../ui/bits';
 import { fmtClock, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
-  getAttention, getProduction, getProductAt, getStations, stationLabel,
-  type AttentionFinding, type LiveLine, type ProductionRow, type StationRow,
+  getAttention, getProduction, getProductAt, getStations, stationLabel, getMachinesRunning,
+  type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
 } from '../api';
 import type { Screen, ReadingsFilter } from '../ui/Bar';
 
@@ -103,6 +103,11 @@ export function LineScreen({
     REFRESH_MS,
     `attention:${period.from}:${period.to}:${period.shift ?? 'all'}`,
   );
+  // What each machine is running (roadmap Phase 4, 14 Sep 2026): the product
+  // on each station from its newest cones, in a two-hour window anchored on
+  // the newest reading — never on the clock — and capped at the replay
+  // instant, like everything else on this screen.
+  const machines = usePolling(() => getMachinesRunning(period.tsTo), REFRESH_MS, `machines-running:${period.tsTo}`);
 
   if (loading && !line) return <Loading />;
   if (!line) return <Empty message={W.lag.noData} />;
@@ -162,6 +167,19 @@ export function LineScreen({
           <Failed error={product.error} onRetry={product.refresh} />
         ) : (
           <ProductBlock data={product.data} canWrite={canWrite} onChange={onChangeProduct} />
+        )}
+      </Block>
+
+      <Block
+        label={W.cone.machinesTitle}
+        note={machines.data ? W.cone.machinesNote(machines.data.data.materialsRunning) : null}
+      >
+        {machines.error && !machines.data ? (
+          <Failed error={machines.error} onRetry={machines.refresh} />
+        ) : !machines.data ? (
+          <SkelLines n={3} short />
+        ) : (
+          <MachinesBlock data={machines.data.data} stations={stations.data?.stations ?? []} onOpen={onOpenStation} />
         )}
       </Block>
 
@@ -415,6 +433,58 @@ function ProductBlock({
         </button>
       )}
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- machines */
+
+/**
+ * One row per active station: the product it is running, since when, and how
+ * many cones in the window. Quiet stations say so in the same row rather than
+ * vanishing — a machine that stopped is information too. Compact on purpose:
+ * this block sits between the product and the station grid and must not
+ * push either off the first screen.
+ */
+function MachinesBlock({
+  data,
+  stations,
+  onOpen,
+}: {
+  data: MachinesRunningData;
+  stations: StationRow[];
+  onOpen: (station: number) => void;
+}) {
+  if (data.asOfUtc == null || data.machines.length === 0) return <Empty message={W.nothingHere} />;
+  const nameOf = new Map(stations.map((s) => [s.stationId, s]));
+  return (
+    <>
+      <table>
+        <tbody>
+          {data.machines.map((m) => (
+            <tr key={m.station} className="click" onClick={() => onOpen(m.station)} onKeyDown={rowKeys(() => onOpen(m.station))} tabIndex={0}>
+              <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>{stationLabel(nameOf.get(m.station), m.station)}</td>
+              <td>
+                {m.quiet ? (
+                  <span className="mut">{W.cone.quiet2h}</span>
+                ) : (
+                  <>
+                    <span style={{ fontWeight: 500 }}>{m.productName ?? (m.materialId != null ? W.cone.noProductName(m.materialId) : W.cone.noMaterial)}</span>
+                    <span className="mut">
+                      {' · '}
+                      {m.sinceIsWindowStart || m.sinceUtc == null ? W.cone.sinceAtLeast : W.cone.since(fmtClock(m.sinceUtc))}
+                      {' · '}
+                      {W.cone.conesInWindow(fmtInt(m.conesOnMaterial))}
+                    </span>
+                  </>
+                )}
+                <Chevron />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mut sm" style={{ marginTop: 8 }}>{W.cone.machinesWindow}</p>
+    </>
   );
 }
 

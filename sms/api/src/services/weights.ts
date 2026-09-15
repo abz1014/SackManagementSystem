@@ -7,6 +7,7 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { getPlausibilityRule } from './admin.js';
+import { plausibleWhere } from './coneState.js';
 
 export type Basis = 'as_recorded' | 'gross' | 'net';
 
@@ -20,6 +21,12 @@ export interface Outlier { weight: number; shiftDate: string | null; eventId: nu
 
 export interface WeightStats {
   count: number;
+  /**
+   * Readings the population rule excluded as implausible (roadmap Phase 4,
+   * 14 Sep 2026) — the same figure spc.ts and the reconciliation report.
+   * `outliers` below lists a sample of them deliberately.
+   */
+  implausible: number;
   avg: number | null;
   min: number | null;
   max: number | null;
@@ -98,18 +105,18 @@ export async function getWeights(
     if (to) w.push(`${col} <= @to`);
     return w.join(' AND ');
   };
-  // --- cones (grams) / sacks (kg): outlier floor is the SAME app-owned
-  // plausibility rule spc.ts reads (sms.plausibility_rule) — was a hardcoded
-  // CONE_OUT/SACK_OUT constant here. Only the LOWER bound is used, deliberately:
-  // unlike spc.ts, this has never excluded a high outlier, so the giveaway
-  // stats keep the ~2200-2354g scale-fault population spc.ts drops. That
-  // asymmetry is a pre-existing, documented choice (see the module comment
-  // above) and is preserved exactly — this change only relocates the numbers
-  // into a table an admin can edit, it does not add a new ceiling.
+  // --- cones (grams) / sacks (kg): the population is the ONE plausibility
+  // rule (coneState.ts plausibleWhere — roadmap Phase 4, 14 Sep 2026). Until
+  // then this file used the LOWER bound only, so its average kept the
+  // ~2200-2354 g scale-fault population spc.ts drops, and "the app's average
+  // cone weight" was two different numbers on two screens. Both bounds now,
+  // everywhere a statistic is computed. The `outliers` sample is the one
+  // deliberate exception: it LISTS the excluded readings, which is the point
+  // of it, and says so with includeImplausible.
   const plausibility = await getPlausibilityRule(pool, lineId);
-  const CONE_OUT = plausibility.coneLoG;
+  const conePlaus = { loG: plausibility.coneLoG, hiG: plausibility.coneHiG };
+  const sackPlaus = { loG: plausibility.sackLoKg, hiG: plausibility.sackHiKg };
   const CONE_BUCKET = 20;
-  const SACK_OUT = plausibility.sackLoKg;
   const SACK_BUCKET = 1;
 
   // Every value that varies at runtime is bound, not interpolated. The tare/tube
@@ -124,41 +131,57 @@ export async function getWeights(
     if (to) r.input('to', mssql.Date, to);
     r.input('coneAdj', mssql.Float, coneAdj);
     r.input('sackAdj', mssql.Float, sackAdj);
-    r.input('coneOut', mssql.Int, CONE_OUT);
     r.input('coneBucket', mssql.Int, CONE_BUCKET);
-    r.input('sackOut', mssql.Int, SACK_OUT);
     r.input('sackBucket', mssql.Int, SACK_BUCKET);
     return r;
   };
+  /** A request with the cone population predicate bound; returns [request, predicate]. */
+  const coneReq = (opts?: { includeImplausible: boolean }): [mssql.Request, string] => {
+    const r = bind(pool.request());
+    return [r, plausibleWhere(r, 'weight_g', conePlaus, opts)];
+  };
+  const sackReq = (opts?: { includeImplausible: boolean }): [mssql.Request, string] => {
+    const r = bind(pool.request());
+    return [r, plausibleWhere(r, 'weight_kg', sackPlaus, opts)];
+  };
 
-  const coneStat = await bind(pool.request()).query<{ n: number; avg: number; mn: number; mx: number; sd: number }>(
+  const [csReq, csPlaus] = coneReq();
+  const coneStat = await csReq.query<{ n: number; avg: number; mn: number; mx: number; sd: number; excluded: number }>(
     `SELECT COUNT(*) n, AVG(weight_g - @coneAdj) avg, MIN(weight_g - @coneAdj) mn,
-            MAX(weight_g - @coneAdj) mx, STDEV(weight_g - @coneAdj) sd
-     FROM sms.cone_event WHERE ${dateWhere()} AND weight_g >= @coneOut`,
+            MAX(weight_g - @coneAdj) mx, STDEV(weight_g - @coneAdj) sd,
+            (SELECT COUNT(*) FROM sms.cone_event WHERE ${dateWhere()} AND weight_g IS NOT NULL AND NOT (${csPlaus})) excluded
+     FROM sms.cone_event WHERE ${dateWhere()} AND ${csPlaus}`,
   );
-  const coneHist = await bind(pool.request()).query<{ bucket: number; count: number }>(
+  const [chReq, chPlaus] = coneReq();
+  const coneHist = await chReq.query<{ bucket: number; count: number }>(
     `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket bucket, COUNT(*) count
-     FROM sms.cone_event WHERE ${dateWhere()} AND weight_g >= @coneOut
+     FROM sms.cone_event WHERE ${dateWhere()} AND ${chPlaus}
      GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket ORDER BY bucket`,
   );
-  const coneOut = await bind(pool.request()).query<{ w: number; d: string; id: number }>(
+  // The excluded readings themselves, lightest first — shown, on purpose.
+  const [coReq, coAll] = coneReq({ includeImplausible: true });
+  const coneOut = await coReq.query<{ w: number; d: string; id: number }>(
     `SELECT TOP 20 weight_g - @coneAdj w, CONVERT(varchar(10), shift_date, 120) d, cone_event_id id
-     FROM sms.cone_event WHERE ${dateWhere()} AND (weight_g < @coneOut OR weight_g <= 0) ORDER BY weight_g`,
+     FROM sms.cone_event WHERE ${dateWhere()} AND ${coAll} AND NOT (weight_g BETWEEN @plausLo AND @plausHi) ORDER BY weight_g`,
   );
 
-  const sackStat = await bind(pool.request()).query<{ n: number; avg: number; mn: number; mx: number; sd: number }>(
+  const [ssReq, ssPlaus] = sackReq();
+  const sackStat = await ssReq.query<{ n: number; avg: number; mn: number; mx: number; sd: number; excluded: number }>(
     `SELECT COUNT(*) n, AVG(weight_kg - @sackAdj) avg, MIN(weight_kg - @sackAdj) mn,
-            MAX(weight_kg - @sackAdj) mx, STDEV(weight_kg - @sackAdj) sd
-     FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg >= @sackOut`,
+            MAX(weight_kg - @sackAdj) mx, STDEV(weight_kg - @sackAdj) sd,
+            (SELECT COUNT(*) FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg IS NOT NULL AND NOT (${ssPlaus})) excluded
+     FROM sms.sack_event WHERE ${dateWhere()} AND ${ssPlaus}`,
   );
-  const sackHist = await bind(pool.request()).query<{ bucket: number; count: number }>(
+  const [shReq, shPlaus] = sackReq();
+  const sackHist = await shReq.query<{ bucket: number; count: number }>(
     `SELECT FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket bucket, COUNT(*) count
-     FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg >= @sackOut
+     FROM sms.sack_event WHERE ${dateWhere()} AND ${shPlaus}
      GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket ORDER BY bucket`,
   );
-  const sackOut = await bind(pool.request()).query<{ w: number; d: string; id: number }>(
+  const [soReq, soAll] = sackReq({ includeImplausible: true });
+  const sackOut = await soReq.query<{ w: number; d: string; id: number }>(
     `SELECT TOP 20 weight_kg - @sackAdj w, CONVERT(varchar(10), shift_date, 120) d, sack_event_id id
-     FROM sms.sack_event WHERE ${dateWhere()} AND (weight_kg < @sackOut OR weight_kg <= 0) ORDER BY weight_kg`,
+     FROM sms.sack_event WHERE ${dateWhere()} AND ${soAll} AND NOT (weight_kg BETWEEN @plausLo AND @plausHi) ORDER BY weight_kg`,
   );
 
   // Nominal comes from the product actually selected for this line, when one is.
@@ -215,7 +238,7 @@ export async function getWeights(
   return {
     basis,
     cone: {
-      count: cs.n, avg: coneAvg, min: num(cs.mn), max: num(cs.mx), stdev: num(cs.sd),
+      count: cs.n, implausible: Number(cs.excluded ?? 0), avg: coneAvg, min: num(cs.mn), max: num(cs.mx), stdev: num(cs.sd),
       unit: 'g', bucketSize: CONE_BUCKET,
       histogram: coneHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
       outliers: mapOut(coneOut.recordset),
@@ -223,7 +246,7 @@ export async function getWeights(
       giveawayPerConeG, giveawayTotalKg,
     },
     sack: {
-      count: ss.n, avg: num(ss.avg), min: num(ss.mn), max: num(ss.mx), stdev: num(ss.sd),
+      count: ss.n, implausible: Number(ss.excluded ?? 0), avg: num(ss.avg), min: num(ss.mn), max: num(ss.mx), stdev: num(ss.sd),
       unit: 'kg', bucketSize: SACK_BUCKET,
       histogram: sackHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
       outliers: mapOut(sackOut.recordset),

@@ -9,7 +9,8 @@
  *   future_timestamp        ERROR     production time more than an hour ahead of the plant wall clock
  *   stale_timestamp         WARNING   a reading hours behind the readings around it — a station clock fault
  *   nonpositive_weight      ERROR     weight <= 0
- *   outlier_weight          WARNING   below the plausibility floor
+ *   outlier_weight          WARNING   outside the plausibility window (sms.plausibility_rule — the
+ *                                     app-owned rule, read once per pass; roadmap Phase 4)
  *   no_station              WARNING   no usable station id (the source sent 0)
  *   station_not_in_roster   WARNING   a machine number that is not a station on the line — one per
  *                                     (machine, source table, generation), see stationRosterFindings
@@ -58,6 +59,25 @@ export type CheckName = (typeof CHECK_NAMES)[number];
  */
 export const PER_SUBJECT_CHECKS: ReadonlySet<string> = new Set(['station_not_in_roster']);
 
+/**
+ * The bounds outside which a weight is a scale fault, not a reading — the
+ * same app-owned rule the API's weight statistics exclude by
+ * (sms.plausibility_rule, Setup › Rules). Until roadmap Phase 4 (14 Sep
+ * 2026) this file hard-coded 1500 g / 40 kg as the floor and had no ceiling,
+ * so an admin editing the rule changed every screen and not the finding
+ * that names the faulty rows. The values on file are the developer's
+ * measured defaults, not yet confirmed by IFL (Q10).
+ */
+export interface PlausibilityBounds {
+  coneLoG: number;
+  coneHiG: number;
+  sackLoKg: number;
+  sackHiKg: number;
+}
+
+/** What the transform applied before the rule table existed; the fallback when it is empty. */
+export const DEFAULT_PLAUSIBILITY: PlausibilityBounds = { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 };
+
 export interface Finding {
   check_name: string;
   severity: Severity;
@@ -103,6 +123,8 @@ export function computeFindings<T extends Weighted>(
    *  incremental batch is still caught against history, not just against
    *  rows that happen to share its batch. -Infinity = no history (backfill). */
   initialMaxMs = -Infinity,
+  /** The plausibility rule on file; the historical constants when not given. */
+  plausibility: PlausibilityBounds = DEFAULT_PLAUSIBILITY,
 ): Finding[] {
   // production_ts_utc_ms is the PLANT'S WALL CLOCK labelled as UTC (see
   // wallClock.ts / format.ts) — comparing it against real UTC Date.now()
@@ -122,7 +144,11 @@ export function computeFindings<T extends Weighted>(
   let nonPositive = 0;
   let outlier = 0;
   let collision = 0;
-  const outlierThreshold = kind === 'sack' ? 40 : 1500; // kg for sacks, g for cones
+  // kg for sacks, g for cones; rejects carry a cone weight when they carry one
+  const window =
+    kind === 'sack'
+      ? { lo: plausibility.sackLoKg, hi: plausibility.sackHiKg }
+      : { lo: plausibility.coneLoG, hi: plausibility.coneHiG };
   // The first offending row of each check, by raw_id — subject_ref (Phase 3).
   const first: Record<string, number | null> = {};
   const note = (check: string, r: Weighted) => {
@@ -158,7 +184,7 @@ export function computeFindings<T extends Weighted>(
       if (w <= 0) {
         nonPositive++;
         note('nonpositive_weight', r);
-      } else if (w < outlierThreshold) {
+      } else if (w < window.lo || w > window.hi) {
         outlier++;
         note('outlier_weight', r);
       }
@@ -188,7 +214,12 @@ export function computeFindings<T extends Weighted>(
       ' — a station clock fault, not a production gap',
   );
   add('nonpositive_weight', 'ERROR', nonPositive, `${nonPositive} rows with weight <= 0`);
-  add('outlier_weight', 'WARNING', outlier, `${outlier} rows below ${outlierThreshold}${kind === 'sack' ? 'kg' : 'g'}`);
+  add(
+    'outlier_weight',
+    'WARNING',
+    outlier,
+    `${outlier} rows outside the plausibility window ${window.lo}-${window.hi}${kind === 'sack' ? 'kg' : 'g'} (the rule on file, not yet confirmed by IFL)`,
+  );
   add(
     'no_station',
     'WARNING',
@@ -200,6 +231,25 @@ export function computeFindings<T extends Weighted>(
 }
 
 /** What the roster check needs: the line, and the station ids it knows. */
+/**
+ * The plausibility rule on file for a line, read once per pass, the same
+ * way api/src/services/admin.ts getPlausibilityRule reads it for every
+ * screen. Falls back to the historical constants only when the table has no
+ * row for the line — a fresh install before seedReference has run.
+ */
+export async function loadPlausibilityRule(pool: ConnectionPool, lineId: number): Promise<PlausibilityBounds> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ cl: number; ch: number; sl: number; sh: number }>(
+      `SELECT TOP 1 cone_lo_g cl, cone_hi_g ch, sack_lo_kg sl, sack_hi_kg sh
+         FROM sms.plausibility_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+    );
+  const row = r.recordset[0];
+  if (!row) return DEFAULT_PLAUSIBILITY;
+  return { coneLoG: Number(row.cl), coneHiG: Number(row.ch), sackLoKg: Number(row.sl), sackHiKg: Number(row.sh) };
+}
+
 export interface StationRoster {
   lineId: number;
   stations: ReadonlySet<number>;

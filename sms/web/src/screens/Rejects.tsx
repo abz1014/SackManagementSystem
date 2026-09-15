@@ -14,20 +14,44 @@
  *     eight-hour window, so on "This shift" the old chart could only ever show
  *     noise. The rise stays visible from any period.
  *
+ * ROADMAP PHASE 5 (14 Sep 2026) — the drilldowns the requirement names, and
+ * the rules that keep this screen honest with the others:
+ *
+ *  - THE HEADLINE COUNTS WHAT LINE COUNTS. The period figures ask
+ *    /api/reject-spc for the same from/to, SHIFT and TSTO Line sends to
+ *    /api/production. Before this the route took neither, so "This shift" here
+ *    was the whole production day and the two screens printed two numbers for
+ *    one period (gap analysis §7). A test pins the agreement.
+ *  - WHICH FIGURES FOLLOW THE PERIOD. The reasons list and the by-day table
+ *    follow the selected period. The trend and its "rising" verdict look at
+ *    the fixed trailing window, because the episode detector needs
+ *    consecutive DAYS (lib/period.ts rule 2). The screen says which is which.
+ *  - ONE FILTER SET FOR EVERY NUMBER. Station and product narrow the
+ *    headline, the reasons, the trend and the table alike, through one
+ *    `RejectFilters`. Choosing a reason (a Pareto bar) narrows the trend and
+ *    the table to that code; the chip names it and clears it.
+ *  - EVERY FETCH HAS A FAILURE STATE. "No cones were rejected" used to render
+ *    when /api/rejects failed; a refusal or an outage is now the `Failed`
+ *    sentence with a retry, per block, and the inline rename reports its own
+ *    failure instead of swallowing it.
+ *
  * There is no "by station" section here. That was the third screen ranking the
  * same fourteen stations, and it is now a link into the one station table on
  * Weight, which already carries a reject-rate column.
  */
-import { useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useLive, usePolling } from '../lib/live';
+import { distinctProductLabels, productLabel } from '../lib/productLabel';
 import { W } from '../lib/words';
 import { trailingWindow, daysWithReadings, type Period } from '../lib/period';
-import { Block, Details, Empty, Failed, Loading, SkelChart, SkelLines } from '../ui/bits';
+import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, Toolbar, rowKeys } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, linePath, fittingTicks, tickIndices } from '../ui/chart';
-import { fmtInt, fmtPct1 } from '../lib/fmt';
+import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
 import {
-  getRejects, getRejectSpc, getRange, setRejectLabel,
-  type RejectReason, type RejectSpcData,
+  getRange, getStations, getProducts, stationLabel, setRejectLabel,
+  getRejectsFiltered, getRejectSpcFiltered, getRejectsByDayCode, rejectCodeParam,
+  type RejectReason, type RejectSpcData, type RejectDayCodeRow, type RejectFilters,
+  type StationRow, type ProductOption,
 } from '../api';
 
 /**
@@ -43,24 +67,42 @@ import {
  */
 const never = (): Promise<never> => new Promise<never>(() => {});
 
+/** What the by-day table hands the reason sheet. */
+export interface ReasonRef {
+  day: string;
+  rejectType: string;
+  tubeCode: number | null;
+  materialCode: number | null;
+}
+
 export function RejectsScreen({
   period,
   onSeeCones,
   onSeeStations,
+  onOpenReason,
   canName,
 }: {
   period: Period;
   onSeeCones: () => void;
   onSeeStations: () => void;
+  onOpenReason: (r: ReasonRef) => void;
   canName: boolean;
 }) {
   const { line } = useLive();
+  // The drilldown controls. Local state, not the URL: they are a working
+  // narrowing of this screen, not a period a colleague should inherit from a
+  // pasted link — that is the global period's job.
+  const [station, setStation] = useState<number | null>(null);
+  const [product, setProduct] = useState<number | null>(null);
+  const [code, setCode] = useState<string | null>(null);
   // Rarely changes (it moves once a day at most), so a slow heartbeat is
   // plenty. Finding H6 (Sep 2026 audit): without this, trailingWindow() below
   // always claimed the full 14 days regardless of how much history actually
   // exists — the exact wrong side to be wrong on right after go-live, when
   // the record is a handful of days old.
   const range = usePolling(() => getRange(), 30 * 60_000, 'range');
+  const stations = usePolling(() => getStations(), 10 * 60_000, 'stations');
+  const products = usePolling(() => getProducts(), 10 * 60_000, 'products');
   // Wait for BOTH before computing the window. Deriving it from `line` alone
   // and letting `firstDay` arrive later meant the first paint used an
   // unclipped 14-day window: three requests went out against it, were thrown
@@ -81,87 +123,173 @@ export function RejectsScreen({
         })
       : null;
 
+  // The narrowing every request shares. tsTo on the trend too: under a replay
+  // the trailing window must not reach past the replayed instant either.
+  const narrow: RejectFilters = { station: station ?? undefined, product: product ?? undefined, tsTo: period.tsTo };
+  const narrowKey = `${station ?? 'any'}:${product ?? 'any'}:${period.tsTo}`;
+  // The period, exactly as Line sends it to /api/production.
+  const periodF: RejectFilters = { ...narrow, from: period.from, to: period.to, shift: period.shift };
+  const periodKey = `${period.from}:${period.to}:${period.shift ?? 'all'}:${narrowKey}`;
+
   const quality = usePolling(
-    () => (win ? getRejectSpc(win.from, win.to, 'quality', 'day') : never()),
+    () => (win ? getRejectSpcFiltered({ ...narrow, from: win.from, to: win.to, rejectType: 'quality', bucket: 'day' }) : never()),
     5 * 60_000,
-    `rspc:q:${win?.from}:${win?.to}`,
+    `rspc:q:${win?.from}:${win?.to}:${narrowKey}`,
   );
   const weight = usePolling(
-    () => (win ? getRejectSpc(win.from, win.to, 'weight', 'day') : never()),
+    () => (win ? getRejectSpcFiltered({ ...narrow, from: win.from, to: win.to, rejectType: 'weight', bucket: 'day' }) : never()),
     5 * 60_000,
-    `rspc:w:${win?.from}:${win?.to}`,
+    `rspc:w:${win?.from}:${win?.to}:${narrowKey}`,
   );
+  // One reason, followed through the window, when a Pareto bar is chosen.
+  // The answer carries the code it was fetched for: usePolling keeps the last
+  // data across a key change, so without this the chart would draw reason A's
+  // series under reason B's name for the moment B takes to arrive.
+  const coded = usePolling(
+    async () => {
+      if (!win || !code) return never();
+      const env = await getRejectSpcFiltered({ ...narrow, from: win.from, to: win.to, rejectType: 'all', bucket: 'day', code });
+      return { forCode: code, trend: env.data };
+    },
+    5 * 60_000,
+    `rspc:c:${win?.from}:${win?.to}:${narrowKey}:${code ?? ''}`,
+  );
+  // Reasons FOLLOW THE PERIOD (roadmap Phase 5): they were fixed to the
+  // trailing window, so "This shift" showed a fortnight's reasons.
   const reasons = usePolling(
-    () => (win ? getRejects(win.from, win.to) : never()),
-    5 * 60_000,
-    `reasons:${win?.from}:${win?.to}`,
-  );
-  // The period figures, which are what the headline counts.
-  const periodQ = usePolling(
-    () => getRejectSpc(period.from, period.to, 'quality', 'day'),
+    () => getRejectsFiltered(periodF),
     period.live ? 60_000 : 5 * 60_000,
-    `pq:${period.from}:${period.to}`,
+    `reasons:${periodKey}`,
+  );
+  // The period figures, which are what the headline counts — the SAME
+  // shift/tsTo Line sends, so the two screens agree.
+  const periodQ = usePolling(
+    () => getRejectSpcFiltered({ ...periodF, from: period.from, to: period.to, rejectType: 'quality', bucket: 'day' }),
+    period.live ? 60_000 : 5 * 60_000,
+    `pq:${periodKey}`,
   );
   const periodW = usePolling(
-    () => getRejectSpc(period.from, period.to, 'weight', 'day'),
+    () => getRejectSpcFiltered({ ...periodF, from: period.from, to: period.to, rejectType: 'weight', bucket: 'day' }),
     period.live ? 60_000 : 5 * 60_000,
-    `pw:${period.from}:${period.to}`,
+    `pw:${periodKey}`,
+  );
+  const byDay = usePolling(
+    () => getRejectsByDayCode({ ...periodF, from: period.from, to: period.to, code: code ?? undefined }),
+    period.live ? 60_000 : 5 * 60_000,
+    `byday:${periodKey}:${code ?? ''}`,
   );
 
+  // A chosen reason that no longer appears in the period's reasons is still
+  // a valid filter (it may simply have no rejects this period); it is only
+  // dropped when the period's list has loaded and cannot name it, so the chip
+  // never shows a code the reader cannot see in the list beside it.
+  const reasonRows = reasons.data?.data.reasons ?? [];
+  const activeReason = code ? reasonRows.find((r) => rejectCodeParam(r) === code) ?? null : null;
+  useEffect(() => {
+    if (code && reasons.data && !activeReason) setCode(null);
+  }, [code, reasons.data, activeReason]);
+
   if (!win) return <Loading />;
-  if (quality.error && !quality.data) return <Failed error={quality.error} onRetry={quality.refresh} />;
 
   const q = periodQ.data?.data ?? null;
   const w = periodW.data?.data ?? null;
+  const figuresFailed = (periodQ.error && !periodQ.data) || (periodW.error && !periodW.data);
   // The band is drawn only where the period intersects the trailing window.
   const periodOverlapsWindow = period.from <= win.to && period.to >= win.from;
-  const anyReasonUnnamed = (reasons.data?.data.reasons ?? []).some((r) => !r.label);
+  const anyReasonUnnamed = reasonRows.some((r) => !r.label);
   const totalRejects = (q?.totalRejects ?? 0) + (w?.totalRejects ?? 0);
   const produced = q?.totalProduced ?? 0;
   const ratePct = produced + totalRejects > 0 ? (100 * totalRejects) / (produced + totalRejects) : null;
 
-  const rising = ongoing(quality.data?.data) ?? ongoing(weight.data?.data);
-  const risingKind = ongoing(quality.data?.data) ? W.rejects.quality : W.rejects.weightKind;
+  // The verdict follows what the trend shows: the chosen reason when one is
+  // chosen, otherwise quality then weight.
+  const codedTrend = code && coded.data?.forCode === code ? coded.data.trend : null;
+  const codedPending = !!code && codedTrend == null;
+  const rising = codedTrend ? ongoing(codedTrend) : ongoing(quality.data?.data) ?? ongoing(weight.data?.data);
+  const risingKind = codedTrend
+    ? (activeReason ? reasonName(activeReason) : W.rejects.quality)
+    : ongoing(quality.data?.data) ? W.rejects.quality : W.rejects.weightKind;
   // Every rise in the window, not just one still running at the newest
   // bucket — otherwise the headline says "Steady." over a chart of spikes.
-  const windowEpisodes = [
-    ...(quality.data?.data.episodes ?? []),
-    ...(weight.data?.data.episodes ?? []),
-  ];
+  const windowEpisodes = codedTrend
+    ? codedTrend.episodes
+    : [...(quality.data?.data.episodes ?? []), ...(weight.data?.data.episodes ?? [])];
   const lastEnded = windowEpisodes.map((e) => e.endTs).sort().slice(-1)[0] ?? null;
   const settledTail =
     windowEpisodes.length > 0 && lastEnded
       ? W.rejects.steadyAfterRises(windowEpisodes.length, dayLabel(lastEnded))
       : W.rejects.steady;
 
-  const top = reasons.data?.data.reasons?.[0] ?? null;
+  const top = reasonRows[0] ?? null;
+  const unattributed = reasons.data?.data.unattributed ?? null;
+  const M = W.rejectsMore;
 
   return (
     <>
       <div className="page">
       <p className="q">{W.question.rejects}</p>
       <h1 className="wide">
-        {q == null || w == null
-          ? '…'
-          : `${W.rejects.headline(fmtInt(totalRejects), fmtPct1(ratePct), q.totalRejects, w.totalRejects)} — ${
-              rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : settledTail
-            }.`}
+        {figuresFailed
+          ? '—'
+          : q == null || w == null
+            ? '…'
+            : `${W.rejects.headline(fmtInt(totalRejects), fmtPct1(ratePct), q.totalRejects, w.totalRejects)} — ${
+                rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : settledTail
+              }.`}
       </h1>
       </div>
 
       <Block first>
-        <div className="figs two">
-          <div>
-            <b className="fig-val">{fmtInt(totalRejects)}<span className="fig-unit">{W.fig.rejected}</span></b>
-            <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtPct1(ratePct))}</span>
+        {figuresFailed ? (
+          <Failed error={periodQ.error ?? periodW.error} onRetry={() => { periodQ.refresh(); periodW.refresh(); }} />
+        ) : (
+          <div className="figs two">
+            <div>
+              <b className="fig-val">{fmtInt(totalRejects)}<span className="fig-unit">{W.fig.rejected}</span></b>
+              <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtPct1(ratePct))}</span>
+            </div>
+            <div>
+              <b className="fig-val">{top ? `${Math.round(top.pct)}%` : '—'}</b>
+              <span className="fig-note">
+                {top ? M.topReasonThisPeriod(reasonName(top)) : W.rejects.none}
+              </span>
+            </div>
           </div>
-          <div>
-            <b className="fig-val">{top ? `${Math.round(top.pct)}%` : '—'}</b>
-            <span className="fig-note">
-              {top ? `${reasonName(top)} · ${W.rejects.topReason} over the last ${win.requestedDays} days` : W.rejects.none}
-            </span>
-          </div>
+        )}
+        <div style={{ marginTop: 16 }}>
+          {/* The station and product lists are fetches too: when one fails
+              its chip used to vanish without a word, which reads as "there
+              are no stations", not "the list could not be loaded". */}
+          {(stations.error && !stations.data) || (products.error && !products.data) ? (
+            <Failed
+              error={stations.error ?? products.error}
+              onRetry={() => { stations.refresh(); products.refresh(); }}
+            />
+          ) : null}
+          <Toolbar
+            left={
+              <>
+                <StationChip stations={stations.data?.stations ?? []} value={station} onChange={setStation} />
+                <ProductChip products={products.data?.products ?? []} value={product} onChange={setProduct} />
+                {code && (
+                  <span className="chip on">
+                    {M.codeChip(activeReason ? reasonName(activeReason) : code)}{' '}
+                    <button type="button" className="linkish x" onClick={() => setCode(null)} aria-label={`${M.clearCode} ${M.codeChip('')}`}>
+                      ×
+                    </button>
+                  </span>
+                )}
+              </>
+            }
+          />
         </div>
+        {/* The product caveat, only under a product filter: the same fact Line
+            states for cones, for the rejects this screen counts. */}
+        {product != null && unattributed && unattributed.rows > 0 && (
+          <p className="mut sm" style={{ marginTop: 10 }}>
+            {M.predateProduct(fmtInt(unattributed.rows), fmtInt(unattributed.of))}
+          </p>
+        )}
       </Block>
 
       {/* The rate over time on the left, what is causing it on the right:
@@ -172,31 +300,58 @@ export function RejectsScreen({
           must not print on a screen where every shown code IS named — the
           same screen offers "Name it" and writes those labels. */}
       <Block
-        label={periodOverlapsWindow ? W.rejects.trendTitle(win.requestedDays) : W.rejects.trendTitleNoShade(win.requestedDays)}
+        label={periodOverlapsWindow ? M.trendTitle(win.requestedDays) : M.trendTitleNoShade(win.requestedDays)}
         note={anyReasonUnnamed ? W.rejects.namesAwaited : null}
       >
         <div className="two-col">
           <div>
-            {quality.loading && !quality.data ? (
+            {/* Both series are fetches: a failed weight series used to leave
+                the chart drawing quality alone, with nothing to say the other
+                half was missing. Only when one reason is followed does the
+                weight series not matter (the chart draws the reason alone). */}
+            {quality.error && !quality.data ? (
+              <Failed error={quality.error} onRetry={quality.refresh} />
+            ) : !code && weight.error && !weight.data ? (
+              <Failed error={weight.error} onRetry={weight.refresh} />
+            ) : codedPending && coded.error ? (
+              <Failed error={coded.error} onRetry={coded.refresh} />
+            ) : (quality.loading && !quality.data) || (!code && weight.loading && !weight.data) || codedPending ? (
               <SkelChart />
             ) : (
               <TrendChart
-                quality={quality.data?.data ?? null}
-                weight={weight.data?.data ?? null}
+                quality={codedTrend ?? quality.data?.data ?? null}
+                weight={codedTrend ? null : weight.data?.data ?? null}
+                singleName={codedTrend && activeReason ? reasonName(activeReason) : null}
                 periodFrom={period.from}
                 periodTo={period.to}
               />
             )}
           </div>
           <div>
-            <Reasons
-              rows={reasons.data?.data.reasons ?? []}
-              loading={reasons.loading && !reasons.data}
-              canName={canName}
-              onNamed={reasons.refresh}
-            />
+            {reasons.error && !reasons.data ? (
+              <Failed error={reasons.error} onRetry={reasons.refresh} />
+            ) : (
+              <Reasons
+                rows={reasonRows}
+                loading={reasons.loading && !reasons.data}
+                canName={canName}
+                active={code}
+                onChoose={(r) => setCode((c) => (c === rejectCodeParam(r) ? null : rejectCodeParam(r)))}
+                onNamed={reasons.refresh}
+              />
+            )}
           </div>
         </div>
+      </Block>
+
+      <Block label={M.byDayTitle} note={M.byDayNote}>
+        {byDay.error && !byDay.data ? (
+          <Failed error={byDay.error} onRetry={byDay.refresh} />
+        ) : byDay.loading && !byDay.data ? (
+          <SkelLines n={6} />
+        ) : (
+          <ByDayTable rows={byDay.data?.data.rows ?? []} onOpen={onOpenReason} />
+        )}
       </Block>
 
       <Block tight>
@@ -213,8 +368,7 @@ export function RejectsScreen({
       <div className="page">
       <Details>
         <p>
-          The trend is drawn over the last {win.requestedDays} production days with the selected period shaded, because
-          a sustained rise cannot be seen inside a single shift.
+          {M.reasonsFollowPeriod} {M.detectorFixed(win.requestedDays)}
           {/* The window clamps at the first day on record, not at a hole in
               the middle — and the record has one (10 Jul → 5 Aug 2026). Say
               how many of the requested days actually hold anything. */}
@@ -228,6 +382,7 @@ export function RejectsScreen({
           {' '}A day is marked as a rise when its rate sits above the
           usual range for that many cones, and consecutive marked days are joined into one episode.
         </p>
+        <p>{codedTrend ? M.bandNoteOneSeries : M.bandNote}</p>
         {(quality.data?.data.spansGenerations || weight.data?.data.spansGenerations) && (
           <p className="mut">{W.rejects.spansGenerations}</p>
         )}
@@ -235,6 +390,7 @@ export function RejectsScreen({
           Weight and quality rejects are counted separately throughout: a rise in one says nothing about the other.
           Reject rate is rejected cones over everything weighed, rejected cones included.
         </p>
+        <p className="mut">{M.dayBasisCaveat}</p>
       </Details>
       </div>
     </>
@@ -251,10 +407,56 @@ function ongoing(d: RejectSpcData | null | undefined) {
 const dayLabel = (ts: string) =>
   new Date(ts).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
 
-function reasonName(r: RejectReason): string {
+function reasonName(r: { label: string | null; tubeCode: number | null; materialCode: number | null; rejectType?: string }): string {
   if (r.label) return r.label;
+  if (r.rejectType === 'weight') return W.readings.weightReject;
   if (r.tubeCode == null && r.materialCode == null) return W.rejects.noCode;
   return W.rejects.codeUnnamed(`${r.tubeCode ?? '—'}/${r.materialCode ?? '—'}`);
+}
+
+/* --------------------------------------------------------------- filters */
+
+function StationChip({ stations, value, onChange }: { stations: StationRow[]; value: number | null; onChange: (v: number | null) => void }) {
+  if (stations.length === 0) return null;
+  return (
+    <label className="chip">
+      {W.rejectsMore.filterStation}
+      <select
+        value={value ?? ''}
+        aria-label={W.rejectsMore.filterStation}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+      >
+        <option value="">{W.rejectsMore.all}</option>
+        {stations.map((s) => (
+          <option key={s.stationId} value={s.stationId}>{stationLabel(s, s.stationId)}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ProductChip({ products, value, onChange }: { products: ProductOption[]; value: number | null; onChange: (v: number | null) => void }) {
+  // Six PDAS materials on this line share the description "205-IL0-SD";
+  // printed plain, the select repeated it six times (15 Sep 2026).
+  const labels = useMemo(() => distinctProductLabels(products), [products]);
+  if (products.length === 0) return null;
+  return (
+    <label className="chip">
+      {W.rejectsMore.filterProduct}
+      <select
+        value={value ?? ''}
+        aria-label={W.rejectsMore.filterProduct}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+      >
+        <option value="">{W.rejectsMore.all}</option>
+        {products.map((p) => (
+          <option key={p.productId} value={p.productId}>{labels.get(p.productId) ?? productLabel(p)}</option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 /* ------------------------------------------------------------ trend chart */
@@ -262,11 +464,14 @@ function reasonName(r: RejectReason): string {
 function TrendChart({
   quality,
   weight,
+  singleName,
   periodFrom,
   periodTo,
 }: {
   quality: RejectSpcData | null;
+  /** Null when one reason is followed: the chart then draws one series. */
   weight: RejectSpcData | null;
+  singleName: string | null;
   periodFrom: string;
   periodTo: string;
 }) {
@@ -282,16 +487,26 @@ function TrendChart({
   if (days.length === 0) return <Empty message={W.rejects.none} />;
 
   const wByTs = new Map((weight?.buckets ?? []).map((b) => [b.bucketTs, b]));
-  const rateOf = (r: number | null) => (r == null ? 0 : r * 100);
-  const series = days.map((b) => ({
-    ts: b.bucketTs,
-    q: rateOf(b.rate),
-    w: rateOf(wByTs.get(b.bucketTs)?.rate ?? null),
-    produced: b.produced,
-    qn: b.rejects,
-    wn: wByTs.get(b.bucketTs)?.rejects ?? 0,
-  }));
-  const max = Math.max(...series.map((s) => Math.max(s.q, s.w)), 1);
+  const pct = (r: number | null) => (r == null ? null : r * 100);
+  const series = days.map((b) => {
+    const wb = wByTs.get(b.bucketTs) ?? null;
+    return {
+      ts: b.bucketTs,
+      q: pct(b.rate) ?? 0,
+      w: pct(wb?.rate ?? null) ?? 0,
+      qUcl: pct(b.ucl),
+      qLcl: pct(b.lcl),
+      wUcl: pct(wb?.ucl ?? null),
+      qOut: b.outOfControl,
+      wOut: wb?.outOfControl ?? false,
+      produced: b.produced,
+      qn: b.rejects,
+      wn: wb?.rejects ?? 0,
+    };
+  });
+  // The y-range covers the band too, or a ceiling above every point would
+  // be clipped off the top of the plot.
+  const max = Math.max(...series.map((s) => Math.max(s.q, s.w, s.qUcl ?? 0, s.wUcl ?? 0)), 1);
   const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
   const y = (v: number) => T + ((max - v) / max) * (H - T - B);
 
@@ -299,19 +514,40 @@ function TrendChart({
   const firstIn = series.findIndex((s) => inPeriod(s.ts));
   const lastIn = series.map((s) => inPeriod(s.ts)).lastIndexOf(true);
 
+  // The band: UCL over LCL, per bucket (a p-chart for varying sample size
+  // gives every day its own limits). Drawn only across runs of days that
+  // HAVE limits — a day too thin for a valid limit (rejectSpc.ts) breaks the
+  // band rather than being bridged by a made-up value.
+  const bandRuns: number[][] = [];
+  for (let i = 0; i < series.length; i++) {
+    if (series[i]!.qUcl == null) continue;
+    const run = bandRuns[bandRuns.length - 1];
+    if (run && run[run.length - 1] === i - 1) run.push(i);
+    else bandRuns.push([i]);
+  }
+  const bandPath = (run: number[]) => {
+    const upper = run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) }));
+    const lower = [...run].reverse().map((i) => ({ x: x(i), y: y(series[i]!.qLcl ?? 0) }));
+    return `${linePath(upper)} L ${lower.map((p) => `${p.x} ${p.y}`).join(' L ')} Z`;
+  };
+  const wCeiling = series.map((s, i) => (s.wUcl == null ? null : { x: x(i), y: y(s.wUcl) }));
+
   const grid = [1, 2, 3, 4].filter((v) => v < max);
   const h = hover != null ? series[hover] : null;
   // How many day labels actually FIT. Four were hardcoded, which collided the
   // moment this chart moved into a half-width column: "Wed 26 Aug" printed on
   // top of "Sat 29 Aug".
   const ticks = tickIndices(series.length, fittingTicks(width - L - R, 11, 13, series.length, 4));
+  const qName = singleName ?? W.rejects.quality;
 
   return (
     <div ref={box}>
       <Readout
         hovered={
           h
-            ? `${dayLabel(h.ts)} · ${W.rejects.quality} ${h.q.toFixed(1)}% · ${W.rejects.weightKind} ${h.w.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed`
+            ? weight
+              ? `${dayLabel(h.ts)} · ${W.rejects.quality} ${h.q.toFixed(1)}% · ${W.rejects.weightKind} ${h.w.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+              : `${dayLabel(h.ts)} · ${qName} ${h.q.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
             : null
         }
         resting={`${series.length} days · the shaded band is the selected period`}
@@ -327,16 +563,37 @@ function TrendChart({
             <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{v}%</text>
           </g>
         ))}
+        {/* The usual range for the first series: filled, with its ceiling ruled. */}
+        {bandRuns.map((run) => (
+          <g key={run[0]}>
+            <path d={bandPath(run)} fill="var(--paper-3)" opacity={0.9} />
+            <path d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) })))} fill="none" stroke="var(--rule-2)" strokeWidth={1} />
+          </g>
+        ))}
+        {/* The weight series' ceiling, dashed like its line. */}
+        {weight && wCeiling.some((p) => p != null) && (
+          <path
+            d={linePath(wCeiling.filter((p): p is { x: number; y: number } => p != null))}
+            fill="none" stroke="var(--grid)" strokeWidth={1} strokeDasharray="2 3"
+          />
+        )}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
         <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.q) })))} fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round" />
-        <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.w) })))} fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round" />
+        {weight && (
+          <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.w) })))} fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round" />
+        )}
+        {/* Out-of-control days, in the mark Weight's control chart uses. */}
+        {series.map((s, i) => (s.qOut ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
+        {weight && series.map((s, i) => (s.wOut ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
         {/* Labelled on the mark, so the chart needs no legend. */}
         <text x={width - R + 10} y={y(series[series.length - 1]!.q) + 4} fontSize="var(--fs-small)" fill="var(--ink)">
-          {W.rejects.quality} {series[series.length - 1]!.q.toFixed(1)}%
+          {qName} {series[series.length - 1]!.q.toFixed(1)}%
         </text>
-        <text x={width - R + 10} y={y(series[series.length - 1]!.w) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
-          {W.rejects.weightKind} {series[series.length - 1]!.w.toFixed(1)}%
-        </text>
+        {weight && (
+          <text x={width - R + 10} y={y(series[series.length - 1]!.w) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
+            {W.rejects.weightKind} {series[series.length - 1]!.w.toFixed(1)}%
+          </text>
+        )}
         {series.map((_, i) => (
           <rect key={i} className="hit" x={x(i) - (width - L - R) / Math.max(1, series.length) / 2} y={T}
                 width={(width - L - R) / Math.max(1, series.length)} height={H - T - B}
@@ -358,57 +615,130 @@ function Reasons({
   rows,
   loading,
   canName,
+  active,
+  onChoose,
   onNamed,
 }: {
   rows: RejectReason[];
   loading: boolean;
   canName: boolean;
+  active: string | null;
+  onChoose: (r: RejectReason) => void;
   onNamed: () => void;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (loading) return <SkelLines n={6} short />;
   if (rows.length === 0) return <Empty message={W.rejects.none} />;
   const max = Math.max(...rows.map((r) => r.count), 1);
 
+  // The inline rename, with its failure reported rather than swallowed: the
+  // old handler awaited setRejectLabel with no catch, so a 403 or an outage
+  // closed the editor as if the name had been saved.
+  const save = async (r: RejectReason) => {
+    try {
+      await setRejectLabel(r.rejectCodeId!, draft.trim() || null);
+      setSaveError(null);
+      setEditing(null);
+      onNamed();
+    } catch (e) {
+      setSaveError(String((e as Error).message ?? e));
+    }
+  };
+
   return (
-    <div className="bars">
-      {rows.map((r) => (
-        <div key={`${r.rejectType}:${r.tubeCode}:${r.materialCode}`}>
-          <span className={r.label ? '' : 'g'}>{reasonName(r)}</span>
-          <i style={{ width: `${Math.round((100 * r.count) / max)}%`, background: r.label ? 'var(--graphite)' : 'var(--grid)' }} />
-          <em>{fmtInt(r.count)} · {Math.round(r.pct)}%</em>
-          {canName && r.rejectCodeId != null ? (
-            editing === r.rejectCodeId ? (
-              <span className="row" style={{ gap: 6 }}>
-                <input
-                  type="text"
-                  value={draft}
-                  autoFocus
-                  aria-label="Name for this code"
-                  style={{ width: 120, fontSize: 'var(--fs-small)', padding: '2px 6px' }}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={async (e) => {
-                    if (e.key === 'Escape') setEditing(null);
-                    if (e.key === 'Enter') {
-                      await setRejectLabel(r.rejectCodeId!, draft.trim() || null);
-                      setEditing(null);
-                      onNamed();
-                    }
-                  }}
-                />
-              </span>
-            ) : (
-              <button type="button" className="linkish sm" onClick={() => { setEditing(r.rejectCodeId!); setDraft(r.label ?? ''); }}>
-                {W.rejects.nameIt}
+    <div>
+      <p className="mut sm" style={{ marginTop: 0, marginBottom: 8 }}>{W.rejectsMore.clickBarHint}</p>
+      <div className="bars">
+        {rows.map((r) => {
+          const isActive = active === rejectCodeParam(r);
+          return (
+            <div key={`${r.rejectType}:${r.tubeCode}:${r.materialCode}`}>
+              {/* The bar's name is the control: choosing it follows this
+                  reason through the trend and the days below. */}
+              <button
+                type="button"
+                className={`linkish${r.label ? '' : ' g'}`}
+                style={{ textAlign: 'left', fontWeight: isActive ? 600 : undefined }}
+                aria-pressed={isActive}
+                onClick={() => onChoose(r)}
+              >
+                {reasonName(r)}
               </button>
-            )
-          ) : (
-            <span />
-          )}
-        </div>
-      ))}
+              <i style={{ width: `${Math.round((100 * r.count) / max)}%`, background: isActive ? 'var(--ink)' : r.label ? 'var(--graphite)' : 'var(--grid)' }} />
+              <em>{fmtInt(r.count)} · {Math.round(r.pct)}%</em>
+              {canName && r.rejectCodeId != null ? (
+                editing === r.rejectCodeId ? (
+                  <span className="row" style={{ gap: 6 }}>
+                    <input
+                      type="text"
+                      value={draft}
+                      autoFocus
+                      aria-label="Name for this code"
+                      style={{ width: 120, fontSize: 'var(--fs-small)', padding: '2px 6px' }}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { setEditing(null); setSaveError(null); }
+                        if (e.key === 'Enter') void save(r);
+                      }}
+                    />
+                  </span>
+                ) : (
+                  <button type="button" className="linkish sm" onClick={() => { setEditing(r.rejectCodeId!); setDraft(r.label ?? ''); setSaveError(null); }}>
+                    {W.rejects.nameIt}
+                  </button>
+                )
+              ) : (
+                <span />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {saveError && (
+        <p className="state err sm" role="alert" style={{ padding: '8px 0' }}>
+          {W.rejectsMore.renameFailed} <span className="sr-only">{saveError}</span>
+        </p>
+      )}
     </div>
+  );
+}
+
+/* --------------------------------------------------------- by day, by code */
+
+function ByDayTable({ rows, onOpen }: { rows: RejectDayCodeRow[]; onOpen: (r: ReasonRef) => void }) {
+  const M = W.rejectsMore;
+  if (rows.length === 0) return <Empty message={M.noneForFilters} />;
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th style={{ width: '9em' }}>{M.colDay}</th>
+          <th>{M.colReason}</th>
+          <th className="n" style={{ width: '6em' }}>{M.colCount}</th>
+          <th className="n" style={{ width: '9em' }}>{M.colCones}</th>
+          <th className="n" style={{ width: '6em' }}>{M.colRate}</th>
+          <th className="n" style={{ width: '2em' }} />
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => {
+          const ref: ReasonRef = { day: r.day, rejectType: r.rejectType, tubeCode: r.tubeCode, materialCode: r.materialCode };
+          const key = `${r.day}|${rejectCodeParam(r)}`;
+          return (
+            <tr key={key} className="click" tabIndex={0} onClick={() => onOpen(ref)} onKeyDown={rowKeys(() => onOpen(ref))}>
+              <td>{fmtDay(`${r.day}T00:00:00Z`)}</td>
+              <td className={r.label ? '' : 'g'}>{reasonName(r)}</td>
+              <td className="n">{fmtInt(r.count)}</td>
+              <td className="n">{fmtInt(r.cones)}</td>
+              <td className="n">{r.ratePct == null ? '—' : fmtPct1(r.ratePct)}</td>
+              <td className="n"><Chevron label={W.openRecord} /></td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }

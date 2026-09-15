@@ -36,8 +36,15 @@ export interface AuditEntryInput {
   detail: string | null;
 }
 
-/** The INSERT itself, on whatever request source it is given. */
-async function insertAudit(db: Db, actorId: number, e: AuditEntryInput): Promise<void> {
+/**
+ * The INSERT itself, on whatever request source it is given. `actorId` is
+ * null for an event with no signed-in actor (roadmap Phase 11, 14 Sep 2026):
+ * a failed login names the username it was tried against in `target_id` and
+ * nobody in `actor_id`, because the column is a foreign key to app_user and
+ * the attempt may name an account that does not exist. The CLI's retention
+ * run is the other null actor; it says so in `detail`.
+ */
+async function insertAudit(db: Db, actorId: number | null, e: AuditEntryInput): Promise<void> {
   await db
     .request()
     .input('actor', mssql.Int, actorId)
@@ -53,7 +60,7 @@ async function insertAudit(db: Db, actorId: number, e: AuditEntryInput): Promise
 
 export async function recordAudit(
   pool: ConnectionPool,
-  actorId: number,
+  actorId: number | null,
   action: string,
   targetType: string,
   targetId: string | number | null,
@@ -162,6 +169,58 @@ export interface AuditEntry {
   targetType: string;
   targetId: string | null;
   detail: string | null;
+}
+
+export interface AuditPage {
+  entries: AuditEntry[];
+  /** Pass back as `before` to fetch the next (older) page; null when this was the last page. */
+  nextBefore: number | null;
+}
+
+/**
+ * The newest `limit` rows, or the `limit` rows older than `before` — keyset
+ * paging on audit_id (roadmap Phase 11, 14 Sep 2026). The viewer was a bare
+ * TOP 500: the 501st-oldest event was unreachable from the app, and once the
+ * auth events landed here too (a login is a row now) 500 rows is a few days
+ * on a busy line, not a history. audit_id is the IDENTITY, monotone with
+ * insertion, so it pages without the OFFSET scan a growing table would pay.
+ */
+export async function listAuditPage(pool: ConnectionPool, opts: { limit?: number; before?: number | null } = {}): Promise<AuditPage> {
+  const limit = Math.min(Math.max(1, opts.limit ?? 200), 1000);
+  const r = await pool
+    .request()
+    .input('n', mssql.Int, limit + 1)
+    .input('before', mssql.BigInt, opts.before ?? null)
+    .query<{
+      audit_id: number; at_utc: Date; actor_id: number | null; actor_name: string | null;
+      action: string; target_type: string; target_id: string | null; detail: string | null;
+    }>(
+      `SELECT TOP (@n) a.audit_id, a.at_utc, a.actor_id, u.display_name AS actor_name,
+              a.action, a.target_type, a.target_id, a.detail
+       FROM sms.audit_log a
+       LEFT JOIN sms.app_user u ON u.user_id = a.actor_id
+       WHERE (@before IS NULL OR a.audit_id < @before)
+       ORDER BY a.audit_id DESC`,
+    );
+  const rows = r.recordset.slice(0, limit).map(mapAuditRow);
+  const more = r.recordset.length > limit;
+  return { entries: rows, nextBefore: more && rows.length ? rows[rows.length - 1]!.auditId : null };
+}
+
+function mapAuditRow(x: {
+  audit_id: number; at_utc: Date; actor_id: number | null; actor_name: string | null;
+  action: string; target_type: string; target_id: string | null; detail: string | null;
+}): AuditEntry {
+  return {
+    auditId: Number(x.audit_id),
+    atUtc: new Date(x.at_utc).toISOString(),
+    actorId: x.actor_id,
+    actorName: x.actor_name,
+    action: x.action,
+    targetType: x.target_type,
+    targetId: x.target_id,
+    detail: x.detail,
+  };
 }
 
 export async function listAudit(pool: ConnectionPool, limit = 500): Promise<AuditEntry[]> {

@@ -18,8 +18,11 @@ import type { ApiConfig } from './config.js';
 
 /**
  * A pool whose every query either answers "nothing" or, when `failing` is
- * set, throws — the latter turns /api/health (public, one query) into a 500
- * without needing a session.
+ * set, throws — the latter turns POST /api/auth/login (public, one query)
+ * into a 500 without needing a session. It used to be /api/health, which
+ * since roadmap Phase 11 (14 Sep 2026) answers a dead database with 503
+ * `status: 'down'` on purpose — a probe wants that word, not a stack — so
+ * it can no longer stand in for "any route whose query throws".
  */
 class FakeDb {
   failing: Error | null = null;
@@ -109,7 +112,11 @@ describe('the 500 handler writes one JSON line', () => {
   it("level 'error', the request, the user, the stack, and the request id — which the body returns too", async () => {
     db.failing = new Error('Login failed for user sms_api');
     try {
-      const res = await fetch(`${base}/api/health`);
+      const res = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'someone', password: 'something' }),
+      });
       expect(res.status).toBe(500);
       const body = (await res.json()) as { error: string; requestId: string };
       expect(body.error).toBe('internal error');
@@ -118,9 +125,9 @@ describe('the 500 handler writes one JSON line', () => {
       const entry = logged().find((l) => l.level === 'error');
       expect(entry).toBeDefined();
       expect(entry!.svc).toBe('api');
-      expect(entry!.msg).toBe('api error: GET /api/health user=anonymous');
-      expect(entry!.method).toBe('GET');
-      expect(entry!.url).toBe('/api/health');
+      expect(entry!.msg).toBe('api error: POST /api/auth/login user=anonymous');
+      expect(entry!.method).toBe('POST');
+      expect(entry!.url).toBe('/api/auth/login');
       expect(entry!.user).toBe('anonymous');
       expect(entry!.correlationId).toBe(body.requestId);
       const err = entry!.err as { name: string; message: string; stack: string };
@@ -137,7 +144,11 @@ describe('the 500 handler writes one JSON line', () => {
   it('every line the API wrote in this file parses as JSON with the four fixed keys', async () => {
     db.failing = new Error('boom');
     try {
-      await fetch(`${base}/api/health`);
+      await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'someone', password: 'something' }),
+      });
       await fetch(`${base}/api/operations`);
       await new Promise((r) => setTimeout(r, 20));
     } finally {

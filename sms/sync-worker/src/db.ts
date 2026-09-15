@@ -1,11 +1,43 @@
 /** Connection-pool factory. Two logins: sms_app (app DB) + sms_readonly (IFL). */
 import mssql from 'mssql';
+import { createLogger } from '@sms/shared';
 import { toMssqlConfig, type DbConfig } from './config.js';
 import { isTransient } from './reader/errorClass.js';
 import { withRetry } from './util/retry.js';
 
-export async function createPool(c: DbConfig): Promise<mssql.ConnectionPool> {
+const log = createLogger('sync-worker');
+
+export interface CreatePoolOptions {
+  /**
+   * Called on the pool's 'error' event. Default: one structured error line.
+   * The API passes its own handler so it can also mark itself degraded.
+   */
+  onError?: (err: unknown) => void;
+}
+
+/**
+ * Every pool gets an 'error' listener (roadmap Phase 11 item 3, 14 Sep 2026).
+ * mssql's ConnectionPool is an EventEmitter and emits 'error' for pool-level
+ * failures — a connection the server closed under it, a failed reconnect.
+ * An EventEmitter 'error' with no listener is thrown, and neither process
+ * had one: the worker would have died on the first such event instead of
+ * logging it and reconnecting on the next tick (which it does anyway — each
+ * pass opens fresh pools, see pass.ts), and the API would have died with it
+ * rather than answering 'degraded'.
+ */
+export async function createPool(c: DbConfig, opts: CreatePoolOptions = {}): Promise<mssql.ConnectionPool> {
   const pool = new mssql.ConnectionPool(toMssqlConfig(c));
+  pool.on(
+    'error',
+    opts.onError ??
+      ((err: unknown) => {
+        log.error('database pool error (the next pass reconnects)', {
+          database: c.database,
+          server: c.server,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+  );
   await pool.connect();
   return pool;
 }

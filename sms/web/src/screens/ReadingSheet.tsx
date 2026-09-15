@@ -7,7 +7,12 @@
  * to somebody who had asked what a cone weighed.
  *
  * WHAT IT MAY AND MAY NOT SAY:
- *  - The scale's verdict, always, named as the scale's.
+ *  - The reading's STATE, in the same words as the register's column — the
+ *    one server-side classification (roadmap Phase 4, 14 Sep 2026): the
+ *    scale's verdict when it rejected the cone, the product's tolerance when
+ *    the scale passed it, "not judged" when there was nothing to judge by.
+ *    When the two facts differ, both are printed, and the sentence says IFL
+ *    has not yet confirmed which governs.
  *  - The product's limits ONLY when a product was in force at this reading's
  *    time. When none was, it says so and computes nothing; the old app applied
  *    today's tolerance to a reading from weeks earlier and printed a
@@ -76,6 +81,7 @@ export function ReadingSheet({
           row.production_ts_utc,
           row.material_id ?? undefined,
           type === 'sack' ? undefined : (row.weight_g ?? undefined),
+          type === 'sack' ? undefined : row.in_range,
         );
         if (cancelled) return;
 
@@ -143,25 +149,45 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
   // own judge(); the register's "outside limits" column and this sentence
   // could then have disagreed about the same cone.
   const verdict = !isSack && p?.verdict && p.verdict.inside != null ? p.verdict : null;
+  // The one classification: the row's own `state` from the detail endpoint
+  // (the same CASE the register lists it by), with the product-at verdict's
+  // copy as the fallback for an API answering without it.
+  const coneState = isSack || isReject ? null : (row.state ?? p?.verdict?.state ?? null);
+  const stateTone = coneState == null ? (rejectedByScale ? 'acc' : '') : coneState === 'within' ? '' : coneState === 'unknown' ? 'mut' : 'acc';
 
   return (
     <>
       {/* A quality reject is rejected before it is weighed and carries no weight. */}
       <div className="big">{isSack ? fmtKg(row.weight_kg) : row.weight_g == null ? W.readings.notWeighed : fmtG(row.weight_g)}</div>
-      <div className={rejectedByScale ? 'acc' : ''} style={{ marginTop: 8, fontWeight: 500 }}>
-        {isReject ? W.readings.rejectedFor(rejectReason(row)) : rejectedByScale ? W.rejectedByScale : W.passed}
+      <div className={stateTone} style={{ marginTop: 8, fontWeight: 500 }}>
+        {isReject
+          ? W.readings.rejectedFor(rejectReason(row))
+          : coneState != null
+            ? W.cone.state[coneState]
+            : rejectedByScale
+              ? W.rejectedByScale
+              : W.passed}
       </div>
 
-      {/* The product comparison — only when there was a product to compare
-          to, and only for a reading that has a weight to compare. */}
+      {/* The second fact — the product's tolerance, or why there is no
+          judgement — for a reading that has a weight. One sentence per
+          state, and both facts when the scale and the tolerance differ. */}
       {!isSack && row.weight_g != null && (
         <div className="g" style={{ marginTop: 6 }}>
-          {p?.product == null ? (
-            W.noProductThen
+          {coneState === 'unknown' && p?.verdict?.unknownReason === 'implausible' && p.plausibility ? (
+            W.cone.notJudged.implausible(fmtG(p.plausibility.loG), fmtG(p.plausibility.hiG))
+          ) : p?.product == null ? (
+            coneState === 'unknown' ? W.cone.notJudged.no_limits : W.noProductThen
           ) : p.limits == null ? (
             'The product recorded at this time carries no target weight, so there are no limits to compare against.'
-          ) : verdict == null ? null : verdict.inside ? (
-            `Inside the product's limits, ${p.limits.label}.`
+          ) : verdict == null ? null : coneState === 'rejected' ? (
+            verdict.inside
+              ? W.cone.rejectedInside(p.limits.label)
+              : W.cone.rejectedOutside(describeMiss(verdict.outsideByG!), p.limits.label)
+          ) : coneState === 'low' || coneState === 'high' ? (
+            <span className="acc">{W.cone.lowHigh(describeMiss(verdict.outsideByG!), p.limits.label, verdict.scalePassed ?? null)}</span>
+          ) : verdict.inside ? (
+            W.cone.withinOf(p.limits.label)
           ) : (
             <span className="acc">
               {W.alsoOutsideProduct(p.limits.label, describeMiss(verdict.outsideByG!))}

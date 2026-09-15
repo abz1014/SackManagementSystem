@@ -1,6 +1,6 @@
 /** `sms sync` — run one full pass (seed, Reader→raw, Transform→canonical). */
 import { openContext, cliLog } from '../context.js';
-import { runFullSync, TableHaltsError, type FullSyncResult } from '@sms/sync-worker';
+import { runFullSync, TableHaltsError, clearPersistentFailure, type FullSyncResult } from '@sms/sync-worker';
 
 function report(started: number, r: FullSyncResult): void {
   const secs = ((Date.now() - started) / 1000).toFixed(1);
@@ -22,6 +22,9 @@ export async function sync(): Promise<number> {
     const started = Date.now();
     try {
       report(started, await runFullSync(ctx.app, ctx.ifl, ctx.cfg));
+      // A clean pass clears a standing persistent_sync_failure finding, the
+      // same as the service loop does (15 Sep 2026 recovery rehearsal).
+      await clearPersistentFailure(ctx.app);
       return 0;
     } catch (err) {
       // Per-table isolation (Phase 2): some tables synced and were

@@ -25,9 +25,11 @@ export interface ProductionData {
    * Only on a product-filtered call, else null. Cones in the period carrying
    * no product at all (`rows`) out of every cone in it (`of`): readings from
    * before the source recorded a product are dropped by the filter, and the
-   * screen must say so rather than narrow the period silently.
+   * screen must say so rather than narrow the period silently. Cones and
+   * rejects separately since roadmap Phase 5 (14 Sep 2026) — the reject
+   * count was product-filtered too and had no caveat of its own.
    */
-  unattributed: { rows: number; of: number } | null;
+  unattributed: { cones: { rows: number; of: number }; rejects: { rows: number; of: number } } | null;
 }
 
 export interface Envelope<T> {
@@ -606,6 +608,9 @@ function registerParams(q: RegisterQuery): URLSearchParams {
   if (q.tsFrom) p.set('tsFrom', q.tsFrom);
   if (q.tsTo) p.set('tsTo', q.tsTo);
   if (q.outsideProductLimits) p.set('outsideProductLimits', 'true');
+  // roadmap Phase 4 (14 Sep 2026): the state filter and the product filter.
+  if (q.state && q.state.length > 0) p.set('state', q.state.join(','));
+  if (q.product != null) p.set('product', String(q.product));
   p.set('sort', q.sort ?? 'time');
   p.set('dir', q.dir ?? 'desc');
   if (q.page) p.set('page', String(q.page));
@@ -769,6 +774,7 @@ export function getSpc(q: SpcQuery): Promise<Envelope<SpcData>> {
   if (q.usl != null) p.set('usl', String(q.usl));
   if (q.lsl != null) p.set('lsl', String(q.lsl));
   if (q.shift) p.set('shift', q.shift);
+  if (q.station != null) p.set('station', String(q.station)); // roadmap Phase 4
   return get(`/api/spc?${p.toString()}`);
 }
 
@@ -1169,7 +1175,15 @@ export interface ProductAtData {
    * and `reason` says why. `outsideByG` is signed: negative = under the
    * lower limit, positive = over the upper, 0 = inside.
    */
-  verdict: { inside: boolean | null; outsideByG: number | null; reason: 'no_product_recorded' | 'no_setpoint' | null } | null;
+  verdict: {
+    inside: boolean | null;
+    outsideByG: number | null;
+    reason: 'no_product_recorded' | 'no_setpoint' | null;
+    /** roadmap Phase 4 (14 Sep 2026): the one classification, and the scale's bit as sent. */
+    state?: ConeState;
+    scalePassed?: boolean | null;
+    unknownReason?: 'no_weight' | 'implausible' | 'no_limits' | null;
+  } | null;
   /** The limits are the oldest version known and the reading predates it. */
   limitsAreLowerBound: boolean;
 }
@@ -1181,11 +1195,12 @@ export interface ProductAtData {
  * `weightG` asks the server to judge the reading too; the sheet no longer
  * carries its own copy of the comparison.
  */
-export function getProductAt(at?: string | null, productId?: number | null, weightG?: number | null): Promise<ProductAtData> {
+export function getProductAt(at?: string | null, productId?: number | null, weightG?: number | null, inRange?: boolean | null): Promise<ProductAtData> {
   const p = new URLSearchParams();
   if (at) p.set('at', at);
   if (productId != null) p.set('productId', String(productId));
   if (weightG != null) p.set('weightG', String(weightG));
+  if (inRange != null) p.set('inRange', String(inRange)); // roadmap Phase 4: the scale's bit, for the state
   const qs = p.toString();
   return get(qs ? `/api/product-at?${qs}` : '/api/product-at');
 }
@@ -1283,4 +1298,291 @@ export function getWeightStations(q: {
   if (q.periodTo) p.set('periodTo', q.periodTo);
   if (q.shift) p.set('shift', q.shift);
   return get(`/api/weight-stations?${p.toString()}`);
+}
+
+// ---- roadmap Phase 5: reject management (14 Sep 2026) ----
+//
+// One filter shape for every reject endpoint, mirroring api's rejects.ts
+// RejectFilters: the Pareto (/api/rejects), the trend (/api/reject-spc), the
+// per-day breakdown (/api/rejects/by-day-code) and the reason sheet's list
+// (/api/rejects/reason) all take it, so a control on the Rejects screen
+// narrows all four identically. `code` is `weight` or `<tube>-<material>`.
+export interface RejectFilters {
+  from?: string;
+  to?: string;
+  shift?: string;
+  /** Instant cap, so a replay (?at=) counts only what existed at that moment. */
+  tsTo?: string;
+  station?: number;
+  /** material_id. Rows from before 5 Aug 2026 carry none — see `unattributed`. */
+  product?: number;
+  code?: string;
+}
+
+function rejectFilterParams(f: RejectFilters): URLSearchParams {
+  const p = new URLSearchParams();
+  if (f.from) p.set('from', f.from);
+  if (f.to) p.set('to', f.to);
+  if (f.shift) p.set('shift', f.shift);
+  if (f.tsTo) p.set('tsTo', f.tsTo);
+  if (f.station != null) p.set('station', String(f.station));
+  if (f.product != null) p.set('product', String(f.product));
+  if (f.code) p.set('code', f.code);
+  return p;
+}
+
+/** The URL form of a reason's code, as the API's parseCodeParam reads it. */
+export function rejectCodeParam(r: { rejectType: string; tubeCode: number | null; materialCode: number | null }): string {
+  return r.rejectType === 'weight' ? 'weight' : `${r.tubeCode ?? 'null'}-${r.materialCode ?? 'null'}`;
+}
+
+export interface RejectDataFiltered extends RejectData {
+  /** Only on a product-filtered call: rejects in the range with no product, of every reject in it. */
+  unattributed: { rows: number; of: number } | null;
+}
+
+export function getRejectsFiltered(f: RejectFilters): Promise<Envelope<RejectDataFiltered>> {
+  return get(`/api/rejects?${rejectFilterParams(f).toString()}`);
+}
+
+export function getRejectSpcFiltered(
+  q: RejectFilters & { from: string; to: string; rejectType: RejectTypeFilter; bucket?: RejectBucketSize },
+): Promise<Envelope<RejectSpcData>> {
+  const p = rejectFilterParams(q);
+  p.set('rejectType', q.rejectType);
+  if (q.bucket) p.set('bucket', q.bucket);
+  return get(`/api/reject-spc?${p.toString()}`);
+}
+
+export interface RejectDayCodeRow {
+  /** YYYY-MM-DD production day (06:00-06:00 under the line's shift rule). */
+  day: string;
+  rejectType: string;
+  tubeCode: number | null;
+  materialCode: number | null;
+  rejectCodeId: number | null;
+  label: string | null;
+  displayLabel: string;
+  isPass: boolean | null;
+  count: number;
+  /** Cones weighed that day under the same filters. */
+  cones: number;
+  /** Cones + every reject of the day — the rate's denominator. */
+  inspected: number;
+  ratePct: number | null;
+}
+export interface RejectDayCodeData {
+  dayBasis: 'production_day';
+  denominator: 'cones_plus_rejects';
+  days: number;
+  total: number;
+  rows: RejectDayCodeRow[];
+}
+export function getRejectsByDayCode(f: RejectFilters & { from: string; to: string }): Promise<Envelope<RejectDayCodeData>> {
+  return get(`/api/rejects/by-day-code?${rejectFilterParams(f).toString()}`);
+}
+
+export interface RejectReasonRow {
+  eventId: number;
+  productionTsUtc: string;
+  shiftCode: string;
+  station: number | null;
+  materialId: number | null;
+  productLabel: string | null;
+  weightG: number | null;
+  sourceRowId: number | null;
+  epochLabel: string | null;
+  attributionMethod: string | null;
+}
+export interface RejectReasonData {
+  day: string;
+  dayBasis: 'production_day';
+  code: { rejectType: string; tubeCode: number | null; materialCode: number | null };
+  rejectCodeId: number | null;
+  label: string | null;
+  displayLabel: string;
+  isPass: boolean | null;
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: RejectReasonRow[];
+}
+export function getRejectReason(q: {
+  day: string; code: string; shift?: string; station?: number; product?: number; page?: number; pageSize?: number;
+}): Promise<Envelope<RejectReasonData>> {
+  const p = new URLSearchParams({ day: q.day, code: q.code });
+  if (q.shift) p.set('shift', q.shift);
+  if (q.station != null) p.set('station', String(q.station));
+  if (q.product != null) p.set('product', String(q.product));
+  if (q.page) p.set('page', String(q.page));
+  if (q.pageSize) p.set('pageSize', String(q.pageSize));
+  return get(`/api/rejects/reason?${p.toString()}`);
+}
+
+// ---- roadmap Phase 11: security, reliability and operations (14 Sep 2026) ----
+
+/** What /api/health answers. Anonymous callers get `status` and `service` with the rest nulled. */
+export type HealthStatus = 'ok' | 'degraded' | 'down';
+export interface HealthReport {
+  status: HealthStatus;
+  service: { version: string; uptimeSeconds: number; startedAtUtc: string; pid: number };
+  database: { ok: boolean; latencyMs: number | null; sizeMb: number | null; capMb: number; pctOfCap: number | null };
+  acquisition: { kind: LiveHealthKind | null; ageSeconds: number | null; cadenceSeconds: number | null; halted: string[] | null };
+  backup: { dir: string; newestFile: string | null; newestAtUtc: string | null; ageDays: number | null; warning: boolean } | null;
+  degradedReason: string | null;
+}
+/** Unauthenticated on the server; the browser always has its cookie, so the full report comes back. */
+export function getHealth(): Promise<HealthReport> {
+  return get('/api/health');
+}
+
+/** The caller's own password. 403 = the current password was wrong; 400 carries the policy sentence in `detail`. */
+export function changePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean; otherSessionsRevoked: number }> {
+  return post('/api/auth/password', { currentPassword, newPassword });
+}
+/** Admin reset of another account; every session of that account is revoked. */
+export function adminResetPassword(userId: number, newPassword: string): Promise<{ ok: boolean; sessionsRevoked: number }> {
+  return post(`/api/admin/users/${userId}/password`, { newPassword });
+}
+
+/** One keyset page of the audit log; pass `nextBefore` back to walk older. */
+export function adminGetAuditPage(before: number | null, limit = 40): Promise<{ entries: AuditEntry[]; nextBefore: number | null }> {
+  const p = new URLSearchParams();
+  if (before != null) p.set('before', String(before));
+  p.set('limit', String(limit));
+  return get(`/api/admin/audit?${p.toString()}`);
+}
+
+// ---- roadmap Phase 4: cone weight module (14 Sep 2026) ----
+// Interface declaration merging adds the new fields to the existing types
+// without editing them in place: the server emits `state` on every cone row
+// (register list, detail, CSV), `product_name` on cones and rejects, counts
+// per state on /api/production, and the station on /api/spc.
+
+/** The ONE classification — shared/src/domain/classification.ts. */
+export type ConeState = 'within' | 'low' | 'high' | 'rejected' | 'unknown';
+export const CONE_STATES: readonly ConeState[] = ['within', 'low', 'high', 'rejected', 'unknown'];
+
+export interface RegisterRow {
+  /** Cones only, from the shared rule; absent on sacks and rejects. */
+  state?: ConeState;
+  /** The reading's own product by name (cones and rejects); null before 5 Aug 2026. */
+  product_name?: string | null;
+}
+export interface RegisterQuery {
+  /** Cone only: keep these states. */
+  state?: ConeState[];
+  /** The reading's own material_id (cones and rejects). */
+  product?: number;
+}
+export interface SpcQuery {
+  station?: number;
+}
+export interface SpcData {
+  /** The station the chart is drawn for, or null for the line. */
+  station: number | null;
+  /** Readings the population rule excluded as implausible. */
+  implausible: number;
+}
+export type StateCounts = Record<ConeState, number>;
+export interface ProductionData {
+  /** Cones per state over the same filters as `rows`; null unless the route computed it. */
+  states: StateCounts | null;
+  /** Readings the population rule excluded as implausible. */
+  implausible: number | null;
+}
+export interface ProductAtData {
+  /** The plausibility window the state was judged with (roadmap Phase 4). */
+  plausibility?: { loG: number; hiG: number };
+}
+export interface ReportData {
+  readings: { states: StateCounts; implausible: number } | null;
+  shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null } | null;
+}
+export interface LimitHistoryVersion {
+  versionId: number;
+  setpointG: number | null;
+  offsetMinusG: number | null;
+  offsetPlusG: number | null;
+  /** App instant (genuine UTC) — format with fmtAppInstant, never the plant-clock formatters. */
+  effectiveFromUtc: string;
+  effectiveIsLowerBound: boolean;
+  source: 'pdas_observed' | 'sms_write';
+  changedBy: string | null;
+  reason: string | null;
+  recordedAtUtc: string;
+  label: string | null;
+}
+export interface LimitHistoryProduct {
+  productId: number;
+  label: string;
+  activeFlag: boolean | null;
+  versions: LimitHistoryVersion[];
+}
+export function getProductLimitHistory(): Promise<{ products: LimitHistoryProduct[] }> {
+  return get('/api/products/limits/history');
+}
+
+export interface MachineRunning {
+  station: number;
+  stationName: string | null;
+  machineName: string | null;
+  materialId: number | null;
+  productName: string | null;
+  cones: number;
+  conesOnMaterial: number;
+  newestUtc: string | null;
+  sinceUtc: string | null;
+  sinceIsWindowStart: boolean;
+  quiet: boolean;
+}
+export interface MachinesRunningData {
+  asOfUtc: string | null;
+  windowMs: number;
+  windowStartUtc: string | null;
+  machines: MachineRunning[];
+  materialsRunning: number;
+}
+export function getMachinesRunning(at?: string | null): Promise<Envelope<MachinesRunningData>> {
+  const p = new URLSearchParams();
+  if (at) p.set('at', at);
+  const qs = p.toString();
+  return get(qs ? `/api/machines/running?${qs}` : '/api/machines/running');
+}
+
+export interface ShiftCheckData {
+  from: string;
+  to: string;
+  cones: number;
+  mismatched: number;
+  mismatchPct: number;
+  noLegacyShift: number;
+  byDay: { day: string; cones: number; mismatched: number; mismatchPct: number }[];
+  topHours: { hour: number; mismatched: number }[];
+  note: string;
+}
+export function getShiftCheck(from: string, to: string): Promise<Envelope<ShiftCheckData>> {
+  return get(`/api/shift-check?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+}
+
+export interface WeightAggregate { n: number; sumG: number | null; avgG: number | null; minG: number | null; maxG: number | null }
+export interface ReconciliationData {
+  from: string;
+  to: string;
+  shift: string | null;
+  total: WeightAggregate;
+  plausible: WeightAggregate;
+  implausible: WeightAggregate;
+  noWeight: number;
+  byState: Record<ConeState, WeightAggregate>;
+  plausibility: { loG: number; hiG: number };
+  limitWindows: number;
+  basis: 'as_recorded';
+  note: string;
+}
+/** Manager+ (rank 3). */
+export function getReconciliation(from: string, to: string, shift?: string | null): Promise<Envelope<ReconciliationData>> {
+  const p = new URLSearchParams({ from, to });
+  if (shift) p.set('shift', shift);
+  return get(`/api/reconciliation?${p.toString()}`);
 }

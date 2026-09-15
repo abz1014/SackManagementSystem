@@ -36,15 +36,56 @@ export async function createUser(db: Db, username: string, password: string, rol
     .query(`INSERT INTO sms.app_user (username, password_hash, display_name, role_id)
             SELECT @u, @h, @d, role_id FROM sms.role WHERE name=@r`);
 }
+/**
+ * Thrown by updateUser when the change would leave the installation with no
+ * active administrator (roadmap Phase 11 item 1, 14 Sep 2026). The route
+ * answers 409. Before this the guard existed only in the Setup screen, which
+ * disabled the toggle on the caller's own row — so a second admin could
+ * still deactivate the first, and then themself, leaving Setup unreachable
+ * to everyone and the only way back a hand-written UPDATE in SSMS.
+ */
+export class LastAdminError extends Error {
+  constructor() {
+    super('This is the last active administrator. Make another account an administrator first.');
+    this.name = 'LastAdminError';
+  }
+}
+
+/** How many active accounts hold the admin role. */
+export async function countActiveAdmins(db: Db): Promise<number> {
+  const r = await db.request().query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM sms.app_user u JOIN sms.role r ON r.role_id = u.role_id
+      WHERE u.active = 1 AND r.name = 'admin'`,
+  );
+  return Number(r.recordset[0]?.n ?? 0);
+}
+
+/** Is this account an ACTIVE admin right now? Used by the last-admin guard. */
+async function isActiveAdmin(db: Db, userId: number): Promise<boolean> {
+  const r = await db.request().input('id', mssql.Int, userId).query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM sms.app_user u JOIN sms.role r ON r.role_id = u.role_id
+      WHERE u.user_id = @id AND u.active = 1 AND r.name = 'admin'`,
+  );
+  return Number(r.recordset[0]?.n ?? 0) > 0;
+}
+
 /** Returns the pre-update active/role so the caller can log a plain-language
  *  "old -> new" — this table has no version history of its own, unlike the
- *  rule tables below, so the audit log is the only place that trail exists. */
+ *  rule tables below, so the audit log is the only place that trail exists.
+ *
+ *  Refuses (LastAdminError) to deactivate or demote the last active admin.
+ *  The check runs inside the caller's transaction, on the same connection as
+ *  the UPDATE, so two admins racing to demote each other cannot both pass. */
 export async function updateUser(
   db: Db,
   userId: number,
   active?: boolean,
   role?: string,
 ): Promise<{ oldActive: boolean | null; oldRole: string | null }> {
+  const removesAdmin = active === false || (role != null && role !== 'admin');
+  if (removesAdmin && (await isActiveAdmin(db, userId)) && (await countActiveAdmins(db)) <= 1) {
+    throw new LastAdminError();
+  }
   let oldActive: boolean | null = null;
   let oldRole: string | null = null;
   if (active != null) {
@@ -69,6 +110,66 @@ export async function updateUser(
     }
   }
   return { oldActive, oldRole };
+}
+
+// ---- passwords (roadmap Phase 11 item 1, 14 Sep 2026) ----
+/**
+ * Until this wave there was no way to change a password in the UI, the API
+ * or the CLI: a forgotten password was an UPDATE in SSMS with a hash minted
+ * by hand. Two paths now, both through these helpers: the self-service
+ * change (verifies the current password first) and the admin reset (does
+ * not — the point of a reset is that the current one is lost). Both write
+ * the hash inside auditedWrite's transaction and revoke the user's other
+ * sessions in the same transaction.
+ */
+
+/** The stored hash, or null when the account does not exist or is inactive. */
+export async function passwordHashOf(db: Db, userId: number): Promise<string | null> {
+  const r = await db.request().input('id', mssql.Int, userId).query<{ h: string }>(
+    `SELECT password_hash AS h FROM sms.app_user WHERE user_id = @id AND active = 1`,
+  );
+  return r.recordset[0]?.h ?? null;
+}
+
+/**
+ * The policy, in one place: the route, the admin reset, the create route and
+ * the CLI all call this so they cannot drift apart. Returns the reason a
+ * password is refused, or null when it passes. Length only — IFL has not
+ * stated a policy (Phase 11 clarifications), and inventing composition rules
+ * they did not ask for would be over-claiming.
+ */
+export function passwordPolicyProblem(password: string, minLength: number): string | null {
+  if (typeof password !== 'string' || password.length < minLength) {
+    return `The password must be at least ${minLength} characters.`;
+  }
+  return null;
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  return argon2.hash(password);
+}
+
+/** True when `password` is the one behind `hash`. Never throws: a malformed hash is a wrong password. */
+export async function verifyPassword(hash: string, password: string): Promise<boolean> {
+  return argon2.verify(hash, password).catch(() => false);
+}
+
+/** Write a new hash. Returns false when the user row did not exist. */
+export async function setPasswordHash(db: Db, userId: number, hash: string): Promise<boolean> {
+  const r = await db
+    .request()
+    .input('id', mssql.Int, userId)
+    .input('h', mssql.NVarChar(256), hash)
+    .query(`UPDATE sms.app_user SET password_hash = @h WHERE user_id = @id`);
+  return (r.rowsAffected[0] ?? 0) > 0;
+}
+
+/** The username behind an id, for the audit row of a reset; null when absent. */
+export async function usernameOf(db: Db, userId: number): Promise<string | null> {
+  const r = await db.request().input('id', mssql.Int, userId).query<{ u: string }>(
+    `SELECT username AS u FROM sms.app_user WHERE user_id = @id`,
+  );
+  return r.recordset[0]?.u ?? null;
 }
 
 // ---- stations (Q11) ----
