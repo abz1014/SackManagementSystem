@@ -91,7 +91,9 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange)
   const resolved: ResolvedPeriod = { period: 'custom', from: range.from, to: range.to };
   const [report, weights, stations, scaleRejected] = await Promise.all([
     getReport(pool, lineId, resolved),
-    getWeights(pool, lineId, 'as_recorded', range.from, range.to),
+    // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
+    // resolves that to the basis Setup has on file, like every other reader.
+    getWeights(pool, lineId, undefined, range.from, range.to),
     getWeightStations(pool, lineId, range.from, range.to),
     listEvents(pool, lineId, 'cone', { from: range.from, to: range.to, inRange: false, page: 1, pageSize: 1, sort: 'time', dir: 'desc' }),
   ]);

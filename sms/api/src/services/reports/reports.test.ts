@@ -25,7 +25,7 @@ vi.mock('../production.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../production.js')>();
   return { ...actual, getProduction: vi.fn() };
 });
-vi.mock('../weights.js', () => ({ getWeights: vi.fn() }));
+vi.mock('../weights.js', () => ({ getWeights: vi.fn(), getConfiguredBasis: vi.fn() }));
 vi.mock('../weightStations.js', () => ({ getWeightStations: vi.fn() }));
 vi.mock('../rejects.js', () => ({ getRejectPareto: vi.fn(), getRejectsByDayCode: vi.fn() }));
 vi.mock('../rejectSpc.js', () => ({ getRejectSpc: vi.fn() }));
@@ -40,7 +40,7 @@ vi.mock('../coneState.js', async (importOriginal) => {
 import { getReport, type ReportData } from '../report.js';
 import { listEvents } from '../register.js';
 import { getProduction } from '../production.js';
-import { getWeights } from '../weights.js';
+import { getWeights, getConfiguredBasis } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { getRejectPareto, getRejectsByDayCode } from '../rejects.js';
 import { getRejectSpc } from '../rejectSpc.js';
@@ -136,6 +136,7 @@ beforeEach(() => {
   vi.mocked(listEvents).mockReset();
   vi.mocked(getProduction).mockReset();
   vi.mocked(getWeights).mockReset();
+  vi.mocked(getConfiguredBasis).mockReset();
   vi.mocked(getWeightStations).mockReset();
   vi.mocked(getRejectPareto).mockReset();
   vi.mocked(getRejectsByDayCode).mockReset();
@@ -158,6 +159,7 @@ beforeEach(() => {
   });
   // `as never`: Phase 9 is adding fields to these two shapes in the same wave; the report reads only what it names.
   vi.mocked(getWeights).mockResolvedValue(fakeWeights() as never);
+  vi.mocked(getConfiguredBasis).mockResolvedValue('as_recorded');
   vi.mocked(getWeightStations).mockResolvedValue(fakeStations() as never);
   vi.mocked(getRejectPareto).mockResolvedValue({
     total: 20,
@@ -384,8 +386,10 @@ describe('cone weight report', () => {
   it('takes mean/SD/histogram from weights.ts, states from production, stations from the station table, and computes the median over the same population', async () => {
     const { pool, calls } = fakePool((sql) => (sql.includes('PERCENTILE_CONT') ? [{ med: 1957.5 }] : []));
     const d = await getConeWeightReport(pool, 1, PERIOD, {});
-    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, 'as_recorded', PERIOD.from, PERIOD.to);
-    expect(d).toMatchObject({ cones: 1000, weighed: 996, implausible: 4, meanG: 1957.1, medianG: 1957.5, medianSource: 'report_query', sdG: 12.3, bucketSizeG: 20, states: STATES });
+    // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — the report
+    // must let getWeights resolve the basis Setup has on file, never assume one.
+    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to);
+    expect(d).toMatchObject({ basis: 'as_recorded', cones: 1000, weighed: 996, implausible: 4, meanG: 1957.1, medianG: 1957.5, medianSource: 'report_query', sdG: 12.3, bucketSizeG: 20, states: STATES });
     expect(d.byStation.map((s) => s.station)).toEqual([7, 3]);
     const med = calls.find((c) => c.sql.includes('PERCENTILE_CONT'))!;
     expect(med.sql).toContain('weight_g BETWEEN @plausLo AND @plausHi');
@@ -406,6 +410,12 @@ describe('cone weight report', () => {
   it('medianConeWeight returns null on an empty period', async () => {
     expect(await medianConeWeight(fakePool().pool, 1, PERIOD.from, PERIOD.to, { loG: 1500, hiG: 2100 })).toBeNull();
   });
+  it('H8 (15 Sep 2026): reports whatever basis getWeights resolves, never a hardcoded literal', async () => {
+    vi.mocked(getWeights).mockResolvedValueOnce({ ...fakeWeights(), basis: 'net' } as never);
+    const { pool } = fakePool();
+    const d = await getConeWeightReport(pool, 1, PERIOD, {});
+    expect(d.basis).toBe('net');
+  });
 });
 
 describe('sack report', () => {
@@ -424,11 +434,24 @@ describe('sack report', () => {
     expect(t.headers).toEqual(SACK_CSV_HEADERS);
     expect(t.rows[0]).toEqual(['total', 'total', 40, 1880, 47, 1000, 25, 17, 57.5, null, null]);
   });
+  it('H8 (15 Sep 2026): weightBasis is whatever getWeights resolves, never a hardcoded literal', async () => {
+    vi.mocked(getWeights).mockResolvedValueOnce({ ...fakeWeights(), basis: 'net' } as never);
+    const d = await getSackReport(fakePool().pool, 1, PERIOD, {});
+    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to);
+    expect(d.weightBasis).toBe('net');
+    expect(getConfiguredBasis).not.toHaveBeenCalled();
+  });
   it('drops the whole-period distribution under a shift filter rather than printing it under a shift heading', async () => {
     const d = await getSackReport(fakePool().pool, 1, PERIOD, { shift: 'night' });
     expect(getWeights).not.toHaveBeenCalled();
     expect(d.distribution).toBeNull();
     for (const c of vi.mocked(getProduction).mock.calls) expect(c[2].shift).toBe('night');
+  });
+  it('H8: under a shift filter, weightBasis still comes from the configured basis (getConfiguredBasis), not a hardcoded fallback', async () => {
+    vi.mocked(getConfiguredBasis).mockResolvedValueOnce('net');
+    const d = await getSackReport(fakePool().pool, 1, PERIOD, { shift: 'night' });
+    expect(getConfiguredBasis).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(d.weightBasis).toBe('net');
   });
 });
 
@@ -471,6 +494,8 @@ describe('management summary', () => {
     expect(d.prior).toEqual({ from: '2026-08-25', to: '2026-08-31' });
     expect(vi.mocked(getReport).mock.calls.map((c) => c[2].from)).toEqual([PERIOD.from, '2026-08-25']);
     expect(getWeights).toHaveBeenCalledTimes(2);
+    // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded', for both periods.
+    for (const c of vi.mocked(getWeights).mock.calls) expect(c[2]).toBeUndefined();
     expect(getWeightStations).toHaveBeenCalledTimes(2);
     expect(d.kpis.map((k) => k.key)).toEqual(KPI_DEFINITIONS.map((k) => k.key));
     const cones = d.kpis.find((k) => k.key === 'cones_weighed')!;
@@ -492,6 +517,14 @@ describe('management summary', () => {
     expect(cones.prior).toBeNull();
     expect(cones.delta).toBeNull();
     expect(d.kpis.find((k) => k.key === 'days_with_data')!).toMatchObject({ current: 7, prior: 0, delta: { abs: 7, pct: null } });
+  });
+  it('H8 (15 Sep 2026): the weight KPIs relay whatever basis getWeights resolved, unchanged — the report does no arithmetic of its own', async () => {
+    vi.mocked(getWeights).mockResolvedValue({ ...fakeWeights(), cone: { ...fakeWeights().cone, avg: 1887.1, stdev: 12.3 }, basis: 'net' } as never);
+    const d = await getManagementSummary(fakePool().pool, 1, PERIOD, {});
+    // 1887.1 is fakeWeights().cone.avg (1957.1) minus a 70 g tube — the figure
+    // getWeights would report under 'net'; summary.ts must relay it exactly.
+    expect(d.kpis.find((k) => k.key === 'mean_cone_weight_g')!.current).toBe(1887.1);
+    expect(d.kpis.find((k) => k.key === 'cone_weight_sd_g')!.current).toBe(12.3);
   });
   it('CSV: one row per KPI with the approval column', () => {
     const t = summaryCsv({

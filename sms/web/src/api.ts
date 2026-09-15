@@ -1226,14 +1226,27 @@ export interface WeightStationsData {
   };
 }
 
+/**
+ * The trailing detector window (fixed length, `trailingDays`) ENDS at the
+ * selected period's end (`to`) rather than at the newest production day —
+ * finding H4, 15 Sep 2026. Omit `from` and let the server derive it from
+ * `trailingDays`: that keeps the fixed-14-day rule defined in exactly ONE
+ * place (`app.ts`, mirroring `trailingWindow` in `lib/period.ts`), not
+ * re-derived here too. Sending `to` is what lets a reader pick June or July
+ * and see that period's own product limits, not September's.
+ */
 export function getWeightStations(q: {
   trailingDays?: number;
+  from?: string;
+  to?: string;
   periodFrom?: string;
   periodTo?: string;
   shift?: string | null;
 }): Promise<Envelope<WeightStationsData>> {
   const p = new URLSearchParams();
   if (q.trailingDays) p.set('trailingDays', String(q.trailingDays));
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
   if (q.periodFrom) p.set('periodFrom', q.periodFrom);
   if (q.periodTo) p.set('periodTo', q.periodTo);
   if (q.shift) p.set('shift', q.shift);
@@ -1684,12 +1697,6 @@ export interface SackSummaryData {
   totals: SackGroup & { cones: number; conesPerSack: number | null };
   byShift: (SackGroup & { shift: string })[];
   byProduct: (SackGroup & { materialId: number | null; productName: string | null })[];
-  /* Production by day and by day × shift (IFL Q28, 15 Sep 2026: "sack stock
-     per machine" means sack production per machine by shift and day).
-     Optional: a screen built with them must keep working against an API
-     deployed without them. */
-  byDay?: (SackGroup & { day: string })[];
-  byDayShift?: (SackGroup & { day: string; shift: string })[];
   unattributed: { rows: number; of: number };
   weightBasis: string;
   tareKg: number;

@@ -26,14 +26,15 @@ import { getPlausibilityRule } from '../admin.js';
 import { plausibleWhere, type StateCounts } from '../coneState.js';
 import { getProduction } from '../production.js';
 import type { ResolvedPeriod } from '../report.js';
-import { getWeights, type Bucket } from '../weights.js';
+import { getWeights, type Basis, type Bucket } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
 export interface ConeWeightReportData {
   period: ResolvedPeriod;
-  basis: 'as_recorded';
+  /** Whatever Setup has on file (H8, 15 Sep 2026) — this used to be hardcoded. */
+  basis: Basis;
   /** Every cone reading in the period. */
   cones: number;
   /** The plausible population every statistic below is computed over. */
@@ -85,7 +86,10 @@ export async function getConeWeightReport(
 ): Promise<ConeWeightReportData> {
   const { from, to } = resolved;
   const [w, prod, stations, plausibility] = await Promise.all([
-    getWeights(pool, lineId, 'as_recorded', from, to),
+    // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
+    // resolves that to the basis Setup has on file (weights.ts's loadWeightRule),
+    // the same row every other basis-aware figure in the app reads.
+    getWeights(pool, lineId, undefined, from, to),
     getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true }),
     getWeightStations(pool, lineId, from, to),
     getPlausibilityRule(pool, lineId),
@@ -100,7 +104,7 @@ export async function getConeWeightReport(
 
   return {
     period: resolved,
-    basis: 'as_recorded',
+    basis: w.basis,
     cones: prod.rows[0]?.cones ?? 0,
     weighed: w.cone.count,
     implausible: w.cone.implausible,
@@ -120,9 +124,13 @@ export async function getConeWeightReport(
     lineMeanG: stations.lineMeanG,
     plausibility: window,
     note:
-      'Weights as the scale recorded them (the weight basis is not yet confirmed by IFL). Every statistic is over readings ' +
-      'inside the plausibility window; the excluded count is stated. The target is the product selected for the line, ' +
-      'applied line-wide.',
+      (w.basis === 'net'
+        ? `Net basis: cone tube weight subtracted from every reading, per the weight rule on file. `
+        : w.basis === 'gross'
+          ? `Gross basis: weights as the scale recorded them (identical to As-recorded until IFL confirms the basis, Q4/Q5). `
+          : `Weights as the scale recorded them (the weight basis is not yet confirmed by IFL). `) +
+      'Every statistic is over readings inside the plausibility window; the excluded count is stated. The target is the ' +
+      'product selected for the line, applied line-wide.',
   };
 }
 

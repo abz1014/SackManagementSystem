@@ -90,19 +90,54 @@ export interface WeightsData {
  */
 const FALLBACK_CONE_SETPOINT_G = 1950;
 
+/**
+ * The weight_rule row every basis-aware figure in the app reads — the same
+ * table production.ts, sacks.ts and sackStock.ts each query for `basis`/
+ * `tare` (those already read the CONFIGURED basis; they were never the
+ * defect). Centralised here so a caller that needs only the basis, not the
+ * full distribution `getWeights` computes below, has one place to get it
+ * from rather than a second copy of this query (H8, 15 Sep 2026).
+ */
+async function loadWeightRule(pool: ConnectionPool, lineId: number): Promise<{ basis: Basis; tube: number; tare: number }> {
+  const wr = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tube: number; tare: number }>(
+    `SELECT TOP 1 basis, cone_tube_weight_g AS tube, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+  );
+  const raw = wr.recordset[0]?.basis;
+  const basis: Basis = raw === 'gross' || raw === 'net' ? raw : 'as_recorded';
+  return { basis, tube: Number(wr.recordset[0]?.tube ?? 70), tare: Number(wr.recordset[0]?.tare ?? 0.5) };
+}
+
+/**
+ * The basis Setup has on file for this line right now (H8, 15 Sep 2026) —
+ * what a caller should default to rather than assuming `as_recorded`, so
+ * the report builders and the sack summary can never disagree with the
+ * envelope's own `weightBasis` about the same kilograms. Exported for sites
+ * that need only the basis, not the distribution (see sack.ts's shift
+ * branch, which skips `getWeights` itself on purpose).
+ */
+export async function getConfiguredBasis(pool: ConnectionPool, lineId: number): Promise<Basis> {
+  return (await loadWeightRule(pool, lineId)).basis;
+}
+
 export async function getWeights(
   pool: ConnectionPool,
   lineId: number,
-  basis: Basis,
+  /**
+   * Pass a value to force a specific view (the /api/weights basis toggle);
+   * omit it (undefined) to use whatever Setup has on file — every caller
+   * except that one toggle should omit it (H8, 15 Sep 2026: this used to be
+   * hardcoded 'as_recorded' at every report call site, silently ignoring
+   * the configured basis).
+   */
+  basis: Basis | undefined,
   from?: string,
   to?: string,
 ): Promise<WeightsData> {
-  // tube/tare from the active weight_rule
-  const wr = await pool.request().input('line', mssql.Int, lineId).query<{ tube: number; tare: number }>(
-    `SELECT TOP 1 cone_tube_weight_g AS tube, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
-  );
-  const tube = Number(wr.recordset[0]?.tube ?? 70);
-  const tare = Number(wr.recordset[0]?.tare ?? 0.5);
+  const rule = await loadWeightRule(pool, lineId);
+  // Explicit override wins; otherwise fall back to the configured basis.
+  basis = basis ?? rule.basis;
+  const tube = rule.tube;
+  const tare = rule.tare;
   const coneAdj = basis === 'net' ? tube : 0;
   const sackAdj = basis === 'net' ? tare : 0;
 

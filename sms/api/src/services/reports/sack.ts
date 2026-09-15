@@ -26,7 +26,7 @@ import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { loadProductCatalogue } from '../productLimits.js';
 import { listEvents } from '../register.js';
 import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js';
-import { getWeights, type WeightStats } from '../weights.js';
+import { getConfiguredBasis, getWeights, type WeightStats } from '../weights.js';
 import { pct, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
@@ -56,21 +56,27 @@ export async function getSackReport(
 ): Promise<SackReportData> {
   const { from, to } = resolved;
   const shift = filters.shift;
-  const [total, byShift, byDay, byProduct, rejected, catalogue, weights] = await Promise.all([
+  const [total, byShift, byDay, byProduct, rejected, catalogue, weights, shiftBasis] = await Promise.all([
     getProduction(pool, lineId, { from, to, shift, groupBy: 'none' }),
     getProduction(pool, lineId, { from, to, shift, groupBy: 'shift' }),
     getProduction(pool, lineId, { from, to, shift, groupBy: 'day' }),
     getProduction(pool, lineId, { from, to, shift, groupBy: 'product' }),
     listEvents(pool, lineId, 'sack', { from, to, shift, inRange: false, page: 1, pageSize: 1, sort: 'time', dir: 'desc' }),
     loadProductCatalogue(pool),
-    shift ? Promise.resolve(null) : getWeights(pool, lineId, 'as_recorded', from, to),
+    // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
+    // resolves that to the basis Setup has on file.
+    shift ? Promise.resolve(null) : getWeights(pool, lineId, undefined, from, to),
+    // Under a shift filter `getWeights` is skipped on purpose (see the module
+    // comment), but `weightBasis` below still has to name the TRUE configured
+    // basis, not a hardcoded fallback — so fetch just the basis, the cheap way.
+    shift ? getConfiguredBasis(pool, lineId) : Promise.resolve(null),
   ]);
   const totals = total.rows[0] ? toReportLine(total.rows[0]) : toReportLine({ group: 'total', cones: 0, rejectedCones: 0, sacks: 0, sackWeightKg: 0, conesInRangePct: null });
   const order = ['morning', 'evening', 'night'];
   return {
     period: resolved,
     filters,
-    weightBasis: weights?.basis ?? 'as_recorded',
+    weightBasis: weights?.basis ?? shiftBasis ?? 'as_recorded',
     totals,
     rejectedByScale: rejected.total,
     inRangePct: totals.sacks > 0 ? pct(totals.sacks - rejected.total, totals.sacks) : null,

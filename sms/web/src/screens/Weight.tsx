@@ -61,6 +61,18 @@ export function WeightScreen({
     () =>
       getWeightStations({
         trailingDays: TRAILING_DAYS,
+        // Finding H4, 15 Sep 2026: `to` anchors the fixed 14-day detector
+        // window on the SELECTED period's end, not on the newest production
+        // day (the server's old default). Without it, picking June or July
+        // still resolved the product and its limits at today's instant, so
+        // the dashed USL/LSL lines and Cp/Cpk described September's material
+        // against June's readings — violating ONE STATUS VOCABULARY (a
+        // reading is judged by the limits in force at its own time) and
+        // THE DETECTORS IGNORE THE PERIOD (fixed LENGTH, not a fixed anchor).
+        // Deliberately no `from` here: the server derives it from
+        // `trailingDays` (mirroring `trailingWindow` in lib/period.ts), so
+        // the 14-day rule has exactly one definition, not one on each side.
+        to: period.to,
         periodFrom: period.from,
         periodTo: period.to,
         shift: period.shift,

@@ -307,6 +307,7 @@ function Chrome({
         <StationSheet
           station={Number(route.sheet.id)}
           canAdjust={rank >= 2}
+          periodTo={period.to}
           onClose={() => go({ sheet: null })}
         />
       )}

@@ -1047,14 +1047,18 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // weight consistency (Q4/Q5) — distribution, outliers, giveaway, basis toggle
   app.get('/api/weights', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // H8 (15 Sep 2026): `basis` is an explicit override for the /api/weights
+      // toggle — no `.default('as_recorded')`. Omitting it is the normal case
+      // and must fall back to what Setup has on file, not a hardcoded literal
+      // that silently ignored a `net` basis the moment one was configured.
       const q = z
-        .object({ from: dateStr, to: dateStr, basis: z.enum(['as_recorded', 'gross', 'net']).default('as_recorded') })
+        .object({ from: dateStr, to: dateStr, basis: z.enum(['as_recorded', 'gross', 'net']).optional() })
         .safeParse(req.query);
       if (!q.success) {
         res.status(400).json({ error: 'invalid query' });
         return;
       }
-      const data = await getWeights(pool, cfg.lineId, q.data.basis as Basis, q.data.from, q.data.to);
+      const data = await getWeights(pool, cfg.lineId, q.data.basis as Basis | undefined, q.data.from, q.data.to);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);

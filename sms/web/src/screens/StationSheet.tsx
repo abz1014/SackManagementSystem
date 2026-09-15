@@ -49,10 +49,16 @@ import {
 export function StationSheet({
   station,
   canAdjust,
+  periodTo,
   onClose,
 }: {
   station: number;
   canAdjust: boolean;
+  /** Finding H4, 15 Sep 2026: the selected period's end, so a sheet opened
+   *  from a past period is judged against that period's own product limits —
+   *  not today's, which is what the trailing window anchored on by default
+   *  before this was threaded through. See Weight.tsx and api.ts. */
+  periodTo: string;
   onClose: () => void;
 }) {
   const [data, setData] = useState<WeightStationsData | null>(null);
@@ -70,7 +76,7 @@ export function StationSheet({
     (async () => {
       try {
         const [w, s, a] = await Promise.all([
-          getWeightStations({ trailingDays: TRAILING_DAYS }),
+          getWeightStations({ trailingDays: TRAILING_DAYS, to: periodTo }),
           getStations(),
           // This station's rows plus the line-wide ones — all of them, not six.
           listAdjustments({ station }),
@@ -86,7 +92,7 @@ export function StationSheet({
     return () => {
       dead = true;
     };
-  }, [station, nonce]);
+  }, [station, periodTo, nonce]);
 
   const row = data?.stations.find((s) => s.station === station) ?? null;
   const name = stationLabel(names.find((n) => n.stationId === station), station);
