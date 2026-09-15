@@ -64,6 +64,16 @@ export interface SyncConfig {
    * while winding runs. Floor 1.
    */
   sackBlackoutHours: number;
+  /**
+   * The plant's known UTC offset, in minutes, as a cross-check (finding M6,
+   * Sep 2026 audit; extended to the worker for roadmap H7, 15 Sep 2026 — the
+   * worker is what stamps production_ts_utc_ms on every ingested row, so it
+   * needs this at least as much as the API, which has read it since M6).
+   * Same env var, same optional-means-skip semantics as api/src/config.ts:
+   * unset skips the check rather than forcing a new required variable on an
+   * existing deployment. See @sms/shared's checkPlantOffset.
+   */
+  plantUtcOffsetMinutes?: number;
   app: DbConfig;
   iflData: DbConfig;
   pdasDbName: string;
@@ -91,6 +101,19 @@ function intEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, min: numb
   return n;
 }
 
+/**
+ * `Number('')` is 0, not NaN — a genuine JS quirk, distinct from the one
+ * `intEnv` above guards against. z.coerce.number().optional() only skips
+ * coercion for a literal `undefined`; a blank-but-present env var (an
+ * installer who left `PLANT_UTC_OFFSET_MINUTES=` with nothing after the `=`)
+ * would otherwise coerce silently to 0 — "the plant is at UTC" — which is
+ * exactly the kind of silent wrong answer this whole check exists to catch.
+ * So blank is normalised to `undefined` (skip) before it ever reaches zod.
+ */
+function blankToUndefined(v: string | undefined): string | undefined {
+  return v === undefined || v.trim() === '' ? undefined : v;
+}
+
 export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig {
   const app = dbSchema.parse({
     server: env.APP_DB_SERVER,
@@ -116,6 +139,11 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
     intervalSeconds: intEnv(env, 'SYNC_INTERVAL_SECONDS', 60, 5),
     failureCriticalAfter: intEnv(env, 'SYNC_FAILURE_CRITICAL_AFTER', 5, 1),
     sackBlackoutHours: intEnv(env, 'SACK_BLACKOUT_HOURS', 4, 1),
+    // Same shape as api/src/config.ts's identical field: z.coerce.number()
+    // rejects a non-numeric value (it does not silently pass NaN through,
+    // unlike a bare Number()), and .optional() is what makes an unset
+    // PLANT_UTC_OFFSET_MINUTES mean "skip the check" rather than "0".
+    plantUtcOffsetMinutes: z.coerce.number().int().optional().parse(blankToUndefined(env.PLANT_UTC_OFFSET_MINUTES)),
     app,
     iflData,
     pdasDbName: env.IFL_DB_NAME_PDAS ?? 'PDAS_TP1U2',

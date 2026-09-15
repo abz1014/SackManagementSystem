@@ -38,6 +38,7 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
    - `LINE_ID` (default `1`) → the line this worker and this API serve; every row is stamped with it. Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested. `LINE_NAME` is only the **seed** for that line's display name on a fresh database; afterwards the plant, unit and line names live in `sms.line` and are edited in **Setup › Line** (roadmap Phase 1, migration 028).
    - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
+   - **PLANT_UTC_OFFSET_MINUTES=300** (UTC+5, this plant) — set this on every install. See below.
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
 
@@ -59,6 +60,12 @@ you put real TLS in front. The API logs an explicit warning to stderr
 (`logs\api.err.log`) whenever a login arrives over plain HTTP from a non-localhost
 host while `COOKIE_SECURE=true`, so this shows up as a clear message rather than a
 mystery.
+
+### ⚠️ `PLANT_UTC_OFFSET_MINUTES` — declares what timezone the plant IS
+
+The whole two-clocks design (`shared/src/domain/plantClock.ts`) assumes the deployment host's OS timezone equals the plant's. Nothing enforces that assumption except this variable: at startup, both the API and the sync worker compare `PLANT_UTC_OFFSET_MINUTES` against the host's own OS-reported offset and warn loudly on a mismatch — the sync worker additionally raises a standing WARNING finding, visible on the Operations screen, cleared automatically once the host's clock is fixed and the worker restarts.
+
+This matters specifically because **the owner supplies the plant PC** (IFL, 15 Sep 2026), and a freshly imaged Windows Server defaults to UTC. On such a host every reading arrives "five hours in the future" relative to the plant clock — silently, until shift attribution or the live status is visibly wrong. **Set `PLANT_UTC_OFFSET_MINUTES=300` (this plant is UTC+5) on every install; do not leave it commented out.** Neither process refuses to start on a mismatch — check the log (API) or the Operations screen (worker) after first boot to confirm the host's clock actually matches.
 
 ### Reaching it from other machines
 
@@ -597,7 +604,16 @@ Four database logins exist by design, each for one job. None is ever written int
 | `sms_app` | the sidecar server | `db_datareader`, `db_datawriter`, `db_ddladmin` on `[sms]` only | us, at install (`db/bootstrap/00_create_app_database.sql`) | API, sync worker, CLI, `db:migrate` — `APP_DB_USER/PASSWORD` |
 | `sms_backup` | the sidecar server | `db_backupoperator` on `[sms]` only | us, at install (SQL in *Backup & restore*) | `scripts/backup-appdb.ps1` — passed as `-Pass` |
 | `sms_sim` | **development machines only** | writer on `DATA_TP1U2_SIM` (a database whose name ends `_SIM`; the simulator refuses any other) | the developer, by hand (*Plant simulator*, above) | `scripts/simulate-plant.mjs` — `SIM_DB_NAME/USER/PASSWORD` in `.env`; never created on a plant server |
-| `sms_pdas_writer` | IFL's plant SQL Server | `UPDATE`/`INSERT` on `dbo.Materials`, `EXECUTE` on `CreateMaterial` + `SetMaterialStatusActive`, `INSERT` on `dbo.nhs_events` — **does not exist yet** | IFL's DBA, only after written authority for PDAS writes | API — `PDAS_WRITE_USER/PASSWORD`, behind `PDAS_WRITE_ENABLED` |
+| `sms_pdas_writer` | IFL's plant SQL Server (`TP1-PDAS\PDAS`, see below — **not** whatever host serves `DATA_TP1U2`) | **Nine rights** (finding H6, 15 Sep 2026 audit — this row used to name two): `EXECUTE` on `CreateMaterial`, `SetMaterialStatusActive`, `AddBlend`, `AddCount`, `AddTubeType`, `CreatePallet`, `SetPalletStatusActive`; `UPDATE` on `dbo.Materials` (the vendor supplies no UPDATE proc — changing a setpoint is one guarded single-row `UPDATE`); `INSERT` on `dbo.nhs_events`. **Does not exist yet.** | IFL's DBA — theirs to issue, and only after written authority that names all nine rights above, not the two this row used to state | API — `PDAS_WRITE_USER/PASSWORD`, behind `PDAS_WRITE_ENABLED` |
+
+**The real PDAS host (observed, not assumed — 15 Sep 2026, finding H6).** IFL's own screenshots — SSMS's Object Explorer and a VNC session title bar, ten images under `Desktop/SPS unzip/SPS/*.jpg` — show PDAS on its own box: server `TP1-PDAS` at `192.168.100.37`, instance `TP1-PDAS\PDAS`, SQL Server 2022 (16.0.1000). `PDAS_WRITE_SERVER` must point there. Nothing in those screenshots says whether `DATA_TP1U2` lives on the same box; do not assume it does.
+
+**Why `sms_pdas_writer` must be its own login, not the one in those screenshots.** Every procedure call demonstrated there ran under a NAMED PERSONAL LOGIN — `ibrahim`, visible in the SSMS connection panel and the VNC window title on all ten images — not a service account. A dedicated `sms_pdas_writer` is required instead of reusing (or mirroring) that login, for three reasons, and this is the argument the written-authority request to IFL rests on:
+1. **Attribution.** An application's writes cannot be attributed to a person's account — every change SMS makes would read as something `ibrahim` did by hand, indistinguishable in PDAS's own event log from an actual manual edit.
+2. **Rotation.** The credential cannot be rotated without breaking `ibrahim`'s own access to PDAS — a password change made for the app's sake would lock a person out.
+3. **Continuity.** It disappears the day `ibrahim` leaves or changes role, which is exactly the moment a production dependency must not break.
+
+The request to IFL should therefore ask for a new login provisioned for the application, scoped to the nine rights in the table above — not for the use of an existing person's credentials.
 
 **The migration login split (roadmap Phase 11, 14 Sep 2026).** `sms_app` holds `db_ddladmin` only so `npm run db:migrate` can run as it. That right also lets it drop the append-only trigger migration 030 puts on `sms.audit_log` — so the trigger stops accidents and ordinary misuse, but a party holding the app's own login could remove it, delete rows and put it back. Real tamper-evidence needs the migration login separated from the runtime login: create `sms_migrate` with `db_ddladmin` (and `db_datareader`/`db_datawriter`, for the data migrations), run `db:migrate` with `APP_DB_USER=sms_migrate` at upgrade time only, and **revoke `db_ddladmin` from `sms_app`** (`ALTER ROLE db_ddladmin DROP MEMBER sms_app`). `00_create_app_database.sql` does not yet do this — it is an install-time decision for the operator, recorded here so the trigger's guarantee is not overstated. Until it is done, the audit log is append-only against the code and against mistakes, not against the app's own credential.
 

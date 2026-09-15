@@ -2,34 +2,49 @@
 import { readFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import { loadDotEnv, createPool } from '@sms/sync-worker';
+import { checkPlantOffset } from '@sms/shared';
 import { loadApiConfig } from './config.js';
 import { createApp } from './app.js';
-import { plantOffsetMinutes } from './services/plantClock.js';
 import { markDegraded, SERVICE_VERSION } from './services/health.js';
 import { log } from './log.js';
 
 /**
  * Cross-checks PLANT_UTC_OFFSET_MINUTES (if set) against this process's own
- * OS timezone (finding M6, Sep 2026 audit). plantClock.ts's whole two-clocks
- * design assumes the deployment host's timezone equals the plant's; nothing
- * previously verified that, and a mismatch fails silently by exactly the
- * offset — five hours on this plant. A loud warning, not a crash: getting
- * this check wrong must never be worse than not having it.
+ * OS timezone (finding M6, Sep 2026 audit). The comparison itself is
+ * `@sms/shared`'s `checkPlantOffset` (moved there for roadmap H7, 15 Sep
+ * 2026, so the sync worker — sync-worker/src/index.ts, same call, same
+ * message shape — runs the identical check; it used to exist only here).
+ * plantClock.ts's whole two-clocks design assumes the deployment host's
+ * timezone equals the plant's; nothing previously verified that, and a
+ * mismatch fails silently by exactly the offset — five hours on this plant.
+ * A loud warning, not a crash: getting this check wrong must never be worse
+ * than not having it (see @sms/shared's checkPlantOffset for why, at length
+ * — the owner supplies the plant PC per IFL's 15 Sep answer, and a freshly
+ * imaged Windows Server defaults to UTC).
+ *
+ * This log line is the API's contribution only. It does NOT call
+ * markDegraded: that marker exists for pool connectivity and getHealth()
+ * clears it unconditionally on the next successful DB probe (health.ts) —
+ * using it for a standing config mismatch would make the warning flicker
+ * away the moment /api/health is next polled, which reads as "it fixed
+ * itself" when nothing did. The sync worker raises a proper standing
+ * dq_finding instead (visible on the Operations screen, cleared only when
+ * the check itself next agrees) — see sync-worker/src/index.ts. Giving the
+ * API the same durable, screen-visible signal would need either a
+ * non-self-clearing degraded reason in health.ts or a public findings
+ * writer exported from @sms/sync-worker's lib.ts; both are out of this
+ * change's scope and are a natural follow-up.
  */
-function checkPlantOffset(expectedMinutes: number | undefined): void {
-  if (expectedMinutes == null) return;
-  const actual = plantOffsetMinutes();
-  if (actual !== expectedMinutes) {
-    // One JSON line since 14 Sep 2026 (roadmap Phase 2 item 6); the three
-    // numbers are fields so a monitor can alert on `offsetMismatchMinutes`.
-    log.warn(
-      `plantClock: this host's OS timezone reports a UTC offset of ${actual} minutes, ` +
-        `but PLANT_UTC_OFFSET_MINUTES says the plant is at ${expectedMinutes}. Every production/app-time ` +
-        `comparison in this app (product changeovers, calibration adjustments, live status) will be off by ` +
-        `${actual - expectedMinutes} minutes until this host's timezone matches the plant's.`,
-      { hostOffsetMinutes: actual, plantOffsetMinutes: expectedMinutes, offsetMismatchMinutes: actual - expectedMinutes },
-    );
-  }
+function checkPlantOffsetOnStartup(expectedMinutes: number | undefined): void {
+  const result = checkPlantOffset(expectedMinutes);
+  if (!result.checked || !result.mismatched) return;
+  // One JSON line since 14 Sep 2026 (roadmap Phase 2 item 6); the three
+  // numbers are fields so a monitor can alert on `offsetMismatchMinutes`.
+  log.warn(result.message, {
+    hostOffsetMinutes: result.hostOffsetMinutes,
+    plantOffsetMinutes: result.plantOffsetMinutes,
+    offsetMismatchMinutes: result.offsetMismatchMinutes,
+  });
 }
 
 /**
@@ -72,7 +87,7 @@ function installShutdown(server: { close(cb: (err?: Error) => void): unknown }, 
 async function main(): Promise<void> {
   loadDotEnv();
   const cfg = loadApiConfig();
-  checkPlantOffset(cfg.plantUtcOffsetMinutes);
+  checkPlantOffsetOnStartup(cfg.plantUtcOffsetMinutes);
   const pool = await createPool(cfg.appDb, {
     // A pool-level error (a connection the server dropped, a failed
     // reconnect) is an EventEmitter 'error': with no listener Node treats it

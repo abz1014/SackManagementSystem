@@ -21,12 +21,14 @@
  * pools and closes them (pass.ts), so there is none to borrow between passes.
  */
 import type { ConnectionPool } from 'mssql';
-import { createLogger } from '@sms/shared';
+import { randomUUID } from 'node:crypto';
+import { createLogger, checkPlantOffset } from '@sms/shared';
 import { loadDotEnv, loadSyncConfig, type SyncConfig } from './config.js';
 import { createPool } from './db.js';
 import { runPass } from './pass.js';
 import { TableHaltsError } from './runner.js';
 import type { FullSyncResult } from './pipeline.js';
+import { clearFindings, persistFindings } from './transform/dq.js';
 import {
   checkDatabaseSize,
   clearPersistentFailure,
@@ -37,6 +39,49 @@ import {
 } from './housekeeping.js';
 
 const log = createLogger('sync-worker');
+
+/**
+ * Check name for the plant-clock cross-check below — not in dq.ts's
+ * CHECK_NAMES, the same way housekeeping.ts's PERSISTENT_SYNC_FAILURE and
+ * DATABASE_SIZE aren't: check names are owned by whichever module raises
+ * them (see dq.ts's CHECK_NAMES comment).
+ */
+export const PLANT_CLOCK_MISMATCH = 'plant_clock_mismatch';
+
+/**
+ * Cross-checks PLANT_UTC_OFFSET_MINUTES against this host's OS timezone —
+ * the same check the API has run since finding M6 (api/src/index.ts),
+ * extended here for roadmap H7 (15 Sep 2026) because THIS process is the one
+ * that actually stamps production_ts_utc_ms on every ingested row; a
+ * mismatch is silent by exactly the offset (five hours on this plant) and a
+ * freshly imaged Windows Server — the owner supplies the plant PC, per IFL's
+ * 15 Sep answer — defaults to UTC.
+ *
+ * Unlike the API, the worker keeps its own pool and can afford a standing
+ * `dq_finding`, so a mismatch here is not just a log line: it is a WARNING
+ * finding on the Operations screen, raised once at startup and cleared at
+ * the next startup where the check agrees — the same "state finding" pattern
+ * clearFindings/persistFindings already use for product_mirror_failed and
+ * persistent_sync_failure (dq.ts, housekeeping.ts). Not fatal, and not
+ * retried mid-run: this is static configuration, so re-checking every pass
+ * would only repeat the same answer until the process restarts.
+ */
+async function checkPlantOffsetOnStartup(cfg: SyncConfig, pool: ConnectionPool): Promise<void> {
+  const result = checkPlantOffset(cfg.plantUtcOffsetMinutes);
+  if (!result.checked) return; // PLANT_UTC_OFFSET_MINUTES unset: nothing to compare, nothing to clear
+  if (!result.mismatched) {
+    await clearFindings(pool, PLANT_CLOCK_MISMATCH);
+    return;
+  }
+  log.warn(result.message, {
+    hostOffsetMinutes: result.hostOffsetMinutes,
+    plantOffsetMinutes: result.plantOffsetMinutes,
+    offsetMismatchMinutes: result.offsetMismatchMinutes,
+  });
+  await persistFindings(pool, randomUUID(), [
+    { check_name: PLANT_CLOCK_MISMATCH, severity: 'WARNING', subject_table: null, count: 1, detail: result.message },
+  ]);
+}
 
 /** How long a stop signal waits for the pass in flight before exiting anyway. */
 const STOP_DEADLINE_MS = 30_000;
@@ -117,6 +162,11 @@ async function main(): Promise<void> {
     mode: once ? 'once' : `loop ${cfg.intervalSeconds}s`,
     failureCriticalAfter: cfg.failureCriticalAfter,
   });
+
+  // Once at startup, static config vs. this host's OS timezone — see the
+  // function doc for why the worker gets its own standing finding rather
+  // than just a log line (roadmap H7, 15 Sep 2026).
+  await withAppPool(cfg, 'plant clock cross-check', (pool) => checkPlantOffsetOnStartup(cfg, pool));
 
   // Rows a previous process left 'running' (a crash, a kill, a power cut).
   // Older than two intervals: anything younger may be a pass genuinely in

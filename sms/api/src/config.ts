@@ -5,6 +5,19 @@
 import { z } from 'zod';
 import type { DbConfig } from '@sms/sync-worker';
 
+/**
+ * `Number('')` is 0, not NaN. `z.coerce.number().optional()` only skips
+ * coercion for a literal `undefined`, so a blank-but-present env var (left
+ * as `PLANT_UTC_OFFSET_MINUTES=` with nothing after the `=`) would otherwise
+ * coerce silently to 0 — "the plant is at UTC" — exactly the kind of silent
+ * wrong answer the offset cross-check exists to catch. Blank is normalised
+ * to `undefined` (skip the check) before it reaches zod. Same helper as
+ * sync-worker/src/config.ts's identical guard on the same variable.
+ */
+function blankToUndefined(v: string | undefined): string | undefined {
+  return v === undefined || v.trim() === '' ? undefined : v;
+}
+
 const schema = z.object({
   port: z.coerce.number().int().positive().default(4000),
   lineId: z.coerce.number().int().positive().default(1),
@@ -107,9 +120,18 @@ const schema = z.object({
    * Off by default, and every field optional: with the flag off, or with the
    * flag on but credentials missing, the API degrades to a read-only product
    * screen rather than failing to start. The login is meant to be
-   * `sms_pdas_writer`, provisioned by IFL's DBA with UPDATE/INSERT on
-   * dbo.Materials, EXECUTE on CreateMaterial + SetMaterialStatusActive, INSERT
-   * on dbo.nhs_events, and nothing else — enforced by the login, not by code.
+   * `sms_pdas_writer`, provisioned by IFL's DBA with EXECUTE on all seven
+   * vendor procs the write path calls (CreateMaterial, SetMaterialStatusActive,
+   * AddBlend, AddCount, AddTubeType, CreatePallet, SetPalletStatusActive),
+   * UPDATE on dbo.Materials (change-limits; the vendor has no proc for it) and
+   * INSERT on dbo.nhs_events — nine rights, not two (CLAUDE.md ¶3, finding H6,
+   * 15 Sep 2026 audit) — and nothing else, enforced by the login, not by code.
+   *
+   * Two more guards live in resolvePdasWrite below (also H6): the writer's own
+   * database must be the one the sync worker reads (IFL_DB_NAME_PDAS), and the
+   * writer's login must differ from the sync worker's read-only one
+   * (IFL_DB_USER). Both refuse rather than throw, same as the missing-field
+   * case above.
    */
   pdasWriteEnabled: z
     .enum(['true', 'false'])
@@ -126,6 +148,15 @@ const schema = z.object({
       trustServerCertificate: z.coerce.boolean().default(true),
     })
     .default({}),
+  /**
+   * READ, NEVER CONNECTED TO. The sync worker's own IFL_DB_NAME_PDAS and
+   * IFL_DB_USER (sync-worker/src/config.ts) — the two values the PDAS-writer
+   * guards below compare the writer's own settings against. This does not
+   * widen "the API holds no IFL connection string" (line ~98): no pool is
+   * ever opened with these, they are two strings held for comparison only.
+   */
+  iflDbNamePdas: z.string().optional(),
+  iflDbUser: z.string().optional(),
 });
 
 /** How the PDAS write path resolved at startup — and, if not, why. */
@@ -157,9 +188,21 @@ export interface ApiConfig {
 
 /**
  * Resolve the write path from its flag and (optional) credentials. Never
- * throws: a missing or partial login degrades to "disabled, and here is why",
- * which the product screen shows in place of the buttons. The reason is
- * written for the operator who will read it on the Setup screen.
+ * throws: a missing or partial login, or a login that fails either guard
+ * below, degrades to "disabled, and here is why", which the product screen
+ * shows in place of the buttons. The reason is written for the operator who
+ * will read it on the Setup screen.
+ *
+ * `ifl` carries the sync worker's own IFL_DB_NAME_PDAS / IFL_DB_USER — read,
+ * never connected to (see the schema comment above) — so the two guards below
+ * (H6, 15 Sep 2026 audit) can be checked with no new connection:
+ *  - the writer's database must be the one the sync worker reads. This both
+ *    blocks a writer pointed at the wrong database AND, deliberately, allows
+ *    a same-named offline proof against a local copy with no special case:
+ *    when IFL_DB_NAME_PDAS is itself pointed at a local `_SEP07` copy (as
+ *    .env does for that proof), a matching PDAS_WRITE_DATABASE is accepted.
+ *  - the writer's login must differ from the sync worker's read-only one —
+ *    that login must never also be the writer.
  */
 function resolvePdasWrite(
   enabled: boolean,
@@ -172,6 +215,7 @@ function resolvePdasWrite(
     encrypt: boolean;
     trustServerCertificate: boolean;
   },
+  ifl: { dbNamePdas?: string; user?: string } = {},
 ): PdasWriteConfig {
   if (!enabled) {
     return { enabled: false, db: null, disabledReason: 'PDAS_WRITE_ENABLED is not true.' };
@@ -184,6 +228,26 @@ function resolvePdasWrite(
       disabledReason:
         `PDAS_WRITE_ENABLED is true but PDAS_WRITE_${missing.map((k) => k.toUpperCase()).join(' / PDAS_WRITE_')} ` +
         `is not set. The write login must be provisioned separately from the read-only sync login.`,
+    };
+  }
+  // Same default the sync worker itself falls back to (sync-worker/src/config.ts).
+  const iflDbNamePdas = ifl.dbNamePdas ?? 'PDAS_TP1U2';
+  if (db.database !== iflDbNamePdas) {
+    return {
+      enabled: false,
+      db: null,
+      disabledReason:
+        `PDAS_WRITE_DATABASE (${JSON.stringify(db.database)}) does not match IFL_DB_NAME_PDAS ` +
+        `(${JSON.stringify(iflDbNamePdas)}). The writer must point at the same database the sync worker reads.`,
+    };
+  }
+  if (ifl.user != null && db.user === ifl.user) {
+    return {
+      enabled: false,
+      db: null,
+      disabledReason:
+        `PDAS_WRITE_USER is the same login as IFL_DB_USER (${JSON.stringify(db.user)}). ` +
+        `The read-only sync login must never be the writer.`,
     };
   }
   return {
@@ -213,7 +277,7 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     tlsKeyPath: env.TLS_KEY_PATH,
     tlsPfxPath: env.TLS_PFX_PATH,
     tlsPfxPassphrase: env.TLS_PFX_PASSPHRASE,
-    plantUtcOffsetMinutes: env.PLANT_UTC_OFFSET_MINUTES,
+    plantUtcOffsetMinutes: blankToUndefined(env.PLANT_UTC_OFFSET_MINUTES),
     passwordMinLength: env.PASSWORD_MIN_LENGTH,
     backupDir: env.BACKUP_DIR,
     appDb: {
@@ -235,7 +299,14 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       encrypt: env.PDAS_WRITE_ENCRYPT ?? 'true',
       trustServerCertificate: env.PDAS_WRITE_TRUST_SERVER_CERTIFICATE ?? 'true',
     },
+    // Read for the two guards in resolvePdasWrite only — never held on ApiConfig,
+    // never used to open a connection. See the schema comment above.
+    iflDbNamePdas: env.IFL_DB_NAME_PDAS,
+    iflDbUser: env.IFL_DB_USER,
   });
-  const { pdasWriteEnabled, pdasWriteDb, ...rest } = parsed;
-  return { ...rest, pdasWrite: resolvePdasWrite(pdasWriteEnabled, pdasWriteDb) } as ApiConfig;
+  const { pdasWriteEnabled, pdasWriteDb, iflDbNamePdas, iflDbUser, ...rest } = parsed;
+  return {
+    ...rest,
+    pdasWrite: resolvePdasWrite(pdasWriteEnabled, pdasWriteDb, { dbNamePdas: iflDbNamePdas, user: iflDbUser }),
+  } as ApiConfig;
 }

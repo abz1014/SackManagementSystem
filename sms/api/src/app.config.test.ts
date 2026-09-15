@@ -24,7 +24,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import type { Server } from 'http';
 import argon2 from 'argon2';
 import { createApp } from './app.js';
-import type { ApiConfig } from './config.js';
+import { loadApiConfig, type ApiConfig } from './config.js';
 import { invalidateLiveConfigCache } from './services/live.js';
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
@@ -591,5 +591,64 @@ describe('reject codes — list, and per-field update with severity', () => {
     expect(audits()[0]!.inputs.get('detail')).toBe('severity (none) -> WARNING');
     expect((await call('manager', 'PUT', '/api/reject-codes/12', { severity: 'FATAL' })).status).toBe(400);
     expect((await call('manager', 'PUT', '/api/reject-codes/12', {})).status).toBe(400);
+  });
+});
+
+describe('loadApiConfig — the PDAS writer guards (finding H6, 15 Sep 2026 audit)', () => {
+  // A minimal but complete env: every field loadApiConfig requires, plus a
+  // writer config that would pass the pre-existing "fields present" check,
+  // so each test only has to override what it is testing.
+  const baseEnv = (overrides: Record<string, string | undefined> = {}) =>
+    ({
+      APP_DB_SERVER: '.\\SQLEXPRESS',
+      APP_DB_PORT: '1433',
+      APP_DB_NAME: 'sms',
+      APP_DB_USER: 'sms_app',
+      APP_DB_PASSWORD: 'x',
+      APP_DB_ENCRYPT: 'true',
+      APP_DB_TRUST_SERVER_CERTIFICATE: 'true',
+      PDAS_WRITE_ENABLED: 'true',
+      PDAS_WRITE_SERVER: 'TP1-PDAS\\PDAS',
+      PDAS_WRITE_PORT: '1433',
+      PDAS_WRITE_DATABASE: 'PDAS_TP1U2',
+      PDAS_WRITE_USER: 'sms_pdas_writer',
+      PDAS_WRITE_PASSWORD: 'x',
+      // The sync worker's own read-only settings, which the two guards below
+      // compare the writer against (sync-worker/src/config.ts).
+      IFL_DB_NAME_PDAS: 'PDAS_TP1U2',
+      IFL_DB_USER: 'sms_readonly',
+      ...overrides,
+    }) as unknown as NodeJS.ProcessEnv;
+
+  it('a correctly-formed writer config (database matches the reader, login differs) is enabled', () => {
+    const cfg = loadApiConfig(baseEnv());
+    expect(cfg.pdasWrite.enabled).toBe(true);
+    expect(cfg.pdasWrite.disabledReason).toBeNull();
+    expect(cfg.pdasWrite.db).toMatchObject({ database: 'PDAS_TP1U2', user: 'sms_pdas_writer' });
+  });
+
+  it('writer database ≠ IFL_DB_NAME_PDAS is disabled, naming both keys', () => {
+    const cfg = loadApiConfig(baseEnv({ PDAS_WRITE_DATABASE: 'DATA_TP1U2' }));
+    expect(cfg.pdasWrite.enabled).toBe(false);
+    expect(cfg.pdasWrite.db).toBeNull();
+    expect(cfg.pdasWrite.disabledReason).toContain('PDAS_WRITE_DATABASE');
+    expect(cfg.pdasWrite.disabledReason).toContain('IFL_DB_NAME_PDAS');
+  });
+
+  it('writer user = reader user (IFL_DB_USER) is disabled — the read-only login must never be the writer', () => {
+    const cfg = loadApiConfig(baseEnv({ PDAS_WRITE_USER: 'sms_readonly' }));
+    expect(cfg.pdasWrite.enabled).toBe(false);
+    expect(cfg.pdasWrite.db).toBeNull();
+    expect(cfg.pdasWrite.disabledReason).toContain('PDAS_WRITE_USER');
+    expect(cfg.pdasWrite.disabledReason).toContain('IFL_DB_USER');
+  });
+
+  it('the offline-proof case: writer DB = reader DB = a local _SEP07 value is enabled, deliberately', () => {
+    const cfg = loadApiConfig(
+      baseEnv({ PDAS_WRITE_DATABASE: 'PDAS_TP1U2_SEP07', IFL_DB_NAME_PDAS: 'PDAS_TP1U2_SEP07' }),
+    );
+    expect(cfg.pdasWrite.enabled).toBe(true);
+    expect(cfg.pdasWrite.disabledReason).toBeNull();
+    expect(cfg.pdasWrite.db).toMatchObject({ database: 'PDAS_TP1U2_SEP07' });
   });
 });
