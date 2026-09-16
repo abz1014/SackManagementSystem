@@ -15,28 +15,29 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
-  getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, type AuthUser,
+  getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, REPORT_TYPES, CONE_STATES,
+  type AuthUser, type ReportType, type ConeState,
 } from './api';
 import { LiveProvider, readAsOf, useLive, usePlantNow } from './lib/live';
 import { assessHealth } from './lib/health';
-import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams } from './lib/period';
+import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams, type ShiftCode } from './lib/period';
 import { W } from './lib/words';
 import { Bar, SCREENS, type Screen, type ReadingsFilter } from './ui/Bar';
 import { Loading } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { LineScreen } from './screens/Line';
-import { ReadingsScreen } from './screens/Readings';
+import { ReadingsScreen, LISTINGS, type Listing } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
 import { StationSheet } from './screens/StationSheet';
 import { ProductSheet } from './screens/ProductSheet';
 import { ReportScreen } from './screens/Report';
-import { WeightScreen } from './screens/Weight';
+import { WeightScreen, type WeightMode } from './screens/Weight';
 import { RejectsScreen } from './screens/Rejects';
 import { ReasonSheet, reasonIdOf } from './screens/ReasonSheet';
 import { WallScreen } from './screens/Wall';
 import { SetupScreen } from './screens/Setup';
 import { HealthScreen } from './screens/Health';
-import { SacksScreen } from './screens/Sacks';
+import { SacksScreen, type SackUnit } from './screens/Sacks';
 import { StockSheet } from './screens/StockSheet';
 import { LoginScreen } from './screens/Login';
 import './app.css';
@@ -52,13 +53,62 @@ export interface Sheet {
   id: string;
 }
 
-interface Route {
+/**
+ * Roadmap Phase 2b (16 Sep 2026) — screen state joins the route.
+ *
+ * Ten pieces of user-chosen state used to live in component memory and never
+ * reach the URL: a user could not send a colleague what they were looking at,
+ * bookmark it, or keep it across a reload. Each new field below is one of
+ * them, keyed tersely (these links get pasted into chat) and following `rf`'s
+ * precedent — an enum or number, validated on the way in, omitted from the
+ * URL whenever it equals the screen's default.
+ *
+ * STATION AND PRODUCT ARE SHARED, DELIBERATELY, NOT PER-SCREEN. The Phase 2a
+ * IA review (`audit/IA-PROPOSAL.md` §7) flagged that Readings, Weight and
+ * Report each picked "which station" under their own local name; giving each
+ * its own URL key would have meant three parameters for one real-world
+ * selection, and a second migration the day a link had to carry a station
+ * choice from one screen to another (Weight's station table already means to
+ * open that station's readings — see roadmap Phase 2a). One key, `st` (and
+ * `pr` for product, shared the same way between Report and Rejects), means a
+ * link that sets it filters every screen that understands it consistently,
+ * and switching screens without touching it keeps the same station in view.
+ * Nothing else here is shared: `listing`, `mode`, `unit` and a page number
+ * mean nothing outside the one screen that owns them.
+ */
+export interface Route {
   view: View;
   period: PeriodParams;
   sheet: Sheet | null;
-  /** Replay instant for the live screens; only honoured when the API allows it. */
   at: string | null;
   readingsFilter: ReadingsFilter;
+
+  /** Report: which of the ten types, and its own shift-filter override. */
+  reportType: ReportType;
+  reportShift: ShiftCode | null;
+  /** SHARED — see the file-level note above. Read by Report's filters,
+   *  Weight's chart-station selector, Readings' station chip and Rejects'
+   *  station chip alike. */
+  station: number | null;
+  /** SHARED — Report's product filter and Rejects' product chip. */
+  product: number | null;
+
+  /** Readings: what to list, the cone-state chips, and the page. Station is
+   *  the shared field above. */
+  readingsListing: Listing;
+  readingsStates: ConeState[];
+  readingsPage: number;
+
+  /** Weight: which chart. Chart station is the shared field above. */
+  weightMode: WeightMode;
+
+  /** Sacks: the ledger's unit, and the history register's page. */
+  sacksUnit: SackUnit;
+  sacksPage: number;
+
+  /** Rejects: the chosen Pareto reason. Station/product are the shared
+   *  fields above — see RejectsScreen's file header for why they moved. */
+  rejectsCode: string | null;
 }
 
 const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall', 'health'] as const;
@@ -77,9 +127,41 @@ const EXPORT_RANK = 3;
  */
 const ENGINEER_RANK = 2;
 
-function parseRoute(): Route {
+/** Defaults for every field this module owns — the no-window (SSR/test)
+ *  fallback and the yardstick `routeSearch` omits a value against. */
+const DEFAULT_ROUTE: Omit<Route, 'view' | 'period' | 'sheet' | 'at' | 'readingsFilter'> = {
+  reportType: 'daily',
+  reportShift: null,
+  station: null,
+  product: null,
+  readingsListing: 'cones',
+  readingsStates: [],
+  readingsPage: 1,
+  weightMode: 'time',
+  sacksUnit: 'sacks',
+  sacksPage: 1,
+  rejectsCode: null,
+};
+
+/** A positive integer, or null for anything else — missing, zero, negative,
+ *  fractional or not a number at all. Never throws on a hand-edited URL. */
+function parseId(v: string | null): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** Readings' listing defaults to plain 'cones' EXCEPT when a deep-linked
+ *  `rf=inspectionRejects` arrived with no explicit `rl` of its own — the one
+ *  existing behaviour (`initialFilter === 'inspectionRejects'` used to seed
+ *  this screen's local `useState`) an old link must keep getting for free. */
+function defaultListing(rf: ReadingsFilter): Listing {
+  return rf === 'inspectionRejects' ? 'inspectionRejects' : 'cones';
+}
+
+export function parseRoute(): Route {
   if (typeof window === 'undefined') {
-    return { view: 'line', period: { key: 'shift' }, sheet: null, at: null, readingsFilter: null };
+    return { view: 'line', period: { key: 'shift' }, sheet: null, at: null, readingsFilter: null, ...DEFAULT_ROUTE };
   }
   const p = new URLSearchParams(window.location.search);
   const raw = p.get('s');
@@ -87,22 +169,76 @@ function parseRoute(): Route {
   const sheetRaw = p.get('sheet');
   const m = sheetRaw?.match(/^(station|cone|sack|reject|product|reason|stock):(.+)$/);
   const rf = p.get('rf');
+  const readingsFilter: ReadingsFilter = rf === 'outsideLimits' || rf === 'inspectionRejects' ? rf : null;
+
+  const rtRaw = p.get('rt');
+  const reportType: ReportType = (REPORT_TYPES as readonly string[]).includes(rtRaw ?? '') ? (rtRaw as ReportType) : DEFAULT_ROUTE.reportType;
+  const rshRaw = p.get('rsh');
+  const reportShift: ShiftCode | null = rshRaw === 'morning' || rshRaw === 'evening' || rshRaw === 'night' ? rshRaw : null;
+
+  // SHARED across Report, Weight, Readings and Rejects — see the Route note.
+  const station = parseId(p.get('st'));
+  const product = parseId(p.get('pr'));
+
+  const rlRaw = p.get('rl');
+  const readingsListing: Listing = (LISTINGS as readonly string[]).includes(rlRaw ?? '') ? (rlRaw as Listing) : defaultListing(readingsFilter);
+  const rcsRaw = p.get('rcs');
+  const readingsStates: ConeState[] = rcsRaw
+    ? rcsRaw.split(',').filter((x): x is ConeState => (CONE_STATES as readonly string[]).includes(x))
+    : [];
+  const readingsPage = Math.max(1, parseId(p.get('rp')) ?? 1);
+
+  const weightMode: WeightMode = p.get('wm') === 'dist' ? 'dist' : 'time';
+
+  const sacksUnit: SackUnit = p.get('su') === 'kg' ? 'kg' : 'sacks';
+  const sacksPage = Math.max(1, parseId(p.get('sp')) ?? 1);
+
+  const rejectsCode = p.get('jc');
+
   return {
     view,
     period: parsePeriodParams(p),
     sheet: m ? { kind: m[1] as Sheet['kind'], id: m[2]! } : null,
     at: readAsOf(),
-    readingsFilter: rf === 'outsideLimits' || rf === 'inspectionRejects' ? rf : null,
+    readingsFilter,
+    reportType,
+    reportShift,
+    station,
+    product,
+    readingsListing,
+    readingsStates,
+    readingsPage,
+    weightMode,
+    sacksUnit,
+    sacksPage,
+    rejectsCode,
   };
 }
 
-function routeSearch(r: Route): string {
+export function routeSearch(r: Route): string {
   const p = new URLSearchParams();
   p.set('s', r.view);
   writePeriodParams(p, r.period);
   if (r.sheet) p.set('sheet', `${r.sheet.kind}:${r.sheet.id}`);
   if (r.at) p.set('at', r.at);
   if (r.readingsFilter) p.set('rf', r.readingsFilter);
+
+  if (r.reportType !== DEFAULT_ROUTE.reportType) p.set('rt', r.reportType);
+  if (r.reportShift) p.set('rsh', r.reportShift);
+  if (r.station != null) p.set('st', String(r.station));
+  if (r.product != null) p.set('pr', String(r.product));
+
+  if (r.readingsListing !== defaultListing(r.readingsFilter)) p.set('rl', r.readingsListing);
+  if (r.readingsStates.length > 0) p.set('rcs', r.readingsStates.join(','));
+  if (r.readingsPage > 1) p.set('rp', String(r.readingsPage));
+
+  if (r.weightMode !== DEFAULT_ROUTE.weightMode) p.set('wm', r.weightMode);
+
+  if (r.sacksUnit !== DEFAULT_ROUTE.sacksUnit) p.set('su', r.sacksUnit);
+  if (r.sacksPage > 1) p.set('sp', String(r.sacksPage));
+
+  if (r.rejectsCode) p.set('jc', r.rejectsCode);
+
   return `?${p.toString()}`;
 }
 
@@ -134,10 +270,19 @@ function Session({ user, onSignOut }: { user: AuthUser; onSignOut: () => void })
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  const go = useCallback((next: Partial<Route>) => {
+  // PUSH vs REPLACE: a change from a fixed set of choices — a screen, a
+  // report type, a toggle, a chip — is a navigation a reader may want to
+  // undo with Back, so it pushes. A value advanced by STEPPING — a page
+  // number, here — is not: paging through the register ten times must not
+  // fill the back button with nine stops nobody wants to revisit, so it
+  // replaces. Everything below defaults to push; only the two pagers pass
+  // `{ replace: true }`.
+  const go = useCallback((next: Partial<Route>, opts?: { replace?: boolean }) => {
     setRoute((prev) => {
       const merged = { ...prev, ...next };
-      window.history.pushState(null, '', routeSearch(merged));
+      const url = routeSearch(merged);
+      if (opts?.replace) window.history.replaceState(null, '', url);
+      else window.history.pushState(null, '', url);
       return merged;
     });
   }, []);
@@ -163,7 +308,7 @@ function Chrome({
 }: {
   user: AuthUser;
   route: Route;
-  go: (next: Partial<Route>) => void;
+  go: (next: Partial<Route>, opts?: { replace?: boolean }) => void;
   onSignOut: () => void;
 }) {
   const { line, loading, error } = useLive();
@@ -269,27 +414,71 @@ function Chrome({
           {route.view === 'readings' && (
             <ReadingsScreen
               period={period}
+              listing={route.readingsListing}
+              onListingChange={(l) => go({
+                readingsListing: l,
+                readingsPage: 1,
+                // Manually switching what to list is a distinct choice from
+                // clearing the deep-linked outside-limits filter via its own
+                // chip below — see ReadingsScreen's note on `outsideOnly`.
+                // inspectionRejects carries no such clash: it only ever
+                // seeded this screen's default listing.
+                readingsFilter: route.readingsFilter === 'outsideLimits' ? null : route.readingsFilter,
+              })}
+              station={route.station}
+              onStationChange={(v) => go({ station: v, readingsPage: 1 })}
+              states={route.readingsStates}
+              onStatesChange={(v) => go({ readingsStates: v, readingsPage: 1 })}
+              page={route.readingsPage}
+              onPageChange={(pg) => go({ readingsPage: pg }, { replace: true })}
               initialFilter={route.readingsFilter}
-              onFilterChange={(f) => go({ readingsFilter: f })}
+              onFilterChange={(f) => go({ readingsFilter: f, readingsPage: 1 })}
               onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
               canExport={rank >= EXPORT_RANK}
             />
           )}
 
-          {route.view === 'report' && <ReportScreen period={period} user={user} />}
+          {route.view === 'report' && (
+            <ReportScreen
+              period={period}
+              user={user}
+              type={route.reportType}
+              onTypeChange={(t) => go({ reportType: t })}
+              filters={{ shift: route.reportShift ?? undefined, station: route.station ?? undefined, product: route.product ?? undefined }}
+              onShiftChange={(sh) => go({ reportShift: sh })}
+              onStationChange={(v) => go({ station: v })}
+              onProductChange={(v) => go({ product: v })}
+            />
+          )}
 
           {route.view === 'weight' && (
             <WeightScreen
               period={period}
+              mode={route.weightMode}
+              onModeChange={(m) => go({ weightMode: m })}
+              chartStation={route.station}
+              onChartStationChange={(v) => go({ station: v })}
               onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
-              onSeeOutside={() => go({ view: 'readings', readingsFilter: 'outsideLimits' })}
+              onSeeOutside={() => go({
+                view: 'readings', readingsFilter: 'outsideLimits',
+                readingsListing: 'cones', readingsStates: [], readingsPage: 1,
+              })}
             />
           )}
 
           {route.view === 'rejects' && (
             <RejectsScreen
               period={period}
-              onSeeCones={() => go({ view: 'readings', readingsFilter: 'inspectionRejects' })}
+              station={route.station}
+              onStationChange={(v) => go({ station: v })}
+              product={route.product}
+              onProductChange={(v) => go({ product: v })}
+              code={route.rejectsCode}
+              onCodeChange={(c, opts) => go({ rejectsCode: c }, opts)}
+              onSeeCones={() => go({
+                view: 'readings', readingsFilter: 'inspectionRejects',
+                readingsListing: 'inspectionRejects', readingsStates: [], readingsPage: 1,
+              })}
               onSeeStations={() => go({ view: 'weight' })}
               onOpenReason={(r) => go({ sheet: { kind: 'reason', id: reasonIdOf({ ...r, rejectType: r.rejectType as 'quality' | 'weight' }) } })}
               canName={rank >= ENGINEER_RANK}
@@ -302,6 +491,10 @@ function Chrome({
           {route.view === 'sacks' && (
             <SacksScreen
               period={period}
+              unit={route.sacksUnit}
+              onUnitChange={(u) => go({ sacksUnit: u })}
+              page={route.sacksPage}
+              onPageChange={(pg) => go({ sacksPage: pg }, { replace: true })}
               canRecord={rank >= ENGINEER_RANK}
               onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
               onOpenDay={(day) => go({ sheet: { kind: 'stock', id: day } })}
@@ -346,7 +539,11 @@ function Chrome({
             onClose={() => go({ sheet: null })}
             // Readings has no reason filter (Phase 5): the link narrows to the
             // day and the inspection-reject listing, and says so on the sheet.
-            onOpenRegister={(day) => go({ view: 'readings', readingsFilter: 'inspectionRejects', period: { key: 'pick', picked: { from: day, to: day } }, sheet: null })}
+            onOpenRegister={(day) => go({
+              view: 'readings', readingsFilter: 'inspectionRejects',
+              readingsListing: 'inspectionRejects', readingsStates: [], readingsPage: 1,
+              period: { key: 'pick', picked: { from: day, to: day } }, sheet: null,
+            })}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
           />
         )}

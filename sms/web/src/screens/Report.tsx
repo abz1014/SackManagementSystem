@@ -18,14 +18,22 @@
  *  - one sentence under the sack totals explaining why sack stock per
  *    machine is missing.
  *
- * The report type lives in this screen's own state, not the URL: the
- * global period control is the one period control, and App.tsx carries no
- * report parameter (Phase 8 adds nothing there).
+ * Roadmap Phase 2b (16 Sep 2026): the report type and its filters now DO live
+ * in the URL — a user who picks "Rejects" and pastes the link used to send a
+ * colleague to Daily instead, the worst of the ten defects that phase fixed.
+ * The type is App.tsx's `rt`; the shift override is `rsh`; station and
+ * product are the SHARED `st`/`pr` keys Weight's chart selector and Readings'
+ * station chip also read and write (see App.tsx's Route note). Switching
+ * type no longer prunes a filter the new type does not take — `acceptsFilter`
+ * already keeps it out of both the query (`queryFor`) and the chip row below,
+ * so there is nothing left for pruning to protect, and NOT pruning is what
+ * lets the shared station/product survive a type change instead of a report
+ * silently wiping a selection Weight or Rejects still wants.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { usePolling, useLive } from '../lib/live';
 import { W } from '../lib/words';
-import type { Period } from '../lib/period';
+import type { Period, ShiftCode } from '../lib/period';
 import { Block, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
 import { fmtDayLong, fmtInt } from '../lib/fmt';
 import {
@@ -33,7 +41,7 @@ import {
   type AuthUser, type ProductOption, type ReportFilters, type ReportHeader, type ReportResponse, type ReportType, type StationRow,
 } from '../api';
 import { distinctProductLabels } from '../lib/productLabel';
-import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, filtersFor, pollKey, queryFor, REPORT_MIN_RANK } from './report/model';
+import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_MIN_RANK } from './report/model';
 import { PrintHead, generatedLine } from './report/PrintHead';
 import { fmtDayShort } from './report/shared';
 import { DailySection } from './report/Daily';
@@ -47,11 +55,27 @@ import { CalibrationSection } from './report/Calibration';
 import { SummarySection } from './report/Summary';
 import { MachineProductSection } from './report/MachineProduct';
 
-export function ReportScreen({ period, user }: { period: Period; user: AuthUser }) {
+export function ReportScreen({
+  period,
+  user,
+  type,
+  onTypeChange,
+  filters,
+  onShiftChange,
+  onStationChange,
+  onProductChange,
+}: {
+  period: Period;
+  user: AuthUser;
+  type: ReportType;
+  onTypeChange: (t: ReportType) => void;
+  filters: ReportFilters;
+  onShiftChange: (s: ShiftCode | undefined) => void;
+  onStationChange: (v: number | null) => void;
+  onProductChange: (v: number | null) => void;
+}) {
   const { line, asOf } = useLive();
   const rank = ROLE_RANK[user.role] ?? 1;
-  const [type, setType] = useState<ReportType>('daily');
-  const [filters, setFilters] = useState<ReportFilters>({});
   const allowed = FILTERS_BY_TYPE[type];
 
   // Station names and the product list, for the filter chips. Fetched once
@@ -70,12 +94,6 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
     period.live ? 60_000 : 10 * 60_000,
     `${pollKey(type, q)}:${canRead ? 'ok' : 'no'}`,
   );
-
-  // Changing the type keeps every filter it accepts and drops the rest.
-  const choose = (t: ReportType) => {
-    setType(t);
-    setFilters((f) => filtersFor(t, f));
-  };
 
   // usePolling keeps the LAST GOOD answer while a new key loads, so for a
   // moment after the type changes `r.data` is the previous report. Only a
@@ -129,7 +147,7 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
             chosen type accepts — never one it would refuse. */}
         <div className="row no-print" style={{ marginTop: 18 }} role="group" aria-label={W.reports.selectorLabel}>
           {REPORT_TYPES.map((t) => (
-            <button key={t} type="button" className={`chip${t === type ? ' on' : ''}`} aria-pressed={t === type} onClick={() => choose(t)}>
+            <button key={t} type="button" className={`chip${t === type ? ' on' : ''}`} aria-pressed={t === type} onClick={() => onTypeChange(t)}>
               {W.reports.type[t]}
             </button>
           ))}
@@ -142,7 +160,7 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
                 <select
                   value={filters.shift ?? ''}
                   aria-label={W.reports.filterShift}
-                  onChange={(e) => setFilters((f) => ({ ...f, shift: (e.target.value || undefined) as ReportFilters['shift'] }))}
+                  onChange={(e) => onShiftChange((e.target.value || undefined) as ReportFilters['shift'])}
                   style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
                 >
                   <option value="">{period.shift ? W.shiftName[period.shift] : W.reports.all}</option>
@@ -158,7 +176,7 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
                 <select
                   value={filters.station ?? ''}
                   aria-label={W.reports.filterStation}
-                  onChange={(e) => setFilters((f) => ({ ...f, station: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                  onChange={(e) => onStationChange(e.target.value === '' ? null : Number(e.target.value))}
                   style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
                 >
                   <option value="">{W.reports.all}</option>
@@ -174,7 +192,7 @@ export function ReportScreen({ period, user }: { period: Period; user: AuthUser 
                 <select
                   value={filters.product ?? ''}
                   aria-label={W.reports.filterProduct}
-                  onChange={(e) => setFilters((f) => ({ ...f, product: e.target.value === '' ? undefined : Number(e.target.value) }))}
+                  onChange={(e) => onProductChange(e.target.value === '' ? null : Number(e.target.value))}
                   style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
                 >
                   <option value="">{W.reports.all}</option>

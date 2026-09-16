@@ -23,7 +23,7 @@
  * the reading's own product beside it. Nothing about a cone's state is
  * decided in this file.
  */
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
@@ -44,6 +44,7 @@ export const PAGE_SIZE = 100;
 // reject_event rows, cones the inspection stations threw out before they
 // were ever weighed as a cone_event row at all.
 export type Listing = 'cones' | 'sacks' | 'rejected' | 'inspectionRejects';
+export const LISTINGS: readonly Listing[] = ['cones', 'sacks', 'rejected', 'inspectionRejects'];
 
 /** What each listing asks the register for. */
 function queryFor(
@@ -84,12 +85,37 @@ function queryFor(
 
 export function ReadingsScreen({
   period,
+  listing,
+  onListingChange,
+  station,
+  onStationChange,
+  states,
+  onStatesChange,
+  page,
+  onPageChange,
   initialFilter,
   onFilterChange,
   onOpenReading,
   canExport,
 }: {
   period: Period;
+  /**
+   * Roadmap Phase 2b (16 Sep 2026): what to list, the station and state
+   * chips, and the page all live in the URL now (App.tsx's `route`), not in
+   * this component — a refresh or a pasted link used to lose all four.
+   * Controlled the same way the period is: a value and a setter, no local
+   * mirror, so the address bar and the screen cannot disagree.
+   */
+  listing: Listing;
+  onListingChange: (l: Listing) => void;
+  station: number | null;
+  onStationChange: (v: number | null) => void;
+  /** The state chips (Phase 4). Empty = every state. Cones only; the other
+   *  listings have no classification and the chips are not shown for them. */
+  states: ConeState[];
+  onStatesChange: (v: ConeState[]) => void;
+  page: number;
+  onPageChange: (p: number) => void;
   /**
    * Arrives set when Weight's disagreement banner, the Home attention list,
    * or Rejects' "see the rejected cones" link opened this screen — finding
@@ -102,24 +128,20 @@ export function ReadingsScreen({
   onOpenReading: (type: RegisterType, id: string | number) => void;
   canExport: boolean;
 }) {
-  const [listing, setListing] = useState<Listing>(initialFilter === 'inspectionRejects' ? 'inspectionRejects' : 'cones');
   // DERIVED from the URL, never local state. As local state it desynced: the
   // chip's Clear button and the listing toggle both dropped the filter from
   // the view while `?rf=outsideLimits` stayed in the address bar, so a
   // refresh — or the link a manager pasted to someone else — silently
   // reapplied a filter the header no longer mentioned.
   const outsideOnly = initialFilter === 'outsideLimits';
-  const [station, setStation] = useState<number | null>(null);
-  // The state chips (Phase 4). Empty = every state. Cones only; the other
-  // listings have no classification and the chips are not shown for them.
-  const [states, setStates] = useState<ConeState[]>([]);
-  const [page, setPage] = useState(1);
   // Finding H12 (Sep 2026 audit): narrowing the global period while parked on
   // a later page used to show a truthful, nonzero header count over a
   // visibly empty table, with the pager hidden because the new, smaller
-  // total no longer needed it.
+  // total no longer needed it. Replace, not push: this is a correction the
+  // period change makes on the reader's behalf, not a choice of its own.
   useEffect(() => {
-    setPage(1);
+    if (page !== 1) onPageChange(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period.from, period.to, period.shift]);
   const { line, asOf } = useLive();
   const health = assessHealth(line);
@@ -155,15 +177,6 @@ export function ReadingsScreen({
   const total = rows.data?.data.total ?? 0;
   const rejectedTotal = rejected.data?.data.total ?? 0;
 
-  const setListingReset = (l: Listing) => {
-    setListing(l);
-    setPage(1);
-    // A deep-linked filter is a one-shot arrival, not a standing preference —
-    // manually switching what to list is a distinct choice from clearing it
-    // via the chip below. Goes through the URL so the two cannot disagree.
-    if (outsideOnly) onFilterChange?.(null);
-  };
-
   return (
     <>
       {/* The same print header the reports carry (roadmap Phase 8, 15 Sep
@@ -189,7 +202,10 @@ export function ReadingsScreen({
               <Toggle
                 label="What to list"
                 value={listing}
-                onChange={setListingReset}
+                // Page-reset and clearing a stale outside-limits deep link
+                // are both baked into App.tsx's onListingChange, in the same
+                // history entry — see the Route note there.
+                onChange={onListingChange}
                 options={[
                   { key: 'cones', label: W.readings.cones },
                   { key: 'sacks', label: W.readings.sacks },
@@ -201,19 +217,13 @@ export function ReadingsScreen({
                 <StationChip
                   stations={stationList}
                   value={station}
-                  onChange={(v) => {
-                    setStation(v);
-                    setPage(1);
-                  }}
+                  onChange={onStationChange}
                 />
               )}
               {listing === 'cones' && !outsideOnly && (
                 <StateChips
                   value={states}
-                  onChange={(v) => {
-                    setStates(v);
-                    setPage(1);
-                  }}
+                  onChange={onStatesChange}
                 />
               )}
               {outsideOnly && (
@@ -222,10 +232,7 @@ export function ReadingsScreen({
                   <button
                     type="button"
                     className="linkish"
-                    onClick={() => {
-                      onFilterChange?.(null);
-                      setPage(1);
-                    }}
+                    onClick={() => onFilterChange?.(null)}
                   >
                     {W.readings.clear}
                   </button>
@@ -272,7 +279,7 @@ export function ReadingsScreen({
             </span>
             <span>
               {W.readings.perPage(PAGE_SIZE, fmtInt(total))}
-              <Pager page={page} total={total} onPage={setPage} />
+              <Pager page={page} total={total} onPage={onPageChange} />
             </span>
           </p>
         </>

@@ -77,24 +77,53 @@ export interface ReasonRef {
 
 export function RejectsScreen({
   period,
+  station,
+  onStationChange,
+  product,
+  onProductChange,
+  code,
+  onCodeChange,
   onSeeCones,
   onSeeStations,
   onOpenReason,
   canName,
 }: {
   period: Period;
+  /**
+   * Roadmap Phase 2b (16 Sep 2026), overruling the comment this replaced.
+   *
+   * That comment kept these local on the theory that they were "a working
+   * narrowing of this screen, not a period a colleague should inherit from a
+   * pasted link — that is the global period's job." The distinction does not
+   * hold up: station and product are not periods, and every sibling screen
+   * that narrows by the same two things — Report's filter chips, Weight's
+   * chart-station selector, Readings' station chip — is gaining a URL key in
+   * this same phase for the identical reason (Phase 1's frontend audit).
+   * Singling Rejects out would have meant a manager's "station 7 is rising"
+   * link landing everyone on the unfiltered chart, the exact defect this
+   * phase exists to close, and it would have left three-going-on-four
+   * screen-local names for "which station" instead of the ONE the Phase 2a
+   * IA review asked for (`audit/IA-PROPOSAL.md` §7). Station and product are
+   * the SHARED `st`/`pr` keys — see App.tsx's Route note; setting one here
+   * and switching to Weight keeps the same station in view. `code` is not
+   * shared (no other screen has a reject reason to pick) but is exactly as
+   * linkable, and already degrades safely: the effect below still drops a
+   * code the period's reasons can no longer name, which is the "unknown
+   * value falls back to the default" rule this phase requires, not a
+   * consequence of being local state.
+   */
+  station: number | null;
+  onStationChange: (v: number | null) => void;
+  product: number | null;
+  onProductChange: (v: number | null) => void;
+  code: string | null;
+  onCodeChange: (c: string | null, opts?: { replace?: boolean }) => void;
   onSeeCones: () => void;
   onSeeStations: () => void;
   onOpenReason: (r: ReasonRef) => void;
   canName: boolean;
 }) {
   const { line } = useLive();
-  // The drilldown controls. Local state, not the URL: they are a working
-  // narrowing of this screen, not a period a colleague should inherit from a
-  // pasted link — that is the global period's job.
-  const [station, setStation] = useState<number | null>(null);
-  const [product, setProduct] = useState<number | null>(null);
-  const [code, setCode] = useState<string | null>(null);
   // Rarely changes (it moves once a day at most), so a slow heartbeat is
   // plenty. Finding H6 (Sep 2026 audit): without this, trailingWindow() below
   // always claimed the full 14 days regardless of how much history actually
@@ -186,8 +215,10 @@ export function RejectsScreen({
   const reasonRows = reasons.data?.data.reasons ?? [];
   const activeReason = code ? reasonRows.find((r) => rejectCodeParam(r) === code) ?? null : null;
   useEffect(() => {
-    if (code && reasons.data && !activeReason) setCode(null);
-  }, [code, reasons.data, activeReason]);
+    // Replace, not push: an automatic correction the period's own answer
+    // makes, not a choice the reader took — see App.tsx's push/replace rule.
+    if (code && reasons.data && !activeReason) onCodeChange(null, { replace: true });
+  }, [code, reasons.data, activeReason, onCodeChange]);
 
   if (!win) return <Loading />;
 
@@ -269,12 +300,12 @@ export function RejectsScreen({
           <Toolbar
             left={
               <>
-                <StationChip stations={stations.data?.stations ?? []} value={station} onChange={setStation} />
-                <ProductChip products={products.data?.products ?? []} value={product} onChange={setProduct} />
+                <StationChip stations={stations.data?.stations ?? []} value={station} onChange={onStationChange} />
+                <ProductChip products={products.data?.products ?? []} value={product} onChange={onProductChange} />
                 {code && (
                   <span className="chip on">
                     {M.codeChip(activeReason ? reasonName(activeReason) : code)}{' '}
-                    <button type="button" className="linkish x" onClick={() => setCode(null)} aria-label={`${M.clearCode} ${M.codeChip('')}`}>
+                    <button type="button" className="linkish x" onClick={() => onCodeChange(null)} aria-label={`${M.clearCode} ${M.codeChip('')}`}>
                       ×
                     </button>
                   </span>
@@ -336,7 +367,7 @@ export function RejectsScreen({
                 loading={reasons.loading && !reasons.data}
                 canName={canName}
                 active={code}
-                onChoose={(r) => setCode((c) => (c === rejectCodeParam(r) ? null : rejectCodeParam(r)))}
+                onChoose={(r) => onCodeChange(code === rejectCodeParam(r) ? null : rejectCodeParam(r))}
                 onNamed={reasons.refresh}
               />
             )}

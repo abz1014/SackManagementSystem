@@ -38,18 +38,28 @@ import {
   type StockLedgerData,
 } from '../api';
 
-type Unit = 'sacks' | 'kg';
+/** Roadmap Phase 2b (16 Sep 2026): the ledger's unit, in the URL as `su`. */
+export type SackUnit = 'sacks' | 'kg';
 
 const periodLabel = (p: Period): string =>
   p.from === p.to ? fmtDayLong(p.from) : `${fmtDayLong(p.from)} to ${fmtDayLong(p.to)}`;
 
 export function SacksScreen({
   period,
+  unit,
+  onUnitChange,
+  page,
+  onPageChange,
   canRecord,
   onOpenReading,
   onOpenDay,
 }: {
   period: Period;
+  unit: SackUnit;
+  onUnitChange: (u: SackUnit) => void;
+  /** The history register's page — see `History` below. */
+  page: number;
+  onPageChange: (p: number) => void;
   /** Rank 3 — the developer's default until IFL sets the rank for a stock entry. */
   canRecord: boolean;
   onOpenReading: (type: RegisterType, id: string | number) => void;
@@ -64,7 +74,6 @@ export function SacksScreen({
     `sacks:summary:${key}`,
   );
   const ledger = usePolling(() => getSackStock({ from: period.from, to: period.to, tsTo: period.tsTo }), slow, `sacks:stock:${key}`);
-  const [unit, setUnit] = useState<Unit>('sacks');
 
   const s = summary.data?.data ?? null;
   const headline = !s
@@ -117,7 +126,7 @@ export function SacksScreen({
           <Ledger
             d={ledger.data.data}
             unit={unit}
-            onUnit={setUnit}
+            onUnit={onUnitChange}
             canRecord={canRecord}
             onRecorded={() => { ledger.refresh(); summary.refresh(); }}
             onOpenDay={onOpenDay}
@@ -125,7 +134,7 @@ export function SacksScreen({
         )}
       </Block>
 
-      <History period={period} onOpenReading={onOpenReading} />
+      <History period={period} page={page} onPageChange={onPageChange} onOpenReading={onOpenReading} />
     </>
   );
 }
@@ -201,14 +210,14 @@ function GroupTable({
 
 /* ----------------------------------------------------------------- ledger */
 
-const flow = (f: LedgerFlow, unit: Unit): string =>
+const flow = (f: LedgerFlow, unit: SackUnit): string =>
   unit === 'sacks' ? fmtInt(f.sacks) : f.kg === 0 ? '0' : f.kg.toLocaleString('en-US', { maximumFractionDigits: 1 });
-const signed = (f: LedgerFlow, unit: Unit): string => {
+const signed = (f: LedgerFlow, unit: SackUnit): string => {
   const v = unit === 'sacks' ? f.sacks : f.kg;
   if (v === 0) return '0';
   return `${v > 0 ? '+' : '−'}${flow({ sacks: Math.abs(f.sacks), kg: Math.abs(f.kg) }, unit)}`;
 };
-const unitWord = (n: number, unit: Unit): string => (unit === 'sacks' ? `${fmtInt(n)} ${W.sacks.figSacks}` : `${n.toLocaleString('en-US', { maximumFractionDigits: 1 })} ${W.sacks.figKg}`);
+const unitWord = (n: number, unit: SackUnit): string => (unit === 'sacks' ? `${fmtInt(n)} ${W.sacks.figSacks}` : `${n.toLocaleString('en-US', { maximumFractionDigits: 1 })} ${W.sacks.figKg}`);
 
 function Ledger({
   d,
@@ -219,8 +228,8 @@ function Ledger({
   onOpenDay,
 }: {
   d: StockLedgerData;
-  unit: Unit;
-  onUnit: (u: Unit) => void;
+  unit: SackUnit;
+  onUnit: (u: SackUnit) => void;
   canRecord: boolean;
   onRecorded: () => void;
   onOpenDay: (day: string) => void;
@@ -322,7 +331,7 @@ function Ledger({
   );
 }
 
-function DayRow({ day, unit, hasCounts, onOpen }: { day: LedgerDay; unit: Unit; hasCounts: boolean; onOpen: () => void }) {
+function DayRow({ day, unit, hasCounts, onOpen }: { day: LedgerDay; unit: SackUnit; hasCounts: boolean; onOpen: () => void }) {
   const quiet = day.movements === 0 && day.weighed.sacks === 0;
   return (
     <tr className={`click${quiet ? ' mut' : ''}`} tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}>
@@ -428,8 +437,19 @@ function MovementForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =
 
 /* ---------------------------------------------------------------- history */
 
-function History({ period, onOpenReading }: { period: Period; onOpenReading: (type: RegisterType, id: string | number) => void }) {
-  const [page, setPage] = useState(1);
+function History({
+  period,
+  page,
+  onPageChange,
+  onOpenReading,
+}: {
+  period: Period;
+  /** Roadmap Phase 2b (16 Sep 2026): lifted to the URL (`sp`), so this
+   *  register's page survives a refresh or a pasted link like the rest. */
+  page: number;
+  onPageChange: (p: number) => void;
+  onOpenReading: (type: RegisterType, id: string | number) => void;
+}) {
   const { line } = useLive();
   const health = assessHealth(line);
   const stale = health.kind !== 'ok';
@@ -469,7 +489,7 @@ function History({ period, onOpenReading }: { period: Period; onOpenReading: (ty
             </span>
             <span>
               {W.readings.perPage(PAGE_SIZE, fmtInt(total))}
-              <Pager page={page} total={total} onPage={setPage} />
+              <Pager page={page} total={total} onPage={onPageChange} />
             </span>
           </p>
         </>

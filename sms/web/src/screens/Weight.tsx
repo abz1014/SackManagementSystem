@@ -42,20 +42,34 @@ import {
   type SpcData, type StationRow, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
+/** Roadmap Phase 2b (16 Sep 2026): the chart toggle, in the URL as `wm`. */
+export type WeightMode = 'time' | 'dist';
+
 export function WeightScreen({
   period,
+  mode,
+  onModeChange,
+  chartStation,
+  onChartStationChange,
   onOpenStation,
   onSeeOutside,
 }: {
   period: Period;
+  mode: WeightMode;
+  onModeChange: (m: WeightMode) => void;
+  /**
+   * One station's stream, or the whole line (roadmap Phase 4, 14 Sep 2026).
+   * The chart only: the figures above it and the station table below stay
+   * line-wide, so the selector cannot make the headline describe one scale.
+   * SHARED with Readings, Report and Rejects (Phase 2b) — see App.tsx's
+   * Route note: it is the same "which station" a link should carry between
+   * them, not a Weight-only value.
+   */
+  chartStation: number | null;
+  onChartStationChange: (v: number | null) => void;
   onOpenStation: (station: number) => void;
   onSeeOutside: () => void;
 }) {
-  const [mode, setMode] = useState<'time' | 'dist'>('time');
-  // One station's stream, or the whole line (roadmap Phase 4, 14 Sep 2026).
-  // The chart only: the figures above it and the station table below stay
-  // line-wide, so the selector cannot make the headline describe one scale.
-  const [chartStation, setChartStation] = useState<number | null>(null);
 
   const st = usePolling(
     () =>
@@ -197,7 +211,7 @@ export function WeightScreen({
           <Toggle
             label="Chart"
             value={mode}
-            onChange={setMode}
+            onChange={onModeChange}
             options={[
               { key: 'time', label: W.weight.overTime },
               { key: 'dist', label: W.weight.distribution },
@@ -209,7 +223,7 @@ export function WeightScreen({
             <select
               value={chartStation ?? ''}
               aria-label={W.cone.stationSelect}
-              onChange={(e) => setChartStation(e.target.value === '' ? null : Number(e.target.value))}
+              onChange={(e) => onChartStationChange(e.target.value === '' ? null : Number(e.target.value))}
               style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
             >
               <option value="">{W.cone.wholeLine}</option>
