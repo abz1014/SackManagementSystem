@@ -28,9 +28,35 @@ export interface PollState<T> {
 }
 
 /**
+ * The one decision this file makes about stale data, pulled out so it can be
+ * unit-tested without rendering the hook: given the key the last data was
+ * fetched under and the key now in effect, may that old data still be shown?
+ *
+ * Same key (a routine poll tick, a manual refresh, a tab regaining focus) —
+ * yes: it is the last good reading of the thing still on screen, and a
+ * transient failure shouldn't blank a live display over it.
+ *
+ * Different key — no, regardless of why the key changed (new period, new
+ * station, new report). The old value describes a different question than
+ * the one now on screen; keeping it around lets a failed fetch present it as
+ * the answer to the new question, which is worse than an error state.
+ */
+export function keepDataAcrossKeyChange(prevKey: string | null, nextKey: string): boolean {
+  return prevKey === nextKey;
+}
+
+/**
  * Poll `fn` every `intervalMs`, keyed so a change of `key` starts a fresh
  * cycle. On error the last good data is kept and `error` is set: a stale
  * number with a warning beats a blank screen in front of a running line.
+ *
+ * That "keep the last good data" rule applies to a refetch of the SAME
+ * query only. When `key` itself changes, any data already held describes
+ * the previous key (the previous period/station/report), not the one now
+ * on screen — so it is cleared before the new key's first fetch runs. If
+ * that fetch fails, the screen sees `data: null, error: <message>` and
+ * renders its failure state instead of the old key's numbers under the new
+ * heading.
  */
 export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: string): PollState<T> {
   const [data, setData] = useState<T | null>(null);
@@ -40,11 +66,20 @@ export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: str
   const [tick, setTick] = useState(0);
   const fnRef = useRef(fn);
   fnRef.current = fn;
+  const prevKeyRef = useRef<string | null>(null);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+
+    if (!keepDataAcrossKeyChange(prevKeyRef.current, key)) {
+      setData(null);
+      setError(null);
+      setUpdatedAt(null);
+    }
+    prevKeyRef.current = key;
+
     const schedule = () => {
       timer = window.setTimeout(run, intervalMs);
     };
