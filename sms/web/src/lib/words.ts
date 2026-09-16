@@ -449,6 +449,32 @@ export const W = {
     adjustWhy: 'Why',
     save: 'Save',
     noTarget: 'No product target',
+    /* UX Phase 5 Brief 2 (16 Sep 2026), strings for the station table's own
+       per-station target (WeightStationRow.targetBasis) — pre-added here so
+       the Wave 3 worker on Weight.tsx/StationSheet.tsx does not need to open
+       this file. A station that ran more than one material in the window has
+       no single target: say so, not "unknown". */
+    mixedTarget: (n: number) => `No single target applies — ${n} materials ran here.`,
+    /* Sibling of `limitsChanged` above, for underneath the STATION TABLE
+       rather than the chart. */
+    limitsChangedTable: (n: number) =>
+      n === 1
+        ? 'The line-wide target’s limits changed once inside this window; stations show the version in force at its end.'
+        : `The line-wide target’s limits changed ${n} times inside this window; stations show the version in force at its end.`,
+    /* The line-wide Current Product itself changing (a new product_timeline entry), not just a limits revision on the same product. */
+    productChangedTable: (n: number) =>
+      n === 1
+        ? 'The line-wide Current Product changed once inside this window.'
+        : `The line-wide Current Product changed ${n} times inside this window.`,
+    /* A station whose readings carry no material_id at all (the July
+       generation) is judged against the line-wide product, not its own
+       material — say which basis applies. */
+    targetLineProduct: 'No material recorded for these readings — judged against the line-wide product instead.',
+    /* The sack weight chart (spc.ts returns source:'none' for sacks
+       deliberately): the product setpoint is a CONE weight in grams, so no
+       tolerance applies to a sack weight in kilograms. State the absence,
+       never a number. */
+    sackNoTarget: 'No product tolerance applies: the product target is a cone weight in grams, and this is a sack weight in kilograms.',
   } as const,
 
   /* --------------------------------------------------------------- rejects */
@@ -500,6 +526,11 @@ export const W = {
     byStationNote: 'opens the Weight station table, flagged stations first',
     perDay: 'Rejects per day',
     none: 'No cones were rejected in this period.',
+    /* UX Phase 5 Brief 2 (16 Sep 2026), pre-added for the Wave 3 worker on
+       Rejects.tsx: the Pareto's "vital few" sentence and its cumulative
+       column, so that worker never needs to open this file. */
+    vitalFew: (n: number, pct: string) => `${n} ${n === 1 ? 'reason accounts' : 'reasons account'} for ${pct} of rejects in this period.`,
+    cumulativePct: 'Cumulative %',
   } as const,
 
   /* ---------------------------------------------------------------- report */
@@ -1300,6 +1331,27 @@ export const W = {
     lineMean: (g: string) => `Line mean ${g}`,
     target: (g: string, label: string) => `target ${g} (${label})`,
     noTarget: 'no product target recorded',
+    /* UX Phase 5 Brief 2 (16 Sep 2026): the cone-weight report's one target
+       (U1) — printed with its product label and the instant it took effect,
+       never a bare number, and never a fabricated one when nothing was in
+       force. */
+    targetNone: 'No product was in force at the end of this period.',
+    targetSince: (instant: string) => `in force since ${instant}`,
+    limitsChangedInPeriod: (n: number) =>
+      n === 1
+        ? 'The target’s limits changed once inside this period; this is the version in force at its end.'
+        : `The target’s limits changed ${n} times inside this period; this is the version in force at its end.`,
+    /* Product report (U3): each row's own target, never borrowed from another product or the line-wide mirror. */
+    colTarget: 'Target',
+    targetNoProduct: 'No product',
+    targetNoLimits: 'No limits recorded',
+    /* Management summary (U5): a KPI whose delta would measure a coverage
+       gap, not a change in production, reads as an em dash with the reason
+       printed — never a percentage. */
+    notComparable: 'not comparable',
+    incomparableNote: 'Why some figures above read “not comparable”:',
+    productMix: 'Products run',
+    productMixNone: 'No product recorded on these readings.',
     /* Reject report. */
     reasons: 'Reasons',
     byDayCode: 'By day and reason',

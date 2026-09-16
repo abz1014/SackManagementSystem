@@ -5,7 +5,7 @@ import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ProductOption, ProductReportData } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';
-import { fmtG1, StateCells, StateHeads } from './shared';
+import { fmtG1, fmtSignedG, StateCells, StateHeads } from './shared';
 
 export function ProductSection({ d, products }: { d: ProductReportData; products: ProductOption[] }) {
   const rows = d.rows.filter((r) => r.cones > 0 || r.rejectedCones > 0 || r.sacks > 0);
@@ -44,6 +44,8 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
                 <th className="n">{W.reports.colWeighed}</th>
                 <th className="n">{W.reports.colMean}</th>
                 <th className="n">{W.reports.colSpread}</th>
+                <th className="n">{W.reports.colTarget}</th>
+                <th className="n">{W.reports.colVsTarget}</th>
                 <StateHeads />
                 <th className="n">{W.reports.colExcluded}</th>
               </tr>
@@ -60,6 +62,12 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
                   <td className="n">{fmtInt(r.weight.n)}</td>
                   <td className="n">{fmtG1(r.weight.avgG)}</td>
                   <td className="n">{fmtG1(r.weight.sdG)}</td>
+                  <td className="n">
+                    {r.target == null
+                      ? (r.productId == null ? W.reports.targetNoProduct : W.reports.targetNoLimits)
+                      : fmtG1(r.target.setpointG)}
+                  </td>
+                  <td className="n">{fmtSignedG(r.vsTargetG)}</td>
                   <StateCells s={r.states} />
                   <td className="n">{fmtInt(r.implausible)}</td>
                 </tr>

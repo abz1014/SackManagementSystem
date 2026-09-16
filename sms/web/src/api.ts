@@ -1612,11 +1612,36 @@ export interface WeightStationRow {
   /** Longest calendar-contiguous run of days the pattern rules had; a rule needing more could never have fired. */
   longestRun: number;
   projection: DriftProjection | null;
+  /**
+   * Where this row's target came from (UX Phase 5 Brief 1, unit U2, 16 Sep
+   * 2026): up to six materials can run concurrently on different machines
+   * (Sep 2026 data), so the line-wide target used to be applied to every
+   * station regardless of what it actually ran.
+   *  - 'station_material': this station ran exactly one material in the
+   *    window; the target is THAT material's own limits, in force at the
+   *    window's end.
+   *  - 'mixed': more than one material ran here in the window — there is no
+   *    single honest target, so `vsTargetG` is null and `materialsInWindow`
+   *    says how many it ran instead of a number that would silently average
+   *    two products' tolerances.
+   *  - 'line_product': every reading at this station carries no material_id
+   *    (the July generation). Falls back to the line-wide Current Product
+   *    timeline, exactly as coneState.ts does for the same readings.
+   */
+  targetBasis: 'station_material' | 'mixed' | 'line_product';
+  /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
+  materialsInWindow?: number;
 }
 
 export interface WeightStationsData {
   limits: { loG: number; hiG: number } | null;
   rules: NelsonRuleInfo[];
+  /** When the line-wide target (above) was last recorded (genuine UTC — fmtAppInstant). */
+  targetEffectiveFromUtc: string | null;
+  /** How many times the line-wide product's own limits changed inside the window (a version that BEGAN inside it). Null when there is no line-wide product at all. */
+  limitsChangedInWindow: number | null;
+  /** How many times the line-wide Current Product itself changed inside the window (a new product_timeline entry, not just a limits revision). */
+  productChangesInWindow: number;
 }
 
 export interface AttentionFinding {
@@ -1949,6 +1974,15 @@ export interface ProductReportRow extends ReportLine {
   weight: { n: number; avgG: number | null; sdG: number | null; minG: number | null; maxG: number | null };
   states: StateCounts;
   implausible: number;
+  /**
+   * UX Phase 5 Brief 1, unit U3 (16 Sep 2026): this product's own limits, in
+   * force at the period's end. Null for the NO_PRODUCT_GROUP row and for a
+   * product whose version carries no usable limits — never a borrowed
+   * line-wide or current-mirror number.
+   */
+  target: { setpointG: number; loG: number; hiG: number; inForceAtUtc: string; limitsChangedInPeriod: number } | null;
+  /** Signed grams of this row's own mean weight against its own target; null when `target` is null or the mean is unknown. */
+  vsTargetG: number | null;
 }
 export interface ProductReportData {
   period: ReportData['period'];
@@ -2012,7 +2046,9 @@ export interface RejectReportData {
 
 export interface ConeWeightReportData {
   period: ReportData['period'];
-  basis: 'as_recorded';
+  /** BUG FIX (UX Phase 5 Brief 2, 16 Sep 2026): the server relays `w.basis` from getWeights,
+   * which is the full Basis union, not the single literal this field used to carry. */
+  basis: Basis;
   cones: number;
   weighed: number;
   implausible: number;
@@ -2025,7 +2061,23 @@ export interface ConeWeightReportData {
   states: StateCounts | null;
   bucketSizeG: number;
   histogram: Bucket[];
-  target: { setpointG: number; source: 'current_product' | 'fallback'; label: string | null };
+  /**
+   * UX Phase 5 Brief 1, unit U1 (16 Sep 2026): the ONE target this report
+   * prints, taken from the same resolution the station table below uses —
+   * the line-wide product IN FORCE AT THE PERIOD'S END — never today's
+   * current product applied backwards over the whole period. `source` is
+   * 'none', never a fabricated number, when nothing was in force.
+   */
+  target: {
+    setpointG: number | null;
+    productId: number | null;
+    label: string | null;
+    /** When this target began applying (genuine UTC — fmtAppInstant). */
+    inForceAtUtc: string | null;
+    /** How many times this target's own limits changed inside the period. */
+    limitsChangedInPeriod: number;
+    source: 'in_force_at_period_end' | 'none';
+  };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
   lineMeanG: number | null;
   plausibility: { loG: number; hiG: number };
@@ -2093,13 +2145,33 @@ export interface KpiRow {
   current: number | null;
   prior: number | null;
   delta: { abs: number; pct: number | null } | null;
+  /**
+   * UX Phase 5 Brief 1, unit U5 (16 Sep 2026): whether `delta` is safe to
+   * read as a trend. False for a count-shaped KPI when the two periods'
+   * coverage differs materially (the record's 10 Jul - 5 Aug hole) — the
+   * delta would measure the coverage gap, not a change in production.
+   */
+  comparable: boolean;
+  /** Why `comparable` is false, printed rather than left for the reader to guess; null when comparable. */
+  incomparableReason: string | null;
   approval: 'awaiting';
 }
+
+/** One product's share of a period, for the product-mix comparison on the summary. */
+export interface ProductMixRow {
+  /** material_id, or null for readings that predate product recording. */
+  productId: number | null;
+  label: string;
+  cones: number;
+}
+
 export interface ManagementSummaryData {
   period: ReportData['period'];
   prior: { from: string; to: string };
   coverage: { current: ReportData['coverage']; prior: ReportData['coverage'] };
   kpis: KpiRow[];
+  /** Which products each period actually ran (UX Phase 5 Brief 1, unit U5) — a KPI marked comparable can still be comparing different products. */
+  productMix: { current: ProductMixRow[]; prior: ProductMixRow[] };
   verdict: { cones: number; sacks: number; sackWeightKg: number };
   approval: 'awaiting';
   note: string;

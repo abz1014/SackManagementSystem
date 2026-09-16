@@ -8,8 +8,8 @@
  */
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
-import { fmtDayLong, fmtSpan } from '../../lib/fmt';
-import type { KpiRow, ManagementSummaryData } from '../../api';
+import { fmtDayLong, fmtInt, fmtSpan } from '../../lib/fmt';
+import type { KpiRow, ManagementSummaryData, ProductMixRow } from '../../api';
 import { digitsFor, fmtDelta } from './model';
 
 function fmtValue(v: number | null, unit: KpiRow['unit']): string {
@@ -29,6 +29,10 @@ export function SummarySection({ d }: { d: ManagementSummaryData }) {
     );
   }
   const priorEmpty = d.coverage.prior.daysWithData === 0;
+  // U5: every incomparable row this call carries the same reason (it is
+  // derived from the two periods' coverage, not the individual KPI), so one
+  // note beneath the table explains all of them rather than repeating it.
+  const incomparableReason = d.kpis.find((k) => !k.comparable)?.incomparableReason ?? null;
   return (
     <>
       <Block first>
@@ -64,14 +68,71 @@ export function SummarySection({ d }: { d: ManagementSummaryData }) {
                   </td>
                   <td className="n">{fmtValue(k.current, k.unit)}</td>
                   <td className="n">{fmtValue(k.prior, k.unit)}</td>
-                  <td className="n">{k.unit === 'seconds' && k.delta ? `${k.delta.abs > 0 ? '+' : k.delta.abs < 0 ? '−' : ''}${fmtSpan(Math.abs(k.delta.abs))}` : fmtDelta(k.delta, digitsFor(k.unit))}</td>
+                  <td className="n">
+                    {k.comparable ? (
+                      k.unit === 'seconds' && k.delta
+                        ? `${k.delta.abs > 0 ? '+' : k.delta.abs < 0 ? '−' : ''}${fmtSpan(Math.abs(k.delta.abs))}`
+                        : fmtDelta(k.delta, digitsFor(k.unit))
+                    ) : (
+                      <span title={k.incomparableReason ?? undefined}>{W.reports.notComparable}</span>
+                    )}
+                  </td>
                   <td className="mut sm">{k.approval === 'awaiting' ? W.reports.approval : k.approval}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {incomparableReason && (
+          <p className="mut sm" style={{ marginTop: 10 }}>{W.reports.incomparableNote} {incomparableReason}</p>
+        )}
       </Block>
+
+      <Block label={W.reports.productMix}>
+        <div className="tw">
+          <table>
+            <thead>
+              <tr>
+                <th>{W.reports.colProduct}</th>
+                <th className="n">{W.reports.thisPeriod}</th>
+                <th className="n">{W.reports.priorPeriod}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <ProductMixRows current={d.productMix.current} prior={d.productMix.prior} />
+            </tbody>
+          </table>
+        </div>
+      </Block>
+    </>
+  );
+}
+
+/** The union of products either period ran, each period's own cone count beside it — so a reader can see whether a mean-weight comparison is even comparing the same products. */
+function ProductMixRows({ current, prior }: { current: ProductMixRow[]; prior: ProductMixRow[] }) {
+  const curOf = new Map(current.map((m) => [m.productId, m]));
+  const priorOf = new Map(prior.map((m) => [m.productId, m]));
+  const ids = [...new Set([...curOf.keys(), ...priorOf.keys()])];
+  if (ids.length === 0) {
+    return (
+      <tr>
+        <td colSpan={3} className="mut sm">{W.reports.productMixNone}</td>
+      </tr>
+    );
+  }
+  return (
+    <>
+      {ids.map((id) => {
+        const c = curOf.get(id);
+        const p = priorOf.get(id);
+        return (
+          <tr key={id ?? 'none'}>
+            <td>{(c ?? p)?.label}</td>
+            <td className="n">{c ? fmtInt(c.cones) : '—'}</td>
+            <td className="n">{p ? fmtInt(p.cones) : '—'}</td>
+          </tr>
+        );
+      })}
     </>
   );
 }

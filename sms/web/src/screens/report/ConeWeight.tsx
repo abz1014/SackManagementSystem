@@ -1,7 +1,7 @@
 /** Cone weight report: mean, median, spread, states, the distribution and the stations. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
-import { fmtInt } from '../../lib/fmt';
+import { fmtAppInstant, fmtInt } from '../../lib/fmt';
 import { stationLabel, type ConeWeightReportData, type StationRow } from '../../api';
 import { fmtG1, fmtSignedG, Histogram, statesLine } from './shared';
 
@@ -20,7 +20,14 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
         <div className="figs">
           <div>
             <b className="fig-val">{d.meanG == null ? '—' : Math.round(d.meanG).toLocaleString('en-US')}<span className="fig-unit">g {W.reports.meanLabel}</span></b>
-            <span className="fig-note">{W.reports.target(fmtG1(d.target.setpointG), d.target.label ?? d.target.source)}</span>
+            {d.target.source === 'none' ? (
+              <span className="fig-note">{W.reports.targetNone}</span>
+            ) : (
+              <span className="fig-note">
+                {W.reports.target(fmtG1(d.target.setpointG), d.target.label ?? W.reports.wholeLine)}
+                {d.target.inForceAtUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.target.inForceAtUtc))}`}
+              </span>
+            )}
           </div>
           <div>
             <b className="fig-val">{d.medianG == null ? '—' : Math.round(d.medianG).toLocaleString('en-US')}<span className="fig-unit">g {W.reports.medianLabel}</span></b>
@@ -33,6 +40,9 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
         </div>
         <p className="mut sm" style={{ marginTop: 14 }}>{W.reports.readingsExcluded(fmtInt(d.cones), fmtInt(d.implausible))}.</p>
         {d.states && <p className="mut sm" style={{ marginTop: 6 }}>{W.reports.states}: {statesLine(d.states)}.</p>}
+        {d.target.limitsChangedInPeriod > 0 && (
+          <p className="mut sm" style={{ marginTop: 6 }}>{W.reports.limitsChangedInPeriod(d.target.limitsChangedInPeriod)}</p>
+        )}
         <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>
       </Block>
 
