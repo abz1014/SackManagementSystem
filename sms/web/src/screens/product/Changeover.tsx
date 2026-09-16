@@ -34,13 +34,10 @@
  * everything else execute would call — the plan step for either says so via
  * its own `proc` field, never asserted as already authorised here).
  *
- * MISSING STRING, REPORTED RATHER THAN HARDCODED (per this brief's own
- * instruction): the stated sentence explaining that a new tube type is not
- * offered here has no home in `W.product.changeover` or anywhere else in
- * `words.ts` — searched, not present. Rather than invent prose in this file,
- * the tube-type picker below is ID-only (behaviour is correct) but carries
- * no explanatory sentence; see this file's own report for the exact key to
- * add (suggested: `W.product.changeover.tubeExistingOnly`).
+ * TUBE-TYPE EXPLANATION (added UX Phase 6 Brief 3, 16 Sep 2026):
+ * `W.product.changeover.tubeExistingOnly` renders beside the picker. It does
+ * not claim PDAS would reject a new tube type — only that this system cannot
+ * call `AddTubeType` correctly yet (its parameter name is unverified).
  *
  * PACK SCHEMA HAS NO PICKER, DELIBERATELY, NOT AS A GAP: the SOP
  * (`services/changeover.ts` header) says PackSchemaId is always 1, and
@@ -356,14 +353,14 @@ function PickersForm({
 
       <label className="field">
         <span>{W.product.tubeType}</span>
-        {/* ID-only: see the file header on why AddTubeType is not offered here,
-            and on the explanatory sentence this field is missing a string for. */}
+        {/* ID-only: see the file header on why AddTubeType is not offered here. */}
         <select value={tubeTypeId} onChange={(e) => setTubeTypeId(e.target.value === '' ? '' : Number(e.target.value))}>
           <option value="">—</option>
           {refs.tubeTypes.map((t) => (
             <option key={t.id} value={t.id}>{t.name}{t.tubeWeightG != null ? ` (${fmtG(t.tubeWeightG)})` : ''}</option>
           ))}
         </select>
+        <span className="mut sm">{W.product.changeover.tubeExistingOnly}</span>
       </label>
 
       <label className="field"><span>{W.product.setpointG}</span>
@@ -378,11 +375,11 @@ function PickersForm({
       <label className="field"><span>{W.product.desc1}</span>
         <input value={lot} onChange={(e) => setLot(e.target.value)} />
       </label>
-      <label className="field"><span>{W.product.colour}</span>
+      <label className="field"><span>{W.product.ppColour}</span>
         <input value={ppColour} onChange={(e) => setPpColour(e.target.value)} />
       </label>
 
-      <label className="field"><span>{W.product.colour}</span>
+      <label className="field"><span>{W.product.sackColour}</span>
         <input value={sackColour} onChange={(e) => setSackColour(e.target.value)} />
       </label>
 

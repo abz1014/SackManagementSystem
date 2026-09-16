@@ -1550,7 +1550,7 @@ export interface ReconciliationData {
   basis: 'as_recorded';
   note: string;
 }
-/** Manager+ (rank 3). */
+/** Rank 1 — a read of SMS's own canonical aggregates, no more sensitive than /api/production (0d8b74a lowered this from rank 3). */
 export function getReconciliation(from: string, to: string, shift?: string | null): Promise<Envelope<ReconciliationData>> {
   const p = new URLSearchParams({ from, to });
   if (shift) p.set('shift', shift);
@@ -2413,4 +2413,32 @@ export interface ChangeoverOutcome {
  */
 export function executeChangeover(body: ChangeoverRequestBody): Promise<ChangeoverOutcome> {
   return post('/api/changeover/execute', body);
+}
+
+// ---- UX Phase 6 Brief 3: the product-change trail ----
+/**
+ * services/productChanges.ts's ProductChangeEntry, verbatim. `changedAtUtc`
+ * and `effectiveFromUtc` are APP-WRITTEN instants (genuine UTC) — render with
+ * `fmtAppInstant`, never a plant-clock formatter (CLAUDE.md's two clocks).
+ */
+export interface ProductChangeEntry {
+  changeId: number;
+  productId: number | null;
+  palletId: number | null;
+  procName: string | null;
+  operation: string;
+  outcome: string;
+  pdasErrorCode: number | null;
+  message: string | null;
+  reason: string | null;
+  changedByName: string | null;
+  changedAtUtc: string;
+  effectiveFromUtc: string | null;
+}
+/** GET /api/product-changes — rank 1. One keyset page; pass `nextBefore` back to walk older, same idiom as adminGetAuditPage. */
+export function getProductChanges(before: number | null, limit = 40): Promise<{ entries: ProductChangeEntry[]; nextBefore: number | null }> {
+  const p = new URLSearchParams();
+  if (before != null) p.set('before', String(before));
+  p.set('limit', String(limit));
+  return get(`/api/product-changes?${p.toString()}`);
 }

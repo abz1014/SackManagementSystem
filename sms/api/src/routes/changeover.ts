@@ -35,6 +35,13 @@
  *                                  that into 503, never a 500. With blockers
  *                                  but the flag on, 409. Only once both are
  *                                  clear does it call the vendor's procs.
+ *   GET  /api/product-changes    — rank 1. Its FIRST reader (UX Phase 6 Brief
+ *                                  3, 16 Sep 2026): the table is written by
+ *                                  this file's own recordDisabledAttempt and
+ *                                  by pdasWrite.ts's recordChange, but until
+ *                                  now nothing ever read it back. A read of
+ *                                  SMS's own attempt log, keyset-paged on
+ *                                  change_id — see services/productChanges.ts.
  *
  * No route here can set PDAS_WRITE_ENABLED — that is a startup-time env var
  * (config.ts), read once into cfg.pdasWrite / the shared PdasWriter (app.ts).
@@ -46,6 +53,7 @@ import { requireRole, type AuthedRequest } from '../auth.js';
 import { getPlausibilityRule } from '../services/admin.js';
 import { listPackSchemas, listPallets } from '../services/pallets.js';
 import { planChangeover, executeChangeover, type ChangeoverRequest } from '../services/changeover.js';
+import { listProductChangePage } from '../services/productChanges.js';
 
 // Matches app.ts's own PDAS_WRITE_RANK (both gate every write that reaches a
 // vendor proc); kept as a separate literal because app.ts's is local to its
@@ -175,6 +183,22 @@ export function mountChangeoverRoutes(ctx: RouteContext): void {
       // real PDAS rows and the response names exactly which, per the plan's
       // own contract. 207 marks that as partial without inventing a new shape.
       res.status(outcome.ok ? 200 : 207).json(outcome);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // The product-change trail — rank 1 (a read; the blanket app.use('/api',
+  // requireRole(1)) above already covers this, same as /refs and /plan).
+  // `?before=<change_id>&limit=` walks older pages; without `before` the
+  // newest page is returned. See services/productChanges.ts for the shape.
+  app.get('/api/product-changes', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = z
+        .object({ before: z.coerce.number().int().positive().optional(), limit: z.coerce.number().int().min(1).max(1000).optional() })
+        .safeParse(req.query);
+      if (!q.success) { res.status(400).json({ error: 'invalid query' }); return; }
+      res.json(await listProductChangePage(pool, { before: q.data.before ?? null, limit: q.data.limit ?? 200 }));
     } catch (err) {
       next(err);
     }

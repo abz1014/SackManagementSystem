@@ -89,6 +89,20 @@ class FakeDb {
         { pallet_id: 51, product_id: 101, description: 'Old Retired Lot', lot_code: null, pack_schema_id: 1, ps_desc: 'Sack 3x4', lot: 'LOT-OLD', active_flag: false, desc1: null, label_type: 1, steam_prog: 0, routing: 0, pdas_created_at: new Date('2026-08-01T00:00:00Z') },
       ]);
     }
+    // Checked before the generic 'FROM sms.product' match just below, which
+    // 'FROM sms.product_change c' would otherwise satisfy as a substring.
+    // GET /api/product-changes (services/productChanges.ts) — the row Brief 2's
+    // fixture-level disabled-execute test proves gets written, read back here.
+    if (sql.includes('FROM sms.product_change c')) {
+      return rows([
+        {
+          change_id: 1, product_id: null, pallet_id: null, proc_name: 'CreateMaterial', operation: 'create',
+          outcome: 'disabled', pdas_error_code: null, message: 'PDAS_WRITE_ENABLED is not true.',
+          reason: 'Process engineer changeover, ticket 77', changed_by_name: 'engineer',
+          changed_at: new Date('2026-09-16T10:00:00Z'), effective_from: null,
+        },
+      ]);
+    }
     if (sql.includes('FROM sms.product')) {
       return rows([{ product_id: 100, blend_id: 1, count_id: 2, tube_type_id: 3, active_flag: true, description: '205-IL0-SD', lot_code: null }]);
     }
@@ -174,6 +188,8 @@ describe('RBAC rows for the changeover routes', () => {
     { method: 'POST', path: '/api/changeover/plan', minRank: 1, body: CHANGEOVER_BODY },
     // rank 2 — matches PDAS_WRITE_RANK, the same gate every other PDAS write route uses.
     { method: 'POST', path: '/api/changeover/execute', minRank: 2, body: CHANGEOVER_BODY },
+    // rank 1 — a read, the one-audience rule (CLAUDE.md).
+    { method: 'GET', path: '/api/product-changes', minRank: 1 },
   ])('$method $path (needs rank $minRank)', async (route) => {
     expect((await call(null, route.method, route.path, route.body)).status).toBe(401);
     for (const u of USERS) {
@@ -243,5 +259,24 @@ describe('POST /api/changeover/execute', () => {
     expect(inserts).toHaveLength(1);
     expect(inserts[0]!.inputs.get('outcome')).toBe('disabled');
     expect(inserts[0]!.inputs.get('by')).toBe(2); // the engineer
+  });
+});
+
+describe('GET /api/product-changes', () => {
+  it('returns the disabled attempt the changeover route recorded', async () => {
+    const r = await call('viewer', 'GET', '/api/product-changes');
+    expect(r.status).toBe(200);
+    expect(r.json.entries).toHaveLength(1);
+    expect(r.json.entries[0]).toMatchObject({
+      changeId: 1,
+      procName: 'CreateMaterial',
+      operation: 'create',
+      outcome: 'disabled',
+      message: 'PDAS_WRITE_ENABLED is not true.',
+      reason: 'Process engineer changeover, ticket 77',
+      changedByName: 'engineer',
+      effectiveFromUtc: null,
+    });
+    expect(r.json.nextBefore).toBe(null);
   });
 });

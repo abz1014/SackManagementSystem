@@ -201,6 +201,14 @@ export const W = {
     /* Finding M10 (Sep 2026 audit): PDAS's MaterialDesc2 carries real color
        data (e.g. 'PARROT', 'Khaki-2') that was never selected or shown. */
     colour: 'Colour',
+    /* Sep 2026 audit fix: Changeover.tsx rendered the material's PP colour
+       (PDAS MaterialDesc2) and the pallet's sack colour (PDAS PalletDesc1)
+       BOTH under this one `colour` label — two different fields, one visible
+       caption. These are the distinct ones; `colour` above stays as the
+       Catalogue tab's single-field label (Running/Catalogue only ever show
+       one colour at a time). */
+    ppColour: 'PP colour',
+    sackColour: 'Sack colour',
     previewLimits: (limits: string) => `New limits would be ${limits}.`,
     confirm: 'Record this product',
     cancel: 'Cancel',
@@ -296,6 +304,12 @@ export const W = {
       dryRun: 'Check the plan',
       execute: 'Execute the changeover',
       noneYet: 'No changeover has been planned yet.',
+      /* Added Sep 2026 audit fix: Brief 2 correctly refused to hardcode this
+         sentence and flagged it as missing rather than invent prose. Does
+         NOT claim PDAS would reject a new tube type — only that this system
+         cannot call AddTubeType correctly yet. */
+      tubeExistingOnly:
+        'Only existing tube types are offered here. AddTubeType’s parameter name has not been confirmed against PDAS, so this system cannot call it correctly yet — that is not the same as knowing PDAS would refuse a new one.',
     } as const,
 
     /* ---- History tab (Brief 3 builds the screen; strings fixed here so
@@ -1074,7 +1088,12 @@ export const W = {
        census of what this system holds, not a reconciliation against IFL's
        database (which this system has no standing live connection to check). */
     reconciliationTitle: 'Reconciliation — what this system holds',
-    reconciliationNote: 'A count of the readings this system has recorded, by source table and generation. This is not a comparison against IFL’s database; nothing here reads it live.',
+    /* Corrected Sep 2026 audit (finding: this string claimed a grouping the
+       endpoint does not do). api/src/services/reconcile.ts groups by scale
+       state (within/low/high/rejected/unknown) crossed with plausibility
+       bucket (plausible/implausible/no weight) over sms.cone_event — no
+       source-table or generation dimension anywhere in the query. */
+    reconciliationNote: 'A census of the readings this system has recorded, grouped by scale/tolerance state and by whether the weight is plausible. This is not a comparison against IFL’s database; nothing here reads it live.',
   } as const,
 
   /* -------------------------------------------- cone weight (Phase 4) */
