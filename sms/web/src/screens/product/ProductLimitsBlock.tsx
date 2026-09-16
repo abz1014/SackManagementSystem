@@ -24,17 +24,35 @@
 import { useState } from 'react';
 import {
   getProductLimitHistory, getProductWriteStatus, setLocalLimitVersion,
-  type LimitHistoryProduct, type LimitHistoryVersion,
+  type LimitHistoryProduct, type LimitHistoryVersion, type ProductWriteStatus,
 } from '../../api';
 import { fmtClock, fmtDay, fmtG } from '../../lib/fmt';
 import { W } from '../../lib/words';
 import { Failed, SkelLines } from '../../ui/bits';
 import { Said, useResource, useWrite } from '../setup/shared';
 
+/**
+ * Whether the SMS-local limit editor should be offered, derived defensively
+ * rather than by dereferencing `status.local.canWrite` directly. `local` is
+ * typed as required on `ProductWriteStatus` (api.ts), but that type is a
+ * compile-time promise, not a runtime guarantee: `get()` hands back whatever
+ * JSON the server actually sent, unvalidated. A server built before
+ * `local` was added to `GET /api/product-write/status` (commit 2e8b470) — or
+ * one from a future rollback, or a shape a proxy mangled — returns a body
+ * with no `local` at all, and `status.local.canWrite` throws
+ * "Cannot read properties of undefined (reading 'canWrite')", taking the
+ * whole screen down through the error boundary. A missing or malformed
+ * `local` must read as "cannot write" and let the history render anyway —
+ * kept a pure function, with no DOM, so it is unit-tested directly below.
+ */
+export function canWriteLocal(status: ProductWriteStatus | undefined | null): boolean {
+  return Boolean(status && typeof status === 'object' && status.local && status.local.canWrite === true);
+}
+
 export function ProductLimitsBlock() {
   const res = useResource(() => getProductLimitHistory());
   const status = useResource(() => getProductWriteStatus());
-  const canWrite = status.data?.local.canWrite ?? false;
+  const canWrite = canWriteLocal(status.data);
 
   return (
     <div>
