@@ -7,7 +7,7 @@
  * and legitimate values still load.
  */
 import { describe, expect, it } from 'vitest';
-import { loadSyncConfig } from './config.js';
+import { loadSyncConfig, toMssqlConfig, SYNC_REQUEST_TIMEOUT_MS, SYNC_POOL_DEFAULT, type DbConfig } from './config.js';
 
 const BASE: NodeJS.ProcessEnv = {
   APP_DB_SERVER: 'localhost',
@@ -59,5 +59,58 @@ describe('loadSyncConfig — numeric keys', () => {
   it('refuses a non-positive LINE_ID — every row is stamped with it', () => {
     expect(() => loadSyncConfig({ ...BASE, LINE_ID: '0' })).toThrow(/LINE_ID must be at least 1/);
     expect(() => loadSyncConfig({ ...BASE, LINE_ID: 'one' })).toThrow(/LINE_ID must be a whole number/);
+  });
+});
+
+/**
+ * 16 Sep 2026 fix (defect 1): the API used to call sync-worker's `createPool`
+ * with no override and silently inherited the worker's batch profile — 5
+ * connections, a ten-minute requestTimeout. `toMssqlConfig` now takes an
+ * `overrides` parameter the API supplies (api/src/config.ts's
+ * `apiPoolOptions`); these pin that (a) the worker's OWN callers — pass.ts,
+ * sync-worker/index.ts, the CLI — get byte-identical config to before this
+ * parameter existed, since none of them pass overrides, and (b) a caller that
+ * does pass overrides gets exactly what it asked for, not a partial merge
+ * that silently keeps a worker default it meant to replace.
+ */
+describe('toMssqlConfig — pool/requestTimeout overrides', () => {
+  const DB: DbConfig = {
+    server: 'localhost',
+    port: 1433,
+    database: 'sms',
+    user: 'u',
+    password: 'p',
+    encrypt: false,
+    trustServerCertificate: true,
+  };
+
+  it('with no overrides, reproduces the worker batch defaults exactly', () => {
+    const cfg = toMssqlConfig(DB);
+    expect(cfg.pool).toEqual(SYNC_POOL_DEFAULT);
+    expect(cfg.pool).toEqual({ max: 5, min: 0, idleTimeoutMillis: 30000 });
+    expect(cfg.requestTimeout).toBe(SYNC_REQUEST_TIMEOUT_MS);
+    expect(cfg.requestTimeout).toBe(10 * 60_000);
+  });
+
+  it('a full pool override replaces every field, and requestTimeout independently', () => {
+    const cfg = toMssqlConfig(DB, { pool: { max: 10, min: 1, idleTimeoutMillis: 30000 }, requestTimeout: 30_000 });
+    expect(cfg.pool).toEqual({ max: 10, min: 1, idleTimeoutMillis: 30000 });
+    expect(cfg.requestTimeout).toBe(30_000);
+  });
+
+  it('a partial pool override merges onto the worker defaults, field by field', () => {
+    const cfg = toMssqlConfig(DB, { pool: { max: 20 } });
+    expect(cfg.pool).toEqual({ max: 20, min: 0, idleTimeoutMillis: 30000 });
+    // requestTimeout untouched when the override does not mention it.
+    expect(cfg.requestTimeout).toBe(SYNC_REQUEST_TIMEOUT_MS);
+  });
+
+  it('every other field (server/database/user/options) is unaffected by overrides', () => {
+    const withOverride = toMssqlConfig(DB, { pool: { max: 1 }, requestTimeout: 1 });
+    const withoutOverride = toMssqlConfig(DB);
+    expect(withOverride.server).toBe(withoutOverride.server);
+    expect(withOverride.database).toBe(withoutOverride.database);
+    expect(withOverride.user).toBe(withoutOverride.user);
+    expect(withOverride.options).toEqual(withoutOverride.options);
   });
 });

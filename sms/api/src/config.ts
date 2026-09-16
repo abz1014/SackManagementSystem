@@ -18,6 +18,51 @@ function blankToUndefined(v: string | undefined): string | undefined {
   return v === undefined || v.trim() === '' ? undefined : v;
 }
 
+/**
+ * The API's own connection-pool profile (16 Sep 2026 fix): before this, the
+ * API called sync-worker's `createPool` with no override and inherited its
+ * batch-worker config — `pool: { max: 5, min: 0 }` and a ten-minute
+ * `requestTimeout` (sync-worker/src/config.ts's `SYNC_POOL_DEFAULT` /
+ * `SYNC_REQUEST_TIMEOUT_MS`). That is correct for a single-threaded sync pass
+ * and wrong for an HTTP API: one slow query could hold a connection for ten
+ * minutes, and six concurrent viewers could exhaust a five-connection pool.
+ *
+ * Defaults here, not measured against plant load (no concurrency numbers
+ * exist yet — IFL has a handful of named accounts, roadmap CLAUDE.md):
+ *  - max 10 / min 1: double the worker's ceiling, one warm connection instead
+ *    of zero, sized for "more readers than the worker ever needed" without
+ *    guessing a real peak.
+ *  - idleTimeoutMillis 30000: unchanged from the worker's own default — pool
+ *    churn isn't the problem being fixed here.
+ *  - requestTimeout 30000 (30 s): an interactive request that has not
+ *    answered in 30 s has already failed as far as a user watching a screen
+ *    is concerned, and holding a connection for anything close to the
+ *    worker's 10-minute maintenance timeout starves every other reader
+ *    behind it in the pool.
+ * All four are env-overridable (see loadApiConfig) so the plant can raise
+ * them without a rebuild if real usage proves them wrong.
+ */
+export const DEFAULT_DB_POOL_MAX = 10;
+export const DEFAULT_DB_POOL_MIN = 1;
+export const DEFAULT_DB_POOL_IDLE_TIMEOUT_MS = 30_000;
+export const DEFAULT_DB_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * The largest from/to span any range-capped analytics/report route accepts —
+ * shared by every such route in app.ts (`/api/attention`,
+ * `/api/weight-stations`, `/api/report`, `/api/spc`, `/api/reject-spc`,
+ * `/api/calibration`) so the cap can only ever say one number.
+ *
+ * 366 was chosen to "cover any real single-year analysis", but the largest
+ * dataset that has ever existed against this app is 53 production days (19
+ * from the July sample + 34 from September) — nothing has ever executed a
+ * query anywhere near 366 days. The value is therefore UNPROVEN above 53
+ * days; it is left at 366 unchanged here, and a later task should measure
+ * the range-capped queries (getWeightSpc, getRejectSpc, getStationDrift, …)
+ * against synthetic volume before this number is trusted at scale.
+ */
+export const MAX_RANGE_DAYS = 366;
+
 const schema = z.object({
   port: z.coerce.number().int().positive().default(4000),
   lineId: z.coerce.number().int().positive().default(1),
@@ -98,6 +143,15 @@ const schema = z.object({
    * the API. Default matches the backup script's own -OutDir default.
    */
   backupDir: z.string().min(1).default('C:\\sms-backups'),
+  /**
+   * The API's own pool/requestTimeout profile (see the block comment above
+   * DEFAULT_DB_POOL_MAX). Overridable so the plant can raise them without a
+   * rebuild once real concurrent usage says the defaults are wrong.
+   */
+  dbPoolMax: z.coerce.number().int().positive().default(DEFAULT_DB_POOL_MAX),
+  dbPoolMin: z.coerce.number().int().nonnegative().default(DEFAULT_DB_POOL_MIN),
+  dbPoolIdleTimeoutMs: z.coerce.number().int().positive().default(DEFAULT_DB_POOL_IDLE_TIMEOUT_MS),
+  dbRequestTimeoutMs: z.coerce.number().int().positive().default(DEFAULT_DB_REQUEST_TIMEOUT_MS),
   appDb: z.object({
     server: z.string().min(1),
     port: z.coerce.number().int().positive(),
@@ -182,8 +236,32 @@ export interface ApiConfig {
   /** Optional on the type so the test fixtures that build an ApiConfig by hand keep compiling; the loader always sets both. */
   passwordMinLength?: number;
   backupDir?: string;
+  /** Optional on the type for the same reason as passwordMinLength above; apiPoolOptions() falls back to the DEFAULT_* constants. */
+  dbPoolMax?: number;
+  dbPoolMin?: number;
+  dbPoolIdleTimeoutMs?: number;
+  dbRequestTimeoutMs?: number;
   appDb: DbConfig;
   pdasWrite: PdasWriteConfig;
+}
+
+/**
+ * The pool/requestTimeout options the API hands to `createPool` — a small
+ * pure function so it is testable without starting the server (index.ts's
+ * `main()` opens the real DB connection and is not a practical unit-test
+ * target). index.ts calls `createPool(cfg.appDb, { onError, ...apiPoolOptions(cfg) })`.
+ */
+export function apiPoolOptions(
+  cfg: Pick<ApiConfig, 'dbPoolMax' | 'dbPoolMin' | 'dbPoolIdleTimeoutMs' | 'dbRequestTimeoutMs'>,
+): { pool: { max: number; min: number; idleTimeoutMillis: number }; requestTimeout: number } {
+  return {
+    pool: {
+      max: cfg.dbPoolMax ?? DEFAULT_DB_POOL_MAX,
+      min: cfg.dbPoolMin ?? DEFAULT_DB_POOL_MIN,
+      idleTimeoutMillis: cfg.dbPoolIdleTimeoutMs ?? DEFAULT_DB_POOL_IDLE_TIMEOUT_MS,
+    },
+    requestTimeout: cfg.dbRequestTimeoutMs ?? DEFAULT_DB_REQUEST_TIMEOUT_MS,
+  };
 }
 
 /**
@@ -280,6 +358,10 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     plantUtcOffsetMinutes: blankToUndefined(env.PLANT_UTC_OFFSET_MINUTES),
     passwordMinLength: env.PASSWORD_MIN_LENGTH,
     backupDir: env.BACKUP_DIR,
+    dbPoolMax: env.API_DB_POOL_MAX,
+    dbPoolMin: env.API_DB_POOL_MIN,
+    dbPoolIdleTimeoutMs: env.API_DB_POOL_IDLE_TIMEOUT_MS,
+    dbRequestTimeoutMs: env.API_DB_REQUEST_TIMEOUT_MS,
     appDb: {
       server: env.APP_DB_SERVER,
       port: env.APP_DB_PORT,

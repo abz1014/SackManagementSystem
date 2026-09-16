@@ -19,17 +19,17 @@ import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import type { RouteContext } from './context.js';
 import { envelope } from '../envelope.js';
+import { MAX_RANGE_DAYS } from '../config.js';
 import { getRejectsByDayCode, listRejectsOfDayCode, parseCodeParam, type RejectFilters } from '../services/rejects.js';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 /**
- * Same cap as app.ts's validateRange (366 days, 400 otherwise): these
- * aggregate over the whole range in one pass, so an accidental multi-year
- * query must be refused, not attempted.
+ * Same cap as app.ts's validateRange (MAX_RANGE_DAYS, config.ts: 366 days,
+ * 400 otherwise): these aggregate over the whole range in one pass, so an
+ * accidental multi-year query must be refused, not attempted.
  */
-const MAX_RANGE_DAYS = 366;
 function rangeError(from: string, to: string): string | null {
   if (from > to) return 'from must be <= to';
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;

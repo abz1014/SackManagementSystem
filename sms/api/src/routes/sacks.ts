@@ -29,6 +29,7 @@ import { z } from 'zod';
 import type { RouteContext } from './context.js';
 import { envelope } from '../envelope.js';
 import { requireRole, type AuthedRequest } from '../auth.js';
+import { MAX_RANGE_DAYS } from '../config.js';
 import { loadShiftRule } from '../services/live.js';
 import { getSackSummary } from '../services/sacks.js';
 import {
@@ -38,8 +39,7 @@ import {
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
-/** Same cap as app.ts's validateRange and routes/rejects.ts: 366 days, 400 otherwise. */
-const MAX_RANGE_DAYS = 366;
+/** Same cap as app.ts's validateRange and routes/rejects.ts (MAX_RANGE_DAYS, config.ts): 366 days, 400 otherwise. */
 function rangeError(from: string, to: string): string | null {
   if (from > to) return 'from must be <= to';
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;

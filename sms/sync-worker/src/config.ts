@@ -165,14 +165,43 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
  * remedy for a mixed shift-rule regime (H5). sack_event (8,201) and
  * reject_event (4,570) fit inside 15s and hid the problem.
  *
- * This is a maintenance-path timeout on the worker/CLI pools only — the API
- * builds its own pool and keeps its short one, so no user-facing request can
- * hang for ten minutes.
+ * This is a maintenance-path timeout, correct for the worker/CLI's own pool
+ * (below). The API — a different process, serving concurrent interactive
+ * readers rather than one batch pass — overrides it via `toMssqlConfig`'s
+ * `overrides` parameter; see api/src/config.ts's `apiPoolOptions` /
+ * `dbRequestTimeoutMs` for that profile and why it is 30 s, not 10 min.
  */
 export const SYNC_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
-/** Translate our DbConfig into an mssql connection config. */
-export function toMssqlConfig(c: DbConfig) {
+/**
+ * The worker's own default pool sizing: `max: 5` is generous for a
+ * single-threaded batch pass that opens one pool per pass (pass.ts), `min: 0`
+ * lets it sit idle between passes without holding a connection open.
+ */
+export const SYNC_POOL_DEFAULT = { max: 5, min: 0, idleTimeoutMillis: 30000 } as const;
+
+/** A pool-sizing override — every field optional so a caller can replace just what it needs. */
+export interface PoolProfile {
+  max?: number;
+  min?: number;
+  idleTimeoutMillis?: number;
+}
+
+/** Overrides `toMssqlConfig` accepts on top of the worker's own defaults. */
+export interface MssqlConfigOverrides {
+  pool?: PoolProfile;
+  requestTimeout?: number;
+}
+
+/**
+ * Translate our DbConfig into an mssql connection config.
+ *
+ * `overrides` is how a non-batch caller (the API, api/src/index.ts) replaces
+ * the pool sizing and requestTimeout without this file changing the worker's
+ * own defaults — omit it (every worker/CLI caller does) and the result is
+ * byte-identical to before this parameter existed.
+ */
+export function toMssqlConfig(c: DbConfig, overrides: MssqlConfigOverrides = {}) {
   return {
     server: c.server,
     port: c.port,
@@ -186,7 +215,7 @@ export function toMssqlConfig(c: DbConfig) {
       // The plant runs one timezone; we treat the stored wall clock as canonical.
       useUTC: true,
     },
-    pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
-    requestTimeout: SYNC_REQUEST_TIMEOUT_MS,
+    pool: { ...SYNC_POOL_DEFAULT, ...overrides.pool },
+    requestTimeout: overrides.requestTimeout ?? SYNC_REQUEST_TIMEOUT_MS,
   };
 }

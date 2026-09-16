@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import { loadDotEnv, createPool } from '@sms/sync-worker';
 import { checkPlantOffset } from '@sms/shared';
-import { loadApiConfig } from './config.js';
+import { loadApiConfig, apiPoolOptions } from './config.js';
 import { createApp } from './app.js';
 import { markDegraded, SERVICE_VERSION } from './services/health.js';
 import { log } from './log.js';
@@ -88,6 +88,15 @@ async function main(): Promise<void> {
   loadDotEnv();
   const cfg = loadApiConfig();
   checkPlantOffsetOnStartup(cfg.plantUtcOffsetMinutes);
+  // 16 Sep 2026 fix: without an explicit override, createPool falls back to
+  // sync-worker's own batch profile (sync-worker/src/config.ts's
+  // SYNC_POOL_DEFAULT / SYNC_REQUEST_TIMEOUT_MS: 5 connections, a 10-minute
+  // requestTimeout) — sized for one single-threaded sync pass, not N
+  // concurrent interactive readers. `dbPool`/`dbRequestTimeout` below are the
+  // API's OWN values (config.ts's apiPoolOptions/DEFAULT_DB_POOL_MAX has the
+  // reasoning); API_DB_POOL_MAX/MIN/IDLE_TIMEOUT_MS and
+  // API_DB_REQUEST_TIMEOUT_MS can raise them without a rebuild.
+  const { pool: dbPool, requestTimeout: dbRequestTimeout } = apiPoolOptions(cfg);
   const pool = await createPool(cfg.appDb, {
     // A pool-level error (a connection the server dropped, a failed
     // reconnect) is an EventEmitter 'error': with no listener Node treats it
@@ -99,6 +108,8 @@ async function main(): Promise<void> {
       log.error('app-db pool error', { err: err instanceof Error ? err : { message } });
       markDegraded(`pool error: ${message}`);
     },
+    pool: dbPool,
+    requestTimeout: dbRequestTimeout,
   });
   const app = createApp(pool, cfg);
 

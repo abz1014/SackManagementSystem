@@ -1,7 +1,7 @@
 /** Connection-pool factory. Two logins: sms_app (app DB) + sms_readonly (IFL). */
 import mssql from 'mssql';
 import { createLogger } from '@sms/shared';
-import { toMssqlConfig, type DbConfig } from './config.js';
+import { toMssqlConfig, type DbConfig, type PoolProfile } from './config.js';
 import { isTransient } from './reader/errorClass.js';
 import { withRetry } from './util/retry.js';
 
@@ -13,6 +13,18 @@ export interface CreatePoolOptions {
    * The API passes its own handler so it can also mark itself degraded.
    */
   onError?: (err: unknown) => void;
+  /**
+   * Pool sizing / requestTimeout override, passed straight to
+   * `toMssqlConfig`. Every field is optional and merges onto the worker's own
+   * batch defaults (config.ts's `SYNC_POOL_DEFAULT` / `SYNC_REQUEST_TIMEOUT_MS`)
+   * — omitted entirely, `createPool` reproduces today's worker/CLI config
+   * exactly. The API is the one caller that supplies this (api/src/index.ts,
+   * via api/src/config.ts's `apiPoolOptions`): five connections and a
+   * ten-minute timeout are right for a single batch pass and wrong for N
+   * concurrent interactive readers.
+   */
+  pool?: PoolProfile;
+  requestTimeout?: number;
 }
 
 /**
@@ -26,7 +38,7 @@ export interface CreatePoolOptions {
  * rather than answering 'degraded'.
  */
 export async function createPool(c: DbConfig, opts: CreatePoolOptions = {}): Promise<mssql.ConnectionPool> {
-  const pool = new mssql.ConnectionPool(toMssqlConfig(c));
+  const pool = new mssql.ConnectionPool(toMssqlConfig(c, { pool: opts.pool, requestTimeout: opts.requestTimeout }));
   pool.on(
     'error',
     opts.onError ??
