@@ -30,7 +30,10 @@ vi.mock('../weightStations.js', () => ({ getWeightStations: vi.fn() }));
 vi.mock('../rejects.js', () => ({ getRejectPareto: vi.fn(), getRejectsByDayCode: vi.fn() }));
 vi.mock('../rejectSpc.js', () => ({ getRejectSpc: vi.fn() }));
 vi.mock('../admin.js', () => ({ getPlausibilityRule: vi.fn() }));
-vi.mock('../productLimits.js', () => ({ loadProductCatalogue: vi.fn() }));
+vi.mock('../productLimits.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../productLimits.js')>();
+  return { ...actual, loadProductCatalogue: vi.fn() };
+});
 vi.mock('../lineConfig.js', () => ({ getLineIdentity: vi.fn() }));
 vi.mock('../coneState.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../coneState.js')>();
@@ -109,20 +112,25 @@ function fakeReport(over: Partial<ReportData> = {}): ReportData {
 const CTX = { plausibility: { loG: 1500, hiG: 2100 }, windows: [{ materialId: 21, fromMs: null, toMs: null, loG: 1930, hiG: 1990 }] };
 
 const stationRow = (station: number, flagged = false) => ({
-  station, n: 500, meanG: 1958.2, vsLineG: 1.1, vsTargetG: -1.8, daysHeld: 3, flagged, rejectRatePct: 2.1, lastAdjustedUtc: null,
+  station, n: 500, meanG: 1958.2, vsLineG: 1.1, vsTargetG: -1.8, targetBasis: 'line_product' as const, daysHeld: 3, flagged, rejectRatePct: 2.1, lastAdjustedUtc: null,
   days: [{ date: '2026-09-05', n: 100, mean: 1958, nelson: flagged ? [2] : [] }, { date: '2026-09-06', n: 100, mean: 1959, nelson: [] }],
 });
+// U1/U2 (16 Sep 2026): the cone-weight report's target and the station
+// table's own qualifier now come from these two fields.
 const fakeStations = () => ({
   from: PERIOD.from, to: PERIOD.to, days: 7, lineMeanG: 1957.1, targetG: 1960, productId: 21, productLabel: '205-IL0-SD',
+  targetEffectiveFromUtc: '2026-08-20T00:00:00.000Z', limitsChangedInWindow: 0, productChangesInWindow: 0,
   thresholdG: 3, minDaysHeld: 3, lineRejectRatePct: 2.16, stations: [stationRow(7, true), stationRow(3)],
 });
+// U1 (16 Sep 2026): coneWeight.ts no longer reads weights.ts's own nominal/
+// giveaway fields (it takes its target from getWeightStations instead — see
+// fakeStations() above), so this fixture no longer carries them; nothing
+// left in reports/ consumes them.
 const fakeWeights = () => ({
   basis: 'as_recorded' as const,
   cone: {
     count: 996, implausible: 4, avg: 1957.1, min: 1802, max: 2050, stdev: 12.3, unit: 'g' as const, bucketSize: 20,
     histogram: [{ bucket: 1940, count: 400 }, { bucket: 1960, count: 596 }], outliers: [],
-    nominalSetpointG: 1960, nominalSource: 'current_product' as const, nominalLabel: '205-IL0-SD', provisionalReasons: [],
-    giveawayPerConeG: -2.9, giveawayTotalKg: -2.9,
   },
   sack: {
     count: 40, implausible: 1, avg: 47, min: 45, max: 49, stdev: 0.8, unit: 'kg' as const, bucketSize: 1,
@@ -178,7 +186,25 @@ beforeEach(() => {
               { bucketTs: '2026-09-02T00:00:00.000Z', generation: 2, produced: 500, inspected: 510, rejects: 10, rate: 0.045, ucl: 0.038, lcl: 0.001, outOfControl: true }],
   });
   vi.mocked(getPlausibilityRule).mockResolvedValue({ coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 });
-  vi.mocked(loadProductCatalogue).mockResolvedValue({ product: (id: number) => (id === 21 ? { label: '205-IL0-SD' } : null) } as never);
+  // U3 (16 Sep 2026): product.ts now also asks the catalogue for a product's
+  // own versioned limits (versionAt/versionsAscending), so the fake here
+  // carries one version for product 21 — effective well before PERIOD, so
+  // the default fixture reports limitsChangedInPeriod: 0 unless a test
+  // overrides it.
+  const PRODUCT_21_VERSION = {
+    productId: 21, setpointG: 1960, offsetMinusG: 30, offsetPlusG: 30,
+    effectiveFromMs: Date.parse('2026-08-20T00:00:00Z'), effectiveFromUtc: '2026-08-20T00:00:00.000Z',
+    effectiveIsLowerBound: false, source: 'pdas_observed' as const,
+  };
+  vi.mocked(loadProductCatalogue).mockResolvedValue({
+    product: (id: number) => (id === 21 ? { productId: 21, label: '205-IL0-SD', activeFlag: true } : null),
+    versionAt: (id: number, ms: number) => (id === 21 && ms >= PRODUCT_21_VERSION.effectiveFromMs ? PRODUCT_21_VERSION : null),
+    versionsAscending: (id: number) => (id === 21 ? [PRODUCT_21_VERSION] : []),
+    limitsAt: (id: number) => (id === 21 ? { targetG: 1960, loG: 1930, hiG: 1990, label: '1,960 ± 30 g' } : null),
+    latest: (id: number) => (id === 21 ? PRODUCT_21_VERSION : null),
+    productIds: () => [21],
+    isEmpty: false,
+  } as never);
   vi.mocked(getLineIdentity).mockResolvedValue({
     lineId: 1, code: 'L3', name: 'Line 3', displayName: 'TP1 · Line 3 · Unit 2', isActive: true,
     unit: { unitId: 1, code: 'U2', name: 'Unit 2' }, plant: { plantId: 1, code: 'TP1', name: 'TP1' },
@@ -332,6 +358,13 @@ describe('product report', () => {
     expect(d.rows.map((r) => r.productId)).toEqual([21, null]);
     expect(d.rows[0]).toMatchObject({ productLabel: '205-IL0-SD', cones: 700, weight: { n: 690, avgG: 1958.4, sdG: 11.2 }, states: { within: 680, low: 20, high: 0, rejected: 0, unknown: 0 }, implausible: 10 });
     expect(d.rows[1]).toMatchObject({ productLabel: 'No product on the reading', states: { unknown: 300 } });
+    // U3 (16 Sep 2026): each row's target comes from THAT product's own
+    // versioned limits — never null for a real product, always null for the
+    // "No product on the reading" row.
+    expect(d.rows[0]!.target).toEqual({ setpointG: 1960, loG: 1930, hiG: 1990, inForceAtUtc: '2026-08-20T00:00:00.000Z', limitsChangedInPeriod: 0 });
+    expect(d.rows[0]!.vsTargetG).toBeCloseTo(1958.4 - 1960, 5);
+    expect(d.rows[1]!.target).toBeNull();
+    expect(d.rows[1]!.vsTargetG).toBeNull();
     expect(d.unattributed).toEqual({ cones: 300, rejects: 6, sacks: 12, ofCones: 1000, ofRejects: 20, ofSacks: 40 });
     // Both own queries bind the plausibility window and the same filters.
     const own = calls.filter((c) => c.sql.includes('FROM sms.cone_event'));
@@ -346,6 +379,45 @@ describe('product report', () => {
     const t = productCsv(d);
     expect(t.headers).toEqual(PRODUCT_CSV_HEADERS);
     expect(t.rows[0]!.slice(0, 3)).toEqual([21, '205-IL0-SD', 700]);
+  });
+
+  it("product report resolves each row's target from that product's own limit version", async () => {
+    // Two products, each with its own limits, one of which changed INSIDE
+    // the period — pinning that the count is per-product, not the line-wide
+    // qualifier, and that "changed" means began inside the period (mirrors
+    // spc.getSpec.test.ts's own rule for the same arithmetic).
+    vi.mocked(getProduction).mockResolvedValueOnce({
+      groupBy: 'product', unattributed: null, states: null, implausible: null,
+      rows: [
+        { group: '21', cones: 700, rejectedCones: 14, rejectRatePct: 2, conesInRangePct: 99, sacks: 28, sackWeightKg: 1316, avgSackKg: 47, conesPerSack: 25 },
+        { group: '22', cones: 300, rejectedCones: 6, rejectRatePct: 2, conesInRangePct: 99, sacks: 12, sackWeightKg: 564, avgSackKg: 47, conesPerSack: 25 },
+      ],
+    } as never);
+    const V21 = { productId: 21, setpointG: 1960, offsetMinusG: 30, offsetPlusG: 30, effectiveFromMs: Date.parse('2026-08-20T00:00:00Z'), effectiveFromUtc: '2026-08-20T00:00:00.000Z', effectiveIsLowerBound: false, source: 'pdas_observed' as const };
+    const V22_OLD = { productId: 22, setpointG: 1900, offsetMinusG: 20, offsetPlusG: 20, effectiveFromMs: Date.parse('2026-07-01T00:00:00Z'), effectiveFromUtc: '2026-07-01T00:00:00.000Z', effectiveIsLowerBound: false, source: 'pdas_observed' as const };
+    const V22_NEW = { productId: 22, setpointG: 1905, offsetMinusG: 20, offsetPlusG: 20, effectiveFromMs: Date.parse('2026-09-03T00:00:00Z'), effectiveFromUtc: '2026-09-03T00:00:00.000Z', effectiveIsLowerBound: false, source: 'sms_local' as const };
+    vi.mocked(loadProductCatalogue).mockResolvedValueOnce({
+      product: (id: number) => (id === 21 ? { productId: 21, label: '205-IL0-SD', activeFlag: true } : id === 22 ? { productId: 22, label: 'Other blend', activeFlag: true } : null),
+      versionAt: (id: number, ms: number) => (id === 21 ? V21 : id === 22 ? (ms >= V22_NEW.effectiveFromMs ? V22_NEW : V22_OLD) : null),
+      versionsAscending: (id: number) => (id === 21 ? [V21] : id === 22 ? [V22_OLD, V22_NEW] : []),
+      limitsAt: () => null,
+      latest: () => null,
+      productIds: () => [21, 22],
+      isEmpty: false,
+    } as never);
+    const { pool } = fakePool((sql) => {
+      if (sql.includes('STDEV')) return [{ grp: '21', n: 690, avg: 1958.4, sd: 11.2, mn: 1900, mx: 2010, excluded: 0 }, { grp: '22', n: 290, avg: 1902, sd: 9, mn: 1880, mx: 1930, excluded: 0 }];
+      if (sql.includes('GROUP BY ISNULL') && sql.includes('CASE')) return [{ grp: '21', state: 'within', n: 690 }, { grp: '22', state: 'within', n: 290 }];
+      return [];
+    });
+    const d = await getProductReport(pool, 1, PERIOD, {});
+    const p21 = d.rows.find((r) => r.productId === 21)!;
+    const p22 = d.rows.find((r) => r.productId === 22)!;
+    expect(p21.target).toEqual({ setpointG: 1960, loG: 1930, hiG: 1990, inForceAtUtc: '2026-08-20T00:00:00.000Z', limitsChangedInPeriod: 0 });
+    // Product 22's newer version (2026-09-03) began INSIDE [2026-09-01, 2026-09-07]: one change.
+    expect(p22.target).toEqual({ setpointG: 1905, loG: 1885, hiG: 1925, inForceAtUtc: '2026-09-03T00:00:00.000Z', limitsChangedInPeriod: 1 });
+    expect(p21.vsTargetG).toBeCloseTo(1958.4 - 1960, 5);
+    expect(p22.vsTargetG).toBeCloseTo(1902 - 1905, 5);
   });
 });
 
@@ -415,6 +487,38 @@ describe('cone weight report', () => {
     const { pool } = fakePool();
     const d = await getConeWeightReport(pool, 1, PERIOD, {});
     expect(d.basis).toBe('net');
+  });
+  it('cone-weight report takes its target from the limits in force at the period end', async () => {
+    // fakeStations() carries targetG 1960 / productId 21 — the station
+    // table's own resolution — NOT weights.ts's nominal figure (fakeWeights
+    // uses 1960 too, deliberately, so a bug that read the wrong field would
+    // not be caught by a numeric mismatch alone; the shape below is the real
+    // pin — no nominalSource/nominalLabel survive into the report).
+    const { pool } = fakePool();
+    const d = await getConeWeightReport(pool, 1, PERIOD, {});
+    expect(d.target).toEqual({
+      setpointG: 1960,
+      productId: 21,
+      label: '205-IL0-SD',
+      inForceAtUtc: '2026-08-20T00:00:00.000Z',
+      limitsChangedInPeriod: 0,
+      source: 'in_force_at_period_end',
+    });
+    const t = coneWeightCsv(d);
+    expect(t.rows.find((r) => r[1] === 'target_source')![2]).toBe('in_force_at_period_end');
+  });
+  it('a period with no product in force reports target null, never 1950', async () => {
+    vi.mocked(getWeightStations).mockResolvedValueOnce({
+      ...fakeStations(), targetG: null, productId: null, productLabel: null, targetEffectiveFromUtc: null, limitsChangedInWindow: null,
+    } as never);
+    const { pool } = fakePool();
+    const d = await getConeWeightReport(pool, 1, PERIOD, {});
+    expect(d.target).toEqual({
+      setpointG: null, productId: null, label: null, inForceAtUtc: null, limitsChangedInPeriod: 0, source: 'none',
+    });
+    const t = coneWeightCsv(d);
+    expect(t.rows.find((r) => r[1] === 'target_g')![2]).toBeNull();
+    expect(t.rows.find((r) => r[1] === 'target_source')![2]).toBe('none');
   });
 });
 
@@ -500,11 +604,23 @@ describe('management summary', () => {
     expect(d.kpis.map((k) => k.key)).toEqual(KPI_DEFINITIONS.map((k) => k.key));
     const cones = d.kpis.find((k) => k.key === 'cones_weighed')!;
     expect(cones).toMatchObject({ current: 1000, prior: 800, delta: { abs: 200, pct: 25 }, approval: 'awaiting' });
+    // U5 (16 Sep 2026): both periods here have equal coverage (7 of 7 days
+    // each — fakeReport's default), so the coverage test finds no gap and
+    // every KPI, count-shaped or not, is comparable.
+    expect(cones.comparable).toBe(true);
+    expect(cones.incomparableReason).toBeNull();
     expect(d.kpis.find((k) => k.key === 'cones_within_limits_pct')!.current).toBe(98); // 900 of 918 judged (unknown excluded)
     expect(d.kpis.find((k) => k.key === 'stations_flagged')!.current).toBe(1);
     expect(d.kpis.find((k) => k.key === 'cones_rejected_by_scale')!.current).toBe(17);
     expect(d.verdict).toEqual({ cones: 1000, sacks: 40, sackWeightKg: 1880 });
     expect(d.approval).toBe('awaiting');
+    // U5's product mix: the same getProduction(groupBy:'product') fixture
+    // used elsewhere ('21' and 'none'), labelled through loadProductCatalogue.
+    expect(d.productMix.current).toEqual([
+      { productId: 21, label: '205-IL0-SD', cones: 700 },
+      { productId: null, label: 'No product on the reading', cones: 300 },
+    ]);
+    expect(d.productMix.prior).toEqual(d.productMix.current); // same fixture answers getProduction for both periods here
   });
   it('a prior period with no readings gives null priors and null deltas, never "up from 0"', async () => {
     vi.mocked(getReport).mockImplementation(async (_p, _l, resolved) =>
@@ -516,7 +632,17 @@ describe('management summary', () => {
     const cones = d.kpis.find((k) => k.key === 'cones_weighed')!;
     expect(cones.prior).toBeNull();
     expect(cones.delta).toBeNull();
-    expect(d.kpis.find((k) => k.key === 'days_with_data')!).toMatchObject({ current: 7, prior: 0, delta: { abs: 7, pct: null } });
+    // U5: 0 of 7 prior days against 7 of 7 current — a 100% coverage gap,
+    // well past the threshold — so a count-shaped KPI is marked incomparable
+    // even though its own delta happens to already be null here.
+    expect(cones.comparable).toBe(false);
+    expect(cones.incomparableReason).toMatch(/coverage gap/);
+    // days_with_data is not count-shaped (it IS the coverage figure) and a
+    // rate KPI is coverage-independent — both stay comparable regardless.
+    const days = d.kpis.find((k) => k.key === 'days_with_data')!;
+    expect(days).toMatchObject({ current: 7, prior: 0, delta: { abs: 7, pct: null }, comparable: true, incomparableReason: null });
+    const rate = d.kpis.find((k) => k.key === 'inspection_reject_rate_pct')!;
+    expect(rate.comparable).toBe(true);
   });
   it('H8 (15 Sep 2026): the weight KPIs relay whatever basis getWeights resolved, unchanged — the report does no arithmetic of its own', async () => {
     vi.mocked(getWeights).mockResolvedValue({ ...fakeWeights(), cone: { ...fakeWeights().cone, avg: 1887.1, stdev: 12.3 }, basis: 'net' } as never);
@@ -530,11 +656,12 @@ describe('management summary', () => {
     const t = summaryCsv({
       period: PERIOD, prior: { from: '2026-08-25', to: '2026-08-31' },
       coverage: { current: fakeReport().coverage, prior: fakeReport().coverage },
-      kpis: [{ ...KPI_DEFINITIONS[0]!, current: 10, prior: 8, delta: { abs: 2, pct: 25 }, approval: 'awaiting' }],
+      kpis: [{ ...KPI_DEFINITIONS[0]!, current: 10, prior: 8, delta: { abs: 2, pct: 25 }, comparable: true, incomparableReason: null, approval: 'awaiting' }],
+      productMix: { current: [], prior: [] },
       verdict: { cones: 10, sacks: 1, sackWeightKg: 47 }, approval: 'awaiting', note: '',
     });
     expect(t.headers).toEqual(SUMMARY_CSV_HEADERS);
-    expect(t.rows[0]).toEqual(['cones_weighed', 'Cones weighed', 'cones', 10, 8, 2, 25, 'higher', '2026-09-01 to 2026-09-07', '2026-08-25 to 2026-08-31', 'awaiting']);
+    expect(t.rows[0]).toEqual(['cones_weighed', 'Cones weighed', 'cones', 10, 8, 2, 25, 'higher', '2026-09-01 to 2026-09-07', '2026-08-25 to 2026-08-31', 'awaiting', true, null]);
   });
 });
 

@@ -50,7 +50,27 @@ export interface ConeWeightReportData {
   states: StateCounts | null;
   bucketSizeG: number;
   histogram: Bucket[];
-  target: { setpointG: number; source: 'current_product' | 'fallback'; label: string | null };
+  /**
+   * UX Phase 5 Brief 1, unit U1 (16 Sep 2026): the ONE target this report
+   * prints, taken from the same resolution the station table (below) already
+   * uses — getWeightStations()'s targetG/productLabel, the line-wide product
+   * IN FORCE AT THE PERIOD'S END — never weights.ts's own nominal figure
+   * (the product running NOW, regardless of the period, with a hardcoded
+   * constant behind it when none was even selected). Before this fix the figure tile and
+   * the "vs target" column could print two different numbers for the same
+   * report. `source` is 'none', never a fabricated number, when no product
+   * was in force at the period's end.
+   */
+  target: {
+    setpointG: number | null;
+    productId: number | null;
+    label: string | null;
+    /** When this target began applying — the version qualifier, same instant convention as spc.ts's limitsEffectiveFromUtc. */
+    inForceAtUtc: string | null;
+    /** How many times this target's OWN limits changed inside the period (a version that BEGAN inside it, not merely in force at its end). */
+    limitsChangedInPeriod: number;
+    source: 'in_force_at_period_end' | 'none';
+  };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
   lineMeanG: number | null;
   plausibility: { loG: number; hiG: number };
@@ -117,7 +137,14 @@ export async function getConeWeightReport(
     states: prod.states,
     bucketSizeG: w.cone.bucketSize,
     histogram: w.cone.histogram,
-    target: { setpointG: w.cone.nominalSetpointG, source: w.cone.nominalSource, label: w.cone.nominalLabel },
+    target: {
+      setpointG: stations.targetG,
+      productId: stations.productId,
+      label: stations.productLabel,
+      inForceAtUtc: stations.targetEffectiveFromUtc,
+      limitsChangedInPeriod: stations.limitsChangedInWindow ?? 0,
+      source: stations.targetG != null ? 'in_force_at_period_end' : 'none',
+    },
     byStation: stations.stations.map((s) => ({
       station: s.station, n: s.n, meanG: s.meanG, vsLineG: s.vsLineG, vsTargetG: s.vsTargetG, flagged: s.flagged,
     })),
@@ -130,7 +157,8 @@ export async function getConeWeightReport(
           ? `Gross basis: weights as the scale recorded them (identical to As-recorded until IFL confirms the basis, Q4/Q5). `
           : `Weights as the scale recorded them (the weight basis is not yet confirmed by IFL). `) +
       'Every statistic is over readings inside the plausibility window; the excluded count is stated. The target is the ' +
-      'product selected for the line, applied line-wide.',
+      'line-wide product in force at the END of this period, from the same versioned limits the station table below uses ' +
+      '— never today\'s product applied backwards over the whole period, and never an invented number when none was in force.',
   };
 }
 

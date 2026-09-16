@@ -25,8 +25,10 @@
 import type { ConnectionPool } from 'mssql';
 import { getReport, type ReportData, type ResolvedPeriod } from '../report.js';
 import { listEvents } from '../register.js';
+import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { getWeights } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
+import { loadProductCatalogue } from '../productLimits.js';
 import { delta, pct, priorPeriod, round, type DayRange, type Delta, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
@@ -67,7 +69,31 @@ export interface KpiRow extends KpiDefinition {
   current: number | null;
   prior: number | null;
   delta: Delta | null;
+  /**
+   * UX Phase 5 Brief 1, unit U5 (16 Sep 2026): whether the delta above is
+   * safe to read as a trend. The record has a coverage hole (10 Jul – 5 Aug
+   * 2026, IFL's table rebuild has not been sent yet) that `priorPeriod`
+   * (common.ts) — CALENDAR days — does not know about, so a prior period can
+   * hold far fewer days of data than the current one while still being
+   * treated as a full comparison. For a COUNT-shaped KPI (cones, sacks, kg,
+   * seconds, stops, readings — see COUNT_SHAPED_UNITS below) that difference
+   * in coverage moves the total by itself, so `comparable` is false and the
+   * delta must not be presented as a trend. Rate and mean KPIs (%, g) and
+   * `days_with_data` itself stay comparable regardless — they are
+   * coverage-independent by construction.
+   */
+  comparable: boolean;
+  /** Why `comparable` is false, printed rather than left for the reader to guess; null when comparable. */
+  incomparableReason: string | null;
   approval: 'awaiting';
+}
+
+/** One product's share of a period, for the product-mix comparison below. */
+export interface ProductMixRow {
+  /** material_id, or null for readings that predate product recording. */
+  productId: number | null;
+  label: string;
+  cones: number;
 }
 
 export interface ManagementSummaryData {
@@ -75,6 +101,13 @@ export interface ManagementSummaryData {
   prior: DayRange;
   coverage: { current: ReportData['coverage']; prior: ReportData['coverage'] };
   kpis: KpiRow[];
+  /**
+   * Which products each period actually ran (UX Phase 5 Brief 1, unit U5),
+   * so a mean-weight comparison across two periods can state whether it is
+   * comparing the same products or two different ones — a KPI comparable by
+   * the coverage test above can still be comparing different products.
+   */
+  productMix: { current: ProductMixRow[]; prior: ProductMixRow[] };
   /** The verdict mark's figures for the period: what is signed for. */
   verdict: { cones: number; sacks: number; sackWeightKg: number };
   approval: 'awaiting';
@@ -85,17 +118,58 @@ interface PeriodFigures {
   coverage: ReportData['coverage'];
   values: Record<string, number | null>;
   totals: ReportData['totals'];
+  /** Raw product-id + cones, labelled later (once) by the caller. */
+  productMix: { productId: number | null; cones: number }[];
+}
+
+/**
+ * KPI units whose figure is a raw COUNT over the period (as opposed to a
+ * rate, a mean, or the day-count itself) — the shapes a coverage gap moves by
+ * itself. Chosen from KPI_DEFINITIONS' own `unit` field, not by key, so a new
+ * count-shaped KPI is covered automatically and a rate/mean one never is by
+ * mistake.
+ */
+const COUNT_SHAPED_UNITS: ReadonlySet<KpiUnit> = new Set(['cones', 'sacks', 'kg', 'seconds', 'stops', 'readings']);
+
+/**
+ * How much the two periods' COVERAGE may differ before a count-shaped KPI's
+ * delta stops being presented as a trend.
+ *
+ * THE THRESHOLD: more than 20% of the (equal-length) period's days differing
+ * in daysWithData between current and prior.
+ *
+ * WHY 20%, not stricter or looser: the periods `priorPeriod` builds are
+ * always equal length, so `daysInPeriod` is the same denominator on both
+ * sides — the comparison is "how many of those days actually held data,
+ * current versus prior". A gap of one or two days out of a multi-week period
+ * (a sync hiccup, a maintenance day) is already visible honestly in the
+ * `coverage` figures printed beside the KPI table and does not, by itself,
+ * explain a double-digit percentage swing in a count — so it should not
+ * silently suppress the comparison. The brief's own example — 9 of 34 prior
+ * days against a fully-covered current period — is a 74% gap, more than
+ * three and a half times this line; 20% is comfortably below that while
+ * still well above ordinary single-day noise (about 1 day in 5, i.e. one
+ * missed day in a five-day week or seven in a five-week month).
+ */
+const COVERAGE_MATERIAL_THRESHOLD = 0.2;
+
+function coverageDiffers(cur: ReportData['coverage'], prior: ReportData['coverage']): boolean {
+  const denom = Math.max(cur.daysInPeriod, prior.daysInPeriod, 1);
+  return Math.abs(cur.daysWithData - prior.daysWithData) / denom > COVERAGE_MATERIAL_THRESHOLD;
 }
 
 async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange): Promise<PeriodFigures> {
   const resolved: ResolvedPeriod = { period: 'custom', from: range.from, to: range.to };
-  const [report, weights, stations, scaleRejected] = await Promise.all([
+  const [report, weights, stations, scaleRejected, byProduct] = await Promise.all([
     getReport(pool, lineId, resolved),
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
     // resolves that to the basis Setup has on file, like every other reader.
     getWeights(pool, lineId, undefined, range.from, range.to),
     getWeightStations(pool, lineId, range.from, range.to),
     listEvents(pool, lineId, 'cone', { from: range.from, to: range.to, inRange: false, page: 1, pageSize: 1, sort: 'time', dir: 'desc' }),
+    // U5 (16 Sep 2026): raw product-id + cones for the product-mix comparison
+    // below; labelled once in getManagementSummary, not per period.
+    getProduction(pool, lineId, { from: range.from, to: range.to, groupBy: 'product' }),
   ]);
   const t = report.totals;
   const empty = report.coverage.daysWithData === 0;
@@ -124,7 +198,11 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange)
   // for an empty range; those must not become a prior of 0 and a delta of
   // "up from 0". Null them all except the coverage count itself.
   if (empty) for (const k of Object.keys(values)) if (k !== 'days_with_data') values[k] = null;
-  return { coverage: report.coverage, values, totals: t };
+  const productMix = byProduct.rows.map((r) => ({
+    productId: r.group === NO_PRODUCT_GROUP ? null : Number(r.group),
+    cones: r.cones,
+  }));
+  return { coverage: report.coverage, values, totals: t, productMix };
 }
 
 export async function getManagementSummary(
@@ -134,20 +212,41 @@ export async function getManagementSummary(
   _filters: ReportFilters,
 ): Promise<ManagementSummaryData> {
   const prior = priorPeriod(resolved.from, resolved.to);
-  const [cur, prev] = await Promise.all([
+  const [cur, prev, catalogue] = await Promise.all([
     figuresFor(pool, lineId, { from: resolved.from, to: resolved.to }),
     figuresFor(pool, lineId, prior),
+    loadProductCatalogue(pool),
   ]);
+  // A count-shaped KPI's delta is only presented as a trend when the two
+  // periods' coverage is close enough that the delta is not simply an
+  // artefact of one having far fewer days of data than the other (the
+  // record's 10 Jul – 5 Aug hole makes this a real, not hypothetical, case).
+  const covDiffers = coverageDiffers(cur.coverage, prev.coverage);
+  const incomparableReason =
+    `Prior period covers ${prev.coverage.daysWithData} of ${prev.coverage.daysInPeriod} days with readings, versus ` +
+    `${cur.coverage.daysWithData} of ${cur.coverage.daysInPeriod} for the current period — comparing the totals would ` +
+    'measure that coverage gap, not a change in production.';
   const kpis: KpiRow[] = KPI_DEFINITIONS.map((k) => {
     const current = round(cur.values[k.key] ?? null);
     const before = round(prev.values[k.key] ?? null);
-    return { ...k, current, prior: before, delta: delta(current, before), approval: 'awaiting' };
+    const comparable = !COUNT_SHAPED_UNITS.has(k.unit) || !covDiffers;
+    return {
+      ...k, current, prior: before, delta: delta(current, before),
+      comparable, incomparableReason: comparable ? null : incomparableReason,
+      approval: 'awaiting',
+    };
   });
+  const labelFor = (pid: number | null) => (pid == null ? 'No product on the reading' : (catalogue.product(pid)?.label ?? `Product ${pid}`));
+  const productMix = {
+    current: cur.productMix.map((m) => ({ ...m, label: labelFor(m.productId) })),
+    prior: prev.productMix.map((m) => ({ ...m, label: labelFor(m.productId) })),
+  };
   return {
     period: resolved,
     prior,
     coverage: { current: cur.coverage, prior: prev.coverage },
     kpis,
+    productMix,
     verdict: { cones: cur.totals.cones, sacks: cur.totals.sacks, sackWeightKg: cur.totals.sackWeightKg },
     approval: 'awaiting',
     note:
@@ -158,6 +257,7 @@ export async function getManagementSummary(
 
 export const SUMMARY_CSV_HEADERS = [
   'kpi', 'label', 'unit', 'current', 'prior', 'delta', 'delta_pct', 'better_when', 'period', 'prior_period', 'ifl_approval',
+  'comparable', 'incomparable_reason',
 ] as const;
 
 export function summaryCsv(d: ManagementSummaryData): CsvTable {
@@ -165,6 +265,7 @@ export function summaryCsv(d: ManagementSummaryData): CsvTable {
   const priorPeriodLabel = `${d.prior.from} to ${d.prior.to}`;
   const rows: CsvRow[] = d.kpis.map((k) => [
     k.key, k.label, k.unit, k.current, k.prior, k.delta?.abs ?? null, k.delta?.pct ?? null, k.betterWhen, period, priorPeriodLabel, k.approval,
+    k.comparable, k.incomparableReason,
   ]);
   return { headers: SUMMARY_CSV_HEADERS, rows };
 }

@@ -23,7 +23,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { bindStateCase, foldStateCounts, loadStateContext, plausibleWhere, type StateCounts } from '../coneState.js';
 import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
-import { loadProductCatalogue } from '../productLimits.js';
+import { loadProductCatalogue, limitsFromVersion } from '../productLimits.js';
 import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js';
 import { round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
@@ -36,6 +36,17 @@ export interface ProductReportRow extends ReportLine {
   weight: { n: number; avgG: number | null; sdG: number | null; minG: number | null; maxG: number | null };
   states: StateCounts;
   implausible: number;
+  /**
+   * UX Phase 5 Brief 1, unit U3 (16 Sep 2026): a per-product row is the one
+   * shape where a target is unambiguous — one product, one version in force
+   * at the period's end, from the same versioned history spc.ts and
+   * weightStations.ts read. Null for the NO_PRODUCT_GROUP row (nothing to
+   * judge it against) and for a product whose version carries no usable
+   * limits.
+   */
+  target: { setpointG: number; loG: number; hiG: number; inForceAtUtc: string; limitsChangedInPeriod: number } | null;
+  /** Signed grams of this row's own mean weight against its own target; null when `target` is null or the mean is unknown. */
+  vsTargetG: number | null;
 }
 
 export interface ProductReportData {
@@ -101,23 +112,43 @@ export async function getProductReport(
   }
   const weightOf = new Map(weights.recordset.map((r) => [r.grp, r]));
 
+  // Period bounds on the production-time convention, the same instants
+  // spc.ts's getSpec and weightStations.ts use for "the limits in force at
+  // the period end" and "changed inside the period".
+  const startMs = new Date(`${from}T00:00:00Z`).getTime();
+  const endMs = new Date(`${to}T23:59:59Z`).getTime();
+
   const rows: ProductReportRow[] = prod.rows.map((r) => {
     const line = toReportLine(r);
     const w = weightOf.get(r.group);
     const productId = r.group === NO_PRODUCT_GROUP ? null : Number(r.group);
+    const avgG = round(w?.avg);
+    let target: ProductReportRow['target'] = null;
+    if (productId != null) {
+      const v = catalogue.versionAt(productId, endMs);
+      const lim = limitsFromVersion(v);
+      if (v && lim) {
+        const changed = catalogue
+          .versionsAscending(productId)
+          .filter((x) => x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
+        target = { setpointG: lim.targetG, loG: lim.loG, hiG: lim.hiG, inForceAtUtc: v.effectiveFromUtc, limitsChangedInPeriod: changed };
+      }
+    }
     return {
       ...line,
       productId,
       productLabel: productId == null ? 'No product on the reading' : (catalogue.product(productId)?.label ?? `Product ${productId}`),
       weight: {
         n: Number(w?.n ?? 0),
-        avgG: round(w?.avg),
+        avgG,
         sdG: round(w?.sd),
         minG: round(w?.mn),
         maxG: round(w?.mx),
       },
       states: foldStateCounts(statesOf.get(r.group) ?? []),
       implausible: Number(w?.excluded ?? 0),
+      target,
+      vsTargetG: target == null || avgG == null ? null : round(avgG - target.setpointG),
     };
   });
 
@@ -145,6 +176,7 @@ export const PRODUCT_CSV_HEADERS = [
   'product_id', 'product', 'cones', 'cones_in_range_pct', 'rejected_at_inspection', 'inspection_reject_rate_pct',
   'sacks', 'sack_weight_kg', 'weight_n', 'weight_avg_g', 'weight_sd_g', 'weight_min_g', 'weight_max_g',
   'within', 'low', 'high', 'rejected', 'unknown', 'implausible_excluded',
+  'target_g', 'vs_target_g', 'limits_changed_in_period',
 ] as const;
 
 export function productCsv(d: ProductReportData): CsvTable {
@@ -152,6 +184,7 @@ export function productCsv(d: ProductReportData): CsvTable {
     r.productId, r.productLabel, r.cones, r.conesInRangePct, r.rejectedCones, r.rejectRatePct,
     r.sacks, r.sackWeightKg, r.weight.n, r.weight.avgG, r.weight.sdG, r.weight.minG, r.weight.maxG,
     r.states.within, r.states.low, r.states.high, r.states.rejected, r.states.unknown, r.implausible,
+    r.target?.setpointG ?? null, r.vsTargetG, r.target?.limitsChangedInPeriod ?? null,
   ]);
   return { headers: PRODUCT_CSV_HEADERS, rows };
 }

@@ -42,9 +42,10 @@ import {
   type DriftProjection, type StationDriftDay,
 } from './calibration.js';
 import type { NelsonRuleInfo } from './nelson.js';
-import { getPlausibilityRule } from './admin.js';
+import { getPlausibilityRule, type PlausibilityRule } from './admin.js';
 import { loadProductTimeline, limitsOf } from './productAt.js';
 import { loadProductCatalogue } from './productLimits.js';
+import { plausibleWhere } from './coneState.js';
 import { driftThresholdG, MIN_DAYS_HELD } from './attention.js';
 import { consecutiveProductionDays } from './plantClock.js';
 
@@ -59,8 +60,33 @@ export interface WeightStationRow {
   sdG: number;
   /** Signed grams against the line's own mean. */
   vsLineG: number;
-  /** Signed grams against the product target, or null when none was recorded. */
+  /**
+   * Signed grams against this row's own target (see `targetBasis`) — null
+   * when no target could be resolved, or when the station ran more than one
+   * material in the window and there is therefore no single target to be
+   * signed against.
+   */
   vsTargetG: number | null;
+  /**
+   * Where this row's target came from (roadmap Phase 9 item 4 / UX Phase 5
+   * Brief 1, 16 Sep 2026): up to six materials can run concurrently on
+   * different machines (Sep 2026 data), so the line-wide target used to be
+   * applied to every station regardless of what it actually ran.
+   *  - 'station_material': this station ran exactly one material_id in the
+   *    window; the target is THAT material's own limits, in force at the
+   *    window's end — never the line-wide product.
+   *  - 'mixed': this station ran more than one material_id in the window.
+   *    There is no single honest target, so `vsTargetG` is null and
+   *    `materialsInWindow` says how many it ran instead of a number that
+   *    would silently average two different products' tolerances.
+   *  - 'line_product': every reading at this station carries no material_id
+   *    (the July generation predates the column). Falls back to the
+   *    line-wide Current Product timeline, exactly as coneState.ts does for
+   *    the same readings.
+   */
+  targetBasis: 'station_material' | 'mixed' | 'line_product';
+  /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
+  materialsInWindow?: number;
   /** Consecutive most-recent production days on the same side of the line. */
   daysHeld: number;
   /** The pattern test fired inside that run. */
@@ -92,6 +118,28 @@ export interface WeightStationsData {
   limits: { loG: number; hiG: number } | null;
   productId: number | null;
   productLabel: string | null;
+  /**
+   * When the line-wide target (above) was last recorded — the same instant
+   * convention as spc.ts's `limitsEffectiveFromUtc` — so a consumer (the
+   * cone-weight report, UX Phase 5 Brief 1) can print a version qualifier
+   * beside the figure instead of a bare number.
+   */
+  targetEffectiveFromUtc: string | null;
+  /**
+   * How many times the line-wide product's OWN limits changed inside the
+   * window — a version that BEGAN inside `[from, to]`, mirroring spc.ts's
+   * getSpec (:218-231): the version in force at the window's end is not
+   * itself "a change inside the window" unless it also began inside it.
+   * Null when there is no line-wide product at all (nothing to have changed).
+   */
+  limitsChangedInWindow: number | null;
+  /**
+   * How many times the line-wide Current Product ITSELF changed inside the
+   * window (a new product_timeline entry, not just a limits revision on the
+   * same product) — the qualifier the chart already implies but the table
+   * never printed.
+   */
+  productChangesInWindow: number;
   /** How far from the line a station must sit to be worth acting on. */
   thresholdG: number;
   minDaysHeld: number;
@@ -129,25 +177,47 @@ export async function getWeightStations(
     loadProductCatalogue(pool),
   ]);
 
-  // The target is the product in force at the END of the window: it is what
-  // the line is making now, and the table is read to decide what to do next.
-  // Its limits come from the versioned history AT that instant, not from the
-  // mirror's current values (productLimits.ts). Still one line-wide target:
-  // with up to six materials running on different machines (Sep 2026 data),
-  // a per-machine target is the honest next step — recorded, not built.
+  // The line-wide target is the product in force at the END of the window:
+  // it is what the line is making now, and the table is read to decide what
+  // to do next. Its limits come from the versioned history AT that instant,
+  // not from the mirror's current values (productLimits.ts). This is now
+  // only the FALLBACK target — see `stationTarget` below — for a station
+  // whose readings carry no material_id at all (the July generation).
+  const startMs = new Date(`${from}T00:00:00Z`).getTime();
   const endMs = new Date(`${to}T23:59:59Z`).getTime();
   const product = timeline.at(endMs);
   const limits = product ? (catalogue.limitsAt(product.productId, endMs) ?? limitsOf(product)) : null;
+  // Same rule as spc.ts's getSpec (:218-231): a version in force at the
+  // window's end is not itself "a change inside the window" unless it also
+  // BEGAN inside it.
+  const limitsChangedInWindow = product
+    ? catalogue.versionsAscending(product.productId).filter((v) => v.effectiveFromMs > startMs && v.effectiveFromMs <= endMs).length
+    : null;
+  const targetEffectiveFromUtc = product ? (catalogue.versionAt(product.productId, endMs)?.effectiveFromUtc ?? null) : null;
+  // How many times the line-wide Current Product itself changed (a new
+  // product_timeline entry), not merely a limits revision on the same product.
+  const productChangesInWindow = timeline.entries.filter((e) => e.effectiveFromMs > startMs && e.effectiveFromMs <= endMs).length;
 
   // Every logged adjustment restarts the station's centreline and sigma as
   // well as its run (calibration.ts header, Phase 9).
   const restarts = adjustmentRestarts(adjustments);
 
+  // stationMaterialCounts runs AFTER the pair above, not alongside them:
+  // rejectRatesByStation issues two queries on this same pool in a fixed
+  // order that several existing tests pin positionally (fakePool(...
+  // responses) helpers in weightStations.test.ts, .window.test.ts,
+  // .gap.test.ts, .phase9.test.ts), and running a third query concurrently
+  // would race with — and silently steal a response slot from — those two.
+  // Sequencing it after keeps their two-response fixtures correct unchanged;
+  // a fixture that supplies no third response simply gets an empty
+  // recordset here, which resolves to every station falling back to
+  // targetBasis 'line_product' — the same target those tests already expect.
   const [drift, rejectStats] = await Promise.all([
     getStationDrift(pool, lineId, from, to, plausibility, { restarts }),
     rejectRatesByStation(pool, lineId, from, to),
   ]);
   const rejects = rejectStats.rates;
+  const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility);
 
   const active = drift.stations.filter((s) => s.n > 0);
   const totalN = active.reduce((s, x) => s + x.n, 0);
@@ -203,6 +273,31 @@ export async function getWeightStations(
     }
     if (!flagged) run = [];
 
+    // Per-station, per-material target (roadmap Phase 9 item 4 / UX Phase 5
+    // Brief 1, 16 Sep 2026). See WeightStationRow.targetBasis for the three
+    // outcomes. `nonNull` excludes rows with no material_id (July generation)
+    // from the "how many materials" count — those are judged by the
+    // line-wide fallback below, exactly as coneState.ts's limitWindowsFor
+    // does for the same readings.
+    const matRows = stationMaterials.get(st.station) ?? [];
+    const nonNull = matRows.filter((m) => m.materialId != null);
+    const distinctMaterials = [...new Set(nonNull.map((m) => m.materialId!))];
+    let targetBasis: WeightStationRow['targetBasis'] = 'line_product';
+    let materialsInWindow: number | undefined;
+    let stationLimits: { loG: number; hiG: number; targetG: number } | null = limits;
+    let rowVsTargetG: number | null = limits == null ? null : round(runMean - limits.targetG);
+    if (distinctMaterials.length === 1) {
+      targetBasis = 'station_material';
+      const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
+      stationLimits = mLimits;
+      rowVsTargetG = mLimits == null ? null : round(runMean - mLimits.targetG);
+    } else if (distinctMaterials.length > 1) {
+      targetBasis = 'mixed';
+      materialsInWindow = distinctMaterials.length;
+      stationLimits = null; // no single target to project toward either
+      rowVsTargetG = null; // NO NUMBER — there is no single target, so printing one would be over-claiming.
+    }
+
     const r = rejects.get(st.station);
     return {
       station: st.station,
@@ -211,7 +306,9 @@ export async function getWeightStations(
       medianG: st.medianG == null ? null : round(st.medianG),
       sdG: round(st.stdevWithin ?? 0),
       vsLineG: lineMeanG == null ? 0 : round(runMean - lineMeanG),
-      vsTargetG: limits == null ? null : round(runMean - limits.targetG),
+      vsTargetG: rowVsTargetG,
+      targetBasis,
+      ...(materialsInWindow != null ? { materialsInWindow } : {}),
       daysHeld,
       flagged,
       rejectRatePct: r == null ? null : round(r, 2),
@@ -220,16 +317,19 @@ export async function getWeightStations(
       centrelineG: round(st.centrelineG ?? st.grandMean),
       sigmaDayToDay: st.sigmaDayToDay ?? 0,
       longestRun: st.longestRun ?? 0,
-      // Only a flagged station is projected: the line is fitted over the run
-      // the finding names, and a station with no finding has no run.
-      projection: flagged ? projectDaysToLimit(run, limits ? { loG: limits.loG, hiG: limits.hiG, targetG: limits.targetG } : null) : null,
+      // Only a flagged station is projected, and only when it has a single
+      // target to project toward: `projectDaysToLimit` must return null for
+      // a 'mixed' station (stationLimits is null there) — there is no one
+      // limit to head for, so a projection would be exactly the over-claim
+      // this table exists to refuse.
+      projection: flagged ? projectDaysToLimit(run, stationLimits ? { loG: stationLimits.loG, hiG: stationLimits.hiG, targetG: stationLimits.targetG } : null) : null,
       days: st.days,
     };
   });
 
   // Flagged first, then by distance from target when there is one, else from
   // the line. The column header states the sort, so it is never a mystery.
-  const key = (s: WeightStationRow) => Math.abs((limits ? s.vsTargetG : s.vsLineG) ?? 0);
+  const key = (s: WeightStationRow) => Math.abs((s.vsTargetG != null ? s.vsTargetG : s.vsLineG) ?? 0);
   stations.sort((a, b) => Number(b.flagged) - Number(a.flagged) || key(b) - key(a));
 
   // Volume-weighted, not an average of the stations' own percentages — a
@@ -248,12 +348,46 @@ export async function getWeightStations(
     limits: limits ? { loG: limits.loG, hiG: limits.hiG } : null,
     productId: product?.productId ?? null,
     productLabel: product?.label ?? null,
+    targetEffectiveFromUtc,
+    limitsChangedInWindow,
+    productChangesInWindow,
     thresholdG,
     minDaysHeld: MIN_DAYS_HELD,
     lineRejectRatePct,
     stations,
     rules: drift.rules ?? [],
   };
+}
+
+/**
+ * Per-station, per-material cone counts over the window (UX Phase 5 Brief 1,
+ * 16 Sep 2026) — the same window and the same plausibility predicate every
+ * other weight statistic in this file uses (coneState.ts's plausibleWhere,
+ * the ONE population rule), so a station's material mix here is the same
+ * population its mean/median/SD above are computed over.
+ */
+async function stationMaterialCounts(
+  pool: ConnectionPool,
+  lineId: number,
+  from: string,
+  to: string,
+  plausibility: PlausibilityRule,
+): Promise<Map<number, { materialId: number | null; n: number }[]>> {
+  const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
+  const plaus = plausibleWhere(req, 'weight_g', { loG: plausibility.coneLoG, hiG: plausibility.coneHiG });
+  const r = await req.query<{ st: number; mat: number | null; n: number }>(
+    `SELECT source_station st, material_id mat, COUNT(*) n
+       FROM sms.cone_event
+      WHERE line_id=@line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL AND ${plaus}
+      GROUP BY source_station, material_id`,
+  );
+  const out = new Map<number, { materialId: number | null; n: number }[]>();
+  for (const row of r.recordset) {
+    const list = out.get(row.st) ?? [];
+    list.push({ materialId: row.mat == null ? null : Number(row.mat), n: Number(row.n) });
+    out.set(row.st, list);
+  }
+  return out;
 }
 
 /**
