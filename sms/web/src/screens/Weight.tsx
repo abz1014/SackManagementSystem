@@ -343,7 +343,10 @@ export function WeightScreen({
             three figures above and the station table below stay cone-only,
             so a reader cannot mistake them for describing this chart. */}
         {chartType === 'sack' && (
-          <p className="mut sm" style={{ marginTop: 10 }}>{W.weight.sackNoTarget}</p>
+          <>
+            <p className="mut sm" style={{ marginTop: 10 }}>{W.weight.sackNoTarget}</p>
+            <p className="mut sm" style={{ marginTop: 4 }}>{W.weight.sackChartOnly}</p>
+          </>
         )}
         {/* The population under the chart, stated once: the same count and
             the same exclusion the report and the reconciliation print. */}

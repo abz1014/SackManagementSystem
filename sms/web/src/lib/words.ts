@@ -475,6 +475,13 @@ export const W = {
        tolerance applies to a sack weight in kilograms. State the absence,
        never a number. */
     sackNoTarget: 'No product tolerance applies: the product target is a cone weight in grams, and this is a sack weight in kilograms.',
+    /* Companion to sackNoTarget: the toggle only changes the chart below it.
+       The headline, the three figures above and the station table below all
+       stay cone-only regardless of the toggle (Weight.tsx always queries
+       coneLine for those, never spc). Say so once, beside sackNoTarget,
+       so a reader cannot read the kilogram chart into the gram numbers
+       around it. */
+    sackChartOnly: 'The headline, the figures above and the station table below still describe cones, not this sack chart.',
   } as const,
 
   /* --------------------------------------------------------------- rejects */
