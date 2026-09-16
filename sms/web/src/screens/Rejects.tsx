@@ -47,6 +47,7 @@ import { trailingWindow, daysWithReadings, type Period } from '../lib/period';
 import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, Toolbar, rowKeys } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, linePath, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
+import { vitalFew } from '../lib/pareto';
 import {
   getRange, getStations, getProducts, stationLabel, setRejectLabel,
   getRejectsFiltered, getRejectSpcFiltered, getRejectsByDayCode, rejectCodeParam,
@@ -664,6 +665,13 @@ function Reasons({
   if (loading) return <SkelLines n={6} short />;
   if (rows.length === 0) return <Empty message={W.rejects.none} />;
   const max = Math.max(...rows.map((r) => r.count), 1);
+  // UX Phase 5 Brief 4, unit U4 (16 Sep 2026): the "vital few" — the smallest
+  // leading run of reasons whose cumulative share already reaches 80%. Pure
+  // arithmetic over the server's own running cumulativePct (lib/pareto.ts);
+  // no severity grouping, no cause inference — reject code MEANINGS are still
+  // an unanswered IFL question (Q10).
+  const vitalCount = vitalFew(rows, 80);
+  const vitalPct = vitalCount > 0 ? rows[vitalCount - 1]!.cumulativePct : 0;
 
   // The inline rename, with its failure reported rather than swallowed: the
   // old handler awaited setRejectLabel with no catch, so a 403 or an outage
@@ -681,6 +689,7 @@ function Reasons({
 
   return (
     <div>
+      <p className="mut sm" style={{ marginTop: 0, marginBottom: 4 }}>{W.rejects.vitalFew(vitalCount, fmtPct1(vitalPct))}</p>
       <p className="mut sm" style={{ marginTop: 0, marginBottom: 8 }}>{W.rejectsMore.clickBarHint}</p>
       <div className="bars">
         {rows.map((r) => {
@@ -699,7 +708,16 @@ function Reasons({
                 {reasonName(r)}
               </button>
               <i style={{ width: `${Math.round((100 * r.count) / max)}%`, background: isActive ? 'var(--ink)' : r.label ? 'var(--graphite)' : 'var(--grid)' }} />
-              <em>{fmtInt(r.count)} · {Math.round(r.pct)}%</em>
+              {/* Roadmap UX Phase 5 Brief 4 (16 Sep 2026): the cumulative share joins
+                  count/pct in this SAME cell — report/Reject.tsx:57 gives cumulativePct
+                  its own <em>, but that report row has no naming control competing for
+                  the fourth .bars grid column (app.css:616) that this row's Name-it
+                  button/editor already occupies; a fifth cell would overflow the
+                  4-column grid template. aria-label carries W.rejects.cumulativePct
+                  since there is no <th> here to hold it. */}
+              <em aria-label={W.rejects.cumulativePct}>
+                {fmtInt(r.count)} · {Math.round(r.pct)}% · {fmtPct1(r.cumulativePct)} cum.
+              </em>
               {canName && r.rejectCodeId != null ? (
                 editing === r.rejectCodeId ? (
                   <span className="row" style={{ gap: 6 }}>
