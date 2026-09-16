@@ -11,6 +11,7 @@
 import type { Express, Request } from 'express';
 import type { ConnectionPool } from 'mssql';
 import type { ApiConfig } from '../config.js';
+import type { PdasWriter } from '../services/pdasWrite.js';
 
 export interface RouteContext {
   app: Express;
@@ -18,4 +19,11 @@ export interface RouteContext {
   cfg: ApiConfig;
   /** Fire-and-forget audit for non-configuration events (login, export). Configuration writes use auditedWrite. */
   audit: (req: Request, action: string, targetType: string, targetId: string | number | null, detail: string | null) => void;
+  /**
+   * The single PDAS writer instance app.ts opens (§5 header): reused rather
+   * than constructed again per route module, so there is still only one lazy
+   * writer pool in the process. Routes read `.enabled`/`.disabledReason`
+   * freely — those never open a connection — and only a write call does.
+   */
+  pdas: PdasWriter;
 }

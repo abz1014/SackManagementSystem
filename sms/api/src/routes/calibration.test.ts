@@ -15,7 +15,7 @@ type Handler = (req: Request, res: Response, next: (e?: unknown) => void) => voi
 function mount(): Map<string, Handler> {
   const routes = new Map<string, Handler>();
   const app = { get: (path: string, h: Handler) => routes.set(path, h) } as unknown as Express;
-  mountCalibrationRoutes({ app, pool: {} as RouteContext['pool'], cfg: {} as RouteContext['cfg'], audit: () => {} });
+  mountCalibrationRoutes({ app, pool: {} as RouteContext['pool'], cfg: {} as RouteContext['cfg'], audit: () => {}, pdas: {} as RouteContext['pdas'] });
   return routes;
 }
 

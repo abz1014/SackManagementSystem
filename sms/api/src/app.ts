@@ -64,6 +64,7 @@ import { mountOpsRoutes } from './routes/ops.js';
 import { mountReportsRoutes } from './routes/reports.js';
 import { mountCalibrationRoutes } from './routes/calibration.js';
 import { mountSacksRoutes } from './routes/sacks.js';
+import { mountChangeoverRoutes } from './routes/changeover.js';
 
 const dateStr = z
   .string()
@@ -1802,13 +1803,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // they mount here, after every gate above and BEFORE the /api 404 below:
   // mounted after it (as the first stub did, 14 Sep 2026) every one of their
   // routes was shadowed by `not found` and could never be reached.
-  const routeCtx = { app, pool, cfg, audit };
+  const routeCtx = { app, pool, cfg, audit, pdas };
   mountConeRoutes(routeCtx);
   mountRejectsRoutes(routeCtx);
   mountOpsRoutes(routeCtx);
   mountReportsRoutes(routeCtx);
   mountCalibrationRoutes(routeCtx);
   mountSacksRoutes(routeCtx);
+  mountChangeoverRoutes(routeCtx);
 
   // JSON 404 for unmatched API routes
   app.use('/api', (_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));

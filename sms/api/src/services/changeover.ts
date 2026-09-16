@@ -20,12 +20,18 @@
  * on the panel, and the result sentence says exactly that.
  *
  * WHY A PLAN FIRST. Two of the vendor's refusals are only knowable in
- * advance from the mirror: CreateMaterial refuses a (blend, count, tube)
- * triple that already exists, active or not (-7001 — IFL's own engineer hit
- * it four times in six minutes on 18 Aug 2026), and CreatePallet refuses a
- * (material, schema, lot) that exists (-8001). The plan checks both against
- * the mirror and names the existing row, so the sequence is refused before
- * step 1 rather than failing at step 4 with three rows already written.
+ * advance from the mirror: CreateMaterial is expected to refuse a (blend,
+ * count, tube) triple that already exists, active or not (-7001), and
+ * CreatePallet is expected to refuse a (material, schema, lot) that exists
+ * (-8001) — both EXPECTED, not established fact: the 15 Sep 2026 audit found
+ * the field notes these were cited from (IFL's engineer, 18 Aug 2026) contain
+ * no error of any kind, every executed call shown returning @error/@errorMsg
+ * = NULL/NULL. The real behaviour is to be established by an offline proof
+ * against the local `_SEP07` copy, not repeated as fact until it is. The plan
+ * checks both against the mirror and names the existing row regardless, so
+ * the sequence is refused before step 1 rather than failing at step 4 with
+ * three rows already written — if the refusal proves not to behave as
+ * expected, the plan's check is still a harmless, conservative one.
  *
  * NO ROLLBACK IS POSSIBLE. Each vendor proc commits its own row and writes
  * its own nhs_events line; there is no transaction across them and no
@@ -39,6 +45,7 @@
  * until IFL's written authorisation arrives.
  */
 import type { ConnectionPool } from 'mssql';
+import mssql from 'mssql';
 import type { Actor, PalletFields, PdasWriter, SetpointBounds, TubeForm, WriteFailure } from './pdasWrite.js';
 import { findPalletByKey, listPallets } from './pallets.js';
 import { recordAudit } from './audit.js';
@@ -105,7 +112,20 @@ export interface ChangeoverPlan {
   noRollback: string;
   /** The limits the new material will carry, ready to print. */
   limits: { setpointG: number; offsetMinusG: number; offsetPlusG: number; label: string };
+  /**
+   * The honesty contract (CLAUDE.md, Q63/pdasWrite.ts header): a changeover
+   * makes ids selectable in PDAS; it never selects them on a machine. Always
+   * false — there is no path in this module that could make it true.
+   */
+  reachesMachine: false;
+  /** Printed verbatim by the UI. Carried forward from this file's own header, not invented. */
+  operatorNote: string;
 }
+
+/** The honesty-contract sentence — verbatim on every plan, never reworded per caller. */
+export const OPERATOR_SELECTS_ON_MACHINE =
+  'This makes the product available in PDAS and records what was intended. ' +
+  'The operator still selects it on the QCS panel at the machine.';
 
 export interface StepDone extends PlanStep {
   /** The id PDAS allocated (or confirmed). */
@@ -332,6 +352,8 @@ export async function planChangeover(deps: ChangeoverDeps, req: ChangeoverReques
     warnings,
     noRollback: NO_ROLLBACK,
     limits: { setpointG, offsetMinusG, offsetPlusG, label: limitsLabel },
+    reachesMachine: false,
+    operatorNote: OPERATOR_SELECTS_ON_MACHINE,
   };
 }
 
@@ -340,13 +362,50 @@ export async function planChangeover(deps: ChangeoverDeps, req: ChangeoverReques
 const failureOf = (f: WriteFailure) => ({ code: f.code, message: f.message, pdasErrorCode: f.pdasErrorCode ?? null });
 
 /**
+ * A row in sms.product_change for a changeover that never reached PDAS — the
+ * flag was off, so no vendor proc ran. Same table PdasWriter's own recordChange
+ * writes to (migration 027/036), same shape, written directly here because
+ * this whole-sequence attempt has no single PdasWriter method to record it
+ * through: 'create' is the closest of the CHECK-constrained operation values
+ * (CK_pc_operation, migration 036) — a changeover's first real write, had the
+ * flag been on, would have been CreateMaterial.
+ */
+async function recordDisabledAttempt(pool: ConnectionPool, req: ChangeoverRequest, actor: Actor, message: string): Promise<void> {
+  await pool
+    .request()
+    .input('pid', mssql.Int, null)
+    .input('pallet', mssql.Int, null)
+    .input('proc', mssql.VarChar(40), 'CreateMaterial')
+    .input('op', mssql.VarChar(20), 'create')
+    .input('before', mssql.NVarChar(mssql.MAX), null)
+    .input('after', mssql.NVarChar(mssql.MAX), JSON.stringify(req))
+    .input('obs', mssql.NVarChar(mssql.MAX), null)
+    .input('outcome', mssql.VarChar(20), 'disabled')
+    .input('code', mssql.Int, null)
+    .input('msg', mssql.NVarChar(500), message)
+    .input('eff', mssql.DateTime2(3), null)
+    .input('by', mssql.Int, actor.userId)
+    .input('reason', mssql.NVarChar(255), req.reason)
+    .query(
+      `INSERT INTO sms.product_change
+         (product_id, pallet_id, proc_name, operation, before_json, after_json, observed_after_json, outcome,
+          pdas_error_code, message, effective_from, changed_by, reason)
+       VALUES (@pid, @pallet, @proc, @op, @before, @after, @obs, @outcome, @code, @msg, @eff, @by, @reason)`,
+    );
+}
+
+/**
  * Run the plan in order, stopping at the first failure. The caller has
  * already checked `plan.blockers` is empty and the flag is on (the route
  * answers 409 otherwise); this re-checks both so it cannot be misused.
  */
 export async function executeChangeover(deps: ChangeoverDeps, req: ChangeoverRequest, actor: Actor): Promise<ChangeoverOutcome | { refused: string }> {
   const plan = await planChangeover(deps, req);
-  if (!deps.writer.enabled) return { refused: deps.writer.disabledReason ?? 'The PDAS write path is not enabled.' };
+  if (!deps.writer.enabled) {
+    const message = deps.writer.disabledReason ?? 'The PDAS write path is not enabled.';
+    await recordDisabledAttempt(deps.pool, req, actor, message);
+    return { refused: message };
+  }
   if (plan.blockers.length > 0) return { refused: plan.blockers.join(' ') };
 
   const done: StepDone[] = [];
