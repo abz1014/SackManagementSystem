@@ -51,6 +51,10 @@ export function StationSheet({
   canAdjust,
   periodTo,
   onClose,
+  onSeeReadings,
+  onSeeRejects,
+  onSeeCalibrationReport,
+  onSeeShiftReport,
 }: {
   station: number;
   canAdjust: boolean;
@@ -60,6 +64,18 @@ export function StationSheet({
    *  before this was threaded through. See Weight.tsx and api.ts. */
   periodTo: string;
   onClose: () => void;
+  /**
+   * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.6
+   * "a station → its drift and its adjustments" and the two hops beside it):
+   * the evidence for a station's finding was one tap away here, but the
+   * cones and rejects BEHIND that evidence were not. Each carries this
+   * station and closes the sheet; the period travels with it automatically
+   * (App.tsx's `go` merges it).
+   */
+  onSeeReadings: () => void;
+  onSeeRejects: () => void;
+  onSeeCalibrationReport: () => void;
+  onSeeShiftReport: () => void;
 }) {
   const [data, setData] = useState<WeightStationsData | null>(null);
   const [names, setNames] = useState<StationRow[]>([]);
@@ -115,7 +131,18 @@ export function StationSheet({
         // which the branch above already covers.
         <Empty message={W.stationNotFound} />
       ) : (
-        <Body row={row} data={data} name={name} log={log} canAdjust={canAdjust} onLogged={() => setNonce((n) => n + 1)} />
+        <Body
+          row={row}
+          data={data}
+          name={name}
+          log={log}
+          canAdjust={canAdjust}
+          onLogged={() => setNonce((n) => n + 1)}
+          onSeeReadings={onSeeReadings}
+          onSeeRejects={onSeeRejects}
+          onSeeCalibrationReport={onSeeCalibrationReport}
+          onSeeShiftReport={onSeeShiftReport}
+        />
       )}
     </Sheet>
   );
@@ -141,6 +168,10 @@ function Body({
   log,
   canAdjust,
   onLogged,
+  onSeeReadings,
+  onSeeRejects,
+  onSeeCalibrationReport,
+  onSeeShiftReport,
 }: {
   row: WeightStationRow;
   data: WeightStationsData;
@@ -148,6 +179,10 @@ function Body({
   log: AdjustmentList;
   canAdjust: boolean;
   onLogged: () => void;
+  onSeeReadings: () => void;
+  onSeeRejects: () => void;
+  onSeeCalibrationReport: () => void;
+  onSeeShiftReport: () => void;
 }) {
   const signed = (v: number | null) => {
     if (v == null) return '—';
@@ -255,6 +290,18 @@ function Body({
         </>
       )}
       <p className="mut sm" style={{ marginTop: 8 }}>{W.weight.adjustmentResets}</p>
+
+      {/* Roadmap Phase 2b guided-navigation pass (16 Sep 2026): the evidence
+          above was one tap away; the cones and rejects behind it were not. */}
+      <p style={{ marginTop: 18 }}>
+        <button type="button" className="linkish" onClick={onSeeReadings}>{W.calibration.seeReadings}</button>
+        {' · '}
+        <button type="button" className="linkish" onClick={onSeeRejects}>{W.calibration.seeRejects}</button>
+        {' · '}
+        <button type="button" className="linkish" onClick={onSeeCalibrationReport}>{W.calibration.seeCalibrationReport}</button>
+        {' · '}
+        <button type="button" className="linkish" onClick={onSeeShiftReport}>{W.calibration.seeShiftReport}</button>
+      </p>
 
       {canAdjust && <LogForm station={row.station} name={name} offsetMinutes={offset} onLogged={onLogged} />}
 

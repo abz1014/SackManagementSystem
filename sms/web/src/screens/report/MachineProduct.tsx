@@ -21,7 +21,7 @@
  * report and screen carry.
  */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
 import { fmtClock, fmtInt } from '../../lib/fmt';
 import type { MachineProductChange, MachineProductReportData, MachineShiftCell } from '../../api';
 import { fmtDayShort } from './shared';
@@ -36,7 +36,14 @@ function labelOf(id: number | null, name: string | null, labels: Record<string, 
   return labels[String(id ?? 'none')] ?? name ?? (id == null ? W.cone.noMaterial : W.cone.noProductName(id));
 }
 
-export function MachineProductSection({ d }: { d: MachineProductReportData }) {
+/**
+ * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.3
+ * "a machine → its product and its shift"): the changeover matrix names the
+ * machine on every row but opened nothing. `onOpen` opens that station's
+ * sheet — the same destination the machine rows on Line and the station
+ * table on Weight already open.
+ */
+export function MachineProductSection({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
   if (d.rows.length === 0) {
     return (
       <Block first>
@@ -72,7 +79,10 @@ export function MachineProductSection({ d }: { d: MachineProductReportData }) {
             <tbody>
               {d.rows.map((r) => (
                 <tr key={r.station}>
-                  <td>{machineLabel(r.station, r.machineName, r.stationName)}</td>
+                  <td className="click" tabIndex={0} onClick={() => onOpen(r.station)} onKeyDown={rowKeys(() => onOpen(r.station))}>
+                    {machineLabel(r.station, r.machineName, r.stationName)}
+                    <Chevron label={W.openRecord} />
+                  </td>
                   {r.cells.map((cell, i) => (
                     <td key={i}>{cell ? <Cell cell={cell} labels={d.labels} /> : '—'}</td>
                   ))}

@@ -2,10 +2,19 @@
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
-import type { RejectReportData } from '../../api';
+import type { RejectReason, RejectReportData } from '../../api';
 import { fmtDayShort, fmtPct } from './shared';
 
-export function RejectSection({ d }: { d: RejectReportData }) {
+/**
+ * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.5
+ * "a reject code → the days and readings behind it"): a Pareto bar on paper
+ * named a reason but could not be followed to it. `onOpenCode` sends the
+ * reader to the Rejects screen with that code selected — the same code param
+ * (`jc`) the live screen's own Pareto bars set — carrying the period and the
+ * station/product filters this report was already showing (`st`/`pr` are
+ * shared, so they ride along automatically).
+ */
+export function RejectSection({ d, onOpenCode }: { d: RejectReportData; onOpenCode: (r: RejectReason) => void }) {
   if (d.total === 0 && d.trend.every((t) => t.produced === 0)) {
     return (
       <Block first>
@@ -40,7 +49,9 @@ export function RejectSection({ d }: { d: RejectReportData }) {
           <div className="bars">
             {d.reasons.map((r) => (
               <div key={`${r.rejectType}-${r.tubeCode}-${r.materialCode}`}>
-                <span>{r.displayLabel}</span>
+                <button type="button" className="linkish" style={{ textAlign: 'left' }} onClick={() => onOpenCode(r)}>
+                  {r.displayLabel}
+                </button>
                 <i style={{ width: `${Math.max(2, r.pct)}%`, background: 'var(--graphite)' }} />
                 <em>{fmtInt(r.count)} · {fmtPct(r.pct)}</em>
                 <em className="sm mut">{fmtPct(r.cumulativePct)} cum.</em>

@@ -72,6 +72,7 @@ export function ReasonSheet({
   onClose,
   onOpenRegister,
   onOpenReading,
+  onOpenReport,
 }: {
   id: string;
   canName: boolean;
@@ -79,6 +80,13 @@ export function ReasonSheet({
   /** Readings, on this production day's inspection rejects. */
   onOpenRegister: (day: string) => void;
   onOpenReading: (type: 'reject', id: number) => void;
+  /**
+   * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.5
+   * "a reject code → the days and readings behind it"). The reject report has
+   * no per-code filter, so this narrows to this reason's own day, the same
+   * narrowing `onOpenRegister` already uses.
+   */
+  onOpenReport: (day: string) => void;
 }) {
   const ref = parseReasonId(id);
   const [s, setS] = useState<State>({ data: null, stations: [], error: null });
@@ -120,7 +128,15 @@ export function ReasonSheet({
       ) : !s.data ? (
         <Loading />
       ) : (
-        <Body data={s.data} stations={s.stations} canName={canName} onRenamed={refresh} onOpenRegister={onOpenRegister} onOpenReading={onOpenReading} />
+        <Body
+          data={s.data}
+          stations={s.stations}
+          canName={canName}
+          onRenamed={refresh}
+          onOpenRegister={onOpenRegister}
+          onOpenReading={onOpenReading}
+          onOpenReport={onOpenReport}
+        />
       )}
     </Sheet>
   );
@@ -133,6 +149,7 @@ function Body({
   onRenamed,
   onOpenRegister,
   onOpenReading,
+  onOpenReport,
 }: {
   data: RejectReasonData;
   stations: StationRow[];
@@ -140,6 +157,7 @@ function Body({
   onRenamed: () => void;
   onOpenRegister: (day: string) => void;
   onOpenReading: (type: 'reject', id: number) => void;
+  onOpenReport: (day: string) => void;
 }) {
   const M = W.rejectsMore;
   const [editing, setEditing] = useState(false);
@@ -253,6 +271,10 @@ function Body({
       <p style={{ marginTop: 22 }}>
         <button type="button" className="linkish" onClick={() => onOpenRegister(data.day)}>{M.openRegister}</button>{' '}
         <span className="mut sm">· {M.openRegisterNote}</span>
+      </p>
+      <p style={{ marginTop: 8 }}>
+        <button type="button" className="linkish" onClick={() => onOpenReport(data.day)}>{M.openReport}</button>{' '}
+        <span className="mut sm">· {M.openReportNote}</span>
       </p>
       <p className="mut sm" style={{ marginTop: 14 }}>{M.dayBasisCaveat}</p>
     </>

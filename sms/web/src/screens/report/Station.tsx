@@ -1,11 +1,19 @@
 /** Machine / station report: the one station ranking, on paper. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
 import { fmtAppInstant, fmtInt, fmtPct1 } from '../../lib/fmt';
 import { stationLabel, type StationReportData, type StationRow } from '../../api';
 import { fmtG1, fmtSignedG, StateCells, StateHeads } from './shared';
 
-export function StationSection({ d, names }: { d: StationReportData; names: StationRow[] }) {
+/**
+ * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.6):
+ * a row on paper was a dead end — the same finding was one click from
+ * evidence on Weight's identical table, but not here. `onOpen` opens the
+ * station sheet over this report, carrying nothing but the station id: the
+ * sheet reads its own period from the URL's global period, not from this
+ * report's (possibly different) range, exactly as Weight's table does.
+ */
+export function StationSection({ d, names, onOpen }: { d: StationReportData; names: StationRow[]; onOpen: (station: number) => void }) {
   if (d.rows.length === 0) {
     return (
       <Block first>
@@ -45,8 +53,17 @@ export function StationSection({ d, names }: { d: StationReportData; names: Stat
             </thead>
             <tbody>
               {d.rows.map((r) => (
-                <tr key={r.station}>
-                  <td>{nameOf(r.station)}</td>
+                <tr
+                  key={r.station}
+                  className="click"
+                  tabIndex={0}
+                  onClick={() => onOpen(r.station)}
+                  onKeyDown={rowKeys(() => onOpen(r.station))}
+                >
+                  <td>
+                    {nameOf(r.station)}
+                    <Chevron label={W.openRecord} />
+                  </td>
                   <td className="n">{fmtInt(r.cones)}</td>
                   <td className="n">{fmtPct1(r.conesInRangePct)}</td>
                   <td className="n">{fmtG1(r.meanG)}</td>

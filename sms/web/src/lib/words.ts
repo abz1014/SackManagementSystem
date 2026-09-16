@@ -179,6 +179,12 @@ export const W = {
     setBy: 'set by',
     change: 'Change',
     history: 'History',
+    /* Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md
+       §6.4 "a product → what it produced"). No Product Catalogue screen
+       exists yet (Phase 6), so this points at the one place production is
+       already broken out by product: the Product report type. */
+    seeReport: 'See what it produced',
+    seeReportNote: 'opens the product report, filtered to this product',
     none: 'No product has been recorded for this line yet.',
     /* Distinct from `none` above (OVERVIEW-SPEC.md §3.4 empty states, D4):
        `none` is /api/product-at's neverRecorded === true; this is the
@@ -322,6 +328,13 @@ export const W = {
        by this file's own rule — but everything in it is stated in words,
        and nothing in it is worked out on the client: each line prints a
        field the server sent, or "not available" when it sent none. */
+    /* Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md
+       §6.4 "the product in force at a reading → its report"). No Product
+       Catalogue screen exists yet (Phase 6); this opens the Product report
+       for that product, narrowed to this reading's own production day — the
+       same day-narrowing ReasonSheet's register link already uses. */
+    seeProductReport: 'See this product’s report',
+    seeProductReportNote: 'opens the product report for this product, on this reading’s day',
     provenance: 'Where this reading came from',
     /* TWO CLOCKS, named (CLAUDE.md). The plant's times are its wall clock;
        the moment the reading reached this system is a real UTC instant shown
@@ -863,6 +876,12 @@ export const W = {
     notWeighed: 'not weighed',
     openRegister: 'See this day in Readings',
     openRegisterNote: 'opens Readings on the inspection rejects of this day; the reason itself is listed only here',
+    /* Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md
+       §6.5 "a reject code → the days and readings behind it"). The reject
+       report has no per-code filter (FILTERS_BY_TYPE), so this narrows to
+       the same day the sheet is already showing rather than the code alone. */
+    openReport: 'See this day on the reject report',
+    openReportNote: 'opens the reject report for this day',
     nameThisReason: 'Name this reason',
     rename: 'Rename',
     save: 'Save',
@@ -1087,6 +1106,15 @@ export const W = {
         ? '1 adjustment on record for this station, including line-wide ones.'
         : `${n} adjustments on record for this station, including line-wide ones.`,
     adjustedAtNote: 'Plant time. Stored as an app instant and converted with the offset the server reports, never the browser\u2019s.',
+    /* Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md
+       \u00a76.6 "a station \u2192 its drift and its adjustments" and the hops beside
+       it) \u2014 the evidence in this sheet is one tap away, but the cones and
+       rejects BEHIND it were not, and neither was this station's own place
+       in a report. Every link carries this station and the sheet's period. */
+    seeReadings: 'See this station\u2019s readings',
+    seeRejects: 'See this station\u2019s rejects',
+    seeCalibrationReport: 'See the calibration report',
+    seeShiftReport: 'See this machine by shift',
   } as const,
 
   /* ------------------------------------ sacks and the stock ledger (Phase 7) */

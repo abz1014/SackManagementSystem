@@ -40,7 +40,21 @@ function limitsLabel(p: ProductOption | undefined): string | null {
   return `${fmtG(p.setpointG - minus)} to ${fmtG(p.setpointG + plus)}`;
 }
 
-export function ProductSheet({ canWrite, onClose }: { canWrite: boolean; onClose: () => void }) {
+export function ProductSheet({
+  canWrite,
+  onClose,
+  onSeeReport,
+}: {
+  canWrite: boolean;
+  onClose: () => void;
+  /**
+   * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.4
+   * "a product → what it produced"). No Product Catalogue screen exists yet
+   * (Phase 6); this is the one place production already breaks out by
+   * product — the Product report type, filtered to this product.
+   */
+  onSeeReport: (productId: number) => void;
+}) {
   const [current, setCurrentState] = useState<TimelineEntry | null | undefined>(undefined);
   const [products, setProducts] = useState<ProductOption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +85,7 @@ export function ProductSheet({ canWrite, onClose }: { canWrite: boolean; onClose
           products={products!}
           canWrite={canWrite}
           onChanged={() => setNonce((n) => n + 1)}
+          onSeeReport={onSeeReport}
         />
       )}
     </Sheet>
@@ -82,11 +97,13 @@ function Body({
   products,
   canWrite,
   onChanged,
+  onSeeReport,
 }: {
   current: TimelineEntry | null;
   products: ProductOption[];
   canWrite: boolean;
   onChanged: () => void;
+  onSeeReport: (productId: number) => void;
 }) {
   const currentOption = current ? products.find((p) => p.productId === current.productId) : undefined;
   const limits = limitsLabel(currentOption);
@@ -115,6 +132,10 @@ function Body({
           {currentOption?.activeFlag === false && (
             <p className="acc sm" style={{ marginTop: 10 }}>{W.product.inactive}</p>
           )}
+          <p style={{ marginTop: 10 }}>
+            <button type="button" className="linkish" onClick={() => onSeeReport(current.productId)}>{W.product.seeReport}</button>{' '}
+            <span className="mut sm">· {W.product.seeReportNote}</span>
+          </p>
         </>
       ) : (
         <p className="mut" style={{ marginTop: 12 }}>{W.product.none}</p>

@@ -37,8 +37,8 @@ import type { Period, ShiftCode } from '../lib/period';
 import { Block, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
 import { fmtDayLong, fmtInt } from '../lib/fmt';
 import {
-  getReportOf, reportExportUrl, getStations, getProducts, REPORT_TYPES, ROLE_RANK,
-  type AuthUser, type ProductOption, type ReportFilters, type ReportHeader, type ReportResponse, type ReportType, type StationRow,
+  getReportOf, reportExportUrl, getStations, getProducts, REPORT_TYPES, ROLE_RANK, rejectCodeParam,
+  type AuthUser, type ProductOption, type RejectReason, type ReportFilters, type ReportHeader, type ReportResponse, type ReportType, type StationRow,
 } from '../api';
 import { distinctProductLabels } from '../lib/productLabel';
 import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_MIN_RANK } from './report/model';
@@ -64,6 +64,8 @@ export function ReportScreen({
   onShiftChange,
   onStationChange,
   onProductChange,
+  onOpenStation,
+  onOpenCode,
 }: {
   period: Period;
   user: AuthUser;
@@ -73,6 +75,17 @@ export function ReportScreen({
   onShiftChange: (s: ShiftCode | undefined) => void;
   onStationChange: (v: number | null) => void;
   onProductChange: (v: number | null) => void;
+  /**
+   * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.1
+   * "Report · any total → the screen that explains it" — Report had no
+   * outbound link of any kind). Opens the station sheet over this report;
+   * the station and machine-product sections are the only ones that name a
+   * station per row.
+   */
+  onOpenStation: (station: number) => void;
+  /** Same pass: the reject report's reasons are the only rows on this screen
+   *  that name a reject code, so the code hop from §6.5 lands here. */
+  onOpenCode: (code: string) => void;
 }) {
   const { line, asOf } = useLive();
   const rank = ROLE_RANK[user.role] ?? 1;
@@ -217,25 +230,34 @@ export function ReportScreen({
       ) : !data ? (
         <ReportSkeleton />
       ) : (
-        <Sections type={type} data={data} names={names} products={productList} />
+        <Sections type={type} data={data} names={names} products={productList} onOpenStation={onOpenStation} onOpenCode={onOpenCode} />
       )}
     </>
   );
 }
 
 /** One switch, so a new type is one line here and one file under report/. */
-function Sections({ type, data, names, products }: { type: ReportType; data: ReportResponse<ReportType>; names: StationRow[]; products: ProductOption[] }) {
+function Sections({
+  type, data, names, products, onOpenStation, onOpenCode,
+}: {
+  type: ReportType;
+  data: ReportResponse<ReportType>;
+  names: StationRow[];
+  products: ProductOption[];
+  onOpenStation: (station: number) => void;
+  onOpenCode: (code: string) => void;
+}) {
   switch (type) {
     case 'daily': return <DailySection d={(data as ReportResponse<'daily'>).report} />;
     case 'shift': return <ShiftSection d={(data as ReportResponse<'shift'>).report} />;
     case 'product': return <ProductSection d={(data as ReportResponse<'product'>).report} products={products} />;
-    case 'station': return <StationSection d={(data as ReportResponse<'station'>).report} names={names} />;
-    case 'reject': return <RejectSection d={(data as ReportResponse<'reject'>).report} />;
+    case 'station': return <StationSection d={(data as ReportResponse<'station'>).report} names={names} onOpen={onOpenStation} />;
+    case 'reject': return <RejectSection d={(data as ReportResponse<'reject'>).report} onOpenCode={(r: RejectReason) => onOpenCode(rejectCodeParam(r))} />;
     case 'cone-weight': return <ConeWeightSection d={(data as ReportResponse<'cone-weight'>).report} names={names} />;
     case 'sack': return <SackSection d={(data as ReportResponse<'sack'>).report} products={products} />;
     case 'calibration': return <CalibrationSection d={(data as ReportResponse<'calibration'>).report} names={names} />;
     case 'management-summary': return <SummarySection d={(data as ReportResponse<'management-summary'>).report} />;
-    case 'machine-product': return <MachineProductSection d={(data as ReportResponse<'machine-product'>).report} />;
+    case 'machine-product': return <MachineProductSection d={(data as ReportResponse<'machine-product'>).report} onOpen={onOpenStation} />;
   }
 }
 

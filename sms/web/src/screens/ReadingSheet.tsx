@@ -53,10 +53,18 @@ export function ReadingSheet({
   type,
   id,
   onClose,
+  onOpenProductReport,
 }: {
   type: RegisterType;
   id: string;
   onClose: () => void;
+  /**
+   * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.4
+   * "the product in force at a reading → its report"). No Product Catalogue
+   * screen exists yet (Phase 6); this opens the Product report for that
+   * product, narrowed to this reading's own production day.
+   */
+  onOpenProductReport: (productId: number, day: string) => void;
 }) {
   const [s, setS] = useState<State>({ row: null, product: null, stations: [], around: null, error: null });
 
@@ -109,7 +117,7 @@ export function ReadingSheet({
       ) : !s.row ? (
         <Loading />
       ) : (
-        <Body type={type} state={s} />
+        <Body type={type} state={s} onOpenProductReport={onOpenProductReport} />
       )}
     </Sheet>
   );
@@ -136,7 +144,13 @@ function rejectReason(row: RegisterRow): string {
   return W.readings.qualityRejectCode(pair);
 }
 
-function Body({ type, state }: { type: RegisterType; state: State }) {
+function Body({
+  type, state, onOpenProductReport,
+}: {
+  type: RegisterType;
+  state: State;
+  onOpenProductReport: (productId: number, day: string) => void;
+}) {
   const row = state.row!;
   const isSack = type === 'sack';
   const isReject = type === 'reject';
@@ -227,6 +241,19 @@ function Body({ type, state }: { type: RegisterType; state: State }) {
           </>
         )}
       </dl>
+
+      {p?.product && (
+        <p style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="linkish"
+            onClick={() => onOpenProductReport(p.product!.productId, String(row.shift_date).slice(0, 10))}
+          >
+            {W.readings.seeProductReport}
+          </button>{' '}
+          <span className="mut sm">· {W.readings.seeProductReportNote}</span>
+        </p>
+      )}
 
       {/* Finding M7: named "Recorded" above rather than "Weighed" for exactly
           this reason, stated once here rather than repeated per row in the

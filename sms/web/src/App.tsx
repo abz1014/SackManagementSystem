@@ -448,6 +448,8 @@ function Chrome({
               onShiftChange={(sh) => go({ reportShift: sh })}
               onStationChange={(v) => go({ station: v })}
               onProductChange={(v) => go({ product: v })}
+              onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
+              onOpenCode={(c) => go({ view: 'rejects', rejectsCode: c })}
             />
           )}
 
@@ -527,10 +529,25 @@ function Chrome({
             canAdjust={rank >= 2}
             periodTo={period.to}
             onClose={() => go({ sheet: null })}
+            // Roadmap Phase 2b guided-navigation pass (16 Sep 2026,
+            // IA-PROPOSAL.md §6.6): each carries THIS station — the sheet's
+            // own, not whatever `route.station` happened to hold — via the
+            // shared `st` key, and closes the sheet. Readings' page resets
+            // (a fresh filter, not a stale page number); the reject report
+            // and calibration report both accept a station filter
+            // (report/model.ts FILTERS_BY_TYPE).
+            onSeeReadings={() => go({ view: 'readings', station: Number(route.sheet!.id), sheet: null, readingsPage: 1 })}
+            onSeeRejects={() => go({ view: 'rejects', station: Number(route.sheet!.id), sheet: null })}
+            onSeeCalibrationReport={() => go({ view: 'report', reportType: 'calibration', station: Number(route.sheet!.id), sheet: null })}
+            onSeeShiftReport={() => go({ view: 'report', reportType: 'machine-product', station: Number(route.sheet!.id), sheet: null })}
           />
         )}
         {route.sheet?.kind === 'product' && (
-          <ProductSheet canWrite={rank >= 2} onClose={() => go({ sheet: null })} />
+          <ProductSheet
+            canWrite={rank >= 2}
+            onClose={() => go({ sheet: null })}
+            onSeeReport={(productId) => go({ view: 'report', reportType: 'product', product: productId, sheet: null })}
+          />
         )}
         {route.sheet?.kind === 'reason' && (
           <ReasonSheet
@@ -545,6 +562,12 @@ function Chrome({
               period: { key: 'pick', picked: { from: day, to: day } }, sheet: null,
             })}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+            // Same day-narrowing as onOpenRegister above: the reject report
+            // has no per-code filter, so the day is what carries.
+            onOpenReport={(day) => go({
+              view: 'report', reportType: 'reject',
+              period: { key: 'pick', picked: { from: day, to: day } }, sheet: null,
+            })}
           />
         )}
         {route.sheet?.kind === 'stock' && <StockSheet day={route.sheet.id} onClose={() => go({ sheet: null })} />}
@@ -553,6 +576,12 @@ function Chrome({
             type={route.sheet.kind}
             id={route.sheet.id}
             onClose={() => go({ sheet: null })}
+            // The product in force at THIS reading, narrowed to its own
+            // production day — mirrors ReasonSheet's day-narrowing above.
+            onOpenProductReport={(productId, day) => go({
+              view: 'report', reportType: 'product', product: productId,
+              period: { key: 'pick', picked: { from: day, to: day } }, sheet: null,
+            })}
           />
         )}
       </ErrorBoundary>
