@@ -363,6 +363,15 @@ export interface ProductWriteStatus {
   reason: string | null;
   /** enabled AND this user's rank allows it. */
   canWrite: boolean;
+  /**
+   * The SMS-local limit path (POST /api/products/limits/local) — a SEPARATE
+   * gate from `canWrite` above, and independent of `enabled`: it never
+   * touches PDAS, so it does not depend on PDAS_WRITE_ENABLED. Drive the
+   * local editor's availability from this, never from a rank constant in
+   * the client — a rank the server no longer honours must not still show a
+   * button that only ever answers 403.
+   */
+  local: { canWrite: boolean };
 }
 export interface ProductOptions {
   blends: { id: number; name: string }[];
@@ -1457,10 +1466,12 @@ export interface LimitHistoryVersion {
   setpointG: number | null;
   offsetMinusG: number | null;
   offsetPlusG: number | null;
-  /** App instant (genuine UTC) — format with fmtAppInstant, never the plant-clock formatters. */
+  /** App instant (genuine UTC) — kept for completeness; render "in force from" from effectiveFromPlant instead (fmtDay/fmtClock), never this with fmtAppInstant. */
   effectiveFromUtc: string;
+  /** The same instant on the production-time convention (Two Clocks) — the one to render, with the UTC-pinned formatters. */
+  effectiveFromPlant: string;
   effectiveIsLowerBound: boolean;
-  source: 'pdas_observed' | 'sms_write';
+  source: 'pdas_observed' | 'sms_write' | 'sms_local';
   changedBy: string | null;
   reason: string | null;
   recordedAtUtc: string;
@@ -1474,6 +1485,12 @@ export interface LimitHistoryProduct {
 }
 export function getProductLimitHistory(): Promise<{ products: LimitHistoryProduct[] }> {
   return get('/api/products/limits/history');
+}
+/** Append an SMS-local limit version — never touches PDAS. Engineer rank (2). */
+export function setLocalLimitVersion(p: {
+  productId: number; setpointG: number; offsetMinusG: number; offsetPlusG: number; effectiveFrom?: string; reason?: string | null;
+}): Promise<{ versionId: number; label: string | null; products: LimitHistoryProduct[] }> {
+  return post('/api/products/limits/local', p);
 }
 
 export interface MachineRunning {
@@ -2193,9 +2210,17 @@ export function getReportOf<T extends ReportType>(type: T, q: ReportQuery): Prom
   return get(`/api/reports/${type}?${reportParams(q).toString()}`);
 }
 
-/** The CSV's address — rank 3 on the server, audited `export.csv`. A link, so the browser downloads it. */
-export function reportExportUrl(type: ReportType, q: ReportQuery): string {
-  return `/api/reports/${type}/export?${reportParams(q).toString()}`;
+/**
+ * The export's address — rank 3 on the server, audited `export.csv` /
+ * `export.xlsx`. A link, so the browser downloads it. `format` defaults to
+ * `csv` and is omitted from the URL in that case, matching the server's own
+ * default (`exportQuery` in routes/reports.ts) so existing CSV links are
+ * unchanged byte-for-byte.
+ */
+export function reportExportUrl(type: ReportType, q: ReportQuery, format?: 'csv' | 'xlsx'): string {
+  const p = reportParams(q);
+  if (format && format !== 'csv') p.set('format', format);
+  return `/api/reports/${type}/export?${p.toString()}`;
 }
 
 /** The print header on its own, for the register's Print button. */

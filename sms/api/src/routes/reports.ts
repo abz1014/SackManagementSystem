@@ -6,7 +6,8 @@
  *
  *   GET /api/reports/header                  rank 1        the print header (line, plant time, who, version)
  *   GET /api/reports/:type                    REPORT_RANK[type]  one composed report (services/reports/*)
- *   GET /api/reports/:type/export            rank 3        the same report as one CSV, audited `export.csv`
+ *   GET /api/reports/:type/export?format=csv|xlsx   rank 3   the same report as CSV (default) or XLSX,
+ *                                                             audited `export.csv` / `export.xlsx`
  *
  * There is no per-type route: every type, including management-summary,
  * is served by the single parameterised handler. The gate lives in `parse()`,
@@ -24,11 +25,12 @@ import { z } from 'zod';
 import { requireRole, type AuthedRequest } from '../auth.js';
 import { TtlCache } from '../cache.js';
 import { envelope } from '../envelope.js';
+import { MAX_RANGE_DAYS } from '../config.js';
 import { plantNowMs } from '../services/plantClock.js';
 import { resolvePeriod, REPORT_PERIODS, type ReportPeriod, type ResolvedPeriod } from '../services/report.js';
 import {
-  buildHeader, buildReport, csvDocument, csvFilename, reportCsv,
-  EXPORT_RANK, FILTERS_BY_TYPE, REPORT_RANK, isReportType,
+  buildHeader, buildReport, buildXlsx, csvDocument, csvFilename, reportCsv, reportFilename, reportSheets,
+  EXPORT_RANK, FILTERS_BY_TYPE, REPORT_RANK, XLSX_CONTENT_TYPE, isReportType,
   type AnyReportData, type ReportFilters, type ReportHeader, type ReportType,
 } from '../services/reports/index.js';
 import type { RouteContext } from './context.js';
@@ -39,8 +41,8 @@ const isoTs = z
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
   .optional();
 
-// Same cap as app.ts's analytics routes and the /api/report route.
-const MAX_RANGE_DAYS = 366;
+// Same cap as app.ts's analytics routes and the /api/report route
+// (MAX_RANGE_DAYS, config.ts).
 function rangeProblem(from: string, to: string): string | null {
   if (from > to) return 'from must be <= to';
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
@@ -60,6 +62,9 @@ const reportQuery = z.object({
   at: isoTs,
 });
 type ReportQuery = z.infer<typeof reportQuery>;
+
+/** The export route's own extra param; kept separate from `reportQuery` so no other route gains it by accident. */
+const exportQuery = z.object({ format: z.enum(['csv', 'xlsx']).default('csv') });
 
 interface Parsed {
   type: ReportType;
@@ -205,18 +210,34 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
   app.get('/api/reports/:type', serveReport());
 
   // Rank 3 like the register export, and audited the same way: which report
-  // left the building, for what window (roadmap Phase 11's `export.csv`).
+  // left the building, for what window, in what format (roadmap Phase 11's
+  // `export.csv`, extended 16 Sep 2026 with `export.xlsx` for the same
+  // report as a workbook — a different file leaving the building gets a
+  // different audit verb).
   app.get('/api/reports/:type/export', requireRole(EXPORT_RANK), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const p = await parse(req, res);
       if (!p) return;
+      const fmt = exportQuery.safeParse(req.query);
+      if (!fmt.success) {
+        res.status(400).json({ error: 'invalid query', detail: fmt.error.flatten().fieldErrors });
+        return;
+      }
       const [header, data] = await Promise.all([headerFor(p, req), buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters)]);
       const table = reportCsv(p.type, data);
+      const filters = Object.entries(p.filters).map(([k, v]) => `${k}=${String(v)}`).join(' ');
+      const detail = `${p.resolved.from} to ${p.resolved.to}${filters ? ` (${filters})` : ''}`;
+      if (fmt.data.format === 'xlsx') {
+        res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+        res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'xlsx')}"`);
+        res.send(buildXlsx(reportSheets(p.type, data, header, table)));
+        audit(req, 'export.xlsx', 'report', p.type, detail);
+        return;
+      }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${csvFilename(header)}"`);
       res.send(csvDocument(table.headers, table.rows, header));
-      const filters = Object.entries(p.filters).map(([k, v]) => `${k}=${String(v)}`).join(' ');
-      audit(req, 'export.csv', 'report', p.type, `${p.resolved.from} to ${p.resolved.to}${filters ? ` (${filters})` : ''}`);
+      audit(req, 'export.csv', 'report', p.type, detail);
     } catch (err) {
       next(err);
     }

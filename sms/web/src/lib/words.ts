@@ -483,6 +483,7 @@ export const W = {
     colRate: 'Rate',
     print: 'Print',
     exportCsv: 'Export CSV',
+    exportXlsx: 'Export Excel',
     printedAt: 'Printed',
     printedBy: 'by',
     /* The label on the verdict mark — the one ink fill in the application,
@@ -939,10 +940,14 @@ export const W = {
     stationSelect: 'Station',
     wholeLine: 'Whole line',
     excludedNote: (n: string, m: string) => `${n} readings, of which ${m} implausible excluded`,
-    /* Setup › Rules › Product limits (read-only). */
+    /* Setup › Rules › Product limits, and the Product sheet — ONE component
+       (ProductLimitsBlock), rendered in both (roadmap Phase 4 item 2, 15 Sep
+       2026: IFL wants limits editable from Setup; the write is rank 2, so
+       Setup alone would hide it from every engineer account — finding H3's
+       mistake, not to be repeated). */
     limitsSection: 'Product limits',
     limitsNote:
-      'The versioned history this system judges every reading by — each reading by the limits in force at its own time. Changing a limit happens through the PDAS write path, when IFL authorises it in writing; nothing here is editable.',
+      'The versioned history this system judges every reading by — each reading by the limits in force at its own time. Changing a limit here records a NEW version; it never rewrites or removes an old one, and readings already recorded keep the limits that were in force when they were weighed.',
     limitsNoneYet: 'No limits recorded yet for this product.',
     limitsNoProducts: 'No products are known yet — the product master has not been mirrored.',
     colLimits: 'Limits',
@@ -953,8 +958,15 @@ export const W = {
     noLaterThan: 'no later than',
     noLaterThanNote:
       '\u201cNo later than\u201d marks a version first seen at that instant, not known to have started then: the oldest one is a lower bound.',
-    source: { pdas_observed: 'seen in PDAS', sms_write: 'written by SMS' } as const,
+    source: { pdas_observed: 'seen in PDAS', sms_write: 'written by SMS to PDAS', sms_local: 'recorded in SMS' } as const,
     retired: 'retired',
+    /* The local (non-PDAS) limits editor. */
+    changeLimitsLocal: 'Change limits',
+    changeLimitsLocalNote:
+      'This records a new limits version in SMS. It does not change PDAS or the product master, and it does not rewrite any past version: readings already recorded keep the limits that were in force when they were weighed.',
+    changeLimitsLocalUnavailable: 'Changing limits needs an engineer account.',
+    localWasLabel: (from: string, to: string) => `${from} → ${to}`,
+    localFirstRecorded: 'first recorded here',
     /* Report and Setup › Rules: the shift attribution check. */
     readingsSentence: (n: string, m: string) =>
       `${n} cone readings, of which ${m} implausible were excluded from the weight figures.`,

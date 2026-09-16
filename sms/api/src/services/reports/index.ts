@@ -85,4 +85,5 @@ export function reportCsv<T extends ReportType>(type: T, data: ReportDataByType[
 
 export * from './common.js';
 export { buildHeader } from './header.js';
-export { csvDocument, csvFilename, attributionRows, toCsv, escapeCell } from './csv.js';
+export { csvDocument, csvFilename, reportFilename, attributionRows, toCsv, escapeCell } from './csv.js';
+export { buildXlsx, reportSheets, XLSX_CONTENT_TYPE } from './xlsx.js';

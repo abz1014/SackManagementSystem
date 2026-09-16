@@ -21,6 +21,7 @@ import argon2 from 'argon2';
 import { createApp } from '../app.js';
 import type { ApiConfig } from '../config.js';
 import { REPORT_TYPES } from '../services/reports/common.js';
+import { XLSX_CONTENT_TYPE } from '../services/reports/index.js';
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
 
@@ -296,6 +297,48 @@ describe('GET /api/reports/:type/export', () => {
       expect(r.status, t).toBe(200);
       expect(r.text.split('\n')[0]!.length, t).toBeGreaterThan(0);
     }
+  });
+
+  it('no format param still answers CSV and still audits export.csv (no-regression pin)', async () => {
+    const r = await get(`/api/reports/reject/export?${Q}`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toMatch(/^text\/csv/);
+    expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07.csv"');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const auditRows = db.statements.filter((s) => s.sql.includes('INSERT INTO sms.audit_log'));
+    expect(auditRows.some((s) => [...s.inputs.values()].includes('export.csv'))).toBe(true);
+    expect(auditRows.some((s) => [...s.inputs.values()].includes('export.xlsx'))).toBe(false);
+  });
+
+  describe('format=xlsx', () => {
+    it('as rank 3 (manager) answers the workbook content type, an .xlsx filename, and exactly one export.xlsx audit row', async () => {
+      const r = await get(`/api/reports/reject/export?${Q}&shift=night&format=xlsx`, 'manager');
+      expect(r.status).toBe(200);
+      expect(r.headers.get('content-type')).toMatch(new RegExp(`^${XLSX_CONTENT_TYPE.replace(/[.+]/g, '\\$&')}`));
+      const disposition = r.headers.get('content-disposition')!;
+      expect(disposition).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07.xlsx"');
+      expect(disposition.endsWith('.xlsx"')).toBe(true);
+      // The zip's local-file-header magic survives fetch's text() decoding for these leading ASCII/control bytes.
+      expect(r.text.slice(0, 2)).toBe('PK');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const auditRows = db.statements.filter((s) => s.sql.includes('INSERT INTO sms.audit_log'));
+      const xlsxRows = auditRows.filter((s) => [...s.inputs.values()].includes('export.xlsx'));
+      expect(xlsxRows.length).toBe(1);
+      expect([...xlsxRows[0]!.inputs.values()]).toEqual(
+        expect.arrayContaining(['export.xlsx', 'report', 'reject', '2026-09-01 to 2026-09-07 (shift=night)']),
+      );
+      expect(auditRows.some((s) => [...s.inputs.values()].includes('export.csv'))).toBe(false);
+    });
+
+    it('as rank 1 (viewer) is refused with 403, same as the CSV export', async () => {
+      const r = await get(`/api/reports/reject/export?${Q}&format=xlsx`, 'viewer');
+      expect(r.status).toBe(403);
+    });
+
+    it('an invalid format value is a 400, not silently treated as csv', async () => {
+      const r = await get(`/api/reports/reject/export?${Q}&format=json`);
+      expect(r.status).toBe(400);
+    });
   });
 });
 
