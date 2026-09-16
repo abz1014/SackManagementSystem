@@ -18,6 +18,63 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
+### UX programme, Phase 6 (Expose backend) — Product screen, changeover UI, two readers (16 Sep 2026)
+
+Four commits on `floor-first-rework` (`be4b9fc`, `fd85624`, `0d8b74a`, `177abc9`),
+following Phase 5. Verified against the code, not against the brief that
+described it: the nav bar (`SCREENS` in `web/src/ui/Bar.tsx`) has **seven**
+entries — `line, readings, weight, rejects, sacks, product, report` — one more
+than Phase 5's six, not eight.
+
+1. **A 7th nav item, Product**, with four tabs (Running / Changeover /
+   Catalogue / History, URL key `pt`, `running` the default). `web/src/screens/
+   ProductSheet.tsx` is **deleted** and unreferenced (verified by grep); its
+   line-wide product display and change form moved into `Running.tsx`, its
+   PDAS catalogue into `Catalogue.tsx`. `?sheet=product:*` bookmarks redirect.
+   Product › Running pivots the existing `/api/machines/running` payload by
+   material; Line's own machine table was deliberately left untouched (one
+   capability, one screen).
+2. **The changeover workflow is reachable at last** — `?s=product&pt=changeover`
+   over `/api/changeover/{refs,plan,execute}`, which existed, routed and tested
+   since roadmap Wave F with no client ever calling it. Plan is rank 1 and never
+   opens the PDAS writer pool; execute is `requireRole(PDAS_WRITE_RANK)` = rank
+   2 and returns `503 DISABLED` while `PDAS_WRITE_ENABLED=false` (`409 BLOCKED`
+   once enabled and a blocker fires) — verified in `api/src/routes/
+   changeover.ts`. The screen prints the server's `disabledReason` verbatim, no
+   optimistic UI.
+3. **`sms.product_change` got its first reader.** `GET /api/product-changes`
+   (rank 1, keyset-paged, `api/src/services/productChanges.ts`) — the table had
+   two writers (`pdasWrite.ts`, `changeover.ts`) and, before this, nothing that
+   read it back. Product › History renders the trail beside the product
+   timeline; `outcome='disabled'` rows are labelled as attempts that never
+   reached PDAS.
+4. **DQ findings are listed**, grouped by `subjectTable`, on Health — the count
+   was already on the wire and is now itemised, no API change.
+5. **Reconciliation is on Health**, `GET /api/reconciliation`, rank lowered
+   from 3 to 1 (owner decision — it is a read of SMS's own `sms.cone_event`
+   aggregates, no more sensitive than `/api/production`). It is a census of
+   SMS's own readings, **not** a comparison against IFL's source (`sms verify`
+   is that, and has no HTTP route); a UI sentence claiming a "by source table
+   and generation" grouping the endpoint does not do was removed.
+
+Suite: **1169 passed / 4 skipped**, `npx vitest run` from `sms/`, observed
+16 Sep 2026 (was 1164).
+
+**Not done by this phase, plainly not:** reliability states (a DQ-finding →
+source-table destination, source-generation history, `sms.rebuild_audit`,
+archived floor, `sms verify` over HTTP), testing (there is still no automated
+route/browser harness — every hop above was verified by grep, by the vitest
+suite, and by hand), and visual polish of the Product screen. Blocked on IFL,
+unchanged: written authority for all nine PDAS write rights, `AddTubeType`'s
+parameter name, weight basis (Q4/Q5), KPI approval (Q33-37), reject-code
+meanings (Q10); sack stock per machine is still not computable from IFL's
+data. Everything above was verified against the local `_SEP07` dev copy only,
+never against real plant data. The rank-1 (viewer) UI path was never exercised
+live in Phase 5 or 6 — workers stayed signed in as admin and were forbidden to
+create or reset accounts — so rank gating rests on code inspection and the
+RBAC test, not a live viewer session. The branch is unpushed, now roughly 80
+commits ahead of `origin/main`; only the owner pushes.
+
 ### UX programme, Phase 5 (Analytics) — versioned targets given teeth (16 Sep 2026)
 
 Six commits on `floor-first-rework` (`be5ac3e` … `1f16faf`), against the specs in
@@ -169,6 +226,11 @@ rail, the section column, the "Light Steel" stylesheet, the floor and wall
 screens and the three endpoints no requirement asks for (`/api/oee`,
 `/api/shift-analysis`, `/api/stoppage-patterns`) are **deleted**, not unrouted.
 Net: 8,058 lines added, 10,375 removed.
+
+> **Update, UX Phase 6 (16 Sep 2026):** the nav bar now has **seven** entries —
+> Line · Readings · Weight · Rejects · Sacks · **Product** · Report — `SCREENS`
+> in `web/src/ui/Bar.tsx`. Product is new (see the dated section above); the
+> other six are unchanged. Do not read this paragraph's "six" as current.
 
 **Rules the code now enforces, each of which was a real defect before.** Do not
 undo any of these without reading why they exist:

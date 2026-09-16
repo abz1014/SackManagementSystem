@@ -2,12 +2,12 @@
 
 **Full session handover: [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — read it first if resuming cold; it covers the dirty working tree this file's §3 does not yet reflect.
 
-**As of:** 16 September 2026, UX programme Phase 5 (Analytics) complete on top of Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
+**As of:** 16 September 2026, UX programme Phase 6 (Expose backend) complete on top of Phase 5 and Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
 
-**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns and Phase 5 Analytics — six commits `be5ac3e`…`1f16faf`). It refines screens inside roadmap phases already marked complete above (mainly 4, 8 and 9) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s "UX programme, Phase 5" section for what it actually changed. Do not read "Phase 5" in commit messages as roadmap Phase 5 (Reject management) — the two numbering schemes are independent.
+**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns, Phase 5 Analytics, and now Phase 6 Expose backend — ten commits `be5ac3e`…`177abc9`). It refines screens inside roadmap phases already marked complete above (mainly 4, 6, 8 and 9) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s "UX programme, Phase 6" section for what it actually changed. Do not read "Phase 6" in commit messages as roadmap Phase 6 (Product/PDAS) — the two numbering schemes are independent, and this UX phase is what finally put a UI on top of roadmap Phase 6's PDAS write path (still off).
 
 ---
 
@@ -34,6 +34,50 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 ---
 
 ## 2. Completed
+
+### UX programme, Phase 6 — Expose backend (16 Sep 2026)
+- Four commits (`be4b9fc`, `fd85624`, `0d8b74a`, `177abc9`) put a UI on backend
+  that already existed, routed and tested, but had no caller. Verified against
+  the code: the nav bar (`SCREENS` in `web/src/ui/Bar.tsx`) now has **seven**
+  entries (`line, readings, weight, rejects, sacks, product, report`), not
+  eight — one more than Phase 5.
+- **Product**, a 7th nav item with four tabs (Running/Changeover/Catalogue/
+  History, URL key `pt`). `web/src/screens/ProductSheet.tsx` is deleted and
+  unreferenced (grep-verified); its content moved into `Running.tsx` and
+  `Catalogue.tsx`. Running pivots `/api/machines/running` by material; Line's
+  own machine table is untouched, so the same capability is not on two
+  screens.
+- **The changeover workflow is reachable at last**, `?s=product&pt=changeover`
+  over `/api/changeover/{refs,plan,execute}` (existed since roadmap Wave F,
+  zero prior callers). Plan is rank 1; execute is `requireRole(PDAS_WRITE_RANK)`
+  = rank 2 and returns `503 DISABLED` while `PDAS_WRITE_ENABLED=false`
+  (verified in `api/src/routes/changeover.ts`), rendering the server's
+  `disabledReason` verbatim with no optimistic UI.
+- `sms.product_change`'s first reader: `GET /api/product-changes` (rank 1,
+  keyset-paged, `api/src/services/productChanges.ts`), rendered on
+  Product › History beside the product timeline.
+- DQ findings are listed (grouped by `subjectTable`) on Health, no API change.
+  Reconciliation (`GET /api/reconciliation`) is wired on Health, its rank
+  lowered from 3 to 1 by owner decision — it is a read of SMS's own
+  `sms.cone_event` aggregates, not a comparison against IFL's source (`sms
+  verify` is that, has no HTTP route). A UI sentence claiming a grouping the
+  endpoint does not do ("by source table and generation") was removed.
+- Test suite: **1169 passed / 4 skipped** (`npx vitest run` from `sms/`,
+  observed 16 Sep 2026; was 1164 before this phase).
+- **Not done by this phase:** reliability states (DQ-finding → source-table
+  destination, source-generation history, `sms.rebuild_audit`, archived floor,
+  `sms verify` over HTTP — 3-4 days of new backend); testing (still no
+  automated route/browser harness — every hop was verified by hand, by grep,
+  and by the vitest run above); visual polish of the Product screen. Blocked
+  on IFL, unchanged: written authority for all nine PDAS write rights,
+  `AddTubeType`'s parameter name, weight basis (Q4/Q5), KPI approval (Q33-37),
+  reject-code meanings (Q10); sack stock per machine remains not computable
+  from IFL's data. Everything verified against the local `_SEP07` dev copy
+  only, never against real plant data. The rank-1 (viewer) UI path was never
+  exercised live in Phase 5 or 6 — workers were signed in as admin and
+  forbidden to create or reset accounts — so rank gating rests on code
+  inspection and the RBAC test only. The branch remains unpushed, now roughly
+  80 commits ahead of `origin/main`.
 
 ### UX programme, Phase 5 — Analytics (16 Sep 2026)
 - Six commits (`be5ac3e`, `5503406`, `0510afd`, `cc1ffe3`, `856e981`, `1f16faf`) closing the
@@ -99,7 +143,7 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 
 ## 3. In progress
 
-Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, the UX programme (§2, not a roadmap phase) has moved past Phase 5: Phase 6 (a Product nav item with Running/Changeover/Catalogue/History tabs, and the changeover-workflow UI) has **not started** — the four drilldown hops built in `053e4de` have no destination yet. Phases 7, 8 and 9 of the UX programme (reliability states, testing, visual polish) are also not started. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
+Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, the UX programme (§2, not a roadmap phase) has moved past Phase 6: the Product nav item, its Running/Changeover/Catalogue/History tabs, and the changeover-workflow UI are now built (§2), closing the four drilldown hops that `053e4de` had left with no destination. Phases 7, 8 and 9 of the UX programme (reliability states, testing, visual polish of the Product screen) are **not started**. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
 
 ---
 
@@ -140,7 +184,7 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 
 | | Value |
 |---|---|
-| Suite | vitest, **1164 tests passed / 4 skipped** (16 Sep 2026, end of UX programme Phase 5, observed via `npx vitest run` from `sms/`); 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
+| Suite | vitest, **1169 tests passed / 4 skipped** (16 Sep 2026, end of UX programme Phase 6, observed via `npx vitest run` from `sms/`); 1164 at the end of UX programme Phase 5; 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
 | Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 |
 | CI | `.github/workflows/ci.yml` runs the same gate plus a clean-tree check and a tracked-secret-file check on every push to `main`/`floor-first-rework` and every PR. **Has not run yet** — nothing is pushed. |
 | Database needed | None. Every test runs against a fake `mssql` pool or pure functions. |
