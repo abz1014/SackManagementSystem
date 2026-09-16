@@ -114,6 +114,16 @@ export const W = {
     rejected: 'rejected',
     kg: 'kg',
     gAverage: 'g average',
+    /* Line's fourth KPI (OVERVIEW-SPEC.md §3.1): the note under "outside the
+       product's limits" — data.states.unknown, always shown, never only on a
+       non-zero count, so a period with no product in force reads "0 outside
+       the limits, N could not be judged" rather than a bare, misleading 0. */
+    couldNotBeJudged: (n: string) => `${n} could not be judged`,
+    /* The KPI block's own empty-state note (OVERVIEW-SPEC.md §3.1 case 6,
+       "the source has not caught up"): a live period is always short by the
+       acquisition lag, and a zero here can mean that rather than a stopped
+       line. Never a literal "about 18 minutes" — the lag is measured. */
+    notCaughtUp: (lag: string) => `Cones weighed in the last ${lag} have not reached this system yet.`,
   } as const,
   /* ONE status vocabulary, and it names its basis every time it appears.
      Two verdicts exist on every cone — the scale's own in-range bit and the
@@ -134,11 +144,24 @@ export const W = {
       ? "1 cone in this period was passed by the scale but sits outside the product's limits."
       : `${n} cones in this period were passed by the scale but sit outside the product's limits.`,
   seeThem: 'See them',
+  /* Line's Attention block (OVERVIEW-SPEC.md §3.2 change (b)): a countless
+     sentence, so the outside-limits finding does not print a second number
+     for the fact KPI figure 4 already states, from a different SQL
+     population (see productDisagreement, D2). W.disagreement stays for
+     Weight's banner, which counts a different population and is out of
+     scope of this change. */
+  outsideLimitsThisPeriod: "Cones passed by the scale sit outside the product's limits in this period.",
 
   /* ------------------------------------------------------------- attention */
   attention: 'Attention',
   nothingNeedsAttention: 'Nothing needs attention.',
   andMore: (n: number, where: string) => `and ${n} more — see ${where}`,
+  /* Line's Attention block, empty state (OVERVIEW-SPEC.md §3.2 change,
+     "a second empty case"): when the trailing window held fewer production
+     days than the drift rule needs, "Nothing needs attention" is a
+     statement about the record, not the line. */
+  tooFewProductionDays: (n: number) =>
+    `— only ${n} production day${n === 1 ? '' : 's'} in the window, too few to judge a station's drift.`,
 
   /* --------------------------------------------------------------- product */
   product: {
@@ -157,6 +180,11 @@ export const W = {
     change: 'Change',
     history: 'History',
     none: 'No product has been recorded for this line yet.',
+    /* Distinct from `none` above (OVERVIEW-SPEC.md §3.4 empty states, D4):
+       `none` is /api/product-at's neverRecorded === true; this is the
+       ordinary case on a July-generation period or under replay, where a
+       product exists but none was in force at the queried instant. */
+    noneAtThisTime: 'No product was recorded for the line at this time.',
     inactive: 'This product is marked inactive in the product master.',
     /* Finding M10 (Sep 2026 audit): PDAS's MaterialDesc2 carries real color
        data (e.g. 'PARROT', 'Khaki-2') that was never selected or shown. */
@@ -220,6 +248,19 @@ export const W = {
   station: (n: number) => `Station ${n}`,
   quiet: 'quiet',
   quietFor: (span: string, n: number) => `Station ${n} has been quiet for ${span}`,
+  /* The station grid's tag line (OVERVIEW-SPEC.md §3.3): quiet always wins —
+     a machine that stopped is the bigger fact than one that rejected a few
+     cones — so this is only ever shown when a station is NOT quiet. */
+  stationRejected: (n: number) => `${n} rejected`,
+  /* groupBy=station groups rejects by source_station, which is null for
+     rejects the QCS path never attached to a station. Rendered in the
+     block's note only when the sum is above zero, so the boxes' rejects
+     never silently disagree with KPI figure 3. */
+  unattributedRejects: (n: number) => (n === 1 ? '1 reject not attributed to a station' : `${n} rejects not attributed to a station`),
+  /* Prefixed to the stations block note when health is not 'ok': the quiet
+     tags are still true (measured to dataAsOfUtc, never the clock), but a
+     reader would otherwise read "quiet" as "quiet right now". */
+  measuredToNewest: (t: string) => `measured to the newest reading, ${t}`,
   lastReadings: 'Last readings',
   lastSack: 'Last sack',
   lastCone: 'Last cone',
@@ -742,6 +783,12 @@ export const W = {
   /* --------------------------------------------------------- shared chrome */
   working: 'Show the working',
   details: 'Details',
+  /* Line's Details disclosure, third paragraph (OVERVIEW-SPEC.md §3.6): the
+     honest home for a fact that would be noise in a KPI note and a lie of
+     omission if dropped entirely — readings the population rule excluded as
+     scale faults, already on the wire as /api/production's `implausible`. */
+  detailsImplausible: (n: string) =>
+    `${n} readings in this period were outside the plausible range for a cone and are excluded from every figure above.`,
   loading: 'Loading…',
   couldNotLoad: 'Could not load this. The plant connection may be down.',
   notAllowed: 'This is only available to an administrator.',
@@ -927,7 +974,10 @@ export const W = {
     /* Line › What each machine is running. Anchored on the newest reading,
        never the clock: the plant writes a cone about a quarter of an hour
        after it is weighed. */
-    machinesTitle: 'What each machine is running',
+    /* OVERVIEW-SPEC.md §3.4/§7: this block now merges "what each machine is
+       running" with the line-wide product record, so the label asks the
+       single question both answers. Sole use is Line.tsx. */
+    machinesTitle: 'What is being made',
     machinesNote: (n: number) => (n === 1 ? '1 product running' : `${n} products running`),
     machinesWindow: 'from each machine\u2019s newest cones in the last 2 hours of plant time',
     quiet2h: 'nothing in the last 2 h',

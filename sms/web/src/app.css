@@ -419,6 +419,14 @@ h1 .acc, .headline .acc { color: var(--acc); }
 /* A figure that is a range or a sentence rather than a count steps down one
    notch, so it still fits on one line at 1100px. Was an inline style. */
 .fig-val.small { font-size: var(--fs-head); }
+/* A figure that is also a door (Line's KPI row, OVERVIEW-SPEC.md §3.1): a
+   plain button reset so it reads exactly like the static .fig-val div next
+   to it, with only the cursor and a hover cue marking it as a control. */
+.fig-link {
+  display: block; width: 100%; text-align: left; background: none; border: 0; padding: 0;
+  font: inherit; color: inherit; cursor: pointer;
+}
+.fig-link:hover .fig-val { color: var(--acc); }
 
 /* ---- attention: at most three sentences, each ending in a link ---------- */
 

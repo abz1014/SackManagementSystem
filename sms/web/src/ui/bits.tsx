@@ -77,18 +77,34 @@ export interface FigureProps {
   /** The qualifier line: the basis, the share, the comparison. */
   note?: ReactNode;
   accent?: boolean;
+  /**
+   * When set, the whole figure is a door to the screen that explains it —
+   * the owner's KPI → exception → drilldown pattern (OVERVIEW-SPEC.md §3.1).
+   * Optional and additive: a Figure with no onClick renders exactly as
+   * before (a plain div), so existing callers such as Sacks.tsx are
+   * unaffected.
+   */
+  onClick?: () => void;
 }
 
-export function Figure({ value, unit, note, accent }: FigureProps) {
-  return (
-    <div>
+export function Figure({ value, unit, note, accent, onClick }: FigureProps) {
+  const body = (
+    <>
       <b className={`fig-val${accent ? ' acc' : ''}`}>
         {value}
         {unit && <span className="fig-unit">{unit}</span>}
       </b>
       {note && <span className="fig-note">{note}</span>}
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" className="fig-link" onClick={onClick}>
+        {body}
+      </button>
+    );
+  }
+  return <div>{body}</div>;
 }
 
 /** Three figures, or two, or four. Never five: past four they stop being read. */

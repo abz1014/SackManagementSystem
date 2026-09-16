@@ -30,12 +30,13 @@ import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
-  SkelFigures, SkelLines, SkelStations,
+  SkelFigures, SkelLines, SkelStations, type FigureProps,
 } from '../ui/bits';
 import { fmtClock, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
   getAttention, getProduction, getProductAt, getStations, stationLabel, getMachinesRunning,
   type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
+  type StateCounts,
 } from '../api';
 import type { Screen, ReadingsFilter } from '../ui/Bar';
 import { projectionSentence } from './StationSheet';
@@ -113,6 +114,14 @@ export function LineScreen({
   if (loading && !line) return <Loading />;
   if (!line) return <Empty message={W.lag.noData} />;
 
+  // Line's own empty-state note for the KPI row (OVERVIEW-SPEC.md §3.1 case
+  // 6): absent when the figures are non-zero or health is not 'ok' — the
+  // strip and headline already carry that doubt (rule 8), a second warning
+  // here would be the density failure IFL named. Only computed once totals
+  // has data; skeleton and Failed carry their own states.
+  const kpiNote = totals.data ? kpiBlockNote(totals.data.data.rows[0] ?? null, line, period, health.kind === 'ok') : null;
+  const implausible = totals.data?.data.implausible ?? null;
+
   return (
     <>
       <div className="page">
@@ -129,9 +138,12 @@ export function LineScreen({
         {totals.error && !totals.data ? (
           <Failed error={totals.error} onRetry={totals.refresh} />
         ) : totals.data ? (
-          <Figures items={periodFigures(totals.data.data.rows[0] ?? null)} />
+          <>
+            <Figures items={periodFigures(totals.data.data.rows[0] ?? null, totals.data.data.states, onNavigate)} />
+            {kpiNote && <p className="mut sm" style={{ marginTop: 8 }}>{kpiNote}</p>}
+          </>
         ) : (
-          <SkelFigures n={3} />
+          <SkelFigures n={4} />
         )}
       </Block>
 
@@ -151,42 +163,20 @@ export function LineScreen({
             total={attention.data?.data.totalFindings ?? 0}
             stations={stations.data?.stations ?? []}
             loading={attention.loading && !attention.data}
+            windowDays={attention.data?.data.window.days ?? null}
+            minDaysHeld={attention.data?.data.thresholds.minDaysHeld ?? null}
             onNavigate={onNavigate}
+            onOpenStation={onOpenStation}
           />
         )}
       </Block>
 
-      <Block
-        label={W.product.title}
-        // Fixed alongside H3 (Sep 2026 audit): this linked to a #history
-        // anchor that existed nowhere on the page. It now opens the same
-        // product sheet the Change button does, which carries the full
-        // changeover history — available to every reader, not only canWrite.
-        note={<button type="button" className="linkish" onClick={onChangeProduct}>{W.product.history}</button>}
-      >
-        {product.error && !product.data ? (
-          <Failed error={product.error} onRetry={product.refresh} />
-        ) : (
-          <ProductBlock data={product.data} canWrite={canWrite} onChange={onChangeProduct} />
-        )}
-      </Block>
-
-      <Block
-        label={W.cone.machinesTitle}
-        note={machines.data ? W.cone.machinesNote(machines.data.data.materialsRunning) : null}
-      >
-        {machines.error && !machines.data ? (
-          <Failed error={machines.error} onRetry={machines.refresh} />
-        ) : !machines.data ? (
-          <SkelLines n={3} short />
-        ) : (
-          <MachinesBlock data={machines.data.data} stations={stations.data?.stations ?? []} onOpen={onOpenStation} />
-        )}
-      </Block>
-
+      {/* Stations moves above "What is being made" (OVERVIEW-SPEC.md §3):
+          the attention list above names stations, and this grid is the
+          surface a reader scans to find the one it named. */}
       <Block
         label={`${W.stations} — ${W.stationsNote}`}
-        note={quietNote(line, stations.data?.stations ?? [])}
+        note={stationsNote(line, stations.data?.stations ?? [], perStation.data?.data.rows ?? null, health.kind === 'ok')}
       >
         {/* perStation counted too: without it a failed counts fetch left
             every station cell in its permanent loading state — the
@@ -209,6 +199,30 @@ export function LineScreen({
         )}
       </Block>
 
+      {/* The merge of today's "Product recorded in this system" and "What
+          each machine is running" (OVERVIEW-SPEC.md §3.4): one question,
+          answered once. The machine rows are the block's primary content and
+          must survive a product-lookup failure, so the two calls keep
+          independent guards. */}
+      <Block
+        label={W.cone.machinesTitle}
+        note={machines.data ? W.cone.machinesNote(machines.data.data.materialsRunning) : null}
+      >
+        {machines.error && !machines.data ? (
+          <Failed error={machines.error} onRetry={machines.refresh} />
+        ) : !machines.data ? (
+          <SkelLines n={3} short />
+        ) : (
+          <MachinesBlock data={machines.data.data} stations={stations.data?.stations ?? []} onOpen={onOpenStation} />
+        )}
+
+        {product.error && !product.data ? (
+          <Failed error={product.error} onRetry={product.refresh} />
+        ) : (
+          <ProductFooter data={product.data} canWrite={canWrite} onChangeProduct={onChangeProduct} />
+        )}
+      </Block>
+
       <Block label={W.lastReadings}>
         <LastReadings line={line} onOpen={onOpenReading} />
       </Block>
@@ -227,6 +241,11 @@ export function LineScreen({
           {attention.data ? fmtG(attention.data.data.thresholds.driftG) : '—'} for{' '}
           {attention.data?.data.thresholds.minDaysHeld ?? '—'} days or more.
         </p>
+        {/* OVERVIEW-SPEC.md §3.6: the honest home for the population rule —
+            noise in a KPI note, a lie of omission if dropped entirely. */}
+        {implausible != null && implausible > 0 && (
+          <p>{W.detailsImplausible(fmtInt(implausible))}</p>
+        )}
       </Details>
       </div>
     </>
@@ -295,28 +314,92 @@ function lineTitle(line: LiveLine): string {
 
 /* ----------------------------------------------------------------- figures */
 
-/** The three figures for the SELECTED period. Zeros, not dashes: an empty
- *  period is a normal fact on a plant that runs six days, and zero is a
- *  measurement. */
-function periodFigures(r: ProductionRow | null) {
+/**
+ * The four figures for the SELECTED period. Zeros, not dashes: an empty
+ * period is a normal fact on a plant that runs six days, and zero is a
+ * measurement.
+ *
+ * Every figure is a link (OVERVIEW-SPEC.md §3.1): the KPI → exception →
+ * drilldown pattern the owner asked for, closed for the price of four
+ * onClick handlers — no new API, no new URL key, no new handler shape.
+ * `onNav` is `onNavigate`, already wired at App.tsx to merge the period.
+ */
+function periodFigures(
+  r: ProductionRow | null,
+  states: StateCounts | null,
+  onNav: (s: Screen, filter?: ReadingsFilter) => void,
+): FigureProps[] {
   const cones = r?.cones ?? 0;
   const rejected = r?.rejectedCones ?? 0;
   const sacks = r?.sacks ?? 0;
   const kg = r?.sackWeightKg ?? 0;
   const rejectRate =
     cones + rejected > 0 ? `${Math.round((1000 * rejected) / (cones + rejected)) / 10}%` : '0%';
+  // states is computed once for the whole range at rank 1 on every
+  // /api/production call (app.ts withStates: true) — served today and
+  // discarded by the client until now. low/high = passed the scale, outside
+  // the product's limits in force at that reading's own time; unknown = no
+  // weight, an implausible weight, or no limits in force (coneState.ts).
+  const outsideLimits = states ? states.low + states.high : 0;
+  const couldNotBeJudged = states ? states.unknown : 0;
   return [
     {
       value: fmtInt(cones),
       unit: W.fig.cones,
       note: r?.conesInRangePct != null ? W.withinLimits(fmtPct1(r.conesInRangePct)) : null,
+      // Readings, unfiltered: the filter is explicitly cleared by go()'s
+      // merge (App.tsx: filter ?? null), not left over from a previous hop.
+      onClick: () => onNav('readings'),
     },
     // Rounded: a headline figure with two decimal places reads as precision
     // the reader is being asked to care about, and nobody weighs a shift's
     // output to the gram.
-    { value: fmtInt(sacks), unit: W.fig.sacks, note: `${fmtInt(Math.round(kg))} ${W.fig.kg}` },
-    { value: fmtInt(rejected), unit: W.fig.rejected, note: W.ofEverything(rejectRate) },
+    {
+      value: fmtInt(sacks),
+      unit: W.fig.sacks,
+      note: `${fmtInt(Math.round(kg))} ${W.fig.kg}`,
+      onClick: () => onNav('sacks'),
+    },
+    {
+      value: fmtInt(rejected),
+      unit: W.fig.rejected,
+      note: W.ofEverything(rejectRate),
+      onClick: () => onNav('rejects'),
+    },
+    {
+      value: fmtInt(outsideLimits),
+      unit: W.outsideProduct,
+      note: W.fig.couldNotBeJudged(fmtInt(couldNotBeJudged)),
+      // The identical hop Weight and the attention list already open.
+      onClick: () => onNav('readings', 'outsideLimits'),
+    },
   ];
+}
+
+/**
+ * The KPI block's own empty-state note (OVERVIEW-SPEC.md §3.1 case 6): three
+ * distinct explanations for a figure that reads low or zero, tried in order
+ * of how much they explain. Never shown when health is not 'ok' — rule 8,
+ * the strip and headline already carry that doubt, and a second warning here
+ * is the density failure IFL named.
+ */
+function kpiBlockNote(r: ProductionRow | null, line: LiveLine, period: Period, healthOk: boolean): string | null {
+  if (!healthOk) return null;
+  const cones = r?.cones ?? 0;
+  const sacks = r?.sacks ?? 0;
+  const rejected = r?.rejectedCones ?? 0;
+  if (cones + sacks + rejected > 0) return null;
+  // No readings at all: the headline already says so (W.lag.noData); a
+  // second sentence here would repeat it for no reason.
+  if (line.dataAsOfUtc == null) return null;
+  // The source has not caught up: on a live period the query is always
+  // capped at the plant's current instant (period.tsTo), so the newest
+  // acquisition lag's worth of cones is structurally missing — the 2 Sep
+  // 2026 live rehearsal's lesson. Never on a period that is already closed.
+  if (period.live && line.ingestLagSeconds != null && line.ingestLagSeconds > 0) {
+    return W.fig.notCaughtUp(fmtSpan(line.ingestLagSeconds));
+  }
+  return W.nothingHere;
 }
 
 /* --------------------------------------------------------------- attention */
@@ -326,21 +409,35 @@ function AttentionList({
   total,
   stations,
   loading,
+  windowDays,
+  minDaysHeld,
   onNavigate,
+  onOpenStation,
 }: {
   findings: AttentionFinding[];
   total: number;
   stations: StationRow[];
   loading: boolean;
+  /** The FIXED trailing window the drift and reject rules actually had. */
+  windowDays: number | null;
+  minDaysHeld: number | null;
   onNavigate: (s: Screen, filter?: ReadingsFilter) => void;
+  onOpenStation: (station: number) => void;
 }) {
   // Two lines: the attention list is at most three sentences, and reserving
   // two keeps the block from growing as it lands on a calm shift.
   if (loading) return <SkelLines n={2} short />;
   if (findings.length === 0) {
+    // A second empty case (OVERVIEW-SPEC.md §3.2): when the record holds
+    // fewer production days than the drift rule needs, "Nothing needs
+    // attention" is a statement about the record, not the line.
+    const tooFew = windowDays != null && minDaysHeld != null && windowDays < minDaysHeld;
     return (
       <ul className="attn calm">
-        <li>{W.nothingNeedsAttention}</li>
+        <li>
+          {W.nothingNeedsAttention}
+          {tooFew && ` ${W.tooFewProductionDays(windowDays!)}`}
+        </li>
       </ul>
     );
   }
@@ -348,21 +445,33 @@ function AttentionList({
   return (
     <>
       <ul className="attn">
-        {findings.map((f, i) => (
-          <li key={i}>
-            <span className="say">{sentence(f, byId)}</span>{' '}
-            <button
-              type="button"
-              className="linkish"
-              // Finding H4 (Sep 2026 audit): this used to open Readings
-              // unfiltered regardless of which finding was clicked — the same
-              // dead end as Weight's disagreement banner.
-              onClick={() => onNavigate(f.screen as Screen, f.kind === 'outside_product_limits' ? 'outsideLimits' : undefined)}
-            >
-              {W.nav[f.screen as keyof typeof W.nav]}
-            </button>
-          </li>
-        ))}
+        {findings.map((f, i) => {
+          // (a) A station-drift finding opens that station's sheet, not
+          // Weight unsorted and unfiltered (IA-PROPOSAL.md §6.1's worst
+          // context drop) — onOpenStation already exists, wired to
+          // ?sheet=station:N, and the link word is the station's own label.
+          const isStationDrift = f.kind === 'station_drift' && f.station != null;
+          const isOutsideLimits = f.kind === 'outside_product_limits';
+          const label = isStationDrift
+            ? stationLabel(byId.get(f.station!), f.station!)
+            : isOutsideLimits
+              ? W.seeThem
+              : W.nav[f.screen as keyof typeof W.nav];
+          const onClick = isStationDrift
+            ? () => onOpenStation(f.station!)
+            // Finding H4 (Sep 2026 audit): this used to open Readings
+            // unfiltered regardless of which finding was clicked — the same
+            // dead end as Weight's disagreement banner.
+            : () => onNavigate(f.screen as Screen, isOutsideLimits ? 'outsideLimits' : undefined);
+          return (
+            <li key={i}>
+              <span className="say">{sentence(f, byId)}</span>{' '}
+              <button type="button" className="linkish" onClick={onClick}>
+                {label}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {/* Name the screen the FIRST HIDDEN finding actually lives on.
           attention.ts orders drift findings first and caps at three, so the
@@ -403,41 +512,68 @@ function sentence(f: AttentionFinding, stations: Map<number, StationRow>): strin
       return `${cap(kind)} rejects have been rising since ${since} — ${fmtPct1(f.ratePct)} against a usual ${fmtPct1(f.usualPct)}.`;
     }
     case 'outside_product_limits':
-      return W.disagreement(f.count ?? 0);
+      // (b) Countless, deliberately: with KPI figure 4 directly above this
+      // block, a numeral here would be a second number for one fact, from a
+      // DIFFERENT SQL population (productDisagreement — see D2 in the spec).
+      // W.disagreement stays in words.ts for Weight's own banner.
+      return W.outsideLimitsThisPeriod;
   }
 }
 
 /* ----------------------------------------------------------------- product */
 
-function ProductBlock({
+/**
+ * Footer line 2 of the merged "What is being made" block (OVERVIEW-SPEC.md
+ * §3.4): the line-wide product record is now the FALLBACK for readings from
+ * before the plant's own MaterialId column existed, not the primary answer —
+ * the per-machine rows above are. History and Change call the same handler
+ * (onChangeProduct), both opening the product sheet, so a future repoint to
+ * a dedicated Product screen (IA-PROPOSAL.md §3.2) is a one-line change.
+ */
+function ProductFooter({
   data,
   canWrite,
-  onChange,
+  onChangeProduct,
 }: {
   data: { product: { label: string } | null; limits: { targetG: number; label: string } | null; neverRecorded: boolean } | null;
   canWrite: boolean;
-  onChange: () => void;
+  onChangeProduct: () => void;
 }) {
-  if (!data) return <SkelLines n={3} short />;
-  if (!data.product) return <p className="g">{W.product.none}</p>;
+  if (!data) return <SkelLines n={2} short />;
   return (
-    <div className="row between top">
+    <div className="row between top" style={{ marginTop: 12 }}>
       <div>
-        <div className="product-name">{data.product.label}</div>
-        {data.limits && (
-          <div className="g">
-            {W.product.target} {fmtG(data.limits.targetG)} · {W.product.limits} {data.limits.label}
-          </div>
+        {!data.product ? (
+          // D4: neverRecorded distinguishes "nothing was ever recorded for
+          // this line" from "a product exists but none was in force at this
+          // instant" — the normal case on a July-generation period or a
+          // replay, which used to render the same sentence as the former.
+          <p className="g">{data.neverRecorded ? W.product.none : W.product.noneAtThisTime}</p>
+        ) : (
+          <>
+            <div className="product-name">{data.product.label}</div>
+            {data.limits && (
+              <div className="g">
+                {W.product.target} {fmtG(data.limits.targetG)} · {W.product.limits} {data.limits.label}
+              </div>
+            )}
+            {/* Requirement 3 says "update product details on machines". Nothing here
+                reaches a machine, and the screen says so rather than implying it. */}
+            <div className="mut sm">{W.product.notSentToMachine}</div>
+          </>
         )}
-        {/* Requirement 3 says "update product details on machines". Nothing here
-            reaches a machine, and the screen says so rather than implying it. */}
-        <div className="mut sm">{W.product.notSentToMachine}</div>
       </div>
-      {canWrite && (
-        <button type="button" className="btn" onClick={onChange}>
-          {W.product.change}
-        </button>
-      )}
+      <div className="row" style={{ gap: 16 }}>
+        {/* Fixed alongside H3 (Sep 2026 audit): this used to link to a
+            #history anchor that existed nowhere on the page. It opens the
+            same product sheet Change does, available to every reader. */}
+        <button type="button" className="linkish" onClick={onChangeProduct}>{W.product.history}</button>
+        {canWrite && (
+          <button type="button" className="btn" onClick={onChangeProduct}>
+            {W.product.change}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -511,6 +647,50 @@ function quietNote(line: LiveLine, stations: StationRow[]): string | null {
   return `${quiet.length} stations quiet, longest ${name} for ${fmtSpan(quietSeconds(line, worst.lastTs))}`;
 }
 
+/** The station roster: never a hardcoded fourteen, requirement 10 is about
+ *  accommodating more machines. Shared by the grid and the block note so the
+ *  two agree on which group keys are real stations. */
+function stationIds(line: LiveLine, stations: StationRow[]): number[] {
+  const configured = stations.map((s) => s.stationId);
+  const seen = line.stations.map((s) => s.station);
+  return [...new Set([...configured, ...seen])].sort((a, b) => a - b);
+}
+
+/** groupBy=station groups sms.reject_event by source_station, which is NULL
+ *  for rejects the QCS path never attached to a station (OVERVIEW-SPEC.md
+ *  §3.3). Summed here rather than dropped, so the boxes' rejects never
+ *  silently disagree with KPI figure 3. */
+function unattributedRejectsCount(counts: ProductionRow[] | null, ids: number[]): number {
+  if (!counts) return 0;
+  const known = new Set(ids);
+  let sum = 0;
+  for (const r of counts) {
+    if (!known.has(Number(r.group))) sum += r.rejectedCones;
+  }
+  return sum;
+}
+
+/** The Stations block's note: the quiet summary, plus the unattributed-
+ *  rejects caveat when it is above zero, prefixed with the stale-anchor
+ *  sentence when health is not 'ok'. Absent (null) in the normal case, so it
+ *  costs no words in the steady state (OVERVIEW-SPEC.md §3.3 rules 3, 8). */
+function stationsNote(
+  line: LiveLine,
+  stationsRoster: StationRow[],
+  counts: ProductionRow[] | null,
+  healthOk: boolean,
+): string | null {
+  const parts: string[] = [];
+  const quiet = quietNote(line, stationsRoster);
+  if (quiet) parts.push(quiet);
+  const unattributed = unattributedRejectsCount(counts, stationIds(line, stationsRoster));
+  if (unattributed > 0) parts.push(W.unattributedRejects(unattributed));
+  const body = parts.length > 0 ? parts.join(' · ') : null;
+  if (healthOk || line.dataAsOfUtc == null) return body;
+  const prefix = W.measuredToNewest(fmtClock(line.dataAsOfUtc));
+  return body ? `${prefix} · ${body}` : prefix;
+}
+
 function StationRowGrid({
   line,
   stations,
@@ -519,18 +699,11 @@ function StationRowGrid({
 }: {
   line: LiveLine;
   stations: StationRow[];
-  /** Cones per station for the SELECTED period. Null while it loads. */
+  /** Cones and rejects per station for the SELECTED period. Null while it loads. */
   counts: ProductionRow[] | null;
   onOpen: (station: number) => void;
 }) {
-  // The count comes from Setup, not a hardcoded fourteen: requirement 10 is
-  // about accommodating more machines, and a constant in the bundle is the
-  // first thing that stops that being true.
-  const ids = useMemo(() => {
-    const configured = stations.map((s) => s.stationId);
-    const seen = line.stations.map((s) => s.station);
-    return [...new Set([...configured, ...seen])].sort((a, b) => a - b);
-  }, [stations, line.stations]);
+  const ids = useMemo(() => stationIds(line, stations), [stations, line.stations]);
 
   // The row keeps its full width and height while the names arrive, so the
   // block below it does not travel up the page.
@@ -541,6 +714,7 @@ function StationRowGrid({
   // and is what decides "quiet"; the first follows the period control.
   const liveById = new Map(line.stations.map((s) => [s.station, s]));
   const countById = new Map((counts ?? []).map((r) => [Number(r.group), r.cones]));
+  const rejectById = new Map((counts ?? []).map((r) => [Number(r.group), r.rejectedCones]));
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
 
   return (
@@ -548,7 +722,11 @@ function StationRowGrid({
       {ids.map((id) => {
         const row = liveById.get(id);
         const cones = counts == null ? null : (countById.get(id) ?? 0);
+        const rejected = counts == null ? 0 : (rejectById.get(id) ?? 0);
         const quiet = row ? quietSeconds(line, row.lastTs) > QUIET_AFTER_SECONDS : true;
+        // Quiet always wins (OVERVIEW-SPEC.md §3.3): a machine that stopped
+        // is the bigger fact than one that rejected a few cones.
+        const tag = quiet ? W.quiet : rejected > 0 ? W.stationRejected(rejected) : ' ';
         return (
           <button
             key={id}
@@ -566,7 +744,7 @@ function StationRowGrid({
                 reserves 1.4em precisely so the row does not reflow — and every
                 block below it does not travel up the page — the moment a
                 station goes quiet. */}
-            <span className="st-tag">{quiet ? W.quiet : ' '}</span>
+            <span className="st-tag">{tag}</span>
           </button>
         );
       })}
