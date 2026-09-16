@@ -2304,3 +2304,113 @@ export function getReportHeader(q: { from?: string; to?: string; at?: string | n
   const qs = p.toString();
   return get(qs ? `/api/reports/header?${qs}` : '/api/reports/header');
 }
+
+// ---- UX Phase 6 Brief 2: the changeover workflow ----
+// Appended, not edited in place (the three-agent collision rule). Mirrors
+// api/src/services/changeover.ts:100-147 exactly — the same plan/outcome
+// shape the server computes, so Changeover.tsx renders it rather than
+// re-deriving it. routes/changeover.ts: refs and plan are rank 1 (never open
+// the PDAS writer pool — the dry run works with PDAS_WRITE_ENABLED=false);
+// execute is rank 2 and answers 503 `code:'DISABLED'` or 409 `code:'BLOCKED'`
+// on refusal, both surfaced here as a thrown ApiError (status 503/409,
+// message = the server's own `error` string) rather than a resolved value —
+// executeChangeover() below only ever resolves on a 200/207 body, which is
+// the one thing allowed to say a write happened (CLAUDE.md, this brief).
+
+/** GET /api/changeover/refs response — the form's pickers, read from the sidecar mirror. */
+export interface ChangeoverRefs {
+  blends: { id: number; name: string }[];
+  counts: { id: number; name: string }[];
+  tubeTypes: { id: number; name: string; tubeWeightG: number | null }[];
+  packSchemas: { packSchemaId: number; description: string | null; conesPerLayer: number | null; packTypeId: number | null }[];
+  /** Already filtered to active pallets by the server (routes/changeover.ts). */
+  pallets: {
+    palletId: number; productId: number; productLabel: string | null;
+    packSchemaId: number | null; packSchemaLabel: string | null; lot: string | null;
+    active: boolean | null; sackColour: string | null;
+    labelType: number | null; steamProg: number | null; routing: number | null; pdasCreatedAt: string | null;
+  }[];
+}
+export function getChangeoverRefs(): Promise<ChangeoverRefs> {
+  return get('/api/changeover/refs');
+}
+
+/** Mirrors routes/changeover.ts's changeoverBody / services/changeover.ts's ChangeoverRequest exactly. */
+export type ChangeoverRefChoice = { id: number } | { name: string };
+export type ChangeoverTubeChoice = { id: number } | { name: string; tubeWeightG: number; tubeForm?: 1 | 2 };
+export interface ChangeoverRequestBody {
+  blend: ChangeoverRefChoice;
+  count: ChangeoverRefChoice;
+  tubeType: ChangeoverTubeChoice;
+  material: { setpointG: number; offsetMinusG: number; offsetPlusG: number; lot: string; ppColour: string | null };
+  pallet: { packSchemaId: number; lot: string | null; sackColour: string | null };
+  retire: { productIds: number[]; palletIds: number[] };
+  reason: string;
+}
+
+export type ChangeoverStepKind = 'blend' | 'count' | 'tube_type' | 'material' | 'pallet' | 'retire_material' | 'retire_pallet';
+export type ChangeoverStepAction = 'reuse' | 'add' | 'create' | 'retire';
+/** services/changeover.ts's PlanStep, verbatim. */
+export interface ChangeoverPlanStep {
+  step: ChangeoverStepKind;
+  action: ChangeoverStepAction;
+  /** The vendor procedure this step executes; null when nothing is written (reuse). */
+  proc: string | null;
+  label: string;
+  id: number | null;
+  detail: Record<string, string | number | boolean | null>;
+}
+
+/** services/changeover.ts:104-123, verbatim — the dry-run response. */
+export interface ChangeoverPlan {
+  writesEnabled: boolean;
+  /** Null when writesEnabled is true. Print verbatim — never a hardcoded sentence. */
+  disabledReason: string | null;
+  steps: ChangeoverPlanStep[];
+  /** Empty = the plan can run. */
+  blockers: string[];
+  warnings: string[];
+  /** Printed verbatim. */
+  noRollback: string;
+  limits: { setpointG: number; offsetMinusG: number; offsetPlusG: number; label: string };
+  /** Always false: a changeover never selects anything on a machine (CLAUDE.md). */
+  reachesMachine: false;
+  /** Printed verbatim. */
+  operatorNote: string;
+}
+
+/** POST /api/changeover/plan — rank 1. Never opens the PDAS writer pool, so it works with PDAS_WRITE_ENABLED=false. */
+export function planChangeover(body: ChangeoverRequestBody): Promise<ChangeoverPlan> {
+  return post('/api/changeover/plan', body);
+}
+
+export interface ChangeoverStepDone extends ChangeoverPlanStep {
+  /** The id PDAS allocated (or confirmed, on reuse). */
+  resultId: number;
+}
+export interface ChangeoverStepFailed extends ChangeoverPlanStep {
+  error: { code: 'DISABLED' | 'CONFLICT' | 'IMPLAUSIBLE' | 'NOT_FOUND' | 'PDAS_ERROR' | 'ERROR'; message: string; pdasErrorCode: number | null };
+}
+/** services/changeover.ts:139-147, verbatim — the outcome of a run that actually reached PDAS (200 ok / 207 partial). */
+export interface ChangeoverOutcome {
+  ok: boolean;
+  done: ChangeoverStepDone[];
+  failed: ChangeoverStepFailed | null;
+  notDone: ChangeoverPlanStep[];
+  materialId: number | null;
+  palletId: number | null;
+  noRollback: string;
+}
+
+/**
+ * POST /api/changeover/execute — rank 2 server-side. A refusal (the flag is
+ * off, or the flag is on but the plan has blockers) is a 503/409 response,
+ * which `post()` turns into a thrown `ApiError` (status 503 or 409, message
+ * = the server's `error` field verbatim) rather than a resolved value — this
+ * function only ever resolves on 200 (`ok`) or 207 (partial, `NO_ROLLBACK`
+ * applies). Callers must catch and read `ApiError.status`/`.message`; there
+ * is no other way to learn a refusal reason, and none should be invented.
+ */
+export function executeChangeover(body: ChangeoverRequestBody): Promise<ChangeoverOutcome> {
+  return post('/api/changeover/execute', body);
+}

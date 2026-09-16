@@ -89,7 +89,12 @@ export function ProductScreen({
           onSeeStationReadings={onSeeStationReadings}
         />
       )}
-      {tab === 'changeover' && <ChangeoverTab />}
+      {/* Same rank>=2 boolean Running's "Change" form gates — it matches
+          PDAS_WRITE_RANK (routes/changeover.ts) exactly, so Execute's own
+          client-side gate (writesEnabled && no blockers && this) agrees
+          with the server without needing a second rank number threaded
+          through. Brief 2, 16 Sep 2026. */}
+      {tab === 'changeover' && <ChangeoverTab canWrite={canWrite} />}
       {tab === 'catalogue' && <CatalogueTab productId={productId} onProductIdChange={onProductIdChange} />}
       {tab === 'history' && <HistoryTab />}
     </>
