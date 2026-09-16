@@ -6,7 +6,7 @@
  *
  *   GET  /api/products/limits/history   rank 1   the versioned limits, per product
  *   POST /api/products/limits/local     rank 2   append an SMS-local limit version — NEVER touches PDAS (roadmap Phase 4 item 2, 15 Sep 2026)
- *   GET  /api/reconciliation            rank 3   weight totals by state and plausibility, for a period
+ *   GET  /api/reconciliation            rank 1   weight totals by state and plausibility, for a period
  *   GET  /api/machines/running          rank 1   the product on each machine, from its newest cones
  *   GET  /api/shift-check               rank 1   plant-stored shift vs SMS-derived shift, per day
  */
@@ -106,8 +106,12 @@ export function mountConeRoutes({ app, pool, cfg }: RouteContext): void {
     shift: z.enum(['morning', 'evening', 'night']).optional(),
   });
 
-  // Manager+: it is the reconciliation figure, not a screen figure.
-  app.get('/api/reconciliation', requireRole(3), async (req: Request, res: Response, next: NextFunction) => {
+  // UX Phase 6 Brief 4 (16 Sep 2026): was requireRole(3) — wrong under the
+  // one-audience rule (CLAUDE.md, "roles gate WRITES only"). This is a READ
+  // of SMS's own canonical aggregates (sms.cone_event, grouped), strictly
+  // less sensitive than /api/production which sits at the blanket rank 1.
+  // Falls through to the app's shared signed-in gate.
+  app.get('/api/reconciliation', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const q = periodQuery.safeParse(req.query);
       if (!q.success) {

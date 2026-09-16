@@ -51,6 +51,17 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
   const blocking = ops.data?.data.dq.findings.filter((f) => f.severity === 'ERROR' || f.severity === 'CRITICAL') ?? [];
   const mixedRules = ops.data?.data.shiftRuleRegimes?.filter((r) => r.mixed) ?? [];
 
+  // Every finding, not only the blocking ones counted above — grouped by the
+  // table it is about, '—' for the (rare) finding with none.
+  const allFindings = ops.data?.data.dq.findings ?? [];
+  const findingsByTable = new Map<string, typeof allFindings>();
+  for (const f of allFindings) {
+    const key = f.subjectTable ?? '—';
+    const existing = findingsByTable.get(key);
+    if (existing) existing.push(f);
+    else findingsByTable.set(key, [f]);
+  }
+
   // Roadmap Phase 2 (14 Sep 2026): the source block. Absent from an API
   // built before it, in which case the probe line says so and the halted
   // sentence does not appear — `halted` read defensively for the same reason.
@@ -98,6 +109,45 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
         <dt>{W.sync.findings}</dt>
         <dd>{blocking.length === 0 ? W.sync.none : `${blocking.length}`}</dd>
       </dl>
+
+      {/* UX Phase 6 Brief 4 (16 Sep 2026): the findings themselves, not just
+          their count. Every DqFinding already arrives on the wire
+          (/api/operations dq.findings) — this lists ALL of them, not only the
+          ERROR/CRITICAL ones counted above, grouped by the table each one is
+          about, so a finding sits beside the per-table sync rows below rather
+          than in a second, disconnected list. */}
+      <Details summary={W.health.dqFindings}>
+        {ops.loading && !ops.data ? (
+          <SkelLines n={3} short />
+        ) : allFindings.length === 0 ? (
+          <p className="mut">{W.health.dqFindingsNone}</p>
+        ) : (
+          <div className="tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Check</th>
+                  <th>Severity</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...findingsByTable.entries()].flatMap(([table, findings]) =>
+                  findings.map((f, i) => (
+                    <tr key={`${table}:${f.checkName}:${i}`}>
+                      <td>{i === 0 ? table : ''}</td>
+                      <td>{f.checkName}</td>
+                      <td className={f.severity === 'ERROR' || f.severity === 'CRITICAL' ? 'acc' : ''}>{f.severity}</td>
+                      <td>{f.detail ?? '—'}</td>
+                    </tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Details>
 
       {failures.length > 0 && (
         <p className="acc" style={{ marginTop: 14 }}>

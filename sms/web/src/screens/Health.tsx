@@ -14,12 +14,118 @@
  * Every threshold on this page is the developer's default and the copy says
  * so where IFL's answer would change it (words.ts `health`).
  */
-import { usePolling } from '../lib/live';
+import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { Block, Failed, SkelLines } from '../ui/bits';
-import { fmtAppInstant, fmtSpan } from '../lib/fmt';
-import { getHealth } from '../api';
+import { Block, Details, Failed, SkelFigures, SkelLines } from '../ui/bits';
+import { fmtAppInstant, fmtG, fmtInt, fmtSpan } from '../lib/fmt';
+import { parsePeriodParams, resolvePeriod } from '../lib/period';
+import { getHealth, getReconciliation, type ConeState, type WeightAggregate } from '../api';
 import { SyncHealthBlock } from './health/SyncHealthBlock';
+
+/**
+ * The reconciliation figures for `Period` — a census of SMS's OWN canonical
+ * readings (`sms.cone_event`), never a comparison against IFL's source; that
+ * comparison is `sms verify`, a CLI command with no HTTP route.
+ *
+ * The period travels in the URL like everywhere else (lib/period.ts), but
+ * HealthScreen has no `period` prop from App.tsx (health is admin/system
+ * plumbing, not a period-scoped analysis screen) — so it is resolved here,
+ * independently, from the same two inputs App.tsx uses: the URL's `p`/`from`/
+ * `to` params and the plant clock `useLive()` already reports. Same anchor,
+ * same rules, no prop needed.
+ */
+function ReconciliationBlock() {
+  const { line } = useLive();
+  const params = parsePeriodParams(new URLSearchParams(window.location.search));
+  const period = line
+    ? resolvePeriod(
+        params.key,
+        {
+          shiftDate: line.shift.shiftDate,
+          shiftCode: line.shift.code,
+          shiftStartUtc: line.shift.startUtc,
+          plantNowUtc: line.plantNowUtc,
+          dataAsOfUtc: line.dataAsOfUtc,
+        },
+        params.picked,
+      )
+    : null;
+
+  const rec = usePolling(
+    () => (period ? getReconciliation(period.from, period.to, period.shift ?? null) : Promise.resolve(null)),
+    5 * 60_000,
+    `reconciliation:${period?.from ?? 'none'}:${period?.to ?? 'none'}:${period?.shift ?? 'all'}`,
+  );
+  const d = rec.data?.data ?? null;
+
+  const row = (label: string, agg: WeightAggregate) => (
+    <tr key={label}>
+      <td>{label}</td>
+      <td className="n">{fmtInt(agg.n)}</td>
+      <td className="n">{fmtG(agg.avgG)}</td>
+      <td className="n">{fmtG(agg.minG)}</td>
+      <td className="n">{fmtG(agg.maxG)}</td>
+    </tr>
+  );
+
+  const states: ConeState[] = ['within', 'low', 'high', 'rejected', 'unknown'];
+
+  return (
+    <Block label={W.health.reconciliationTitle}>
+      <p className="mut sm">{W.health.reconciliationNote}</p>
+      {!period || (rec.loading && !d) ? (
+        <SkelFigures n={4} />
+      ) : rec.error && !d ? (
+        <Failed error={rec.error} onRetry={rec.refresh} />
+      ) : d ? (
+        <>
+          <dl className="kv" style={{ marginTop: 20 }}>
+            <dt>Period</dt>
+            <dd>
+              {d.from === d.to ? d.from : `${d.from} → ${d.to}`}
+              {d.shift ? ` (${d.shift})` : ''}
+            </dd>
+            <dt>Plausibility window</dt>
+            <dd>{fmtG(d.plausibility.loG)} – {fmtG(d.plausibility.hiG)}</dd>
+          </dl>
+          <Details summary="Readings by state">
+            <div className="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th className="n">N</th>
+                    <th className="n">Avg</th>
+                    <th className="n">Min</th>
+                    <th className="n">Max</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row('Total', d.total)}
+                  {row('Plausible', d.plausible)}
+                  {row('Implausible', d.implausible)}
+                  <tr>
+                    <td>No weight</td>
+                    <td className="n">{fmtInt(d.noWeight)}</td>
+                    <td className="n">—</td>
+                    <td className="n">—</td>
+                    <td className="n">—</td>
+                  </tr>
+                  {states.map((s) => row(W.cone.state[s], d.byState[s]))}
+                </tbody>
+              </table>
+            </div>
+            {/* The server's own note, printed verbatim — it names the basis
+                (as-recorded weight, no tube/tare adjustment) and that the
+                plausibility window is unconfirmed by IFL. Not paraphrased,
+                so a changed caveat on the server cannot go stale here. */}
+            <p className="mut sm" style={{ marginTop: 12 }}>{d.note}</p>
+          </Details>
+        </>
+      ) : null}
+    </Block>
+  );
+}
 
 export function HealthScreen({ isAdmin }: { isAdmin: boolean }) {
   const h = usePolling(() => getHealth(), 30_000, 'health');
@@ -38,6 +144,8 @@ export function HealthScreen({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       <SyncHealthBlock first isAdmin={isAdmin} />
+
+      <ReconciliationBlock />
 
       <Block label={W.health.database}>
         {h.error && !r ? (

@@ -34,8 +34,6 @@ const API_FILE = 'api.ts';
  */
 const ALLOW_LIST: Record<string, string> = {
   // ---- (b) unreachable feature — the endpoint is real and works, no screen calls it yet ----
-  getReconciliation:
-    'DEV-PLAN-2026-09-15.md task N11 — "fix reconcile.ts:113 and surface /api/reconciliation on a screen" — designed (WAVE-CD1-CONTRACT.md), not yet wired to Report.',
   getDowntime:
     '/api/downtime computes the full stoppage list, hourly buckets, MTBF/MTTR and availabilityPct; only its stoppageCount/stoppedSeconds subset reaches Report via getReportOf("daily") today (screens/report/Daily.tsx).',
   getCalibrationRules:

@@ -242,7 +242,7 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/products/limits/history', minRank: 1 },
   { method: 'GET', path: '/api/machines/running', minRank: 1 },
   { method: 'GET', path: '/api/shift-check?from=2026-09-01&to=2026-09-07', minRank: 1 },
-  { method: 'GET', path: '/api/reconciliation?from=2026-09-01&to=2026-09-07', minRank: 3 },
+  { method: 'GET', path: '/api/reconciliation?from=2026-09-01&to=2026-09-07', minRank: 1 },
   // roadmap Phase 5 (routes/rejects.ts) — reads, open to every signed-in account
   { method: 'GET', path: '/api/rejects/by-day-code?from=2026-09-01&to=2026-09-07', minRank: 1 },
   { method: 'GET', path: '/api/rejects/reason?day=2026-09-07&code=1-3', minRank: 1 },
