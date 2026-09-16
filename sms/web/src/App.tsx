@@ -23,6 +23,7 @@ import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams 
 import { W } from './lib/words';
 import { Bar, SCREENS, type Screen, type ReadingsFilter } from './ui/Bar';
 import { Loading } from './ui/bits';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import { LineScreen } from './screens/Line';
 import { ReadingsScreen } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
@@ -173,8 +174,17 @@ function Chrome({
   const health = assessHealth(line);
 
   // Wall is the Line screen without the chrome, so it returns before the bar.
+  // It gets its own boundary, with the 'wall' variant, rather than relying on
+  // the screen-area one below: Wall runs unattended with no navigation of its
+  // own, which is exactly why a render throw there needs the one automatic
+  // remount the 'wall' variant attempts before it settles on the fallback —
+  // see ui/ErrorBoundary.tsx.
   if (route.view === 'wall') {
-    return <WallScreen onExit={() => go({ view: 'line' })} />;
+    return (
+      <ErrorBoundary variant="wall" label={W.wall}>
+        <WallScreen onExit={() => go({ view: 'line' })} />
+      </ErrorBoundary>
+    );
   }
 
   if (!line) {
@@ -198,6 +208,12 @@ function Chrome({
     dataAsOfUtc: line.dataAsOfUtc,
   }, route.period.picked);
 
+  // Remounts the screen-area boundary whenever the screen or the open sheet
+  // changes, so navigating away from a crash (via the Bar, still rendered
+  // OUTSIDE this boundary below) clears the failure rather than leaving the
+  // fallback stuck on screen until a hard reload.
+  const screenKey = `${route.view}:${route.sheet ? `${route.sheet.kind}:${route.sheet.id}` : 'none'}`;
+
   return (
     <div className="app">
       <a className="skip-link" href="#main">{W.skipToContent}</a>
@@ -218,121 +234,131 @@ function Chrome({
         onSignOut={onSignOut}
       />
 
-      {line.replay && (
-        <div className="replay no-print">
-          <span>
-            {W.replay} {new Date(line.plantNowUtc).toISOString().replace('T', ' ').slice(0, 19)}. {W.replayNote}
-          </span>
-          <a href={routeSearch({ ...route, at: null })}>Leave replay</a>
-        </div>
-      )}
-
-      {/* Not .page any more: every band carries its own 1100px page inside a
-          full-bleed rule, and each screen wraps its head area in one. */}
-      <main id="main" tabIndex={-1}>
-        {route.view === 'line' && (
-          <LineScreen
-            period={period}
-            onNavigate={(s, filter) => go({ view: s, readingsFilter: filter ?? null })}
-            onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
-            onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-            onChangeProduct={() => go({ sheet: { kind: 'product', id: 'current' } })}
-            canWrite={rank >= 2}
-          />
+      {/* The screen area, boundaried on its own (keyed so a navigation away
+          from a crash — via the Bar above, which stays outside this box —
+          remounts it clean): a render throw while drawing one screen must
+          not blank the top bar and navigation along with it. Plain 'default'
+          variant here, not 'wall' — Wall never reaches this region, since it
+          returns before the Bar further up this function, and every screen
+          here already sits one click away from Line via the Bar that stays
+          standing beside it. */}
+      <ErrorBoundary key={screenKey} variant="default" label={route.view}>
+        {line.replay && (
+          <div className="replay no-print">
+            <span>
+              {W.replay} {new Date(line.plantNowUtc).toISOString().replace('T', ' ').slice(0, 19)}. {W.replayNote}
+            </span>
+            <a href={routeSearch({ ...route, at: null })}>Leave replay</a>
+          </div>
         )}
 
-        {route.view === 'readings' && (
-          <ReadingsScreen
-            period={period}
-            initialFilter={route.readingsFilter}
-            onFilterChange={(f) => go({ readingsFilter: f })}
-            onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-            canExport={rank >= EXPORT_RANK}
+        {/* Not .page any more: every band carries its own 1100px page inside a
+            full-bleed rule, and each screen wraps its head area in one. */}
+        <main id="main" tabIndex={-1}>
+          {route.view === 'line' && (
+            <LineScreen
+              period={period}
+              onNavigate={(s, filter) => go({ view: s, readingsFilter: filter ?? null })}
+              onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
+              onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+              onChangeProduct={() => go({ sheet: { kind: 'product', id: 'current' } })}
+              canWrite={rank >= 2}
+            />
+          )}
+
+          {route.view === 'readings' && (
+            <ReadingsScreen
+              period={period}
+              initialFilter={route.readingsFilter}
+              onFilterChange={(f) => go({ readingsFilter: f })}
+              onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+              canExport={rank >= EXPORT_RANK}
+            />
+          )}
+
+          {route.view === 'report' && <ReportScreen period={period} user={user} />}
+
+          {route.view === 'weight' && (
+            <WeightScreen
+              period={period}
+              onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
+              onSeeOutside={() => go({ view: 'readings', readingsFilter: 'outsideLimits' })}
+            />
+          )}
+
+          {route.view === 'rejects' && (
+            <RejectsScreen
+              period={period}
+              onSeeCones={() => go({ view: 'readings', readingsFilter: 'inspectionRejects' })}
+              onSeeStations={() => go({ view: 'weight' })}
+              onOpenReason={(r) => go({ sheet: { kind: 'reason', id: reasonIdOf({ ...r, rejectType: r.rejectType as 'quality' | 'weight' }) } })}
+              canName={rank >= ENGINEER_RANK}
+            />
+          )}
+
+          {/* Roadmap Phase 7 (15 Sep 2026): open to every account; recording a
+              movement is rank 2 server-side (IFL's Q43 answer, 15 Sep 2026),
+              so the form is offered at ENGINEER_RANK. */}
+          {route.view === 'sacks' && (
+            <SacksScreen
+              period={period}
+              canRecord={rank >= ENGINEER_RANK}
+              onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
+              onOpenDay={(day) => go({ sheet: { kind: 'stock', id: day } })}
+            />
+          )}
+
+          {/* Hiding the gear is decluttering, not access control: a typed URL
+              would otherwise render a page of panels that each fail with 403.
+              The API enforces the same rank server-side. */}
+          {route.view === 'setup' &&
+            (rank >= 4 ? (
+              <SetupScreen currentUsername={user.username} />
+            ) : (
+              <div className="page">
+                <p className="q">{W.question.setup}</p>
+                <h1 className="wide">{W.notAllowed}</h1>
+              </div>
+            ))}
+
+          {/* Open to every signed-in account (roadmap Phase 11): the sync's
+              state was admin-only while IFL's accounts are created at manager. */}
+          {route.view === 'health' && <HealthScreen isAdmin={rank >= 4} />}
+        </main>
+
+        {/* Drill-downs open over the screen and close with Escape, so the reader
+            never loses their filters, their page or their place in the list. */}
+        {route.sheet?.kind === 'station' && (
+          <StationSheet
+            station={Number(route.sheet.id)}
+            canAdjust={rank >= 2}
+            periodTo={period.to}
+            onClose={() => go({ sheet: null })}
           />
         )}
-
-        {route.view === 'report' && <ReportScreen period={period} user={user} />}
-
-        {route.view === 'weight' && (
-          <WeightScreen
-            period={period}
-            onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
-            onSeeOutside={() => go({ view: 'readings', readingsFilter: 'outsideLimits' })}
-          />
+        {route.sheet?.kind === 'product' && (
+          <ProductSheet canWrite={rank >= 2} onClose={() => go({ sheet: null })} />
         )}
-
-        {route.view === 'rejects' && (
-          <RejectsScreen
-            period={period}
-            onSeeCones={() => go({ view: 'readings', readingsFilter: 'inspectionRejects' })}
-            onSeeStations={() => go({ view: 'weight' })}
-            onOpenReason={(r) => go({ sheet: { kind: 'reason', id: reasonIdOf({ ...r, rejectType: r.rejectType as 'quality' | 'weight' }) } })}
+        {route.sheet?.kind === 'reason' && (
+          <ReasonSheet
+            id={route.sheet.id}
             canName={rank >= ENGINEER_RANK}
-          />
-        )}
-
-        {/* Roadmap Phase 7 (15 Sep 2026): open to every account; recording a
-            movement is rank 2 server-side (IFL's Q43 answer, 15 Sep 2026),
-            so the form is offered at ENGINEER_RANK. */}
-        {route.view === 'sacks' && (
-          <SacksScreen
-            period={period}
-            canRecord={rank >= ENGINEER_RANK}
+            onClose={() => go({ sheet: null })}
+            // Readings has no reason filter (Phase 5): the link narrows to the
+            // day and the inspection-reject listing, and says so on the sheet.
+            onOpenRegister={(day) => go({ view: 'readings', readingsFilter: 'inspectionRejects', period: { key: 'pick', picked: { from: day, to: day } }, sheet: null })}
             onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-            onOpenDay={(day) => go({ sheet: { kind: 'stock', id: day } })}
           />
         )}
-
-        {/* Hiding the gear is decluttering, not access control: a typed URL
-            would otherwise render a page of panels that each fail with 403.
-            The API enforces the same rank server-side. */}
-        {route.view === 'setup' &&
-          (rank >= 4 ? (
-            <SetupScreen currentUsername={user.username} />
-          ) : (
-            <div className="page">
-              <p className="q">{W.question.setup}</p>
-              <h1 className="wide">{W.notAllowed}</h1>
-            </div>
-          ))}
-
-        {/* Open to every signed-in account (roadmap Phase 11): the sync's
-            state was admin-only while IFL's accounts are created at manager. */}
-        {route.view === 'health' && <HealthScreen isAdmin={rank >= 4} />}
-      </main>
-
-      {/* Drill-downs open over the screen and close with Escape, so the reader
-          never loses their filters, their page or their place in the list. */}
-      {route.sheet?.kind === 'station' && (
-        <StationSheet
-          station={Number(route.sheet.id)}
-          canAdjust={rank >= 2}
-          periodTo={period.to}
-          onClose={() => go({ sheet: null })}
-        />
-      )}
-      {route.sheet?.kind === 'product' && (
-        <ProductSheet canWrite={rank >= 2} onClose={() => go({ sheet: null })} />
-      )}
-      {route.sheet?.kind === 'reason' && (
-        <ReasonSheet
-          id={route.sheet.id}
-          canName={rank >= ENGINEER_RANK}
-          onClose={() => go({ sheet: null })}
-          // Readings has no reason filter (Phase 5): the link narrows to the
-          // day and the inspection-reject listing, and says so on the sheet.
-          onOpenRegister={(day) => go({ view: 'readings', readingsFilter: 'inspectionRejects', period: { key: 'pick', picked: { from: day, to: day } }, sheet: null })}
-          onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-        />
-      )}
-      {route.sheet?.kind === 'stock' && <StockSheet day={route.sheet.id} onClose={() => go({ sheet: null })} />}
-      {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && route.sheet.kind !== 'reason' && route.sheet.kind !== 'stock' && (
-        <ReadingSheet
-          type={route.sheet.kind}
-          id={route.sheet.id}
-          onClose={() => go({ sheet: null })}
-        />
-      )}
+        {route.sheet?.kind === 'stock' && <StockSheet day={route.sheet.id} onClose={() => go({ sheet: null })} />}
+        {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && route.sheet.kind !== 'reason' && route.sheet.kind !== 'stock' && (
+          <ReadingSheet
+            type={route.sheet.kind}
+            id={route.sheet.id}
+            onClose={() => go({ sheet: null })}
+          />
+        )}
+      </ErrorBoundary>
     </div>
   );
 }
