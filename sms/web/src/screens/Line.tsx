@@ -62,14 +62,14 @@ export function LineScreen({
   onNavigate,
   onOpenStation,
   onOpenReading,
-  onChangeProduct,
+  onOpenProduct,
   canWrite,
 }: {
   period: Period;
   onNavigate: (s: Screen, filter?: ReadingsFilter) => void;
   onOpenStation: (station: number) => void;
   onOpenReading: (type: 'cone' | 'sack', id: string | number) => void;
-  onChangeProduct: () => void;
+  onOpenProduct: () => void;
   canWrite: boolean;
 }) {
   const { line, loading } = useLive();
@@ -219,7 +219,7 @@ export function LineScreen({
         {product.error && !product.data ? (
           <Failed error={product.error} onRetry={product.refresh} />
         ) : (
-          <ProductFooter data={product.data} canWrite={canWrite} onChangeProduct={onChangeProduct} />
+          <ProductFooter data={product.data} canWrite={canWrite} onOpenProduct={onOpenProduct} />
         )}
       </Block>
 
@@ -526,18 +526,24 @@ function sentence(f: AttentionFinding, stations: Map<number, StationRow>): strin
  * Footer line 2 of the merged "What is being made" block (OVERVIEW-SPEC.md
  * §3.4): the line-wide product record is now the FALLBACK for readings from
  * before the plant's own MaterialId column existed, not the primary answer —
- * the per-machine rows above are. History and Change call the same handler
- * (onChangeProduct), both opening the product sheet, so a future repoint to
- * a dedicated Product screen (IA-PROPOSAL.md §3.2) is a one-line change.
+ * the per-machine rows above (MachinesBlock) are. History and Change call the
+ * same handler, `onOpenProduct` — both now open the dedicated Product screen
+ * (UX Phase 6 Brief 1, 16 Sep 2026, IA-PROPOSAL.md §3.2), on its default
+ * Running tab, which shows the SAME `/api/machines/running` payload
+ * MachinesBlock draws above, pivoted by product rather than by station. That
+ * is a different question (which products are in force vs. is the line
+ * running), so the same numbers appearing on both screens is not the
+ * duplication CLAUDE.md:305 forbids. The old product sheet component, which this used to
+ * open, is deleted.
  */
 function ProductFooter({
   data,
   canWrite,
-  onChangeProduct,
+  onOpenProduct,
 }: {
   data: { product: { label: string } | null; limits: { targetG: number; label: string } | null; neverRecorded: boolean } | null;
   canWrite: boolean;
-  onChangeProduct: () => void;
+  onOpenProduct: () => void;
 }) {
   if (!data) return <SkelLines n={2} short />;
   return (
@@ -567,9 +573,9 @@ function ProductFooter({
         {/* Fixed alongside H3 (Sep 2026 audit): this used to link to a
             #history anchor that existed nowhere on the page. It opens the
             same product sheet Change does, available to every reader. */}
-        <button type="button" className="linkish" onClick={onChangeProduct}>{W.product.history}</button>
+        <button type="button" className="linkish" onClick={onOpenProduct}>{W.product.history}</button>
         {canWrite && (
-          <button type="button" className="btn" onClick={onChangeProduct}>
+          <button type="button" className="btn" onClick={onOpenProduct}>
             {W.product.change}
           </button>
         )}

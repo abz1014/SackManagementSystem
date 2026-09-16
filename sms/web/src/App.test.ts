@@ -267,3 +267,36 @@ describe('the period and the replay instant survive alongside the new keys', () 
     expect(r2).toEqual(r1);
   });
 });
+
+describe('Product — tab round-trip, and the deleted sheet\'s legacy bookmark', () => {
+  it('pt round-trips and omits the running default', () => {
+    const r1 = withSearch('?s=product&pt=catalogue&pr=21', () => parseRoute());
+    expect(r1.view).toBe('product');
+    expect(r1.productTab).toBe('catalogue');
+    expect(r1.product).toBe(21);
+
+    const url = routeSearch(r1);
+    expect(url).not.toContain('pt=running');
+    const r2 = withSearch(url, () => parseRoute());
+    expect(r2).toEqual(r1);
+
+    // The default tab never appears in the URL.
+    const r3 = withSearch('?s=product', () => parseRoute());
+    expect(r3.productTab).toBe('running');
+    expect(routeSearch(r3)).not.toContain('pt=');
+  });
+
+  it('an unknown pt falls back to running', () => {
+    const r = withSearch('?s=product&pt=nonsense', () => parseRoute());
+    expect(r.productTab).toBe('running');
+  });
+
+  it('?sheet=product:current opens the Product screen, so old bookmarks survive', () => {
+    const r = withSearch('?s=line&sheet=product:current', () => parseRoute());
+    expect(r.view).toBe('product');
+    expect(r.sheet).toBeNull();
+    expect(r.productTab).toBe('running');
+    // The redirect itself never appears in a freshly-written URL.
+    expect(routeSearch(r)).toBe('?s=product&p=shift');
+  });
+});

@@ -1,251 +1,82 @@
 /**
- * Current Product — the Q1 changeover control.
+ * Product › Catalogue — "Which products exist, what are their limits, and
+ * how do I add or retire one?" (IA-PROPOSAL.md §3.2).
  *
- * Fixes finding H3 (Sep 2026 audit): the backend (currentProduct.ts,
- * /api/products, /api/current-product, /api/product-timeline) and this
- * screen's own copy (lib/words.ts `product`) were both fully built, but
- * Line's "Change" button navigated to Setup, which has no product section —
- * a dead end for the one feature that resolves Q1 and answers requirement 3.
+ * `PdasProducts` and its three forms (`LimitsForm`/`ActiveForm`/`CreateForm`)
+ * are moved VERBATIM in behaviour from the old product sheet component (UX Phase 6 Brief 1,
+ * 16 Sep 2026) — same requests, same validation, same copy. Nothing here
+ * redesigns what they send.
  *
- * It opens as a SHEET, not a Setup section, because Setup is admin-only
- * (`rank >= 4` in App.tsx) while setting the product is a supervisor+ action
- * server-side (`requireRole(2)` on POST /api/current-product) — nesting it in
- * Setup would have hidden it from every supervisor and manager account IFL
- * actually uses. This is the "app-owned product-details overlay" CLAUDE.md's
- * redesign sign-off lists as still to do.
+ * `<ProductLimitsBlock/>` — the SMS-local limit history/editor, shared with
+ * Setup › Rules — is mounted UN-COLLAPSED: it was buried inside a
+ * `<Details>` in the old product sheet component, four levels deep with no outside
+ * signpost (IA-PROPOSAL.md §6.4). It decides its own write visibility from
+ * the server (`GET /api/product-write/status`'s `local.canWrite`), so
+ * mounting it costs one JSX line and no new gating logic here.
+ *
+ * DEEP LINK. `productId` is the shared `pr` key (App.tsx's Route note, the
+ * same one Report and Rejects filter by). When set, the matching row in the
+ * PDAS table is scrolled into view and marked — this table is the one part
+ * of this screen addressable by a single product; `ProductLimitsBlock`
+ * always lists every product's history and is not filtered by it.
  */
-import { useEffect, useState } from 'react';
-import { Sheet } from '../ui/Sheet';
-import { Details, Failed, SkelLines } from '../ui/bits';
-import { W } from '../lib/words';
-import { fmtDayLong, fmtG } from '../lib/fmt';
-import { ProductLimitsBlock } from './product/ProductLimitsBlock';
+import { useEffect, useRef, useState } from 'react';
+import { W } from '../../lib/words';
+import { Block, SkelLines } from '../../ui/bits';
+import { fmtG } from '../../lib/fmt';
+import { ProductLimitsBlock } from './ProductLimitsBlock';
 import {
-  getCurrentProduct, getProducts, getProductTimeline, setCurrentProduct,
-  getProductWriteStatus, getProductOptions, createProduct, setProductActive, updateProductLimits,
-  type ProductOption, type TimelineEntry, type ProductWriteStatus, type ProductOptions, type ProductFields,
-} from '../api';
+  getProducts, getProductWriteStatus, getProductOptions, createProduct, setProductActive, updateProductLimits,
+  type ProductOption, type ProductWriteStatus, type ProductOptions, type ProductFields,
+} from '../../api';
 
 function label(p: { description: string | null; lotCode: string | null; productId: number }): string {
   return p.description || p.lotCode || `Product ${p.productId}`;
 }
 
-function limitsLabel(p: ProductOption | undefined): string | null {
-  if (!p || p.setpointG == null || p.weightOffsetMinusG == null || p.weightOffsetPlusG == null) return null;
-  const minus = Math.abs(p.weightOffsetMinusG);
-  const plus = Math.abs(p.weightOffsetPlusG);
-  // fmtG rather than a third hand-rolled copy of its body: it carries the
-  // non-breaking space, so "1,960 ± 40 g" cannot wrap between number and unit.
-  if (minus === plus) return `${fmtG(p.setpointG)} ± ${fmtG(plus)}`;
-  return `${fmtG(p.setpointG - minus)} to ${fmtG(p.setpointG + plus)}`;
-}
-
-export function ProductSheet({
-  canWrite,
-  onClose,
-  onSeeReport,
+export function CatalogueTab({
+  productId,
 }: {
-  canWrite: boolean;
-  onClose: () => void;
+  productId: number | null;
   /**
-   * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.4
-   * "a product → what it produced"). No Product Catalogue screen exists yet
-   * (Phase 6); this is the one place production already breaks out by
-   * product — the Product report type, filtered to this product.
+   * The setter half of the shared `pr` route field is accepted by
+   * `Product.tsx` (App.tsx's Route note) but not needed here: the deep link
+   * is never cleared once followed — see `PdasProducts`'s own note on why
+   * clearing it would undo the highlight before a reader saw it.
    */
-  onSeeReport: (productId: number) => void;
+  onProductIdChange: (v: number | null) => void;
 }) {
-  const [current, setCurrentState] = useState<TimelineEntry | null | undefined>(undefined);
   const [products, setProducts] = useState<ProductOption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
-  const load = () => {
+  useEffect(() => {
     setError(null);
-    Promise.all([getCurrentProduct(), getProducts()])
-      .then(([c, p]) => {
-        setCurrentState(c.current);
-        setProducts(p.products);
-      })
+    getProducts()
+      .then((r) => setProducts(r.products))
       .catch((e) => setError(String((e as Error).message ?? e)));
-  };
-  useEffect(load, [nonce]);
-
-  const loading = current === undefined || products === null;
-
-  return (
-    <Sheet title={W.product.title} onClose={onClose}>
-      {error ? (
-        <Failed error={error} onRetry={() => setNonce((n) => n + 1)} />
-      ) : loading ? (
-        <SkelLines n={5} short />
-      ) : (
-        <Body
-          current={current ?? null}
-          products={products!}
-          canWrite={canWrite}
-          onChanged={() => setNonce((n) => n + 1)}
-          onSeeReport={onSeeReport}
-        />
-      )}
-    </Sheet>
-  );
-}
-
-function Body({
-  current,
-  products,
-  canWrite,
-  onChanged,
-  onSeeReport,
-}: {
-  current: TimelineEntry | null;
-  products: ProductOption[];
-  canWrite: boolean;
-  onChanged: () => void;
-  onSeeReport: (productId: number) => void;
-}) {
-  const currentOption = current ? products.find((p) => p.productId === current.productId) : undefined;
-  const limits = limitsLabel(currentOption);
+  }, [nonce]);
 
   return (
     <>
-      {current ? (
-        <>
-          <div className="big">{current.productLabel}</div>
-          <dl className="kv" style={{ marginTop: 18 }}>
-            {/* The value is a range ("1,960 ± 40 g"), so it cannot be
-                labelled with the bare word Target. */}
-            <dt>{W.product.targetAndLimits}</dt>
-            <dd>{limits ?? '—'}</dd>
-            {currentOption?.color && (
-              <>
-                <dt>{W.product.colour}</dt>
-                <dd>{currentOption.color}</dd>
-              </>
-            )}
-            <dt>{W.product.since}</dt>
-            <dd>{fmtDayLong(current.effectiveFrom)}</dd>
-            <dt>{W.product.setBy}</dt>
-            <dd>{current.changedBy ?? '—'}</dd>
-          </dl>
-          {currentOption?.activeFlag === false && (
-            <p className="acc sm" style={{ marginTop: 10 }}>{W.product.inactive}</p>
-          )}
-          <p style={{ marginTop: 10 }}>
-            <button type="button" className="linkish" onClick={() => onSeeReport(current.productId)}>{W.product.seeReport}</button>{' '}
-            <span className="mut sm">· {W.product.seeReportNote}</span>
-          </p>
-        </>
-      ) : (
-        <p className="mut" style={{ marginTop: 12 }}>{W.product.none}</p>
-      )}
+      <Block label={W.product.catalogueTitle} note={W.product.catalogueNote}>
+        {error ? (
+          <p className="acc sm">{W.couldNotLoad}</p>
+        ) : !products ? (
+          <SkelLines n={5} short />
+        ) : (
+          <PdasProducts
+            products={products}
+            linkedId={productId}
+            onChanged={() => setNonce((n) => n + 1)}
+          />
+        )}
+      </Block>
 
-      <p className="mut sm" style={{ marginTop: 14 }}>{W.product.notSentToMachine}</p>
-
-      {canWrite && <ChangeForm products={products} currentId={current?.productId ?? null} onChanged={onChanged} />}
-
-      {/* The PDAS products themselves — the write path (§5). Shown to anyone
-          who could act on the line-wide product; the buttons appear only when
-          the server has the path enabled AND the account is a manager. */}
-      {canWrite && <PdasProducts products={products} onChanged={onChanged} />}
-
-      {/* The SMS-local limits editor — the SAME component (not a copy)
-          Setup › Rules renders, un-collapsed there and here on purpose: it
-          decides its own visibility exactly once, so the two cannot drift.
-          Never gated on `canWrite` above (that prop is this sheet's own
-          rank>=2 threshold for the PDAS-facing controls above; the local
-          editor asks the server for ITS OWN write status, a different rank
-          gate that does not depend on PDAS_WRITE_ENABLED) — visible to every
-          signed-in account, same as the rest of this sheet; only the edit
-          control inside it is conditional. */}
-      <ProductLimitsBlock />
-
-      <Details summary={W.product.history}>
-        <History />
-      </Details>
+      <Block label={W.cone.limitsSection}>
+        <ProductLimitsBlock />
+      </Block>
     </>
-  );
-}
-
-function ChangeForm({
-  products,
-  currentId,
-  onChanged,
-}: {
-  products: ProductOption[];
-  currentId: number | null;
-  onChanged: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [productId, setProductId] = useState<number | ''>('');
-  const [reason, setReason] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  if (!open) {
-    return (
-      <button type="button" className="btn" style={{ marginTop: 18 }} onClick={() => setOpen(true)}>
-        {W.product.change}
-      </button>
-    );
-  }
-
-  const chosen = typeof productId === 'number' ? products.find((p) => p.productId === productId) : undefined;
-  const preview = chosen ? limitsLabel(chosen) : null;
-
-  return (
-    <form
-      style={{ marginTop: 18, display: 'grid', gap: 10 }}
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (typeof productId !== 'number') return;
-        setBusy(true);
-        setFailed(false);
-        try {
-          await setCurrentProduct(productId, reason.trim() || undefined);
-          setOpen(false);
-          setReason('');
-          setProductId('');
-          onChanged();
-        } catch {
-          setFailed(true);
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <label className="field">
-        <span>{W.product.change}</span>
-        <select
-          value={productId}
-          autoFocus
-          onChange={(e) => setProductId(e.target.value ? Number(e.target.value) : '')}
-        >
-          <option value="">—</option>
-          {products.map((p) => (
-            <option key={p.productId} value={p.productId} disabled={p.productId === currentId}>
-              {label(p)}
-              {p.color ? ` — ${p.color}` : ''}
-              {p.activeFlag === false ? ' (inactive in product master)' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
-      {preview && <p className="mut sm">{W.product.previewLimits(preview)}</p>}
-      {chosen?.activeFlag === false && <p className="acc sm">{W.product.inactive}</p>}
-      <label className="field">
-        <span>{W.product.reason}</span>
-        <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      {failed && <p className="acc sm">{W.couldNotLoad}</p>}
-      <div className="row">
-        <button type="submit" className="btn primary" disabled={busy || typeof productId !== 'number'}>
-          {W.product.confirm}
-        </button>
-        <button type="button" className="btn" onClick={() => setOpen(false)}>{W.product.cancel}</button>
-      </div>
-    </form>
   );
 }
 
@@ -271,19 +102,45 @@ function errText(e: unknown): string {
   return String((e as { message?: string })?.message ?? e);
 }
 
-function PdasProducts({ products, onChanged }: { products: ProductOption[]; onChanged: () => void }) {
+function PdasProducts({
+  products,
+  linkedId,
+  onChanged,
+}: {
+  products: ProductOption[];
+  /**
+   * The `pr` deep link — the matching row is marked AND kept marked (the
+   * link was a deliberate "go to this product", not a one-off flash), and
+   * scrolled into view once. Deliberately NOT cleared back to the parent's
+   * route state after the scroll: clearing it would re-render with
+   * `linkedId: null` on the very same tick, in effect undoing the highlight
+   * before a reader could see it. A local ref (below), not route state,
+   * tracks whether the one-time scroll already ran.
+   */
+  linkedId: number | null;
+  onChanged: () => void;
+}) {
   const [status, setStatus] = useState<ProductWriteStatus | null>(null);
   const [mode, setMode] = useState<{ kind: 'limits'; id: number } | { kind: 'active'; id: number; active: boolean } | { kind: 'create' } | null>(null);
+  const linkedRef = useRef<HTMLTableRowElement | null>(null);
+  const scrolledRef = useRef(false);
 
   useEffect(() => {
     getProductWriteStatus().then(setStatus).catch(() => setStatus({ enabled: false, reason: 'status unavailable', canWrite: false, local: { canWrite: false } }));
   }, []);
 
+  useEffect(() => {
+    if (linkedId != null && linkedRef.current && !scrolledRef.current) {
+      linkedRef.current.scrollIntoView({ block: 'center' });
+      scrolledRef.current = true;
+    }
+  }, [linkedId]);
+
   const active = products.filter((p) => p.activeFlag !== false);
   const retired = products.filter((p) => p.activeFlag === false);
 
   return (
-    <Details summary={W.product.pdasTitle}>
+    <>
       <p className="mut sm">{W.product.pdasNote}</p>
       {status && !status.canWrite && (
         <p className="mut sm" style={{ marginTop: 8 }}>
@@ -294,8 +151,13 @@ function PdasProducts({ products, onChanged }: { products: ProductOption[]; onCh
         <tbody>
           {[...active, ...retired].map((p) => {
             const f = fieldsOf(p);
+            const linked = linkedId === p.productId;
             return (
-              <tr key={p.productId} className={p.activeFlag === false ? 'mut' : ''}>
+              <tr
+                key={p.productId}
+                ref={linked ? linkedRef : undefined}
+                className={[p.activeFlag === false ? 'mut' : '', linked ? 'acc' : ''].filter(Boolean).join(' ')}
+              >
                 <td>{label(p)}{p.activeFlag === false ? ` · ${W.product.retired}` : ''}</td>
                 <td className="n">{p.productId}</td>
                 <td>{f ? `${fmtG(f.setpointG)} · ${rangeLabel(f)}` : '—'}</td>
@@ -334,7 +196,7 @@ function PdasProducts({ products, onChanged }: { products: ProductOption[]; onCh
       {mode?.kind === 'create' && (
         <CreateForm products={products} onDone={() => { setMode(null); onChanged(); }} onCancel={() => setMode(null)} />
       )}
-    </Details>
+    </>
   );
 }
 
@@ -486,40 +348,5 @@ function CreateForm({ products, onDone, onCancel }: { products: ProductOption[];
       </button>{' '}
       <button type="button" className="btn" onClick={onCancel}>{W.product.cancel}</button>
     </form>
-  );
-}
-
-function History() {
-  const [rows, setRows] = useState<TimelineEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Finding H14's exact defect, which the first draft of this file
-  // reintroduced: swallowing the failure into an empty list made a failed
-  // fetch render "No product has been recorded for this line yet." — the
-  // changeover log asserting itself empty because it could not be read.
-  const load = () => {
-    setError(null);
-    getProductTimeline()
-      .then((r) => setRows(r.timeline))
-      .catch((e) => setError(String((e as Error).message ?? e)));
-  };
-  useEffect(load, []);
-  if (error) return <Failed error={error} onRetry={load} />;
-  if (!rows) return <SkelLines n={3} short />;
-  if (rows.length === 0) return <p className="mut sm">{W.product.none}</p>;
-  return (
-    <table>
-      <tbody>
-        {rows.slice(0, 20).map((r) => (
-          <tr key={r.timelineId}>
-            <td style={{ width: '10em' }}>{fmtDayLong(r.effectiveFrom)}</td>
-            <td>
-              {r.productLabel}
-              {r.changedBy && <span className="mut"> · {r.changedBy}</span>}
-              {r.reason && <span className="mut"> — {r.reason}</span>}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }

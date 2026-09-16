@@ -12,8 +12,10 @@
  * differently.
  *
  * WHAT THIS DOES NOT DO. It never writes to PDAS and never requires
- * PDAS_WRITE_ENABLED — that write path is ProductSheet.tsx's separate
- * PdasProducts/LimitsForm, still there, still off. This one appends a row to
+ * PDAS_WRITE_ENABLED — that write path is Product › Catalogue's separate
+ * PdasProducts/LimitsForm (product/Catalogue.tsx, UX Phase 6 Brief 1,
+ * 16 Sep 2026 — moved here from the deleted product sheet), still there,
+ * still off. This one appends a row to
  * sms.product_limit_version with source 'sms_local' (productLimits.ts's
  * setLocalLimitVersion) and nothing else: not sms.product, not any PDAS
  * table. The control's availability comes from the server's reported

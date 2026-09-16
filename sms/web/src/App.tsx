@@ -22,14 +22,14 @@ import { LiveProvider, readAsOf, useLive, usePlantNow } from './lib/live';
 import { assessHealth } from './lib/health';
 import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams, type ShiftCode } from './lib/period';
 import { W } from './lib/words';
-import { Bar, SCREENS, type Screen, type ReadingsFilter } from './ui/Bar';
+import { Bar, SCREENS, PRODUCT_TABS, type Screen, type ReadingsFilter, type ProductTab } from './ui/Bar';
 import { Loading } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { LineScreen } from './screens/Line';
 import { ReadingsScreen, LISTINGS, type Listing } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
 import { StationSheet } from './screens/StationSheet';
-import { ProductSheet } from './screens/ProductSheet';
+import { ProductScreen } from './screens/Product';
 import { ReportScreen } from './screens/Report';
 import { WeightScreen, type WeightMode } from './screens/Weight';
 import { RejectsScreen } from './screens/Rejects';
@@ -48,8 +48,12 @@ type View = Screen | 'setup' | 'wall' | 'health';
 
 export interface Sheet {
   /** 'reason' (roadmap Phase 5): one day's rejects of one code, id `<day>|<type>|<tube>|<material>`.
-   *  'stock' (roadmap Phase 7): one production day's stock movements, id `<day>`. */
-  kind: 'station' | 'cone' | 'sack' | 'reject' | 'product' | 'reason' | 'stock';
+   *  'stock' (roadmap Phase 7): one production day's stock movements, id `<day>`.
+   *  'product' is GONE as a sheet kind (UX Phase 6 Brief 1, 16 Sep 2026):
+   *  the old product sheet component is deleted, absorbed into the Product nav screen. An
+   *  incoming `?sheet=product:*` is a legacy bookmark and is redirected to
+   *  `?s=product` in `parseRoute` below, never parsed into a live sheet. */
+  kind: 'station' | 'cone' | 'sack' | 'reject' | 'reason' | 'stock';
   id: string;
 }
 
@@ -112,6 +116,11 @@ export interface Route {
   /** Rejects: the chosen Pareto reason. Station/product are the shared
    *  fields above — see RejectsScreen's file header for why they moved. */
   rejectsCode: string | null;
+
+  /** Product (UX Phase 6 Brief 1, 16 Sep 2026): which of the four tabs.
+   *  Product id, when one is deep-linked into Catalogue, is the SHARED
+   *  `product` field above — the same key Report and Rejects use. */
+  productTab: ProductTab;
 }
 
 const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall', 'health'] as const;
@@ -145,6 +154,7 @@ const DEFAULT_ROUTE: Omit<Route, 'view' | 'period' | 'sheet' | 'at' | 'readingsF
   sacksUnit: 'sacks',
   sacksPage: 1,
   rejectsCode: null,
+  productTab: 'running',
 };
 
 /** A positive integer, or null for anything else — missing, zero, negative,
@@ -169,9 +179,17 @@ export function parseRoute(): Route {
   }
   const p = new URLSearchParams(window.location.search);
   const raw = p.get('s');
-  const view: View = (VIEWS as readonly string[]).includes(raw ?? '') ? (raw as View) : 'line';
   const sheetRaw = p.get('sheet');
-  const m = sheetRaw?.match(/^(station|cone|sack|reject|product|reason|stock):(.+)$/);
+  // Legacy bookmark: the old product sheet component is deleted (UX Phase 6 Brief 1) and
+  // `sheet=product:*` was its only id shape (always 'current'). Redirect to
+  // the Product screen itself rather than parsing a sheet kind that no
+  // longer exists, so an old link still lands somewhere useful instead of a
+  // sheet the app can no longer open.
+  const isLegacyProductBookmark = sheetRaw?.startsWith('product:') ?? false;
+  const view: View = isLegacyProductBookmark
+    ? 'product'
+    : (VIEWS as readonly string[]).includes(raw ?? '') ? (raw as View) : 'line';
+  const m = isLegacyProductBookmark ? null : sheetRaw?.match(/^(station|cone|sack|reject|reason|stock):(.+)$/);
   const rf = p.get('rf');
   const readingsFilter: ReadingsFilter = rf === 'outsideLimits' || rf === 'inspectionRejects' ? rf : null;
 
@@ -200,6 +218,9 @@ export function parseRoute(): Route {
 
   const rejectsCode = p.get('jc');
 
+  const ptRaw = p.get('pt');
+  const productTab: ProductTab = (PRODUCT_TABS as readonly string[]).includes(ptRaw ?? '') ? (ptRaw as ProductTab) : 'running';
+
   return {
     view,
     period: parsePeriodParams(p),
@@ -218,6 +239,7 @@ export function parseRoute(): Route {
     sacksUnit,
     sacksPage,
     rejectsCode,
+    productTab,
   };
 }
 
@@ -245,6 +267,8 @@ export function routeSearch(r: Route): string {
   if (r.sacksPage > 1) p.set('sp', String(r.sacksPage));
 
   if (r.rejectsCode) p.set('jc', r.rejectsCode);
+
+  if (r.productTab !== DEFAULT_ROUTE.productTab) p.set('pt', r.productTab);
 
   return `?${p.toString()}`;
 }
@@ -413,7 +437,11 @@ function Chrome({
               onNavigate={(s, filter) => go({ view: s, readingsFilter: filter ?? null })}
               onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
               onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
-              onChangeProduct={() => go({ sheet: { kind: 'product', id: 'current' } })}
+              // UX Phase 6 Brief 1 (16 Sep 2026): the old product sheet component is gone —
+              // both "History" and "Change" on the product block now open
+              // the Product nav screen (Running tab, its default) rather
+              // than a sheet.
+              onOpenProduct={() => go({ view: 'product', sheet: null })}
               canWrite={rank >= 2}
             />
           )}
@@ -512,6 +540,24 @@ function Chrome({
             />
           )}
 
+          {/* UX Phase 6 Brief 1 (16 Sep 2026): open to every signed-in
+              account (ONE AUDIENCE, CLAUDE.md) — only the write actions
+              inside it (setting the running product, PDAS writes) are
+              rank-gated, server-side. `pr` is the SHARED product id, same
+              key Report and Rejects use, here deep-linking Catalogue. */}
+          {route.view === 'product' && (
+            <ProductScreen
+              period={period}
+              tab={route.productTab}
+              onTabChange={(t) => go({ productTab: t })}
+              productId={route.product}
+              onProductIdChange={(v) => go({ product: v })}
+              canWrite={rank >= 2}
+              onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
+              onSeeStationReadings={(n) => go({ view: 'readings', station: n, readingsPage: 1 })}
+            />
+          )}
+
           {/* Hiding the gear is decluttering, not access control: a typed URL
               would otherwise render a page of panels that each fail with 403.
               The API enforces the same rank server-side. */}
@@ -551,13 +597,6 @@ function Chrome({
             onSeeShiftReport={() => go({ view: 'report', reportType: 'machine-product', station: Number(route.sheet!.id), sheet: null })}
           />
         )}
-        {route.sheet?.kind === 'product' && (
-          <ProductSheet
-            canWrite={rank >= 2}
-            onClose={() => go({ sheet: null })}
-            onSeeReport={(productId) => go({ view: 'report', reportType: 'product', product: productId, sheet: null })}
-          />
-        )}
         {route.sheet?.kind === 'reason' && (
           <ReasonSheet
             id={route.sheet.id}
@@ -580,7 +619,7 @@ function Chrome({
           />
         )}
         {route.sheet?.kind === 'stock' && <StockSheet day={route.sheet.id} onClose={() => go({ sheet: null })} />}
-        {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'product' && route.sheet.kind !== 'reason' && route.sheet.kind !== 'stock' && (
+        {route.sheet && route.sheet.kind !== 'station' && route.sheet.kind !== 'reason' && route.sheet.kind !== 'stock' && (
           <ReadingSheet
             type={route.sheet.kind}
             id={route.sheet.id}
@@ -590,6 +629,12 @@ function Chrome({
             onOpenProductReport={(productId, day) => go({
               view: 'report', reportType: 'product', product: productId,
               period: { key: 'pick', picked: { from: day, to: day } }, sheet: null,
+            })}
+            // UX Phase 6 Brief 1 (16 Sep 2026): the second of the two
+            // Phase-4 drilldown hops that had no real destination until the
+            // Product screen's Catalogue tab existed (IA-PROPOSAL.md §6.4).
+            onOpenProductCatalogue={(productId) => go({
+              view: 'product', productTab: 'catalogue', product: productId, sheet: null,
             })}
           />
         )}

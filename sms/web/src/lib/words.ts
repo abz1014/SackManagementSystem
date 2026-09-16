@@ -37,6 +37,10 @@ export const W = {
        Rejects — the one edit outside the `sacks` namespace, because the bar
        indexes this object by screen. */
     sacks: 'Sacks',
+    /* UX Phase 6 Brief 1 (16 Sep 2026): the 7th nav item, absorbing the old
+       Product sheet. Sits between Sacks and Report in time-window order —
+       see Bar.tsx's SCREENS note. */
+    product: 'Product',
     report: 'Report',
   } as const,
   wall: 'Wall',
@@ -57,6 +61,8 @@ export const W = {
     rejects: 'How many cones are being rejected, why, is it getting worse, and where?',
     report: 'What did the line make over this period, on paper.',
     setup: 'Accounts, stations, the rules this system applies, and the plant connection.',
+    /* UX Phase 6 Brief 1 (16 Sep 2026). */
+    product: 'What is each machine running, what are its limits, and how do I change it.',
   } as const,
 
   /* ---------------------------------------------------------- the period */
@@ -242,6 +248,80 @@ export const W = {
     retired: 'retired',
     reasonTooShort: 'Please give a reason of at least 10 characters.',
     written: 'Written to PDAS.',
+
+    /* ---- UX Phase 6 Brief 1 (16 Sep 2026): the Product screen shell,
+       absorbing the old product sheet component. The tab strip, URL key `pt`. */
+    tabs: {
+      running: 'Running',
+      changeover: 'Changeover',
+      catalogue: 'Catalogue',
+      history: 'History',
+    } as const,
+    /* Running tab: the line-wide recorded product (the old sheet's "current"
+       section) plus the SAME /api/machines/running payload Line's
+       MachinesBlock draws, pivoted BY PRODUCT rather than by station — a
+       different question (which products are in force, on which machines)
+       from Line's (is the line running), so the same numbers on two screens
+       is not the duplication CLAUDE.md:305 forbids. */
+    runningNow: 'Products in force now',
+    runningNowNote: 'The same reading window Line uses, grouped by product instead of by machine.',
+    runningNowEmpty: 'No product is recorded as running on any machine right now.',
+    /* One row's machine list: "Station 3, Station 7" plus the since/cones
+       facts MachinesBlock already states per machine. */
+    onMachines: (list: string) => `On ${list}`,
+    /* Catalogue tab: un-collapsed PdasProducts + LimitsForm/ActiveForm/
+       CreateForm (moved verbatim) + ProductLimitsBlock. */
+    catalogueTitle: 'Product catalogue',
+    catalogueNote: 'Every product recorded in PDAS, its limits, and how to add, retire or re-limit one.',
+    /* The `pr` deep link: which row this permalink pointed at. */
+    catalogueLinkedNote: 'Linked from elsewhere in this system.',
+
+    /* ---- Changeover tab (Brief 2 builds the screen; strings fixed here so
+       Brief 2 never opens this file). Put machine N onto product X for this
+       shift: a dry-run plan with blockers and warnings, and an execute step
+       that stays refused until IFL confirms PDAS writes in writing. */
+    changeover: {
+      /* The one static line this brief's own instruction requires: it must
+         not duplicate or contradict the server's own `disabledReason`,
+         which Brief 2 prints verbatim beside it. */
+      executionDisabled: 'Executing a changeover here is switched off until IFL confirms in writing that this system may write to PDAS. The plan below can still be checked.',
+      planTitle: 'What this changeover would do',
+      step: 'Step',
+      blockers: 'Blockers',
+      blockersNote: 'These stop the changeover; it cannot run until each is resolved.',
+      warnings: 'Warnings',
+      warningsNote: 'These do not stop the changeover, but are worth reading first.',
+      noRollback: 'There is no automatic rollback. Reversing a changeover means recording another one.',
+      operatorNote: 'This plan is a dry run: nothing on the machine or in PDAS changes until the changeover is executed, and execution is off (above).',
+      dryRun: 'Check the plan',
+      execute: 'Execute the changeover',
+      noneYet: 'No changeover has been planned yet.',
+    } as const,
+
+    /* ---- History tab (Brief 3 builds the screen; strings fixed here so
+       Brief 3 never opens this file). The product-change trail: SMS's own
+       timeline plus PDAS's own `product_change` audit rows, one per write
+       ATTEMPT — including attempts recorded while PDAS_WRITE_ENABLED was
+       off, which never reached PDAS at all. Named `historyTrail`, not
+       `history` — `product.history` above is already the old sheet's
+       "History" button label and TS refuses a duplicate key. */
+    historyTrail: {
+      title: 'Product change history',
+      colWhen: 'When',
+      colProduct: 'Product',
+      colBy: 'By',
+      colOutcome: 'Outcome',
+      colReason: 'Why',
+      outcome: {
+        applied: 'Applied to PDAS',
+        failed: 'PDAS refused it',
+        /* The honest reading of a row logged while the write path was off:
+           the attempt was recorded, but it never reached PDAS at all — not
+           a failure PDAS answered, and not silently dropped either. */
+        disabled: 'Recorded here; never sent to PDAS (writes were off)',
+      } as const,
+      none: 'No product change has been recorded for this line yet.',
+    } as const,
   } as const,
 
   /* -------------------------------------------------------------- stations */
@@ -335,6 +415,12 @@ export const W = {
        same day-narrowing ReasonSheet's register link already uses. */
     seeProductReport: 'See this product’s report',
     seeProductReportNote: 'opens the product report for this product, on this reading’s day',
+    /* UX Phase 6 Brief 1 (16 Sep 2026): the second of the two Phase-4
+       drilldown hops that had no destination until the Product screen's
+       Catalogue tab existed (IA-PROPOSAL.md §6.4: "the product in force at
+       a reading → Product › Catalogue, that product"). */
+    seeProductCatalogue: 'See this product in the catalogue',
+    seeProductCatalogueNote: 'opens Product › Catalogue for this product',
     provenance: 'Where this reading came from',
     /* TWO CLOCKS, named (CLAUDE.md). The plant's times are its wall clock;
        the moment the reading reached this system is a real UTC instant shown
@@ -977,6 +1063,18 @@ export const W = {
     /* Setup › Audit log paging and the no-actor rows. */
     older: 'Show older',
     noActor: 'no one signed in',
+
+    /* ---- UX Phase 6 Brief 4 (System screen; strings fixed here now so
+       Brief 4 never opens words.ts). */
+    /* A list of data-quality findings the sync's own checks raised — never a
+       comparison against IFL's source, since this system cannot read it live. */
+    dqFindings: 'Data quality findings',
+    dqFindingsNone: 'No data quality findings are open.',
+    /* A count of SMS's OWN readings by table and generation — explicitly a
+       census of what this system holds, not a reconciliation against IFL's
+       database (which this system has no standing live connection to check). */
+    reconciliationTitle: 'Reconciliation — what this system holds',
+    reconciliationNote: 'A count of the readings this system has recorded, by source table and generation. This is not a comparison against IFL’s database; nothing here reads it live.',
   } as const,
 
   /* -------------------------------------------- cone weight (Phase 4) */

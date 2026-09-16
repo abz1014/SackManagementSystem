@@ -54,17 +54,23 @@ export function ReadingSheet({
   id,
   onClose,
   onOpenProductReport,
+  onOpenProductCatalogue,
 }: {
   type: RegisterType;
   id: string;
   onClose: () => void;
   /**
    * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.4
-   * "the product in force at a reading → its report"). No Product Catalogue
-   * screen exists yet (Phase 6); this opens the Product report for that
-   * product, narrowed to this reading's own production day.
+   * "the product in force at a reading → its report"). Opens the Product
+   * report for that product, narrowed to this reading's own production day.
    */
   onOpenProductReport: (productId: number, day: string) => void;
+  /**
+   * UX Phase 6 Brief 1 (16 Sep 2026): the second half of the same §6.4 row —
+   * "the product in force at a reading → Product › Catalogue, that
+   * product" — which had no destination until the Catalogue tab existed.
+   */
+  onOpenProductCatalogue: (productId: number) => void;
 }) {
   const [s, setS] = useState<State>({ row: null, product: null, stations: [], around: null, error: null });
 
@@ -117,7 +123,7 @@ export function ReadingSheet({
       ) : !s.row ? (
         <Loading />
       ) : (
-        <Body type={type} state={s} onOpenProductReport={onOpenProductReport} />
+        <Body type={type} state={s} onOpenProductReport={onOpenProductReport} onOpenProductCatalogue={onOpenProductCatalogue} />
       )}
     </Sheet>
   );
@@ -145,11 +151,12 @@ function rejectReason(row: RegisterRow): string {
 }
 
 function Body({
-  type, state, onOpenProductReport,
+  type, state, onOpenProductReport, onOpenProductCatalogue,
 }: {
   type: RegisterType;
   state: State;
   onOpenProductReport: (productId: number, day: string) => void;
+  onOpenProductCatalogue: (productId: number) => void;
 }) {
   const row = state.row!;
   const isSack = type === 'sack';
@@ -252,6 +259,11 @@ function Body({
             {W.readings.seeProductReport}
           </button>{' '}
           <span className="mut sm">· {W.readings.seeProductReportNote}</span>
+          {' · '}
+          <button type="button" className="linkish" onClick={() => onOpenProductCatalogue(p.product!.productId)}>
+            {W.readings.seeProductCatalogue}
+          </button>{' '}
+          <span className="mut sm">· {W.readings.seeProductCatalogueNote}</span>
         </p>
       )}
 

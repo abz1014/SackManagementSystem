@@ -20,15 +20,18 @@ import { fmtClockSec, fmtClock, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
 import { AccountSheet } from '../screens/Account';
 
-export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'sacks' | 'report';
+export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'sacks' | 'product' | 'report';
 
 /**
  * In time-window order, as the redesign laid them out. 'sacks' (roadmap
  * Phase 7, 15 Sep 2026) sits after Rejects: it is the sack half of
- * requirement 6 and the line-level stock ledger of requirement 7, and
- * Report — which prints its figures — stays last.
+ * requirement 6 and the line-level stock ledger of requirement 7. 'product'
+ * (UX Phase 6 Brief 1, 16 Sep 2026) sits after Sacks and before Report —
+ * absorbing the old Product sheet into a real nav item with four tabs
+ * (Running/Changeover/Catalogue/History, URL key `pt`) — and Report, which
+ * prints the line's figures, stays last.
  */
-export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'sacks', 'report'] as const;
+export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'sacks', 'product', 'report'] as const;
 
 /**
  * What Readings should be narrowed to when a link elsewhere promises a
@@ -37,6 +40,15 @@ export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'reject
  * so both App.tsx and the individual screens can import it without a cycle.
  */
 export type ReadingsFilter = 'outsideLimits' | 'inspectionRejects' | null;
+
+/**
+ * The Product screen's four tabs (UX Phase 6 Brief 1, 16 Sep 2026), URL key
+ * `pt`. Declared here, alongside `Screen` and `ReadingsFilter`, for the same
+ * reason: App.tsx and screens/Product.tsx both need it without a cycle
+ * (Product.tsx cannot import from App.tsx, which imports Product.tsx).
+ */
+export const PRODUCT_TABS = ['running', 'changeover', 'catalogue', 'history'] as const;
+export type ProductTab = (typeof PRODUCT_TABS)[number];
 
 /* -------------------------------------------------------------- the gear */
 
