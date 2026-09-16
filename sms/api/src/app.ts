@@ -85,6 +85,21 @@ export function validateRange(from: string, to: string): string | null {
   return null;
 }
 
+/**
+ * Where `/api/attention`'s fixed trailing window (and every other default
+ * anchored on "the newest production day") ends under a replay. `tsTo`
+ * moves the end of the window; it never changes the window's length, and it
+ * never moves the end LATER than the server's true newest day — a replay
+ * must not see data that "hasn't happened" yet. Absent `tsTo`, this is the
+ * identity function, so every caller's existing behaviour is unchanged.
+ * Exported for app.attention.test.ts, same reasoning as validateRange above.
+ */
+export function cappedNewestDay(newest: string, tsTo: string | null | undefined): string {
+  if (!tsTo) return newest;
+  const tsToDay = new Date(tsTo).toISOString().slice(0, 10);
+  return tsToDay < newest ? tsToDay : newest;
+}
+
 const productionQuery = z.object({
   from: dateStr,
   to: dateStr,
@@ -430,6 +445,18 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     to: dateStr,
     shift: z.enum(['morning', 'evening', 'night']).optional(),
     trailingDays: z.coerce.number().int().min(1).max(90).default(14),
+    // Defect fix (16 Sep 2026): every other analytical endpoint takes an
+    // explicit upper bound (/api/production, /api/reject-spc, /api/rejects);
+    // this one didn't, so a replay (?at=) had no way to keep rule 3's count
+    // (cones passed by the scale but outside the product's limits) from
+    // reading same-day rows written after the replayed instant, and no way
+    // to move the fixed 14-production-day trailing window rules 1 and 2 use
+    // off the server's TRUE newest day onto the replayed one. Optional and
+    // additive: absent, every default below is exactly what it was before.
+    tsTo: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
+      .optional(),
   });
   app.get('/api/attention', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -439,19 +466,20 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const newest = await newestProductionDay();
-      const to = q.data.to ?? newest;
+      const cappedNewest = cappedNewestDay(newest, q.data.tsTo);
+      const to = q.data.to ?? cappedNewest;
       const from = q.data.from ?? to;
       const bad = validateRange(from, to);
       if (bad) {
         res.status(400).json({ error: bad });
         return;
       }
-      const trailingTo = newest;
+      const trailingTo = cappedNewest;
       const trailingFrom = new Date(new Date(`${trailingTo}T12:00:00Z`).getTime() - (q.data.trailingDays - 1) * 86_400_000)
         .toISOString()
         .slice(0, 10);
 
-      const key = `attention:${from}:${to}:${q.data.shift ?? 'all'}:${trailingFrom}:${trailingTo}`;
+      const key = `attention:${from}:${to}:${q.data.shift ?? 'all'}:${trailingFrom}:${trailingTo}${q.data.tsTo ? `:${q.data.tsTo}` : ''}`;
       const cached = prodCache.get(key);
       if (cached) {
         res.setHeader('X-Cache', 'HIT').json(cached);
@@ -461,7 +489,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         pool,
         cfg.lineId,
         { from: trailingFrom, to: trailingTo },
-        { from, to, shift: q.data.shift ?? null },
+        { from, to, shift: q.data.shift ?? null, tsTo: q.data.tsTo ?? null },
       );
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);

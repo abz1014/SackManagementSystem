@@ -31,6 +31,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { classifyConeDetail, isPlausibleWeight, type ConeState } from '@sms/shared';
 import { toPlantMs } from './plantClock.js';
+import { getPlausibilityRule } from './admin.js';
 import type { ProductCatalogue } from './productLimits.js';
 
 export interface ProductInForce {
@@ -375,6 +376,14 @@ export interface DayRange {
   to: string;
   /** Optional single shift within those days. */
   shift?: string | null;
+  /**
+   * Caps the window at an INSTANT — the replay guard `period.ts` documents,
+   * same convention as production.ts/rejects.ts: `production_ts_utc_ms <=
+   * tsTo`. Optional so every existing caller (day-range only) keeps its exact
+   * behaviour; without it a reading anywhere in `to`'s day counts, replay or
+   * not.
+   */
+  tsTo?: string | null;
 }
 
 /**
@@ -397,6 +406,23 @@ export interface DayRange {
  * Readings that cannot be judged — no product recorded, a product with no
  * usable limits, a MaterialId the mirror does not know, no weight or bit —
  * are `unjudged`, never assumed to pass.
+ *
+ * THE ONE POPULATION RULE (coneState.ts, Phase 4): every cone counted here
+ * — total, judged, passedOut and rejectedIn alike — must first pass the same
+ * plausibility window bindStateCase checks before it ever looks at in_range
+ * or a window. Until 15 Sep 2026 this query's base WHERE only excluded a
+ * NULL weight, so a scale fault (the recorded 824 g "cone", or one of the
+ * ~214-cone 2200-2354 g fault population — see spc.ts) could be counted here
+ * as "passed but outside the product's limits" while the register — whose
+ * state column runs bindStateCase, which checks plausibility FIRST — showed
+ * the very same reading as 'unknown'. A user following the Weight screen's
+ * banner to the register then found a different number of rows behind it.
+ * Fixed the same way spc.ts's own `pass_out`/`fail_in` scale-vs-spec query
+ * fixed the identical bug for the SPC screen: add the plausibility bound to
+ * the base WHERE and leave `in_range = 1` / `in_range = 0` exactly as they
+ * were — those already agree with bindStateCase for every row that carries a
+ * bit, and this query, like spc.ts's, is not the place to change what
+ * `judged` means.
  *
  * `catalogue` is optional so older callers keep their behaviour (timeline
  * only, applied to every row); every caller should pass one.
@@ -421,12 +447,20 @@ export async function productDisagreement(
             : [];
         });
 
+  // Fetched even when `windows` came from the legacy (no-catalogue) branch:
+  // the plausibility bound is not a product-limits concept and applies to
+  // the base population regardless of where the windows came from.
+  const plausibility = await getPlausibilityRule(pool, lineId);
+
   const req = pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, range.from)
-    .input('to', mssql.Date, range.to);
+    .input('to', mssql.Date, range.to)
+    .input('plausLo', mssql.Float, plausibility.coneLoG)
+    .input('plausHi', mssql.Float, plausibility.coneHiG);
   if (range.shift) req.input('shift', mssql.VarChar(16), range.shift);
+  if (range.tsTo) req.input('tsTo', mssql.BigInt, new Date(range.tsTo).getTime());
 
   // Per window: a match predicate, and the reading's position against it.
   const matches: string[] = [];
@@ -468,7 +502,8 @@ export async function productDisagreement(
        FROM sms.cone_event
       WHERE line_id = @line AND shift_date BETWEEN @from AND @to
         ${range.shift ? 'AND shift_code = @shift' : ''}
-        AND weight_g IS NOT NULL`,
+        ${range.tsTo ? 'AND production_ts_utc_ms <= @tsTo' : ''}
+        AND weight_g BETWEEN @plausLo AND @plausHi`,
   );
   const row = r.recordset[0];
   const total = Number(row?.total ?? 0);

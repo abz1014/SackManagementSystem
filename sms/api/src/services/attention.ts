@@ -24,6 +24,17 @@
  * Rule 3 is a count, so it honours the period, and the screen says which is
  * which.
  *
+ * REPLAY (`?at=`): `period.tsTo`, when the route supplies it, is the guard
+ * `period.ts` documents (same convention as /api/production and
+ * /api/reject-spc) and flows straight through to `productDisagreement` as
+ * `production_ts_utc_ms <= tsTo` — rule 3's count never leaks a reading
+ * written later in `period.to`'s own day than the replayed instant. It is
+ * optional and additive: absent, `productDisagreement` runs exactly as
+ * before. The fixed trailing window rules 1 and 2 use is not threaded
+ * through here at all — the caller (app.ts) is the one that decides
+ * `trailing.to`, moving it to the replayed day BEFORE calling this function,
+ * per the T3 note on `getAttention` below; the window's LENGTH never changes.
+ *
  * AND "CONSECUTIVE" MEANS ON THE CALENDAR. The daily means list only days that
  * hold data, and the record has a permanent hole (10 Jul to 5 Aug 2026, when
  * IFL rebuilt their tables). Counting array neighbours as consecutive days
