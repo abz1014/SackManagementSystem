@@ -27,10 +27,13 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { createLogger, type Logger } from '@sms/shared';
 import type { DbConfig } from './config.js';
 import { rawShortName, type IflTableDef } from './reader/iflTables.js';
 import { createAdapter, type SourceAdapter } from './reader/SourceAdapter.js';
 import type { Finding } from './transform/dq.js';
+
+const log: Logger = createLogger('sync-worker');
 
 export interface EpochRow {
   epoch_id: number;
@@ -43,6 +46,10 @@ export interface EpochRow {
   provenance: string;
   generation_ordinal: number;
   label: string;
+  /** The archived floor (migration 037, 16 Sep 2026) — see observeArchivedFloor.
+   *  NULL until this generation's first observation. */
+  archived_below_id?: number | null;
+  archived_observed_utc?: Date | null;
 }
 
 /** What the source itself currently reports, before any matching. */
@@ -94,7 +101,8 @@ export async function openEpoch(
     .input('tbl', mssql.VarChar(64), sourceTable)
     .query<EpochRow>(
       `SELECT epoch_id, line_id, source_table, source_server, source_db,
-              source_created_key, schema_fingerprint, provenance, generation_ordinal, label
+              source_created_key, schema_fingerprint, provenance, generation_ordinal, label,
+              archived_below_id, archived_observed_utc
          FROM sms.source_epoch
         WHERE line_id = @line AND source_table = @tbl AND closed_utc IS NULL`,
     );
@@ -155,7 +163,98 @@ export async function resolveEpoch(
     );
   }
 
+  // The archived floor (migration 037, 16 Sep 2026): reached only once the
+  // identity/schema checks above have already proven the source IS this
+  // generation, so the MIN(id) read here can only mean what it looks like it
+  // means. See observeArchivedFloor for what a rise vs a fall does.
+  await observeArchivedFloor(appPool, iflPool, def, open);
+
   return open;
+}
+
+/**
+ * The archived floor — Part 1 of "sms verify survives the day IFL prunes its
+ * first row" (16 Sep 2026).
+ *
+ * WHY. verify's id-checksum reconciliation compares source ⇄ raw over the
+ * WHOLE table. The sidecar's reason to exist is to keep what IFL discards
+ * after about a month, so the day IFL prunes even its first row, verify fails
+ * PERMANENTLY on exactly the rows the product is for. This is what lets it
+ * stop doing that: a per-generation record of the lowest id the source has
+ * actually been OBSERVED still holding, raised only when a pass sees it rise.
+ *
+ * A RISING min is archiving working as designed — the source's earliest id
+ * has moved on, SMS still holds what came before it, and once recorded that
+ * gap is an accounted-for fact rather than a discrepancy verify has to fail
+ * on forever. The UPDATE is guarded (`archived_below_id IS NULL OR < @min`),
+ * the same pattern as checkColumnDrift's column_list guard: two overlapping
+ * passes raising the floor at once cannot leave it lower than either
+ * observed, and a pass that observes the SAME min as last time issues no
+ * UPDATE at all — archived_observed_utc stays the FIRST time this floor was
+ * reached, not the most recent time it was merely re-confirmed.
+ *
+ * A FALLING min is not archiving — ids do not reappear once pruned. It can
+ * only mean the table was reseeded, restored from backup, or rebuilt below a
+ * floor SMS already observed the source holding, and every id-based fact this
+ * app keeps about the generation (this floor, the worker's own watermark) is
+ * meaningless against it. It HALTS — thrown, not swallowed — exactly like
+ * resolveEpoch's identity and schema checks above it, rather than quietly
+ * lowering the floor to match what the reseed now shows.
+ *
+ * A FAILURE TO READ the source's MIN this pass (a timeout, a permission
+ * blip) is different from both, and is the one case this function does NOT
+ * propagate: the identity/schema checks moments earlier already proved the
+ * source is reachable and is this generation, so a failure on this
+ * particular read is transient bookkeeping trouble, not evidence of
+ * anything wrong with the data. Halting the whole table's pass over it would
+ * block ingestion of rows the checks above already cleared, for no gain —
+ * there is always a next pass. It is logged, never silently dropped, so a
+ * *persistent* failure stays visible without being a *blocking* one — the
+ * same non-fatal-by-design stance checkColumnDrift takes on column list
+ * drift, for the same reason: this is enrichment, not a correctness gate.
+ */
+export async function observeArchivedFloor(
+  appPool: ConnectionPool,
+  iflPool: ConnectionPool,
+  def: IflTableDef,
+  epoch: EpochRow,
+): Promise<void> {
+  let sourceMin: number | null;
+  try {
+    const r = await iflPool.request().query<{ lo: unknown }>(`SELECT MIN([id]) lo FROM [${def.sourceTable}]`);
+    const lo = r.recordset[0]?.lo;
+    sourceMin = lo == null ? null : Number(lo);
+  } catch (err) {
+    log.warn('could not observe the archived floor this pass — not blocking on it', {
+      table: def.sourceTable,
+      epoch: epoch.epoch_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  if (sourceMin === null) return; // source table currently empty — nothing to floor
+
+  const floor = epoch.archived_below_id ?? null;
+  if (floor !== null && sourceMin < floor) {
+    throw new Error(
+      `${def.sourceTable}'s lowest id fell from ${floor} to ${sourceMin} within generation ` +
+        `${epoch.epoch_id} ("${epoch.label}"). Ids do not come back once pruned: this is a reseed, a ` +
+        `restore, or a rebuild BELOW a floor SMS already observed the source holding — not archiving. ` +
+        `Sync halted before reading; the archived floor is not lowered automatically. If this really is ` +
+        `a new generation:\n` +
+        `  sms epoch:accept --table=${def.sourceTable} --confirm --label "<what this is>"`,
+    );
+  }
+  if (floor === null || sourceMin > floor) {
+    await appPool
+      .request()
+      .input('id', mssql.Int, epoch.epoch_id)
+      .input('min', mssql.BigInt, sourceMin)
+      .query(
+        `UPDATE sms.source_epoch SET archived_below_id = @min, archived_observed_utc = SYSUTCDATETIME()
+           WHERE epoch_id = @id AND (archived_below_id IS NULL OR archived_below_id < @min)`,
+      );
+  }
 }
 
 /** The dq check a column-list difference raises. Non-fatal, by design — see checkColumnDrift. */

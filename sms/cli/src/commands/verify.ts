@@ -42,6 +42,30 @@
  * `weight_g` / `weight_kg` — same units end to end, no conversion in the
  * transform. Equal ids with a weight altered in flight would pass the checksum
  * and fail this. Aggregate SELECTs only, on the same read-only pool.
+ *
+ * THE ARCHIVED FLOOR (16 Sep 2026). Point 1 above compared the WHOLE source
+ * table, no predicate. The sidecar's reason to exist is to keep what IFL
+ * discards after about a month, so the day IFL prunes even its first row,
+ * COUNT/MIN/SUM all disagree, forever — the worst place for this to fail is
+ * live, at cutover, in front of the client. `sms.source_epoch.archived_below_id`
+ * (migration 037) is the lowest id the sync worker has, on some past pass,
+ * actually observed the source still holding (sync-worker/src/epoch.ts,
+ * `observeArchivedFloor`) — when it is set, the open epoch's id checksum is
+ * compared over `[archived_below_id, ∞)` instead of the whole table, and the
+ * raw rows below it are reported as an ACCOUNTED-FOR remainder, with the date
+ * they were first observed archived, rather than as a discrepancy. NULL (no
+ * observation yet) is the old whole-table comparison, unchanged. A source MIN
+ * that has fallen BELOW the recorded floor is not archiving — ids do not come
+ * back once pruned — and is still a STOP, named as a reseed/restore/rebuild.
+ *
+ * `--from=<production day> --to=<production day>` (both YYYY-MM-DD, inclusive)
+ * scopes the open epoch's id checksum to a production-day window instead of an
+ * id range — the shape of question an acceptance engineer actually asks
+ * ("reconcile last week against our own SELECT"), run beside IFL's own query at
+ * the FAT. Production timestamps are the plant's wall clock (the Two Clocks
+ * rule) and the acquisition lag is ~18 minutes, so a row from the last minutes
+ * of the window may not have arrived yet — a boundary mismatch there is not
+ * necessarily a real one; the output says so and names the window it used.
  */
 import mssql from 'mssql';
 import type { ConnectionPool } from 'mssql';
@@ -51,7 +75,7 @@ import {
   type IflTableDef,
   type SourceIdentity,
 } from '@sms/sync-worker';
-import { openContext } from '../context.js';
+import { openContext, parseArgs } from '../context.js';
 
 type TableDef = IflTableDef;
 
@@ -63,6 +87,28 @@ const CANONICAL: Record<TableDef['key'], { table: string; typeFilter: string }> 
   reject_weight: { table: 'sms.reject_event', typeFilter: "AND c.reject_type = 'weight'" },
 };
 
+/** A production-day window, EXCLUSIVE upper bound — `to` is the instant after
+ *  the last requested day ends. Plant wall clock (Two Clocks rule): these are
+ *  compared to ProductionDate/Date verbatim, never converted. */
+interface Range {
+  from: Date;
+  to: Date;
+}
+
+/**
+ * The production-timestamp column this table kind is judged by, matching
+ * transform.ts exactly: `ProductionDate` for cone/reject; `Date` for sack,
+ * which has no ProductionDate (SCHEMA DQ-5) — getting this wrong would make
+ * `--from/--to` silently exclude every sack rather than error.
+ */
+function productionColumn(def: TableDef): { src: string; raw: string } {
+  return def.columns.some((c) => c.src === 'ProductionDate')
+    ? { src: 'ProductionDate', raw: 'src_ProductionDate' }
+    : { src: 'Date', raw: 'src_Date' };
+}
+
+const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
 interface EpochRow {
   epoch_id: number;
   source_table: string;
@@ -73,6 +119,10 @@ interface EpochRow {
   provenance: string;
   label: string;
   closed_utc: Date | null;
+  /** The archived floor (migration 037) — see the file header. NULL until the
+   *  worker has made its first observation for this open generation. */
+  archived_below_id: number | null;
+  archived_observed_utc: Date | null;
 }
 
 /** The four numbers two sides must agree on. BIGINT arrives from the driver as a string. */
@@ -198,23 +248,61 @@ export async function verifyWeights(
   return mismatches;
 }
 
-/** `sms verify [--weights]` */
-export function parseVerifyArgs(args: string[]): { weights: boolean } {
-  return { weights: args.includes('--weights') };
+export interface VerifyArgs {
+  weights: boolean;
+  /** --from/--to: a production-day window (plant wall clock), given together
+   *  or not at all. `to` is EXCLUSIVE — the instant after the last requested
+   *  day ends — so a same-day window is `[from, from+1day)`. */
+  from: Date | null;
+  to: Date | null;
 }
 
-async function sourceStats(ifl: ConnectionPool, def: TableDef): Promise<IdStats> {
-  const r = await ifl
-    .request()
-    .query<{ n: number; lo: unknown; hi: unknown; s: unknown }>(
-      `SELECT COUNT(*) n, MIN([id]) lo, MAX([id]) hi, SUM(CAST([id] AS BIGINT)) s
-         FROM [${def.sourceTable}]`,
-    );
+/** `sms verify [--weights] [--from=YYYY-MM-DD --to=YYYY-MM-DD]` */
+export function parseVerifyArgs(args: string[]): VerifyArgs {
+  const opts = parseArgs(args);
+  const day = (key: 'from' | 'to'): Date | null => {
+    const v = opts[key];
+    if (v === undefined) return null;
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      throw new Error(
+        `--${key} must be a production day as YYYY-MM-DD (the plant's wall clock, not a browser's local date), got "${String(v)}"`,
+      );
+    }
+    const d = new Date(`${v}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) throw new Error(`--${key}=${v} is not a real calendar day.`);
+    return d;
+  };
+  const from = day('from');
+  const toDay = day('to');
+  if ((from === null) !== (toDay === null)) {
+    throw new Error('--from and --to must be given together — a window needs both bounds.');
+  }
+  const to = toDay === null ? null : new Date(toDay.getTime() + 86_400_000); // exclusive: the day AFTER --to
+  if (from !== null && to !== null && from >= to) {
+    throw new Error(`--from must be on or before --to (got --from after --to).`);
+  }
+  return { weights: args.includes('--weights'), from, to };
+}
+
+async function sourceStats(ifl: ConnectionPool, def: TableDef, range: Range | null): Promise<IdStats> {
+  const req = ifl.request();
+  let where = '';
+  if (range) {
+    const col = productionColumn(def).src;
+    req.input('from', mssql.DateTime, range.from).input('to', mssql.DateTime, range.to);
+    where = ` WHERE [${col}] >= @from AND [${col}] < @to`;
+  }
+  const r = await req.query<{ n: number; lo: unknown; hi: unknown; s: unknown }>(
+    `SELECT COUNT(*) n, MIN([id]) lo, MAX([id]) hi, SUM(CAST([id] AS BIGINT)) s
+       FROM [${def.sourceTable}]${where}`,
+  );
   const x = r.recordset[0];
   return x ? { n: Number(x.n), lo: num(x.lo), hi: num(x.hi), sum: num(x.s) } : EMPTY;
 }
 
-/** One scan of the raw table gives every epoch's stats at once. */
+/** One scan of the raw table gives every epoch's WHOLE (unfiltered) stats at
+ *  once — still drives the "Source generations" listing and, together with a
+ *  floor-scoped rawStatsFiltered call, the archived remainder count. */
 async function rawStatsByEpoch(
   app: ConnectionPool,
   def: TableDef,
@@ -236,6 +324,38 @@ async function rawStatsByEpoch(
       { n: Number(x.n), lo: num(x.lo), hi: num(x.hi), sum: num(x.s) },
     ]),
   );
+}
+
+/**
+ * Raw stats for ONE epoch, scoped to `id >= floor` (the archived floor) OR to
+ * a production-day window — never both: the floor answers "what does
+ * archiving account for", the window answers "what happened on these days",
+ * and this tool has no case yet that asks both at once.
+ */
+async function rawStatsFiltered(
+  app: ConnectionPool,
+  def: TableDef,
+  line: number,
+  epoch: number,
+  scope: { floor: number } | { range: Range },
+): Promise<IdStats> {
+  const req = app.request().input('line', mssql.Int, line).input('e', mssql.Int, epoch);
+  let cond: string;
+  if ('floor' in scope) {
+    req.input('floor', mssql.BigInt, scope.floor);
+    cond = 'src_id >= @floor';
+  } else {
+    const col = productionColumn(def).raw;
+    req.input('from', mssql.DateTime, scope.range.from).input('to', mssql.DateTime, scope.range.to);
+    cond = `[${col}] >= @from AND [${col}] < @to`;
+  }
+  const r = await req.query<{ n: number; lo: unknown; hi: unknown; s: unknown }>(
+    `SELECT COUNT(*) n, MIN(src_id) lo, MAX(src_id) hi, SUM(CAST(src_id AS BIGINT)) s
+       FROM ${def.rawTable}
+      WHERE line_id = @line AND source_epoch = @e AND ${cond}`,
+  );
+  const x = r.recordset[0];
+  return x ? { n: Number(x.n), lo: num(x.lo), hi: num(x.hi), sum: num(x.s) } : EMPTY;
 }
 
 /** raw → canonical and canonical → raw, by raw_id, within one epoch. */
@@ -262,14 +382,29 @@ async function keyGaps(
 }
 
 /**
- * Say WHICH way the open epoch disagrees with its source. The two directions
- * mean different things operationally, so they are named, not just counted.
+ * Say WHICH way the open epoch disagrees with its source, over whatever range
+ * was actually compared (`raw` may already be scoped to the archived floor or
+ * to a --from/--to window — see verify() below). The directions mean
+ * different things operationally, so they are named, not just counted.
+ *
+ * CORRECTED 16 Sep 2026 (part of "sms verify survives a prune"). The old
+ * `weAhead` branch claimed unconditionally that "the worker's backwards gate
+ * halts on this" — but that gate (runner.ts) tests `sourceMax < watermark`,
+ * MAX(id) only, and deleting the source's OLDEST rows never moves MAX. Naming
+ * the wrong gate here cost real operator time chasing a halt that could never
+ * fire. Now that the id-comparison callers scope `raw` to what the source
+ * COULD still hold (the archived floor, or a --from/--to window), a
+ * `raw.lo < src.lo` mismatch here means something INSIDE the compared range —
+ * not a bottom prune, which is filtered out before diagnose() ever runs — so
+ * the backwards-gate claim is only made for the one shape that gate can
+ * actually produce: our recorded top exceeding the source's current top.
  */
 function diagnose(src: IdStats, raw: IdStats): string[] {
   const out: string[] = [];
   const lt = (a: number | null, b: number | null) => a !== null && b !== null && a < b;
   const sourceAhead = raw.n < src.n || lt(raw.hi, src.hi) || lt(src.lo, raw.lo) || (raw.n === 0 && src.n > 0);
-  const weAhead = raw.n > src.n || lt(src.hi, raw.hi) || lt(raw.lo, src.lo);
+  const topFell = lt(src.hi, raw.hi);
+  const weAhead = raw.n > src.n || topFell || lt(raw.lo, src.lo);
   if (sourceAhead) {
     out.push(
       `→ the source has rows we do not (count ${raw.n - src.n >= 0 ? '+' : ''}${raw.n - src.n} on our side).`,
@@ -277,11 +412,19 @@ function diagnose(src: IdStats, raw: IdStats): string[] {
       `  If it persists, the sync is incomplete or halted: check 'sms epoch:list' and sync_run.`,
     );
   }
-  if (weAhead) {
+  if (weAhead && topFell) {
     out.push(
-      `→ we hold rows the source no longer does, inside an OPEN generation. That means rows`,
-      `  were deleted at the source, or it was restored below our watermark; the worker's`,
-      `  backwards gate halts on this. Read-only from here: an operator decides.`,
+      `→ our highest id (${raw.hi}) is ABOVE the source's current highest (${src.hi}): the source's top`,
+      `  has fallen within an OPEN generation. That IS what the worker's watermark gate (its watermark`,
+      `  vs the source's current MAX(id)) halts on — it will catch this on its next pass if it has not`,
+      `  already. Read-only from here: an operator decides.`,
+    );
+  } else if (weAhead) {
+    out.push(
+      `→ we hold more rows than the source does, inside the compared range, with the SAME top id: a row`,
+      `  exists on our side the source's current range does not, or the reverse. This is NOT what the`,
+      `  watermark gate catches (MAX(id) alone; neither table's top moved) and NOT a bottom prune (that`,
+      `  is excluded from this comparison already) — it needs an operator, not a re-run or a wider floor.`,
     );
   }
   if (!sourceAhead && !weAhead) {
@@ -295,7 +438,8 @@ function diagnose(src: IdStats, raw: IdStats): string[] {
 }
 
 export async function verify(args: string[] = []): Promise<number> {
-  const { weights } = parseVerifyArgs(args);
+  const { weights, from, to } = parseVerifyArgs(args);
+  const range: Range | null = from && to ? { from, to } : null;
   const ctx = await openContext({ needIfl: true });
   const line = ctx.cfg.lineId;
   let stops = 0;
@@ -312,6 +456,18 @@ export async function verify(args: string[] = []): Promise<number> {
     console.log('verify — source ⇄ raw ⇄ canonical, per source generation\n');
     console.log(`  source   ${ctx.cfg.iflData.server}/${ctx.cfg.iflData.database}`);
     console.log(`  app      ${ctx.cfg.app.server}/${ctx.cfg.app.database}   (line ${line})`);
+    if (range) {
+      console.log(
+        `  window   ${isoDay(range.from)} .. ${isoDay(new Date(range.to.getTime() - 1))} (production day, plant wall clock)`,
+      );
+      console.log(
+        `           acquisition lag is ~18 min — a row from the final minutes of the window may not have`,
+      );
+      console.log(
+        `           arrived yet; a boundary mismatch there is not necessarily real. Re-run after the next`,
+      );
+      console.log(`           sync pass before treating it as one.`);
+    }
 
     // The tables this line reads are configuration (sms.source_table, roadmap
     // Phase 1), loaded here as the worker loads them at the start of a pass.
@@ -323,7 +479,8 @@ export async function verify(args: string[] = []): Promise<number> {
     const epochs = (
       await ctx.app.request().input('line', mssql.Int, line).query<EpochRow>(
         `SELECT epoch_id, source_table, source_server, source_db, source_created_key,
-                schema_fingerprint, provenance, label, closed_utc
+                schema_fingerprint, provenance, label, closed_utc,
+                archived_below_id, archived_observed_utc
            FROM sms.source_epoch
           WHERE line_id = @line
           ORDER BY epoch_id`,
@@ -414,18 +571,60 @@ export async function verify(args: string[] = []): Promise<number> {
             }
 
             if (sameSource) {
-              const src = await sourceStats(ctx.ifl, def);
-              const same =
-                src.n === raw.n && src.lo === raw.lo && src.hi === raw.hi && src.sum === raw.sum;
+              // Part 2: --from/--to replaces the id range with a production-day
+              // window. Part 1: otherwise, once the worker has observed a floor
+              // for this generation, scope to [floor, ∞) instead of the whole
+              // table — see the file header and epoch.ts's observeArchivedFloor.
+              const floor = e.archived_below_id == null ? null : Number(e.archived_below_id);
+              const src = await sourceStats(ctx.ifl, def, range);
+              const cmp: IdStats = range
+                ? await rawStatsFiltered(ctx.app, def, line, e.epoch_id, { range })
+                : floor !== null
+                  ? await rawStatsFiltered(ctx.app, def, line, e.epoch_id, { floor })
+                  : raw;
+              const same = src.n === cmp.n && src.lo === cmp.lo && src.hi === cmp.hi && src.sum === cmp.sum;
+              const scope = range
+                ? `window ${isoDay(range.from)}..${isoDay(new Date(range.to.getTime() - 1))}`
+                : floor !== null
+                  ? `id ≥ ${floor} (archived floor)`
+                  : 'whole table';
+              console.log(`${IND}compared over ${scope}`);
               console.log(`${IND}${''.padEnd(9)}${'count'.padStart(12)}${'min'.padStart(12)}${'max'.padStart(12)}${'sum'.padStart(12)}`);
               console.log(`${IND}source   ${fmtN(src.n)}${fmtN(src.lo)}${fmtN(src.hi)}${fmtN(src.sum)}`);
               if (same) {
-                console.log(`${IND}raw      ${fmtN(raw.n)}${fmtN(raw.lo)}${fmtN(raw.hi)}${fmtN(raw.sum)}   OK`);
+                console.log(`${IND}raw      ${fmtN(cmp.n)}${fmtN(cmp.lo)}${fmtN(cmp.hi)}${fmtN(cmp.sum)}   OK`);
               } else {
                 stop(
-                  `${IND}raw      ${fmtN(raw.n)}${fmtN(raw.lo)}${fmtN(raw.hi)}${fmtN(raw.sum)}   STOP\n` +
-                    diagnose(src, raw).map((l) => `${IND}${l}`).join('\n'),
+                  `${IND}raw      ${fmtN(cmp.n)}${fmtN(cmp.lo)}${fmtN(cmp.hi)}${fmtN(cmp.sum)}   STOP\n` +
+                    diagnose(src, cmp).map((l) => `${IND}${l}`).join('\n'),
                 );
+              }
+
+              // The remainder: raw rows below the floor, held on purpose, never
+              // asked of the source. Reported as an accounted-for fact — this is
+              // the whole point of Part 1 — with the date archiving was first
+              // observed, not silently folded into either row above.
+              if (!range && floor !== null) {
+                const remainder = raw.n - cmp.n;
+                const observed = e.archived_observed_utc ? new Date(e.archived_observed_utc).toISOString() : 'unknown';
+                console.log(
+                  `${IND}archived   ${remainder} row(s) held below id ${floor} — the source no longer holds ` +
+                    `them; first observed ${observed}   (accounted for, not compared)`,
+                );
+                // Ids do not reappear once pruned. If the LIVE source's own min has
+                // fallen below what was already recorded as archived, the worker's
+                // own ratchet (observeArchivedFloor) has not yet caught a reseed —
+                // this is the same fact as its halt, surfaced here too so a `verify`
+                // run between sync passes does not read as a clean pass.
+                if (src.lo !== null && src.lo < floor) {
+                  stop(
+                    `${IND}archived   the source's current MIN(id) is ${src.lo}, BELOW the recorded floor ${floor}   STOP\n` +
+                      `${IND}→ ids do not come back once pruned: this is a reseed, a restore, or a rebuild — not\n` +
+                      `${IND}  archiving. The worker halts on this too (observeArchivedFloor); if it has not run\n` +
+                      `${IND}  since, it will on its next pass. If this really is a new generation:\n` +
+                      `${IND}    sms epoch:accept --table=${def.sourceTable} --confirm --label "<what this is>"`,
+                  );
+                }
               }
             }
           }

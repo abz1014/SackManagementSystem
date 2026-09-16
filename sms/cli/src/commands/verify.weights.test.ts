@@ -131,7 +131,34 @@ describe('sameWeights', () => {
 
 describe('parseVerifyArgs', () => {
   it('recognises --weights', () => {
-    expect(parseVerifyArgs(['--weights'])).toEqual({ weights: true });
-    expect(parseVerifyArgs([])).toEqual({ weights: false });
+    expect(parseVerifyArgs(['--weights'])).toEqual({ weights: true, from: null, to: null });
+    expect(parseVerifyArgs([])).toEqual({ weights: false, from: null, to: null });
+  });
+
+  it('parses --from/--to as a production-day window, EXCLUSIVE on the far end', () => {
+    const args = parseVerifyArgs(['--from=2026-09-08', '--to=2026-09-14']);
+    expect(args.from?.toISOString()).toBe('2026-09-08T00:00:00.000Z');
+    // --to is the LAST day INCLUDED, so the stored bound is the instant after it ends.
+    expect(args.to?.toISOString()).toBe('2026-09-15T00:00:00.000Z');
+  });
+
+  it('accepts a single-day window (--from === --to)', () => {
+    const args = parseVerifyArgs(['--from=2026-09-10', '--to=2026-09-10']);
+    expect(args.from?.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+    expect(args.to?.toISOString()).toBe('2026-09-11T00:00:00.000Z');
+  });
+
+  it('rejects --from without --to and vice versa — a window needs both bounds', () => {
+    expect(() => parseVerifyArgs(['--from=2026-09-08'])).toThrow(/--from and --to must be given together/);
+    expect(() => parseVerifyArgs(['--to=2026-09-08'])).toThrow(/--from and --to must be given together/);
+  });
+
+  it('rejects --from after --to', () => {
+    expect(() => parseVerifyArgs(['--from=2026-09-14', '--to=2026-09-08'])).toThrow(/--from must be on or before --to/);
+  });
+
+  it('rejects a malformed date rather than silently misreading it', () => {
+    expect(() => parseVerifyArgs(['--from=09/08/2026', '--to=2026-09-14'])).toThrow(/YYYY-MM-DD/);
+    expect(() => parseVerifyArgs(['--from=2026-09-08', '--to=next tuesday'])).toThrow(/YYYY-MM-DD/);
   });
 });
