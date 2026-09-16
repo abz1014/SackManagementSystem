@@ -106,10 +106,22 @@ describe('seedProducts', () => {
     MaterialDesc1: '205-IL0-SD', MaterialDesc2: 'PARROT', MaterialWeightOffsetMinus: 50, MaterialWeightOffsetPlus: 50,
   };
   const mats = { needle: 'FROM [PDAS_TP1U2].dbo.Materials', rows: [material] };
+  // migration 036: pack_schema has no vendor-seed id filter (both real rows
+  // are ids 1-2); pallet uses the same PalletId > 10 convention as Materials.
+  const packSchemas = {
+    needle: 'FROM [PDAS_TP1U2].dbo.PackSchemas',
+    rows: [{ PackSchemaId: 1, PackSchemaDesc: 'Pallet 4x5', ConesPerLayer: 20, PackTypeId: 1 }],
+  };
+  const pallet = {
+    PalletId: 21, MaterialId: 21, PackSchemaId: 1, Lot: 'L-100', SteamProg: 2, LabelType: 1, Routing: 0,
+    PalletActive: true, PalletDesc1: 'Red', PalletDesc2: null, PalletDesc3: null, PalletDesc4: null, PalletDesc5: null,
+    Timestamp: new Date('2026-09-10T08:00:00'),
+  };
+  const pallets = { needle: 'FROM [PDAS_TP1U2].dbo.Pallets', rows: [pallet] };
 
   let ifl: ReturnType<typeof fakePool>;
   beforeEach(() => {
-    ifl = fakePool([blends, counts, tubes, mats]);
+    ifl = fakePool([blends, counts, tubes, mats, packSchemas, pallets]);
   });
 
   it('refuses a database name that is not a plain identifier, before touching either pool', async () => {
@@ -122,10 +134,15 @@ describe('seedProducts', () => {
   it('reads PDAS with the vendor seed rows filtered out, and only ever SELECTs from it', async () => {
     const app = fakePool();
     await seedProducts(app, ifl, 'PDAS_TP1U2');
-    expect(ifl.statements).toHaveLength(4);
+    expect(ifl.statements).toHaveLength(6);
     for (const s of ifl.statements) expect(s.sql.trim()).toMatch(/^SELECT/);
     expect(ifl.statements[3]!.sql).toMatch(/WHERE MaterialId > 10/);
     expect(ifl.statements[3]!.sql).toMatch(/MaterialDesc2/);
+    // PackSchemas carries no vendor-seed id noise (both real rows are ids 1-2) — unfiltered.
+    expect(ifl.statements[4]!.sql).toMatch(/FROM \[PDAS_TP1U2\]\.dbo\.PackSchemas/);
+    expect(ifl.statements[4]!.sql).not.toMatch(/WHERE/);
+    // Pallets uses the same vendor-seed convention as Materials.
+    expect(ifl.statements[5]!.sql).toMatch(/FROM \[PDAS_TP1U2\]\.dbo\.Pallets WHERE PalletId > 10/);
   });
 
   it('mirrors each reference row with a MERGE, casting Count to int and keeping the text', async () => {
@@ -133,7 +150,7 @@ describe('seedProducts', () => {
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     const merges = app.statements.filter((s) => s.sql.includes('MERGE'));
     expect(merges.map((m) => m.sql.match(/MERGE (sms\.\w+)/)![1])).toEqual([
-      'sms.blend', 'sms.yarn_count', 'sms.yarn_count', 'sms.tube_type', 'sms.product',
+      'sms.blend', 'sms.yarn_count', 'sms.yarn_count', 'sms.tube_type', 'sms.product', 'sms.pack_schema', 'sms.pallet',
     ]);
     const [, c30, c230, , prod] = merges;
     expect(c30!.inputs.get('iv')).toBe(30);
@@ -143,6 +160,53 @@ describe('seedProducts', () => {
     expect(prod!.inputs.get('sp')).toBe(1960);
     expect(prod!.inputs.get('col')).toBe('PARROT');
     expect(prod!.inputs.get('d')).toBe('205-IL0-SD');
+  });
+
+  it('mirrors pack_schema with a bound-parameter MERGE (migration 036)', async () => {
+    const app = fakePool();
+    await seedProducts(app, ifl, 'PDAS_TP1U2');
+    const merge = app.statements.find((s) => s.sql.includes('MERGE sms.pack_schema'))!;
+    expect(merge).toBeDefined();
+    expect(merge.sql).toMatch(/ON t\.pack_schema_id=s\.id/);
+    expect(merge.sql).toMatch(
+      /INSERT \(pack_schema_id, description, cones_per_layer, pack_type_id\) VALUES \(@id, @d, @cpl, @pt\)/,
+    );
+    // every value is a bound parameter — no interpolated literal from the row
+    // appears in the SQL text itself.
+    expect(merge.sql).not.toMatch(/Pallet 4x5/);
+    expect(merge.inputs.get('id')).toBe(1);
+    expect(merge.inputs.get('d')).toBe('Pallet 4x5');
+    expect(merge.inputs.get('cpl')).toBe(20);
+    expect(merge.inputs.get('pt')).toBe(1);
+  });
+
+  it('mirrors pallet with a bound-parameter MERGE, id filter applied upstream (migration 036)', async () => {
+    const app = fakePool();
+    await seedProducts(app, ifl, 'PDAS_TP1U2');
+    const merge = app.statements.find((s) => s.sql.includes('MERGE sms.pallet'))!;
+    expect(merge).toBeDefined();
+    expect(merge.sql).toMatch(/ON t\.pallet_id=s\.id/);
+    // column list matches both migration 036's table definition and
+    // pdasWrite.ts's mirrorPallet echo-back MERGE exactly.
+    expect(merge.sql).toMatch(
+      /INSERT \(pallet_id, product_id, pack_schema_id, lot, steam_prog, label_type, routing, active_flag,\s*desc1, desc2, desc3, desc4, desc5, pdas_created_at\)/,
+    );
+    expect(merge.sql).toMatch(
+      /VALUES \(@id, @pid, @ps, @lot, @steam, @label, @routing, @a, @d1, @d2, @d3, @d4, @d5, @ts\)/,
+    );
+    // every value is a bound parameter — the lot string never appears literally in the SQL text.
+    expect(merge.sql).not.toMatch(/L-100/);
+    expect(merge.inputs.get('id')).toBe(21);
+    expect(merge.inputs.get('pid')).toBe(21);
+    expect(merge.inputs.get('ps')).toBe(1);
+    expect(merge.inputs.get('lot')).toBe('L-100');
+    expect(merge.inputs.get('a')).toBe(true);
+    expect(merge.inputs.get('d1')).toBe('Red');
+    expect(merge.inputs.get('ts')).toEqual(pallet.Timestamp);
+    // the row-level id filter (PalletId > 10) lives in the upstream SELECT,
+    // asserted above — this MERGE never re-filters, it mirrors what it was given.
+    const read = ifl.statements.find((s) => s.sql.includes('FROM [PDAS_TP1U2].dbo.Pallets'))!;
+    expect(read.sql).toMatch(/WHERE PalletId > 10/);
   });
 
   it('appends a "first seen" limits version when the product has no history', async () => {

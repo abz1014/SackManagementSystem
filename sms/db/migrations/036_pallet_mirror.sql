@@ -10,8 +10,8 @@
 -- funcGetPalletId). A material with no active pallet is not selectable, so a
 -- changeover that stops at the material is half done. SMS has mirrored
 -- dbo.Materials since migration 006 and dbo.Pallets never; the September copy
--- holds 28 pallets (18 real, ids > 10 — the same vendor-seed rule as
--- Materials), 7 of them active.
+-- holds 25 pallets (15 real, ids > 10 — the same vendor-seed rule as
+-- Materials), 6 of them active. Measured 16 Sep 2026.
 --
 -- WHAT WILL MIRROR THIS, AND FROM WHERE — neither writer is this file. As of
 -- this migration, sync-worker/src/seed/seedProducts.ts reads dbo.Blends,

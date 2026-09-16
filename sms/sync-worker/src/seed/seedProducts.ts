@@ -1,7 +1,10 @@
 /**
- * Mirror PDAS reference data into sms.product/blend/yarn_count/tube_type so the
- * Current Product selector (Q1) has real options. Vendor seed rows filtered
- * (MaterialId>10 per SCHEMA rule). Reads PDAS read-only via the IFL pool.
+ * Mirror PDAS reference data into sms.product/blend/yarn_count/tube_type/
+ * pack_schema/pallet so the Current Product selector (Q1) and a changeover
+ * dry run (migration 036) have real options. Vendor seed rows filtered
+ * (MaterialId>10 / PalletId>10 per SCHEMA rule; dbo.PackSchemas carries no
+ * such seed noise — both its rows, ids 1 and 2, are real plant data, so it
+ * is read unfiltered). Reads PDAS read-only via the IFL pool.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
@@ -43,6 +46,25 @@ export async function seedProducts(
       `SELECT MaterialId, BlendId, CountId, TubeTypeId, MaterialSetpointWeight, MaterialActive, MaterialDesc1, MaterialDesc2,
               MaterialWeightOffsetMinus, MaterialWeightOffsetPlus
        FROM ${db}.dbo.Materials WHERE MaterialId > 10`,
+    )
+  ).recordset;
+  // No id-range seed noise on this table (verified 16 Sep 2026 against the
+  // September copy: only PackSchemaId 1 "Pallet 4x5" and 2 "Sack 3x4" exist,
+  // both real) — read unfiltered, unlike Materials/Pallets.
+  const packSchemas = (
+    await iflPool.request().query(
+      `SELECT PackSchemaId, PackSchemaDesc, ConesPerLayer, PackTypeId FROM ${db}.dbo.PackSchemas`,
+    )
+  ).recordset;
+  const pallets = (
+    await iflPool.request().query(
+      // Same vendor-seed convention as Materials (MaterialId > 10): migration
+      // 036's mirrored columns and api/src/services/pdasWrite.ts's readPallet
+      // (the source of the post-write echo-back MERGE) agree on this exact
+      // column list.
+      `SELECT PalletId, MaterialId, PackSchemaId, Lot, SteamProg, LabelType, Routing, PalletActive,
+              PalletDesc1, PalletDesc2, PalletDesc3, PalletDesc4, PalletDesc5, Timestamp
+       FROM ${db}.dbo.Pallets WHERE PalletId > 10`,
     )
   ).recordset;
 
@@ -95,6 +117,55 @@ export async function seedProducts(
         r.input('om', mssql.Decimal(10, 2), m.MaterialWeightOffsetMinus);
         r.input('op', mssql.Decimal(10, 2), m.MaterialWeightOffsetPlus);
         r.input('col', mssql.NVarChar(255), m.MaterialDesc2 || null);
+      },
+    );
+  }
+  for (const ps of packSchemas) {
+    await up(
+      `MERGE sms.pack_schema t USING (SELECT @id id) s ON t.pack_schema_id=s.id
+       WHEN MATCHED THEN UPDATE SET description=@d, cones_per_layer=@cpl, pack_type_id=@pt
+       WHEN NOT MATCHED THEN INSERT (pack_schema_id, description, cones_per_layer, pack_type_id) VALUES (@id, @d, @cpl, @pt);`,
+      (r) => {
+        r.input('id', mssql.Int, ps.PackSchemaId);
+        r.input('d', mssql.NVarChar(255), ps.PackSchemaDesc);
+        r.input('cpl', mssql.Int, ps.ConesPerLayer);
+        r.input('pt', mssql.Int, ps.PackTypeId);
+      },
+    );
+  }
+  for (const p of pallets) {
+    await up(
+      // Column list matches migration 036's sms.pallet definition and
+      // pdasWrite.ts's mirrorPallet echo-back MERGE (:972-980) exactly —
+      // both were checked against this statement before it was written.
+      `MERGE sms.pallet t USING (SELECT @id id) s ON t.pallet_id=s.id
+       WHEN MATCHED THEN UPDATE SET product_id=@pid, pack_schema_id=@ps, lot=@lot, steam_prog=@steam, label_type=@label,
+                                     routing=@routing, active_flag=@a, desc1=@d1, desc2=@d2, desc3=@d3, desc4=@d4, desc5=@d5,
+                                     pdas_created_at=@ts
+       WHEN NOT MATCHED THEN INSERT (pallet_id, product_id, pack_schema_id, lot, steam_prog, label_type, routing, active_flag,
+                                     desc1, desc2, desc3, desc4, desc5, pdas_created_at)
+         VALUES (@id, @pid, @ps, @lot, @steam, @label, @routing, @a, @d1, @d2, @d3, @d4, @d5, @ts);`,
+      (r) => {
+        r.input('id', mssql.Int, p.PalletId);
+        r.input('pid', mssql.Int, p.MaterialId);
+        r.input('ps', mssql.Int, p.PackSchemaId);
+        r.input('lot', mssql.NVarChar(255), p.Lot);
+        r.input('steam', mssql.Int, p.SteamProg);
+        r.input('label', mssql.Int, p.LabelType);
+        r.input('routing', mssql.Int, p.Routing);
+        r.input('a', mssql.Bit, p.PalletActive);
+        r.input('d1', mssql.NVarChar(255), p.PalletDesc1);
+        r.input('d2', mssql.NVarChar(255), p.PalletDesc2);
+        r.input('d3', mssql.NVarChar(255), p.PalletDesc3);
+        r.input('d4', mssql.NVarChar(255), p.PalletDesc4);
+        r.input('d5', mssql.NVarChar(255), p.PalletDesc5);
+        // pdas_created_at = Pallets.Timestamp: the PDAS server's own
+        // getdate(), i.e. the plant wall clock — NOT app UTC (the two-clocks
+        // rule, CLAUDE.md). Stored as-is, for ordering/display only; never
+        // compared to a UTC instant. Not nullable at the source, so no
+        // COALESCE-on-null guard is needed here (unlike the echo-back MERGE,
+        // which reads through an optional field).
+        r.input('ts', mssql.DateTime2(3), p.Timestamp);
       },
     );
   }
