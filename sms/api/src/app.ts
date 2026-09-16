@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { z } from 'zod';
-import type { ApiConfig } from './config.js';
+import { MAX_RANGE_DAYS, type ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
 import { getOperations } from './services/operations.js';
 import { getProduction, type GroupBy } from './services/production.js';
@@ -73,9 +73,11 @@ const dateStr = z
 // Analytics endpoints (SPC/reject-SPC/OEE) do full-population computation by
 // design — correct at the current 18-day scale, but unbounded once years
 // accumulate. Cap the span rather than let an accidental multi-year query
-// scan/allocate without limit; 366 covers any real single-year analysis.
-const MAX_RANGE_DAYS = 366;
-function validateRange(from: string, to: string): string | null {
+// scan/allocate without limit. MAX_RANGE_DAYS (config.ts) is the ONE shared
+// definition — see that file's comment for why 366 is unproven above the 53
+// days this app has ever actually held. Exported for app.config.test.ts /
+// app.rangeCap.test.ts, which pin it without needing a full HTTP round trip.
+export function validateRange(from: string, to: string): string | null {
   if (from > to) return 'from must be <= to';
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
   if (days > MAX_RANGE_DAYS) return `range too large — max ${MAX_RANGE_DAYS} days, requested ${days}`;
@@ -1284,12 +1286,22 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // The status endpoint is open to any signed-in user so the screen can be
   // read-only and say why, instead of offering a button that can only answer 503.
   const PDAS_WRITE_RANK = 2;
+  // The SMS-local limit path (routes/cone.ts POST /api/products/limits/local,
+  // roadmap Phase 4 item 2, 15 Sep 2026) is a SEPARATE rank gate reported
+  // here alongside the PDAS one, not folded into `canWrite` above and not a
+  // rank check the client does itself: `local.canWrite` is what
+  // ProductLimitsBlock renders its editor from, so a future change to who may
+  // record a local limit change needs one line here, not a client redeploy —
+  // and, unlike `canWrite`, it does not depend on `pdas.enabled` at all: this
+  // path works whether or not PDAS_WRITE_ENABLED is set.
+  const LOCAL_LIMITS_RANK = 2;
   app.get('/api/product-write/status', async (req: Request, res: Response) => {
     const user = (req as AuthedRequest).user;
     res.json({
       enabled: pdas.enabled,
       reason: pdas.disabledReason,
       canWrite: Boolean(user) && (user?.rank ?? 0) >= PDAS_WRITE_RANK && pdas.enabled,
+      local: { canWrite: Boolean(user) && (user?.rank ?? 0) >= LOCAL_LIMITS_RANK },
     });
   });
 

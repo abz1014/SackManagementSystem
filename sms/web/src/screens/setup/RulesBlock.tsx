@@ -19,13 +19,14 @@
 import { useState } from 'react';
 import {
   adminGetRules, adminSetPlausibilityRule, adminSetShiftRule, adminSetWeightRule,
-  getProductLimitHistory, getRange, getShiftCheck,
-  type Basis, type LimitHistoryProduct, type NightBelongsTo, type Rules, type ShiftMode,
+  getRange, getShiftCheck,
+  type Basis, type NightBelongsTo, type Rules, type ShiftMode,
 } from '../../api';
 import { shiftOrderProblem } from '../../lib/shiftTimes';
-import { fmtAppInstant, fmtG, fmtInt, fmtPct1 } from '../../lib/fmt';
+import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import { W } from '../../lib/words';
 import { Block, Failed, SkelLines } from '../../ui/bits';
+import { ProductLimitsBlock } from '../product/ProductLimitsBlock';
 import { Said, useResource, useWrite } from './shared';
 
 const BASES: Basis[] = ['as_recorded', 'gross', 'net'];
@@ -57,7 +58,7 @@ export function RulesBlock() {
         <WeightForm key={JSON.stringify(rules.weight)} rules={rules} onSaved={res.reload} />
         <ShiftForm key={JSON.stringify(rules.shift)} rules={rules} onSaved={res.reload} />
         <PlausibilityForm key={JSON.stringify(rules.plausibility)} rules={rules} onSaved={res.reload} />
-        <ProductLimitsSection />
+        <ProductLimitsBlock />
       </div>
     </Block>
   );
@@ -318,86 +319,7 @@ function PlausibilityForm({ rules, onSaved }: { rules: Rules; onSaved: () => voi
   );
 }
 
-/* -------------------------------------------------------- product limits */
-
-/**
- * Setup › Rules › Product limits — READ-ONLY (roadmap Phase 4 item 2, 14 Sep
- * 2026). The versioned history in sms.product_limit_version, per product:
- * the limits, when they took effect, whether that instant is only a "no
- * later than" bound, the source, and who and why for a write. This history
- * has been written since migration 027 and shown nowhere; every reading is
- * judged by it, so an admin must be able to see what the system applies.
- *
- * Nothing here edits: changing a limit is the PDAS write path (§5), off
- * until IFL authorises it in writing, and its screen is the product sheet.
- *
- * TWO CLOCKS: effective_from is an app instant (genuine UTC), so it takes
- * fmtAppInstant — the plant-clock formatters would land it five hours out.
- */
-function ProductLimitsSection() {
-  const res = useResource(() => getProductLimitHistory());
-  return (
-    <div>
-      <Title none={false}>{W.cone.limitsSection}</Title>
-      <p className="mut sm">{W.cone.limitsNote}</p>
-      {res.error ? (
-        <Failed error={res.error} onRetry={res.reload} />
-      ) : !res.data ? (
-        <SkelLines n={4} short />
-      ) : res.data.products.length === 0 ? (
-        <p className="mut sm">{W.cone.limitsNoProducts}</p>
-      ) : (
-        <div style={{ display: 'grid', gap: 18, marginTop: 12 }}>
-          {res.data.products.map((p) => (
-            <ProductHistory key={p.productId} product={p} />
-          ))}
-          <p className="mut sm">{W.cone.noLaterThanNote}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProductHistory({ product }: { product: LimitHistoryProduct }) {
-  return (
-    <div>
-      <p style={{ fontWeight: 500 }}>
-        {product.label}
-        {product.activeFlag === false && <span className="mut"> · {W.cone.retired}</span>}
-      </p>
-      {product.versions.length === 0 ? (
-        <p className="mut sm">{W.cone.limitsNoneYet}</p>
-      ) : (
-        <div className="tw">
-          <table>
-            <thead>
-              <tr>
-                <th>{W.cone.colLimits}</th>
-                <th>{W.cone.colEffective}</th>
-                <th>{W.cone.colSource}</th>
-                <th>{W.cone.colBy}</th>
-                <th>{W.cone.colReason}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {product.versions.map((v) => (
-                <tr key={v.versionId}>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {v.label ?? (v.setpointG != null ? fmtG(v.setpointG) : '—')}
-                  </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {v.effectiveIsLowerBound && <span className="mut">{W.cone.noLaterThan} </span>}
-                    {fmtAppInstant(v.effectiveFromUtc)}
-                  </td>
-                  <td>{W.cone.source[v.source] ?? v.source}</td>
-                  <td>{v.changedBy ?? '—'}</td>
-                  <td className="mut">{v.reason ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
+/* Product limits (read-only history + the SMS-local editor) moved to
+   ../product/ProductLimitsBlock.tsx, 15 Sep 2026 — the same component now
+   renders in the Product sheet too, so the two cannot show this differently
+   (roadmap Phase 4 item 2; see that file's header). */

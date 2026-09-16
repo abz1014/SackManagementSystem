@@ -19,6 +19,7 @@ import { Sheet } from '../ui/Sheet';
 import { Details, Failed, SkelLines } from '../ui/bits';
 import { W } from '../lib/words';
 import { fmtDayLong, fmtG } from '../lib/fmt';
+import { ProductLimitsBlock } from './product/ProductLimitsBlock';
 import {
   getCurrentProduct, getProducts, getProductTimeline, setCurrentProduct,
   getProductWriteStatus, getProductOptions, createProduct, setProductActive, updateProductLimits,
@@ -127,6 +128,17 @@ function Body({
           who could act on the line-wide product; the buttons appear only when
           the server has the path enabled AND the account is a manager. */}
       {canWrite && <PdasProducts products={products} onChanged={onChanged} />}
+
+      {/* The SMS-local limits editor — the SAME component (not a copy)
+          Setup › Rules renders, un-collapsed there and here on purpose: it
+          decides its own visibility exactly once, so the two cannot drift.
+          Never gated on `canWrite` above (that prop is this sheet's own
+          rank>=2 threshold for the PDAS-facing controls above; the local
+          editor asks the server for ITS OWN write status, a different rank
+          gate that does not depend on PDAS_WRITE_ENABLED) — visible to every
+          signed-in account, same as the rest of this sheet; only the edit
+          control inside it is conditional. */}
+      <ProductLimitsBlock />
 
       <Details summary={W.product.history}>
         <History />
@@ -243,7 +255,7 @@ function PdasProducts({ products, onChanged }: { products: ProductOption[]; onCh
   const [mode, setMode] = useState<{ kind: 'limits'; id: number } | { kind: 'active'; id: number; active: boolean } | { kind: 'create' } | null>(null);
 
   useEffect(() => {
-    getProductWriteStatus().then(setStatus).catch(() => setStatus({ enabled: false, reason: 'status unavailable', canWrite: false }));
+    getProductWriteStatus().then(setStatus).catch(() => setStatus({ enabled: false, reason: 'status unavailable', canWrite: false, local: { canWrite: false } }));
   }, []);
 
   const active = products.filter((p) => p.activeFlag !== false);

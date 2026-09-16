@@ -29,10 +29,45 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import { toPlantMs } from './plantClock.js';
+import { toPlantMs, toPlantIso } from './plantClock.js';
 import type { ProductLimits } from './productAt.js';
+import { auditedWrite, type Db } from './audit.js';
 
-export type LimitSource = 'pdas_observed' | 'sms_write';
+/**
+ * 'pdas_observed' — the sync worker noticed the PDAS mirror changed underneath
+ *   it; a lower-bound observation, not a decision (see effective_is_lower_bound).
+ * 'sms_write' — the PDAS write path (pdasWrite.ts) committed a change to PDAS
+ *   itself and this is its confirmed effect; off until IFL authorises writes.
+ * 'sms_local' — this app recorded a limit change WITHOUT touching PDAS (roadmap
+ *   Phase 4 item 2, 15 Sep 2026: IFL wants limits editable from Setup, and
+ *   nothing may write to PDAS yet). Never mirrored to sms.product — that
+ *   mirror is MERGE-overwritten by the PDAS sync every pass and would erase
+ *   it — so this table is the only place an sms_local change is recorded, and
+ *   it is judged by limitsAt() exactly like every other source.
+ */
+export type LimitSource = 'pdas_observed' | 'sms_write' | 'sms_local';
+
+/**
+ * Which source wins when two versions share the exact same effective_from
+ * instant (to the millisecond) — structurally possible even though it has
+ * not been observed in practice: an sms_local write's effective_from
+ * defaults to "now", and a sync pass writing a pdas_observed row could in
+ * principle land on the same millisecond. Without an explicit rule the order
+ * would fall out of loadProductCatalogue's `ORDER BY effective_from DESC,
+ * version_id DESC` — "whichever was inserted last" — which is an accident of
+ * write timing, not a decision.
+ *
+ * THE RULE: a version this app or PDAS was DELIBERATELY TOLD to record
+ * (sms_local, sms_write) outranks one the sync worker merely OBSERVED already
+ * sitting in the PDAS mirror (pdas_observed) — an observation is evidence the
+ * limits were SOMETHING at that instant, not a record of what anyone decided
+ * they should be, so a genuine write must win the tie. Between the two write
+ * paths, sms_local outranks sms_write; the two are not expected to collide
+ * (they are different features, and only one — sms_local — can be in use
+ * while IFL's PDAS authorisation is outstanding), so the ordering between them
+ * is a tie-break of convenience, not a load-bearing decision.
+ */
+const SOURCE_PRIORITY: Record<LimitSource, number> = { sms_local: 3, sms_write: 2, pdas_observed: 1 };
 
 export interface LimitVersion {
   productId: number;
@@ -92,7 +127,10 @@ export class ProductCatalogue {
       list.push(v);
       this.versions.set(v.productId, list);
     }
-    for (const list of this.versions.values()) list.sort((a, b) => b.effectiveFromMs - a.effectiveFromMs);
+    // Newest first; on an exact tie, SOURCE_PRIORITY decides (see its comment).
+    for (const list of this.versions.values()) {
+      list.sort((a, b) => b.effectiveFromMs - a.effectiveFromMs || SOURCE_PRIORITY[b.source] - SOURCE_PRIORITY[a.source]);
+    }
   }
 
   product(productId: number): CatalogueProduct | null {
@@ -184,11 +222,22 @@ export async function loadProductCatalogue(pool: ConnectionPool): Promise<Produc
 
 /**
  * Append a version. Used by the write path (source 'sms_write', effective the
- * instant PDAS accepted the change) and by the reference sync when it notices
- * the mirror changed underneath it (source 'pdas_observed', a lower bound).
+ * instant PDAS accepted the change), by the reference sync when it notices
+ * the mirror changed underneath it (source 'pdas_observed', a lower bound),
+ * and by setLocalLimitVersion below (source 'sms_local', no PDAS involved).
+ *
+ * Takes a `Db` (a pool OR a transaction — see services/audit.ts) rather than
+ * a ConnectionPool so a caller using auditedWrite() can run this on `tx` and
+ * have the version row and its audit row commit together, same as every
+ * other configuration write in the app. Every existing caller passes a pool,
+ * which satisfies `Db` structurally, so this is not a breaking change.
+ *
+ * Returns the new row's version_id (an IDENTITY, only known after the
+ * INSERT) for a caller that wants to report or test it; existing callers
+ * that do not need it simply do not use the return value.
  */
 export async function appendLimitVersion(
-  pool: ConnectionPool,
+  db: Db,
   v: {
     productId: number;
     setpointG: number | null;
@@ -200,8 +249,8 @@ export async function appendLimitVersion(
     changedBy: number | null;
     reason: string | null;
   },
-): Promise<void> {
-  await pool
+): Promise<number> {
+  const r = await db
     .request()
     .input('pid', mssql.Int, v.productId)
     .input('sp', mssql.Decimal(10, 2), v.setpointG)
@@ -212,12 +261,156 @@ export async function appendLimitVersion(
     .input('src', mssql.VarChar(20), v.source)
     .input('by', mssql.Int, v.changedBy)
     .input('reason', mssql.NVarChar(255), v.reason)
-    .query(
+    .query<{ version_id: number }>(
       `INSERT INTO sms.product_limit_version
          (product_id, setpoint_g, offset_minus_g, offset_plus_g, effective_from,
           effective_is_lower_bound, source, changed_by, reason)
+       OUTPUT inserted.version_id
        VALUES (@pid, @sp, @om, @op, @eff, @lb, @src, @by, @reason)`,
     );
+  return Number(r.recordset[0]?.version_id);
+}
+
+/* ------------------------------------------- the SMS-local write path */
+
+/** Setpoint must be a plausible cone weight; each offset > 0 and at most half the setpoint. */
+export interface SetpointBounds {
+  setpointLoG: number;
+  setpointHiG: number;
+}
+
+/**
+ * The sanity check for an sms_local limit change — "the resulting window
+ * sane" (roadmap Phase 4 item 2, 15 Sep 2026). Deliberately re-implemented
+ * here rather than imported from pdasWrite.ts's private, near-identical
+ * PdasWriter.plausibility: this path must work with PDAS_WRITE_ENABLED unset
+ * and must never import from the module that owns the PDAS connection, so
+ * that the two write paths stay independently reviewable and this one cannot
+ * be broken by a change to the one that is still off. The one deliberate
+ * difference is that BOTH offsets must be strictly positive here (a zero
+ * offset makes the window one edge wide, which a human setting limits
+ * through this form is presumed not to have intended) where the PDAS path
+ * allows zero.
+ */
+export function checkLimitWindowSane(
+  f: { setpointG: number; offsetMinusG: number; offsetPlusG: number },
+  b: SetpointBounds,
+): string | null {
+  if (!(f.setpointG >= b.setpointLoG && f.setpointG <= b.setpointHiG)) {
+    return `Setpoint ${f.setpointG} g is outside the plausible cone range ${b.setpointLoG}–${b.setpointHiG} g.`;
+  }
+  for (const [name, val] of [
+    ['lower offset', f.offsetMinusG],
+    ['upper offset', f.offsetPlusG],
+  ] as const) {
+    if (!(val > 0 && val <= f.setpointG / 2)) {
+      return `The ${name} ${val} g must be more than 0 and at most half the setpoint (${f.setpointG / 2} g).`;
+    }
+  }
+  return null;
+}
+
+/** effective_from may not be in the future — the Two Clocks rule: this is a genuine app-UTC instant, compared against a genuine UTC "now". */
+export function checkNotFuture(effectiveFromUtc: Date, nowUtc: Date = new Date()): string | null {
+  return effectiveFromUtc.getTime() > nowUtc.getTime()
+    ? `effective_from ${effectiveFromUtc.toISOString()} is in the future.`
+    : null;
+}
+
+export interface LocalLimitInput {
+  productId: number;
+  setpointG: number;
+  offsetMinusG: number;
+  offsetPlusG: number;
+  effectiveFromUtc: Date;
+  reason: string | null;
+}
+
+export type LocalLimitResult =
+  | { ok: true; versionId: number; label: string | null }
+  | { ok: false; code: 'UNKNOWN_PRODUCT' | 'IMPLAUSIBLE' | 'FUTURE'; message: string };
+
+/**
+ * Record a limit change WITHOUT touching PDAS (roadmap Phase 4 item 2, 15 Sep
+ * 2026 — IFL answered that limits must be editable from Setup, and nothing
+ * may write to PDAS yet). Engineer rank (2) is enforced by the route, not
+ * here; this function only needs an actor id to attribute the version and
+ * its audit row to.
+ *
+ * ONE new row in sms.product_limit_version, source 'sms_local' — never
+ * sms.product (the PDAS mirror MERGE-overwrites it every sync pass and would
+ * erase a write there), never anything in PDAS_TP1U2, and never a second
+ * insert path: this calls appendLimitVersion(), the same INSERT every other
+ * source uses. The version and its audit row commit in one transaction
+ * (auditedWrite — services/audit.ts), so a change is never recorded without
+ * a record of who made it and why.
+ *
+ * Roadmap rule 12 (never silently change a historical calculation) is kept
+ * by construction: this APPENDS a version effective from `effectiveFromUtc`
+ * onward. Every reading already judged under an earlier version keeps that
+ * verdict — limitsAt() judges each reading by the version in force at ITS
+ * OWN time (productLimits.test.ts pins this) — so no past reading is
+ * reclassified by this call.
+ */
+export async function setLocalLimitVersion(
+  pool: ConnectionPool,
+  actorId: number,
+  bounds: SetpointBounds,
+  input: LocalLimitInput,
+): Promise<LocalLimitResult> {
+  const bad = checkLimitWindowSane(input, bounds) ?? checkNotFuture(input.effectiveFromUtc);
+  if (bad) {
+    return { ok: false, code: bad.startsWith('effective_from') ? 'FUTURE' : 'IMPLAUSIBLE', message: bad };
+  }
+
+  return auditedWrite<LocalLimitResult>(
+    pool,
+    actorId,
+    { action: 'product.limits.local', targetType: 'product', targetId: input.productId, detail: null },
+    async (tx) => {
+      // No FK backs product_id (the mirror is re-seeded and may transiently
+      // lack the row — same reason product_limit_version has none at all),
+      // so this is the only gate against recording limits for a product that
+      // does not exist, the same defect /api/current-product guards against.
+      const known = await tx
+        .request()
+        .input('id', mssql.Int, input.productId)
+        .query<{ n: number }>(`SELECT COUNT(*) AS n FROM sms.product WHERE product_id = @id`);
+      if (!known.recordset[0]?.n) {
+        return {
+          result: { ok: false, code: 'UNKNOWN_PRODUCT', message: `unknown productId ${input.productId}` },
+          noop: true,
+        };
+      }
+
+      const versionId = await appendLimitVersion(tx, {
+        productId: input.productId,
+        setpointG: input.setpointG,
+        offsetMinusG: input.offsetMinusG,
+        offsetPlusG: input.offsetPlusG,
+        effectiveFromUtc: input.effectiveFromUtc,
+        effectiveIsLowerBound: false,
+        source: 'sms_local',
+        changedBy: actorId,
+        reason: input.reason,
+      });
+      const label = limitsFromVersion({
+        productId: input.productId,
+        setpointG: input.setpointG,
+        offsetMinusG: input.offsetMinusG,
+        offsetPlusG: input.offsetPlusG,
+        effectiveFromMs: 0,
+        effectiveFromUtc: input.effectiveFromUtc.toISOString(),
+        effectiveIsLowerBound: false,
+        source: 'sms_local',
+      })?.label ?? null;
+      return {
+        result: { ok: true, versionId, label },
+        targetId: input.productId,
+        detail: `limits recorded in SMS (not PDAS): ${label ?? `${input.setpointG} g`}${input.reason ? ` — ${input.reason}` : ''}`,
+      };
+    },
+  );
 }
 
 /* ------------------------------------------------- the history, readable */
@@ -229,6 +422,17 @@ export interface LimitHistoryVersion {
   offsetPlusG: number | null;
   /** The stored UTC instant, as written — an app instant, not plant time. */
   effectiveFromUtc: string;
+  /**
+   * The same instant re-expressed on the production-time convention (Two
+   * Clocks: toPlantIso — plantClock.ts), for display. A viewer's browser
+   * timezone is not reliable — the account may be a manager opening this
+   * screen away from the plant PC — so "in force from" is rendered from
+   * THIS field with the UTC-pinned formatters (fmtDay/fmtClock), the same
+   * way calibration.ts's adjustedAtPlant is, never from effectiveFromUtc
+   * with a browser-local formatter: that would put a changeover reading up
+   * to five hours off the shift it actually fell in.
+   */
+  effectiveFromPlant: string;
   /** "No later than": first SEEN at effectiveFrom, not known to have started then. */
   effectiveIsLowerBound: boolean;
   source: LimitSource;
@@ -283,6 +487,7 @@ export async function listLimitHistory(pool: ConnectionPool): Promise<LimitHisto
       offsetMinusG: v.offset_minus_g == null ? null : Number(v.offset_minus_g),
       offsetPlusG: v.offset_plus_g == null ? null : Number(v.offset_plus_g),
       effectiveFromUtc: new Date(v.effective_from).toISOString(),
+      effectiveFromPlant: toPlantIso(v.effective_from),
       effectiveIsLowerBound: Boolean(v.effective_is_lower_bound),
       source: v.source,
       changedBy: v.changed_by ?? null,

@@ -4,17 +4,20 @@
  * already behind "signed in"; requireRole raises the bar where the contract
  * says so.
  *
- *   GET /api/products/limits/history   rank 1   the versioned limits, per product
- *   GET /api/reconciliation            rank 3   weight totals by state and plausibility, for a period
- *   GET /api/machines/running          rank 1   the product on each machine, from its newest cones
- *   GET /api/shift-check               rank 1   plant-stored shift vs SMS-derived shift, per day
+ *   GET  /api/products/limits/history   rank 1   the versioned limits, per product
+ *   POST /api/products/limits/local     rank 2   append an SMS-local limit version — NEVER touches PDAS (roadmap Phase 4 item 2, 15 Sep 2026)
+ *   GET  /api/reconciliation            rank 3   weight totals by state and plausibility, for a period
+ *   GET  /api/machines/running          rank 1   the product on each machine, from its newest cones
+ *   GET  /api/shift-check               rank 1   plant-stored shift vs SMS-derived shift, per day
  */
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import { requireRole } from '../auth.js';
+import { requireRole, type AuthedRequest } from '../auth.js';
 import { envelope } from '../envelope.js';
+import { MAX_RANGE_DAYS } from '../config.js';
 import type { RouteContext } from './context.js';
-import { listLimitHistory } from '../services/productLimits.js';
+import { listLimitHistory, setLocalLimitVersion } from '../services/productLimits.js';
+import { getPlausibilityRule } from '../services/admin.js';
 import { getReconciliation } from '../services/reconcile.js';
 import { getMachinesRunning } from '../services/machinesRunning.js';
 import { getShiftCheck } from '../services/shiftCheck.js';
@@ -25,9 +28,9 @@ const isoTs = z
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
   .optional();
 
-// Same cap as app.ts's analytics routes: a period query over years would
-// scan without bound once the record is years long.
-const MAX_RANGE_DAYS = 366;
+// Same cap as app.ts's analytics routes (MAX_RANGE_DAYS, config.ts): a
+// period query over years would scan without bound once the record is
+// years long.
 function rangeProblem(from: string, to: string): string | null {
   if (from > to) return 'from must be <= to';
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
@@ -36,12 +39,62 @@ function rangeProblem(from: string, to: string): string | null {
 }
 
 export function mountConeRoutes({ app, pool, cfg }: RouteContext): void {
-  // The limits history: every product, every version, newest first. Read-only
-  // — changing a limit is the PDAS write path (§5), and only when IFL
-  // authorises it in writing.
+  // The limits history: every product, every version, newest first. Two ways
+  // a version can be added: the PDAS write path (§5, off until IFL
+  // authorises it in writing) and the SMS-local path below (POST .../local,
+  // which never touches PDAS) — this GET reads both back the same way.
   app.get('/api/products/limits/history', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       res.json({ products: await listLimitHistory(pool) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Append an SMS-local limit version — engineer rank (2), same rank as
+  // /api/current-product and the PDAS write path (IFL Q19/Q41: the process
+  // engineer on the floor). Requires no PDAS write access at all: this NEVER
+  // opens a PDAS connection and works whether or not PDAS_WRITE_ENABLED is
+  // set (roadmap Phase 4 item 2, 15 Sep 2026 — IFL wants limits editable in
+  // Setup and nothing may write to PDAS yet). See productLimits.ts's
+  // setLocalLimitVersion for what this appends and why it cannot reclassify
+  // a past reading.
+  const localLimitBody = z.object({
+    productId: z.coerce.number().int().positive(),
+    setpointG: z.coerce.number().positive(),
+    offsetMinusG: z.coerce.number().positive(),
+    offsetPlusG: z.coerce.number().positive(),
+    effectiveFrom: z.string().datetime().optional(),
+    reason: z.string().max(255).nullable().optional().transform((v) => v ?? null),
+  });
+  app.post('/api/products/limits/local', requireRole(2), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const b = localLimitBody.safeParse(req.body);
+      if (!b.success) {
+        res.status(400).json({ error: 'invalid request', detail: b.error.flatten().fieldErrors });
+        return;
+      }
+      const user = (req as AuthedRequest).user!;
+      const p = await getPlausibilityRule(pool, cfg.lineId);
+      const r = await setLocalLimitVersion(
+        pool,
+        user.userId,
+        { setpointLoG: p.coneLoG, setpointHiG: p.coneHiG },
+        {
+          productId: b.data.productId,
+          setpointG: b.data.setpointG,
+          offsetMinusG: b.data.offsetMinusG,
+          offsetPlusG: b.data.offsetPlusG,
+          effectiveFromUtc: b.data.effectiveFrom ? new Date(b.data.effectiveFrom) : new Date(),
+          reason: b.data.reason,
+        },
+      );
+      if (!r.ok) {
+        const status = r.code === 'UNKNOWN_PRODUCT' ? 404 : 400;
+        res.status(status).json({ error: r.message, code: r.code });
+        return;
+      }
+      res.json({ versionId: r.versionId, label: r.label, products: await listLimitHistory(pool) });
     } catch (err) {
       next(err);
     }
