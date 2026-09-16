@@ -18,6 +18,49 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
+### UX programme, Phase 5 (Analytics) — versioned targets given teeth (16 Sep 2026)
+
+Six commits on `floor-first-rework` (`be5ac3e` … `1f16faf`), against the specs in
+`audit/IA-PROPOSAL.md` (Phase 2a) and `audit/OVERVIEW-SPEC.md` (Phase 3). This did not add
+analytics; it made the §8 rule — **a reading is judged by the limits in force at its own
+time, never by today's mirror** — actually hold everywhere a target is shown, and closed the
+one place it didn't:
+
+1. **The cone-weight report's figure tile stopped reading `weights.ts`'s "current product,
+   right now" target** (`FALLBACK_CONE_SETPOINT_G = 1950` when none was selected) while its
+   own `vs target` column, two lines away, already used the period's own versioned target —
+   one report, two answers. It now takes the single target `getWeightStations()` already
+   resolves for the period end (`api/src/services/reports/coneWeight.ts`'s `target` field:
+   `setpointG`, `productLabel`, `inForceAtUtc`, `source: 'none'` when nothing was in force).
+2. **Per-station-per-material targets.** A station that ran exactly one material in the
+   window is judged against that material's own target; a station that ran more than one
+   gets no number, not a blended one (`WeightStationRow.targetBasis: 'station_material' |
+   'mixed' | 'line_product'`, `api/src/services/weightStations.ts`); pre-`MaterialId` July
+   rows fall back to the line-wide product, marked as such.
+3. **A guard test locks this down**: `web/src/targets.guard.test.ts` fails if
+   `nominalSetpointG` / `nominalSource` / `FALLBACK_CONE_SETPOINT_G` leak out of `weights.ts`
+   (the Weight screen's own current-product "now" stat, a written, evidenced exception) into
+   any report or screen, and fails if a report payload declares a `target` field without
+   also stating `inForceAtUtc` or an explicit `'none'` source.
+4. Coverage-sensitive KPIs (counts) stopped being marked as a trend when the compared period
+   has materially less data behind it; an explicit `KpiShape = 'total' | 'rate'`
+   (`api/src/services/reports/summary.ts`) replaced a unit-string heuristic that had wrongly
+   suppressed ratio KPIs (Average sack kg, Cones per sack) that aren't coverage-sensitive.
+   The Pareto's cumulative line, already computed server-side, is now rendered.
+
+Verified in this repo, not carried over from the brief: 1164 tests passed / 4 skipped (was
+1138), `npx vitest run` from `sms/`, 16 Sep 2026. Typecheck and web build were not re-run in
+this pass.
+
+**Not done by this phase, and still open:** the Product nav item (Running / Changeover /
+Catalogue / History) and the changeover workflow UI over `/api/changeover/{refs,plan,
+execute}` — four Phase-4 drilldown hops built in `053e4de` still have no destination to land
+on. Weight basis (Q4/Q5) is unchanged: the Weight headline still states mean and target as
+two separate facts, never "X g below target". KPI approval (Q33-37) is unchanged: every
+summary row keeps `approval: 'awaiting'`. Reject code meanings (Q10) are unchanged. No sack
+tolerance exists in any IFL table. Everything above was verified against the local `_SEP07`
+dev copy only, not live plant data.
+
 ### Roadmap execution — the IFL requirement (from 14 Sep 2026)
 
 `IFL_SMS_Claude_Code_Development_Roadmap.md` is **the requirement** from IFL's

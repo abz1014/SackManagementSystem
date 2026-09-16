@@ -2,10 +2,12 @@
 
 **Full session handover: [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — read it first if resuming cold; it covers the dirty working tree this file's §3 does not yet reflect.
 
-**As of:** 15 September 2026, end of Wave C/D (Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
+**As of:** 16 September 2026, UX programme Phase 5 (Analytics) complete on top of Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
+
+**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns and Phase 5 Analytics — six commits `be5ac3e`…`1f16faf`). It refines screens inside roadmap phases already marked complete above (mainly 4, 8 and 9) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s "UX programme, Phase 5" section for what it actually changed. Do not read "Phase 5" in commit messages as roadmap Phase 5 (Reject management) — the two numbering schemes are independent.
 
 ---
 
@@ -32,6 +34,40 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 ---
 
 ## 2. Completed
+
+### UX programme, Phase 5 — Analytics (16 Sep 2026)
+- Six commits (`be5ac3e`, `5503406`, `0510afd`, `cc1ffe3`, `856e981`, `1f16faf`) closing the
+  one place the owner's §8 rule ("never judge a reading by today's mirror") did not yet
+  hold: the cone-weight report's figure tile took its target from `weights.ts`'s
+  "current product, right now" figure (`FALLBACK_CONE_SETPOINT_G = 1950` with none
+  selected) while its own `vs target` column, in the same report, already used the period's
+  own versioned target. Now one target, resolved at the period end
+  (`api/src/services/reports/coneWeight.ts`'s `target.inForceAtUtc` / `target.source`).
+- Per-station-per-material targets: a station running exactly one material is judged
+  against that material's target; a station running more than one gets no number, not a
+  blend (`WeightStationRow.targetBasis`, `api/src/services/weightStations.ts`); pre-
+  `MaterialId` July rows fall back to the line-wide product, marked as such. Reaches the
+  station table on the web, not just the chart.
+- A guard test, `web/src/targets.guard.test.ts`, greps the committed source for the
+  fallback/current-product identifiers outside their one legitimate home and fails if a
+  report `target` field omits `inForceAtUtc` or an explicit `'none'` source — proven to
+  fail on the pre-fix tree (`be5ac3e^`).
+- Count-shaped KPIs stopped reporting a coverage hole as a trend; an explicit
+  `KpiShape = 'total' | 'rate'` (`api/src/services/reports/summary.ts`) replaced a
+  unit-string heuristic that had also wrongly suppressed non-coverage-sensitive ratios
+  (Average sack kg, Cones per sack). The Pareto's cumulative line (server-computed since
+  day one) is now rendered. A cone/sack weight-chart toggle (`wt` URL key) was added,
+  rendering the absence of a sack tolerance rather than inventing one.
+- This phase made existing engineering honest and visible; it added no new analytic. Test
+  suite: **1164 passed / 4 skipped** (`npx vitest run` from `sms/`, observed 16 Sep 2026;
+  was 1138 before this phase). Typecheck/build were not re-run in this pass — re-run before
+  relying on that gate.
+- **Not done by this phase:** the Product nav item and its Running/Changeover/Catalogue/
+  History tabs; the changeover workflow UI over `/api/changeover/{refs,plan,execute}`;
+  reconciliation. Four Phase-4 drilldown hops (`053e4de`) still have no destination.
+  Weight basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings (Q10) and the missing
+  sack tolerance are all unchanged and still blocked on IFL. Verified against the local
+  `_SEP07` dev copy only.
 
 ### Day 0 (14 Sep 2026)
 - Repository preparation: `.gitattributes`, `q.mjs`/`sync-trace.mjs` ignored, Node 22 pin (`.nvmrc`, `engines`), root `typecheck` covering all five workspaces, root `build`, `verify:release`.
@@ -63,7 +99,7 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 
 ## 3. In progress
 
-Nothing is mid-change. The working tree is clean at every commit above. The next planned work is Wave B and it has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
+Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, the UX programme (§2, not a roadmap phase) has moved past Phase 5: Phase 6 (a Product nav item with Running/Changeover/Catalogue/History tabs, and the changeover-workflow UI) has **not started** — the four drilldown hops built in `053e4de` have no destination yet. Phases 7, 8 and 9 of the UX programme (reliability states, testing, visual polish) are also not started. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
 
 ---
 
@@ -104,7 +140,7 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 
 | | Value |
 |---|---|
-| Suite | vitest, 80 files, **888 tests, 888 passing** (15 Sep 2026, end of Wave C/D round 2); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
+| Suite | vitest, **1164 tests passed / 4 skipped** (16 Sep 2026, end of UX programme Phase 5, observed via `npx vitest run` from `sms/`); 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
 | Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 |
 | CI | `.github/workflows/ci.yml` runs the same gate plus a clean-tree check and a tracked-secret-file check on every push to `main`/`floor-first-rework` and every PR. **Has not run yet** — nothing is pushed. |
 | Database needed | None. Every test runs against a fake `mssql` pool or pure functions. |
