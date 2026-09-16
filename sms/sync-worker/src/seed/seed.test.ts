@@ -1,8 +1,14 @@
 /**
  * The two seeders, against a recording fake pool. Neither had a test before
  * 14 Sep 2026, although both run before every ingest pass and one of them
- * (seedProducts) is the only writer of sms.product_limit_version from the
- * PDAS side — the history every product verdict is judged against.
+ * (seedProducts) is the only writer of `source = 'pdas_observed'` rows in
+ * sms.product_limit_version — the history every product verdict is judged
+ * against. It stopped being the ONLY writer of that table on 15 Sep 2026
+ * (2e8b470): api/src/services/productLimits.ts's setLocalLimitVersion() also
+ * appends rows there, source 'sms_local', from Setup, and the (still off)
+ * PDAS write path appends 'sms_write' rows. seedProducts must never read
+ * those other sources back as if they were its own prior observation — see
+ * the comment above its "latest" query in seedProducts.ts.
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { ConnectionPool } from 'mssql';
@@ -241,5 +247,141 @@ describe('seedProducts', () => {
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     const ins = app.statements.find((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))!;
     expect(ins.inputs.get('sp')).toBeNull();
+  });
+});
+
+/**
+ * Regression, 2e8b470 (Setup's product-limit editor) — found the same day it
+ * landed. The `fakePool` above answers a fixed script per SQL needle, blind
+ * to the query's own WHERE clause, so it cannot tell the fixed comparison
+ * query (`AND source = 'pdas_observed'`) apart from the buggy, unscoped one —
+ * both would just be handed the same scripted rows. These tests need a fake
+ * that actually evaluates the filter from the SQL text, so a test can fail
+ * against the real old code and pass against the real fix.
+ *
+ * Row shapes below deliberately match productLimits.test.ts's
+ * `withLocalChange` catalogue (pdas_observed sp=1960 from 2026-08-01,
+ * sms_local sp=1970 from 2026-09-01) — that file already proves a reading
+ * before/after 2026-09-01 resolves to the right version given exactly this
+ * row set; what these tests add is that a sync pass leaves that row set
+ * undisturbed (or correctly extends it), which is the other half of "rule 12
+ * holds after a sync pass".
+ */
+function versionTablePool(
+  seedRows: { sp: number | null; om: number | null; op: number | null; effectiveFrom: string; source: string }[],
+) {
+  const rows = seedRows.map((r, i) => ({ ...r, versionId: i + 1 }));
+  const inserts: { sp: unknown; om: unknown; op: unknown; reason: unknown; source: string }[] = [];
+  const pool = {
+    rows,
+    inserts,
+    request() {
+      const inputs = new Map<string, unknown>();
+      return {
+        input(name: string, _t: unknown, value: unknown) {
+          inputs.set(name, value);
+          return this;
+        },
+        async query(sql: string) {
+          if (sql.includes('SELECT TOP 1') && sql.includes('FROM sms.product_limit_version')) {
+            // The behaviour under test: whether the query text scopes the
+            // comparison to the mirror's own prior observations.
+            const scoped = sql.includes("AND source = 'pdas_observed'");
+            const candidates = scoped ? rows.filter((r) => r.source === 'pdas_observed') : rows;
+            const newest = [...candidates].sort(
+              (a, b) =>
+                new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime() ||
+                b.versionId - a.versionId,
+            )[0];
+            return { recordset: newest ? [{ sp: newest.sp, om: newest.om, op: newest.op }] : [] };
+          }
+          if (sql.includes('INSERT INTO sms.product_limit_version')) {
+            const row = {
+              sp: inputs.get('sp') as number | null,
+              om: inputs.get('om') as number | null,
+              op: inputs.get('op') as number | null,
+              // Real code writes SYSUTCDATETIME() — always newer than any
+              // fixed 2026-xx-xx literal used in a seed row here.
+              effectiveFrom: new Date().toISOString(),
+              source: 'pdas_observed',
+              versionId: rows.length + 1,
+            };
+            rows.push(row);
+            inserts.push({ sp: row.sp, om: row.om, op: row.op, reason: inputs.get('reason'), source: row.source });
+            return { recordset: [] };
+          }
+          // Every other statement here is a reference-table MERGE; this suite
+          // only exercises the limits-history append, so those are no-ops.
+          return { recordset: [] };
+        },
+      };
+    },
+  };
+  return pool as unknown as ConnectionPool & { rows: typeof rows; inserts: typeof inserts };
+}
+
+describe('seedProducts — the pdas_observed comparison must not be fooled by an sms_local row (regression, 2e8b470)', () => {
+  const blends = { needle: 'FROM [PDAS_TP1U2].dbo.Blends', rows: [] };
+  const counts = { needle: 'FROM [PDAS_TP1U2].dbo.Counts', rows: [] };
+  const tubes = { needle: 'FROM [PDAS_TP1U2].dbo.TubeTypes', rows: [] };
+  const packSchemas = { needle: 'FROM [PDAS_TP1U2].dbo.PackSchemas', rows: [] };
+  const pallets = { needle: 'FROM [PDAS_TP1U2].dbo.Pallets', rows: [] };
+  // Unchanged from PDAS's point of view for the first test: matches the
+  // pdas_observed row seeded below (sp 1960 / om 50 / op 50).
+  const materialUnchanged = {
+    MaterialId: 20, BlendId: 1, CountId: 2, TubeTypeId: 3, MaterialSetpointWeight: 1960, MaterialActive: true,
+    MaterialDesc1: '205-IL0-SD', MaterialDesc2: null, MaterialWeightOffsetMinus: 50, MaterialWeightOffsetPlus: 50,
+  };
+  // A genuine PDAS change for the second test: differs from BOTH the seeded
+  // pdas_observed row (1950) AND the sms_local row (1970), so a false match
+  // against either one cannot make this test pass by accident.
+  const materialChanged = { ...materialUnchanged, MaterialSetpointWeight: 1990 };
+
+  const seedRowsForRegression = () => [
+    { sp: 1960, om: 50, op: 50, effectiveFrom: '2026-08-01T00:00:00.000Z', source: 'pdas_observed' },
+    { sp: 1970, om: 50, op: 50, effectiveFrom: '2026-09-01T00:00:00.000Z', source: 'sms_local' },
+  ];
+
+  it(
+    'an engineer\'s sms_local override that differs from PDAS, with PDAS itself unchanged, ' +
+      'survives a sync pass — no superseding row is written',
+    async () => {
+      const ifl = fakePool([blends, counts, tubes, { needle: 'FROM [PDAS_TP1U2].dbo.Materials', rows: [materialUnchanged] }, packSchemas, pallets]);
+      const app = versionTablePool(seedRowsForRegression());
+
+      await seedProducts(app, ifl, 'PDAS_TP1U2');
+
+      // THE regression: against the unscoped (buggy) query this reads back
+      // the newest row of ANY source — the sms_local row at sp=1970 — sees it
+      // disagree with PDAS's real, unchanged 1960, and wrongly concludes PDAS
+      // changed. Scoped to source='pdas_observed' it reads back sp=1960,
+      // agrees with PDAS, and writes nothing.
+      expect(app.inserts).toHaveLength(0);
+      // The engineer's row is still there, still the newest for its window —
+      // rule 12 holds because nothing was appended on top of it.
+      expect(app.rows).toHaveLength(2);
+      expect(app.rows.find((r) => r.source === 'sms_local')?.sp).toBe(1970);
+    },
+  );
+
+  it('a genuine PDAS change is still recorded even though a newer sms_local row exists — the mirror is not broken by the fix', async () => {
+    const ifl = fakePool([blends, counts, tubes, { needle: 'FROM [PDAS_TP1U2].dbo.Materials', rows: [materialChanged] }, packSchemas, pallets]);
+    const app = versionTablePool(seedRowsForRegression());
+
+    await seedProducts(app, ifl, 'PDAS_TP1U2');
+
+    expect(app.inserts).toHaveLength(1);
+    expect(app.inserts[0]).toMatchObject({ sp: 1990, om: 50, op: 50, source: 'pdas_observed' });
+    expect(app.inserts[0]!.reason).toBe('Mirror observed PDAS values differing from the newest recorded version.');
+    // The new row is timestamped after the sms_local row (SYSUTCDATETIME() vs
+    // the fixed 2026-09-01 literal), so — by the ordinary newest-wins rule
+    // every other version already follows, not a special case here — it
+    // takes over classification going forward without touching the
+    // sms_local row's own effective window. Pinned at the classification
+    // layer in productLimits.test.ts ("pdas_observed after an sms_local
+    // override...").
+    const newest = [...app.rows].sort((a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime())[0];
+    expect(newest?.source).toBe('pdas_observed');
+    expect(newest?.sp).toBe(1990);
   });
 });

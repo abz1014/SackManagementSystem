@@ -177,6 +177,42 @@ export async function seedProducts(
   // newest recorded version, append a new one. It is a LOWER BOUND on when the
   // change took effect: the mirror noticed it now; it may have happened any
   // time since the last pass. api/src/services/productLimits.ts reads these.
+  //
+  // REGRESSION FIXED HERE (found the same day it landed, 2e8b470 →
+  // setLocalLimitVersion, roadmap Phase 4 item 2). This mirror's only job is
+  // to track what PDAS itself says. "Has PDAS changed?" must therefore be
+  // answered by comparing PDAS's current values against the newest row THIS
+  // MIRROR ITSELF WROTE — source = 'pdas_observed' — never against the newest
+  // row of any source. Before this fix the comparison was unscoped: an
+  // engineer's 'sms_local' override (deliberately different from PDAS, by
+  // design — that is the whole point of a local override) is newer than any
+  // 'pdas_observed' row, so the very next sync pass after an engineer edited
+  // limits from Setup read that sms_local row back as "the mirror's last
+  // known value", saw it disagree with PDAS's unchanged live values, wrongly
+  // concluded PDAS had changed, and appended a fresh 'pdas_observed' row
+  // stamped now — which then outranked the engineer's row by recency and
+  // silently undid the edit within one sync interval (60s). An sms_local row
+  // is a deliberate local decision, not evidence about what PDAS holds, and
+  // must never feed this comparison.
+  //
+  // What happens when PDAS genuinely changes AFTER an sms_local override
+  // exists (step 2 of the fix): this comparison still only looks at
+  // 'pdas_observed' rows, so it still correctly detects the real change and
+  // appends a new 'pdas_observed' row — the mirror's job is to report what
+  // PDAS now holds, and that must never be suppressed just because a local
+  // override happens to exist. That new row is stamped SYSUTCDATETIME(), so
+  // by ordinary recency (ProductCatalogue.versionAt — newest effective_from
+  // wins) it becomes the version in force for readings from that moment
+  // onward, superseding the earlier sms_local override. This is the correct
+  // outcome, not a reopening of the bug: the bug was the mirror FABRICATING a
+  // change that never happened at PDAS; a genuinely newer, genuinely true
+  // observation of PDAS's own master data is real news and is allowed to
+  // govern classification going forward, exactly as any other newer version
+  // would (SOURCE_PRIORITY only breaks an exact-instant tie — it is not a
+  // cross-time precedence rule). Nothing here reclassifies any reading
+  // already judged under the sms_local version: that version's effective_from
+  // is untouched and still governs every reading between it and the new
+  // pdas_observed row (roadmap rule 12).
   for (const m of mats) {
     const sp = m.MaterialSetpointWeight == null ? null : Number(m.MaterialSetpointWeight);
     const om = m.MaterialWeightOffsetMinus == null ? null : Number(m.MaterialWeightOffsetMinus);
@@ -186,7 +222,7 @@ export async function seedProducts(
       .input('id', mssql.Int, m.MaterialId)
       .query<{ sp: number | null; om: number | null; op: number | null }>(
         `SELECT TOP 1 setpoint_g sp, offset_minus_g om, offset_plus_g op
-           FROM sms.product_limit_version WHERE product_id = @id
+           FROM sms.product_limit_version WHERE product_id = @id AND source = 'pdas_observed'
           ORDER BY effective_from DESC, version_id DESC`,
       );
     const l = latest.recordset[0];

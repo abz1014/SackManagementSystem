@@ -97,6 +97,38 @@ describe('sms_local — appending a version never reclassifies a past reading', 
   });
 });
 
+describe('pdas_observed after an sms_local override — step 2 of the 2e8b470 regression fix', () => {
+  // sms_local override on 1 Sep; PDAS itself then genuinely changes again on
+  // 15 Sep, and seedProducts.ts's now-fixed comparison (scoped to
+  // source='pdas_observed', so the sms_local row cannot mask this real
+  // change) appends a fresh pdas_observed row for it. Decision: the mirror's
+  // report of what PDAS NOW holds is real news, and is allowed to supersede
+  // the earlier local override going forward — an sms_local write is not a
+  // permanent veto over the mirror, only a version like any other. Nothing
+  // about the sms_local row's own effective window changes: it still governs
+  // every reading between the two dates (roadmap rule 12).
+  const cat = new ProductCatalogue(
+    [{ productId: 20, label: '205-IL0-SD', activeFlag: true }],
+    [
+      v({ effectiveFromUtc: '2026-08-01T00:00:00.000Z', effectiveIsLowerBound: true }),
+      v({ effectiveFromUtc: '2026-09-01T00:00:00.000Z', setpointG: 1970, source: 'sms_local' }),
+      v({ effectiveFromUtc: '2026-09-15T00:00:00.000Z', setpointG: 1990, source: 'pdas_observed', effectiveIsLowerBound: true }),
+    ],
+  );
+
+  it('a reading before the sms_local change is still judged by the original pdas_observed version', () => {
+    expect(cat.versionAt(20, T('2026-08-15T00:00:00Z'))).toMatchObject({ setpointG: 1960, source: 'pdas_observed' });
+  });
+
+  it('a reading between the sms_local change and the later genuine PDAS change is judged by the local override', () => {
+    expect(cat.versionAt(20, T('2026-09-05T00:00:00Z'))).toMatchObject({ setpointG: 1970, source: 'sms_local' });
+  });
+
+  it('a reading after the later, genuine PDAS change is judged by PDAS again — the record is not suppressed by the earlier local override', () => {
+    expect(cat.versionAt(20, T('2026-09-20T00:00:00Z'))).toMatchObject({ setpointG: 1990, source: 'pdas_observed' });
+  });
+});
+
 describe('SOURCE_PRIORITY — the tie-break when two versions share one instant', () => {
   const TIE = '2026-09-01T00:00:00.000Z';
 
