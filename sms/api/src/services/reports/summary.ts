@@ -34,11 +34,29 @@ import type { CsvRow, CsvTable } from './csv.js';
 
 export type KpiUnit = 'cones' | 'sacks' | 'kg' | 'g' | '%' | 'days' | 'stations' | 'seconds' | 'stops' | 'readings';
 export type BetterWhen = 'higher' | 'lower' | 'neither';
+/**
+ * The SHAPE of the figure, not its unit — this is what decides whether a
+ * coverage gap between two periods can move it (defect fix, 16 Sep 2026: the
+ * comparability rule below used to key off `unit` alone, which wrongly
+ * treated 'Average sack (kg)' and 'Cones per sack (cones)' as coverage-
+ * sensitive totals because their UNIT happens to match a count KPI's unit.
+ * Both are MEANS — a ratio of two totals — and a ratio is not moved by having
+ * fewer days on one side; a total is. `unit` stays purely presentational.
+ *
+ *  - 'total': a raw sum/count over the period (cones weighed, sacks weighed,
+ *    kg, seconds lost, stoppage count, readings excluded). Coverage-sensitive.
+ *  - 'rate': a mean, percentage or ratio of two totals (in-range %, mean
+ *    weight, average sack, cones per sack, stations flagged, days with
+ *    data). Coverage-independent by construction.
+ */
+export type KpiShape = 'total' | 'rate';
 
 export interface KpiDefinition {
   key: string;
   label: string;
   unit: KpiUnit;
+  /** See KpiShape. Drives comparability, independent of `unit`. */
+  shape: KpiShape;
   betterWhen: BetterWhen;
   /** One sentence; the SQL-level formula is in KPI-DEFINITIONS.md under the same key. */
   definition: string;
@@ -46,23 +64,23 @@ export interface KpiDefinition {
 
 /** The order the summary prints them in. Keys match KPI-DEFINITIONS.md. */
 export const KPI_DEFINITIONS: readonly KpiDefinition[] = [
-  { key: 'cones_weighed', label: 'Cones weighed', unit: 'cones', betterWhen: 'higher', definition: 'Cone readings in the period.' },
-  { key: 'cones_in_range_pct', label: 'Cones in range', unit: '%', betterWhen: 'higher', definition: 'Share of cone readings the scale marked in range.' },
-  { key: 'cones_rejected_by_scale', label: 'Rejected by the scale', unit: 'cones', betterWhen: 'lower', definition: 'Cone readings the scale marked out of range.' },
-  { key: 'rejects_at_inspection', label: 'Rejected at inspection', unit: 'cones', betterWhen: 'lower', definition: 'Cones the inspection stations rejected before they were weighed as cones.' },
-  { key: 'inspection_reject_rate_pct', label: 'Inspection reject rate', unit: '%', betterWhen: 'lower', definition: 'Inspection rejects over cones plus inspection rejects.' },
-  { key: 'cones_within_limits_pct', label: 'Within product limits', unit: '%', betterWhen: 'higher', definition: 'Cones classified within the limits in force at their own time, over cones that could be judged.' },
-  { key: 'mean_cone_weight_g', label: 'Mean cone weight', unit: 'g', betterWhen: 'neither', definition: 'Average recorded cone weight over the plausible population.' },
-  { key: 'cone_weight_sd_g', label: 'Cone weight spread', unit: 'g', betterWhen: 'lower', definition: 'Standard deviation of recorded cone weight over the plausible population.' },
-  { key: 'implausible_readings', label: 'Implausible readings excluded', unit: 'readings', betterWhen: 'lower', definition: 'Cone readings outside the plausibility window, excluded from every weight figure.' },
-  { key: 'sacks_weighed', label: 'Sacks weighed', unit: 'sacks', betterWhen: 'higher', definition: 'Sack readings in the period.' },
-  { key: 'sack_weight_kg', label: 'Sack weight', unit: 'kg', betterWhen: 'higher', definition: 'Sum of recorded sack weight, under the weight rule’s basis.' },
-  { key: 'avg_sack_kg', label: 'Average sack', unit: 'kg', betterWhen: 'neither', definition: 'Sack weight divided by sacks weighed.' },
-  { key: 'cones_per_sack', label: 'Cones per sack (approx.)', unit: 'cones', betterWhen: 'neither', definition: 'Cones weighed divided by sacks weighed — an approximation, no cone is keyed to its sack.' },
-  { key: 'time_lost_seconds', label: 'Time lost', unit: 'seconds', betterWhen: 'lower', definition: 'Sum of gaps between consecutive cones longer than the stop threshold.' },
-  { key: 'stoppages', label: 'Stoppages', unit: 'stops', betterWhen: 'lower', definition: 'Count of gaps between consecutive cones longer than the stop threshold.' },
-  { key: 'stations_flagged', label: 'Stations flagged for drift', unit: 'stations', betterWhen: 'lower', definition: 'Stations whose daily means failed a pattern test inside a qualifying run against the line.' },
-  { key: 'days_with_data', label: 'Days with readings', unit: 'days', betterWhen: 'neither', definition: 'Production days in the period holding at least one cone reading.' },
+  { key: 'cones_weighed', label: 'Cones weighed', unit: 'cones', shape: 'total', betterWhen: 'higher', definition: 'Cone readings in the period.' },
+  { key: 'cones_in_range_pct', label: 'Cones in range', unit: '%', shape: 'rate', betterWhen: 'higher', definition: 'Share of cone readings the scale marked in range.' },
+  { key: 'cones_rejected_by_scale', label: 'Rejected by the scale', unit: 'cones', shape: 'total', betterWhen: 'lower', definition: 'Cone readings the scale marked out of range.' },
+  { key: 'rejects_at_inspection', label: 'Rejected at inspection', unit: 'cones', shape: 'total', betterWhen: 'lower', definition: 'Cones the inspection stations rejected before they were weighed as cones.' },
+  { key: 'inspection_reject_rate_pct', label: 'Inspection reject rate', unit: '%', shape: 'rate', betterWhen: 'lower', definition: 'Inspection rejects over cones plus inspection rejects.' },
+  { key: 'cones_within_limits_pct', label: 'Within product limits', unit: '%', shape: 'rate', betterWhen: 'higher', definition: 'Cones classified within the limits in force at their own time, over cones that could be judged.' },
+  { key: 'mean_cone_weight_g', label: 'Mean cone weight', unit: 'g', shape: 'rate', betterWhen: 'neither', definition: 'Average recorded cone weight over the plausible population.' },
+  { key: 'cone_weight_sd_g', label: 'Cone weight spread', unit: 'g', shape: 'rate', betterWhen: 'lower', definition: 'Standard deviation of recorded cone weight over the plausible population.' },
+  { key: 'implausible_readings', label: 'Implausible readings excluded', unit: 'readings', shape: 'total', betterWhen: 'lower', definition: 'Cone readings outside the plausibility window, excluded from every weight figure.' },
+  { key: 'sacks_weighed', label: 'Sacks weighed', unit: 'sacks', shape: 'total', betterWhen: 'higher', definition: 'Sack readings in the period.' },
+  { key: 'sack_weight_kg', label: 'Sack weight', unit: 'kg', shape: 'total', betterWhen: 'higher', definition: 'Sum of recorded sack weight, under the weight rule’s basis.' },
+  { key: 'avg_sack_kg', label: 'Average sack', unit: 'kg', shape: 'rate', betterWhen: 'neither', definition: 'Sack weight divided by sacks weighed.' },
+  { key: 'cones_per_sack', label: 'Cones per sack (approx.)', unit: 'cones', shape: 'rate', betterWhen: 'neither', definition: 'Cones weighed divided by sacks weighed — an approximation, no cone is keyed to its sack.' },
+  { key: 'time_lost_seconds', label: 'Time lost', unit: 'seconds', shape: 'total', betterWhen: 'lower', definition: 'Sum of gaps between consecutive cones longer than the stop threshold.' },
+  { key: 'stoppages', label: 'Stoppages', unit: 'stops', shape: 'total', betterWhen: 'lower', definition: 'Count of gaps between consecutive cones longer than the stop threshold.' },
+  { key: 'stations_flagged', label: 'Stations flagged for drift', unit: 'stations', shape: 'rate', betterWhen: 'lower', definition: 'Stations whose daily means failed a pattern test inside a qualifying run against the line.' },
+  { key: 'days_with_data', label: 'Days with readings', unit: 'days', shape: 'rate', betterWhen: 'neither', definition: 'Production days in the period holding at least one cone reading.' },
 ];
 
 export interface KpiRow extends KpiDefinition {
@@ -75,12 +93,15 @@ export interface KpiRow extends KpiDefinition {
    * 2026, IFL's table rebuild has not been sent yet) that `priorPeriod`
    * (common.ts) — CALENDAR days — does not know about, so a prior period can
    * hold far fewer days of data than the current one while still being
-   * treated as a full comparison. For a COUNT-shaped KPI (cones, sacks, kg,
-   * seconds, stops, readings — see COUNT_SHAPED_UNITS below) that difference
-   * in coverage moves the total by itself, so `comparable` is false and the
-   * delta must not be presented as a trend. Rate and mean KPIs (%, g) and
-   * `days_with_data` itself stay comparable regardless — they are
-   * coverage-independent by construction.
+   * treated as a full comparison. For a `shape: 'total'` KPI (a raw sum/count
+   * — cones, sacks, kg, seconds, stops, readings) that difference in coverage
+   * moves the figure by itself, so `comparable` is false and the delta must
+   * not be presented as a trend. `shape: 'rate'` KPIs (percentages, means,
+   * ratios such as average sack weight or cones per sack, and
+   * `days_with_data` itself) stay comparable regardless — they are
+   * coverage-independent by construction. This is decided by `shape`, NOT by
+   * `unit`: a mean can share its unit with a total (average sack is 'kg',
+   * same as sack weight) without sharing its coverage sensitivity.
    */
   comparable: boolean;
   /** Why `comparable` is false, printed rather than left for the reader to guess; null when comparable. */
@@ -121,15 +142,6 @@ interface PeriodFigures {
   /** Raw product-id + cones, labelled later (once) by the caller. */
   productMix: { productId: number | null; cones: number }[];
 }
-
-/**
- * KPI units whose figure is a raw COUNT over the period (as opposed to a
- * rate, a mean, or the day-count itself) — the shapes a coverage gap moves by
- * itself. Chosen from KPI_DEFINITIONS' own `unit` field, not by key, so a new
- * count-shaped KPI is covered automatically and a rate/mean one never is by
- * mistake.
- */
-const COUNT_SHAPED_UNITS: ReadonlySet<KpiUnit> = new Set(['cones', 'sacks', 'kg', 'seconds', 'stops', 'readings']);
 
 /**
  * How much the two periods' COVERAGE may differ before a count-shaped KPI's
@@ -229,7 +241,7 @@ export async function getManagementSummary(
   const kpis: KpiRow[] = KPI_DEFINITIONS.map((k) => {
     const current = round(cur.values[k.key] ?? null);
     const before = round(prev.values[k.key] ?? null);
-    const comparable = !COUNT_SHAPED_UNITS.has(k.unit) || !covDiffers;
+    const comparable = k.shape !== 'total' || !covDiffers;
     return {
       ...k, current, prior: before, delta: delta(current, before),
       comparable, incomparableReason: comparable ? null : incomparableReason,

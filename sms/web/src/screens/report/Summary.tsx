@@ -6,10 +6,12 @@
  * Every row prints "awaiting IFL's approval": the set and its definitions
  * (KPI-DEFINITIONS.md) are the developer's proposal until IFL signs them.
  */
+import { useMemo } from 'react';
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtDayLong, fmtInt, fmtSpan } from '../../lib/fmt';
-import type { KpiRow, ManagementSummaryData, ProductMixRow } from '../../api';
+import type { KpiRow, ManagementSummaryData, ProductMixRow, ProductOption } from '../../api';
+import { distinctProductLabels } from '../../lib/productLabel';
 import { digitsFor, fmtDelta } from './model';
 
 function fmtValue(v: number | null, unit: KpiRow['unit']): string {
@@ -20,7 +22,17 @@ function fmtValue(v: number | null, unit: KpiRow['unit']): string {
   return unit === '%' ? `${s}%` : `${s} ${unit}`;
 }
 
-export function SummarySection({ d }: { d: ManagementSummaryData }) {
+export function SummarySection({ d, products }: { d: ManagementSummaryData; products: ProductOption[] }) {
+  // Defect fix (16 Sep 2026): several PDAS materials on this line share one
+  // plain description ("205-IL0-SD" is six of them), which is all the
+  // server's labelFor can print, so the product-mix table could show the
+  // same words on four rows the reader has no way to tell apart even though
+  // they are distinct products (distinct productId). Product.tsx already
+  // solves this for its own per-product rows via distinctProductLabels; the
+  // same disambiguation is reused here rather than inventing a second one.
+  // Done client-side because the server's product catalogue (productLimits.ts)
+  // is outside this worker's file ownership for this task.
+  const labels = useMemo(() => distinctProductLabels(products), [products]);
   if (d.coverage.current.daysWithData === 0) {
     return (
       <Block first>
@@ -99,7 +111,7 @@ export function SummarySection({ d }: { d: ManagementSummaryData }) {
               </tr>
             </thead>
             <tbody>
-              <ProductMixRows current={d.productMix.current} prior={d.productMix.prior} />
+              <ProductMixRows current={d.productMix.current} prior={d.productMix.prior} labels={labels} />
             </tbody>
           </table>
         </div>
@@ -109,7 +121,7 @@ export function SummarySection({ d }: { d: ManagementSummaryData }) {
 }
 
 /** The union of products either period ran, each period's own cone count beside it — so a reader can see whether a mean-weight comparison is even comparing the same products. */
-function ProductMixRows({ current, prior }: { current: ProductMixRow[]; prior: ProductMixRow[] }) {
+function ProductMixRows({ current, prior, labels }: { current: ProductMixRow[]; prior: ProductMixRow[]; labels: Map<number, string> }) {
   const curOf = new Map(current.map((m) => [m.productId, m]));
   const priorOf = new Map(prior.map((m) => [m.productId, m]));
   const ids = [...new Set([...curOf.keys(), ...priorOf.keys()])];
@@ -120,6 +132,10 @@ function ProductMixRows({ current, prior }: { current: ProductMixRow[]; prior: P
       </tr>
     );
   }
+  // The server's own label (`c ?? p)?.label`) is the plain PDAS description,
+  // which collides across materials; when the row names a real product,
+  // prefer the disambiguated label built from the full product list.
+  const nameOf = (id: number | null, row: ProductMixRow | undefined) => (id == null ? row?.label : (labels.get(id) ?? row?.label));
   return (
     <>
       {ids.map((id) => {
@@ -127,7 +143,7 @@ function ProductMixRows({ current, prior }: { current: ProductMixRow[]; prior: P
         const p = priorOf.get(id);
         return (
           <tr key={id ?? 'none'}>
-            <td>{(c ?? p)?.label}</td>
+            <td>{nameOf(id, c ?? p)}</td>
             <td className="n">{c ? fmtInt(c.cones) : '—'}</td>
             <td className="n">{p ? fmtInt(p.cones) : '—'}</td>
           </tr>

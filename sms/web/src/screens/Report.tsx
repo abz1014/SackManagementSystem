@@ -256,7 +256,7 @@ function Sections({
     case 'cone-weight': return <ConeWeightSection d={(data as ReportResponse<'cone-weight'>).report} names={names} />;
     case 'sack': return <SackSection d={(data as ReportResponse<'sack'>).report} products={products} />;
     case 'calibration': return <CalibrationSection d={(data as ReportResponse<'calibration'>).report} names={names} />;
-    case 'management-summary': return <SummarySection d={(data as ReportResponse<'management-summary'>).report} />;
+    case 'management-summary': return <SummarySection d={(data as ReportResponse<'management-summary'>).report} products={products} />;
     case 'machine-product': return <MachineProductSection d={(data as ReportResponse<'machine-product'>).report} onOpen={onOpenStation} />;
   }
 }

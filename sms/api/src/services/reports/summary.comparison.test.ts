@@ -124,6 +124,18 @@ describe('management summary — a comparison may not be an artefact of coverage
     const mean = d.kpis.find((k) => k.key === 'mean_cone_weight_g')!;
     expect(mean.comparable).toBe(true);
 
+    // Defect fix (16 Sep 2026): these two are MEANS/RATIOS whose unit happens
+    // to match a count KPI's unit ('kg' like sack_weight_kg, 'cones' like
+    // cones_weighed) — they must not be swept into the count-shaped group by
+    // unit alone. A coverage gap does not make the average sack lighter or
+    // change how many cones go in a sack.
+    const avgSack = d.kpis.find((k) => k.key === 'avg_sack_kg')!;
+    expect(avgSack.comparable).toBe(true);
+    expect(avgSack.incomparableReason).toBeNull();
+    const conesPerSack = d.kpis.find((k) => k.key === 'cones_per_sack')!;
+    expect(conesPerSack.comparable).toBe(true);
+    expect(conesPerSack.incomparableReason).toBeNull();
+
     // days_with_data IS the coverage figure — always comparable, never suppressed.
     expect(d.kpis.find((k) => k.key === 'days_with_data')!.comparable).toBe(true);
   });
