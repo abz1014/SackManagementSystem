@@ -52,15 +52,27 @@
  * same shape as the first three: flag check first, the vendor's proc with its
  * OUTPUT @error/@errorMsg, an echo-back read of the row PDAS now holds, the
  * app-side mirror refreshed, and one sms.product_change row whatever happened.
- * Verified from the proc bodies in PDAS_TP1U2_SEP07 (read-only, 15 Sep 2026):
+ * Verified from the proc bodies in PDAS_TP1U2_SEP07 (read-only, 15 Sep 2026),
+ * EXCEPT the one piece the 16 Sep 2026 introspection task could not confirm —
+ * see the AddTubeType bullet below and PROC_PARAMS' own comment:
  *   - AddBlend / AddCount: INSERT, duplicate check `name LIKE @name` (so the
  *     vendor's own compare is case-insensitive and treats '_' and '%' as
  *     wildcards), -4001/-6001 "already exist", -4004/-6004 "empty" — a check
  *     written `= NULL` that can never fire; the empty case is refused here.
- *   - AddTubeType: OUTPUT parameter is literally `@typeTypeId` (vendor typo),
- *     `@tubeForm int = 0` whose own validation refuses 0 (-5002: must be 1 or
- *     2), so a form is always passed; -5001 duplicate (name AND form), -5003
- *     weight <= 0. 26 of the 27 tube types on this line are form 2.
+ *   - AddTubeType: `@tubeForm int = 0` whose own validation refuses 0 (-5002:
+ *     must be 1 or 2), so a form is always passed; -5001 duplicate (name AND
+ *     form), -5003 weight <= 0. 26 of the 27 tube types on this line are form
+ *     2. Its OUTPUT parameter is bound below as `@typeTypeId` — presumed to be
+ *     the vendor's own typo, by analogy with every other Add* proc's pattern —
+ *     but UNLIKE the other six procedures this one was never confirmed: no
+ *     screenshot of it exists (Desktop/SPS unzip/SPS/*.jpg has one for each of
+ *     the other six), and the 16 Sep 2026 introspection attempt against
+ *     PDAS_TP1U2_SEP07 found that IFL_DB_USER holds only db_datareader there
+ *     — no EXECUTE/VIEW DEFINITION on any procedure — so sys.parameters and
+ *     OBJECT_DEFINITION returned nothing for it, or for any of the twelve
+ *     (scripts/pdas-introspect.mjs; the grant that would fix this is proposed,
+ *     not applied, at db/bootstrap/11_pdas_procedure_metadata.template.sql).
+ *     Do not read this binding as confirmed.
  *   - CreatePallet: INSERT keyed on (MaterialId, PackSchemaId, Lot), -8001
  *     "Pallet already exist" regardless of PalletActive, -8004 when material,
  *     schema or lot is empty, -8002 bad active bit; @labelType defaults to 1
@@ -76,6 +88,81 @@ import mssql from 'mssql';
 import type { PdasWriteConfig } from '../config.js';
 import { appendLimitVersion } from './productLimits.js';
 import { recordAudit } from './audit.js';
+
+/**
+ * The only seven vendor procedures this module ever calls, and the only
+ * values `execProc`'s `proc` parameter accepts (see execProc below) — a
+ * procedure identifier can never come from anywhere else.
+ */
+export type VendorProc =
+  | 'CreateMaterial'
+  | 'SetMaterialStatusActive'
+  | 'AddBlend'
+  | 'AddCount'
+  | 'AddTubeType'
+  | 'CreatePallet'
+  | 'SetPalletStatusActive';
+
+/**
+ * Every parameter each vendor procedure declares — the ground truth this
+ * whole file's `.input()` / `.output()` calls must stay a subset of (see
+ * pdasWrite.test.ts's "proc bindings match PROC_PARAMS" test, which exercises
+ * every method through a fake writer pool and checks exactly that).
+ *
+ * PROVENANCE, per procedure, from the 16 Sep 2026 PDAS introspection task:
+ *
+ *   - CreateMaterial, SetMaterialStatusActive, AddBlend, AddCount,
+ *     CreatePallet, SetPalletStatusActive — READ DIRECTLY off the real plant
+ *     server's own metadata: SSMS's "Execute Procedure..." parameter grid
+ *     (which SSMS builds from sys.parameters, exactly what this task's own
+ *     script queries), captured 7 Sep 2026 against TP1-PDAS\PDAS as
+ *     screenshots at Desktop/SPS unzip/SPS/*.jpg ("Create Material Proc.jpg",
+ *     "Add blend proc.jpg", "Add Count.jpg", "Create Pallet.jpg",
+ *     "Set Material Active.jpg", "Set PalletStatus.jpg"). This is what
+ *     PROVED CreateMaterial has five @materialDesc parameters, not two —
+ *     the code bound only materialDesc1/2 until this task (see createProduct
+ *     above). Every OTHER parameter on these six procedures — names, types,
+ *     which are OUTPUT — matches what the code already bound; nothing else
+ *     changed.
+ *   - AddTubeType — NOT independently confirmed. No screenshot of it exists,
+ *     and sms/scripts/pdas-introspect.mjs (SELECT-only, against the local
+ *     PDAS_TP1U2_SEP07 copy, using the existing read-only IFL_DB_* login)
+ *     could not read it either: that login holds only db_datareader there —
+ *     by design, per db/bootstrap/10_ifl_readonly_login.template.sql — which
+ *     carries no EXECUTE / VIEW DEFINITION on ANY procedure, so sys.parameters
+ *     and OBJECT_DEFINITION returned nothing for all twelve procedures alike,
+ *     not just this one (db/bootstrap/11_pdas_procedure_metadata.template.sql
+ *     proposes the metadata-only grant that would fix this; it has not been
+ *     applied). The three input names (tubeType, tubeForm, tubeWeight) follow
+ *     the pattern every confirmed Add* proc uses and were never in question;
+ *     the OUTPUT id name 'typeTypeId' is still only the vendor's presumed
+ *     typo. Treat this one entry as unverified, not as evidence it is right.
+ *
+ * has_default_value could not be read for any procedure (same permission gap)
+ * — CreateMaterial is called with all five @materialDesc parameters bound
+ * explicitly for exactly that reason: it is correct whether or not defaults
+ * exist, so the missing evidence does not block the fix.
+ */
+export const PROC_PARAMS: Record<VendorProc, readonly string[]> = {
+  CreateMaterial: [
+    'error', 'errorMsg', 'materialId',
+    'blendId', 'countId', 'tubeTypeId',
+    'materialSetpointWeight', 'materialWeightOffsetMinus', 'materialWeightOffsetPlus',
+    'materialActive',
+    'materialDesc1', 'materialDesc2', 'materialDesc3', 'materialDesc4', 'materialDesc5',
+  ],
+  SetMaterialStatusActive: ['error', 'errorMsg', 'materialId', 'materialActive'],
+  AddBlend: ['error', 'errorMsg', 'blendId', 'blend'],
+  AddCount: ['error', 'errorMsg', 'countId', 'count'],
+  // Unverified — see the provenance note above.
+  AddTubeType: ['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight'],
+  CreatePallet: [
+    'error', 'errorMsg', 'palletId',
+    'materialId', 'packSchemaId', 'lot', 'steamProg', 'labelType', 'routing', 'palletActive',
+    'palletDesc1', 'palletDesc2', 'palletDesc3', 'palletDesc4', 'palletDesc5',
+  ],
+  SetPalletStatusActive: ['error', 'errorMsg', 'palletId', 'palletActive'],
+};
 
 /** The six fields an operator sees and may change on an existing product. */
 export interface ProductFields {
@@ -392,6 +479,15 @@ export class PdasWriter {
         .input('materialActive', mssql.Bit, p.fields.active)
         .input('materialDesc1', mssql.NVarChar(255), p.fields.desc1 ?? '')
         .input('materialDesc2', mssql.NVarChar(255), p.fields.desc2 ?? '')
+        // CreateMaterial has FIVE @materialDesc parameters, not two (confirmed
+        // 16 Sep 2026 — see PROC_PARAMS below). ProductFields only carries
+        // desc1/desc2 (the two IFL's own SOP populates), so 3-5 are bound to
+        // an empty string, matching IFL's own runbook practice rather than
+        // leaving mssql to fail the call over parameters this app has no value
+        // for. Before this fix these three were never bound at all.
+        .input('materialDesc3', mssql.NVarChar(255), '')
+        .input('materialDesc4', mssql.NVarChar(255), '')
+        .input('materialDesc5', mssql.NVarChar(255), '')
         .output('error', mssql.Int, 0)
         .output('errorMsg', mssql.NVarChar(255))
         .output('materialId', mssql.Int)
@@ -721,11 +817,16 @@ export class PdasWriter {
   /**
    * Execute one vendor proc that answers through OUTPUT @error/@errorMsg and
    * (for the creates) an OUTPUT id. `idParam` is the proc's own name for that
-   * parameter — AddTubeType's is `typeTypeId`, the vendor's typo, and mssql
-   * binds by name so it must be spelled the vendor's way.
+   * parameter — AddTubeType's is bound as `typeTypeId`, presumed to be the
+   * vendor's own typo, UNCONFIRMED (see the file header and PROC_PARAMS) —
+   * and mssql binds by name so it must be spelled the vendor's way.
+   *
+   * `proc` is a `VendorProc`, not `string`: the only seven names that may ever
+   * reach `dbo.${proc}` below are the module's own literals, never a value
+   * built or passed in from outside it.
    */
   private async execProc(
-    proc: string,
+    proc: VendorProc,
     bind: (r: mssql.Request) => mssql.Request,
     idParam: string | null,
   ): Promise<{ code: number; raw: string | null; id: number | null }> {
@@ -875,7 +976,12 @@ export class PdasWriter {
       const r = await this.execProc(
         'AddTubeType',
         (q) => q.input('tubeType', mssql.NVarChar(255), name).input('tubeForm', mssql.Int, tubeForm).input('tubeWeight', mssql.Float, p.tubeWeightG),
-        'typeTypeId', // sic — the vendor's parameter name
+        // UNVERIFIED (16 Sep 2026 introspection task, PDAS_TP1U2_SEP07): no
+        // screenshot of AddTubeType exists and IFL_DB_USER cannot see any
+        // procedure's metadata on this login (see the file header and
+        // PROC_PARAMS below). 'typeTypeId' is the vendor's presumed typo,
+        // unchanged from the original guess pending real confirmation.
+        'typeTypeId',
       );
       if (r.code !== 0 || r.id == null) {
         const message = explainPdasError('AddTubeType', r.code, r.raw);
