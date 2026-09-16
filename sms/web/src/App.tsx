@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, REPORT_TYPES, CONE_STATES,
-  type AuthUser, type ReportType, type ConeState,
+  type AuthUser, type ReportType, type ConeState, type SpcType,
 } from './api';
 import { LiveProvider, readAsOf, useLive, usePlantNow } from './lib/live';
 import { assessHealth } from './lib/health';
@@ -101,6 +101,9 @@ export interface Route {
 
   /** Weight: which chart. Chart station is the shared field above. */
   weightMode: WeightMode;
+  /** Weight: the chart's own population, cone or sack (UX Phase 5 Brief 3
+   *  unit U6, 16 Sep 2026, URL key `wt`) — follows the exact `wm` pattern. */
+  weightChartType: SpcType;
 
   /** Sacks: the ledger's unit, and the history register's page. */
   sacksUnit: SackUnit;
@@ -138,6 +141,7 @@ const DEFAULT_ROUTE: Omit<Route, 'view' | 'period' | 'sheet' | 'at' | 'readingsF
   readingsStates: [],
   readingsPage: 1,
   weightMode: 'time',
+  weightChartType: 'cone',
   sacksUnit: 'sacks',
   sacksPage: 1,
   rejectsCode: null,
@@ -189,6 +193,7 @@ export function parseRoute(): Route {
   const readingsPage = Math.max(1, parseId(p.get('rp')) ?? 1);
 
   const weightMode: WeightMode = p.get('wm') === 'dist' ? 'dist' : 'time';
+  const weightChartType: SpcType = p.get('wt') === 'sack' ? 'sack' : 'cone';
 
   const sacksUnit: SackUnit = p.get('su') === 'kg' ? 'kg' : 'sacks';
   const sacksPage = Math.max(1, parseId(p.get('sp')) ?? 1);
@@ -209,6 +214,7 @@ export function parseRoute(): Route {
     readingsStates,
     readingsPage,
     weightMode,
+    weightChartType,
     sacksUnit,
     sacksPage,
     rejectsCode,
@@ -233,6 +239,7 @@ export function routeSearch(r: Route): string {
   if (r.readingsPage > 1) p.set('rp', String(r.readingsPage));
 
   if (r.weightMode !== DEFAULT_ROUTE.weightMode) p.set('wm', r.weightMode);
+  if (r.weightChartType !== DEFAULT_ROUTE.weightChartType) p.set('wt', r.weightChartType);
 
   if (r.sacksUnit !== DEFAULT_ROUTE.sacksUnit) p.set('su', r.sacksUnit);
   if (r.sacksPage > 1) p.set('sp', String(r.sacksPage));
@@ -458,6 +465,8 @@ function Chrome({
               period={period}
               mode={route.weightMode}
               onModeChange={(m) => go({ weightMode: m })}
+              chartType={route.weightChartType}
+              onChartTypeChange={(t) => go({ weightChartType: t })}
               chartStation={route.station}
               onChartStationChange={(v) => go({ station: v })}
               onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}

@@ -36,10 +36,10 @@ import {
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
-import { fmtG, fmtInt, fmtPct1 } from '../lib/fmt';
+import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
-  type SpcData, type StationRow, type WeightStationRow, type WeightStationsData,
+  type SpcData, type SpcType, type StationRow, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
 /** Roadmap Phase 2b (16 Sep 2026): the chart toggle, in the URL as `wm`. */
@@ -49,6 +49,8 @@ export function WeightScreen({
   period,
   mode,
   onModeChange,
+  chartType,
+  onChartTypeChange,
   chartStation,
   onChartStationChange,
   onOpenStation,
@@ -58,12 +60,24 @@ export function WeightScreen({
   mode: WeightMode;
   onModeChange: (m: WeightMode) => void;
   /**
+   * UX Phase 5 Brief 3 unit U6 (16 Sep 2026), URL key `wt`, default `cone`:
+   * the chart's own population. spc.ts deliberately returns `source:'none'`
+   * for sacks — the product setpoint is a CONE weight in grams, a sack
+   * weight is kilograms, so no tolerance ever applies to a sack chart. The
+   * headline, the three figures above and the station table below stay
+   * cone-only regardless of this toggle — see the note printed under the
+   * chart when `chartType === 'sack'`.
+   */
+  chartType: SpcType;
+  onChartTypeChange: (v: SpcType) => void;
+  /**
    * One station's stream, or the whole line (roadmap Phase 4, 14 Sep 2026).
    * The chart only: the figures above it and the station table below stay
    * line-wide, so the selector cannot make the headline describe one scale.
    * SHARED with Readings, Report and Rejects (Phase 2b) — see App.tsx's
    * Route note: it is the same "which station" a link should carry between
-   * them, not a Weight-only value.
+   * them, not a Weight-only value. Sacks carry no station column at all
+   * (CLAUDE.md), so it is ignored while `chartType === 'sack'`.
    */
   chartStation: number | null;
   onChartStationChange: (v: number | null) => void;
@@ -99,7 +113,12 @@ export function WeightScreen({
   // target: without it /api/spc has no spec and the chart shows a line with
   // nothing to judge it against.
   const productId = st.data?.data.productId ?? null;
-  const spc = usePolling(
+  // ALWAYS cone, line-wide: feeds the headline and the three figures, which
+  // stay cone-only no matter what the chart toggle below is set to (UX Phase
+  // 5 Brief 3 unit U6, 16 Sep 2026) — a sack chart's own mean is grams-vs-
+  // kilograms nonsense sitting under a headline about cones if this and the
+  // chart's own query below were ever the same call.
+  const coneLine = usePolling(
     () =>
       getSpc({
         type: 'cone',
@@ -109,14 +128,33 @@ export function WeightScreen({
         productId: productId ?? undefined,
       }),
     period.live ? 60_000 : 5 * 60_000,
-    `spc:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
+    `spc-cone:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
   );
-  // One station's stream for the chart (Phase 4). Fetched only while a station
-  // is chosen; the line-wide `spc` above keeps feeding the headline and the
-  // figures, so choosing a station cannot make them describe one scale.
+  // The CHART's own population — follows `chartType`. For 'cone' with no
+  // station chosen this duplicates `coneLine` above; the two are kept as
+  // separate calls (rather than one shared for both purposes) so a future
+  // change to either never has to worry about the other's contract. Never
+  // sent a productId for a sack chart: spc.ts returns source:'none' for
+  // sacks regardless, and a cone product id beside a sack request would
+  // misleadingly imply one was consulted.
+  const spc = usePolling(
+    () =>
+      getSpc({
+        type: chartType,
+        from: period.from,
+        to: period.to,
+        shift: period.shift ?? undefined,
+        productId: chartType === 'cone' ? (productId ?? undefined) : undefined,
+      }),
+    period.live ? 60_000 : 5 * 60_000,
+    `spc:${chartType}:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
+  );
+  // One station's stream for the chart (Phase 4), cone only: sack1_TP1U2
+  // carries no station/machine column, so there is nothing to select a
+  // station's stream from when chartType is 'sack'.
   const stationSpc = usePolling(
     () =>
-      chartStation == null
+      chartType !== 'cone' || chartStation == null
         ? Promise.resolve(null)
         : getSpc({
             type: 'cone',
@@ -127,7 +165,7 @@ export function WeightScreen({
             station: chartStation,
           }),
     period.live ? 60_000 : 5 * 60_000,
-    `spc-station:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}:${chartStation ?? 'none'}`,
+    `spc-station:${chartType}:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}:${chartStation ?? 'none'}`,
   );
 
   const names = usePolling(() => getStations(), 10 * 60_000, 'stations');
@@ -151,13 +189,19 @@ export function WeightScreen({
   // moves when the figures and the table arrive.
   if (!st.data) return <ScreenSkeleton question={W.question.weight} figures={3} table={8} />;
   const d = st.data.data;
-  // `sLine` is always the line; `s` is what the chart draws — the station's
-  // stream while one is chosen, the line otherwise.
-  const sLine = spc.data?.data ?? null;
-  const s = chartStation == null ? sLine : (stationSpc.data?.data ?? null);
-  const chartLoading = chartStation == null ? spc.loading : stationSpc.loading;
-  const chartError = chartStation == null ? spc.error : stationSpc.error;
-  const chartRefresh = chartStation == null ? spc.refresh : stationSpc.refresh;
+  // `sLine` feeds the headline and the three figures — always cone, always
+  // the whole line, from `coneLine` above, never from the chart's own
+  // (possibly sack, possibly one-station) query. `s` is what the CHART
+  // draws — the station's stream while one is chosen, the line otherwise. A
+  // station stream only ever exists for cone (stationSpc is deliberately
+  // never fetched for sack, above), so a leftover `st=` from
+  // Readings/Rejects/Report cannot make a sack chart read as empty.
+  const usingStation = chartType === 'cone' && chartStation != null;
+  const sLine = coneLine.data?.data ?? null;
+  const s = usingStation ? (stationSpc.data?.data ?? null) : (spc.data?.data ?? null);
+  const chartLoading = usingStation ? stationSpc.loading : spc.loading;
+  const chartError = usingStation ? stationSpc.error : spc.error;
+  const chartRefresh = usingStation ? stationSpc.refresh : spc.refresh;
 
   return (
     <>
@@ -180,7 +224,22 @@ export function WeightScreen({
               {/* The median beside the mean (roadmap Phase 9 item 1): the same
                   population, the same period and shift, from the same call. */}
               {sLine && sLine.count > 0 && sLine.median != null ? `${W.calibration.medianNote(fmtG(sLine.median))} · ` : ''}
-              {d.targetG != null ? `product target ${fmtG(d.targetG)}` : W.weight.noTarget}
+              {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the bare "product
+                  target 1,960 g" carried no product name and no time
+                  statement — the same target object the station table below
+                  already resolves (targetG/productLabel/targetEffectiveFromUtc,
+                  Wave 1's be5ac3e), so the figure and the table can never
+                  disagree about which product or which version of its limits
+                  is being shown. Same phrasing report/ConeWeight.tsx (U1)
+                  uses for the identical fact. */}
+              {d.targetG != null ? (
+                <>
+                  {W.reports.target(fmtG(d.targetG), d.productLabel ?? W.reports.wholeLine)}
+                  {d.targetEffectiveFromUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}`}
+                </>
+              ) : (
+                W.weight.noTarget
+              )}
             </span>
           </div>
           <div>
@@ -208,32 +267,49 @@ export function WeightScreen({
 
       <Block>
         <div className="row between" style={{ marginBottom: 12 }}>
-          <Toggle
-            label="Chart"
-            value={mode}
-            onChange={onModeChange}
-            options={[
-              { key: 'time', label: W.weight.overTime },
-              { key: 'dist', label: W.weight.distribution },
-            ]}
-          />
+          <div className="row">
+            <Toggle
+              label="Chart"
+              value={mode}
+              onChange={onModeChange}
+              options={[
+                { key: 'time', label: W.weight.overTime },
+                { key: 'dist', label: W.weight.distribution },
+              ]}
+            />
+            {/* UX Phase 5 Brief 3 unit U6 (16 Sep 2026), URL key `wt`: the
+                chart's own population, cone or sack. Sacks carry no station
+                column (CLAUDE.md), so the station selector beside this one
+                only applies to cone and is hidden otherwise. */}
+            <Toggle
+              label="Weight"
+              value={chartType}
+              onChange={onChartTypeChange}
+              options={[
+                { key: 'cone', label: W.readings.cones },
+                { key: 'sack', label: W.readings.sacks },
+              ]}
+            />
+          </div>
           {/* The station selector (Phase 4): the chart for one scale's stream. */}
-          <label className="chip">
-            {W.cone.stationSelect}
-            <select
-              value={chartStation ?? ''}
-              aria-label={W.cone.stationSelect}
-              onChange={(e) => onChartStationChange(e.target.value === '' ? null : Number(e.target.value))}
-              style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
-            >
-              <option value="">{W.cone.wholeLine}</option>
-              {(names.data?.stations ?? []).map((n) => (
-                <option key={n.stationId} value={n.stationId}>
-                  {stationLabel(n, n.stationId)}
-                </option>
-              ))}
-            </select>
-          </label>
+          {chartType === 'cone' && (
+            <label className="chip">
+              {W.cone.stationSelect}
+              <select
+                value={chartStation ?? ''}
+                aria-label={W.cone.stationSelect}
+                onChange={(e) => onChartStationChange(e.target.value === '' ? null : Number(e.target.value))}
+                style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+              >
+                <option value="">{W.cone.wholeLine}</option>
+                {(names.data?.stations ?? []).map((n) => (
+                  <option key={n.stationId} value={n.stationId}>
+                    {stationLabel(n, n.stationId)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {chartError && !s ? (
           // Finding H14 (Sep 2026 audit): this used to fall through to
@@ -245,19 +321,29 @@ export function WeightScreen({
         ) : !s || s.subgroups.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : mode === 'time' ? (
-          <OverTime spc={s} target={d.targetG} multiDay={period.from !== period.to} />
+          <OverTime spc={s} target={chartType === 'cone' ? d.targetG : null} multiDay={period.from !== period.to} />
         ) : (
-          <Distribution spc={s} target={d.targetG} />
+          <Distribution spc={s} target={chartType === 'cone' ? d.targetG : null} />
         )}
         {/* The limit lines are one version of the product's tolerance — the
             one in force at the end of the period. When the tolerance changed
             inside the period, say so; the dashed lines then did not apply to
             every point, and a reader judging last week's cones by this
-            week's limits is the error the versioned history exists to end. */}
+            week's limits is the error the versioned history exists to end.
+            Cone only: spc.ts always answers source:'none' for sack. */}
         {s && s.spec.source === 'product' && (s.spec.limitsChangedInPeriod ?? 0) > 0 && (
           <p className="mut sm" style={{ marginTop: 10 }}>
             {W.weight.limitsChanged(s.spec.limitsChangedInPeriod!)}
           </p>
+        )}
+        {/* UX Phase 5 Brief 3 unit U6: a sack weight is kilograms and the
+            product setpoint is a cone weight in grams, so spc.ts refuses to
+            invent a tolerance for it (source:'none' always, spc.ts:202-204).
+            State the absence — never a number — and that the headline, the
+            three figures above and the station table below stay cone-only,
+            so a reader cannot mistake them for describing this chart. */}
+        {chartType === 'sack' && (
+          <p className="mut sm" style={{ marginTop: 10 }}>{W.weight.sackNoTarget}</p>
         )}
         {/* The population under the chart, stated once: the same count and
             the same exclusion the report and the reconciliation print. */}
@@ -276,6 +362,24 @@ export function WeightScreen({
         <div className="tw">
           <StationTable rows={d.stations} data={d} names={names.data?.stations ?? []} onOpen={onOpenStation} />
         </div>
+        {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the chart's sibling
+            qualifiers, previously stopping at the chart (`limitsChanged`
+            above) and never printed under the table it equally applies to.
+            Both describe the LINE-WIDE target's own history over the window
+            — a station on `targetBasis: 'station_material'` is unaffected by
+            either, but the table carries no per-row space to say so, and the
+            line-wide target is still what a `targetBasis: 'line_product'` or
+            'mixed' fallback ultimately traces back to. */}
+        {(d.limitsChangedInWindow ?? 0) > 0 && (
+          <p className="mut sm" style={{ marginTop: 10 }}>
+            {W.weight.limitsChangedTable(d.limitsChangedInWindow!)}
+          </p>
+        )}
+        {d.productChangesInWindow > 0 && (
+          <p className="mut sm" style={{ marginTop: 10 }}>
+            {W.weight.productChangedTable(d.productChangesInWindow)}
+          </p>
+        )}
       </Block>
 
       <div className="page">
@@ -302,9 +406,13 @@ export function WeightScreen({
         })()}
         {s && (
           <p>
-            Over this period: {fmtInt(s.count)} cones, mean {fmtG(s.mean)}
-            {s.median != null ? `, median ${fmtG(s.median)}` : ''}, standard deviation{' '}
-            {s.stdevOverall.toFixed(2)} g overall and {s.stdevWithin.toFixed(2)} g within{' '}
+            {/* UX Phase 5 Brief 3 unit U6 (16 Sep 2026): `s` follows the
+                chart toggle now, so its population word and its unit (spc.ts's
+                own `unit`, 'g' for cones or 'kg' for sacks) must too — this
+                used to hardcode "cones" and "g" unconditionally. */}
+            Over this period: {fmtInt(s.count)} {kindWord(s.unit)}, mean {fmtW(s.mean, s.unit)}
+            {s.median != null ? `, median ${fmtW(s.median, s.unit)}` : ''}, standard deviation{' '}
+            {s.stdevOverall.toFixed(2)} {s.unit} overall and {s.stdevWithin.toFixed(2)} {s.unit} within{' '}
             {s.bucketLabel} groups. {s.xbarOutOfControl} group averages fell outside the control band and{' '}
             {s.nelsonFlagged} carried a non-random pattern.
             {s.capability.cpk != null && ` Cp ${s.capability.cp?.toFixed(2)}, Cpk ${s.capability.cpk.toFixed(2)}.`}
@@ -338,8 +446,21 @@ function headline(d: WeightStationsData, s: SpcData | null): string {
   const tail = need === 0 ? W.weight.allStationsSteady : W.weight.stationsNeedLook(need);
   if (d.targetG == null) return `${W.weight.headlineNoTarget(mean)} ${tail}`;
   // Until the weight basis is confirmed the difference is not stated as a
-  // finding — see the file header.
-  return `${W.weight.headlineUnconfirmed(mean, fmtG(d.targetG))} ${tail}`;
+  // finding — see the file header. The target itself still carries its
+  // product and the instant its limits took effect (UX Phase 5 Brief 3 unit
+  // U2, 16 Sep 2026) — the bare "1,960 g" here used to name neither, so a
+  // reader had no way to tell whether it was the same target the station
+  // table below was judging against.
+  return `${W.weight.headlineUnconfirmed(mean, targetPhrase(d))} ${tail}`;
+}
+
+/** "1,960 g (201-IH0-SD), in force since 16/09/2026, 09:00:00" — the target
+ *  with its product and the instant its limits took effect, so the headline
+ *  and the figure note never state a bare number the station table below
+ *  cannot be checked against. */
+function targetPhrase(d: WeightStationsData): string {
+  const base = `${fmtG(d.targetG)} (${d.productLabel ?? W.reports.wholeLine})`;
+  return d.targetEffectiveFromUtc ? `${base}, ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}` : base;
 }
 
 /** The complement of the in-range share, to one decimal. */
@@ -350,6 +471,24 @@ function rejectedShare(inRangePct: number | null): string {
 }
 
 /* ----------------------------------------------------------------- charts */
+
+/**
+ * UX Phase 5 Brief 3 unit U6 (16 Sep 2026): the chart now draws sack weights
+ * too (spc.ts's own `unit` field, 'g' | 'kg'), so every value it formats and
+ * every population word it prints has to follow the data's own type — a
+ * sack mean run through `fmtG` printed "47 g" for a genuinely 47-kilogram
+ * average, and "cones" read wrong under a sack chart. `W.readings.cones` /
+ * `.sacks` are the only existing plural words for the two populations
+ * (lowercased for mid-sentence use); there is no dedicated singular form in
+ * words.ts, so the aria-label below spells the two cases out rather than
+ * fabricate a new key.
+ */
+function fmtW(n: number | null | undefined, unit: 'g' | 'kg'): string {
+  return unit === 'kg' ? fmtKg(n) : fmtG(n);
+}
+function kindWord(unit: 'g' | 'kg'): string {
+  return unit === 'kg' ? W.readings.sacks.toLowerCase() : W.readings.cones.toLowerCase();
+}
 
 /**
  * Axis labels carry the day as soon as the window spans more than one.
@@ -393,18 +532,19 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
             // The pattern named on hover (roadmap Phase 9 item 3): the rule
             // labels were defined for the UI and never rendered — this read
             // "non-random pattern" for every one of the eight.
-            ? `${tickLabel(h.ts, multiDay)} · ${fmtG(h.mean)}, the average of ${fmtInt(h.n)} cones${
+            ? `${tickLabel(h.ts, multiDay)} · ${fmtW(h.mean, spc.unit)}, the average of ${fmtInt(h.n)} ${kindWord(spc.unit)}${
                 h.nelson.length ? ` · ${W.calibration.patternOn(h.nelson.map((id) => NELSON_RULE_LABEL[id]).join(', '))}` : h.xViolates ? ` · ${W.calibration.patternOn(NELSON_RULE_LABEL[1])}` : ''
               }`
             : null
         }
-        resting={`${g.length} groups of about ${fmtInt(Math.round(spc.count / Math.max(1, g.length)))} cones`}
+        resting={`${g.length} groups of about ${fmtInt(Math.round(spc.count / Math.max(1, g.length)))} ${kindWord(spc.unit)}`}
       />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label="Average cone weight over time"
+      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img"
+           aria-label={spc.unit === 'kg' ? 'Average sack weight over time' : 'Average cone weight over time'}
            onMouseLeave={() => setHover(null)}>
-        {spc.spec.usl != null && <RefLine y={y(spc.spec.usl)} x1={L} x2={width - R} label={`upper limit ${fmtG(spc.spec.usl)}`} dashed />}
+        {spc.spec.usl != null && <RefLine y={y(spc.spec.usl)} x1={L} x2={width - R} label={`upper limit ${fmtW(spc.spec.usl, spc.unit)}`} dashed />}
         {target != null && <RefLine y={y(target)} x1={L} x2={width - R} label={`target ${fmtG(target)}`} tone="ink" />}
-        {spc.spec.lsl != null && <RefLine y={y(spc.spec.lsl)} x1={L} x2={width - R} label={`lower limit ${fmtG(spc.spec.lsl)}`} dashed />}
+        {spc.spec.lsl != null && <RefLine y={y(spc.spec.lsl)} x1={L} x2={width - R} label={`lower limit ${fmtW(spc.spec.lsl, spc.unit)}`} dashed />}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
         <path d={linePath(g.map((p, i) => ({ x: x(i), y: y(p.mean) })))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
         {g.map((p, i) =>
@@ -461,10 +601,11 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
   return (
     <div ref={box}>
       <Readout
-        hovered={h ? `${fmtG(h.start)} to ${fmtG(h.end)} · ${fmtInt(h.count)} cones` : null}
-        resting={`${fmtInt(spc.count)} cones, ${fmtG(bins[0]!.start)} to ${fmtG(bins[bins.length - 1]!.end)}`}
+        hovered={h ? `${fmtW(h.start, spc.unit)} to ${fmtW(h.end, spc.unit)} · ${fmtInt(h.count)} ${kindWord(spc.unit)}` : null}
+        resting={`${fmtInt(spc.count)} ${kindWord(spc.unit)}, ${fmtW(bins[0]!.start, spc.unit)} to ${fmtW(bins[bins.length - 1]!.end, spc.unit)}`}
       />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label="Cone weight distribution"
+      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img"
+           aria-label={spc.unit === 'kg' ? 'Sack weight distribution' : 'Cone weight distribution'}
            onMouseLeave={() => setHover(null)}>
         {bins.map((b, i) => (
           <rect key={i} x={cx(i) - slot * 0.42} y={y(b.count)} width={slot * 0.84}
@@ -487,7 +628,7 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
                 fontSize="var(--fs-tick)"
                 fill="var(--muted)"
               >
-                {label} {fmtG(v)}
+                {label} {label === 'target' ? fmtG(v) : fmtW(v, spc.unit)}
               </text>
             </g>
           ) : null,
@@ -520,6 +661,30 @@ function StationTable({
     const g = fmtG(Math.abs(v));
     if (Math.round(v) === 0) return g;
     return `${v > 0 ? '+' : '−'}${g}`;
+  };
+
+  /**
+   * UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the three outcomes of
+   * `targetBasis` (weightStations.ts, Wave 1 be5ac3e), rendered where the
+   * plain `signed(r.vsTargetG)` used to sit unconditionally.
+   *  - 'mixed': NO NUMBER — more than one material ran here in the window,
+   *    so no single target applies. The row's own `projection` is already
+   *    null server-side (weightStations.ts:295-300); nothing here computes
+   *    a substitute.
+   *  - 'line_product': the line-wide fallback (July generation, no
+   *    material_id at all) — the number is shown, marked with a `title`
+   *    tooltip carrying the reason, the same pattern report/Summary.tsx
+   *    (U5) uses for its own "not comparable" cells.
+   *  - 'station_material': the plain signed figure, unmarked.
+   */
+  const vsTargetCell = (r: WeightStationRow) => {
+    if (r.targetBasis === 'mixed') {
+      return <span className="mut">{W.weight.mixedTarget(r.materialsInWindow ?? 0)}</span>;
+    }
+    if (r.targetBasis === 'line_product') {
+      return <span title={W.weight.targetLineProduct}>{signed(r.vsTargetG)}</span>;
+    }
+    return signed(r.vsTargetG);
   };
 
   return (
@@ -556,7 +721,7 @@ function StationTable({
             <td className="n">{r.medianG == null ? '—' : fmtG(r.medianG)}</td>
             <td className="n">{r.sdG == null ? '—' : `${r.sdG.toFixed(1)} g`}</td>
             <td className="n">{signed(r.vsLineG)}</td>
-            <td className="n">{signed(r.vsTargetG)}</td>
+            <td className="n">{vsTargetCell(r)}</td>
             <td style={{ paddingLeft: 28, whiteSpace: 'nowrap' }} className={r.flagged ? 'acc' : ''}>
               {r.flagged ? `${r.daysHeld} days` : '—'}
             </td>

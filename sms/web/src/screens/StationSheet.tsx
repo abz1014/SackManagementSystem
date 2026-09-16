@@ -215,7 +215,23 @@ function Body({
         <dt>{W.weight.colVsLine}</dt>
         <dd>{signed(row.vsLineG)}</dd>
         <dt>{W.weight.colVsTarget}</dt>
-        <dd>{row.vsTargetG == null ? W.weight.noTarget : signed(row.vsTargetG)}</dd>
+        {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the sheet's sibling of
+            the station table's own targetBasis rendering (Weight.tsx's
+            vsTargetCell) — see that function's header for the three
+            outcomes. A plain `vsTargetG == null` check used to read
+            "No product target" for a MIXED station too, which is a
+            different fact: a target exists, just not a single one to show. */}
+        <dd>
+          {row.targetBasis === 'mixed' ? (
+            W.weight.mixedTarget(row.materialsInWindow ?? 0)
+          ) : row.vsTargetG == null ? (
+            W.weight.noTarget
+          ) : row.targetBasis === 'line_product' ? (
+            <span title={W.weight.targetLineProduct}>{signed(row.vsTargetG)}</span>
+          ) : (
+            signed(row.vsTargetG)
+          )}
+        </dd>
         <dt>{W.weight.colRejects}</dt>
         <dd>
           {row.rejectRatePct == null ? '—' : `${row.rejectRatePct.toFixed(1)}%`}

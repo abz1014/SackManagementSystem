@@ -45,6 +45,7 @@ describe('parseRoute / routeSearch — defaults', () => {
       readingsStates: [],
       readingsPage: 1,
       weightMode: 'time',
+      weightChartType: 'cone',
       sacksUnit: 'sacks',
       sacksPage: 1,
       rejectsCode: null,
@@ -58,7 +59,7 @@ describe('parseRoute / routeSearch — defaults', () => {
     for (const view of ['readings', 'weight', 'sacks', 'rejects']) {
       const r = baseRoute(view);
       const params = new URLSearchParams(routeSearch(r));
-      for (const key of ['rt', 'rsh', 'st', 'pr', 'rl', 'rcs', 'rp', 'wm', 'su', 'sp', 'jc']) {
+      for (const key of ['rt', 'rsh', 'st', 'pr', 'rl', 'rcs', 'rp', 'wm', 'wt', 'su', 'sp', 'jc']) {
         expect(params.has(key), `${view} should not carry ${key} at its default`).toBe(false);
       }
     }
@@ -146,6 +147,20 @@ describe('Weight — mode and the shared station round-trip', () => {
     const r = withSearch('?s=weight&wm=bogus', () => parseRoute());
     expect(r.weightMode).toBe('time');
   });
+
+  // UX Phase 5 Brief 3 unit U6 (16 Sep 2026): the chart's cone/sack toggle,
+  // following the exact `wm` pattern above.
+  it('?wt=sack parses to the sack chart type and round-trips through routeSearch', () => {
+    const r1 = withSearch('?s=weight&wt=sack', () => parseRoute());
+    expect(r1.weightChartType).toBe('sack');
+    const r2 = withSearch(routeSearch(r1), () => parseRoute());
+    expect(r2).toEqual(r1);
+  });
+
+  it('an unknown chart type falls back to cone', () => {
+    const r = withSearch('?s=weight&wt=bogus', () => parseRoute());
+    expect(r.weightChartType).toBe('cone');
+  });
 });
 
 describe('Sacks — unit and page round-trip', () => {
@@ -203,6 +218,7 @@ describe('no-regression pin — an old link with only the pre-Phase-2b keys stil
     expect(r.station).toBeNull();
     expect(r.product).toBeNull();
     expect(r.weightMode).toBe('time');
+    expect(r.weightChartType).toBe('cone');
   });
 
   it('a sheet deep link, a replay instant and a picked period parse exactly as the pre-Phase-2b keys alone describe them', () => {
