@@ -2,12 +2,12 @@
 
 **Full session handover: [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — read it first if resuming cold; it covers the dirty working tree this file's §3 does not yet reflect.
 
-**As of:** 21 September 2026, UX programme Phase 8 (Testing) complete on top of Phases 5–7 and Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
+**As of:** 21 September 2026, UX programme Phase 9 (Print & visual polish) CLOSES the nine-phase UX programme, on top of Phases 5–8 and Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
 
-**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns, Phase 5 Analytics, Phase 6 Expose backend, Phase 7 Reliability states, and now Phase 8 Testing — twenty-one commits `be5ac3e`…`6bcdffd`). It refines screens and, as of Phase 8, the test harness itself, inside roadmap phases already marked complete or partial above (mainly 4, 6, 8, 9, 11 and 12) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s dated "UX programme, Phase 8" section for what it actually changed. Do not read "Phase 8" in commit messages as roadmap Phase 8 (Dashboards & reports, itself long complete) — the two numbering schemes are independent, and roadmap Phase 12 (Testing & release) moves from PARTIAL-with-no-component-harness to PARTIAL-with-a-component-harness by this UX phase; it is not marked COMPLETE because performance, load, FAT and SAT are still untouched (see §1 row 12 and the "Not done" note under §2).
+**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns, Phase 5 Analytics, Phase 6 Expose backend, Phase 7 Reliability states, Phase 8 Testing, and now Phase 9 Print & visual polish, which CLOSES it — twenty-five commits `be5ac3e`…`08398b9`). It refines screens and, as of Phase 8, the test harness itself, inside roadmap phases already marked complete or partial above (mainly 4, 6, 8, 9, 11 and 12) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s dated "UX programme, Phase 9" section for what it actually changed, and the same file's Phase 8 section immediately below it for the harness work Phase 9 builds on. Do not read "Phase 8" or "Phase 9" in commit messages as roadmap Phase 8/9 (Dashboards & reports / Calibration analytics, both long complete) — the two numbering schemes are independent, and roadmap Phase 12 (Testing & release) moves from PARTIAL-with-no-component-harness to PARTIAL-with-a-component-harness-and-print-CSS by these two UX phases; it is not marked COMPLETE because performance, load, FAT and SAT are still untouched, no browser/layout harness exists to verify print or the Wall, and print itself has only ever been checked by viewport-resize simulation, never a real print dialog (see §1 row 12 and the "Not done" notes under §2).
 
 ---
 
@@ -27,13 +27,76 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 | 9 — Calibration analytics | **COMPLETE — validation method awaiting IFL** | Median beside the mean (same population rule) on Weight, the station table and the sheet; per-station SD rendered; Nelson rules named on hover and on the sheet, the centreline and I-MR sigma restart at a logged adjustment, rules that cannot fire on the series length are said so; the station sheet compares days on the plant clock (`web/src/lib/plantClock.ts`); the adjustment form takes the plant time, a note, before/after/reference readings and the product in force (migration 034); adjustments filter by period and station and include line-wide ones; a **projection** ("at N g/day this station reaches the action limit in about K days if it continues at that rate" — OLS over the flagged run, never called a prediction); `CALIBRATION-VALIDATION.md` with a real sweep over the 53 days: 12 flagged episodes, all beginning with a measurable step, 11 of them in July where no product limits existed (a floor on the fallback threshold is recommended, value for IFL). |
 | 10 — Optional AI/ML | **BLOCKED** | 53 production days held against a six-month minimum; one ledger row. Wave F, after go-live plus accrual. |
 | 11 — Security & operations | **COMPLETE — role mapping, retention policy and the live-host rehearsal await IFL** | Password change (self) and reset (admin) with session revocation and a length policy; last-admin guard; login/logout/failed-login/export audited; limiter and cache bounded; `/api/health` (service · database size vs the 10 GB cap · acquisition · backups) and a Health screen every account can open; `pool.on('error')`, graceful SIGTERM/SIGINT, orphaned-run reconciliation at start, `persistent_sync_failure` CRITICAL after N consecutive halts (cleared by the next clean pass — loop or one-shot), hourly database-size check; `sms retention` (sync_run 90 d keeping the newest per table, non-CRITICAL findings 365 d, expired sessions; never audit/product_change/readings — IFL's decision); migration 030 makes `audit_log` append-only at the database (with the `db_ddladmin` caveat written down); `cutover`/`epoch:purge` take the lock, refuse a pass in flight and require `--backup=<existing .bak>`; scripts for DB maintenance, scheduled tasks (`-WhatIf` rehearsed) and configuration backup; DEPLOY.md gains Health, Scheduled tasks, Retention, Database maintenance, Configuration backup, Upgrading and rolling back; CHANGELOG 0.2.0. **Acceptance rehearsed 15 Sep 2026** (§2). |
-| 12 — Testing & release | **PARTIAL** | 1240 tests passed / 4 skipped, 118 test files (21 Sep 2026, end of UX programme Phase 8; was 1194/110 at Phase 7, 1169/109 at Phase 6, 324 tests / 34 files at Phase 0 closure), all against fakes, passing under UTC±0 and UTC+5; CI workflow added (Wave A); `verify:release` gate (not re-run this pass — only `npx vitest run` was). There IS now a component harness, closed this phase: `vitest.config.ts` gained `environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']]`, keyed on file EXTENSION rather than directory so it cannot swallow `web/src/App.test.ts`'s own `globalThis.window` teardown into jsdom; `@testing-library/react`/`@testing-library/dom` mount the real `<App/>` for a 4-rank UI matrix (`web/src/rank.matrix.test.tsx`, closing the rank-1/viewer rendering gap open since Phase 5) and six state-carrying drilldown hops (`web/src/hops.test.tsx`), a route/client crosscheck (`web/src/rank.crosscheck.test.ts`) locks each write control's client-side rank to its server route, and three screens (`SyncHealthBlock`, `Readings`, `Weight`) carry two-sided failure-state tests. Of the 16 top-level files in `web/src/screens/`, 2 (Readings, Weight) now have a direct component test; the other 14, including Setup, do not. Still absent: any browser/layout harness (jsdom computes no layout; Wall at 1920px and print CSS remain unverified, and Playwright is explicitly deferred) and `@testing-library/user-event` (not installed, so Setup's form blocks and the Changeover confirm flow cannot be component-tested with realistic event sequences). The rank-1 matrix closes the *rendering* question only — nobody has signed in as a viewer on a live instance; that still needs Q65–70 and an IFL-created account. No performance, load, FAT or SAT material — this row stays PARTIAL for that reason. **One unexplained intermittent failure remains open** (roughly 1 run in 74 under `--sequence.shuffle`, never captured with a test name — see §6); a suite reported "green" carries that caveat. |
-| 13 — Documentation | **PARTIAL** | `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected), credentials statement, technical history, questions status. Data dictionary, operator manual, FAT/SAT protocols absent. |
+| 12 — Testing & release | **PARTIAL** | 1246 tests passed / 4 skipped, 120 test files (21 Sep 2026, end of UX programme Phase 9; was 1240/118 at Phase 8, 1194/110 at Phase 7, 1169/109 at Phase 6, 324 tests / 34 files at Phase 0 closure), all against fakes, passing under UTC±0 and UTC+5; CI workflow added (Wave A); `verify:release` gate (not re-run this pass — `npx vitest run` and `npm run typecheck` were). The component harness (closed at Phase 8: `vitest.config.ts`'s `environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']]`, the rank-1 UI matrix, six drilldown hops, the route/client rank crosscheck) is unchanged by Phase 9. Phase 9 adds `PrintHead.test.tsx` (two-sided: header present vs a failed fetch's degraded block) and `web/src/print.landscape.guard.test.ts` (a source-level guard proving app.css's print-landscape CSS selector and Report.tsx's rendered aria-label stay in agreement — proven to fail on a deliberately mismatched string and pass once restored). Of the 16 top-level files in `web/src/screens/`, 2 (Readings, Weight) have a direct component test; the other 14, including Setup, do not. Still absent: any browser/layout harness (jsdom computes no layout; Wall at 1920px and print CSS are verified only by viewport-resize simulation plus an injected stylesheet, never a real print dialog — see CLAUDE.md's Phase 9 section) and `@testing-library/user-event` (not installed, so Setup's form blocks and the Changeover confirm flow cannot be component-tested with realistic event sequences). The rank-1 matrix closes the *rendering* question only — nobody has signed in as a viewer on a live instance; that still needs Q65–70 and an IFL-created account. No performance, load, FAT or SAT material — this row stays PARTIAL for that reason. **One unexplained intermittent failure remains open** (roughly 1 run in 74 under `--sequence.shuffle`, never captured with a test name — see §6); a suite reported "green" carries that caveat. |
+| 13 — Documentation | **PARTIAL** | `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected — the font claim in its "Internet access is not required" section was itself wrong until this pass, see §6/CLAUDE.md), credentials statement, technical history, questions status. Data dictionary, operator manual, FAT/SAT protocols absent. |
 | 14 — Site commissioning | out of scope until a host exists | — |
 
 ---
 
 ## 2. Completed
+
+### UX programme, Phase 9 — Print & visual polish (21 Sep 2026) — CLOSES the nine-phase UX programme
+
+- Four commits (`c14cae0`, `99c9e40`, `a95b355`, `08398b9`), plus a guard test
+  committed alongside this record. Full detail, including the honest
+  three-way split on the twelve acceptance checks and every item still
+  blocked on IFL, is in `CLAUDE.md`'s dated "UX programme, Phase 9" section —
+  not repeated in full here.
+- Product screen composition fixed: a dead `.big` class outside a Sheet had
+  left the product code (the screen's own reason to exist) at body size; a
+  seventh, off-ramp type size in Catalogue is gone; the tab strip gained the
+  spacing class the other tab strips already had and stopped printing a
+  solid ink pill; two tabs' duplicated `first` attribute, which had erased
+  the hairline under the tab strip, is removed.
+- The register's Print button (`Readings.tsx:253`, no `disabled` gate, unlike
+  Report's) can no longer leave the page with no attribution: `PrintHead.tsx`
+  used to return `null` on a failed header fetch; it now prints a degraded
+  block naming exactly what could not be stated, never the browser's own
+  clock standing in for the plant's.
+- Print CSS stops silently clipping report tables: explicit `@page` margins,
+  `.tw` widens to the full page under print, and — by owner decision, after
+  both orientations were screenshotted for comparison — reports print
+  landscape while the Readings register stays portrait.
+- MachineProduct (~103 columns on the dev range) print-suppresses itself
+  with a one-line pointer to its CSV export, rather than clipping a
+  structurally unfixable table.
+- **A new fragility, disclosed rather than left implicit:** the landscape
+  rule depends on a UI copy string (`W.reports.selectorLabel`) staying in
+  sync with a hardcoded CSS selector in `app.css`. `web/src/
+  print.landscape.guard.test.ts` (new this phase) reads both off disk and
+  fails if they disagree — proven red on a deliberately mismatched string,
+  green once restored, clean `git status` after. The cleaner long-term fix
+  (a first-class wrapper class on `<main>`) is named but not built, since
+  this phase does not own `Report.tsx`/`App.tsx`.
+- **This is a simulation of print, not a verification of print.** No real
+  print dialog exists in this environment; every clipping/fit claim above
+  comes from viewport resize plus an injected stylesheet. No real user has
+  seen any of this on real plant data, printed or otherwise.
+- **The twelve acceptance checks from the 3 Sep design handoff live at
+  `design/handoff-2026-09-03/README.md:623-655`** — `CLAUDE.md` used to point
+  readers at `REDESIGN.md` for them, which contains no such checklist; that
+  pointer is corrected in this same pass. Of the twelve: check 1 fails
+  permanently by arithmetic (Line, Weight, Rejects and Report each need all
+  six type steps); several were re-verified this phase; several are reasoned
+  from unchanged code rather than re-observed; and 3/7/8/12 remain
+  browser-only checks this programme has never had a harness to observe at
+  all. Do not collapse that three-way split back into "eleven of twelve."
+- Suite: **1246 passed / 4 skipped** (was 1240/4 at Phase 8), `npx vitest run`
+  from `sms/`, observed 21 Sep 2026. `npm run typecheck` (all five
+  workspaces) clean the same date.
+- **`sms/DEPLOY.md`'s font claim was also corrected in this pass** (not a
+  Phase 9 UI change, but found while closing the programme's documentation):
+  it stated fonts were "system stacks (Segoe UI / Cascadia Mono)" with no
+  self-hosting; `app.css` in fact self-hosts Instrument Sans
+  (`web/public/fonts/InstrumentSans-Variable.woff2`) precisely because the
+  plant PC has no internet and a Google Fonts link would silently fall back
+  to Segoe UI with no error. "Cascadia Mono" does not appear anywhere in the
+  application's own source (`design/tokens.css`, a separate design-token
+  reference file outside `sms/`, uses it as an unrelated monospace-stack
+  fallback and was not in scope for this pass). The true conclusion — no CDN,
+  no external host, no `<link>` in `index.html` — is unchanged; only the
+  false premise is corrected, plus a note that `web/dist/fonts/` must
+  physically reach the plant host as part of the build output.
 
 ### UX programme, Phase 8 — Testing (21 Sep 2026)
 - Six commits (`c827e49`, `963ecb6`, `3f2de1b`, `58644d3`, `6bcdffd`, plus the
@@ -280,7 +343,7 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 
 ## 3. In progress
 
-Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, the UX programme (§2, not a roadmap phase) has moved past Phase 7: Phase 8 (Testing) is now built (§2) — the project can render a React component under test for the first time, the rank-1 viewer UI matrix and six drilldown hops are locked down, and a real test-ordering defect was found and fixed. UX programme Phase 9 (visual polish, the last UX phase) is **not started**. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
+Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, **the UX programme (§2, not a roadmap phase) is now CLOSED**: Phase 9 (Print & visual polish), the last of the nine UX phases, landed the same day as this update (§2) — the Product screen's dead type classes and print leaks are fixed, the register's print header degrades honestly instead of silently, print CSS stops clipping report tables, MachineProduct print-suppresses itself in favour of its CSV, and a new guard locks the print-landscape CSS selector to the copy string it depends on. Nothing further is planned under the UX programme numbering; any future screen work is roadmap work proper. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
 
 ---
 
@@ -321,8 +384,8 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 
 | | Value |
 |---|---|
-| Suite | vitest, **1240 tests passed / 4 skipped**, 118 test files (21 Sep 2026, end of UX programme Phase 8, observed via `npx vitest run` from `sms/` — this run); 1194/110 at the end of UX programme Phase 7; 1169/109 at the end of UX programme Phase 6; 1164 at the end of UX programme Phase 5; 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
-| Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 (not re-run this pass — only `npx vitest run` was) |
+| Suite | vitest, **1246 tests passed / 4 skipped**, 120 test files (21 Sep 2026, end of UX programme Phase 9 — the programme's close — observed via `npx vitest run` from `sms/` — this run); 1240/118 at the end of UX programme Phase 8; 1194/110 at the end of UX programme Phase 7; 1169/109 at the end of UX programme Phase 6; 1164 at the end of UX programme Phase 5; 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
+| Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 (not re-run this pass — `npx vitest run` and `npm run typecheck` were, both clean) |
 | CI | `.github/workflows/ci.yml` runs the same gate plus a clean-tree check and a tracked-secret-file check on every push to `main`/`floor-first-rework` and every PR. **Has not run yet** — nothing is pushed. |
 | Database needed | None. Every test runs against a fake `mssql` pool or pure functions. |
 | Known failures | **One open, unexplained, intermittent.** Roughly 1 failure in 74 full `npx vitest run` executions under `--sequence.shuffle`; no test name has ever been captured for it. 60 clean runs in normal order did not reproduce it. The one suggestive-but-unproven observation: `Weight.test.tsx` failed once while two heavy vitest processes ran concurrently, and did not reproduce without that load, consistent with resource contention rather than a code defect — **not proven, not a capture**; do not "fix" it speculatively. Two ordering defects that WERE captured and fixed in this phase: `api/src/routes/ops.test.ts` shared session cookies from a `beforeAll` while some of its own tests revoke sessions, and `api/src/app.config.test.ts` used a deliberately stateful fake DB that only tolerated one run order — both now independent, 45 consecutive shuffled runs clean. Separately, one timezone defect existed at `0dd33fa`, found only by an adversarial run under `TZ=UTC` (two `plantClock` tests, `-0` vs `0`); fixed and pinned in `7a0c5f7`. |

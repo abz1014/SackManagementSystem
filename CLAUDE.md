@@ -18,6 +18,131 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
+### UX programme, Phase 9 (Print & visual polish) — CLOSES the nine-phase programme (21 Sep 2026)
+
+Four commits on `floor-first-rework` (`c14cae0`, `99c9e40`, `a95b355`,
+`08398b9`), plus a guard test committed alongside this section. This is the
+last UX phase; the programme that began with Phase 2a's information
+architecture on 16 Sep 2026 is complete as far as this codebase, working
+against a single local dev copy, can take it.
+
+1. **The Product screen's own composition was undersized.** `.big` is scoped
+   `.sheet .big` only (`web/src/app.css:686`); outside a Sheet it is dead CSS,
+   so `Running.tsx`'s product code — the fact the whole screen exists to state
+   — rendered at body size, same as the label beneath it. `Catalogue.tsx` had
+   the same dead class plus an inline `fontSize: '1.1em'` (~18.7px), a
+   seventh type size outside the six-step ramp the 3 Sep redesign fixed at.
+   Both replaced: `Running.tsx` now uses `.headline` (34px, the established
+   non-h1 case); `Catalogue.tsx` uses `var(--fs-qual)`, the idiom already used
+   elsewhere in the app. The tab strip gained `tight` (it lacked the spacing
+   class Readings' and Weight's tab strips already carry) and its Toggle was
+   wrapped in the existing `Toolbar` component so its `no-print` class hides
+   it in print — before this, printing any Product tab printed the four tab
+   buttons, one a solid ink pill, onto the page. Two tabs (Changeover,
+   History) had duplicated the tab strip's own `first`, which zeroes the
+   top border — removing it restored the hairline under the tab strip on
+   those two tabs.
+2. **A printed page can now state its own provenance even when the header
+   fetch fails.** `Readings.tsx:253`'s Print button carries no `disabled`
+   gate (unlike Report's), and `PrintHead.tsx` used to return `null` outright
+   when `GET /api/reports/header` failed — so a register could be printed
+   with no line, period, generated-at, operator or SMS version on it at all,
+   and `reliability.guard.test.ts` had this allow-listed as "deferred to
+   Phase 9" for exactly that reason. It now renders a degraded block instead:
+   line, title and period from `useLive()` and the caller's own props (no
+   second round trip needed), plus two sentences naming what genuinely cannot
+   be stated. **It never substitutes the browser's clock for the plant's** —
+   the app's own TWO CLOCKS rule — because that would print a fact on paper
+   that is not true.
+3. **Print CSS stopped silently clipping report tables.** `.tw {
+   overflow-x: auto }` scrolls on screen; a sheet of paper has nothing to
+   scroll, so a wide table's columns past the div's edge used to vanish with
+   no visual cue, and no `@page` rule anywhere meant print fell back to the
+   browser's own default page size. Explicit `@page` margins were added,
+   `.tw` widens to the full page in print, the Calibration table's 10 columns
+   were verified to go from clipped (two rightmost columns silently gone) to
+   complete, and — **by owner decision, after both orientations were
+   screenshotted** — reports print landscape while the Readings register
+   stays portrait. Product and Station report types go from clipped to
+   fitting under landscape.
+4. **MachineProduct suppresses itself in print rather than clipping.** It
+   renders roughly 103 columns on the dev range (one per machine, production
+   day and shift) — a structural limit no orientation or type-size rule can
+   fix. It now prints one line naming that the same data is in the CSV
+   export, with the on-screen table itself hidden from print (`.no-print`)
+   so nothing half-clipped lands on paper. Nothing on screen changed.
+
+**A new fragility this phase introduced, not removed: the landscape rule
+depends on a UI copy string.** `@page` is a document-level at-rule that
+cannot be scoped by an ordinary selector, so `app.css` keys the named
+`report-landscape` page off a DOM hook — `main:has([role="group"]
+[aria-label="Report"])` — and that `aria-label` is rendered by `Report.tsx`
+from `W.reports.selectorLabel` in `words.ts`. Edit that one copy string (for
+the Urdu pass §11 already anticipates, or an unrelated tidy-up) and the CSS
+selector silently stops matching: no error, no failing screen, no visible
+change until someone is holding a clipped portrait printout at IFL. A guard,
+`web/src/print.landscape.guard.test.ts`, now reads both sides off disk and
+fails if they disagree — proven to fail on a deliberately mismatched string
+and to pass once restored. The clean fix, for whoever next owns `Report.tsx`,
+is a first-class wrapper class (e.g. `<main className="report">`) so the CSS
+never has to key off translatable copy at all; this phase did not own
+`Report.tsx`/`App.tsx`'s `<main>` and left that refactor undone.
+
+**Recorded honestly, because this is the closing record for the whole
+programme and it must not flatter what was actually verified:**
+- **Nothing in this nine-phase programme has been seen by a real user on
+  real plant data.** Every observation across all nine phases, including
+  this one, is against the local `_SEP07` dev copy.
+- **No print-pipeline verification exists, in this phase or any before it.**
+  This sandbox has no real print dialog. Every print claim above — clipping,
+  column counts, landscape fitting more — comes from viewport resize plus an
+  injected stylesheet, cross-checked against `scrollWidth`/`clientWidth`.
+  That is a simulation of print layout, not a print render, and Phase 9
+  improves the print CSS without being able to prove it survives contact
+  with an actual printer or PDF driver.
+- **No browser or layout harness exists.** jsdom computes no layout (Phase 8
+  established this and it remains true); several of the twelve acceptance
+  checks below are verifiable only by a person looking at a real screen.
+  Phase 9 cannot prove print stays fixed going forward, only that it was
+  fixed once, observed this way, on this date.
+- **Acceptance check 1 fails permanently, by arithmetic, not by oversight.**
+  Line, Weight, Rejects and Report each genuinely need all six type steps —
+  a headline, display figures, a qualifier, body text, captions and axis
+  ticks — so "at most four of the six" cannot be met by any of them. Do not
+  round this up in any future summary.
+- **The twelve checks are a three-way split, not one undifferentiated
+  "eleven of twelve."** Some were re-verified this phase; some are reasoned
+  from code that did not change and so are assumed still true, not
+  re-observed; some (3, 7, 8, 12 among them) are browser-only checks this
+  programme has never had the harness to observe at all and are carried
+  forward as unverified, not as passing. Say which kind a claim is; do not
+  collapse the three into a single count again.
+- **The rare flake Phase 8 found is still OPEN.** Roughly 1 failure in 74
+  full `npx vitest run` executions, never captured with a test name. Every
+  "the suite is green" claim in this programme, this phase's own 1246/4
+  included, carries that caveat.
+- **No viewer has ever signed in.** `rank.matrix.test.tsx` (Phase 8) proves
+  rank 1 renders correctly; nobody has authenticated as one on a live
+  instance. Still needs Q65-70 and an IFL-created account.
+- **`sms.source_epoch.last_seen_utc` still has no writer anywhere in the
+  repo.**
+- **Flagged, not fixed, in this phase's own scope:** `Readings.tsx:253`
+  prints while rows are still loading or failed, unlike `Report.tsx:138` —
+  a real behaviour gap, deliberately left for whoever next touches that
+  file rather than folded into this phase's brief.
+- **Blocked on IFL, unchanged:** written authority for all nine PDAS write
+  rights; `AddTubeType`'s parameter name; weight basis (Q4/Q5); KPI approval
+  (Q33-37); reject-code meanings (Q10); sack stock per machine (still not
+  computable from IFL's data); the 10 Jul - 5 Aug data; the live read-only
+  login and host (Q65-70). **36 questions remain unsent.**
+- **The branch is unpushed**, roughly 95 commits ahead of `origin/main`; CI
+  has never run against it. Only the owner pushes.
+
+Suite: **1246 passed / 4 skipped**, `npx vitest run` from `sms/`, observed
+21 Sep 2026 (was 1240 at the end of Phase 8; includes this phase's own
+`PrintHead.test.tsx` and the landscape guard). Typecheck (`npm run
+typecheck`, all five workspaces) clean the same date.
+
 ### UX programme, Phase 8 (Testing) — a component harness exists at last (21 Sep 2026)
 
 Six commits on `floor-first-rework` (`c827e49`, `963ecb6`, `3f2de1b`, `58644d3`,
@@ -75,7 +200,8 @@ Suite: **1194 → 1240 passed / 4 skipped**, 118 files, `npx vitest run` from
 **Not done by this phase:** Phase 9 (visual polish, the last UX phase) is
 unstarted, including `report/PrintHead.tsx` (still drops its print
 attribution block silently on a failed header fetch) and the Product screen's
-visual pass. There is still no browser/layout harness — jsdom computes no
+visual pass. **Update: Phase 9 closed both — see the Phase 9 section above,
+which now precedes this one.** There is still no browser/layout harness — jsdom computes no
 layout, so nothing asserts layout, print CSS, or the Wall at 1920px;
 Playwright is deferred by the owner and would sit on top of this harness, not
 replace it. Of the 16 top-level `web/src/screens/` files, only 2 (Readings,
@@ -328,6 +454,13 @@ state sentence is 79px at 1920, and the footer is pinned.
 3. The register’s Export button was offered at rank 2 while the server gates it
    at 3 — a control that could only ever answer 403. `EXPORT_RANK` now matches
    `requireRole(3)`.
+
+**The twelve acceptance checks live at `design/handoff-2026-09-03/README.md:623-655`,
+not in `REDESIGN.md`** (`REDESIGN.md` describes the audit and the chosen
+option; it contains no numbered checklist — verified by grep, zero hits for
+"acceptance check" in that file). An earlier version of this section pointed
+readers at `REDESIGN.md` for them; that pointer was wrong from the day it was
+written and is corrected here.
 
 **Eleven of the twelve acceptance checks pass, verified in the browser.**
 Skeletons were added to every block so nothing changes height as it lands

@@ -160,10 +160,25 @@ acquisition delay.
 
 ### Internet access is not required
 
-The built SPA references no external hosts: fonts are system stacks (Segoe UI /
-Cascadia Mono), and there are no CDN scripts, styles, or web fonts. Everything is
-served from `:4000`. An air-gapped plant LAN is the intended environment — Node,
-SQL Server and the build output are the only prerequisites, all installed locally.
+The built SPA references no external hosts. The design handoff's Instrument
+Sans variable font is **self-hosted**, not a system stack: one file,
+`web/public/fonts/InstrumentSans-Variable.woff2`, weights 400–700, served via
+`@font-face` in `app.css` and named first in `--font` (3 Sep 2026 visual
+redesign, `CLAUDE.md`) — because the plant PC has no internet, and a Google
+Fonts `<link>` would silently fall back to Segoe UI on the one machine that
+matters, with no error to say so. There are no CDN scripts, styles, or `<link>`
+web-font references in `index.html`, and no other external host is referenced
+anywhere in the built bundle. Everything is served from `:4000`. An air-gapped
+plant LAN is the intended environment — Node, SQL Server and the build output
+are the only prerequisites, all installed locally.
+
+**This makes `web/dist/fonts/` a deployment prerequisite, not an asset that
+can be dropped.** `npm run build` copies it from `web/public/fonts/` as part
+of the Vite build, but the directory still has to physically reach the plant
+host along with the rest of `web/dist` — copy the build output as a whole, do
+not hand-pick files. If it does not reach the host, the app does not error;
+it silently renders in Segoe UI, which is exactly the failure self-hosting
+the font exists to prevent.
 
 > **ngrok is a review-time tool only.** The tunnel and its watchdog
 > (`ops/sms-watchdog.ps1`) exist to share the app with reviewers over the
