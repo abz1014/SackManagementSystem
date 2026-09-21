@@ -34,6 +34,9 @@ class FakeRequest {
 
 const ADMIN = { userId: 4, username: 'admin', role: 'admin', rank: 4 };
 const MANAGER = { userId: 3, username: 'manager', role: 'manager', rank: 3 };
+/** rank 1 — proves the new routes answer for the ONE-AUDIENCE floor (UX Phase 7 Brief 2). */
+const VIEWER = { userId: 1, username: 'viewer', role: 'viewer', rank: 1 };
+const USERS = [ADMIN, MANAGER, VIEWER];
 
 /** Stands in for mssql.Transaction; records begin/commit/rollback on the db. */
 class FakeTransaction {
@@ -64,7 +67,7 @@ class FakeDb {
 
     if (sql.includes('SELECT 1 AS ok')) return row({ ok: 1 });
     if (sql.includes('FROM sms.app_user u JOIN sms.role r ON r.role_id = u.role_id') && sql.includes('WHERE u.username = @u')) {
-      const u = [ADMIN, MANAGER].find((x) => x.username === inputs.get('u'));
+      const u = USERS.find((x) => x.username === inputs.get('u'));
       if (!u) return none();
       return row({ user_id: u.userId, password_hash: this.hash, display_name: u.username, role: u.role, rank: u.rank, active: true });
     }
@@ -74,11 +77,23 @@ class FakeDb {
     }
     if (sql.includes('FROM sms.session s') && sql.includes('JOIN sms.app_user u')) {
       const uid = this.sessions.get(inputs.get('id') as string);
-      const u = [ADMIN, MANAGER].find((x) => x.userId === uid);
+      const u = USERS.find((x) => x.userId === uid);
       if (!u) return none();
       return row({ user_id: u.userId, username: u.username, display_name: u.username, role: u.role, rank: u.rank });
     }
     if (sql.includes('DELETE FROM sms.session')) return none();
+
+    // GET /api/dq-destination — a known ref (501) resolves to a canonical
+    // row; every other ref answers none() (the route turns that into 404).
+    if (sql.includes('FROM sms.cone_event WHERE line_id = @line AND raw_id = @ref')) {
+      return inputs.get('ref') === 501 ? row({ id: 9001 }) : none();
+    }
+    if (sql.includes('FROM sms.sack_event WHERE line_id = @line AND raw_id = @ref')) {
+      return inputs.get('ref') === 777 ? row({ id: 42 }) : none();
+    }
+    if (sql.includes('FROM sms.reject_event WHERE line_id = @line AND raw_id = @ref')) {
+      return inputs.get('ref') === 88 ? row({ id: 3 }) : none();
+    }
 
     // /api/product-at: a line-wide timeline with one product, a catalogue
     // with one version of its limits, and a newest cone at 12:00.
@@ -135,7 +150,7 @@ beforeAll(async () => {
   const addr = server.address();
   if (addr == null || typeof addr === 'string') throw new Error('expected a network address');
   base = `http://127.0.0.1:${addr.port}`;
-  for (const u of [ADMIN, MANAGER]) {
+  for (const u of USERS) {
     const res = await fetch(`${base}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -156,7 +171,7 @@ beforeEach(() => {
   db.txLog = [];
 });
 
-async function call(role: 'admin' | 'manager', method: string, path: string, body?: unknown) {
+async function call(role: 'admin' | 'manager' | 'viewer', method: string, path: string, body?: unknown) {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: { Cookie: cookies[role]!, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
@@ -358,5 +373,55 @@ describe('GET /api/weight-stations — `to` resolves `from` without asking for t
     // whenever `to` was already given — a wasted round trip on every call
     // that names an explicit window, including every report.
     expect(db.statements.some((s) => s.sql.includes('MAX(shift_date)'))).toBe(false);
+  });
+});
+
+describe('GET /api/dq-destination — rank 1, resolves a DQ finding subjectRef to its canonical row (UX Phase 7 Brief 2)', () => {
+  it('cone_raw + a ref that resolves answers {type, id} at 200', async () => {
+    const r = await call('manager', 'GET', '/api/dq-destination?table=cone_raw&ref=501');
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ type: 'cone', id: 9001 });
+  });
+
+  it('sack_raw and reject_qcs_raw/reject_weight_raw resolve through the same route', async () => {
+    const s = await call('manager', 'GET', '/api/dq-destination?table=sack_raw&ref=777');
+    expect(s.status).toBe(200);
+    expect(s.json).toEqual({ type: 'sack', id: 42 });
+    const q = await call('manager', 'GET', '/api/dq-destination?table=reject_qcs_raw&ref=88');
+    expect(q.status).toBe(200);
+    expect(q.json).toEqual({ type: 'reject', id: 3 });
+  });
+
+  it('a ref that resolves to nothing (rebuilt away) answers 404, not a dead link', async () => {
+    const r = await call('manager', 'GET', '/api/dq-destination?table=cone_raw&ref=999999');
+    expect(r.status).toBe(404);
+  });
+
+  it('an unknown table is refused as 400 — never built into SQL', async () => {
+    const injected = encodeURIComponent("sms.cone_event; DROP TABLE x");
+    const r = await call('manager', 'GET', `/api/dq-destination?table=${injected}&ref=1`);
+    expect(r.status).toBe(400);
+    // The literal is checked before any query naming a canonical table runs.
+    expect(db.statements.some((s) => s.sql.includes('DROP TABLE'))).toBe(false);
+  });
+
+  it('a non-positive ref is refused as 400', async () => {
+    expect((await call('manager', 'GET', '/api/dq-destination?table=cone_raw&ref=0')).status).toBe(400);
+    expect((await call('manager', 'GET', '/api/dq-destination?table=cone_raw&ref=abc')).status).toBe(400);
+  });
+
+  it('answers at rank 1 (viewer) — every read is open to every signed-in account', async () => {
+    const r = await call('viewer', 'GET', '/api/dq-destination?table=cone_raw&ref=501');
+    expect(r.status).toBe(200);
+  });
+});
+
+describe('GET /api/system-history — rank 1, source generations + rebuilds + verify runs (UX Phase 7 Brief 2)', () => {
+  it('answers 200 with all three arrays present, at rank 1 (viewer)', async () => {
+    const r = await call('viewer', 'GET', '/api/system-history');
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.json.data.generations)).toBe(true);
+    expect(Array.isArray(r.json.data.rebuilds)).toBe(true);
+    expect(Array.isArray(r.json.data.verifyRuns)).toBe(true);
   });
 });

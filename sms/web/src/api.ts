@@ -895,7 +895,21 @@ export interface SchemaFingerprint {
   epochId: number | null;
   epochLabel: string | null;
 }
-export interface DqFinding { checkName: string; severity: string; subjectTable: string | null; detail: string | null; }
+export interface DqFinding {
+  checkName: string;
+  severity: string;
+  subjectTable: string | null;
+  detail: string | null;
+  /**
+   * The raw_id of the first offending row — only the row-scoped checks ever
+   * carry one; the other five (source_columns_changed,
+   * raw_read_without_write, transform_zero_write, product_mirror_failed,
+   * transform_failed) describe a pass or a table as a whole and this is null
+   * for them by construction. null means "do not offer a link", never
+   * "the link is broken" — see getDqDestination.
+   */
+  subjectRef: number | null;
+}
 export interface SyncLifetime {
   passes: number;
   tableRuns: number;
@@ -949,6 +963,87 @@ export interface OperationsData {
 }
 export function getOperations(): Promise<Envelope<OperationsData>> {
   return get('/api/operations');
+}
+
+/**
+ * Where a DQ finding's offending row landed — cone/sack/reject and its
+ * canonical id, so a screen can go straight to the reading. `table` is the
+ * RAW table's short name (`cone_raw` | `sack_raw` | `reject_qcs_raw` |
+ * `reject_weight_raw`), matching `DqFinding.subjectTable` for the checks
+ * that carry a `subjectRef` at all — never call this when `subjectRef` is
+ * null. Throws ApiError(404) when the ref no longer resolves to a canonical
+ * row (rebuilt away since the finding was recorded) and ApiError(400) for an
+ * unrecognised table. UX Phase 7 Brief 2 (rank 1); not yet wired to a
+ * screen — see web/src/api.callers.test.ts's ALLOW_LIST.
+ */
+export interface DqDestination { type: 'cone' | 'sack' | 'reject'; id: number }
+export function getDqDestination(table: string, ref: number): Promise<DqDestination> {
+  const p = new URLSearchParams({ table, ref: String(ref) });
+  return get(`/api/dq-destination?${p.toString()}`);
+}
+
+/**
+ * Source generations (`sms.source_epoch`, open AND closed — /api/operations'
+ * `schema` block only ever shows the open one per table), canonical rebuilds
+ * (`sms.rebuild_audit`, which had no reader anywhere before this), and `sms
+ * verify` runs (`sms.verify_run`, migration 039 — the record `sms verify`
+ * itself now writes, so the app can finally say whether and against WHICH
+ * source it has ever been reconciled). UX Phase 7 Brief 2 (rank 1); not yet
+ * wired to a screen — see web/src/api.callers.test.ts's ALLOW_LIST.
+ */
+export interface SourceGeneration {
+  epochId: number;
+  sourceTable: string;
+  label: string;
+  generationOrdinal: number;
+  provenance: string;
+  sourceServer: string;
+  sourceDb: string;
+  firstSeenUtc: string;
+  lastSeenUtc: string | null;
+  closedUtc: string | null;
+  registeredBy: string;
+  archivedBelowId: number | null;
+  archivedObservedUtc: string | null;
+  rawRowCount: number;
+}
+export interface RebuildRun {
+  rebuildId: number;
+  snapshotId: string;
+  fromTransformVersion: number;
+  toTransformVersion: number;
+  targetTable: string;
+  rowsRebuilt: number;
+  startedAtUtc: string;
+  finishedAtUtc: string | null;
+  outcome: string;
+  initiatedBy: number | null;
+  errorMessage: string | null;
+}
+export interface VerifyRun {
+  verifyRunId: number;
+  startedAtUtc: string;
+  finishedAtUtc: string | null;
+  sourceServer: string;
+  sourceDb: string;
+  appServer: string;
+  appDb: string;
+  lineId: number;
+  stops: number;
+  weightsChecked: boolean;
+  windowFrom: string | null;
+  windowTo: string | null;
+  verdict: 'clean' | 'stops';
+  summary: string | null;
+  smsVersion: string | null;
+}
+export interface SystemHistoryData {
+  generations: SourceGeneration[];
+  rebuilds: RebuildRun[];
+  verifyRuns: VerifyRun[];
+}
+export function getSystemHistory(): Promise<Envelope<SystemHistoryData>> {
+  return get('/api/system-history');
 }
 
 // ---- live line state — polled by the floor screens and the wall display ----

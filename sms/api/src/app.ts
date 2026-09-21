@@ -7,7 +7,8 @@ import mssql from 'mssql';
 import { z } from 'zod';
 import { MAX_RANGE_DAYS, type ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
-import { getOperations } from './services/operations.js';
+import { getOperations, resolveDqDestination, isDqDestinationTable, type DqDestinationTable } from './services/operations.js';
+import { getSystemHistory } from './services/systemHistory.js';
 import { getProduction, type GroupBy } from './services/production.js';
 import { getRejectPareto, listRejectCodes, updateRejectCode, REJECT_SEVERITIES, parseCodeParam } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
@@ -731,6 +732,64 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.get('/api/operations', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const data = await getOperations(pool, cfg.lineId);
+      res.json(await envelope(pool, cfg.lineId, data));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * Where a DQ finding's offending row actually landed (UX Phase 7 Brief 2,
+   * rank 1 — a lookup of SMS's own canonical rows by their own raw_id, no
+   * more sensitive than the register /api/events already exposes at rank 1).
+   *
+   * `table` is checked against the literal allow-list in operations.ts
+   * before it ever reaches a query — an unknown value is refused here as a
+   * 400, never built into SQL. Only nine of the fourteen DQ checks
+   * (sync-worker/src/transform/dq.ts CHECK_NAMES) are row-scoped and carry a
+   * subject_ref at all; the other five (source_columns_changed,
+   * raw_read_without_write, transform_zero_write, product_mirror_failed,
+   * transform_failed) describe a pass or a table as a whole, so a screen
+   * must not call this route for them in the first place — this endpoint
+   * cannot tell the difference between "no subject_ref was ever recorded"
+   * and "ref doesn't exist"; both answer the same way (400 for a missing
+   * `ref`, 404 for one that resolves to nothing), and it is the caller's job
+   * not to ask when subjectRef is null.
+   */
+  const dqDestinationQuery = z.object({
+    table: z.string(),
+    ref: z.coerce.number().int().positive(),
+  });
+  app.get('/api/dq-destination', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = dqDestinationQuery.safeParse(req.query);
+      if (!q.success || !isDqDestinationTable(q.data.table)) {
+        res.status(400).json({
+          error: 'invalid query',
+          detail: q.success ? `unknown table "${q.data.table}"` : q.error.flatten().fieldErrors,
+        });
+        return;
+      }
+      const dest = await resolveDqDestination(pool, cfg.lineId, q.data.table as DqDestinationTable, q.data.ref);
+      if (!dest) {
+        res.status(404).json({ error: 'no longer in the register — the row may have been rebuilt since this finding was recorded' });
+        return;
+      }
+      res.json(dest);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * Source generations, canonical rebuilds, and `sms verify` runs — three
+   * standing facts the database already held and no screen had ever read
+   * (UX Phase 7 Brief 2). Rank 1: all three are read-only reflections of the
+   * app-owned sidecar's own audit trail, no more sensitive than /api/operations.
+   */
+  app.get('/api/system-history', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await getSystemHistory(pool, cfg.lineId);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);

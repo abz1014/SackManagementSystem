@@ -8,6 +8,9 @@ import {
 } from '@sms/sync-worker';
 import { createLogger } from '@sms/shared';
 import type { ConnectionPool } from 'mssql';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 /** The CLI's logger: human output stays on console; errors and retries go through here too. */
 export const cliLog = createLogger('cli');
@@ -43,6 +46,25 @@ export async function openContext(opts: { needIfl?: boolean } = {}): Promise<Ctx
       if (opts.needIfl && ifl !== app) await ifl.close();
     },
   };
+}
+
+/**
+ * The CLI's own version, from `cli/package.json` — read at call time (never
+ * cached across a whole process) so `sms.verify_run.sms_version` names the
+ * build that actually ran, not a value baked into a shared import graph.
+ * `context.ts` compiles to `cli/dist/context.js`, one level below the
+ * package root, so `../package.json` from there is `cli/package.json`.
+ * Never throws: a version that cannot be read is recorded as null, which is
+ * itself an honest fact worth keeping rather than a reason to fail the run.
+ */
+export function cliVersion(): string | null {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Parse `--key=value` and `--flag` args into a map. */

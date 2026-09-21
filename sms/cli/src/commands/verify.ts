@@ -75,7 +75,7 @@ import {
   type IflTableDef,
   type SourceIdentity,
 } from '@sms/sync-worker';
-import { openContext, parseArgs } from '../context.js';
+import { openContext, parseArgs, cliLog, cliVersion, type Ctx } from '../context.js';
 
 type TableDef = IflTableDef;
 
@@ -437,7 +437,61 @@ function diagnose(src: IdStats, raw: IdStats): string[] {
   return out;
 }
 
+/**
+ * `sms.verify_run` (migration 039) — one row per `sms verify` run, so the
+ * application can finally say whether it has ever been reconciled against
+ * IFL's source, and against WHICH source: `source_server`/`source_db` and
+ * `app_server`/`app_db` carry exactly the four facts this function already
+ * PRINTS near the top of verify() (`ctx.cfg.iflData.server/.database` and
+ * `ctx.cfg.app.server/.database`), so a run against the local `_SEP07` copy
+ * can never be read back as a run against the plant.
+ *
+ * `started_at_utc`/`finished_at_utc` are genuine app-written UTC (the Two
+ * Clocks rule, CLAUDE.md) — this is an app-side event, not a production one,
+ * so it is never stamped on the plant wall clock.
+ *
+ * A failure to write this row must NOT change verify()'s exit code — the
+ * reconciliation it ran is the thing being reported, and losing the ability
+ * to persist a record of it is not the same failure. Logged, not thrown.
+ */
+async function recordVerifyRun(
+  ctx: Ctx,
+  info: { startedAtUtc: Date; finishedAtUtc: Date; stops: number; weightsChecked: boolean; range: Range | null; summary: string },
+): Promise<void> {
+  const verdict: 'clean' | 'stops' = info.stops === 0 ? 'clean' : 'stops';
+  try {
+    await ctx.app
+      .request()
+      .input('started', mssql.DateTime2, info.startedAtUtc)
+      .input('finished', mssql.DateTime2, info.finishedAtUtc)
+      .input('srcServer', mssql.NVarChar(128), ctx.cfg.iflData.server)
+      .input('srcDb', mssql.NVarChar(128), ctx.cfg.iflData.database)
+      .input('appServer', mssql.NVarChar(128), ctx.cfg.app.server)
+      .input('appDb', mssql.NVarChar(128), ctx.cfg.app.database)
+      .input('line', mssql.Int, ctx.cfg.lineId)
+      .input('stops', mssql.Int, info.stops)
+      .input('weights', mssql.Bit, info.weightsChecked)
+      .input('wFrom', mssql.DateTime2, info.range ? info.range.from : null)
+      .input('wTo', mssql.DateTime2, info.range ? info.range.to : null)
+      .input('verdict', mssql.VarChar(10), verdict)
+      .input('summary', mssql.NVarChar(1000), info.summary.slice(0, 1000))
+      .input('ver', mssql.VarChar(32), cliVersion())
+      .query(
+        `INSERT INTO sms.verify_run
+           (started_at_utc, finished_at_utc, source_server, source_db, app_server, app_db, line_id,
+            stops, weights_checked, window_from, window_to, verdict, summary, sms_version)
+         VALUES (@started, @finished, @srcServer, @srcDb, @appServer, @appDb, @line,
+                 @stops, @weights, @wFrom, @wTo, @verdict, @summary, @ver)`,
+      );
+  } catch (err) {
+    cliLog.error('verify: failed to record sms.verify_run (exit code is unaffected)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function verify(args: string[] = []): Promise<number> {
+  const startedAtUtc = new Date();
   const { weights, from, to } = parseVerifyArgs(args);
   const range: Range | null = from && to ? { from, to } : null;
   const ctx = await openContext({ needIfl: true });
@@ -681,10 +735,28 @@ export async function verify(args: string[] = []): Promise<number> {
       console.log(
         `\n✓ every open generation reconciles with its source; raw ⇄ canonical clean on ${gapsChecked} epoch(s)`,
       );
+      await recordVerifyRun(ctx, {
+        startedAtUtc,
+        finishedAtUtc: new Date(),
+        stops,
+        weightsChecked: weights,
+        range,
+        summary: `${epochs.length} generation(s), ${gapsChecked} epoch check(s) clean, 0 STOP(s)` +
+          (weights ? `, weights OK` : ''),
+      });
       return 0;
     }
     if (stops > 0) console.log(`\n✗ ${stops} STOP condition(s) — see above`);
     else console.log(`\n✗ weight reconciliation failed — see above`);
+    await recordVerifyRun(ctx, {
+      startedAtUtc,
+      finishedAtUtc: new Date(),
+      stops,
+      weightsChecked: weights,
+      range,
+      summary: `${epochs.length} generation(s), ${gapsChecked} epoch check(s), ${stops} STOP(s)` +
+        (weights ? `, weights ${weightMismatches === 0 ? 'OK' : `${weightMismatches} MISMATCH`}` : ''),
+    });
     return 1;
   } finally {
     await ctx.close();

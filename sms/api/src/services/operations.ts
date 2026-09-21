@@ -142,7 +142,22 @@ export interface OperationsData {
   dq: {
     latestRunId: string | null;
     bySeverity: Record<string, number>;
-    findings: { checkName: string; severity: string; subjectTable: string | null; detail: string | null }[];
+    findings: {
+      checkName: string;
+      severity: string;
+      subjectTable: string | null;
+      detail: string | null;
+      /**
+       * The raw_id of the first offending row (sms.dq_finding.subject_ref,
+       * migration 009; written by sync-worker/src/transform/dq.ts). Only the
+       * nine row-scoped checks ever carry one — the other five (
+       * source_columns_changed, raw_read_without_write, transform_zero_write,
+       * product_mirror_failed, transform_failed) describe a pass or a table
+       * as a whole and are written with no subject_ref, so this is null for
+       * them by construction, not by an omission here. UX Phase 7 Brief 2.
+       */
+      subjectRef: number | null;
+    }[];
   };
 }
 
@@ -348,8 +363,9 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     severity: string;
     subject_table: string | null;
     detail: string | null;
+    subject_ref: number | null;
   }>(
-    `SELECT TOP 200 run_id, check_name, severity, subject_table, detail
+    `SELECT TOP 200 run_id, check_name, severity, subject_table, detail, subject_ref
      FROM sms.dq_finding
      ORDER BY CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'ERROR' THEN 1 WHEN 'WARNING' THEN 2 ELSE 3 END,
               finding_id DESC`,
@@ -360,6 +376,7 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     severity: r.severity,
     subjectTable: r.subject_table,
     detail: r.detail,
+    subjectRef: r.subject_ref == null ? null : Number(r.subject_ref),
   }));
   // kept for API-shape stability: the run that recorded the newest finding
   const latestRunId = f.recordset[0]?.run_id ?? null;
@@ -399,4 +416,77 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     source,
     dq: { latestRunId, bySeverity, findings },
   };
+}
+
+/* ------------------------------------------------- DQ finding destination (UX Phase 7 Brief 2) */
+
+/**
+ * `GET /api/dq-destination?table=<raw short name>&ref=<raw_id>` — where a
+ * row-scoped DQ finding's offending row actually landed, so a screen can go
+ * from "2 rows timestamped 27h behind" straight to the reading rather than
+ * re-running the check by hand.
+ *
+ * `table` is the RAW table's short name, matching `subject_table` as the
+ * per-row checks in sync-worker/src/transform/dq.ts write it for the cone,
+ * sack and reject streams, and as `stationRosterFindings` writes it for
+ * `station_not_in_roster` (sync-worker/src/reader/iflTables.ts:83,99,112,128
+ * name the four raw tables this maps). It is checked against this literal
+ * map only — never interpolated into SQL — so an unknown value is a 400, not
+ * a query built from client input.
+ *
+ * `ref` is `raw_id`: every canonical table carries it
+ * (003_cone_event.sql:48, 004_sack_event.sql:36, 008_reject_event.sql:32) as
+ * the row's own lineage back to the raw layer, so the lookup is a single
+ * indexed equality against the canonical table (migration 039's
+ * `(line_id, raw_id)` index) — never against the raw table itself, which
+ * this resolver has no reason to expose.
+ *
+ * Returns null when no canonical row carries that raw_id for this line —
+ * either the id never existed, or it did and was rebuilt away
+ * (`sms rebuild` deletes and re-transforms, so raw_id survives but the
+ * canonical row it used to identify does not) — the caller (app.ts) turns
+ * that into an explicit 404, never a silent absence.
+ */
+export const DQ_DESTINATION_TABLES = ['cone_raw', 'sack_raw', 'reject_qcs_raw', 'reject_weight_raw'] as const;
+export type DqDestinationTable = (typeof DQ_DESTINATION_TABLES)[number];
+
+export interface DqDestination {
+  type: 'cone' | 'sack' | 'reject';
+  id: number;
+}
+
+/** The one literal map from a raw table's short name to its canonical destination. */
+const DQ_DESTINATION_MAP: Record<
+  DqDestinationTable,
+  { table: string; idCol: string; type: DqDestination['type']; typeFilter: string }
+> = {
+  cone_raw: { table: 'sms.cone_event', idCol: 'cone_event_id', type: 'cone', typeFilter: '' },
+  sack_raw: { table: 'sms.sack_event', idCol: 'sack_event_id', type: 'sack', typeFilter: '' },
+  reject_qcs_raw: { table: 'sms.reject_event', idCol: 'reject_event_id', type: 'reject', typeFilter: " AND reject_type = 'quality'" },
+  reject_weight_raw: { table: 'sms.reject_event', idCol: 'reject_event_id', type: 'reject', typeFilter: " AND reject_type = 'weight'" },
+};
+
+export function isDqDestinationTable(v: string): v is DqDestinationTable {
+  return (DQ_DESTINATION_TABLES as readonly string[]).includes(v);
+}
+
+export async function resolveDqDestination(
+  pool: ConnectionPool,
+  lineId: number,
+  table: DqDestinationTable,
+  ref: number,
+): Promise<DqDestination | null> {
+  const dest = DQ_DESTINATION_MAP[table];
+  // `dest.table`, `dest.idCol` and `dest.typeFilter` all come from the literal
+  // map above, keyed by a value already checked against DQ_DESTINATION_TABLES
+  // — never from the caller's own string. `ref` and `lineId` are bound.
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('ref', mssql.BigInt, ref)
+    .query<{ id: number }>(
+      `SELECT ${dest.idCol} AS id FROM ${dest.table} WHERE line_id = @line AND raw_id = @ref${dest.typeFilter}`,
+    );
+  const row = r.recordset[0];
+  return row ? { type: dest.type, id: Number(row.id) } : null;
 }

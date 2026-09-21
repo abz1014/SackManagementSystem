@@ -363,3 +363,94 @@ describe('sms verify — --from/--to window', () => {
     expect(await verify(['--from=2026-09-08', '--to=2026-09-08'])).not.toBe(0);
   });
 });
+
+/**
+ * `sms.verify_run` (migration 039, UX Phase 7 Brief 2): until now `sms
+ * verify` reconciled and printed but persisted nothing, so the application
+ * could never say whether — or against WHICH source — it had ever been
+ * reconciled. These pin what recordVerifyRun() actually binds, and that a
+ * failure to write the row never changes the exit code: every OTHER test in
+ * this file uses appPool(), which has no route for `INSERT INTO
+ * sms.verify_run`, and every one of them still returns the exit code its
+ * reconciliation earned — that absence, silently swallowed and logged, IS
+ * the proof; the last case here just names it.
+ */
+function capturingAppPool(base: Pool): Pool & { captured: Map<string, unknown>[] } {
+  const captured: Map<string, unknown>[] = [];
+  const request = () => {
+    const inputs = new Map<string, unknown>();
+    const req = {
+      input: (name: string, _type: unknown, value: unknown) => {
+        inputs.set(name, value);
+        return req;
+      },
+      query: async (sql: string) => {
+        if (sql.includes('INSERT INTO sms.verify_run')) {
+          captured.push(new Map(inputs));
+          return { recordset: [] as unknown[] };
+        }
+        return base.request().query(sql);
+      },
+    };
+    return req;
+  };
+  return { request, calls: base.calls, captured } as unknown as Pool & { captured: Map<string, unknown>[] };
+}
+
+describe('sms verify — records sms.verify_run (migration 039)', () => {
+  it('a clean run binds the real source/app identity, 0 stops, verdict "clean" and a version string', async () => {
+    const pool = capturingAppPool(appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] }));
+    world.app = pool;
+    world.ifl = iflPool([1, 2, 3]);
+
+    expect(await verify()).toBe(0);
+    expect(pool.captured).toHaveLength(1);
+    const ins = pool.captured[0]!;
+    // Exactly the four facts the header of verify() already prints
+    // (verify.ts:457-458) — a run against this fixture's `DATA_TP1U2_SEP07`
+    // source must never be recorded as a run against anything else.
+    expect(ins.get('srcServer')).toBe('localhost');
+    expect(ins.get('srcDb')).toBe('DATA_TP1U2_SEP07');
+    expect(ins.get('appServer')).toBe('localhost');
+    expect(ins.get('appDb')).toBe('sms');
+    expect(ins.get('line')).toBe(1);
+    expect(ins.get('stops')).toBe(0);
+    expect(ins.get('verdict')).toBe('clean');
+    expect(ins.get('weights')).toBe(false);
+    expect(ins.get('wFrom')).toBeNull();
+    expect(ins.get('wTo')).toBeNull();
+    expect(typeof ins.get('ver')).toBe('string');
+  });
+
+  it('a STOP run binds verdict "stops" and the real stop count, not a flag', async () => {
+    // Same fixture as "STOPs when the id SUM differs…" above.
+    const pool = capturingAppPool(appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 4] }] }));
+    world.app = pool;
+    world.ifl = iflPool([1, 3, 4]);
+
+    expect(await verify()).not.toBe(0);
+    expect(pool.captured).toHaveLength(1);
+    expect(pool.captured[0]!.get('verdict')).toBe('stops');
+    expect(Number(pool.captured[0]!.get('stops'))).toBeGreaterThan(0);
+  });
+
+  it('--from/--to binds the window bounds, not null', async () => {
+    const pool = capturingAppPool(
+      appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3, 4, 5] }], scoped: [2, 3] }),
+    );
+    world.app = pool;
+    world.ifl = iflPool([2, 3]);
+
+    expect(await verify(['--from=2026-09-08', '--to=2026-09-08'])).toBe(0);
+    expect(pool.captured[0]!.get('wFrom')).toEqual(new Date('2026-09-08T00:00:00.000Z'));
+    // window_to is stored as parseVerifyArgs' EXCLUSIVE bound (the instant
+    // after --to ends), matching Range.to everywhere else in this file.
+    expect(pool.captured[0]!.get('wTo')).toEqual(new Date('2026-09-09T00:00:00.000Z'));
+  });
+
+  it('a failure to write the row never changes the exit code (appPool() has no INSERT route)', async () => {
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    expect(await verify()).toBe(0);
+  });
+});
