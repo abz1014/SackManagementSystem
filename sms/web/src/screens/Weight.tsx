@@ -184,11 +184,17 @@ export function WeightScreen({
     `prod:${period.from}:${period.to}:${period.shift ?? 'all'}:${period.tsTo}`,
   );
 
-  if (st.error && !st.data) return <Failed error={st.error} onRetry={st.refresh} />;
-  // Not a bare spinner: the screen's own shape, at its own heights, so nothing
-  // moves when the figures and the table arrive.
-  if (!st.data) return <ScreenSkeleton question={W.question.weight} figures={3} table={8} />;
-  const d = st.data.data;
+  // UX Phase 7 Brief 5 (21 Sep 2026): `st` used to gate the WHOLE screen —
+  // `if (st.error && !st.data) return <Failed/>` returned before the chart
+  // section below, which is fed by `coneLine`/`spc`/`stationSpc`, three
+  // entirely separate fetches. A failed /api/weight-stations therefore blanked
+  // a perfectly good chart along with the headline, figures and station table
+  // that genuinely depend on it — exactly the "one failure collapses the whole
+  // picture" shape the owner's principle forbids. `d` is now nullable and each
+  // section below guards on it independently; the chart section never checks
+  // it at all.
+  if (!st.data && !st.error) return <ScreenSkeleton question={W.question.weight} figures={3} table={8} />;
+  const d: WeightStationsData | null = st.data?.data ?? null;
   // `sLine` feeds the headline and the three figures — always cone, always
   // the whole line, from `coneLine` above, never from the chart's own
   // (possibly sack, possibly one-station) query. `s` is what the CHART
@@ -242,8 +248,13 @@ export function WeightScreen({
                     Wave 1's be5ac3e), so the figure and the table can never
                     disagree about which product or which version of its limits
                     is being shown. Same phrasing report/ConeWeight.tsx (U1)
-                    uses for the identical fact. */}
-                {d.targetG != null ? (
+                    uses for the identical fact.
+                    UX Phase 7 Brief 5: `d` is now nullable — st.error with no
+                    data must read as "unknown", never fall into the same
+                    branch as the honest "no target recorded" case below. */}
+                {d == null ? (
+                  W.weight.targetUnknown
+                ) : d.targetG != null ? (
                   <>
                     {W.reports.target(fmtG(d.targetG), d.productLabel ?? W.reports.wholeLine)}
                     {d.targetEffectiveFromUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}`}
@@ -254,8 +265,23 @@ export function WeightScreen({
               </span>
             </div>
             <div>
-              <b className="fig-val">{rejectedShare(prod.data?.data.rows?.[0]?.conesInRangePct ?? null)}</b>
-              <span className="fig-note">rejected by the scale</span>
+              {/* UX Phase 7 Brief 5 (21 Sep 2026): `prod`'s error was never
+                  read anywhere in this file (KNOWN_DEFECTS in
+                  reliability.guard.test.ts, tracked by Brief 4) — a failed
+                  /api/production fell through to `rejectedShare(null)`,
+                  printing the same "—" as a genuinely empty period. Fixed
+                  the same shape Brief 1 fixed for `coneLine` two figures to
+                  the left: a first-load failure gets its own Failed+retry,
+                  confined to this one tile so the other two figures (which
+                  do not depend on `prod`) keep showing. */}
+              {prod.error && !prod.data ? (
+                <Failed error={prod.error} onRetry={prod.refresh} />
+              ) : (
+                <>
+                  <b className="fig-val">{rejectedShare(prod.data?.data.rows?.[0]?.conesInRangePct ?? null)}</b>
+                  <span className="fig-note">rejected by the scale</span>
+                </>
+              )}
             </div>
             <div>
               <b className="fig-val small">
@@ -270,7 +296,7 @@ export function WeightScreen({
       </Block>
 
       {/* The disagreement, on the surface and only when it is not zero. */}
-      {d.disagreement.passedButOutside > 0 && (
+      {d != null && d.disagreement.passedButOutside > 0 && (
         <Block tight plain>
           <span className="acc">{W.disagreement(d.disagreement.passedButOutside)}</span>{' '}
           <button type="button" className="linkish" onClick={onSeeOutside}>{W.seeThem}</button>
@@ -333,9 +359,12 @@ export function WeightScreen({
         ) : !s || s.subgroups.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : mode === 'time' ? (
-          <OverTime spc={s} target={chartType === 'cone' ? d.targetG : null} multiDay={period.from !== period.to} />
+          // UX Phase 7 Brief 5: `d` can be null on a station-data failure
+          // while the chart itself (`s`) is fine — the target/limit lines
+          // are simply omitted rather than the whole chart being withheld.
+          <OverTime spc={s} target={chartType === 'cone' ? (d?.targetG ?? null) : null} multiDay={period.from !== period.to} />
         ) : (
-          <Distribution spc={s} target={chartType === 'cone' ? d.targetG : null} />
+          <Distribution spc={s} target={chartType === 'cone' ? (d?.targetG ?? null) : null} />
         )}
         {/* The limit lines are one version of the product's tolerance — the
             one in force at the end of the period. When the tolerance changed
@@ -371,54 +400,74 @@ export function WeightScreen({
       </Block>
 
       <Block
-        label={`${W.weight.stationsTable}, ${W.judgedOver(d.days)}`}
-        note={d.targetG != null ? W.weight.sortNote : W.weight.sortNoteNoTarget}
+        label={d == null ? W.weight.stationsTable : `${W.weight.stationsTable}, ${W.judgedOver(d.days)}`}
+        note={d == null ? null : d.targetG != null ? W.weight.sortNote : W.weight.sortNoteNoTarget}
       >
-        <div className="tw">
-          <StationTable rows={d.stations} data={d} names={names.data?.stations ?? []} onOpen={onOpenStation} />
-        </div>
-        {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the chart's sibling
-            qualifiers, previously stopping at the chart (`limitsChanged`
-            above) and never printed under the table it equally applies to.
-            Both describe the LINE-WIDE target's own history over the window
-            — a station on `targetBasis: 'station_material'` is unaffected by
-            either, but the table carries no per-row space to say so, and the
-            line-wide target is still what a `targetBasis: 'line_product'` or
-            'mixed' fallback ultimately traces back to. */}
-        {(d.limitsChangedInWindow ?? 0) > 0 && (
-          <p className="mut sm" style={{ marginTop: 10 }}>
-            {W.weight.limitsChangedTable(d.limitsChangedInWindow!)}
-          </p>
-        )}
-        {d.productChangesInWindow > 0 && (
-          <p className="mut sm" style={{ marginTop: 10 }}>
-            {W.weight.productChangedTable(d.productChangesInWindow)}
-          </p>
+        {/* UX Phase 7 Brief 5 (21 Sep 2026): this table is entirely `d`'s —
+            unlike the chart above, there is no partial content to keep when
+            `d` failed to load, so it gets its own Failed+retry rather than
+            being folded into the top-of-screen gate that used to blank the
+            chart along with it. */}
+        {d == null ? (
+          <Failed error={st.error} onRetry={st.refresh} />
+        ) : (
+          <>
+            <div className="tw">
+              <StationTable rows={d.stations} data={d} names={names.data?.stations ?? []} onOpen={onOpenStation} />
+            </div>
+            {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the chart's sibling
+                qualifiers, previously stopping at the chart (`limitsChanged`
+                above) and never printed under the table it equally applies to.
+                Both describe the LINE-WIDE target's own history over the window
+                — a station on `targetBasis: 'station_material'` is unaffected by
+                either, but the table carries no per-row space to say so, and the
+                line-wide target is still what a `targetBasis: 'line_product'` or
+                'mixed' fallback ultimately traces back to. */}
+            {(d.limitsChangedInWindow ?? 0) > 0 && (
+              <p className="mut sm" style={{ marginTop: 10 }}>
+                {W.weight.limitsChangedTable(d.limitsChangedInWindow!)}
+              </p>
+            )}
+            {d.productChangesInWindow > 0 && (
+              <p className="mut sm" style={{ marginTop: 10 }}>
+                {W.weight.productChangedTable(d.productChangesInWindow)}
+              </p>
+            )}
+          </>
         )}
       </Block>
 
       <div className="page">
       <Details>
-        <p>
-          A station is flagged when it has held one side of the line by at least {fmtG(d.thresholdG)} for{' '}
-          {d.minDaysHeld} production days or more and the pattern test has fired inside that run. The threshold is a
-          tenth of the product&apos;s tolerance when one is recorded.
-        </p>
-        {/* Which rules could not have fired on this window's series (roadmap
-            Phase 9 item 3): the longest run any station had, against each
-            rule's minimum, so an absence of rules 4 and 7 is never read as
-            evidence. The station sheet states the same for one station. */}
-        {(d.rules ?? []).length > 0 && (() => {
-          const longest = Math.max(0, ...d.stations.map((r) => r.longestRun ?? 0));
-          const cannot = d.rules.filter((r) => r.minPoints > longest).map((r) => r.id);
-          const list = cannot.length === 1 ? `rule ${cannot[0]}` : `rules ${cannot.slice(0, -1).join(', ')} and ${cannot[cannot.length - 1]}`;
-          return (
+        {/* UX Phase 7 Brief 5: the threshold rule and the Nelson-rule reach
+            below both come from `d`; when it failed to load, say so once
+            rather than throw a TypeError on `d.thresholdG`/`d.stations`. */}
+        {d == null ? (
+          <p>{W.weight.headlineStationDataFailed}</p>
+        ) : (
+          <>
             <p>
-              {cannot.length > 0 ? W.calibration.cannotFire(list, longest) : W.calibration.allCanFire(longest)}{' '}
-              {W.calibration.notApproved}
+              A station is flagged when it has held one side of the line by at least {fmtG(d.thresholdG)} for{' '}
+              {d.minDaysHeld} production days or more and the pattern test has fired inside that run. The threshold is a
+              tenth of the product&apos;s tolerance when one is recorded.
             </p>
-          );
-        })()}
+            {/* Which rules could not have fired on this window's series (roadmap
+                Phase 9 item 3): the longest run any station had, against each
+                rule's minimum, so an absence of rules 4 and 7 is never read as
+                evidence. The station sheet states the same for one station. */}
+            {(d.rules ?? []).length > 0 && (() => {
+              const longest = Math.max(0, ...d.stations.map((r) => r.longestRun ?? 0));
+              const cannot = d.rules.filter((r) => r.minPoints > longest).map((r) => r.id);
+              const list = cannot.length === 1 ? `rule ${cannot[0]}` : `rules ${cannot.slice(0, -1).join(', ')} and ${cannot[cannot.length - 1]}`;
+              return (
+                <p>
+                  {cannot.length > 0 ? W.calibration.cannotFire(list, longest) : W.calibration.allCanFire(longest)}{' '}
+                  {W.calibration.notApproved}
+                </p>
+              );
+            })()}
+          </>
+        )}
         {s && (
           <p>
             {/* UX Phase 5 Brief 3 unit U6 (16 Sep 2026): `s` follows the
@@ -433,13 +482,15 @@ export function WeightScreen({
             {s.capability.cpk != null && ` Cp ${s.capability.cp?.toFixed(2)}, Cpk ${s.capability.cpk.toFixed(2)}.`}
           </p>
         )}
-        <p>
-          Scale against product over this period: {fmtInt(d.disagreement.passedButOutside)} passed by the scale but
-          outside the product&apos;s limits, {fmtInt(d.disagreement.rejectedButInside)} rejected by the scale but
-          inside them, out of {fmtInt(d.disagreement.judged)} judged.
-          {d.disagreement.unjudged > 0 &&
-            ` ${fmtInt(d.disagreement.unjudged)} could not be judged because no product was recorded at the time.`}
-        </p>
+        {d != null && (
+          <p>
+            Scale against product over this period: {fmtInt(d.disagreement.passedButOutside)} passed by the scale but
+            outside the product&apos;s limits, {fmtInt(d.disagreement.rejectedButInside)} rejected by the scale but
+            inside them, out of {fmtInt(d.disagreement.judged)} judged.
+            {d.disagreement.unjudged > 0 &&
+              ` ${fmtInt(d.disagreement.unjudged)} could not be judged because no product was recorded at the time.`}
+          </p>
+        )}
       </Details>
       </div>
     </>
@@ -448,7 +499,7 @@ export function WeightScreen({
 
 /* --------------------------------------------------------------- headline */
 
-function headline(d: WeightStationsData, s: SpcData | null, coneLineError?: string | null): string {
+function headline(d: WeightStationsData | null, s: SpcData | null, coneLineError?: string | null): string {
   // UX Phase 7 Brief 1: a FAILED /api/spc fetch used to fall through to the
   // `!s` branch below and print "No cones were weighed in this period" — the
   // app asserting an empty plant when the true state is "the request failed
@@ -464,8 +515,18 @@ function headline(d: WeightStationsData, s: SpcData | null, coneLineError?: stri
   // headline stated "Average cone weight is 0 g" and "Every station is
   // steady" about a period in which nothing was weighed — three false
   // sentences, and the honest one below was unreachable.
-  if (!s || s.count === 0) return 'No cones were weighed in this period.';
+  if (!s || s.count === 0) return d == null ? W.weight.headlineStationDataFailed : 'No cones were weighed in this period.';
   const mean = fmtG(s.mean);
+  // UX Phase 7 Brief 5 (21 Sep 2026): `d` (getWeightStations) is a separate
+  // fetch from `s`/`coneLine` above — the average can be known while the
+  // station table and target failed to load, or vice versa. A failed `d`
+  // used to blank this whole headline (and the figures and table below it)
+  // via a top-of-screen `if (st.error && !st.data) return <Failed/>`; now the
+  // average still prints and the missing half is named rather than silently
+  // dropped into "Every station is steady" (which the flagged-count check
+  // below would otherwise print falsely — an empty `d.stations` array reads
+  // identically to "checked every station, none flagged").
+  if (d == null) return `Average cone weight is ${mean}. ${W.weight.headlineStationDataFailed}`;
   const need = d.stations.filter((x) => x.flagged).length;
   const tail = need === 0 ? W.weight.allStationsSteady : W.weight.stationsNeedLook(need);
   if (d.targetG == null) return `${W.weight.headlineNoTarget(mean)} ${tail}`;

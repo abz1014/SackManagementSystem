@@ -442,7 +442,7 @@ function Chrome({
               // the Product nav screen (Running tab, its default) rather
               // than a sheet.
               onOpenProduct={() => go({ view: 'product', sheet: null })}
-              canWrite={rank >= 2}
+              canWrite={rank >= ENGINEER_RANK}
             />
           )}
 
@@ -552,7 +552,7 @@ function Chrome({
               onTabChange={(t) => go({ productTab: t })}
               productId={route.product}
               onProductIdChange={(v) => go({ product: v })}
-              canWrite={rank >= 2}
+              canWrite={rank >= ENGINEER_RANK}
               onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
               onSeeStationReadings={(n) => go({ view: 'readings', station: n, readingsPage: 1 })}
             />
@@ -583,7 +583,7 @@ function Chrome({
         {route.sheet?.kind === 'station' && (
           <StationSheet
             station={Number(route.sheet.id)}
-            canAdjust={rank >= 2}
+            canAdjust={rank >= ENGINEER_RANK}
             periodTo={period.to}
             onClose={() => go({ sheet: null })}
             // Roadmap Phase 2b guided-navigation pass (16 Sep 2026,

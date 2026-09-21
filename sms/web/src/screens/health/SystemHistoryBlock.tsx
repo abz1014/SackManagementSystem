@@ -41,6 +41,26 @@ export function SystemHistoryBlock() {
   return (
     <Block label={W.health.epochRegister.title}>
       <p className="mut sm">{W.health.epochRegister.note}</p>
+      {/* UX Phase 7 Brief 5 (21 Sep 2026): read `sms.source_epoch` and
+          `api/src/services/systemHistory.ts` directly before touching this
+          markup, per this brief's own instruction — a plausible-looking
+          assumption about a column's meaning was already wrong once this
+          phase (Brief 3's own subject_table finding). Two things established
+          that were not true of the table as it stood:
+           - the "Registered" column rendered `g.provenance`
+             ('ifl_live'|'ifl_copy'|'simulator'), not registration info —
+             renamed to "Source" below, with the raw enum value humanised.
+           - "First seen" is the REGISTRATION instant (first_seen_utc
+             defaults to SYSUTCDATETIME() on insert, migration 025:38), not
+             an observed first reading. Said here once rather than left to
+             be misread from the column name alone. */}
+      <p className="mut sm">{W.health.epochRegister.firstSeenIsRegistration}</p>
+      {/* "Last seen" is correctly "—" on every row: `last_seen_utc` has no
+          writer anywhere in the codebase (sync-worker/src/epoch.ts never
+          sets it, and no other file does either — verified by repo-wide
+          grep, 21 Sep 2026). Not a bug to fix here; said on screen so a
+          column of bare dashes is not read as one. */}
+      <p className="mut sm">{W.health.epochRegister.lastSeenNeverRecorded}</p>
 
       {h.error && !d ? (
         <Failed error={h.error} onRetry={h.refresh} />
@@ -60,6 +80,13 @@ export function SystemHistoryBlock() {
                 <th>{W.health.epochRegister.colLastSeen}</th>
                 <th>{W.health.epochRegister.colStatus}</th>
                 <th>{W.health.epochRegister.colBy}</th>
+                {/* Already on the wire (systemHistory.ts's rawRowCount,
+                    Brief 2) but never shown anywhere — closes that gap: July's
+                    142,511 cones existed nowhere else on earth once IFL
+                    dropped the source table, and this is the only screen
+                    that can say how many rows this system still holds for
+                    each generation. */}
+                <th className="n">{W.health.epochRegister.colRows}</th>
               </tr>
             </thead>
             <tbody>
@@ -67,13 +94,14 @@ export function SystemHistoryBlock() {
                 <tr key={g.epochId}>
                   <td>{g.sourceTable}</td>
                   <td className="n">{g.generationOrdinal}</td>
-                  <td>{g.provenance}</td>
+                  <td>{W.health.epochRegister.provenanceLabel(g.provenance)}</td>
                   <td>{fmtAppInstant(g.firstSeenUtc)}</td>
                   <td>{g.lastSeenUtc == null ? '—' : fmtAppInstant(g.lastSeenUtc)}</td>
                   <td className={g.closedUtc == null ? '' : 'mut'}>
                     {g.closedUtc == null ? W.health.epochRegister.open : W.health.epochRegister.closed(fmtAppInstant(g.closedUtc))}
                   </td>
                   <td>{W.health.epochRegister.registeredBy(g.registeredBy, fmtAppInstant(g.firstSeenUtc))}</td>
+                  <td className="n">{g.rawRowCount.toLocaleString('en-GB')}</td>
                 </tr>
               ))}
             </tbody>

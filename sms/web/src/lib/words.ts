@@ -607,6 +607,19 @@ export const W = {
        so a reader cannot read the kilogram chart into the gram numbers
        around it. */
     sackChartOnly: 'The headline, the figures above and the station table below still describe cones, not this sack chart.',
+    /* UX Phase 7 Brief 5 (21 Sep 2026): `st` (getWeightStations) feeds the
+       headline's station count, the target note on the first figure, and the
+       whole station table — but the chart above (`spc`/`stationSpc`/
+       `coneLine`) is a SEPARATE fetch and used to be blanked along with
+       everything else by one `if (st.error && !st.data) return <Failed/>` at
+       the top of the screen. Named distinctly from the chart's own Failed
+       state and from `couldNotLoad` (coneLine's total-failure headline) so
+       the two can never be confused on screen. */
+    headlineStationDataFailed: 'Station and target data could not be loaded; the chart below may still be usable.',
+    /* The figure tile's own note, when the target/station fetch failed
+       rather than genuinely holding no target — distinct from `noTarget`
+       above, which is the honest "none recorded" case. */
+    targetUnknown: 'Target unknown — could not load',
   } as const,
 
   /* --------------------------------------------------------------- rejects */
@@ -1163,14 +1176,37 @@ export const W = {
       none: 'No source generation is registered yet.',
       colTable: 'Source table',
       colOrdinal: 'Generation',
-      colProvenance: 'Registered',
+      /* UX Phase 7 Brief 5 (21 Sep 2026): this column renders `g.provenance`
+         (sms.source_epoch.provenance — 'ifl_live' | 'ifl_copy' | 'simulator',
+         db/migrations/025_source_epoch.sql:29), which of the three physical
+         SOURCES produced this generation — never who registered it, or when.
+         The header used to read "Registered", which is what the LAST column
+         (`colBy`, `g.registeredBy` + `g.firstSeenUtc`) actually says; the two
+         were interchangeable-looking labels over two different facts, in a
+         provenance table of all places. */
+      colProvenance: 'Source',
       colFirstSeen: 'First seen',
+      /* Never populated: `last_seen_utc` (migration 025) has no writer
+         anywhere in sync-worker, cli or api — verified by repo-wide grep,
+         21 Sep 2026. Every row therefore reads "—" here, correctly: this is
+         not a bug, it is a column the system has not been built to keep
+         yet. Said once, in the block's own note, rather than left for a
+         column of bare dashes to be read as a fault. */
       colLastSeen: 'Last seen',
       colStatus: 'Status',
       colBy: 'Registered by',
+      colRows: 'Rows held',
       open: 'open',
       closed: (when: string) => `closed ${when}`,
       registeredBy: (who: string, when: string) => `${who}, ${when}`,
+      provenanceLabel: (p: string) => (p === 'ifl_copy' ? 'IFL copy' : p === 'ifl_live' ? 'IFL live' : p === 'simulator' ? 'Simulator' : p),
+      /* "First seen" is this row's REGISTRATION instant (first_seen_utc
+         defaults to SYSUTCDATETIME() on insert — the epoch's own PK
+         constraint DF_se_first, migration 025:38), not the timestamp of the
+         earliest raw row this system observed under it. Honest about which
+         one it is, rather than let the column name imply the latter. */
+      firstSeenIsRegistration: 'first seen = when this generation was registered, not the earliest reading under it',
+      lastSeenNeverRecorded: '"Last seen" is not yet written by any part of this system — it always reads "—", not a fault in this row.',
       /* The archived floor: the oldest day this system still holds a copy
          of, for a table whose earlier generations are no longer local —
          IFL keeps about a month of the plant's own copy (CLAUDE.md), so an
