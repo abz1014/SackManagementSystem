@@ -2,12 +2,12 @@
 
 **Full session handover: [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — read it first if resuming cold; it covers the dirty working tree this file's §3 does not yet reflect.
 
-**As of:** 21 September 2026, UX programme Phase 7 (Reliability states) complete on top of Phases 5–6 and Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
+**As of:** 21 September 2026, UX programme Phase 8 (Testing) complete on top of Phases 5–7 and Wave C/D (roadmap Phases 1–5, 7–9 and 11 complete; 10, 12, 13 and the IFL-answer work of §7 remain) · branch `floor-first-rework`
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
 
-**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns, Phase 5 Analytics, Phase 6 Expose backend, and now Phase 7 Reliability states — sixteen commits `be5ac3e`…`48de0a7`). It refines screens inside roadmap phases already marked complete above (mainly 4, 6, 8, 9 and 11) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s dated "UX programme, Phase 7" section for what it actually changed. Do not read "Phase 7" in commit messages as a roadmap phase — the two numbering schemes are independent, and roadmap Phases 8 (Testing) and 9 (Documentation) are still `PARTIAL`, not advanced by this UX phase (see §1 rows 12–13 and the "Not done" note under §2).
+**A second, separate numbering exists since 16 Sep 2026: the UX programme** (`audit/IA-PROPOSAL.md` Phase 2a, `audit/OVERVIEW-SPEC.md` Phase 3, then Phase 4 drilldowns, Phase 5 Analytics, Phase 6 Expose backend, Phase 7 Reliability states, and now Phase 8 Testing — twenty-one commits `be5ac3e`…`6bcdffd`). It refines screens and, as of Phase 8, the test harness itself, inside roadmap phases already marked complete or partial above (mainly 4, 6, 8, 9, 11 and 12) rather than adding a new roadmap phase; see §2 below and `CLAUDE.md`'s dated "UX programme, Phase 8" section for what it actually changed. Do not read "Phase 8" in commit messages as roadmap Phase 8 (Dashboards & reports, itself long complete) — the two numbering schemes are independent, and roadmap Phase 12 (Testing & release) moves from PARTIAL-with-no-component-harness to PARTIAL-with-a-component-harness by this UX phase; it is not marked COMPLETE because performance, load, FAT and SAT are still untouched (see §1 row 12 and the "Not done" note under §2).
 
 ---
 
@@ -27,13 +27,86 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 | 9 — Calibration analytics | **COMPLETE — validation method awaiting IFL** | Median beside the mean (same population rule) on Weight, the station table and the sheet; per-station SD rendered; Nelson rules named on hover and on the sheet, the centreline and I-MR sigma restart at a logged adjustment, rules that cannot fire on the series length are said so; the station sheet compares days on the plant clock (`web/src/lib/plantClock.ts`); the adjustment form takes the plant time, a note, before/after/reference readings and the product in force (migration 034); adjustments filter by period and station and include line-wide ones; a **projection** ("at N g/day this station reaches the action limit in about K days if it continues at that rate" — OLS over the flagged run, never called a prediction); `CALIBRATION-VALIDATION.md` with a real sweep over the 53 days: 12 flagged episodes, all beginning with a measurable step, 11 of them in July where no product limits existed (a floor on the fallback threshold is recommended, value for IFL). |
 | 10 — Optional AI/ML | **BLOCKED** | 53 production days held against a six-month minimum; one ledger row. Wave F, after go-live plus accrual. |
 | 11 — Security & operations | **COMPLETE — role mapping, retention policy and the live-host rehearsal await IFL** | Password change (self) and reset (admin) with session revocation and a length policy; last-admin guard; login/logout/failed-login/export audited; limiter and cache bounded; `/api/health` (service · database size vs the 10 GB cap · acquisition · backups) and a Health screen every account can open; `pool.on('error')`, graceful SIGTERM/SIGINT, orphaned-run reconciliation at start, `persistent_sync_failure` CRITICAL after N consecutive halts (cleared by the next clean pass — loop or one-shot), hourly database-size check; `sms retention` (sync_run 90 d keeping the newest per table, non-CRITICAL findings 365 d, expired sessions; never audit/product_change/readings — IFL's decision); migration 030 makes `audit_log` append-only at the database (with the `db_ddladmin` caveat written down); `cutover`/`epoch:purge` take the lock, refuse a pass in flight and require `--backup=<existing .bak>`; scripts for DB maintenance, scheduled tasks (`-WhatIf` rehearsed) and configuration backup; DEPLOY.md gains Health, Scheduled tasks, Retention, Database maintenance, Configuration backup, Upgrading and rolling back; CHANGELOG 0.2.0. **Acceptance rehearsed 15 Sep 2026** (§2). |
-| 12 — Testing & release | **PARTIAL** | 1194 tests passed / 4 skipped, 110 test files (21 Sep 2026, end of UX programme Phase 7; was 1169/109 at Phase 6, 324 tests / 34 files at Phase 0 closure), all against fakes, passing under UTC±0 and UTC+5; CI workflow added (Wave A); `verify:release` gate. There IS a real HTTP route/RBAC harness (`api/src/app.routes.test.ts`, `api/src/app.rbac.test.ts` — real Express app, fake pool, `node fetch`), but there is still no browser/component harness: `vitest.config.ts` is `environment: 'node'`, `include` is `*.test.ts` only, and none of the 16 top-level files in `web/src/screens/` has a component test (verified 21 Sep 2026). No performance, FAT or SAT material. |
+| 12 — Testing & release | **PARTIAL** | 1240 tests passed / 4 skipped, 118 test files (21 Sep 2026, end of UX programme Phase 8; was 1194/110 at Phase 7, 1169/109 at Phase 6, 324 tests / 34 files at Phase 0 closure), all against fakes, passing under UTC±0 and UTC+5; CI workflow added (Wave A); `verify:release` gate (not re-run this pass — only `npx vitest run` was). There IS now a component harness, closed this phase: `vitest.config.ts` gained `environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']]`, keyed on file EXTENSION rather than directory so it cannot swallow `web/src/App.test.ts`'s own `globalThis.window` teardown into jsdom; `@testing-library/react`/`@testing-library/dom` mount the real `<App/>` for a 4-rank UI matrix (`web/src/rank.matrix.test.tsx`, closing the rank-1/viewer rendering gap open since Phase 5) and six state-carrying drilldown hops (`web/src/hops.test.tsx`), a route/client crosscheck (`web/src/rank.crosscheck.test.ts`) locks each write control's client-side rank to its server route, and three screens (`SyncHealthBlock`, `Readings`, `Weight`) carry two-sided failure-state tests. Of the 16 top-level files in `web/src/screens/`, 2 (Readings, Weight) now have a direct component test; the other 14, including Setup, do not. Still absent: any browser/layout harness (jsdom computes no layout; Wall at 1920px and print CSS remain unverified, and Playwright is explicitly deferred) and `@testing-library/user-event` (not installed, so Setup's form blocks and the Changeover confirm flow cannot be component-tested with realistic event sequences). The rank-1 matrix closes the *rendering* question only — nobody has signed in as a viewer on a live instance; that still needs Q65–70 and an IFL-created account. No performance, load, FAT or SAT material — this row stays PARTIAL for that reason. **One unexplained intermittent failure remains open** (roughly 1 run in 74 under `--sequence.shuffle`, never captured with a test name — see §6); a suite reported "green" carries that caveat. |
 | 13 — Documentation | **PARTIAL** | `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected), credentials statement, technical history, questions status. Data dictionary, operator manual, FAT/SAT protocols absent. |
 | 14 — Site commissioning | out of scope until a host exists | — |
 
 ---
 
 ## 2. Completed
+
+### UX programme, Phase 8 — Testing (21 Sep 2026)
+- Six commits (`c827e49`, `963ecb6`, `3f2de1b`, `58644d3`, `6bcdffd`, plus the
+  brief-ordering commit already covered above). This phase added a test
+  harness and 46 tests; it changed no production behaviour — the four
+  content-hashed files in `web/dist` have identical sha256 sums before and
+  after.
+- **The project can render a React component in a test for the first time.**
+  `sms/vitest.config.ts` was `environment: 'node'` collecting `*.test.ts`
+  only. It now also collects `*.test.tsx` and gives only those files jsdom via
+  `environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']]` — keyed on file
+  extension, not directory, deliberately: `web/src/App.test.ts:18-28` assigns
+  and then deletes `globalThis.window` in its own teardown, and a
+  directory-keyed glob would have dropped that file into jsdom and had it
+  delete the real window.
+- **Three dev dependencies**, added to the ROOT `sms/package.json` only
+  (`web/package.json` untouched, verified): `jsdom` pinned `^26.1.0` (`30.x`
+  needs Node ≥22.22; this host runs v22.18.0), `@testing-library/react`, and
+  `@testing-library/dom` (an RTL v16 peer, declared for a reproducible `npm
+  ci`). `user-event` and `jest-dom` were considered and deliberately not
+  added.
+- **The rank-1 (viewer) rendering gap, open since Phase 5, is closed.**
+  `web/src/rank.matrix.test.tsx` mounts the real `<App/>` at all four ranks
+  against a faked `/api/auth/me` — no account, no database, which is what
+  made this gap unreachable before (workers are forbidden to create or reset
+  accounts). All seven nav entries render and are navigable at rank 1; Setup
+  is absent below rank 4; five write controls are absent exactly one rank
+  below their server gate and present at or above it, both sides asserted.
+  This closes the *rendering* question only — nobody has yet signed in as a
+  viewer on a live instance; that still needs the live read-only login
+  (Q65–70) and an IFL-created account.
+- **`web/src/rank.crosscheck.test.ts`** reads the `requireRole` off each write
+  route and asserts it equals the client-side rank constant, six pairings —
+  the mechanical form of the 3 Sep defect where the register's Export button
+  was offered at rank 2 while the server gated it at 3.
+- **Phase 7's failure states are locked down**, nine two-sided cases across
+  `SyncHealthBlock`, `Readings` and `Weight` (`.test.tsx` beside each). Each
+  asserts the absence of the false all-clear sentence it used to print — for
+  example "None", "0 cones weighed", "No cones were weighed in this period",
+  "all stations steady" — and, on the other side, that a healthy fetch still
+  shows the real value, so a screen that just says "could not load"
+  unconditionally would fail too.
+- **Six drilldown hops** (`web/src/hops.test.tsx`), each asserting the URL
+  against `routeSearch()` and that the destination's first request carried
+  the handed-off value. One hop — Reading sheet → Product Catalogue — carries
+  its id in the URL only, never in a request, and is documented as such in
+  the file rather than given a hollow assertion.
+- **A real test-ordering defect was found and fixed**, not merely worked
+  around. `--sequence.shuffle` failed 14 of 15 runs. `api/src/routes/
+  ops.test.ts` shared session cookies from a `beforeAll` while some of its own
+  tests revoke sessions. `api/src/app.config.test.ts`'s failure had a
+  different cause — a deliberately stateful fake DB accumulating mutations
+  across tests with only one valid run order, not the first cause proposed for
+  it. Both suites are now order-independent; 45 consecutive shuffled runs
+  passed clean.
+- **An unexplained rare flake remains open.** Roughly 1 failure in 74 full
+  `npx vitest run` executions, never captured with a test name. 60 clean runs
+  in normal order failed to reproduce it, and a worker correctly declined to
+  apply a speculative fix without a capture. The one suggestive observation —
+  `Weight.test.tsx` failed once while two heavy vitest processes ran
+  concurrently, and did not reproduce without that load — is consistent with
+  resource contention, but is **not proven and not a capture**. Treat every
+  "the suite is green" claim made from this phase onward as carrying that
+  caveat until it is captured and fixed. See §6.
+- **Not done by this phase**: Phase 9 (visual polish, the last UX phase) has
+  not started, including `report/PrintHead.tsx` (a failed header fetch
+  silently drops the print attribution block, allow-listed in the reliability
+  guard as deferred to Phase 9) and the Product screen's visual pass. There is
+  still no browser harness — jsdom computes no layout, so nothing asserts
+  anything about layout, print CSS, or the Wall at 1920px; Playwright was
+  explicitly deferred by the owner and would layer on top of this harness, not
+  replace it. `@testing-library/user-event` is not installed, so Setup's six
+  form blocks and the Changeover confirm flow have no component test.
 
 ### UX programme, Phase 7 — Reliability states (21 Sep 2026)
 - Six commits (`b689e99` a PROJECT_STATUS figure correction, not phase work; then
@@ -207,7 +280,7 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 
 ## 3. In progress
 
-Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, the UX programme (§2, not a roadmap phase) has moved past Phase 6: Phase 7 (reliability states) is now built (§2) — a failed fetch no longer renders as an empty/zero answer, `sms.verify_run`/`source_epoch`/`rebuild_audit` reached a screen, and two guards lock the fix down. UX programme Phases 8 and 9 (an automated browser/component test harness, and visual polish) are **not started** — there is still no way to render a React screen under test. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
+Nothing is mid-change on the roadmap track; the working tree is clean at every commit above. Separately, the UX programme (§2, not a roadmap phase) has moved past Phase 7: Phase 8 (Testing) is now built (§2) — the project can render a React component under test for the first time, the rank-1 viewer UI matrix and six drilldown hops are locked down, and a real test-ordering defect was found and fixed. UX programme Phase 9 (visual polish, the last UX phase) is **not started**. Roadmap Wave B itself has not begun, because every item in it depends on an IFL answer (§5) or on an owner decision (§4).
 
 ---
 
@@ -248,12 +321,12 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 
 | | Value |
 |---|---|
-| Suite | vitest, **1194 tests passed / 4 skipped**, 110 test files (21 Sep 2026, end of UX programme Phase 7, observed via `npx vitest run` from `sms/`); 1169/109 at the end of UX programme Phase 6; 1164 at the end of UX programme Phase 5; 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
+| Suite | vitest, **1240 tests passed / 4 skipped**, 118 test files (21 Sep 2026, end of UX programme Phase 8, observed via `npx vitest run` from `sms/` — this run); 1194/110 at the end of UX programme Phase 7; 1169/109 at the end of UX programme Phase 6; 1164 at the end of UX programme Phase 5; 888 passing at the end of Wave C/D round 2 (15 Sep 2026); 324 at the Phase 0 closure, verified under UTC and in a fresh clone |
 | Gate | `npm run verify:release` — typecheck (all five workspaces) · tests · build; exit 0 (not re-run this pass — only `npx vitest run` was) |
 | CI | `.github/workflows/ci.yml` runs the same gate plus a clean-tree check and a tracked-secret-file check on every push to `main`/`floor-first-rework` and every PR. **Has not run yet** — nothing is pushed. |
 | Database needed | None. Every test runs against a fake `mssql` pool or pure functions. |
-| Known failures | None. One existed at `0dd33fa` and was found only by an adversarial run under `TZ=UTC` (two `plantClock` tests, `-0` vs `0`); fixed and pinned in `7a0c5f7`. |
-| Coverage gaps | Web: 15 test files (route parsing, API callers, the targets/reliability guards, lib helpers, and two nested screens/** modules — `product/ProductLimitsBlock.tsx` and `report/model.ts`); all 16 top-level files in `web/src/screens/` (`ls web/src/screens/*.tsx`) have no direct component test — `vitest.config.ts` is `environment: 'node'`, `*.test.ts` only, so no React render is possible under the current harness (verified 21 Sep 2026). A real HTTP route/RBAC harness DOES exist for the API (`api/src/app.routes.test.ts`, `api/src/app.rbac.test.ts` — real Express, fake pool, `node fetch`); there is no equivalent for the client. No performance, load, FAT or SAT tests. The PDAS write path is tested against fakes only and has never executed against a PDAS database. |
+| Known failures | **One open, unexplained, intermittent.** Roughly 1 failure in 74 full `npx vitest run` executions under `--sequence.shuffle`; no test name has ever been captured for it. 60 clean runs in normal order did not reproduce it. The one suggestive-but-unproven observation: `Weight.test.tsx` failed once while two heavy vitest processes ran concurrently, and did not reproduce without that load, consistent with resource contention rather than a code defect — **not proven, not a capture**; do not "fix" it speculatively. Two ordering defects that WERE captured and fixed in this phase: `api/src/routes/ops.test.ts` shared session cookies from a `beforeAll` while some of its own tests revoke sessions, and `api/src/app.config.test.ts` used a deliberately stateful fake DB that only tolerated one run order — both now independent, 45 consecutive shuffled runs clean. Separately, one timezone defect existed at `0dd33fa`, found only by an adversarial run under `TZ=UTC` (two `plantClock` tests, `-0` vs `0`); fixed and pinned in `7a0c5f7`. |
+| Coverage gaps | Web: a component harness exists as of UX Phase 8 (`environmentMatchGlobs` in `vitest.config.ts`, keyed on the `.test.tsx` extension; `@testing-library/react`/`@testing-library/dom` added to the root `sms/package.json` only), but coverage under it is thin: of the 16 top-level files in `web/src/screens/`, only 2 (`Readings.tsx`, `Weight.tsx`) have a direct component test, plus the nested `screens/health/SyncHealthBlock.tsx`, the rank-1 UI matrix (`rank.matrix.test.tsx`), the rank/route crosscheck (`rank.crosscheck.test.ts`) and six drilldown hops (`hops.test.tsx`). The other 14 screens, including Setup's six form blocks, have none — `@testing-library/user-event` is not installed, so realistic form and confirm-flow interaction cannot be tested yet. No browser/layout harness exists at all: jsdom computes no layout, so nothing asserts anything about layout, print CSS, or the Wall at 1920px; Playwright is deferred by the owner and would sit on top of this harness, not replace it. A real HTTP route/RBAC harness DOES exist for the API (`api/src/app.routes.test.ts`, `api/src/app.rbac.test.ts` — real Express, fake pool, `node fetch`). No performance, load, FAT or SAT tests. The PDAS write path is tested against fakes only and has never executed against a PDAS database. |
 | Live verification recorded this wave | Forced source failure → four `halted` rows → Setup shows the reason → healthy pass supersedes them (`478c456`). Weight reject 18376 and quality reject 18335 sheets (`a473d4d`). |
 
 ---

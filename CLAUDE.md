@@ -18,6 +18,76 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
+### UX programme, Phase 8 (Testing) — a component harness exists at last (21 Sep 2026)
+
+Six commits on `floor-first-rework` (`c827e49`, `963ecb6`, `3f2de1b`, `58644d3`,
+`6bcdffd`). This phase added a test harness and 46 tests; it changed no
+production behaviour — the content-hashed files in `web/dist` are unchanged.
+
+1. **React components can be rendered under test for the first time.**
+   `sms/vitest.config.ts` still defaults to `environment: 'node'` but adds
+   `environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']]` — keyed on the file
+   EXTENSION, not the directory, because `web/src/App.test.ts` assigns and
+   deletes `globalThis.window` itself in teardown, and a directory-keyed glob
+   would have swallowed it into jsdom and had it delete the real window.
+2. **Three dev dependencies, in the ROOT `sms/package.json` only** (verified
+   not present in `web/package.json`): `jsdom` (pinned `^26.1.0`; `30.x` needs
+   Node ≥22.22 and this host runs v22.18.0), `@testing-library/react`,
+   `@testing-library/dom`. `user-event` and `jest-dom` were considered and
+   deliberately not added — Setup's forms and the Changeover confirm flow stay
+   untested until one is.
+3. **The rank-1 (viewer) rendering gap, open since Phase 5, is closed.**
+   `web/src/rank.matrix.test.tsx` mounts the real `<App/>` at all four ranks
+   against a faked `/api/auth/me` — no account, no database needed. All seven
+   nav entries render at rank 1; Setup is absent below rank 4; five write
+   controls are absent one rank below their server gate and present at or
+   above it. This closes the *rendering* question only — nobody has signed in
+   as a viewer on a live instance yet; that still needs Q65-70 and an
+   IFL-created account.
+4. **`web/src/rank.crosscheck.test.ts`** reads each write route's
+   `requireRole` and asserts it against the client-side rank constant — the
+   mechanical form of the 3 Sep defect where Export was offered at rank 2
+   while the server gated it at 3.
+5. **Phase 7's failure states are locked down**: nine two-sided cases across
+   `SyncHealthBlock`, `Readings` and `Weight`, each asserting the false
+   all-clear sentence is gone AND that a healthy fetch still shows the real
+   value.
+6. **Six drilldown hops** (`web/src/hops.test.tsx`) assert the URL and the
+   destination's first request. One hop, Reading sheet → Product Catalogue,
+   carries its id in the URL only, never in a request — documented in the
+   file rather than given a hollow assertion.
+7. **A real test-ordering defect, found and fixed**: `--sequence.shuffle`
+   failed 14 of 15 runs. `api/src/routes/ops.test.ts` shared session cookies
+   from `beforeAll` while some of its own tests revoke sessions;
+   `api/src/app.config.test.ts` had a *different* cause — a deliberately
+   stateful fake DB tolerating only one run order. Both now independent, 45
+   shuffled runs clean.
+8. **An unexplained rare flake remains OPEN** — roughly 1 failure in 74 full
+   runs, never captured with a test name. 60 clean runs in normal order did
+   not reproduce it. The one suggestive observation, `Weight.test.tsx` failing
+   once under concurrent vitest load and not otherwise, is consistent with
+   resource contention but is **not proven, not a capture**. Every "the suite
+   is green" claim from here on carries this caveat.
+
+Suite: **1194 → 1240 passed / 4 skipped**, 118 files, `npx vitest run` from
+`sms/`, observed 21 Sep 2026.
+
+**Not done by this phase:** Phase 9 (visual polish, the last UX phase) is
+unstarted, including `report/PrintHead.tsx` (still drops its print
+attribution block silently on a failed header fetch) and the Product screen's
+visual pass. There is still no browser/layout harness — jsdom computes no
+layout, so nothing asserts layout, print CSS, or the Wall at 1920px;
+Playwright is deferred by the owner and would sit on top of this harness, not
+replace it. Of the 16 top-level `web/src/screens/` files, only 2 (Readings,
+Weight) have a direct component test. Blocked on IFL, unchanged: written
+authority for the nine PDAS write rights, `AddTubeType`'s parameter name,
+weight basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings (Q10), sack
+stock per machine, the 10 Jul – 5 Aug data, and the live read-only login/host
+(Q65-70). `sms.source_epoch.last_seen_utc` still has no writer anywhere in the
+repo. Verified against the local `_SEP07` dev copy only, never real plant
+data. The branch remains unpushed, now roughly 90 commits ahead of
+`origin/main`.
+
 ### UX programme, Phase 7 (Reliability states) — a failed fetch stops reading as "none" (21 Sep 2026)
 
 Six commits on `floor-first-rework` (`b689e99` — a `PROJECT_STATUS.md` figure
@@ -75,7 +145,16 @@ visual polish) are unstarted. There IS a real HTTP route/RBAC harness
 pool, `node fetch`), but no browser or component harness exists for the
 client: `vitest.config.ts` is `environment: 'node'`, `include` is `*.test.ts`
 only, and zero of the 16 top-level files in `web/src/screens/` has a
-component test (verified 21 Sep 2026). `web/src/screens/report/PrintHead.tsx`
+component test (verified 21 Sep 2026).
+
+> **Update, UX Phase 8 (same day, 21 Sep 2026):** this paragraph is now
+> superseded on the harness point — see the Phase 8 section above. A
+> component harness was built the same day, closing the rank-1 rendering gap
+> and adding tests for two of the sixteen screens; the browser/layout gap
+> (no Playwright, no layout assertions) and the PrintHead gap below remain
+> open.
+
+`web/src/screens/report/PrintHead.tsx`
 still silently drops its whole print attribution block on a failed header
 fetch (`if (!header) return null`) — allow-listed as a deferred, cosmetic-only
 gap. Blocked on IFL, unchanged: written authority for the nine PDAS write
