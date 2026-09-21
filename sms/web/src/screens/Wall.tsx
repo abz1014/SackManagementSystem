@@ -209,6 +209,13 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
           {line.lastCone &&
             ` · ${W.lastCone} ${fmtG(line.lastCone.weightG)} ${fmtClock(line.lastCone.ts)}`}
           {error && ` · ${W.offline}`}
+          {/* UX Phase 7 Brief 1: a failed roster/attention fetch used to be
+              invisible here — the board just quietly drew fewer bars, which
+              on a TV nobody is retrying reads as "that station is fine"
+              rather than "the roster failed to load". One sentence, no new
+              skeleton, no layout change (see the file header on why). */}
+          {((stations.error && !stations.data) || (attention.error && !attention.data)) &&
+            ` · ${W.wallBoardIncomplete}`}
         </span>
       </div>
     </div>

@@ -348,6 +348,14 @@ export const W = {
   station: (n: number) => `Station ${n}`,
   quiet: 'quiet',
   quietFor: (span: string, n: number) => `Station ${n} has been quiet for ${span}`,
+  /* UX Phase 7 Brief 1, Wall's footer: /api/stations or /api/attention
+     failing means the board is built only from stations that have live rows
+     (Wall.tsx's `ids`, derived from `names` and `line.stations`) — a station
+     the roster would normally list but that has produced nothing this shift
+     DISAPPEARS from the row entirely instead of showing as a visible gap.
+     On a TV with nobody to press retry this must be said, not silently
+     absorbed; kept to one footer sentence, no skeleton, no layout change. */
+  wallBoardIncomplete: 'The station roster could not be fully loaded — a quiet station may be missing from this row, not just quiet.',
   /* The station grid's tag line (OVERVIEW-SPEC.md §3.3): quiet always wins —
      a machine that stopped is the bigger fact than one that rejected a few
      cones — so this is only ever shown when a station is NOT quiet. */
@@ -386,6 +394,23 @@ export const W = {
     nothingOutside: 'No cones in this period were passed by the scale but outside the product’s limits.',
     countLine: (n: string, rejected: string, pct: string) =>
       `${n} weighed, ${rejected} rejected by the scale (${pct}).`,
+    /* UX Phase 7 Brief 1: the register's own count can load while the
+       separate scale-reject count fails — two independent requests — and the
+       old headline silently substituted 0 for the missing one, printing "0
+       rejected by the scale (0%)" as if the scale had rejected nothing. Says
+       what is known (the weighed count) and names what is not. */
+    countLineRejectUnknown: (n: string) =>
+      `${n} weighed; how many the scale rejected could not be loaded.`,
+    /* The headline replaces the whole sentence, not just the numbers, when
+       the register itself (not just the reject count) failed to load — the
+       body below already shows Failed with its own retry. */
+    countLineFailed: 'Could not load this period’s count. The plant connection may be down.',
+    /* UX Phase 7 Brief 1: when /api/stations fails, StationChip used to
+       return null — removing the filter from the toolbar with no trace, so
+       a viewer could not tell "there is no station filter here" from "the
+       station list could not be reached". Shown in the chip's own place so
+       the toolbar's shape does not change on a failed request either. */
+    stationFilterUnavailable: 'Station filter unavailable',
     filterStation: 'Station',
     filterRejected: 'Rejected only',
     filterShift: 'Shift',
@@ -1094,6 +1119,82 @@ export const W = {
        bucket (plausible/implausible/no weight) over sms.cone_event — no
        source-table or generation dimension anywhere in the query. */
     reconciliationNote: 'A census of the readings this system has recorded, grouped by scale/tolerance state and by whether the weight is plausible. This is not a comparison against IFL’s database; nothing here reads it live.',
+
+    /* ---- UX Phase 7 Brief 1 (reliability states; strings fixed here now
+       so Brief 3 — the Health screen's reliability-states work — never
+       opens words.ts, the same convention Brief 4 followed above). This
+       phase's flagship fix: a blocking-findings COUNT that could not be
+       read must never look identical to a count of zero — that confusion
+       (a failed fetch rendering as an empty answer) is the defect this
+       whole phase exists to close. See CLAUDE.md's "why this phase exists". */
+    dqBlockingCouldNotLoad: 'How many findings are blocking could not be read — this is not the same as none being open.',
+    /* A DQ finding links to ONE example row so a reader can look at it —
+       never named as "the offending reading" (that implies the row itself
+       is at fault, which a data-quality finding does not establish), and
+       never left to imply it is the only row the finding covers. */
+    dqFindingSourceRow: 'the first of the rows this finding counts',
+    /* The row a DQ finding or a rebuild-audit entry links to can outlive its
+       own link — superseded by a later rebuild, or from a generation this
+       system no longer holds. "No longer in the register" says why the
+       click failed without implying a broken link or a bug. */
+    sourceRowGone: 'That reading is no longer in the register — it may have been superseded by a rebuild, or belong to a source generation this system no longer holds.',
+
+    /* The source-generation register (sms.source_epoch; CLAUDE.md's "Source
+       generations (epochs)" — IFL dropped and recreated its weighing
+       tables on 2026-08-05, restarting every identity, so each physical
+       generation of each source table is named and tracked separately). */
+    epochRegister: {
+      title: 'Source generations',
+      note: 'Every physical generation of each source table this system has ever read from. A generation is registered by hand, with sms epoch:accept — never automatically — and the worker halts on any table with no open generation.',
+      none: 'No source generation is registered yet.',
+      colTable: 'Source table',
+      colOrdinal: 'Generation',
+      colProvenance: 'Registered',
+      colFirstSeen: 'First seen',
+      colLastSeen: 'Last seen',
+      colStatus: 'Status',
+      colBy: 'Registered by',
+      open: 'open',
+      closed: (when: string) => `closed ${when}`,
+      registeredBy: (who: string, when: string) => `${who}, ${when}`,
+      /* The archived floor: the oldest day this system still holds a copy
+         of, for a table whose earlier generations are no longer local —
+         IFL keeps about a month of the plant's own copy (CLAUDE.md), so an
+         old generation can be closed here and gone from the plant both. */
+      archivedFloor: (day: string) => `Readings before ${day} are archived, not deleted — the sidecar database is the record of them, not IFL's source.`,
+    } as const,
+
+    /* sms.rebuild_audit — every canonical rebuild this system has run
+       (a re-derivation of attribution/shift/classification over already-
+       synced rows, not a re-fetch from IFL). */
+    rebuildAudit: {
+      title: 'Rebuilds',
+      note: 'Every time this system’s own canonical figures were recomputed over already-synced readings — a shift-rule correction or a re-attribution, never a re-fetch from IFL.',
+      none: 'No rebuild has been run.',
+      colWhen: 'When',
+      colReason: 'Reason',
+      colBy: 'By',
+      colRows: 'Rows affected',
+    } as const,
+
+    /* The LAST `sms verify` run — a manual, point-in-time reconciliation
+       against IFL's OWN source, per source generation, to the checksum
+       (CLAUDE.md: "sms verify reconciles per generation to the checksum").
+       Named and worded apart from reconciliationTitle/reconciliationNote
+       above on purpose: that block is a census of SMS's own data and never
+       touches IFL's database at all; this one is the only place in the
+       whole application that does, and only when a person runs the command. */
+    lastVerify: {
+      title: 'Last reconciliation against IFL’s source',
+      none: 'sms verify has not been run against this copy.',
+      ranAt: (when: string) => `Last run ${when}.`,
+      against: (server: string, db: string) => `against ${server} / ${db}`,
+      verdict: { ok: 'matched', mismatch: 'did not match', notRun: 'not yet run' } as const,
+      /* This sentence is load-bearing: without it a reader could mistake a
+         green "matched" verdict for an ongoing guarantee, when it is a
+         photograph of one command run once. */
+      isManual: 'This is the record of one manual run of the sms verify command — not a live or continuous check. This system holds no standing connection that watches IFL’s database for changes.',
+    } as const,
   } as const,
 
   /* -------------------------------------------- cone weight (Phase 4) */
@@ -1355,6 +1456,12 @@ export const W = {
     quantityKg: 'kg (if known)',
     product: 'Product',
     anyProduct: 'Not stated',
+    /* UX Phase 7 Brief 1: on a failed /api/products, the movement form's
+       product dropdown used to silently offer only "Not stated" — a shorter
+       list than the product actually running, with no sign anything failed.
+       The form is still usable (a movement can genuinely have no product),
+       so this is a note beside the field rather than a block on submission. */
+    productListUnavailable: 'The product list could not be loaded — only "Not stated" is offered below.',
     when: 'When (plant time)',
     why: 'Why',
     save: 'Record',
@@ -1419,6 +1526,13 @@ export const W = {
     filterProduct: 'Product',
     all: 'All',
     notAccepted: (what: string) => `This report does not narrow by ${what}.`,
+    /* UX Phase 7 Brief 1: the station and product filter chips vanished on a
+       failed fetch exactly the way Readings' station chip did (same
+       `list.length === 0` gate covering both "empty" and "could not load"),
+       silently offering a report with fewer filters than it actually has
+       rather than saying the list failed. */
+    filterStationUnavailable: 'Station filter unavailable',
+    filterProductUnavailable: 'Product filter unavailable',
     /* The two reject populations, named apart (the gap analysis found them one word). */
     rejectedByScale: 'Rejected by the scale',
     rejectedAtInspection: 'Rejected at inspection',

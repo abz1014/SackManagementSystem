@@ -183,7 +183,13 @@ export function ReportScreen({
                 </select>
               </label>
             )}
-            {allowed.includes('station') && names.length > 0 && (
+            {/* UX Phase 7 Brief 1: `names.length > 0` alone could not tell a
+                failed /api/stations from a genuinely empty roster — a failed
+                fetch used to just drop the chip, offering the report with a
+                filter it actually has but silently could not show. */}
+            {allowed.includes('station') && (stations.error && !stations.data ? (
+              <span className="chip mut">{W.reports.filterStationUnavailable}</span>
+            ) : names.length > 0 && (
               <label className="chip">
                 {W.reports.filterStation}
                 <select
@@ -198,8 +204,10 @@ export function ReportScreen({
                   ))}
                 </select>
               </label>
-            )}
-            {allowed.includes('product') && productList.length > 0 && (
+            ))}
+            {allowed.includes('product') && (products.error && !products.data ? (
+              <span className="chip mut">{W.reports.filterProductUnavailable}</span>
+            ) : productList.length > 0 && (
               <label className="chip">
                 {W.reports.filterProduct}
                 <select
@@ -214,7 +222,7 @@ export function ReportScreen({
                   ))}
                 </select>
               </label>
-            )}
+            ))}
           </div>
         )}
       </div>

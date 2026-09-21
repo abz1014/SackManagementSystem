@@ -207,54 +207,66 @@ export function WeightScreen({
     <>
       <div className="page">
         <p className="q">{W.question.weight}</p>
-        <h1 className="wide">{headline(d, sLine)}</h1>
+        <h1 className="wide">{headline(d, sLine, coneLine.error)}</h1>
       </div>
 
       <Block first>
-        <div className="figs">
-          <div>
-            <b className="fig-val">
-              {/* count === 0, not just `!s`: an empty period comes back as a
-                  real SpcData with mean 0, which printed a confident "0 g
-                  average" for a period in which nothing was weighed. */}
-              {sLine && sLine.count > 0 ? fmtInt(Math.round(sLine.mean)) : '—'}
-              <span className="fig-unit">{W.fig.gAverage}</span>
-            </b>
-            <span className="fig-note">
-              {/* The median beside the mean (roadmap Phase 9 item 1): the same
-                  population, the same period and shift, from the same call. */}
-              {sLine && sLine.count > 0 && sLine.median != null ? `${W.calibration.medianNote(fmtG(sLine.median))} · ` : ''}
-              {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the bare "product
-                  target 1,960 g" carried no product name and no time
-                  statement — the same target object the station table below
-                  already resolves (targetG/productLabel/targetEffectiveFromUtc,
-                  Wave 1's be5ac3e), so the figure and the table can never
-                  disagree about which product or which version of its limits
-                  is being shown. Same phrasing report/ConeWeight.tsx (U1)
-                  uses for the identical fact. */}
-              {d.targetG != null ? (
-                <>
-                  {W.reports.target(fmtG(d.targetG), d.productLabel ?? W.reports.wholeLine)}
-                  {d.targetEffectiveFromUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}`}
-                </>
-              ) : (
-                W.weight.noTarget
-              )}
-            </span>
+        {/* UX Phase 7 Brief 1: coneLine's error was never read here or in the
+            headline above, so a FAILED /api/spc fetch fell through to the
+            same three dashes a genuinely empty period draws — indistinguishable
+            from "nothing was weighed". Same shape Line.tsx uses for `totals`:
+            a failed first load replaces the figures with Failed and a retry;
+            stale data from a same-key refetch failure (coneLine.error with
+            sLine still set, see lib/live.tsx's keepDataAcrossKeyChange) keeps
+            showing the last good figures rather than blanking them. */}
+        {coneLine.error && !sLine ? (
+          <Failed error={coneLine.error} onRetry={coneLine.refresh} />
+        ) : (
+          <div className="figs">
+            <div>
+              <b className="fig-val">
+                {/* count === 0, not just `!s`: an empty period comes back as a
+                    real SpcData with mean 0, which printed a confident "0 g
+                    average" for a period in which nothing was weighed. */}
+                {sLine && sLine.count > 0 ? fmtInt(Math.round(sLine.mean)) : '—'}
+                <span className="fig-unit">{W.fig.gAverage}</span>
+              </b>
+              <span className="fig-note">
+                {/* The median beside the mean (roadmap Phase 9 item 1): the same
+                    population, the same period and shift, from the same call. */}
+                {sLine && sLine.count > 0 && sLine.median != null ? `${W.calibration.medianNote(fmtG(sLine.median))} · ` : ''}
+                {/* UX Phase 5 Brief 3 unit U2 (16 Sep 2026): the bare "product
+                    target 1,960 g" carried no product name and no time
+                    statement — the same target object the station table below
+                    already resolves (targetG/productLabel/targetEffectiveFromUtc,
+                    Wave 1's be5ac3e), so the figure and the table can never
+                    disagree about which product or which version of its limits
+                    is being shown. Same phrasing report/ConeWeight.tsx (U1)
+                    uses for the identical fact. */}
+                {d.targetG != null ? (
+                  <>
+                    {W.reports.target(fmtG(d.targetG), d.productLabel ?? W.reports.wholeLine)}
+                    {d.targetEffectiveFromUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}`}
+                  </>
+                ) : (
+                  W.weight.noTarget
+                )}
+              </span>
+            </div>
+            <div>
+              <b className="fig-val">{rejectedShare(prod.data?.data.rows?.[0]?.conesInRangePct ?? null)}</b>
+              <span className="fig-note">rejected by the scale</span>
+            </div>
+            <div>
+              <b className="fig-val small">
+                {sLine && sLine.count > 0
+                  ? W.weight.spread(fmtInt(Math.round(sLine.mean - 2 * sLine.stdevOverall)), fmtInt(Math.round(sLine.mean + 2 * sLine.stdevOverall)))
+                  : '—'}
+              </b>
+              <span className="fig-note">{W.weight.spreadNote}</span>
+            </div>
           </div>
-          <div>
-            <b className="fig-val">{rejectedShare(prod.data?.data.rows?.[0]?.conesInRangePct ?? null)}</b>
-            <span className="fig-note">rejected by the scale</span>
-          </div>
-          <div>
-            <b className="fig-val small">
-              {sLine && sLine.count > 0
-                ? W.weight.spread(fmtInt(Math.round(sLine.mean - 2 * sLine.stdevOverall)), fmtInt(Math.round(sLine.mean + 2 * sLine.stdevOverall)))
-                : '—'}
-            </b>
-            <span className="fig-note">{W.weight.spreadNote}</span>
-          </div>
-        </div>
+        )}
       </Block>
 
       {/* The disagreement, on the surface and only when it is not zero. */}
@@ -436,7 +448,16 @@ export function WeightScreen({
 
 /* --------------------------------------------------------------- headline */
 
-function headline(d: WeightStationsData, s: SpcData | null): string {
+function headline(d: WeightStationsData, s: SpcData | null, coneLineError?: string | null): string {
+  // UX Phase 7 Brief 1: a FAILED /api/spc fetch used to fall through to the
+  // `!s` branch below and print "No cones were weighed in this period" — the
+  // app asserting an empty plant when the true state is "the request failed
+  // and we do not know". The figures block above already swaps to `Failed`
+  // with a retry button for the same condition (error, no data at all); this
+  // is the same condition's headline. Stale data from a same-key refetch
+  // failure (coneLineError set but `s` still holding the last good answer)
+  // is not this case — that falls through to the ordinary headline below.
+  if (coneLineError && !s) return W.couldNotLoad;
   // `s` is non-null but EMPTY for a period that holds no readings: /api/spc
   // answers with count 0 and mean 0 rather than with nothing at all, so `!s`
   // alone only ever catches loading and error. Without the count check this

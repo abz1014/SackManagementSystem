@@ -192,7 +192,9 @@ export function ReadingsScreen({
       />
       <div className="page">
         <p className="q">{W.question.readings}</p>
-        <h1 className="wide">{countLine(period, listing, total, rejectedTotal, outsideOnly, states)}</h1>
+        <h1 className="wide">
+          {countLine(period, listing, total, rejectedTotal, outsideOnly, states, !!rows.error && !rows.data, !!rejected.error && !rejected.data)}
+        </h1>
       </div>
 
       <Block first tight>
@@ -218,6 +220,7 @@ export function ReadingsScreen({
                   stations={stationList}
                   value={station}
                   onChange={onStationChange}
+                  failed={!!stations.error && !stations.data}
                 />
               )}
               {listing === 'cones' && !outsideOnly && (
@@ -301,8 +304,28 @@ function listingTitle(listing: Listing): string {
   }
 }
 
-function countLine(period: Period, listing: Listing, total: number, rejected: number, outsideOnly: boolean, states: ConeState[]): string {
+function countLine(
+  period: Period,
+  listing: Listing,
+  total: number,
+  rejected: number,
+  outsideOnly: boolean,
+  states: ConeState[],
+  // UX Phase 7 Brief 1: `rows.error` and `rejected.error` (the two polls
+  // this headline is built from, in ReadingsScreen above) were never read
+  // here — `total` and `rejected` silently fell back to 0 on a failed
+  // fetch, so a dead /api/events read as "0 cones weighed, 0 rejected by
+  // the scale (0%)" in the headline while the body correctly showed Failed
+  // with a retry button two lines below it. One screen, two answers.
+  rowsFailed = false,
+  rejectedCountFailed = false,
+): string {
   const what = fmtDayLong(period.from) === fmtDayLong(period.to) ? fmtDayLong(period.from) : `${period.from} to ${period.to}`;
+  // The register itself failed to load: nothing below `total` can be
+  // trusted, so the whole sentence is replaced rather than any of its
+  // numbers — the body's own Failed block (rendered from the same
+  // `rows.error && !rows.data` condition) carries the retry action.
+  if (rowsFailed) return W.readings.countLineFailed;
   if (listing === 'sacks') return `${what}: ${fmtInt(total)} sacks weighed.`;
   if (listing === 'inspectionRejects') return `${what}: ${fmtInt(total)} cones rejected before weighing.`;
   // With state chips on, `total` is the filtered count — the same reason the
@@ -316,8 +339,12 @@ function countLine(period: Period, listing: Listing, total: number, rejected: nu
   // different populations. Stating them as "N weighed, M rejected (P%)" made
   // P unbounded: 40 shown against 160 scale rejects printed "400.0%".
   if (outsideOnly) return `${what}: ${W.readings.countLineOutside(fmtInt(total))}`;
-  const pct = total > 0 ? `${Math.round((1000 * rejected) / total) / 10}%` : '0%';
   if (listing === 'rejected') return `${what}: ${fmtInt(total)} cones rejected by the scale.`;
+  // The register loaded fine (`total` is real) but the separate scale-reject
+  // count did not — say what is known and name what is not, rather than
+  // stating "0 rejected by the scale (0%)" as if the scale rejected nothing.
+  if (rejectedCountFailed) return `${what}: ${W.readings.countLineRejectUnknown(fmtInt(total))}`;
+  const pct = total > 0 ? `${Math.round((1000 * rejected) / total) / 10}%` : '0%';
   return `${what}: ${W.readings.countLine(fmtInt(total), fmtInt(rejected), pct)}`;
 }
 
@@ -327,11 +354,20 @@ function StationChip({
   stations,
   value,
   onChange,
+  failed,
 }: {
   stations: StationRow[];
   value: number | null;
   onChange: (v: number | null) => void;
+  /** UX Phase 7 Brief 1: /api/stations failing and /api/stations answering
+   *  with a genuinely empty roster look identical to `stations.length === 0`
+   *  below — this used to return null either way, so a failed fetch quietly
+   *  REMOVED the station filter from the toolbar rather than saying it could
+   *  not be reached. A day with no stations at all (unseen in practice, but
+   *  not ruled out) still shows nothing, which is the honest answer there. */
+  failed?: boolean;
 }) {
+  if (failed) return <span className="chip mut">{W.readings.stationFilterUnavailable}</span>;
   if (stations.length === 0) return null;
   return (
     <label className="chip">

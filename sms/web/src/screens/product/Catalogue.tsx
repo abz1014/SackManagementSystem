@@ -22,7 +22,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { W } from '../../lib/words';
-import { Block, SkelLines } from '../../ui/bits';
+import { Block, Failed, SkelLines } from '../../ui/bits';
 import { fmtG } from '../../lib/fmt';
 import { ProductLimitsBlock } from './ProductLimitsBlock';
 import {
@@ -61,7 +61,12 @@ export function CatalogueTab({
     <>
       <Block label={W.product.catalogueTitle} note={W.product.catalogueNote}>
         {error ? (
-          <p className="acc sm">{W.couldNotLoad}</p>
+          // UX Phase 7 Brief 1: a bare <p> with no retry button — the one
+          // failure state in this codebase without one (compare History.tsx's
+          // TimelineBlock, the textbook version of this three-way pattern).
+          // `nonce` already exists to re-trigger the effect above after a
+          // write; reusing it here costs nothing new.
+          <Failed error={error} onRetry={() => setNonce((n) => n + 1)} />
         ) : !products ? (
           <SkelLines n={5} short />
         ) : (

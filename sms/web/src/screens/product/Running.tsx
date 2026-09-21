@@ -71,6 +71,15 @@ export function RunningTab({
       <Block label={W.product.title}>
         {productAt.error && !productAt.data ? (
           <Failed error={productAt.error} onRetry={productAt.refresh} />
+        ) : products.error && !products.data ? (
+          // UX Phase 7 Brief 1: `products.error` was never read here, so
+          // /api/product-at succeeding while /api/products failed fell
+          // through to the `!products.data` skeleton branch below FOREVER —
+          // usePolling keeps retrying, but the same fetch keeps failing, and
+          // nothing on screen ever told the reader that. `products` is also
+          // needed by the change form (ChangeForm's own `products` prop), so
+          // there is no partial render available here beyond retrying.
+          <Failed error={products.error} onRetry={products.refresh} />
         ) : !productAt.data || !products.data ? (
           <SkelLines n={4} short />
         ) : (

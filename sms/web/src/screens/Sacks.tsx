@@ -414,6 +414,12 @@ function MovementForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =
             <option key={p.productId} value={p.productId}>{p.description ?? p.lotCode ?? `Product ${p.productId}`}</option>
           ))}
         </select>
+        {/* UX Phase 7 Brief 1: `list` silently degrading to [] on a failed
+            /api/products used to be indistinguishable from a genuinely empty
+            product master — the dropdown just offered fewer options. */}
+        {products.error && !products.data && (
+          <span className="mut sm">{W.sacks.productListUnavailable}</span>
+        )}
       </label>
       <label className="field">
         <span>{W.sacks.when}</span>
