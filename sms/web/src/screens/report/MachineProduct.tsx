@@ -43,14 +43,39 @@ function labelOf(id: number | null, name: string | null, labels: Record<string, 
  * sheet — the same destination the machine rows on Line and the station
  * table on Weight already open.
  */
+/*
+ * UX Phase 9 Brief D (21 Sep 2026, owner decision): this matrix is one
+ * column per calendar day × shift worked in the period — measured at ~103
+ * columns / 7,438px on the dev range (2026-08-05 to 2026-09-07). No print
+ * orientation or type-size rule fixes that; it is a structural limit, not
+ * something [PHASE 9 PRINT P2]'s full-width/8pt table rule (app.css) can
+ * paper over. So the whole section is print-suppressed — `.no-print` below,
+ * the same existing mechanism the rest of the screen chrome already uses,
+ * not a new one — and replaced on paper by one line pointing at the CSV
+ * export, which carries the identical rows and is already audited (rank 3,
+ * `reportExportUrl` in Report.tsx). `.print-only` (app.css:526-527) is the
+ * existing mirror-image mechanism for that line; using both keeps this
+ * change to markup only, no CSS edit needed for Decision 2. Nothing here
+ * changes what renders on screen.
+ */
 export function MachineProductSection({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
-  if (d.rows.length === 0) {
-    return (
-      <Block first>
-        <Empty message={W.nothingHere} />
-      </Block>
-    );
-  }
+  return (
+    <>
+      <p className="print-only">{W.reports.machineProductTooWideForPrint}</p>
+      <div className="no-print">
+        {d.rows.length === 0 ? (
+          <Block first>
+            <Empty message={W.nothingHere} />
+          </Block>
+        ) : (
+          <MachineProductTables d={d} onOpen={onOpen} />
+        )}
+      </div>
+    </>
+  );
+}
+
+function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
   return (
     <>
       <Block first>

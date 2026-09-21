@@ -68,6 +68,13 @@
  *                      "background graphics", so it survives the setting.
  *   P5  .toggle        Added to the print hide list as a second line of
  *                      defence beside the markup-level fix elsewhere.
+ *   P6  @page report-landscape / main:has(...)   NEW, owner decision (21 Sep
+ *                      2026): REPORTS print landscape, everything else
+ *                      (Readings register above all) stays portrait — see
+ *                      the note by the rule for how a document-level `@page`
+ *                      at-rule was scoped to one screen with no wrapper
+ *                      class available in this pass's owned files, and what
+ *                      was and was not verified.
  * P4 (chart tick legibility) needed no CSS change here — measured, not
  * assumed; see the Phase 9 report for the measurement.
  * ------------------------------------------------------------------------- */
@@ -835,19 +842,50 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 /* [PHASE 9 PRINT P1] No `@page` rule existed anywhere in this file, so print
    fell back to the browser's own default page size and margins — usable
    width was whatever Chrome happened to pick, never stated or tested here.
-   A4 PORTRAIT is what ships: it is the safer default because it changes
-   nothing about how every OTHER printed page in the app (Readings register,
-   single-figure reports) already reads, and because a global landscape
-   default is a page-composition decision for every print in the app, not
-   just the widest report tables — the brief for this pass says explicitly
-   that call belongs to the owner. LANDSCAPE measurably fits more of the wide
-   report tables (Calibration, MachineProduct) without shrinking type as far;
-   both options were screenshotted for the Phase 9 report so the owner can
-   compare and flip `size: A4` to `size: A4 landscape` in one line if they
-   choose it. Margins are tighter than Chrome's ~0.4in default because every
-   report table below is already fighting for width. */
+   A4 PORTRAIT is the document-wide default: every screen except Report
+   prints against this rule, the Readings register above all — a 6-column
+   register has no reason to read sideways. Margins are tighter than
+   Chrome's ~0.4in default because every report table below is already
+   fighting for width. (Owner decision, 21 Sep 2026: Report prints landscape
+   instead — see the named page below, P6 — after both orientations were
+   screenshotted for the Phase 9 report and landscape measurably fit more of
+   the wide report tables without shrinking type as far.) */
 @page {
   size: A4;
+  margin: 14mm 12mm;
+}
+
+/* [PHASE 9 PRINT P6] Landscape for REPORTS ONLY, owner decision 21 Sep 2026.
+   `@page` is a document-level at-rule — it cannot be written as `.report
+   @page { ... }` or nested inside any normal selector — so scoping a second
+   page size to one screen needs a NAMED page (CSS Paged Media Level 3's
+   `page` property plus a named `@page <name>` rule) applied to a box that is
+   unique to that screen. `page`/named `@page` is Baseline "widely available"
+   in Chrome since Feb 2023 (checked against MDN; this sandbox's Browser pane
+   has no real print dialog, so the actual paginated output could not be
+   watched happen — see the Phase 9 report for exactly what was and was not
+   verified).
+
+   Neither `Report.tsx` nor `App.tsx`'s `<main>` is owned by this pass, so no
+   wrapper class (e.g. `<main className="report">`, the clean version of this
+   rule) could be added. The selector below instead keys off a hook already
+   in the DOM: the report-type chip row Report.tsx renders unconditionally
+   for every report type (ten today — `REPORT_TYPES`, `web/src/api.ts`),
+   `role="group" aria-label="Report"`
+   (`Report.tsx:161`, text from `W.reports.selectorLabel` — see `words.ts`).
+   That beats keying off `.verdict` (the other Report-only class), which
+   exists only for the daily and management-summary types and only when the
+   period has data — silently missing MachineProduct, the very report this
+   pass is about. `.no-print` hides that chip row's OWN box in print, but
+   `:has()` matches the DOM regardless of `display`, and the assignment below
+   is on its ancestor `<main>`, which still generates a page box. Verified
+   live (21 Sep 2026): `document.querySelector('main:has([role="group"]
+   [aria-label="Report"])')` returns `<main>` only when the Report screen is
+   mounted, and returns `null` on Line, Readings, Weight, Rejects, Sacks and
+   Product — see the Phase 9 report for the per-screen check. */
+main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
+@page report-landscape {
+  size: A4 landscape;
   margin: 14mm 12mm;
 }
 

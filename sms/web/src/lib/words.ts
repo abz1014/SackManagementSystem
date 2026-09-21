@@ -1729,6 +1729,11 @@ export const W = {
     conesWithoutStation: (n: string) => `${n} cones carry no machine and are not on this matrix.`,
     changeovers: 'Changeovers',
     noChangeovers: 'No changeovers were read in this period.',
+    /* UX Phase 9 Brief D (21 Sep 2026): this matrix is one column per day ×
+       shift worked in the period — over 100 columns on a month-long range,
+       a structural limit no print type size or orientation fixes. Printed
+       alone via `.print-only` in place of the table (MachineProduct.tsx). */
+    machineProductTooWideForPrint: 'This report has one column per machine, day and shift in the period — too many to fit a printed page. The CSV export holds the same data.',
     /* Errors. */
     notAllowed: 'This report is for managers and above.',
   } as const,
