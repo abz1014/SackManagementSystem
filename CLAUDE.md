@@ -18,6 +18,76 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
+### UX programme, Phase 7 (Reliability states) — a failed fetch stops reading as "none" (21 Sep 2026)
+
+Six commits on `floor-first-rework` (`b689e99` — a `PROJECT_STATUS.md` figure
+correction, not phase work — then `1d32f02`, `e596724`, `8611d2b`, `2bcaad8`,
+`48de0a7`). One defect class, closed everywhere it was found: **a failed
+fetch rendering as an EMPTY or ZERO answer** — the app asserting a fact it
+does not have — not new analytics.
+
+1. **`SyncHealthBlock.tsx` never read `ops.error`** (verified in
+   `web/src/screens/health/SyncHealthBlock.tsx` — it now does), so a failed
+   `/api/operations` printed "None" for blocking DQ findings, "no findings
+   open", and an empty per-table list: the block whose job is to report
+   breakage announced all-clear while blind. It now states in words that the
+   count could not be read, which is not the same as none being open. Four
+   more instances of the same shape fixed on Weight, Readings, Product ›
+   Running and Wall.
+2. **Partial-failure naming**: where several fetches feed one statement, the
+   screen now says which part failed instead of collapsing to one blanket
+   error — Readings keeps its weighed total when only the reject count fails
+   to load; Weight no longer lets one fetch gate the whole screen.
+3. **`sms.verify_run`** (migration `039_dq_destination_and_verify_run.sql`) is
+   written by `cli/src/commands/verify.ts` (one `INSERT` per run, non-fatal on
+   write failure) and read, with `sms.source_epoch` and `sms.rebuild_audit`,
+   by the new `GET /api/system-history` — the first screen either table ever
+   reached. Health states plainly that this is the record of a manual run,
+   not a live check. **`sms verify` over HTTP was deliberately not built**:
+   the API has no IFL connection, the credential/host are open questions
+   (Q65-70), and a route would put table scans on the live plant server.
+4. **`GET /api/dq-destination`** resolves a DQ finding's `subjectRef` to its
+   canonical row; both it and `/api/system-history` are rank 1 — verified: no
+   `requireRole` call gates either in `api/src/app.ts`. `reject_event` cannot
+   say whether a reading came from the QCS check or the weight scale, so
+   those findings offer no destination link and say why, rather than
+   guessing — a worker proved the danger by resolving one real `subjectRef`
+   against both tables and getting two different plausible rows.
+5. **Two guards, both proven to fail when the defect is reintroduced**
+   (`web/src/reliability.guard.test.ts`): every `usePolling()` result's
+   `.error` must be read in its own file, or carry a written
+   `ALLOW_LIST`/`KNOWN_DEFECTS` entry (`KNOWN_DEFECTS` is verified empty — no
+   live exception currently claimed); and the ONE AUDIENCE rule is now
+   mechanical client-side — the exact set of `rank >=` read-tier gates in
+   `App.tsx` cannot grow without a reviewed change to this file.
+6. **A finding, not a fix**: `sms.source_epoch.last_seen_utc` has **no writer
+   anywhere in the repository** — verified by grep (only the column
+   definition in `025_source_epoch.sql` and a read in `systemHistory.ts`).
+   `web/src/lib/words.ts` now says so on screen instead of showing bare
+   dashes unexplained. This remains an open item, not resolved.
+
+Suite: **1169 → 1194 passed / 4 skipped**, `npx vitest run` from `sms/`,
+observed 21 Sep 2026.
+
+**Not done by this phase:** roadmap Phases 8 (Testing) and 9 (Documentation/
+visual polish) are unstarted. There IS a real HTTP route/RBAC harness
+(`api/src/app.routes.test.ts`, `api/src/app.rbac.test.ts` — real Express, fake
+pool, `node fetch`), but no browser or component harness exists for the
+client: `vitest.config.ts` is `environment: 'node'`, `include` is `*.test.ts`
+only, and zero of the 16 top-level files in `web/src/screens/` has a
+component test (verified 21 Sep 2026). `web/src/screens/report/PrintHead.tsx`
+still silently drops its whole print attribution block on a failed header
+fetch (`if (!header) return null`) — allow-listed as a deferred, cosmetic-only
+gap. Blocked on IFL, unchanged: written authority for the nine PDAS write
+rights, `AddTubeType`'s parameter name, weight basis (Q4/Q5), KPI approval
+(Q33-37), reject-code meanings (Q10), sack stock per machine, the 10 Jul – 5
+Aug data, and the live read-only login/host (Q65-70, which is what blocks
+`sms verify` over HTTP). **The rank-1 (viewer) UI path has still never been
+exercised live** — Phase 7's guards close the client-side *gating* question
+mechanically; they do not close the *rendering* one. Verified against the
+local `_SEP07` dev copy only, never real plant data. The branch remains
+unpushed, now roughly 85 commits ahead of `origin/main`.
+
 ### UX programme, Phase 6 (Expose backend) — Product screen, changeover UI, two readers (16 Sep 2026)
 
 Four commits on `floor-first-rework` (`be4b9fc`, `fd85624`, `0d8b74a`, `177abc9`),
