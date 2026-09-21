@@ -52,9 +52,10 @@
  * same shape as the first three: flag check first, the vendor's proc with its
  * OUTPUT @error/@errorMsg, an echo-back read of the row PDAS now holds, the
  * app-side mirror refreshed, and one sms.product_change row whatever happened.
- * Verified from the proc bodies in PDAS_TP1U2_SEP07 (read-only, 15 Sep 2026),
- * EXCEPT the one piece the 16 Sep 2026 introspection task could not confirm —
- * see the AddTubeType bullet below and PROC_PARAMS' own comment:
+ * Verified from the proc bodies in PDAS_TP1U2_SEP07 (read-only, 15 Sep 2026).
+ * The 16 Sep 2026 introspection task could not confirm AddTubeType's own
+ * signature this way (see below); a 21 Sep 2026 follow-up did, by a different
+ * route — see the AddTubeType bullet below and PROC_PARAMS' own comment:
  *   - AddBlend / AddCount: INSERT, duplicate check `name LIKE @name` (so the
  *     vendor's own compare is case-insensitive and treats '_' and '%' as
  *     wildcards), -4001/-6001 "already exist", -4004/-6004 "empty" — a check
@@ -63,16 +64,26 @@
  *     must be 1 or 2), so a form is always passed; -5001 duplicate (name AND
  *     form), -5003 weight <= 0. 26 of the 27 tube types on this line are form
  *     2. Its OUTPUT parameter is bound below as `@typeTypeId` — presumed to be
- *     the vendor's own typo, by analogy with every other Add* proc's pattern —
- *     but UNLIKE the other six procedures this one was never confirmed: no
- *     screenshot of it exists (Desktop/SPS unzip/SPS/*.jpg has one for each of
- *     the other six), and the 16 Sep 2026 introspection attempt against
+ *     the vendor's own typo, by analogy with every other Add* proc's pattern.
+ *     No screenshot of it exists (Desktop/SPS unzip/SPS/*.jpg has one for each
+ *     of the other six), and the 16 Sep 2026 introspection attempt against
  *     PDAS_TP1U2_SEP07 found that IFL_DB_USER holds only db_datareader there
  *     — no EXECUTE/VIEW DEFINITION on any procedure — so sys.parameters and
  *     OBJECT_DEFINITION returned nothing for it, or for any of the twelve
  *     (scripts/pdas-introspect.mjs; the grant that would fix this is proposed,
  *     not applied, at db/bootstrap/11_pdas_procedure_metadata.template.sql).
- *     Do not read this binding as confirmed.
+ *     **VERIFIED 21 Sep 2026 by a different route:** a direct Windows-auth
+ *     (`sqlcmd -E`, read-only) query of `sys.procedures`/`sys.parameters`/
+ *     `sys.types` on `PDAS_TP1U2_SEP07` reads the system catalogue directly
+ *     and needs no `db_datareader`-level grant at all, so the proposed
+ *     template grant above was never required for this purpose (it may still
+ *     matter for the plant's own `sms_readonly`, which is a separate
+ *     question). The result was an exact match, in name and parameter order,
+ *     to `PROC_PARAMS.AddTubeType` below — `typeTypeId` is confirmed, not
+ *     presumed. This verifies the procedure's SIGNATURE only: its runtime
+ *     behaviour (the -5001/-5002/-5003 codes above) is still read from the
+ *     proc body text, not observed, and no PDAS procedure has ever been
+ *     executed against any database. Do not read this as more than that.
  *   - CreatePallet: INSERT keyed on (MaterialId, PackSchemaId, Lot), -8001
  *     "Pallet already exist" regardless of PalletActive, -8004 when material,
  *     schema or lot is empty, -8002 bad active bit; @labelType defaults to 1
@@ -124,19 +135,34 @@ export type VendorProc =
  *     above). Every OTHER parameter on these six procedures — names, types,
  *     which are OUTPUT — matches what the code already bound; nothing else
  *     changed.
- *   - AddTubeType — NOT independently confirmed. No screenshot of it exists,
- *     and sms/scripts/pdas-introspect.mjs (SELECT-only, against the local
- *     PDAS_TP1U2_SEP07 copy, using the existing read-only IFL_DB_* login)
- *     could not read it either: that login holds only db_datareader there —
- *     by design, per db/bootstrap/10_ifl_readonly_login.template.sql — which
- *     carries no EXECUTE / VIEW DEFINITION on ANY procedure, so sys.parameters
- *     and OBJECT_DEFINITION returned nothing for all twelve procedures alike,
- *     not just this one (db/bootstrap/11_pdas_procedure_metadata.template.sql
- *     proposes the metadata-only grant that would fix this; it has not been
- *     applied). The three input names (tubeType, tubeForm, tubeWeight) follow
- *     the pattern every confirmed Add* proc uses and were never in question;
- *     the OUTPUT id name 'typeTypeId' is still only the vendor's presumed
- *     typo. Treat this one entry as unverified, not as evidence it is right.
+ *   - AddTubeType — NOT confirmed by the 16 Sep 2026 task. No screenshot of it
+ *     exists, and sms/scripts/pdas-introspect.mjs (SELECT-only, against the
+ *     local PDAS_TP1U2_SEP07 copy, using the existing read-only IFL_DB_*
+ *     login) could not read it either: that login holds only db_datareader
+ *     there — by design, per db/bootstrap/10_ifl_readonly_login.template.sql —
+ *     which carries no EXECUTE / VIEW DEFINITION on ANY procedure, so
+ *     sys.parameters and OBJECT_DEFINITION returned nothing for all twelve
+ *     procedures alike, not just this one
+ *     (db/bootstrap/11_pdas_procedure_metadata.template.sql proposes the
+ *     metadata-only grant that would fix this; it has not been applied). The
+ *     three input names (tubeType, tubeForm, tubeWeight) follow the pattern
+ *     every confirmed Add* proc uses and were never in question.
+ *     **VERIFIED 21 Sep 2026**, closing this gap by a route that needed no
+ *     new grant: a Windows-authenticated (`sqlcmd -E`, read-only) query of
+ *     `sys.procedures` joined to `sys.parameters` and `sys.types` on
+ *     `PDAS_TP1U2_SEP07` reads the system catalogue directly, bypassing the
+ *     `IFL_DB_USER` login's `db_datareader`-only grant entirely — this is
+ *     what the 16 Sep task lacked, not a missing server-side grant. Result:
+ *     `@error int OUTPUT, @errorMsg nvarchar(255) OUTPUT, @typeTypeId int
+ *     OUTPUT, @tubeType nvarchar(255), @tubeForm int, @tubeWeight float`, in
+ *     that parameter_id order — an exact match to the binding below. The
+ *     OUTPUT id name 'typeTypeId' is now CONFIRMED as the vendor's own typo,
+ *     not merely presumed. This confirms the procedure's SIGNATURE; it does
+ *     not confirm runtime behaviour (the -5001/-5002/-5003 codes are still
+ *     read from the proc body, not observed) and no PDAS procedure has ever
+ *     been executed against any database. See the file header for the fuller
+ *     account and CLAUDE.md's dated section of the same date for the
+ *     reproducible query.
  *
  * has_default_value could not be read for any procedure (same permission gap)
  * — CreateMaterial is called with all five @materialDesc parameters bound
@@ -817,9 +843,9 @@ export class PdasWriter {
   /**
    * Execute one vendor proc that answers through OUTPUT @error/@errorMsg and
    * (for the creates) an OUTPUT id. `idParam` is the proc's own name for that
-   * parameter — AddTubeType's is bound as `typeTypeId`, presumed to be the
-   * vendor's own typo, UNCONFIRMED (see the file header and PROC_PARAMS) —
-   * and mssql binds by name so it must be spelled the vendor's way.
+   * parameter — AddTubeType's is bound as `typeTypeId`, the vendor's own
+   * typo, CONFIRMED 21 Sep 2026 (see the file header and PROC_PARAMS) — and
+   * mssql binds by name so it must be spelled the vendor's way.
    *
    * `proc` is a `VendorProc`, not `string`: the only seven names that may ever
    * reach `dbo.${proc}` below are the module's own literals, never a value
@@ -976,11 +1002,12 @@ export class PdasWriter {
       const r = await this.execProc(
         'AddTubeType',
         (q) => q.input('tubeType', mssql.NVarChar(255), name).input('tubeForm', mssql.Int, tubeForm).input('tubeWeight', mssql.Float, p.tubeWeightG),
-        // UNVERIFIED (16 Sep 2026 introspection task, PDAS_TP1U2_SEP07): no
-        // screenshot of AddTubeType exists and IFL_DB_USER cannot see any
-        // procedure's metadata on this login (see the file header and
-        // PROC_PARAMS below). 'typeTypeId' is the vendor's presumed typo,
-        // unchanged from the original guess pending real confirmation.
+        // CONFIRMED 21 Sep 2026 by a Windows-auth catalogue read of
+        // PDAS_TP1U2_SEP07 (the 16 Sep 2026 introspection task's IFL_DB_USER
+        // login could not see any procedure's metadata; a direct sqlcmd -E
+        // query bypasses that grant entirely — see the file header and
+        // PROC_PARAMS above). 'typeTypeId' is the vendor's own typo, and the
+        // exact match to this binding's name and order is what confirms it.
         'typeTypeId',
       );
       if (r.code !== 0 || r.id == null) {

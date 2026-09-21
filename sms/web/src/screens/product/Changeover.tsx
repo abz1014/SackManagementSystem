@@ -22,22 +22,30 @@
  * a thrown `ApiError`; its `status` distinguishes the two, its `message` is
  * the server's own `error` text, printed verbatim.
  *
- * TUBE TYPE IS ID-ONLY (this brief's own instruction): `AddTubeType`'s
- * parameter name is unverified against the vendor and needs `GRANT VIEW
- * DEFINITION` on the local `_SEP07` copy that has not happened (project
- * rule 17 — never guess past an IFL dependency), so this screen offers
- * existing tube types only. Blend and count keep both paths (pick an
- * existing one, or type a new name for `AddBlend`/`AddCount` to add) because
- * those two procedures ARE confirmed (CLAUDE.md, 11 Sep 2026: `CreateMaterial`
- * / `SetMaterialStatusActive` are the two IFL has authorised in writing so
- * far; `AddBlend`/`AddCount` are written and awaiting the same, same as
- * everything else execute would call — the plan step for either says so via
- * its own `proc` field, never asserted as already authorised here).
- *
- * TUBE-TYPE EXPLANATION (added UX Phase 6 Brief 3, 16 Sep 2026):
- * `W.product.changeover.tubeExistingOnly` renders beside the picker. It does
- * not claim PDAS would reject a new tube type — only that this system cannot
- * call `AddTubeType` correctly yet (its parameter name is unverified).
+ * TUBE TYPE OFFERS A NEW NAME TOO, LIKE BLEND AND COUNT (changed 21 Sep
+ * 2026 — see CLAUDE.md's dated section of the same date). Until then this
+ * screen restricted the tube-type picker to existing entries only, because
+ * `AddTubeType`'s OUTPUT parameter name was unverified against the vendor.
+ * That gap closed on 21 Sep 2026: a Windows-authenticated (`sqlcmd -E`,
+ * read-only) query of `sys.procedures`/`sys.parameters` on
+ * `PDAS_TP1U2_SEP07` read the procedure's signature directly — no
+ * `GRANT VIEW DEFINITION` needed, contrary to what project rule 17
+ * previously required waiting on — and confirmed `typeTypeId` as the
+ * OUTPUT id name `pdasWrite.ts` already bound. With the reason for the
+ * restriction gone, the picker now offers the same two paths Blend and
+ * Count already did: pick an existing tube type by id, or type a new name
+ * plus the weight and form `AddTubeType` also requires. **This does not
+ * change execute's gating**: `api/src/routes/changeover.ts`'s body schema
+ * already accepted the `{ name, tubeWeightG, tubeForm? }` shape and
+ * `services/changeover.ts` already called `PdasWriter.addTubeType` for it
+ * — both existed, unreachable from this screen, since roadmap Wave F.
+ * Execute is still `requireRole(PDAS_WRITE_RANK)` and still `503 DISABLED`
+ * while `PDAS_WRITE_ENABLED=false`, exactly as it already gated
+ * `AddBlend`/`AddCount`; a new tube type is no more dangerous to plan than
+ * a new blend or count, and confirming the signature only means this app
+ * CAN call the procedure correctly if execute is ever turned on — not that
+ * IFL has authorised it (that authority is still only given for
+ * `CreateMaterial` / `SetMaterialStatusActive`, per CLAUDE.md, 11 Sep 2026).
  *
  * PACK SCHEMA HAS NO PICKER, DELIBERATELY, NOT AS A GAP: the SOP
  * (`services/changeover.ts` header) says PackSchemaId is always 1, and
@@ -60,6 +68,7 @@ import {
   type ChangeoverRefs,
   type ChangeoverRequestBody,
   type ChangeoverRefChoice,
+  type ChangeoverTubeChoice,
   type ChangeoverPlan,
   type ChangeoverPlanStep,
   type ChangeoverOutcome,
@@ -99,6 +108,26 @@ function choiceOf(r: RefOrNew): ChangeoverRefChoice | null {
   return name.length === 0 ? null : { name };
 }
 
+/* Tube type needs the same ref-or-new shape as blend/count, plus the two
+   extra fields `AddTubeType` requires for a new entry (weight and form) —
+   see the file header on why this is now offered at all. */
+interface TubeRefOrNew {
+  mode: 'ref' | 'new';
+  id: number | '';
+  name: string;
+  tubeWeightG: string;
+  tubeForm: '1' | '2';
+}
+const emptyTubeRefOrNew = (): TubeRefOrNew => ({ mode: 'ref', id: '', name: '', tubeWeightG: '', tubeForm: '2' });
+
+function tubeChoiceOf(r: TubeRefOrNew): ChangeoverTubeChoice | null {
+  if (r.mode === 'ref') return r.id === '' ? null : { id: r.id };
+  const name = r.name.trim();
+  const tubeWeightG = Number(r.tubeWeightG);
+  if (name.length === 0 || !Number.isFinite(tubeWeightG) || tubeWeightG <= 0) return null;
+  return { name, tubeWeightG, tubeForm: r.tubeForm === '1' ? 1 : 2 };
+}
+
 export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
   const [refs, setRefs] = useState<ChangeoverRefs | null>(null);
   const [products, setProducts] = useState<ProductOption[] | null>(null);
@@ -119,7 +148,7 @@ export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
   // an edit is just clicking `dryRun` again.
   const [blend, setBlend] = useState<RefOrNew>(emptyRefOrNew());
   const [count, setCount] = useState<RefOrNew>(emptyRefOrNew());
-  const [tubeTypeId, setTubeTypeId] = useState<number | ''>('');
+  const [tube, setTube] = useState<TubeRefOrNew>(emptyTubeRefOrNew());
   const [setpointG, setSetpointG] = useState('1960');
   const [offsetMinusG, setOffsetMinusG] = useState('30');
   const [offsetPlusG, setOffsetPlusG] = useState('30');
@@ -144,11 +173,12 @@ export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
   const buildBody = (): ChangeoverRequestBody | null => {
     const b = choiceOf(blend);
     const c = choiceOf(count);
-    if (!b || !c || tubeTypeId === '') return null;
+    const t = tubeChoiceOf(tube);
+    if (!b || !c || !t) return null;
     return {
       blend: b,
       count: c,
-      tubeType: { id: tubeTypeId },
+      tubeType: t,
       material: {
         setpointG: Number(setpointG),
         offsetMinusG: Number(offsetMinusG),
@@ -183,7 +213,7 @@ export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
     }
   };
 
-  const canSubmitPlan = choiceOf(blend) !== null && choiceOf(count) !== null && tubeTypeId !== '';
+  const canSubmitPlan = choiceOf(blend) !== null && choiceOf(count) !== null && tubeChoiceOf(tube) !== null;
 
   return (
     <>
@@ -200,8 +230,8 @@ export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
             setBlend={setBlend}
             count={count}
             setCount={setCount}
-            tubeTypeId={tubeTypeId}
-            setTubeTypeId={setTubeTypeId}
+            tube={tube}
+            setTube={setTube}
             setpointG={setpointG}
             setSetpointG={setSetpointG}
             offsetMinusG={offsetMinusG}
@@ -288,6 +318,62 @@ function RefPicker({
   );
 }
 
+/* Same ref-or-new shape as RefPicker, but a new tube type needs two more
+   fields than a new blend or count does (AddTubeType has no "name only"
+   INSERT) — see the file header on why this is offered at all. */
+function TubePicker({
+  value,
+  onChange,
+  options,
+}: {
+  value: TubeRefOrNew;
+  onChange: (v: TubeRefOrNew) => void;
+  options: { id: number; name: string; tubeWeightG: number | null }[];
+}) {
+  return (
+    <label className="field">
+      <span>{W.product.tubeType}</span>
+      {value.mode === 'ref' ? (
+        <span className="row">
+          <select
+            value={value.id}
+            onChange={(e) => onChange({ ...value, id: e.target.value === '' ? '' : Number(e.target.value) })}
+          >
+            <option value="">—</option>
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}{o.tubeWeightG != null ? ` (${fmtG(o.tubeWeightG)})` : ''}</option>
+            ))}
+          </select>
+          <button type="button" className="linkish sm" onClick={() => onChange({ ...emptyTubeRefOrNew(), mode: 'new' })}>
+            {W.config.add}
+          </button>
+        </span>
+      ) : (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <span className="row">
+            <input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder={W.product.tubeType} />
+            <button type="button" className="linkish sm" onClick={() => onChange({ ...emptyTubeRefOrNew(), mode: 'ref' })}>
+              {W.product.cancel}
+            </button>
+          </span>
+          <span className="row">
+            <label className="field sm"><span>{W.product.changeover.tubeWeightG}</span>
+              <input type="number" step="0.1" min="0" value={value.tubeWeightG} onChange={(e) => onChange({ ...value, tubeWeightG: e.target.value })} />
+            </label>
+            <label className="field sm"><span>{W.product.changeover.tubeForm}</span>
+              <select value={value.tubeForm} onChange={(e) => onChange({ ...value, tubeForm: e.target.value === '1' ? '1' : '2' })}>
+                <option value="2">2</option>
+                <option value="1">1</option>
+              </select>
+            </label>
+          </span>
+          <span className="mut sm">{W.product.changeover.tubeNewNote}</span>
+        </div>
+      )}
+    </label>
+  );
+}
+
 function PickersForm({
   refs,
   products,
@@ -295,8 +381,8 @@ function PickersForm({
   setBlend,
   count,
   setCount,
-  tubeTypeId,
-  setTubeTypeId,
+  tube,
+  setTube,
   setpointG,
   setSetpointG,
   offsetMinusG,
@@ -322,8 +408,8 @@ function PickersForm({
   setBlend: (v: RefOrNew) => void;
   count: RefOrNew;
   setCount: (v: RefOrNew) => void;
-  tubeTypeId: number | '';
-  setTubeTypeId: (v: number | '') => void;
+  tube: TubeRefOrNew;
+  setTube: (v: TubeRefOrNew) => void;
   setpointG: string;
   setSetpointG: (v: string) => void;
   offsetMinusG: string;
@@ -351,17 +437,7 @@ function PickersForm({
       <RefPicker fieldLabel={W.product.blend} value={blend} onChange={setBlend} options={refs.blends} />
       <RefPicker fieldLabel={W.product.count} value={count} onChange={setCount} options={refs.counts} />
 
-      <label className="field">
-        <span>{W.product.tubeType}</span>
-        {/* ID-only: see the file header on why AddTubeType is not offered here. */}
-        <select value={tubeTypeId} onChange={(e) => setTubeTypeId(e.target.value === '' ? '' : Number(e.target.value))}>
-          <option value="">—</option>
-          {refs.tubeTypes.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}{t.tubeWeightG != null ? ` (${fmtG(t.tubeWeightG)})` : ''}</option>
-          ))}
-        </select>
-        <span className="mut sm">{W.product.changeover.tubeExistingOnly}</span>
-      </label>
+      <TubePicker value={tube} onChange={setTube} options={refs.tubeTypes} />
 
       <label className="field"><span>{W.product.setpointG}</span>
         <input type="number" step="1" value={setpointG} onChange={(e) => setSetpointG(e.target.value)} />

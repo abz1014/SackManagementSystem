@@ -18,6 +18,31 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
+### `AddTubeType`'s parameter signature confirmed; the tube-type picker restriction lifted (21 Sep 2026)
+
+The 16 Sep 2026 PDAS introspection task (see the file header of `sms/api/src/services/pdasWrite.ts` and its `PROC_PARAMS` comment) could not confirm `AddTubeType`'s OUTPUT parameter name because `IFL_DB_USER` — the login that script used — holds only `db_datareader` on `PDAS_TP1U2_SEP07`, which carries no `EXECUTE`/`VIEW DEFINITION` on any procedure. That gap is now closed, by a different route than the one the 16 Sep task proposed:
+
+Querying `sys.procedures` joined to `sys.parameters` and `sys.types` on `PDAS_TP1U2_SEP07` (`.\SQLEXPRESS`) with **Windows authentication** (`sqlcmd -E`, read-only, `SELECT` only) reads the system catalogue directly and needs no `db_datareader`-level grant at all — the metadata-only grant proposed at `db/bootstrap/11_pdas_procedure_metadata.template.sql` was never the only way to get this, and that template's purpose narrows to whatever it may still do for the plant's own `sms_readonly` login; it has not been removed, and removing it is not this pass's call to make. Result, in `parameter_id` order:
+
+```
+proc_name    parameter_id  param_name   type_name  max_length  is_output
+AddTubeType  1             @error       int        4           1
+AddTubeType  2             @errorMsg    nvarchar   510         1
+AddTubeType  3             @typeTypeId  int        4           1
+AddTubeType  4             @tubeType    nvarchar   510         0
+AddTubeType  5             @tubeForm    int        4           0
+AddTubeType  6             @tubeWeight  float      8           0
+```
+
+This is an **exact match**, in both name and parameter order, to `PROC_PARAMS.AddTubeType` in `pdasWrite.ts` (`['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight']`). The presumed `typeTypeId` output name — guessed by analogy with the vendor's other `Add*` procedures' own typo — was correct. **What this verifies, and no more:** the procedure's *signature* — its parameter names, order, types and OUTPUT flags. It does **not** verify the procedure's *runtime behaviour*: the duplicate-refusal codes (-5001/-5002/-5003) are still read from the proc body text, not observed from an actual call, and **no PDAS procedure of any kind has ever been executed against any database, local or plant.** `PDAS_WRITE_ENABLED` stays `false`, and all nine write rights (see the Phase 1 hard-constraints section below) still await IFL's written authority — nothing about this changes that. Reproduce this yourself with the same query before relying on it further.
+
+Two other points established the same day, by direct measurement rather than by inference:
+
+- **The 10 Jul – 5 Aug data gap is real**, confirmed by querying both attached copies directly rather than by trusting the previously documented row counts: `DATA_TP1U2.pack1_TP1U2` holds 142,511 cones ending `2026-07-10 11:23:10`, `DATA_TP1U2.sack1_TP1U2` holds 5,462 sacks from `2026-06-22` to `2026-07-10`; `DATA_TP1U2_SEP07.pack1_TP1U2` holds 132,552 cones from `2026-08-05` to `2026-09-07 12:00:28`, `DATA_TP1U2_SEP07.sack1_TP1U2` holds 5,435 sacks from `2026-08-05` to `2026-09-07`. All four counts match the figures already carried elsewhere in this file exactly. The July sample's *files* on `D:\google download\` carry an 18 Jul modification date, which was worth checking in case the archive held later data than its documented contents — but the *data inside it* still stops at 10 Jul. The 26-day gap between the two samples exists only at IFL; asking for it (Q56) is not optional and nothing found today substitutes for it.
+- **A related but separate document, `ROADMAP-GAP-ANALYSIS.md` §14** (its CRITICAL "Off-machine safeguarding and continuity" row), states that "the `SPS.rar` archive is no longer on disk" — that clause is corrected there today, since two original client archives (`SPS Database TP1 Line3.rar`, the July sample, and `SPS (2).rar`, the September sample with the ten SSMS screenshots) were found on `D:\google download\` on this machine. The CRITICAL risk that row exists to flag is **not** softened by that correction: `D:` is the second physical disk of the same single laptop, so every copy of IFL's data and of this deliverable is still in one building, on one machine, with no off-machine or off-site copy — see that file for the full item.
+
+The tube-type picker on Product › Changeover (`web/src/screens/product/Changeover.tsx`) restricted the form to existing tube types only, and its explanatory string (`W.product.changeover`, formerly keyed `tubeExistingOnly`) said this was because `AddTubeType`'s parameter name was unverified. That reason no longer holds, so the restriction has been removed: the form now offers a new tube type by name (plus the weight and form `AddTubeType` also requires), the same shape Blend and Count already offered. `api/src/routes/changeover.ts`'s body schema already accepted this shape (`tubeChoice`'s `{ name, tubeWeightG, tubeForm? }` branch) and `services/changeover.ts` already called `PdasWriter.addTubeType` for it — both existed, unreachable, since roadmap Wave F. Execute is still gated by `PDAS_WRITE_RANK` and `PDAS_WRITE_ENABLED` regardless of which path (existing id or new name) a plan step took, exactly as it already gated `AddBlend`/`AddCount`; offering a new tube type is no more dangerous than offering a new blend or count.
+
 ### UX programme, Phase 9 (Print & visual polish) — CLOSES the nine-phase programme (21 Sep 2026)
 
 Four commits on `floor-first-rework` (`c14cae0`, `99c9e40`, `a95b355`,
@@ -131,10 +156,12 @@ programme and it must not flatter what was actually verified:**
   a real behaviour gap, deliberately left for whoever next touches that
   file rather than folded into this phase's brief.
 - **Blocked on IFL, unchanged:** written authority for all nine PDAS write
-  rights; `AddTubeType`'s parameter name; weight basis (Q4/Q5); KPI approval
-  (Q33-37); reject-code meanings (Q10); sack stock per machine (still not
-  computable from IFL's data); the 10 Jul - 5 Aug data; the live read-only
-  login and host (Q65-70). **36 questions remain unsent.**
+  rights (`AddTubeType`'s parameter *signature* was confirmed 21 Sep 2026 —
+  see the section above — but that is not the authority to call it); weight
+  basis (Q4/Q5); KPI approval (Q33-37); reject-code meanings (Q10); sack
+  stock per machine (still not computable from IFL's data); the 10 Jul - 5
+  Aug data; the live read-only login and host (Q65-70). **36 questions
+  remain unsent.**
 - **The branch is unpushed**, roughly 95 commits ahead of `origin/main`; CI
   has never run against it. Only the owner pushes.
 
@@ -206,8 +233,10 @@ layout, so nothing asserts layout, print CSS, or the Wall at 1920px;
 Playwright is deferred by the owner and would sit on top of this harness, not
 replace it. Of the 16 top-level `web/src/screens/` files, only 2 (Readings,
 Weight) have a direct component test. Blocked on IFL, unchanged: written
-authority for the nine PDAS write rights, `AddTubeType`'s parameter name,
-weight basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings (Q10), sack
+authority for the nine PDAS write rights (`AddTubeType`'s parameter
+*signature* was confirmed 21 Sep 2026 — see the dated section above the
+Phase 9 entry — which does not itself grant authority to call it), weight
+basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings (Q10), sack
 stock per machine, the 10 Jul – 5 Aug data, and the live read-only login/host
 (Q65-70). `sms.source_epoch.last_seen_utc` still has no writer anywhere in the
 repo. Verified against the local `_SEP07` dev copy only, never real plant

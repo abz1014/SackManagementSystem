@@ -304,12 +304,18 @@ export const W = {
       dryRun: 'Check the plan',
       execute: 'Execute the changeover',
       noneYet: 'No changeover has been planned yet.',
-      /* Added Sep 2026 audit fix: Brief 2 correctly refused to hardcode this
-         sentence and flagged it as missing rather than invent prose. Does
-         NOT claim PDAS would reject a new tube type — only that this system
-         cannot call AddTubeType correctly yet. */
-      tubeExistingOnly:
-        'Only existing tube types are offered here. AddTubeType’s parameter name has not been confirmed against PDAS, so this system cannot call it correctly yet — that is not the same as knowing PDAS would refuse a new one.',
+      /* Field labels for a new tube type — AddTubeType has no "name only"
+         INSERT, unlike AddBlend/AddCount, so the "new" branch needs two more
+         inputs than RefPicker's. */
+      tubeWeightG: 'Tube weight (g)',
+      tubeForm: 'Tube form',
+      /* Renamed from tubeExistingOnly 21 Sep 2026: AddTubeType's parameter
+         signature was confirmed that day (CLAUDE.md, dated section of the
+         same date), so the picker no longer restricts to existing tube
+         types only — this note now just explains the extra fields a new
+         entry needs, the same role RefPicker's blend/count pickers fill
+         with no note at all because they need nothing extra. */
+      tubeNewNote: 'A new tube type also needs its weight and form (1 or 2) — AddTubeType requires both.',
     } as const,
 
     /* ---- History tab (Brief 3 builds the screen; strings fixed here so

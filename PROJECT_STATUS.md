@@ -225,10 +225,13 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
   `web/src/screens/report/PrintHead.tsx` still silently drops its whole print
   attribution block on a failed header fetch (`if (!header) return null`),
   allow-listed as a deferred, cosmetic-only gap. Blocked on IFL, unchanged:
-  written authority for the nine PDAS write rights, `AddTubeType`'s parameter
-  name, weight basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings
-  (Q10), sack stock per machine (not computable), the 10 Jul – 5 Aug data, and
-  the live read-only login/host (Q65-70, which is what blocks `sms verify`
+  written authority for the nine PDAS write rights (`AddTubeType`'s parameter
+  *signature* was confirmed 21 Sep 2026 by a Windows-auth catalogue read of
+  `PDAS_TP1U2_SEP07` — see `CLAUDE.md`'s dated section of the same name; that
+  is not the authority to call it), weight basis (Q4/Q5), KPI approval
+  (Q33-37), reject-code meanings (Q10), sack stock per machine (not
+  computable), the 10 Jul – 5 Aug data, and the live read-only login/host
+  (Q65-70, which is what blocks `sms verify`
   over HTTP). **The rank-1 (viewer) UI path has still never been exercised
   live** — Phase 7's guards close the client-side *gating* question
   mechanically; they do not close the *rendering* one. Verified against the
