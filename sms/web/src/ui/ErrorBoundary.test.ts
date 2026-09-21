@@ -1,21 +1,14 @@
 /**
  * `shouldAutoRecover` and `WALL_RETRY_DELAY_MS` are the only parts of
- * `ErrorBoundary.tsx` that do not need a DOM: the class itself is a real
- * React error boundary and can only be exercised by mounting it and forcing
- * a child to throw, which needs `environment: 'jsdom'` (or similar) on the
- * test file. This project's root `vitest.config.ts` runs `environment:
- * 'node'` and only collects `**\/src/**\/*.test.ts` — a `.tsx` component
- * test is not picked up at all — so the class's actual catch/remount/
- * fallback behaviour, and the two `window` handlers registered in
- * `main.tsx`, are UNTESTED by this suite. They were checked by hand instead:
- * a thrown error inside a screen shows the fallback with the top bar still
- * standing beside it; on Wall it remounts once on its own after
- * `WALL_RETRY_DELAY_MS` and shows the plain fallback if the throw recurs;
- * `window.onerror` and `unhandledrejection` both reach the console for an
- * uncaught throw and a rejected promise respectively.
+ * `ErrorBoundary.tsx` that do not need a DOM, so they are tested here in
+ * full, in the plain `node` environment (`vitest.config.ts`).
  *
- * What IS pure — the decision of whether a catch should schedule Wall's one
- * automatic remount — is tested here in full.
+ * The class's actual catch/remount/fallback behaviour — mounting the real
+ * boundary and forcing a child to throw — is tested in
+ * `ErrorBoundary.test.tsx` (UX Phase 8 Brief A, 21 Sep 2026), which runs
+ * under `jsdom` via `vitest.config.ts`'s `environmentMatchGlobs` on the
+ * `.test.tsx` extension. `window.onerror`/`unhandledrejection` (registered
+ * in `main.tsx`, not this file) remain checked by hand only.
  */
 import { describe, expect, it } from 'vitest';
 import { shouldAutoRecover, WALL_RETRY_DELAY_MS } from './ErrorBoundary';

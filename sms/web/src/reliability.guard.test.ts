@@ -39,13 +39,30 @@ const SCREENS_DIR = `${WEB_SRC}screens`;
 const REPO_ROOT = toPosix(fileURLToPath(new URL('../..', import.meta.url))).replace(/\/*$/, '/'); // .../sms/
 const relPath = (f: string) => toPosix(f).replace(REPO_ROOT, '').replace(/\/{2,}/g, '/');
 
+/**
+ * UX Phase 8 Brief A (21 Sep 2026): skips `*.test.ts(x)` files and the
+ * `testkit/` directory. Before this, a `.tsx?` glob with no exclusion would
+ * scan a new component test (e.g. `Readings.test.tsx`, added by this same
+ * brief's harness work) as if it were a SCREEN — GUARD 1 below looks for
+ * `usePolling()` declarations specifically under `screens/`, so a stray test
+ * file placed there would be read for polling calls it does not make and,
+ * worse, `testkit/render.tsx`'s own `renderApp` mounts `usePolling` deep
+ * inside `<App/>` textually (via its `import { App } from '../App'`), which
+ * is exactly the kind of incidental match this scan must never attribute to
+ * a screen. Neither exclusion weakens an existing assertion: every current
+ * `expect` in this file (and its threshold) is untouched.
+ */
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     const full = toPosix(`${dir}/${entry}`);
     const st = statSync(full);
-    if (st.isDirectory()) out.push(...listSourceFiles(full));
-    else if (/\.tsx?$/.test(entry)) out.push(full);
+    if (st.isDirectory()) {
+      if (entry === 'testkit') continue;
+      out.push(...listSourceFiles(full));
+    } else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
+      out.push(full);
+    }
   }
   return out;
 }

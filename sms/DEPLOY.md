@@ -170,6 +170,10 @@ SQL Server and the build output are the only prerequisites, all installed locall
 > internet. Neither is part of the plant deployment: no tunnel, no `ops/`
 > watchdog, no outbound dependency. Use the NSSM services below instead.
 5. **Build:** `npm ci && npm run build` (builds all five workspaces in dependency order). To gate a release: `npm run verify:release` = typecheck of all five workspaces + the test suite + the build.
+
+   **A note on what actually lands on the plant host.** `npm ci` above is run with no `--omit=dev`, and it has to be — the build needs `typescript` and `vite`, both devDependencies. So every devDependency already installs on the plant PC today, `vitest` included; jsdom and `@testing-library/react`/`@testing-library/dom` (added UX Phase 8 Brief A, 21 Sep 2026, for component tests) simply join that same set, on disk and wherever this install reaches the npm registry from. None of the three is imported by anything under `web/src` that ships in the built bundle (only by `*.test.tsx` files, which `vite build` never touches) — the sha256 check `verify:release`/this brief's own acceptance run performs on `web/dist` is the evidence, not an assumption.
+
+
 6. **Migrate the app DB:** `npm run db:migrate` (from `sms/`). Not `sqlcmd` over the files by hand: the migration files do not write `sms.schema_migration` themselves — the runner does — so a hand-applied set leaves an empty history, and the next `db:migrate` re-applies everything and fails inside 026 (the hazard described below). If that has already happened, `--mark-applied-through` is the way back.
    - **Stop the sync-worker service first when migrating an app DB that already holds data.**
      Some migrations build indexes on `cone_event`/`reject_event`, which take a

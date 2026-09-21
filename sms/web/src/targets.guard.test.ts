@@ -43,13 +43,36 @@ const API_SRC = toPosix(fileURLToPath(new URL('../../api/src', import.meta.url))
 const REPO_ROOT = toPosix(fileURLToPath(new URL('../..', import.meta.url))).replace(/\/*$/, '/'); // .../sms/
 const REPORTS_DIR = `${API_SRC}services/reports`;
 
+/**
+ * UX Phase 8 Brief A (21 Sep 2026): skips the `testkit/` directory —
+ * `web/src/testkit/*.ts(x)` is test-harness plumbing (a fake fetch, typed
+ * fixtures, RTL wiring), never a report or a screen, and has no business
+ * being swept into check 1's "does this file use a current-product/fallback
+ * identifier" scan below.
+ *
+ * Deliberately NOT a blanket `*.test.tsx?` exclusion, unlike
+ * `reliability.guard.test.ts`'s equivalent function: THIS file's own check 1
+ * already scans test files on purpose and by design — `isHomeTestFile`
+ * below whitelists `weights.*.test.ts(x)` explicitly, and the ALLOW_LIST
+ * entry for `api/src/services/reports/reports.test.ts` (a *.test.ts file)
+ * depends on that file being present in `allFiles` at all, or the "ALLOW_LIST
+ * names only identifiers that genuinely still appear" check fails with
+ * "file not found". A blanket test-file exclusion here would have broken
+ * that existing, passing assertion — exactly the "would weaken a guard"
+ * case the brief says to stop on rather than force, so only the `testkit/`
+ * skip is added.
+ */
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     const full = toPosix(`${dir}/${entry}`);
     const st = statSync(full);
-    if (st.isDirectory()) out.push(...listSourceFiles(full));
-    else if (/\.tsx?$/.test(entry)) out.push(full);
+    if (st.isDirectory()) {
+      if (entry === 'testkit') continue;
+      out.push(...listSourceFiles(full));
+    } else if (/\.tsx?$/.test(entry)) {
+      out.push(full);
+    }
   }
   return out;
 }

@@ -88,10 +88,13 @@ const apiSource = readFileSync(apiPath, 'utf8');
 const wrapperNames = exportedWrapperNames(apiSource);
 
 // Every other .ts/.tsx file under web/src — screens, ui, lib — excluding
-// api.ts itself and any *.test.ts(x), so a wrapper exercised only by its own
-// unit test still counts as unreachable from the app.
+// api.ts itself, any *.test.ts(x), and testkit/ (UX Phase 8 Brief A,
+// 21 Sep 2026: web/src/testkit/ is test-harness plumbing — a fake fetch,
+// typed fixtures, RTL wiring — not app code a real screen goes through, so
+// a wrapper referenced only from there must still count as unreachable from
+// the app, same as one reached only by its own unit test).
 const callerFiles = listSourceFiles(SRC_DIR).filter(
-  (f) => !f.endsWith(`/${API_FILE}`) && !/\.test\.tsx?$/.test(f),
+  (f) => !f.endsWith(`/${API_FILE}`) && !/\.test\.tsx?$/.test(f) && !f.includes('/testkit/'),
 );
 const callerSource = callerFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
 

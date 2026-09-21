@@ -25,6 +25,9 @@
     "verify:release": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "jsdom": "^26.1.0",
     "mssql": "^11.0.1",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
