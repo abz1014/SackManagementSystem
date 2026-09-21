@@ -13,7 +13,7 @@
  * the screen renders, the CSV's trailing rows and this block all say the
  * same thing. Nothing here is computed from the browser's clock.
  */
-import { usePolling } from '../../lib/live';
+import { useLive, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import { getReportHeader, type ReportHeader } from '../../api';
 
@@ -52,8 +52,44 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
  * The same block for a screen that has no report response of its own — the
  * register's Print button. Fetches the header for the period, re-fetched
  * every five minutes so a page left open still prints a current stamp.
+ *
+ * Unlike Report.tsx (whose Print button is `disabled={!data}`, so a missing
+ * header simply cannot be printed), Readings' Print button carries no such
+ * gate — that gap is Readings.tsx's alone to close, and this phase does not
+ * touch it (a `disabled` change is a behaviour change). So when the header
+ * poll fails, this block cannot just vanish the way `PrintHead(null)` does:
+ * the reader can still print, and a page that leaves the building with no
+ * statement of where it came from is the defect this exists to close.
+ *
+ * The degraded block states what it still knows without the server — the
+ * line (from the already-live `useLive()` context, the same source
+ * Report.tsx's Verdict mark uses), and the title/period the CALLER already
+ * holds as props (Readings.tsx composes both from state it already has, no
+ * server round trip needed) — and NAMES the three facts it cannot state:
+ * when it was generated, by whom, and from which SMS version. It never
+ * falls back to the browser's clock for the "generated" instant: the plant
+ * clock and the viewer's clock are five hours apart (TWO CLOCKS,
+ * `api/src/services/plantClock.ts`), and a wrong instant printed as fact is
+ * worse than an admitted gap.
  */
 export function RegisterPrintHead({ from, to, at, title }: { from: string; to: string; at: string | null; title: string }) {
   const h = usePolling(() => getReportHeader({ from, to, at }), 5 * 60_000, `print-head:${from}:${to}:${at ?? ''}`);
-  return <PrintHead header={h.data?.header ?? null} title={title} />;
+  const { line } = useLive();
+  if (h.data?.header) return <PrintHead header={h.data.header} title={title} />;
+  if (h.error) {
+    return (
+      <div className="print-head">
+        <b>
+          {line?.lineName ? `${line.lineName} · ` : ''}
+          {title}
+          {' · '}
+          {from}
+          {to !== from ? ` to ${to}` : ''}
+        </b>
+        <div className="mut sm">{W.reports.generatedUnavailable}</div>
+        <div className="mut sm">{W.reports.printedSelectionNote}</div>
+      </div>
+    );
+  }
+  return null;
 }

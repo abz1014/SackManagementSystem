@@ -103,8 +103,6 @@ const ALLOW_LIST: Record<string, string> = {
   'web/src/screens/Weight.tsx:names':
     'station labels only, same getStations() call as Running.tsx above — StationSheet-style chart legends fall back to numeric ' +
     'labels on failure, never a false weight/reject fact.',
-  'web/src/screens/report/PrintHead.tsx:h':
-    'deferred to Phase 9 — a failed header drops the print attribution block; that is a print-layout decision.',
   'web/src/screens/product/Running.tsx:current':
     "who set the running product and why (getCurrentProduct). On failure `current.data` is undefined, so `setBy` " +
     '(Running.tsx:64-67) resolves to null, and the consuming LineWideProduct renders the whole "Set by" line only ' +

@@ -1570,6 +1570,14 @@ export const W = {
     generatedBy: 'by',
     version: 'SMS',
     definitionsNote: 'Definitions: KPI-DEFINITIONS.md — awaiting IFL’s approval.',
+    /* UX Phase 9: the register's Print button has no `disabled` gate, so a
+       failed /api/reports/header must still leave a printed page with SOME
+       statement of what it is — never silence, and never the viewer's own
+       clock standing in for the plant's. This is that statement: it names
+       the three facts the page cannot state, and leaves the ones it still
+       can (line, title, period, filters) above it. */
+    generatedUnavailable: 'This page could not read when it was generated, by whom, or from which SMS version.',
+    printedSelectionNote: 'The line, period and filters above are the selection this page was printed from.',
     /* Filters. */
     filterShift: 'Shift',
     filterStation: 'Station',
