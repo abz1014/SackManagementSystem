@@ -165,11 +165,7 @@ beforeAll(async () => {
   const addr = server.address();
   if (addr == null || typeof addr === 'string') throw new Error('expected a network address');
   base = `http://127.0.0.1:${addr.port}`;
-  for (const u of [ADMIN, ADMIN2, MANAGER, OPERATOR]) {
-    const res = await login(u.username);
-    if (res.status !== 200) throw new Error(`fixture login failed for ${u.username}: ${res.status}`);
-    cookies[u.username] = res.headers.get('set-cookie')!.split(';')[0]!;
-  }
+  // Logins themselves move to beforeEach below — see the comment there.
 });
 
 afterAll(() => {
@@ -177,12 +173,35 @@ afterAll(() => {
   return new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-beforeEach(() => {
-  db.statements = [];
-  db.txLog = [];
+beforeEach(async () => {
   db.users = [ADMIN, ADMIN2, MANAGER, OPERATOR].map((u) => ({ ...u }));
   db.sizeMb = 512;
   db.dbDown = false;
+  // Fresh sessions for every test, not once in beforeAll. Two routes here
+  // revoke sessions as a side effect of what they exercise — the self-service
+  // password change revokes every OTHER session of the caller, and the admin
+  // reset revokes EVERY session of the target (api/src/routes/ops.ts:83,128,
+  // via revokeSessions in api/src/auth.ts:163) — and in the file's written
+  // order no later test happens to reuse a cookie a revoking test already
+  // killed. Under --sequence.shuffle that stopped being true: e.g. the RBAC
+  // table's admin call against POST /api/admin/users/:id/password revokes
+  // the manager's session same as the dedicated test above it, but (unlike
+  // that test) never restores it, so a shuffle that runs the CSV-export test
+  // afterwards got 401 instead of 200 (confirmed by running the suite
+  // shuffled). Clearing sessions and logging every role in again here means
+  // no test can inherit a cookie an earlier test revoked — each test's
+  // fixture session is scoped to that test.
+  db.sessions = new Map();
+  for (const u of [ADMIN, ADMIN2, MANAGER, OPERATOR]) {
+    const res = await login(u.username);
+    if (res.status !== 200) throw new Error(`fixture login failed for ${u.username}: ${res.status}`);
+    cookies[u.username] = res.headers.get('set-cookie')!.split(';')[0]!;
+  }
+  // Reset AFTER the fixture logins above, not before: those logins are real
+  // requests through the app (session INSERTs, auth.login audit rows) and
+  // must not appear in a test's own statement/audit assertions.
+  db.statements = [];
+  db.txLog = [];
 });
 
 async function call(who: string | null, method: string, path: string, body?: unknown) {
@@ -288,9 +307,8 @@ describe('POST /api/admin/users/:id/password — administrator reset', () => {
     // the manager's cookie is now dead
     const after = await fetch(`${base}/api/range`, { headers: { Cookie: cookies['manager']! } });
     expect(after.status).toBe(401);
-    // restore a manager session for the tests that follow
-    const again = await login('manager');
-    cookies['manager'] = again.headers.get('set-cookie')!.split(';')[0]!;
+    // No manual restore needed: beforeEach logs every role in fresh before
+    // the next test, so this test's revocation cannot outlive it.
   });
 });
 

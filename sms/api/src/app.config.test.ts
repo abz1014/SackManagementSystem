@@ -65,28 +65,49 @@ class FakeDb {
   failAudit = false;
 
   // The seed migration 028 leaves on line 1, trimmed to what the tests read.
-  line = { line_id: 1, line_code: 'L3', line_name: 'Line 3', display_name: 'TP1 · Line 3 · Unit 2', is_active: true, unit_id: 1, unit_code: 'U2', unit_name: 'Unit 2', plant_id: 1, plant_code: 'TP1', plant_name: 'TP1' };
-  machines: Machine[] = [
-    { machine_id: 1, machine_no: 1, kind: 'winder', make: 'Rieter', model: null, name: 'Winder 1', is_active: true, notes: null },
-    { machine_id: 2, machine_no: 2, kind: 'winder', make: 'Rieter', model: null, name: 'Winder 2', is_active: true, notes: null },
-    { machine_id: 15, machine_no: null, kind: 'packer', make: 'Neuenhauser', model: null, name: 'Sack packer', is_active: true, notes: null },
-  ];
-  stations: Station[] = [
-    { station_id: 1, name: null, machine: null, description: null, machine_id: 1, link_source: 'default_by_number', is_active: true },
-    { station_id: 2, name: 'East', machine: null, description: null, machine_id: 2, link_source: 'default_by_number', is_active: true },
-  ];
-  sourceTables = [
-    { source_table_id: 1, kind: 'cone', source_table: 'pack1_TP1U2', raw_table: 'sms_raw.cone_raw', is_enabled: true, data_source_id: 1 },
-    { source_table_id: 2, kind: 'sack', source_table: 'sack1_TP1U2', raw_table: 'sms_raw.sack_raw', is_enabled: true, data_source_id: 1 },
-  ];
-  dataSources = [
-    { data_source_id: 1, system_code: 'ifl_sql', role: 'acquisition', label: 'IFL weighing acquisition (DATA_TP1U2)', connection_key: 'IFL_DB', is_enabled: true, notes: null },
-  ];
+  // Each of these is exposed as a static factory and rebuilt in beforeEach
+  // (see below) rather than left as a field initialiser: several tests below
+  // mutate this record in place (rename, relink, disable), and under
+  // --sequence.shuffle a test that reads the seed value can no longer assume
+  // which other test, if any, ran first and left its own edit behind.
+  line = FakeDb.seedLine();
+  static seedLine() {
+    return { line_id: 1, line_code: 'L3', line_name: 'Line 3', display_name: 'TP1 · Line 3 · Unit 2', is_active: true, unit_id: 1, unit_code: 'U2', unit_name: 'Unit 2', plant_id: 1, plant_code: 'TP1', plant_name: 'TP1' };
+  }
+  machines: Machine[] = FakeDb.seedMachines();
+  static seedMachines(): Machine[] {
+    return [
+      { machine_id: 1, machine_no: 1, kind: 'winder', make: 'Rieter', model: null, name: 'Winder 1', is_active: true, notes: null },
+      { machine_id: 2, machine_no: 2, kind: 'winder', make: 'Rieter', model: null, name: 'Winder 2', is_active: true, notes: null },
+      { machine_id: 15, machine_no: null, kind: 'packer', make: 'Neuenhauser', model: null, name: 'Sack packer', is_active: true, notes: null },
+    ];
+  }
+  stations: Station[] = FakeDb.seedStations();
+  static seedStations(): Station[] {
+    return [
+      { station_id: 1, name: null, machine: null, description: null, machine_id: 1, link_source: 'default_by_number', is_active: true },
+      { station_id: 2, name: 'East', machine: null, description: null, machine_id: 2, link_source: 'default_by_number', is_active: true },
+    ];
+  }
+  sourceTables = FakeDb.seedSourceTables();
+  static seedSourceTables() {
+    return [
+      { source_table_id: 1, kind: 'cone', source_table: 'pack1_TP1U2', raw_table: 'sms_raw.cone_raw', is_enabled: true, data_source_id: 1 },
+      { source_table_id: 2, kind: 'sack', source_table: 'sack1_TP1U2', raw_table: 'sms_raw.sack_raw', is_enabled: true, data_source_id: 1 },
+    ];
+  }
+  dataSources = FakeDb.seedDataSources();
+  static seedDataSources() {
+    return [
+      { data_source_id: 1, system_code: 'ifl_sql', role: 'acquisition', label: 'IFL weighing acquisition (DATA_TP1U2)', connection_key: 'IFL_DB', is_enabled: true, notes: null },
+    ];
+  }
   rejectCodes = FakeDb.seedRejectCodes();
   static seedRejectCodes() {
     return [{ reject_code_id: 12, reject_type: 'quality', tube_code: 2, material_code: 0, label: 'old name' as string | null, is_pass: true as boolean | null, severity: null as string | null }];
   }
-  private nextMachineId = 100;
+  /** Not private: beforeEach resets it alongside the rows above so machine ids stay predictable per test. */
+  nextMachineId = 100;
 
   request(): FakeRequest { return new FakeRequest(this); }
   transaction(): FakeTransaction { return new FakeTransaction(this); }
@@ -280,9 +301,21 @@ beforeEach(() => {
   db.statements = [];
   db.txLog = [];
   db.failAudit = false;
-  // The fake does not undo state on rollback; the one row the failure tests
-  // touch is re-seeded so their UPDATE cannot leak into the list assertions.
+  // The fake does not undo state on rollback, and several tests below rename,
+  // relink, disable or insert against it (machines, stations, source tables,
+  // data sources, the line record, reject codes). Re-seeding everything here
+  // — not just rejectCodes, which is all the pre-shuffle version reset — is
+  // what makes each `it` independent of which of its siblings ran first;
+  // without it, --sequence.shuffle reliably fails (verified: 3-6 of 55 tests
+  // across this file and ops.test.ts, in five consecutive shuffled runs, all
+  // traced to this file's stateful fixture rather than to session cookies).
+  db.line = FakeDb.seedLine();
+  db.machines = FakeDb.seedMachines();
+  db.stations = FakeDb.seedStations();
+  db.sourceTables = FakeDb.seedSourceTables();
+  db.dataSources = FakeDb.seedDataSources();
   db.rejectCodes = FakeDb.seedRejectCodes();
+  db.nextMachineId = 100;
   invalidateLiveConfigCache();
 });
 
@@ -378,6 +411,11 @@ describe('POST /api/admin/machines — adding a machine is configuration, not co
   });
 
   it('the same number again is 409 with the contract message, and nothing is written or audited', async () => {
+    // Independent of the previous test (which also creates machine number 15,
+    // but whose creation this test must not depend on under shuffle): seed a
+    // machine holding number 15 directly, matching what that test would have
+    // left behind if it happened to run first.
+    db.machines.push({ machine_id: 501, machine_no: 15, kind: 'winder', make: null, model: null, name: 'seed-15', is_active: true, notes: null });
     const r = await call('admin', 'POST', '/api/admin/machines', { machineNo: 15, kind: 'winder', name: 'Another 15' });
     expect(r.status).toBe(409);
     expect(r.json).toEqual({ error: 'machine number 15 already exists on this line' });
