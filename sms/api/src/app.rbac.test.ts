@@ -20,6 +20,8 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 // express's specifier fixes it without touching any dependency version.
 import type { Server } from 'http';
 import argon2 from 'argon2';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import type { ApiConfig } from './config.js';
 
@@ -349,5 +351,126 @@ describe('Session lifecycle', () => {
 
     await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Cookie: cookie } });
     expect(await hit({ method: 'GET', path: '/api/range', minRank: 1 }, cookie)).toBe(401);
+  });
+});
+
+/* =====================================================================*
+ * GUARD 2, Part B (UX Phase 7 Brief 4) — mechanical enumeration of every *
+ * GET route's requireRole gate, against the app.ts/routes/*.ts SOURCE,  *
+ * not the curated ROUTES table above.                                   *
+ *                                                                        *
+ * The ROUTES table above is a hand-picked boundary test: it proves the  *
+ * gates it lists behave correctly, but it says nothing about a route    *
+ * NOT on the list — exactly how /api/reconciliation shipped at          *
+ * requireRole(3) in Phase 6 (owner-approved fix, lowered to rank 1,     *
+ * `git log --oneline -- api/src/routes/cone.ts` around "UX Phase 6      *
+ * Brief 4") in violation of CLAUDE.md's ONE AUDIENCE rule: every screen *
+ * is open to every signed-in account; only Setup (and by extension the  *
+ * admin-only management surface) is rank >= 4, and everything else that *
+ * gates at all is a WRITE, not a read. This block reads app.ts and      *
+ * every routes/*.ts file off disk (node:fs, no import of the real       *
+ * modules — same "deliberately dumb" idiom as targets.guard.test.ts and *
+ * api.callers.test.ts in web/src) and fails if any GET route acquires a *
+ * requireRole gate this list does not already name.                     *
+ * =====================================================================*/
+describe('GUARD 2, Part B — every GET route\'s requireRole gate is on the written list', () => {
+  const apiSrcDir = fileURLToPath(new URL('.', import.meta.url));
+
+  function listRouteFiles(): string[] {
+    const routesDir = `${apiSrcDir}routes`;
+    const routeFiles = readdirSync(routesDir)
+      .filter((f) => /\.ts$/.test(f) && !/\.test\.ts$/.test(f))
+      .map((f) => `${routesDir}/${f}`);
+    return [`${apiSrcDir}app.ts`, ...routeFiles];
+  }
+
+  interface GetRoute { file: string; path: string; rankArg: string | null }
+
+  /**
+   * `app.get('/api/foo', requireRole(N), ...)` — deliberately single-line
+   * (every GET registration in this codebase is written on one line, the
+   * canary test below proves the scan still finds a realistic number of
+   * them so a reformat that breaks this assumption is caught, not silently
+   * under-counted).
+   */
+  const GET_RE = /app\.get\(\s*(['"])([^'"]+)\1\s*,\s*(?:(requireRole\(([^)]+)\))\s*,\s*)?/;
+
+  function listGetRoutes(): GetRoute[] {
+    const out: GetRoute[] = [];
+    for (const file of listRouteFiles()) {
+      const src = readFileSync(file, 'utf8');
+      for (const rawLine of src.split('\n')) {
+        const line = rawLine.trim();
+        if (!line.startsWith('app.get(')) continue;
+        const m = GET_RE.exec(line);
+        if (!m) continue;
+        const path = m[2]!;
+        if (!path.startsWith('/api/')) continue; // the SPA catch-all ('*') is not an API route
+        out.push({ file, path, rankArg: m[4] ?? null });
+      }
+    }
+    return out;
+  }
+
+  /** Resolves a requireRole(...) argument literal to a rank number, without
+   *  importing the real module — read straight off the one file that
+   *  defines it, so a rename or a changed value is caught rather than
+   *  silently trusted. */
+  function resolveRankArg(arg: string): number {
+    if (/^\d+$/.test(arg)) return Number(arg);
+    if (arg === 'EXPORT_RANK') {
+      const commonSrc = readFileSync(`${apiSrcDir}services/reports/common.ts`, 'utf8');
+      const m = /export const EXPORT_RANK\s*=\s*(\d+)/.exec(commonSrc);
+      if (!m) throw new Error('EXPORT_RANK definition not found in services/reports/common.ts — update this guard');
+      return Number(m[1]);
+    }
+    throw new Error(`GUARD 2 Part B does not know how to resolve requireRole(${arg}) to a rank — update resolveRankArg`);
+  }
+
+  it('sanity: the scan actually found GET routes (canary on the scan itself)', () => {
+    expect(listGetRoutes().length).toBeGreaterThan(30);
+  });
+
+  it('the only GET routes gated above rank 1 are the register export, the report export, and /api/admin/*', () => {
+    const violations: string[] = [];
+    for (const route of listGetRoutes()) {
+      const rank = route.rankArg == null ? 1 : resolveRankArg(route.rankArg);
+      if (rank === 1) continue; // the blanket app.use('/api', requireRole(1)) tier — the default, not a violation
+      const isRegisterExport = route.path === '/api/events/export' && rank === 3;
+      const isReportExport = route.path === '/api/reports/:type/export' && rank === 3;
+      const isAdminRoute = route.path.startsWith('/api/admin/') && rank === 4;
+      if (isRegisterExport || isReportExport || isAdminRoute) continue;
+      violations.push(`${route.path} (GET, requireRole(${rank}))`);
+    }
+    expect(
+      violations,
+      violations.length === 0
+        ? ''
+        : `these GET routes are gated above rank 1 and are not on the written list (register export rank 3, report ` +
+            `export rank 3, /api/admin/* rank 4): ${violations.join(', ')}. Per CLAUDE.md's ONE AUDIENCE rule every ` +
+            `screen is open to every signed-in account; a read gated above rank 1 outside the three named exceptions ` +
+            `is the exact defect Phase 6 found and fixed at /api/reconciliation (was requireRole(3), lowered to rank ` +
+            `1 with owner approval). If this is deliberate and owner-approved, update this test's exception list; if ` +
+            `not, remove the requireRole call.`,
+    ).toEqual([]);
+  });
+
+  it('the register export and the report export routes still exist and are still gated (canary against the check being vacuous)', () => {
+    const routes = listGetRoutes();
+    const registerExport = routes.find((r) => r.path === '/api/events/export');
+    const reportExport = routes.find((r) => r.path === '/api/reports/:type/export');
+    expect(registerExport?.rankArg, '/api/events/export no longer requireRole-gated at all — update this guard').not.toBeNull();
+    expect(reportExport?.rankArg, "/api/reports/:type/export no longer requireRole-gated at all — update this guard").not.toBeNull();
+    expect(resolveRankArg(registerExport!.rankArg!)).toBe(3);
+    expect(resolveRankArg(reportExport!.rankArg!)).toBe(3);
+  });
+
+  it('every /api/admin/* GET route found is actually rank 4 (canary — an admin route silently downgraded would otherwise pass the exception check above)', () => {
+    const adminGets = listGetRoutes().filter((r) => r.path.startsWith('/api/admin/'));
+    expect(adminGets.length).toBeGreaterThan(3);
+    for (const r of adminGets) {
+      expect(r.rankArg, `${r.path} has no requireRole at all`).not.toBeNull();
+      expect(resolveRankArg(r.rankArg!), `${r.path} is not rank 4`).toBe(4);
+    }
   });
 });
