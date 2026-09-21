@@ -57,11 +57,9 @@ const ALLOW_LIST: Record<string, string> = {
   getReport:
     'superseded by getReportOf("daily", …) via /api/reports/daily, the roadmap Phase 8 rebuild of Report.tsx (its own header comment calls /api/report "the old one").',
 
-  // ---- (b) unreachable feature — UX Phase 7 Brief 2 (21 Sep 2026) built the backend only, no UI ----
-  getSystemHistory:
-    'GET /api/system-history (source generations, rebuild audit, sms verify runs) is built, routed and tested; Brief 2 was scoped to backend only — no screen reads it yet.',
-  getDqDestination:
-    'GET /api/dq-destination resolves a DQ finding subjectRef to its canonical row; built, routed and tested — Brief 2 was scoped to backend only, no screen calls it yet.',
+  // getSystemHistory and getDqDestination were here (Brief 2, backend only,
+  // 21 Sep 2026) — UX Phase 7 Brief 3 wired both to Health's SyncHealthBlock
+  // (DqSourceLink) and SystemHistoryBlock; the gap is closed.
 };
 
 function listSourceFiles(dir: string): string[] {

@@ -21,6 +21,7 @@ import { fmtAppInstant, fmtG, fmtInt, fmtSpan } from '../lib/fmt';
 import { parsePeriodParams, resolvePeriod } from '../lib/period';
 import { getHealth, getReconciliation, type ConeState, type WeightAggregate } from '../api';
 import { SyncHealthBlock } from './health/SyncHealthBlock';
+import { SystemHistoryBlock } from './health/SystemHistoryBlock';
 
 /**
  * The reconciliation figures for `Period` — a census of SMS's OWN canonical
@@ -127,7 +128,16 @@ function ReconciliationBlock() {
   );
 }
 
-export function HealthScreen({ isAdmin }: { isAdmin: boolean }) {
+export function HealthScreen({
+  isAdmin,
+  onOpenReading,
+}: {
+  isAdmin: boolean;
+  /** UX Phase 7 Brief 3: a DQ finding's link to the source row it counts —
+   *  see SyncHealthBlock's DqSourceLink. Same shape as every other screen's
+   *  onOpenReading (App.tsx's `go({ sheet: { kind, id } })`). */
+  onOpenReading: (type: 'cone' | 'sack' | 'reject', id: string | number) => void;
+}) {
   const h = usePolling(() => getHealth(), 30_000, 'health');
   const r = h.data ?? null;
 
@@ -143,9 +153,11 @@ export function HealthScreen({ isAdmin }: { isAdmin: boolean }) {
         )}
       </div>
 
-      <SyncHealthBlock first isAdmin={isAdmin} />
+      <SyncHealthBlock first isAdmin={isAdmin} onOpenReading={onOpenReading} />
 
       <ReconciliationBlock />
+
+      <SystemHistoryBlock />
 
       <Block label={W.health.database}>
         {h.error && !r ? (
@@ -173,7 +185,9 @@ export function HealthScreen({ isAdmin }: { isAdmin: boolean }) {
       </Block>
 
       <Block label={W.health.service}>
-        {!r ? (
+        {h.error && !r ? (
+          <Failed error={h.error} onRetry={h.refresh} />
+        ) : !r ? (
           <SkelLines n={2} short />
         ) : (
           <>
@@ -188,7 +202,9 @@ export function HealthScreen({ isAdmin }: { isAdmin: boolean }) {
       </Block>
 
       <Block label={W.health.backup}>
-        {!r ? (
+        {h.error && !r ? (
+          <Failed error={h.error} onRetry={h.refresh} />
+        ) : !r ? (
           <SkelLines n={2} short />
         ) : r.backup == null ? (
           <p className="mut">{W.health.backupNone}</p>

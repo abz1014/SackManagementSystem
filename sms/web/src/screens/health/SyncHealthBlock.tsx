@@ -13,15 +13,95 @@
  * `unplaced` and it is listed under the table by name — so a manager sees
  * the halt and its reason exactly as an admin does, minus the placement.
  */
+import { useState } from 'react';
 import { useLive, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
-import { Block, Details, SkelLines } from '../../ui/bits';
+import { Block, Details, Failed, SkelLines } from '../../ui/bits';
 import { fmtAppInstant, fmtSpan } from '../../lib/fmt';
 import { noOpenEpochs } from '../../lib/syncHealth';
-import { adminGetSources, getOperations } from '../../api';
+import { adminGetSources, getOperations, getDqDestination, ApiError, type DqFinding } from '../../api';
 import { useResource } from '../setup/shared';
 
-export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: boolean }) {
+/**
+ * A DQ finding's link to the first offending row it counts (UX Phase 7
+ * Brief 3, over Brief 2's `/api/dq-destination`). Brief 2's own contract for
+ * this endpoint turned out to be wrong once checked against real data —
+ * `subject_table` is the CANONICAL name ('cone_event'/'sack_event') for 8 of
+ * the 9 row-scoped checks, not the raw short name the endpoint takes, and
+ * `reject_event` findings are genuinely ambiguous between the QCS and
+ * weight-scale raw tables (sync-worker/src/transform/dq.ts:210 vs :312-314).
+ * This maps the wire's canonical name to the raw name the endpoint actually
+ * wants, and refuses to guess for reject_event at all.
+ */
+const RAW_TABLES = ['cone_raw', 'sack_raw', 'reject_qcs_raw', 'reject_weight_raw'] as const;
+type RawDqTable = (typeof RAW_TABLES)[number];
+function isRawDqTable(v: string): v is RawDqTable {
+  return (RAW_TABLES as readonly string[]).includes(v);
+}
+function dqRawTableFor(subjectTable: string | null): RawDqTable | null {
+  if (subjectTable == null) return null;
+  if (subjectTable === 'cone_event') return 'cone_raw';
+  if (subjectTable === 'sack_event') return 'sack_raw';
+  if (subjectTable === 'reject_event') return null; // ambiguous — never guess (see comment above)
+  // station_not_in_roster already writes the raw short name directly.
+  return isRawDqTable(subjectTable) ? subjectTable : null;
+}
+function DqSourceLink({
+  finding,
+  onOpenReading,
+}: {
+  finding: DqFinding;
+  /** Absent on Setup's copy of this block, which has no sheet to open into
+   *  (SyncHealthBlock is shared with Setup.tsx, outside this brief's file
+   *  ownership) — the row is then named but not clickable, never silently
+   *  dropped. */
+  onOpenReading?: (type: 'cone' | 'sack' | 'reject', id: string | number) => void;
+}) {
+  const [state, setState] = useState<'idle' | 'loading' | 'gone'>('idle');
+
+  if (finding.subjectRef == null) return <span className="mut">—</span>;
+  if (finding.subjectTable === 'reject_event') {
+    return <span className="mut sm">{W.health.dqRejectSourceUnresolvable}</span>;
+  }
+  const raw = dqRawTableFor(finding.subjectTable);
+  if (raw == null) return <span className="mut">—</span>;
+  if (state === 'gone') return <span className="mut sm">{W.health.sourceRowGone}</span>;
+  if (!onOpenReading) return <span className="mut sm">{W.health.dqFindingSourceRow}</span>;
+
+  return (
+    <button
+      type="button"
+      className="linkish"
+      disabled={state === 'loading'}
+      onClick={async () => {
+        setState('loading');
+        try {
+          const dest = await getDqDestination(raw, finding.subjectRef!);
+          onOpenReading(dest.type, dest.id);
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 404) setState('gone');
+          else setState('idle'); // transient failure — leave the control live so a click can retry
+        }
+      }}
+    >
+      {state === 'loading' ? W.loading : W.health.dqFindingSourceRow}
+    </button>
+  );
+}
+
+export function SyncHealthBlock({
+  first,
+  isAdmin,
+  onOpenReading,
+}: {
+  first?: boolean;
+  isAdmin: boolean;
+  /** UX Phase 7 Brief 3: opens the canonical row a DQ finding's subjectRef
+   *  resolves to, the same sheet Line/Readings/Sacks open theirs in. Health
+   *  always passes one; Setup's copy of this block does not (see
+   *  DqSourceLink's comment). */
+  onOpenReading?: (type: 'cone' | 'sack' | 'reject', id: string | number) => void;
+}) {
   const { line } = useLive();
   const ops = usePolling(() => getOperations(), 60_000, 'operations');
   // The line's source tables, for one join only: /api/operations names a
@@ -107,7 +187,13 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
           </>
         )}
         <dt>{W.sync.findings}</dt>
-        <dd>{blocking.length === 0 ? W.sync.none : `${blocking.length}`}</dd>
+        {/* THE defect this phase exists to close (CLAUDE.md): a count that
+            could not be read must never render identically to a count of
+            zero. ops.error with no data at all means this figure was never
+            answered, not that nothing is blocking. */}
+        <dd>
+          {ops.error && !ops.data ? W.health.dqBlockingCouldNotLoad : blocking.length === 0 ? W.sync.none : `${blocking.length}`}
+        </dd>
       </dl>
 
       {/* UX Phase 6 Brief 4 (16 Sep 2026): the findings themselves, not just
@@ -117,7 +203,9 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
           about, so a finding sits beside the per-table sync rows below rather
           than in a second, disconnected list. */}
       <Details summary={W.health.dqFindings}>
-        {ops.loading && !ops.data ? (
+        {ops.error && !ops.data ? (
+          <Failed error={ops.error} onRetry={ops.refresh} />
+        ) : ops.loading && !ops.data ? (
           <SkelLines n={3} short />
         ) : allFindings.length === 0 ? (
           <p className="mut">{W.health.dqFindingsNone}</p>
@@ -130,6 +218,7 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
                   <th>Check</th>
                   <th>Severity</th>
                   <th>Detail</th>
+                  <th>Source row</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,6 +229,9 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
                       <td>{f.checkName}</td>
                       <td className={f.severity === 'ERROR' || f.severity === 'CRITICAL' ? 'acc' : ''}>{f.severity}</td>
                       <td>{f.detail ?? '—'}</td>
+                      <td>
+                        <DqSourceLink finding={f} onOpenReading={onOpenReading} />
+                      </td>
                     </tr>
                   )),
                 )}
@@ -186,7 +278,9 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
       )}
 
       <Details summary={W.sync.perTable}>
-        {ops.loading && !ops.data ? (
+        {ops.error && !ops.data ? (
+          <Failed error={ops.error} onRetry={ops.refresh} />
+        ) : ops.loading && !ops.data ? (
           <SkelLines n={4} short />
         ) : (
           <div className="tw">
@@ -242,6 +336,14 @@ export function SyncHealthBlock({ first, isAdmin }: { first?: boolean; isAdmin: 
         {epochs.unplaced.map((table) => (
           <p key={table} className="acc sm" style={{ marginTop: 10 }}>{W.sync.noOpenEpoch(table)}</p>
         ))}
+        {/* Unit 2 (Brief 3): a failed /api/admin/sources fetch and "not an
+            admin, so this was never fetched" both end up with the same
+            epochs.unplaced list above (noOpenEpochs treats a null tables
+            list identically either way) — but they are not the same fact,
+            and only one of them is a problem worth a sentence. */}
+        {isAdmin && sources.error && (
+          <p className="acc sm" style={{ marginTop: 10 }}>{W.health.sourceListCouldNotLoad}</p>
+        )}
         {h?.cadenceSeconds != null && (
           <p style={{ marginTop: 12 }}>
             Passes arrive about every {fmtSpan(h.cadenceSeconds)}; the connection is called stale after{' '}

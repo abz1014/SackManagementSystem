@@ -573,7 +573,9 @@ function Chrome({
 
           {/* Open to every signed-in account (roadmap Phase 11): the sync's
               state was admin-only while IFL's accounts are created at manager. */}
-          {route.view === 'health' && <HealthScreen isAdmin={rank >= 4} />}
+          {route.view === 'health' && (
+            <HealthScreen isAdmin={rank >= 4} onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })} />
+          )}
         </main>
 
         {/* Drill-downs open over the screen and close with Escape, so the reader

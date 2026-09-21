@@ -1138,6 +1138,20 @@ export const W = {
        system no longer holds. "No longer in the register" says why the
        click failed without implying a broken link or a bug. */
     sourceRowGone: 'That reading is no longer in the register — it may have been superseded by a rebuild, or belong to a source generation this system no longer holds.',
+    /* A reject finding's subjectRef is real but unresolvable from the client
+       alone: sms.reject_event does not record whether the offending row came
+       from the QCS check (reject_qcs_raw) or the weight scale
+       (reject_weight_raw) — Brief 2 tried resolving a real ref against both
+       and got two different, both-plausible readings. A wrong guess is worse
+       than admitting the source row cannot be pinned down, so this finding
+       type never offers a link at all. */
+    dqRejectSourceUnresolvable: 'The source row cannot be identified for this finding: this system does not record whether a reject reading came from the QCS check or the weight scale.',
+    /* UX Phase 7 Brief 3: the source-table list (/api/admin/sources, isAdmin
+       only) failing is a DIFFERENT fact from /api/operations failing — the
+       sync rows themselves (outcome, rows written, age) still loaded fine,
+       only the epoch-placement join could not run. Never let this read as
+       the ordinary non-admin case, where there is simply nothing to place. */
+    sourceListCouldNotLoad: 'The source-table list could not be read, so a halted table below cannot be placed on its row — the halt itself, when there is one, is still named.',
 
     /* The source-generation register (sms.source_epoch; CLAUDE.md's "Source
        generations (epochs)" — IFL dropped and recreated its weighing
