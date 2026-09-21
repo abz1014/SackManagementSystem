@@ -39,8 +39,7 @@ export function SystemHistoryBlock() {
   const archivedNotes = (d?.generations ?? []).filter((g) => g.archivedBelowId != null);
 
   return (
-    <Block label={W.health.epochRegister.title}>
-      <p className="mut sm">{W.health.epochRegister.note}</p>
+    <Block label={W.health.epochRegister.title} note={W.health.epochRegister.note}>
       {/* UX Phase 7 Brief 5 (21 Sep 2026): read `sms.source_epoch` and
           `api/src/services/systemHistory.ts` directly before touching this
           markup, per this brief's own instruction — a plausible-looking

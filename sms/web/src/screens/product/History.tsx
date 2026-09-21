@@ -67,7 +67,7 @@ function TimelineBlock() {
   useEffect(() => { load(); }, []);
 
   return (
-    <Block label={W.product.tabs.history} first>
+    <Block label={W.product.tabs.history}>
       {error ? (
         <Failed error={error} onRetry={load} />
       ) : !rows ? (

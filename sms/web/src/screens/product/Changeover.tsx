@@ -187,7 +187,7 @@ export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <Block label={W.product.tabs.changeover} first>
+      <Block label={W.product.tabs.changeover}>
         {loadError ? (
           <Failed error={loadError} onRetry={() => setNonce((n) => n + 1)} />
         ) : !refs || !products ? (

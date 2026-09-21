@@ -228,7 +228,7 @@ function LimitsForm({ product, onDone, onCancel }: { product: ProductOption; onD
         catch (x) { setErr(errText(x)); } finally { setBusy(false); }
       }}
     >
-      <div className="big" style={{ fontSize: '1.1em' }}>
+      <div style={{ fontSize: 'var(--fs-qual)' }}>
         {W.product.changeLimitsHeading(label(product), product.blend ?? '—', product.countText ?? '—', product.tubeType ?? '—', product.productId)}
       </div>
       <p>
@@ -318,7 +318,7 @@ function CreateForm({ products, onDone, onCancel }: { products: ProductOption[];
         } catch (x) { setErr(errText(x)); } finally { setBusy(false); }
       }}
     >
-      <div className="big" style={{ fontSize: '1.1em' }}>{W.product.newProduct}</div>
+      <div style={{ fontSize: 'var(--fs-qual)' }}>{W.product.newProduct}</div>
       <p className="mut sm">{W.product.newProductNote}</p>
       {opts === null && !err ? <SkelLines n={3} short /> : opts && (
         <>

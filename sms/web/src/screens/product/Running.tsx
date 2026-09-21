@@ -135,7 +135,7 @@ function LineWideProduct({
         <p className="mut">{data.neverRecorded ? W.product.none : W.product.noneAtThisTime}</p>
       ) : (
         <>
-          <div className="big">{data.product.label}</div>
+          <div className="headline">{data.product.label}</div>
           <dl className="kv" style={{ marginTop: 18 }}>
             <dt>{W.product.targetAndLimits}</dt>
             <dd>{data.limits?.label ?? '—'}</dd>

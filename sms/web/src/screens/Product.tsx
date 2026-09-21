@@ -28,7 +28,7 @@
  */
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
-import { Block, Toggle } from '../ui/bits';
+import { Block, Toggle, Toolbar } from '../ui/bits';
 import type { ProductTab } from '../ui/Bar';
 import { RunningTab } from './product/Running';
 import { CatalogueTab } from './product/Catalogue';
@@ -67,17 +67,21 @@ export function ProductScreen({
         <h1 className="wide">{W.nav.product}</h1>
       </div>
 
-      <Block first>
-        <Toggle
-          label={W.nav.product}
-          value={tab}
-          onChange={onTabChange}
-          options={[
-            { key: 'running', label: W.product.tabs.running },
-            { key: 'changeover', label: W.product.tabs.changeover },
-            { key: 'catalogue', label: W.product.tabs.catalogue },
-            { key: 'history', label: W.product.tabs.history },
-          ]}
+      <Block first tight>
+        <Toolbar
+          left={
+            <Toggle
+              label={W.nav.product}
+              value={tab}
+              onChange={onTabChange}
+              options={[
+                { key: 'running', label: W.product.tabs.running },
+                { key: 'changeover', label: W.product.tabs.changeover },
+                { key: 'catalogue', label: W.product.tabs.catalogue },
+                { key: 'history', label: W.product.tabs.history },
+              ]}
+            />
+          }
         />
       </Block>
 
