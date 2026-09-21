@@ -44,6 +44,34 @@
  *  11. @media print  The verdict mark and the station bars survive printing.
  * ------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+ * UX PHASE 9 (21 Sep 2026) — the printed report was dropping columns without
+ * saying so. `.tw { overflow-x: auto }` scrolls on screen but a sheet of
+ * paper has nothing to scroll: whatever didn't fit the div's width was
+ * silently clipped, and there was no `@page` rule anywhere, so print used the
+ * browser default (~680px usable on A4 portrait) against a 1100px screen
+ * design. Every edit below is marked [PHASE 9 PRINT] in place, all inside
+ * `@media print` or `@page` — no screen-media rule changed.
+ *
+ *   P1  @page          NEW. Explicit A4 portrait + margins (see the note by
+ *                      the rule for why portrait, not landscape, shipped).
+ *   P2  .tw            Print gets the FULL page width (the grid is already
+ *                      flattened by the existing [SPEC 5] print rule above)
+ *                      plus a tighter print-only type scale, so a wide table
+ *                      lays out instead of clipping at the div's edge.
+ *   P3  .bars i        The reject Pareto bar is an inline `background` set
+ *                      in Reject.tsx — not printed under "background
+ *                      graphics off", the same failure class [SPEC 11] above
+ *                      already defeats for the verdict mark, one screen
+ *                      over. Redrawn as a bordered (unfilled) box: the width
+ *                      still carries the magnitude, and a border is not
+ *                      "background graphics", so it survives the setting.
+ *   P5  .toggle        Added to the print hide list as a second line of
+ *                      defence beside the markup-level fix elsewhere.
+ * P4 (chart tick legibility) needed no CSS change here — measured, not
+ * assumed; see the Phase 9 report for the measurement.
+ * ------------------------------------------------------------------------- */
+
 /* ------------------------------------------------------------------ tokens */
 
 :root {
@@ -804,8 +832,27 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 /* The print header block carries what the screen chrome would otherwise take
    away with it: which line, which period, coverage, the newest reading, and
    who printed it. Without it a printed report is undated and unattributed. */
+/* [PHASE 9 PRINT P1] No `@page` rule existed anywhere in this file, so print
+   fell back to the browser's own default page size and margins — usable
+   width was whatever Chrome happened to pick, never stated or tested here.
+   A4 PORTRAIT is what ships: it is the safer default because it changes
+   nothing about how every OTHER printed page in the app (Readings register,
+   single-figure reports) already reads, and because a global landscape
+   default is a page-composition decision for every print in the app, not
+   just the widest report tables — the brief for this pass says explicitly
+   that call belongs to the owner. LANDSCAPE measurably fits more of the wide
+   report tables (Calibration, MachineProduct) without shrinking type as far;
+   both options were screenshotted for the Phase 9 report so the owner can
+   compare and flip `size: A4` to `size: A4 landscape` in one line if they
+   choose it. Margins are tighter than Chrome's ~0.4in default because every
+   report table below is already fighting for width. */
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+
 @media print {
-  .bar, .strip, .replay, .no-print, .scrim, .sheet, .wall { display: none !important; }
+  .bar, .strip, .replay, .no-print, .scrim, .sheet, .wall, .toggle { display: none !important; } /* [PHASE 9 PRINT P5] .toggle added */
   body { font-size: 11pt; }
   .page { max-width: none; padding: 0; }
   .band { border-top: 0; }
@@ -833,5 +880,40 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   /* Station bars would print as empty boxes; the numbers carry the same fact. */
   .w-st .bar, .skel { display: none !important; }
   .figs { gap: 0 18px; }
+
+  /* [PHASE 9 PRINT P2] `.tw { overflow-x: auto }` (screen rule, unchanged)
+     scrolls on screen; a printed page has nothing to scroll, so a wide
+     table's columns past the div's edge were silently dropped, not merely
+     hidden behind a scrollbar the reader could reach. On paper the table
+     gets the div's full available width (`.block` is already flattened to a
+     single column by the [SPEC 5] print rule above, so this is now the full
+     printable width, not 920px of it) and a tighter print-only type scale,
+     so more columns actually land on the sheet instead of clipping at an
+     arbitrary edge. Verified against Calibration's 10-column station table:
+     852px of content in a 700px-wide print column before this rule (the
+     rightmost two columns gone with no visual cue); 700px after, at 8pt,
+     with every column present. It does not make every report table fit —
+     MachineProduct's table is one column per shift worked in the period
+     (~3 × days, not the ~14 static <th> in its source), and for a 34-day
+     period that is over 100 columns no font size makes legible on one A4
+     sheet in either orientation. That is a real physical limit, not
+     something this rule can silently paper over; see the Phase 9 report. */
+  .tw { overflow-x: visible !important; }
+  .tw table { width: 100%; table-layout: auto; font-size: 8pt; }
+  .tw th, .tw td { padding-right: 4px; padding-top: 4px; padding-bottom: 4px; }
+  .tw th.n, .tw td.n { padding-left: 8px; }
+  .tw th { white-space: normal; }
+
+  /* [PHASE 9 PRINT P3] `.bars i`'s fill is an inline `background` set by
+     Reject.tsx per row — never printed once "background graphics" is off in
+     the print dialog, the exact failure [SPEC 11] above already defeats for
+     the verdict mark, left unaddressed one screen over. Redrawn as an
+     unfilled, bordered box: the inline `width: X%` still carries the
+     magnitude, and `border-color` is not "background graphics", so it
+     prints regardless of that setting. A blank column with no explanation
+     was the one outcome ruled out; this is truthful about what a bordered
+     box can show (relative width) versus what the filled bar showed
+     on-screen (the same relative width, previously also filled). */
+  .bars i { background: none !important; border: 1px solid var(--ink) !important; box-sizing: border-box; }
 }
 .print-head { display: none; }
