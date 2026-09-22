@@ -44,35 +44,43 @@ function labelOf(id: number | null, name: string | null, labels: Record<string, 
  * table on Weight already open.
  */
 /*
- * UX Phase 9 Brief D (21 Sep 2026, owner decision): this matrix is one
- * column per calendar day × shift worked in the period — measured at ~103
- * columns / 7,438px on the dev range (2026-08-05 to 2026-09-07). No print
- * orientation or type-size rule fixes that; it is a structural limit, not
- * something [PHASE 9 PRINT P2]'s full-width/8pt table rule (app.css) can
- * paper over. So the whole section is print-suppressed — `.no-print` below,
- * the same existing mechanism the rest of the screen chrome already uses,
- * not a new one — and replaced on paper by one line pointing at the CSV
- * export, which carries the identical rows and is already audited (rank 3,
- * `reportExportUrl` in Report.tsx). `.print-only` (app.css:526-527) is the
- * existing mirror-image mechanism for that line; using both keeps this
- * change to markup only, no CSS edit needed for Decision 2. Nothing here
- * changes what renders on screen.
+ * UX Phase 9 Brief D (21 Sep 2026) print-suppressed this whole section: the
+ * matrix is one column per calendar day × shift worked in the period —
+ * measured at 102 columns on the full 34-day dev range (2026-08-05 to
+ * 2026-09-07; the report's own `daysBetween` × 3 shifts, deterministic, not
+ * data-dependent — see machineProduct.ts). The owner was asked whether it
+ * should print at all and said yes ("there is no harm in it right?") on
+ * 22 Sep 2026. There IS one harm, and it is not "should it print" but "at
+ * what scale": 102 columns onto ~1,015px of A4-landscape usable width (the
+ * [PHASE 9 PRINT P6] page) is a ~0.14 shrink factor even before the
+ * row-label column — 8pt text would land under 2pt, unreadable, which is
+ * worse than the page not existing. Scaling was ruled out for exactly that
+ * reason; this section PAGINATES instead, tiling MACHINE_PRODUCT_COLS_PER_PAGE
+ * data columns per sheet with the row-label column repeated on every page
+ * and the span stated ("Columns 1–12 of 102 · page 1 of 9"), so a reader
+ * with the stack in hand can always orient. The on-screen table (`.no-print`,
+ * unchanged, still one continuous table) and the print version (`.print-only`,
+ * now real tables instead of one apology line) render from the same `d`, so
+ * there is exactly one place the matrix's numbers are computed.
  */
+const MACHINE_PRODUCT_COLS_PER_PAGE = 12;
+
+function chunk<T>(arr: readonly T[], size: number): T[][] {
+  if (arr.length === 0) return [arr as T[]];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 export function MachineProductSection({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
-  return (
-    <>
-      <p className="print-only">{W.reports.machineProductTooWideForPrint}</p>
-      <div className="no-print">
-        {d.rows.length === 0 ? (
-          <Block first>
-            <Empty message={W.nothingHere} />
-          </Block>
-        ) : (
-          <MachineProductTables d={d} onOpen={onOpen} />
-        )}
-      </div>
-    </>
-  );
+  if (d.rows.length === 0) {
+    return (
+      <Block first>
+        <Empty message={W.nothingHere} />
+      </Block>
+    );
+  }
+  return <MachineProductTables d={d} onOpen={onOpen} />;
 }
 
 function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
@@ -87,7 +95,8 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
       </Block>
 
       <Block label={W.reports.colMachine}>
-        <div className="tw">
+        {/* Screen: one continuous table, unchanged — a browser window scrolls. */}
+        <div className="tw no-print">
           <table>
             <thead>
               <tr>
@@ -115,6 +124,13 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
               ))}
             </tbody>
           </table>
+        </div>
+        {/* Print / PDF: paginated — a sheet cannot scroll. `tw` gives every
+            page's table the same [PHASE 9 PRINT P2] full-width/8pt rules the
+            screen table's own `.tw` wrapper gets; `print-only` is the only
+            reason this markup is invisible on screen. */}
+        <div className="tw print-only">
+          <MachineProductPrintPages d={d} />
         </div>
       </Block>
 
@@ -168,6 +184,65 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
           </table>
         </div>
       </Block>
+    </>
+  );
+}
+
+/**
+ * The print/PDF version of the machine matrix: `d.columns` tiled into
+ * `MACHINE_PRODUCT_COLS_PER_PAGE`-wide pages, each its own `<table>` with the
+ * row-label column repeated and the span stated above it. `break-after: page`
+ * (`.mp-page`, app.css) puts each page on its own sheet under the existing
+ * `report-landscape` @page rule — one table per printed page, not one huge
+ * table Chromium would have to paginate on its own with no column repeat.
+ * The LAST page gets no forced break, so it doesn't leave a blank trailing
+ * sheet. A period with zero columns (period shorter than one shift-day,
+ * should not happen given daysBetween always returns ≥1 day) still renders
+ * one page with zero data columns rather than nothing.
+ */
+function MachineProductPrintPages({ d }: { d: MachineProductReportData }) {
+  const pages = chunk(d.columns, MACHINE_PRODUCT_COLS_PER_PAGE);
+  const total = d.columns.length;
+  return (
+    <>
+      {pages.map((pageCols, pi) => {
+        const fromCol = pi * MACHINE_PRODUCT_COLS_PER_PAGE + 1;
+        const toCol = fromCol + pageCols.length - 1;
+        const first = d.columns[0] === pageCols[0];
+        return (
+          <div className="mp-page" key={pi}>
+            <p className="mut sm" style={{ marginTop: first ? 0 : 18, marginBottom: 6 }}>
+              {W.reports.machineProductPageSpan(fmtInt(fromCol), fmtInt(toCol), fmtInt(total), fmtInt(pi + 1), fmtInt(pages.length))}
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>{W.reports.colMachine}</th>
+                  {pageCols.map((c) => (
+                    <th key={`${c.day}|${c.shift}`} className="n">
+                      {fmtDayShort(c.day)}
+                      <br />
+                      {W.shiftName[c.shift]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {d.rows.map((r) => (
+                  <tr key={r.station}>
+                    <td>{machineLabel(r.station, r.machineName, r.stationName)}</td>
+                    {pageCols.map((c, i) => {
+                      const globalIndex = fromCol - 1 + i;
+                      const cell = r.cells[globalIndex];
+                      return <td key={i}>{cell ? <Cell cell={cell} labels={d.labels} /> : '—'}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
     </>
   );
 }

@@ -1054,5 +1054,21 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
      box can show (relative width) versus what the filled bar showed
      on-screen (the same relative width, previously also filled). */
   .bars i { background: none !important; border: 1px solid var(--ink) !important; box-sizing: border-box; }
+
+  /* [PHASE 9 JOB 1, 22 Sep 2026] MachineProduct's matrix — one column per
+     day × shift, ~102 on the full dev range — used to be print-suppressed
+     outright ([PHASE 9 PRINT P2]'s own comment above still explains why one
+     sheet can't hold it). The owner asked for it to print anyway; the harm
+     avoided here is scaling it onto one page unreadably small, not printing
+     it at all. `MachineProductPrintPages` (MachineProduct.tsx) tiles the
+     columns into `.mp-page` groups of MACHINE_PRODUCT_COLS_PER_PAGE (12,
+     sized to this same landscape page's ~1,015px usable width at 8pt) and
+     puts each on its own sheet. `break-after: page` forces the sheet break;
+     `:last-child` on the last group leaves no trailing blank page. `.tw`'s
+     existing print rules (`.tw table`, `.tw th`, `.tw td` above) already
+     apply here because the wrapping div carries `tw` alongside `print-only`
+     — no separate width/font rule needed for these tables. */
+  .mp-page { break-inside: avoid; }
+  .mp-page:not(:last-child) { break-after: page; }
 }
 .print-head { display: none; }

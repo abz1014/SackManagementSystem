@@ -1748,11 +1748,17 @@ export const W = {
     conesWithoutStation: (n: string) => `${n} cones carry no machine and are not on this matrix.`,
     changeovers: 'Changeovers',
     noChangeovers: 'No changeovers were read in this period.',
-    /* UX Phase 9 Brief D (21 Sep 2026): this matrix is one column per day ×
-       shift worked in the period — over 100 columns on a month-long range,
-       a structural limit no print type size or orientation fixes. Printed
-       alone via `.print-only` in place of the table (MachineProduct.tsx). */
-    machineProductTooWideForPrint: 'This report has one column per machine, day and shift in the period — too many to fit a printed page. The CSV export holds the same data.',
+    /* UX Phase 9 Brief D (21 Sep 2026) suppressed this matrix from print
+       entirely — over 100 columns on a month-long range, a structural limit
+       no type size or orientation fixes on one sheet. Owner overruled the
+       suppression 22 Sep 2026 ("print the machine product as well"): it now
+       paginates instead (MachineProduct.tsx, `MACHINE_PRODUCT_COLS_PER_PAGE`),
+       tiling the columns across as many A4-landscape sheets as it takes, the
+       row-label column repeated on every page. This string names the span so
+       a reader mid-stack knows where they are; it replaces the old blanket
+       "too wide" message, which is now unused (removed, grep-verified). */
+    machineProductPageSpan: (fromCol: string, toCol: string, total: string, page: string, pages: string) =>
+      `Columns ${fromCol}–${toCol} of ${total} · page ${page} of ${pages}`,
     /* Errors. */
     notAllowed: 'This report is for managers and above.',
   } as const,
