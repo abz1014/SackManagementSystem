@@ -6,8 +6,24 @@
  *
  *   GET /api/reports/header                  rank 1        the print header (line, plant time, who, version)
  *   GET /api/reports/:type                    REPORT_RANK[type]  one composed report (services/reports/*)
- *   GET /api/reports/:type/export?format=csv|xlsx   rank 3   the same report as CSV (default) or XLSX,
- *                                                             audited `export.csv` / `export.xlsx`
+ *   GET /api/reports/:type/export?format=csv|xlsx|pdf   rank 3   the same report as CSV (default), XLSX or
+ *                                                             a server-rendered PDF, audited `export.csv` /
+ *                                                             `export.xlsx` / `export.pdf`
+ *
+ * THE PDF BRANCH (22 Sep 2026, services/reports/pdf.ts) drives a headless
+ * copy of Microsoft Edge — via `puppeteer-core` — that loads THIS SAME
+ * server's own report page and prints it, so the PDF is never a second
+ * layout implementation: see pdf.ts's header. Two things fail loudly rather
+ * than ever producing a broken PDF or a bare 500:
+ *   - Edge missing on the host → 503, `edge.ts`'s named, actionable reason
+ *     (a host/startup fact, not a per-request one — see edge.ts's header);
+ *   - the render itself times out or the page never reaches a loaded state
+ *     → 502, so "PDF export is broken" is distinguishable from "Edge is not
+ *     installed" in whatever is watching this route.
+ * Authentication for the browser this route launches is a short-lived,
+ * single-use, in-process render token (auth.ts's `mintRenderToken`), never
+ * a database session — see auth.ts's RENDER TOKEN block for the full
+ * reasoning and why it does not widen the auth surface.
  *
  * There is no per-type route: every type, including management-summary,
  * is served by the single parameterised handler. The gate lives in `parse()`,
@@ -22,7 +38,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import mssql from 'mssql';
 import { z } from 'zod';
-import { requireRole, type AuthedRequest } from '../auth.js';
+import { requireRole, type AuthedRequest, type AuthUser } from '../auth.js';
 import { TtlCache } from '../cache.js';
 import { envelope } from '../envelope.js';
 import { MAX_RANGE_DAYS } from '../config.js';
@@ -33,7 +49,11 @@ import {
   EXPORT_RANK, FILTERS_BY_TYPE, REPORT_RANK, XLSX_CONTENT_TYPE, isReportType,
   type AnyReportData, type ReportFilters, type ReportHeader, type ReportType,
 } from '../services/reports/index.js';
+import { locateEdge } from '../services/reports/edge.js';
+import { renderReportPdf } from '../services/reports/pdf.js';
 import type { RouteContext } from './context.js';
+
+const PDF_CONTENT_TYPE = 'application/pdf';
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD').optional();
 const isoTs = z
@@ -64,7 +84,7 @@ const reportQuery = z.object({
 type ReportQuery = z.infer<typeof reportQuery>;
 
 /** The export route's own extra param; kept separate from `reportQuery` so no other route gains it by accident. */
-const exportQuery = z.object({ format: z.enum(['csv', 'xlsx']).default('csv') });
+const exportQuery = z.object({ format: z.enum(['csv', 'xlsx', 'pdf']).default('csv') });
 
 interface Parsed {
   type: ReportType;
@@ -223,10 +243,53 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
         res.status(400).json({ error: 'invalid query', detail: fmt.error.flatten().fieldErrors });
         return;
       }
-      const [header, data] = await Promise.all([headerFor(p, req), buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters)]);
-      const table = reportCsv(p.type, data);
       const filters = Object.entries(p.filters).map(([k, v]) => `${k}=${String(v)}`).join(' ');
       const detail = `${p.resolved.from} to ${p.resolved.to}${filters ? ` (${filters})` : ''}`;
+
+      // PDF branches off before the CSV/XLSX table is built: the PDF is not
+      // composed from `data` here at all — Edge re-fetches the report
+      // through the same route a screen uses, which is the whole point (see
+      // this file's header and pdf.ts's). Two distinct failure modes get
+      // two distinct status codes, neither of them a bare 500:
+      //   503  Edge is not on this host at all — a host/startup fact
+      //        (edge.ts), never true only "sometimes";
+      //   502  Edge IS present but this particular render did not finish
+      //        (timeout, crash, the report page never reaching a loaded
+      //        state) — a render failure, not a missing dependency.
+      if (fmt.data.format === 'pdf') {
+        const edge = locateEdge();
+        if (!edge.ok || !edge.path) {
+          res.status(503).json({ error: 'pdf export unavailable', detail: edge.reason });
+          return;
+        }
+        const user = (req as AuthedRequest).user as AuthUser;
+        // Loopback, deliberately: this render is this process asking ITSELF
+        // for the page it already serves, over whichever protocol it is
+        // actually listening on (http, or the direct-TLS https mode —
+        // req.protocol reflects either correctly). Using the request's own
+        // Host header instead would make the render depend on how the
+        // ORIGINAL caller reached this server, which is exactly the kind of
+        // thing a reverse proxy or an unusual DNS setup could point
+        // somewhere this process cannot actually reach.
+        const baseUrl = `${req.protocol}://127.0.0.1:${req.socket.localPort}`;
+        try {
+          const rendered = await renderReportPdf({
+            baseUrl, type: p.type, resolved: p.resolved, filters: p.filters, atMs: p.atMs, user, edgePath: edge.path,
+          });
+          const header = await headerFor(p, req);
+          res.setHeader('Content-Type', PDF_CONTENT_TYPE);
+          res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'pdf')}"`);
+          res.send(rendered.buffer);
+          audit(req, 'export.pdf', 'report', p.type, `${detail} (${rendered.pageCount} pages)`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          res.status(502).json({ error: 'pdf render failed', detail: message });
+        }
+        return;
+      }
+
+      const [header, data] = await Promise.all([headerFor(p, req), buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters)]);
+      const table = reportCsv(p.type, data);
       if (fmt.data.format === 'xlsx') {
         res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
         res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'xlsx')}"`);

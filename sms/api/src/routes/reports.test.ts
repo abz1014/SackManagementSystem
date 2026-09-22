@@ -23,6 +23,16 @@ import type { ApiConfig } from '../config.js';
 import { REPORT_TYPES } from '../services/reports/common.js';
 import { XLSX_CONTENT_TYPE } from '../services/reports/index.js';
 
+// format=pdf never launches a real browser here — that would make this file
+// need Edge on whatever machine runs `npx vitest run`, including CI. The two
+// functions the route calls are mocked so the tests below can drive both of
+// pdf.ts's own failure shapes (Edge missing → 503; the render itself failing
+// → 502) without touching Puppeteer or Edge at all. Real Edge + real
+// puppeteer-core + real generated PDFs are exercised separately, outside the
+// vitest suite (see this change's own report for that run's output).
+vi.mock('../services/reports/edge.js', () => ({ locateEdge: vi.fn() }));
+vi.mock('../services/reports/pdf.js', () => ({ renderReportPdf: vi.fn() }));
+
 interface Stmt { sql: string; inputs: Map<string, unknown> }
 
 class FakeRequest {
@@ -338,6 +348,84 @@ describe('GET /api/reports/:type/export', () => {
     it('an invalid format value is a 400, not silently treated as csv', async () => {
       const r = await get(`/api/reports/reject/export?${Q}&format=json`);
       expect(r.status).toBe(400);
+    });
+  });
+
+  describe('format=pdf', () => {
+    beforeEach(async () => {
+      const { locateEdge } = await import('../services/reports/edge.js');
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      vi.mocked(locateEdge).mockReset();
+      vi.mocked(renderReportPdf).mockReset();
+    });
+
+    it('as rank 3 (manager), with Edge present, answers application/pdf, a .pdf filename, and exactly one export.pdf audit row naming the page count', async () => {
+      const { locateEdge } = await import('../services/reports/edge.js');
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      vi.mocked(locateEdge).mockReturnValue({ ok: true, path: 'C:\\fake\\msedge.exe', reason: null });
+      const buffer = Buffer.from('%PDF-1.4 fake pdf body');
+      vi.mocked(renderReportPdf).mockResolvedValue({ buffer, pageCount: 3 });
+
+      const r = await get(`/api/reports/reject/export?${Q}&shift=night&format=pdf`, 'manager');
+      expect(r.status).toBe(200);
+      expect(r.headers.get('content-type')).toMatch(/^application\/pdf/);
+      expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07.pdf"');
+      expect(r.text).toBe(buffer.toString());
+
+      // renderReportPdf was actually asked for the type/period/filters this
+      // request named, and for the caller who made it — not some default.
+      const call = vi.mocked(renderReportPdf).mock.calls[0]![0];
+      expect(call.type).toBe('reject');
+      expect(call.resolved).toMatchObject({ from: '2026-09-01', to: '2026-09-07' });
+      expect(call.filters).toMatchObject({ shift: 'night' });
+      expect(call.user.role).toBe('manager');
+      expect(call.edgePath).toBe('C:\\fake\\msedge.exe');
+      expect(call.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const auditRows = db.statements.filter((s) => s.sql.includes('INSERT INTO sms.audit_log'));
+      const pdfRows = auditRows.filter((s) => [...s.inputs.values()].includes('export.pdf'));
+      expect(pdfRows.length).toBe(1);
+      expect([...pdfRows[0]!.inputs.values()]).toEqual(
+        expect.arrayContaining(['export.pdf', 'report', 'reject', '2026-09-01 to 2026-09-07 (shift=night) (3 pages)']),
+      );
+      expect(auditRows.some((s) => [...s.inputs.values()].includes('export.csv'))).toBe(false);
+      expect(auditRows.some((s) => [...s.inputs.values()].includes('export.xlsx'))).toBe(false);
+    });
+
+    it('as rank 1 (viewer) is refused with 403 before Edge is ever probed, same as CSV/XLSX', async () => {
+      const { locateEdge } = await import('../services/reports/edge.js');
+      const r = await get(`/api/reports/reject/export?${Q}&format=pdf`, 'viewer');
+      expect(r.status).toBe(403);
+      expect(locateEdge).not.toHaveBeenCalled();
+    });
+
+    it('Edge missing on the host answers 503 with the named, actionable reason — not a 500, and never invokes the renderer', async () => {
+      const { locateEdge } = await import('../services/reports/edge.js');
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      vi.mocked(locateEdge).mockReturnValue({
+        ok: false, path: null, reason: 'Microsoft Edge was not found in any known Windows install location.',
+      });
+
+      const r = await get(`/api/reports/reject/export?${Q}&format=pdf`, 'manager');
+      expect(r.status).toBe(503);
+      expect(r.json).toEqual({
+        error: 'pdf export unavailable',
+        detail: 'Microsoft Edge was not found in any known Windows install location.',
+      });
+      expect(renderReportPdf).not.toHaveBeenCalled();
+    });
+
+    it('a render that throws (timeout, crashed page, …) answers 502, distinct from the Edge-missing 503', async () => {
+      const { locateEdge } = await import('../services/reports/edge.js');
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      vi.mocked(locateEdge).mockReturnValue({ ok: true, path: 'C:\\fake\\msedge.exe', reason: null });
+      vi.mocked(renderReportPdf).mockRejectedValue(new Error('waiting for selector `.print-head` failed: timeout 30000ms exceeded'));
+
+      const r = await get(`/api/reports/reject/export?${Q}&format=pdf`, 'manager');
+      expect(r.status).toBe(502);
+      expect(r.json.error).toBe('pdf render failed');
+      expect(r.json.detail).toMatch(/print-head/);
     });
   });
 });

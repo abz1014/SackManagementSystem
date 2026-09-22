@@ -62,7 +62,7 @@ export function csvDocument(headers: readonly string[], rows: readonly CsvRow[],
 }
 
 /** `sms-report-<type>-<from>[_to_<to>].<ext>` — the filename does the everyday attribution work. */
-export function reportFilename(h: ReportHeader, ext: 'csv' | 'xlsx'): string {
+export function reportFilename(h: ReportHeader, ext: 'csv' | 'xlsx' | 'pdf'): string {
   const span = h.period.from === h.period.to ? h.period.from : `${h.period.from}_to_${h.period.to}`;
   return `sms-report-${h.reportType}-${span}.${ext}`;
 }
