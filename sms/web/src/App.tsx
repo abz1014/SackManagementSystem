@@ -103,8 +103,10 @@ export interface Route {
   readingsStates: ConeState[];
   readingsPage: number;
 
-  /** Weight: which chart. Chart station is the shared field above. */
-  weightMode: WeightMode;
+  /** Weight: which chart. Chart station is the shared field above. `null`
+   *  means no explicit tab was ever chosen — see the file-header note in
+   *  parseRoute for why this can't just default to a fixed value here. */
+  weightMode: WeightMode | null;
   /** Weight: the chart's own population, cone or sack (UX Phase 5 Brief 3
    *  unit U6, 16 Sep 2026, URL key `wt`) — follows the exact `wm` pattern. */
   weightChartType: SpcType;
@@ -149,7 +151,7 @@ const DEFAULT_ROUTE: Omit<Route, 'view' | 'period' | 'sheet' | 'at' | 'readingsF
   readingsListing: 'cones',
   readingsStates: [],
   readingsPage: 1,
-  weightMode: 'time',
+  weightMode: null,
   weightChartType: 'cone',
   sacksUnit: 'sacks',
   sacksPage: 1,
@@ -171,6 +173,28 @@ function parseId(v: string | null): number | null {
  *  this screen's local `useState`) an old link must keep getting for free. */
 function defaultListing(rf: ReadingsFilter): Listing {
   return rf === 'inspectionRejects' ? 'inspectionRejects' : 'cones';
+}
+
+/**
+ * UX Phase 10 (22 Sep 2026): Weight's chart-mode default, period-conditional.
+ *
+ * Distribution — a clean bell with a dashed limit and a target rule — was
+ * measured by a design review as the best graphic in the application, and
+ * Over time (an X̄ line) was the hardcoded default regardless of period, so
+ * on the common single-shift view it rendered as a flat, near-useless line
+ * one click away from the chart that actually says something. A trend line
+ * needs more than one point to be a trend; a shift or a single day is one
+ * point, so Distribution is the more honest default there. A period spanning
+ * more than a day is exactly the case Over time exists for.
+ *
+ * `explicit` is `null` only when the URL carried no `wm` (or an unrecognised
+ * one) — see parseRoute below. Once a user has picked a tab, this function is
+ * never consulted again for that link: the explicit choice always wins, even
+ * across a period change or a reload.
+ */
+export function resolveWeightMode(explicit: WeightMode | null, period: { days: number }): WeightMode {
+  if (explicit) return explicit;
+  return period.days <= 1 ? 'dist' : 'time';
 }
 
 export function parseRoute(): Route {
@@ -210,7 +234,17 @@ export function parseRoute(): Route {
     : [];
   const readingsPage = Math.max(1, parseId(p.get('rp')) ?? 1);
 
-  const weightMode: WeightMode = p.get('wm') === 'dist' ? 'dist' : 'time';
+  // UX Phase 10 (22 Sep 2026): `null` means no explicit choice was ever made
+  // — the URL carries no `wm` at all (or an unrecognised value, treated the
+  // same way). The absence resolves to a PERIOD-CONDITIONAL default in
+  // App.tsx's render (Distribution for a single shift/day, Over time for a
+  // longer span), which needs the plant-clock-resolved Period this parser
+  // does not have. Once a user picks a tab, `wm` is written explicitly
+  // (routeSearch below) and from then on this line reads it back verbatim —
+  // the URL always wins over the conditional default.
+  const weightModeRaw = p.get('wm');
+  const weightMode: WeightMode | null =
+    weightModeRaw === 'dist' ? 'dist' : weightModeRaw === 'time' ? 'time' : null;
   const weightChartType: SpcType = p.get('wt') === 'sack' ? 'sack' : 'cone';
 
   const sacksUnit: SackUnit = p.get('su') === 'kg' ? 'kg' : 'sacks';
@@ -260,7 +294,7 @@ export function routeSearch(r: Route): string {
   if (r.readingsStates.length > 0) p.set('rcs', r.readingsStates.join(','));
   if (r.readingsPage > 1) p.set('rp', String(r.readingsPage));
 
-  if (r.weightMode !== DEFAULT_ROUTE.weightMode) p.set('wm', r.weightMode);
+  if (r.weightMode) p.set('wm', r.weightMode);
   if (r.weightChartType !== DEFAULT_ROUTE.weightChartType) p.set('wt', r.weightChartType);
 
   if (r.sacksUnit !== DEFAULT_ROUTE.sacksUnit) p.set('su', r.sacksUnit);
@@ -491,7 +525,12 @@ function Chrome({
           {route.view === 'weight' && (
             <WeightScreen
               period={period}
-              mode={route.weightMode}
+              // UX Phase 10 (22 Sep 2026): see resolveWeightMode above — the
+              // default is period-conditional, resolved here (not in
+              // parseRoute) because it needs the plant-clock-resolved
+              // `period.days`, not just the raw URL. An explicit `wm` in the
+              // URL always wins.
+              mode={resolveWeightMode(route.weightMode, period)}
               onModeChange={(m) => go({ weightMode: m })}
               chartType={route.weightChartType}
               onChartTypeChange={(t) => go({ weightChartType: t })}

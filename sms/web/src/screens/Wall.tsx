@@ -56,6 +56,18 @@ const QUIET_AFTER_SECONDS = 20 * 60;
  */
 const BAR_MIN_RATIO = 0.045;
 
+/** The middle value of a set of station counts — see Line.tsx's own copy of
+ *  this (StationRowGrid's `median`) for why median rather than mean. Kept
+ *  as a separate local copy rather than a shared import: both are small,
+ *  pure, and screen-local, and neither screen's owner should have to touch
+ *  the other's file to change it. */
+function medianOf(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
 export function WallScreen({ onExit }: { onExit: () => void }) {
   const { line, error } = useLive();
   const plantNow = usePlantNow();
@@ -122,6 +134,13 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
   // than sitting at a tenth of a fixed ceiling. It is a picture of THIS shift,
   // not a comparison against another day's photograph of the wall.
   const rowMax = Math.max(1, ...ids.map((id) => byId.get(id)?.cones ?? 0));
+  // UX Phase 11 (22 Sep 2026): max-normalised bars alone draw the eye to
+  // absolute height, nearly identical across stations on a healthy line,
+  // rather than to deviation — the actual question a glance from the
+  // doorway needs answered. A dashed line at the median count, on the same
+  // 0..rowMax basis as every bar, is what makes "above/below typical" the
+  // thing that's readable, not just "all fourteen are tall".
+  const rowMedianRatio = Math.min(1, medianOf(ids.map((id) => byId.get(id)?.cones ?? 0)) / rowMax);
 
   const quietSeconds = (lastTs: string) =>
     Math.max(0, (new Date(anchor).getTime() - new Date(lastTs).getTime()) / 1000);
@@ -188,7 +207,14 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
             const r = cones === 0 ? 0 : Math.max(BAR_MIN_RATIO, cones / rowMax);
             return (
               <div key={id} className={flag ? 'flag' : quiet ? 'quiet' : undefined}>
-                <span className="bar" style={{ height: `calc(var(--bar-max) * ${r.toFixed(4)})` }} />
+                <span className="bar-track">
+                  <span className="bar" style={{ height: `calc(var(--bar-max) * ${r.toFixed(4)})` }} />
+                  {/* [PHASE 11 R3] Same fraction on every station's cell, so the
+                      dashed line lands at the same height across the row and
+                      reads as one reference line, not fourteen disconnected
+                      ones — see Line.tsx's StationBar for the same technique. */}
+                  <span className="bar-median" style={{ bottom: `calc(var(--bar-max) * ${rowMedianRatio.toFixed(4)})` }} />
+                </span>
                 <span className="cap">
                   <b>{cones === 0 ? '—' : fmtInt(cones)}</b>
                   <i>{names.find((n) => n.stationId === id)?.name?.trim() || id}</i>

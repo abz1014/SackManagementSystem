@@ -12,7 +12,7 @@
  * `URLSearchParams` would.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseRoute, routeSearch, type Route } from './App';
+import { parseRoute, resolveWeightMode, routeSearch, type Route } from './App';
 
 function withSearch<T>(search: string, fn: () => T): T {
   (globalThis as unknown as { window: unknown }).window = { location: { search } };
@@ -44,7 +44,7 @@ describe('parseRoute / routeSearch — defaults', () => {
       readingsListing: 'cones',
       readingsStates: [],
       readingsPage: 1,
-      weightMode: 'time',
+      weightMode: null,
       weightChartType: 'cone',
       sacksUnit: 'sacks',
       sacksPage: 1,
@@ -143,11 +143,38 @@ describe('Weight — mode and the shared station round-trip', () => {
     expect(r2).toEqual(r1);
   });
 
-  it('an unknown mode falls back to the time chart', () => {
+  it('an unknown mode is treated the same as no explicit choice — null, resolved period-conditionally in App.tsx, not hardcoded here', () => {
     const r = withSearch('?s=weight&wm=bogus', () => parseRoute());
-    expect(r.weightMode).toBe('time');
+    expect(r.weightMode).toBeNull();
   });
 
+  it('an explicit ?wm=time round-trips (proves the URL always wins over the period-conditional default)', () => {
+    const r1 = withSearch('?s=weight&wm=time', () => parseRoute());
+    expect(r1.weightMode).toBe('time');
+    const r2 = withSearch(routeSearch(r1), () => parseRoute());
+    expect(r2).toEqual(r1);
+  });
+});
+
+describe('resolveWeightMode — the period-conditional default (UX Phase 10, 22 Sep 2026)', () => {
+  it('defaults to Distribution on a single-shift or single-day period', () => {
+    expect(resolveWeightMode(null, { days: 1 })).toBe('dist');
+  });
+
+  it('defaults to Over time on a period spanning more than one day', () => {
+    expect(resolveWeightMode(null, { days: 2 })).toBe('time');
+    expect(resolveWeightMode(null, { days: 30 })).toBe('time');
+  });
+
+  it('an explicit choice always wins, even when it contradicts what the period would default to', () => {
+    // A single-day period would default to 'dist', but the user picked 'time'.
+    expect(resolveWeightMode('time', { days: 1 })).toBe('time');
+    // A multi-day period would default to 'time', but the user picked 'dist'.
+    expect(resolveWeightMode('dist', { days: 14 })).toBe('dist');
+  });
+});
+
+describe('Weight — chart type round-trip', () => {
   // UX Phase 5 Brief 3 unit U6 (16 Sep 2026): the chart's cone/sack toggle,
   // following the exact `wm` pattern above.
   it('?wt=sack parses to the sack chart type and round-trips through routeSearch', () => {
@@ -217,7 +244,7 @@ describe('no-regression pin — an old link with only the pre-Phase-2b keys stil
     expect(r.reportShift).toBeNull();
     expect(r.station).toBeNull();
     expect(r.product).toBeNull();
-    expect(r.weightMode).toBe('time');
+    expect(r.weightMode).toBeNull();
     expect(r.weightChartType).toBe('cone');
   });
 

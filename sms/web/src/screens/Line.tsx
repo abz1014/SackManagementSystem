@@ -719,6 +719,60 @@ function stationsNote(
   return body ? `${prefix} · ${body}` : prefix;
 }
 
+/**
+ * The middle value of a set of station counts — "typical" for this row, this
+ * period. Median rather than mean so one very heavy or very quiet station
+ * cannot itself drag the reference line toward its own count.
+ */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+/**
+ * The bar + median line for one station (Roadmap UX Phase 11, 22 Sep 2026).
+ * Unfilled (stroke only), never a solid `background`: [SPEC 11] and
+ * [PHASE 9 PRINT P3] (app.css) already established that a CSS `background`
+ * fill is dropped under "print background graphics off" — the verdict mark
+ * and the Rejects Pareto bar both had to be redrawn around exactly that —
+ * while a border/stroke survives it regardless of that setting. Using an
+ * SVG stroke here means this bar needs no print-hide rule at all, unlike the
+ * Wall's own `.w-st .bar` (app.css, `@media print`), which is hidden because
+ * its filled version "would print as empty boxes". It also adds no second
+ * solid ink fill — the app's one, the verdict mark, stays the only one.
+ *
+ * `medianPct` is drawn on every cell at the SAME fraction (the row's shared
+ * median, on the row's shared 0..max basis), so fourteen short dashed
+ * segments land at the same pixel row across the strip and read as one
+ * reference line — no separate overlay element needed.
+ */
+function StationBar({ pct, medianPct }: { pct: number | null; medianPct: number | null }) {
+  return (
+    <span className="st-bar" aria-hidden="true">
+      {(pct != null || medianPct != null) && (
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          {medianPct != null && (
+            <line
+              x1={0} y1={100 - medianPct} x2={100} y2={100 - medianPct}
+              stroke="var(--muted)" strokeWidth={1.5} strokeDasharray="3 3"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+          {pct != null && pct > 0 && (
+            <rect
+              x={20} width={60} y={100 - pct} height={pct}
+              fill="none" stroke="var(--graphite)" strokeWidth={4}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+      )}
+    </span>
+  );
+}
+
 function StationRowGrid({
   line,
   stations,
@@ -745,6 +799,14 @@ function StationRowGrid({
   const rejectById = new Map((counts ?? []).map((r) => [Number(r.group), r.rejectedCones]));
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
 
+  // The bar row's shared scale: every bar and the median line are read
+  // against the SAME 0..max basis, or none of them draws at all while
+  // counts is still null -- a bar against a loading total would be a number
+  // invented rather than measured.
+  const countValues = counts == null ? null : ids.map((id) => countById.get(id) ?? 0);
+  const maxCones = countValues ? Math.max(1, ...countValues) : 0;
+  const medianPct = countValues ? Math.min(100, (median(countValues) / maxCones) * 100) : null;
+
   return (
     <div className="stations" style={{ ['--st-count' as string]: String(ids.length) }}>
       {ids.map((id) => {
@@ -755,6 +817,11 @@ function StationRowGrid({
         // Quiet always wins (OVERVIEW-SPEC.md §3.3): a machine that stopped
         // is the bigger fact than one that rejected a few cones.
         const tag = quiet ? W.quiet : rejected > 0 ? W.stationRejected(rejected) : ' ';
+        // A non-zero count always draws a visible sliver (a 6% floor), so a
+        // low-but-nonzero station is not indistinguishable from a true zero
+        // -- the same "zero is the only genuine gap" rule the Wall board
+        // states outright (Wall.tsx's BAR_MIN_RATIO).
+        const barPct = cones == null ? null : cones <= 0 ? 0 : Math.max(6, (cones / maxCones) * 100);
         return (
           <button
             key={id}
@@ -763,6 +830,7 @@ function StationRowGrid({
             onClick={() => onOpen(id)}
             title={stationLabel(nameOf.get(id), id)}
           >
+            <StationBar pct={barPct} medianPct={medianPct} />
             {/* The number alone unless the station has a plant name: the block
                 is already headed "Stations", so repeating the word fourteen
                 times is noise that also overflowed every box past nine. */}
