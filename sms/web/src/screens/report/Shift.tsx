@@ -3,7 +3,7 @@ import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
 import type { ShiftReportData, ShiftSection as ShiftSectionData } from '../../api';
-import { Fig, LineTable } from './shared';
+import { Fig, LineTable, DayBars } from './shared';
 
 export function ShiftSection({ d }: { d: ShiftReportData }) {
   const any = d.shifts.some((s) => s.totals.cones > 0);
@@ -45,6 +45,9 @@ function OneShift({ s, first }: { s: ShiftSectionData; first: boolean }) {
         <Fig v={fmtInt(t.sacks)} u={W.fig.sacks} n={t.conesPerSack != null ? `${t.conesPerSack} ${W.report.perSack}` : null} />
         <Fig v={fmtInt(Math.round(t.sackWeightKg))} u={W.fig.kg} n={t.avgSackKg != null ? `${fmtKg(t.avgSackKg)} ${W.report.averageSack}` : null} />
         <Fig v={fmtInt(t.rejectedCones)} u={W.reports.rejectedAtInspection.toLowerCase()} n={t.rejectRatePct != null ? W.reports.ofInspected(fmtPct1(t.rejectRatePct)) : null} />
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <DayBars rows={s.byDay} label={W.report.conesPerDayFor(name)} />
       </div>
       <div className="tw" style={{ marginTop: 18 }}>
         <LineTable rows={s.byDay} head={W.report.colDay} />
