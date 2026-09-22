@@ -16,7 +16,10 @@
 import { useState } from 'react';
 import { W } from '../../lib/words';
 import { Empty } from '../../ui/bits';
-import { Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine } from '../../ui/chart';
+import {
+  Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine,
+  linePath, fittingTicks, tickIndices,
+} from '../../ui/chart';
 import { fmtDayLong, fmtInt } from '../../lib/fmt';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -402,6 +405,202 @@ export function DeviationBars({
             </text>
           ) : null,
         )}
+      </svg>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------- reject trend */
+
+/**
+ * The one series shape both the Rejects screen and the Reject report chart
+ * need: a bucket's own rate and its own control limits (a p-chart for
+ * varying sample size gives every bucket its own band — see rejectSpc.ts's
+ * file header). `rate`/`ucl`/`lcl` are FRACTIONS (0..1, matching
+ * `RejectBucket` from the API and `sms.reject_event`'s own SPC service), not
+ * percentages — the component multiplies by 100 once, so a caller holding a
+ * percentage already (the report's `RejectTrendPoint`) divides by 100 first
+ * rather than the component guessing which unit it was handed.
+ */
+export interface TrendBucket {
+  bucketTs: string;
+  rate: number | null;
+  ucl: number | null;
+  lcl: number | null;
+  outOfControl: boolean;
+  produced: number;
+  rejects: number;
+}
+
+/**
+ * Extracted from `Rejects.tsx`'s own `TrendChart` (22 Sep 2026) so the Reject
+ * report can draw the same p-chart instead of printing 40+ rows of digits.
+ * Unchanged in shape and behaviour from the screen's version: one line per
+ * series, a filled band over runs of buckets that have a VALID limit (a
+ * bucket too thin for one — rejectSpc.ts's `MIN_EXPECTED_REJECTS_FOR_VALID_LIMITS`
+ * — breaks the band rather than being bridged by a made-up value), and an
+ * accent mark on every out-of-control point. `weight` is optional: the
+ * report's own trend has no quality/weight split (it is queried with
+ * `rejectType: 'all'`, roadmap Phase 8), so it passes `quality` alone and the
+ * chart draws one line, labelled by `singleName`.
+ *
+ * This band is NOT the X-bar band suppressed elsewhere in this app (commit
+ * 0877396, referenced in `RankBars`/`DeviationBars` above): that band used a
+ * single pooled limit for subgroups of different size, which is the wrong
+ * distribution once n varies. This p-chart gives each bucket its own limit
+ * from its own n (`UCL_i = p̄ + 3·√(p̄(1−p̄)/n_i)`), which is the textbook
+ * correct treatment for varying-n proportion data — a genuinely different,
+ * sounder thing, not the same defect under a new name.
+ */
+export function RejectTrendChart({
+  quality,
+  weight,
+  singleName,
+  periodFrom,
+  periodTo,
+  labelFmt = fmtDayShort,
+  ariaLabel = 'Reject rate over time',
+}: {
+  quality: TrendBucket[];
+  /** Null/omitted when the caller has no quality/weight split — one series is drawn. */
+  weight?: TrendBucket[] | null;
+  /** Label for the single series when `weight` is absent; ignored otherwise. */
+  singleName?: string | null;
+  /** The selected period, shaded over the trailing window — omit to shade nothing. */
+  periodFrom?: string;
+  periodTo?: string;
+  labelFmt?: (ts: string) => string;
+  ariaLabel?: string;
+}) {
+  const [box, width] = useChartWidth();
+  const [hover, setHover] = useState<number | null>(null);
+  const H = 250;
+  const L = 44;
+  const R = 130;
+  const T = 18;
+  const B = 30;
+
+  const days = quality;
+  if (days.length === 0) return <Empty message={W.nothingHere} />;
+
+  const wByTs = new Map((weight ?? []).map((b) => [b.bucketTs, b]));
+  const pct = (r: number | null) => (r == null ? null : r * 100);
+  const series = days.map((b) => {
+    const wb = wByTs.get(b.bucketTs) ?? null;
+    return {
+      ts: b.bucketTs,
+      q: pct(b.rate) ?? 0,
+      w: pct(wb?.rate ?? null) ?? 0,
+      qUcl: pct(b.ucl),
+      qLcl: pct(b.lcl),
+      wUcl: pct(wb?.ucl ?? null),
+      qOut: b.outOfControl,
+      wOut: wb?.outOfControl ?? false,
+      produced: b.produced,
+      qn: b.rejects,
+      wn: wb?.rejects ?? 0,
+    };
+  });
+  // The y-range covers the band too, or a ceiling above every point would
+  // be clipped off the top of the plot.
+  const max = Math.max(...series.map((s) => Math.max(s.q, s.w, s.qUcl ?? 0, s.wUcl ?? 0)), 1);
+  const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
+  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
+
+  const inPeriod = (ts: string) => periodFrom != null && periodTo != null && ts.slice(0, 10) >= periodFrom && ts.slice(0, 10) <= periodTo;
+  const firstIn = series.findIndex((s) => inPeriod(s.ts));
+  const lastIn = series.map((s) => inPeriod(s.ts)).lastIndexOf(true);
+
+  // The band: UCL over LCL, per bucket (a p-chart for varying sample size
+  // gives every day its own limits). Drawn only across runs of days that
+  // HAVE limits — a day too thin for a valid limit (rejectSpc.ts) breaks the
+  // band rather than being bridged by a made-up value.
+  const bandRuns: number[][] = [];
+  for (let i = 0; i < series.length; i++) {
+    if (series[i]!.qUcl == null) continue;
+    const run = bandRuns[bandRuns.length - 1];
+    if (run && run[run.length - 1] === i - 1) run.push(i);
+    else bandRuns.push([i]);
+  }
+  const bandPath = (run: number[]) => {
+    const upper = run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) }));
+    const lower = [...run].reverse().map((i) => ({ x: x(i), y: y(series[i]!.qLcl ?? 0) }));
+    return `${linePath(upper)} L ${lower.map((p) => `${p.x} ${p.y}`).join(' L ')} Z`;
+  };
+  const wCeiling = series.map((s, i) => (s.wUcl == null ? null : { x: x(i), y: y(s.wUcl) }));
+
+  const grid = [1, 2, 3, 4].filter((v) => v < max);
+  const h = hover != null ? series[hover] : null;
+  // How many day labels actually FIT. Four were hardcoded, which collided the
+  // moment this chart moved into a half-width column: "Wed 26 Aug" printed on
+  // top of "Sat 29 Aug".
+  const ticks = tickIndices(series.length, fittingTicks(width - L - R, 11, 13, series.length, 4));
+  const qName = singleName ?? W.rejects.quality;
+
+  return (
+    <div ref={box}>
+      <Readout
+        hovered={
+          h
+            ? weight
+              ? `${labelFmt(h.ts)} · ${W.rejects.quality} ${h.q.toFixed(1)}% · ${W.rejects.weightKind} ${h.w.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+              : `${labelFmt(h.ts)} · ${qName} ${h.q.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+            : null
+        }
+        resting={periodFrom != null ? `${series.length} days · the shaded band is the selected period` : `${series.length} days`}
+      />
+      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}
+           onMouseLeave={() => setHover(null)}>
+        {firstIn >= 0 && (
+          <rect x={x(firstIn) - 4} y={T} width={Math.max(8, x(lastIn) - x(firstIn) + 8)} height={H - T - B} fill="var(--paper-2)" />
+        )}
+        {grid.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
+            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{v}%</text>
+          </g>
+        ))}
+        {/* The usual range for the first series: filled, with its ceiling ruled. */}
+        {bandRuns.map((run) => (
+          <g key={run[0]}>
+            <path d={bandPath(run)} fill="var(--paper-3)" opacity={0.9} />
+            <path d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) })))} fill="none" stroke="var(--rule-2)" strokeWidth={1} />
+          </g>
+        ))}
+        {/* The weight series' ceiling, dashed like its line. */}
+        {weight && wCeiling.some((p) => p != null) && (
+          <path
+            d={linePath(wCeiling.filter((p): p is { x: number; y: number } => p != null))}
+            fill="none" stroke="var(--grid)" strokeWidth={1} strokeDasharray="2 3"
+          />
+        )}
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
+        <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.q) })))} fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round" />
+        {weight && (
+          <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.w) })))} fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round" />
+        )}
+        {/* Out-of-control days, in the mark Weight's control chart uses. */}
+        {series.map((s, i) => (s.qOut ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
+        {weight && series.map((s, i) => (s.wOut ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
+        {/* Labelled on the mark, so the chart needs no legend. */}
+        <text x={width - R + 10} y={y(series[series.length - 1]!.q) + 4} fontSize="var(--fs-small)" fill="var(--ink)">
+          {qName} {series[series.length - 1]!.q.toFixed(1)}%
+        </text>
+        {weight && (
+          <text x={width - R + 10} y={y(series[series.length - 1]!.w) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
+            {W.rejects.weightKind} {series[series.length - 1]!.w.toFixed(1)}%
+          </text>
+        )}
+        {series.map((_, i) => (
+          <rect key={i} className="hit" x={x(i) - (width - L - R) / Math.max(1, series.length) / 2} y={T}
+                width={(width - L - R) / Math.max(1, series.length)} height={H - T - B}
+                onMouseEnter={() => setHover(i)} />
+        ))}
+        {ticks.map((i) => (
+          <text key={`t${i}`} x={x(i)} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, series.length)}>
+            {labelFmt(series[i]!.ts)}
+          </text>
+        ))}
       </svg>
     </div>
   );

@@ -3,7 +3,7 @@ import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { RejectReason, RejectReportData } from '../../api';
-import { fmtDayShort, fmtPct } from './shared';
+import { fmtDayShort, fmtPct, RejectTrendChart, type TrendBucket } from './shared';
 
 /**
  * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.5
@@ -65,32 +65,58 @@ export function RejectSection({ d, onOpenCode }: { d: RejectReportData; onOpenCo
         {d.trend.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : (
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>{W.reports.colDay}</th>
-                  <th className="n">{W.reports.colCones}</th>
-                  <th className="n">{W.reports.rejectedAtInspection}</th>
-                  <th className="n">{W.reports.colRate}</th>
-                  <th className="n">{W.reports.colBand}</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.trend.map((t) => (
-                  <tr key={t.day} className={t.outOfControl ? 'hit' : ''}>
-                    <td>{fmtDayShort(t.day)}</td>
-                    <td className="n">{fmtInt(t.produced)}</td>
-                    <td className="n">{fmtInt(t.rejects)}</td>
-                    <td className="n">{fmtPct(t.ratePct, 2)}</td>
-                    <td className="n">{t.lclPct != null && t.uclPct != null ? `${fmtPct(t.lclPct, 2)} – ${fmtPct(t.uclPct, 2)}` : '—'}</td>
-                    <td className="mut sm">{t.outOfControl ? W.reports.outOfControl : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <RejectTrendChart
+              quality={d.trend.map((t): TrendBucket => ({
+                bucketTs: t.day,
+                rate: t.ratePct == null ? null : t.ratePct / 100,
+                ucl: t.uclPct == null ? null : t.uclPct / 100,
+                lcl: t.lclPct == null ? null : t.lclPct / 100,
+                outOfControl: t.outOfControl,
+                produced: t.produced,
+                rejects: t.rejects,
+              }))}
+              singleName={W.nav.rejects}
+              ariaLabel={W.reports.trend}
+              labelFmt={fmtDayShort}
+            />
+            {/*
+             * The 40+ day table this report used to print in full is now the
+             * chart above plus ONLY the days the chart marks out-of-control —
+             * the days worth a second look on paper, not a digit-for-digit
+             * transcript of every point the chart already draws.
+             */}
+            {d.trend.some((t) => t.outOfControl) ? (
+              <div className="tw" style={{ marginTop: 18 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{W.reports.colDay}</th>
+                      <th className="n">{W.reports.colCones}</th>
+                      <th className="n">{W.reports.rejectedAtInspection}</th>
+                      <th className="n">{W.reports.colRate}</th>
+                      <th className="n">{W.reports.colBand}</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.trend.filter((t) => t.outOfControl).map((t) => (
+                      <tr key={t.day} className="hit">
+                        <td>{fmtDayShort(t.day)}</td>
+                        <td className="n">{fmtInt(t.produced)}</td>
+                        <td className="n">{fmtInt(t.rejects)}</td>
+                        <td className="n">{fmtPct(t.ratePct, 2)}</td>
+                        <td className="n">{t.lclPct != null && t.uclPct != null ? `${fmtPct(t.lclPct, 2)} – ${fmtPct(t.uclPct, 2)}` : '—'}</td>
+                        <td className="mut sm">{W.reports.outOfControl}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mut sm" style={{ marginTop: 10 }}>{W.nothingHere}</p>
+            )}
+          </>
         )}
       </Block>
 

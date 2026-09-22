@@ -45,9 +45,9 @@ import { distinctProductLabels, productLabel } from '../lib/productLabel';
 import { W } from '../lib/words';
 import { trailingWindow, daysWithReadings, type Period } from '../lib/period';
 import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, Toolbar, rowKeys } from '../ui/bits';
-import { Readout, useChartWidth, edgeAnchor, linePath, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
 import { vitalFew } from '../lib/pareto';
+import { RejectTrendChart } from './report/shared';
 import {
   getRange, getStations, getProducts, stationLabel, setRejectLabel,
   getRejectsFiltered, getRejectSpcFiltered, getRejectsByDayCode, rejectCodeParam,
@@ -350,12 +350,13 @@ export function RejectsScreen({
             ) : (quality.loading && !quality.data) || (!code && weight.loading && !weight.data) || codedPending ? (
               <SkelChart />
             ) : (
-              <TrendChart
-                quality={codedTrend ?? quality.data?.data ?? null}
-                weight={codedTrend ? null : weight.data?.data ?? null}
+              <RejectTrendChart
+                quality={(codedTrend ?? quality.data?.data)?.buckets ?? []}
+                weight={codedTrend ? null : (weight.data?.data?.buckets ?? null)}
                 singleName={codedTrend && activeReason ? reasonName(activeReason) : null}
                 periodFrom={period.from}
                 periodTo={period.to}
+                labelFmt={dayLabel}
               />
             )}
           </div>
@@ -488,156 +489,6 @@ function ProductChip({ products, value, onChange }: { products: ProductOption[];
         ))}
       </select>
     </label>
-  );
-}
-
-/* ------------------------------------------------------------ trend chart */
-
-function TrendChart({
-  quality,
-  weight,
-  singleName,
-  periodFrom,
-  periodTo,
-}: {
-  quality: RejectSpcData | null;
-  /** Null when one reason is followed: the chart then draws one series. */
-  weight: RejectSpcData | null;
-  singleName: string | null;
-  periodFrom: string;
-  periodTo: string;
-}) {
-  const [box, width] = useChartWidth();
-  const [hover, setHover] = useState<number | null>(null);
-  const H = 250;
-  const L = 44;
-  const R = 130;
-  const T = 18;
-  const B = 30;
-
-  const days = quality?.buckets ?? [];
-  if (days.length === 0) return <Empty message={W.rejects.none} />;
-
-  const wByTs = new Map((weight?.buckets ?? []).map((b) => [b.bucketTs, b]));
-  const pct = (r: number | null) => (r == null ? null : r * 100);
-  const series = days.map((b) => {
-    const wb = wByTs.get(b.bucketTs) ?? null;
-    return {
-      ts: b.bucketTs,
-      q: pct(b.rate) ?? 0,
-      w: pct(wb?.rate ?? null) ?? 0,
-      qUcl: pct(b.ucl),
-      qLcl: pct(b.lcl),
-      wUcl: pct(wb?.ucl ?? null),
-      qOut: b.outOfControl,
-      wOut: wb?.outOfControl ?? false,
-      produced: b.produced,
-      qn: b.rejects,
-      wn: wb?.rejects ?? 0,
-    };
-  });
-  // The y-range covers the band too, or a ceiling above every point would
-  // be clipped off the top of the plot.
-  const max = Math.max(...series.map((s) => Math.max(s.q, s.w, s.qUcl ?? 0, s.wUcl ?? 0)), 1);
-  const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
-  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
-
-  const inPeriod = (ts: string) => ts.slice(0, 10) >= periodFrom && ts.slice(0, 10) <= periodTo;
-  const firstIn = series.findIndex((s) => inPeriod(s.ts));
-  const lastIn = series.map((s) => inPeriod(s.ts)).lastIndexOf(true);
-
-  // The band: UCL over LCL, per bucket (a p-chart for varying sample size
-  // gives every day its own limits). Drawn only across runs of days that
-  // HAVE limits — a day too thin for a valid limit (rejectSpc.ts) breaks the
-  // band rather than being bridged by a made-up value.
-  const bandRuns: number[][] = [];
-  for (let i = 0; i < series.length; i++) {
-    if (series[i]!.qUcl == null) continue;
-    const run = bandRuns[bandRuns.length - 1];
-    if (run && run[run.length - 1] === i - 1) run.push(i);
-    else bandRuns.push([i]);
-  }
-  const bandPath = (run: number[]) => {
-    const upper = run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) }));
-    const lower = [...run].reverse().map((i) => ({ x: x(i), y: y(series[i]!.qLcl ?? 0) }));
-    return `${linePath(upper)} L ${lower.map((p) => `${p.x} ${p.y}`).join(' L ')} Z`;
-  };
-  const wCeiling = series.map((s, i) => (s.wUcl == null ? null : { x: x(i), y: y(s.wUcl) }));
-
-  const grid = [1, 2, 3, 4].filter((v) => v < max);
-  const h = hover != null ? series[hover] : null;
-  // How many day labels actually FIT. Four were hardcoded, which collided the
-  // moment this chart moved into a half-width column: "Wed 26 Aug" printed on
-  // top of "Sat 29 Aug".
-  const ticks = tickIndices(series.length, fittingTicks(width - L - R, 11, 13, series.length, 4));
-  const qName = singleName ?? W.rejects.quality;
-
-  return (
-    <div ref={box}>
-      <Readout
-        hovered={
-          h
-            ? weight
-              ? `${dayLabel(h.ts)} · ${W.rejects.quality} ${h.q.toFixed(1)}% · ${W.rejects.weightKind} ${h.w.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
-              : `${dayLabel(h.ts)} · ${qName} ${h.q.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
-            : null
-        }
-        resting={`${series.length} days · the shaded band is the selected period`}
-      />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label="Reject rate over time"
-           onMouseLeave={() => setHover(null)}>
-        {firstIn >= 0 && (
-          <rect x={x(firstIn) - 4} y={T} width={Math.max(8, x(lastIn) - x(firstIn) + 8)} height={H - T - B} fill="var(--paper-2)" />
-        )}
-        {grid.map((v) => (
-          <g key={v}>
-            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
-            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{v}%</text>
-          </g>
-        ))}
-        {/* The usual range for the first series: filled, with its ceiling ruled. */}
-        {bandRuns.map((run) => (
-          <g key={run[0]}>
-            <path d={bandPath(run)} fill="var(--paper-3)" opacity={0.9} />
-            <path d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) })))} fill="none" stroke="var(--rule-2)" strokeWidth={1} />
-          </g>
-        ))}
-        {/* The weight series' ceiling, dashed like its line. */}
-        {weight && wCeiling.some((p) => p != null) && (
-          <path
-            d={linePath(wCeiling.filter((p): p is { x: number; y: number } => p != null))}
-            fill="none" stroke="var(--grid)" strokeWidth={1} strokeDasharray="2 3"
-          />
-        )}
-        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
-        <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.q) })))} fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round" />
-        {weight && (
-          <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.w) })))} fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round" />
-        )}
-        {/* Out-of-control days, in the mark Weight's control chart uses. */}
-        {series.map((s, i) => (s.qOut ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
-        {weight && series.map((s, i) => (s.wOut ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
-        {/* Labelled on the mark, so the chart needs no legend. */}
-        <text x={width - R + 10} y={y(series[series.length - 1]!.q) + 4} fontSize="var(--fs-small)" fill="var(--ink)">
-          {qName} {series[series.length - 1]!.q.toFixed(1)}%
-        </text>
-        {weight && (
-          <text x={width - R + 10} y={y(series[series.length - 1]!.w) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
-            {W.rejects.weightKind} {series[series.length - 1]!.w.toFixed(1)}%
-          </text>
-        )}
-        {series.map((_, i) => (
-          <rect key={i} className="hit" x={x(i) - (width - L - R) / Math.max(1, series.length) / 2} y={T}
-                width={(width - L - R) / Math.max(1, series.length)} height={H - T - B}
-                onMouseEnter={() => setHover(i)} />
-        ))}
-        {ticks.map((i) => (
-          <text key={`t${i}`} x={x(i)} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, series.length)}>
-            {dayLabel(series[i]!.ts)}
-          </text>
-        ))}
-      </svg>
-    </div>
   );
 }
 
