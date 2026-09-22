@@ -79,6 +79,78 @@
  * assumed; see the Phase 9 report for the measurement.
  * ------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+ * UX PHASE 10 (22 Sep 2026) — six text collisions, measured live against the
+ * running app at 1280/1440/1600/1920px, none of them a new screen. Every
+ * edit below is marked [PHASE 10] in place.
+ *
+ *   Q1  .fig-val / .fig-unit   Sacks' 4th figure ("100.0% within range")
+ *                              overflowed 81px into the next figure at
+ *                              1440px: `.fig-val` is `white-space: nowrap`
+ *                              and `.fig-unit` inherited it, so a two-word
+ *                              unit could never break even onto a second
+ *                              line. `.fig-val` becomes a wrapping flex row
+ *                              (baseline-aligned, same 7px gap as before,
+ *                              now via `gap` instead of margin so it holds
+ *                              whichever side the wrap lands on); `.fig-unit`
+ *                              gets `white-space: normal` so a long unit
+ *                              drops to its own line — or wraps within
+ *                              itself — instead of running into the next
+ *                              cell. Chosen over widening the 2-up
+ *                              breakpoint or shrinking the display step:
+ *                              both would touch every `.figs` screen for a
+ *                              defect only this one row has, and the type
+ *                              scale is frozen (CLAUDE.md).
+ *   Q2  td.n, th.n              A right-aligned cell's `padding-right: 0`
+ *                              (so a trailing numeric column sits flush
+ *                              against the table's own right edge) zeroes
+ *                              the gap to whatever comes right after it too
+ *                              — and four tables put another cell there:
+ *                              Health's source-generation register (ordinal
+ *                              "1" against "IFL copy"), Product Catalogue
+ *                              (product id "1024" against "1,960 g"), the
+ *                              cone-weight report ("−10.6 g" against
+ *                              "Flagged"'s Yes/No), and the management
+ *                              summary ("−6,023 (−79.0 %)" against
+ *                              "awaiting IFL's approval"). None of these
+ *                              columns is genuinely last — the row usually
+ *                              carries a note or a status word after it.
+ *                              `:not(:last-child)` restores the normal
+ *                              12px gap on every `.n` cell that has a
+ *                              neighbour, and leaves an actually-trailing
+ *                              `.n` cell (Sacks' register, Weight's KPI
+ *                              rows, both flush to the table edge already)
+ *                              untouched.
+ *   Q3  .bars em                The Rejects Pareto's cumulative label
+ *                              ("26 · 55% · 55.3% cum.") is longer than the
+ *                              "1,204 · 55%" shape the count column's
+ *                              comment (below, [SPEC] era) was sized for,
+ *                              and in the two-column layout's 388px track
+ *                              the grid squeezes `minmax(4.5em,max-content)`
+ *                              below its own content (measured: assigned
+ *                              121px against a 155px need) rather than
+ *                              growing it — grid only guarantees a
+ *                              non-flexible track its max-content size when
+ *                              there is room; here there is not, and unlike
+ *                              a flexible `fr` track it is not the one the
+ *                              algorithm shrinks first. The 5.5em name-column
+ *                              backstop two rules below this one was never
+ *                              built to reach the count column and does not
+ *                              — it does not hold for this defect because it
+ *                              was never the mechanism protecting it. `em`
+ *                              was `white-space: nowrap`, so the overflow
+ *                              had nowhere to go but sideways, into the
+ *                              "Name it" button. Removing nowrap lets a
+ *                              count that cannot fit wrap onto a second line
+ *                              inside its own track instead of bleeding into
+ *                              the next one — the same fix shape as Q1, kept
+ *                              inside the column rather than widening it,
+ *                              because widening it would come out of the
+ *                              bar or the name column and reopen the
+ *                              zero-width defect the backstop below exists
+ *                              to prevent.
+ * ------------------------------------------------------------------------- */
+
 /* ------------------------------------------------------------------ tokens */
 
 :root {
@@ -442,13 +514,25 @@ h1 .acc, .headline .acc { color: var(--acc); }
 .figs > * { padding: 0 32px; border-left: 1px solid var(--rule); }
 .figs > *:first-child { padding-left: 0; border-left: 0; }
 .figs > *:last-child { padding-right: 0; }
+/* [PHASE 10 Q1] display:block + white-space:nowrap → a wrapping flex row.
+   The value's own text still never breaks (nowrap kept; a number has no
+   space to break at regardless), but the unit is now a separate flex item
+   that either sits beside the value on the same line (the common case,
+   unchanged) or, when it does not fit, drops to its own line as a whole
+   unit rather than running the tail of its own text into whatever sits to
+   the right of this figure. gap replaces .fig-unit's old margin-left so the
+   7px stays correct on either line the unit lands on. */
 .fig-val {
-  display: block; font-size: var(--fs-display); line-height: 1; font-weight: 600;
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 7px; row-gap: 2px;
+  font-size: var(--fs-display); line-height: 1; font-weight: 600;
   letter-spacing: -0.03em; white-space: nowrap;
 }
 .fig-unit {
   font-size: var(--fs-qual); font-weight: 500; color: var(--graphite);
-  margin-left: 7px; letter-spacing: 0;
+  letter-spacing: 0;
+  /* [PHASE 10 Q1] was inherited nowrap from .fig-val — a two-word unit
+     ("within range") could never break, on its own line or otherwise. */
+  white-space: normal;
 }
 .fig-note { display: block; color: var(--graphite); margin-top: 8px; text-wrap: pretty; }
 /* A figure that is a range or a sentence rather than a count steps down one
@@ -510,6 +594,15 @@ th {
 }
 td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th.n, td.n { text-align: right; padding-right: 0; padding-left: 18px; white-space: nowrap; }
+/* [PHASE 10 Q2] padding-right:0 above is right for a trailing numeric
+   column (flush to the table's own edge) and wrong for one that is not:
+   the next cell's own padding-left is 0 (the `td` shorthand two rules up),
+   so an `.n` column followed by anything else abutted it directly — "1"
+   against "IFL copy", "1024" against "1,960 g", "−10.6 g" against
+   "Flagged"'s Yes/No, "−6,023 (−79.0 %)" against "awaiting IFL's approval".
+   Restored only when the `.n` cell has a sibling after it, so a genuinely
+   trailing one (Sacks' register, Weight's KPI rows) keeps its flush edge. */
+th.n:not(:last-child), td.n:not(:last-child) { padding-right: 12px; }
 tr.on td, tr.hl td { background: var(--paper-3); }
 tr.click { cursor: pointer; }
 tr.click:hover td { background: var(--paper-3); }
@@ -653,7 +746,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 }
 .bars div:last-child { border-bottom: 0; }
 .bars i { display: block; height: 12px; border-radius: 2px; font-style: normal; min-width: 2px; }
-.bars em { font-style: normal; text-align: right; color: var(--graphite); white-space: nowrap; }
+/* [PHASE 10 Q3] was white-space: nowrap. The count column is
+   `minmax(4.5em, max-content)`, a non-flexible track — grid only grows it
+   to max-content when the row has room, and in the two-column layout's
+   388px track it does not (measured: 121px assigned against a 155px need
+   for "26 · 55% · 55.3% cum."), so the excess has to go somewhere. nowrap
+   sent it sideways, over the "Name it" button. Allowing the cumulative
+   label to wrap keeps the overflow inside its own track, on a second line,
+   instead of bleeding into the next column. */
+.bars em { font-style: normal; text-align: right; color: var(--graphite); }
 .bars .sm { font-size: var(--fs-small); }
 @media (max-width: 700px) {
   .bars div { grid-template-columns: 1fr minmax(6em, 9em) 5em; }
