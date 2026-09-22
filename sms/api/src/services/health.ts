@@ -18,14 +18,36 @@
  *
  * `status` folds them: `down` when the database cannot be reached at all;
  * `degraded` when the pool reported an error since the last good probe, the
- * acquisition is stale or late or halted, or the data file is past 80 % of
- * the cap; `ok` otherwise. A monitor needs only that word.
+ * acquisition is stale or late or halted, the data file is past 80 % of the
+ * cap, a standing ERROR/CRITICAL data-quality finding exists, or the newest
+ * backup is missing/stale; `ok` otherwise. A monitor needs only that word.
+ *
+ * WHY DQ FINDINGS AND BACKUP AGE ARE BOTH IN THE FOLD (21 Sep 2026 — three
+ * independent audits found the Health screen's headline claiming "Everything
+ * is healthy" a few lines above a non-zero blocking-findings count and a
+ * stale-backup warning, both already computed and already rendered on the
+ * same page). A severity a check itself marked ERROR/CRITICAL is, by the
+ * database's own CK_dq_severity classification, something that needs
+ * attention — a status called "healthy" that does not consult it is not
+ * measuring what its name claims, so it folds in unconditionally. Backup
+ * staleness is a weaker case — a host/ops fact rather than a data fact, and
+ * it risks a permanently amber status on a dev box with no backup task
+ * configured — but BACKUP_WARN_DAYS is not a guess: it is a named threshold
+ * against a real nightly schedule, already surfaced as a warning on this
+ * same screen, and leaving it out would reproduce the exact contradiction
+ * this fold exists to remove, one block down. Both fold in. If the dev-box
+ * noise proves a real problem, the fix is a per-environment override on
+ * BACKUP_WARN_DAYS or backupDir, not silence in the one word meant to
+ * summarise the page.
  *
  * REDACTION. The route is unauthenticated on purpose — a probe cannot hold a
  * session — but the database size and the acquisition details are facts
  * about the installation, so they are nulled for an anonymous caller and
  * filled in for a signed-in one. `status` is always computed from the full
- * picture: a monitor that could not see WHY still sees THAT.
+ * picture: a monitor that could not see WHY still sees THAT. The same now
+ * holds for the DQ finding count and the backup check: both are always
+ * computed so `status` stays honest for the anonymous probe, and only their
+ * detail (the backup block; the finding rows on Setup/Health) is redacted.
  *
  * BACKUP AGE is read-only from the directory the backup script writes to
  * (BACKUP_DIR), by file mtime. The API never writes there. Two days is the
@@ -241,6 +263,25 @@ export async function acquisitionHealth(pool: ConnectionPool, lineId: number): P
   };
 }
 
+/* ----------------------------------------------------- data-quality fold */
+
+/**
+ * Count of STANDING ERROR/CRITICAL findings in sms.dq_finding — the same two
+ * severities SyncHealthBlock counts as "blocking" (web/src/screens/health/
+ * SyncHealthBlock.tsx). dq_finding has no resolved/cleared flag (migration
+ * 009): every row is a standing fact until whatever wrote it stops finding
+ * the condition, so a plain COUNT is the same "blocking findings" figure the
+ * screen already shows a few lines below this fold's result. Defensive
+ * against an unmigrated database, same as acquisitionHealth: a missing table
+ * must not take the whole probe down with it.
+ */
+export async function dqBlockingFindings(pool: ConnectionPool): Promise<number> {
+  const r = await pool
+    .request()
+    .query<{ n: number }>(`SELECT COUNT(*) AS n FROM sms.dq_finding WHERE severity IN ('ERROR', 'CRITICAL')`);
+  return Number(r.recordset[0]?.n ?? 0);
+}
+
 /* --------------------------------------------------------------- backup */
 
 /** The two fs calls the backup check needs, injectable for tests. */
@@ -288,33 +329,52 @@ export function backupHealth(dir: string, fs: BackupFs = realFs, now = Date.now(
 
 /* ---------------------------------------------------------------- fold */
 
-/** Pure: the one word a monitor reads, from the three facts. */
-export function foldStatus(db: DbProbe, acq: AcquisitionFacts | null, degradedNow: boolean): HealthStatus {
+/**
+ * Pure: the one word a monitor reads, from the five facts — see the module
+ * header for why DQ findings and backup age are folded in alongside the
+ * original three (pool/size/acquisition).
+ */
+export function foldStatus(
+  db: DbProbe,
+  acq: AcquisitionFacts | null,
+  degradedNow: boolean,
+  dqBlockingCount: number,
+  backupWarning: boolean,
+): HealthStatus {
   if (!db.ok) return 'down';
   if (degradedNow) return 'degraded';
   if (db.sizeMb != null && (db.sizeMb / EXPRESS_CAP_MB) * 100 >= SIZE_WARN_PCT) return 'degraded';
   if (acq && (acq.kind === 'stale' || acq.kind === 'late' || acq.halted.length > 0)) return 'degraded';
+  if (dqBlockingCount > 0) return 'degraded';
+  if (backupWarning) return 'degraded';
   return 'ok';
 }
 
 export interface HealthDeps {
   probeDatabase: typeof probeDatabase;
   acquisitionHealth: typeof acquisitionHealth;
+  dqBlockingFindings: typeof dqBlockingFindings;
   backupHealth: (dir: string) => BackupHealth;
   now: () => number;
 }
 const realDeps: HealthDeps = {
   probeDatabase,
   acquisitionHealth,
+  dqBlockingFindings,
   backupHealth: (dir) => backupHealth(dir),
   now: Date.now,
 };
 
 /**
  * The whole report. `authenticated` governs redaction only — every fact is
- * gathered regardless so `status` is honest for the anonymous probe too.
- * Acquisition facts are gathered only when the database answered; asking a
- * dead pool four more questions would just be four more timeouts.
+ * gathered regardless so `status` is honest for the anonymous probe too,
+ * including the DQ finding count and the backup check (see the module
+ * header's REDACTION note — this used to be true of database/acquisition
+ * only; the backup check in particular used to run only for a signed-in
+ * caller, which was fine while nothing derived `status` from it). Acquisition
+ * and DQ facts are gathered only when the database answered; asking a dead
+ * pool more questions would just be more timeouts. The backup check is a
+ * local filesystem read, not a database round trip, so it always runs.
  */
 export async function getHealth(
   pool: ConnectionPool,
@@ -324,15 +384,22 @@ export async function getHealth(
   const db = await deps.probeDatabase(pool);
   if (db.ok) clearDegraded();
   let acq: AcquisitionFacts | null = null;
+  let dqBlocking = 0;
   if (db.ok) {
     try {
       acq = await deps.acquisitionHealth(pool, opts.lineId);
     } catch {
       acq = null; // a missing table on an unmigrated database: the probe still stands
     }
+    try {
+      dqBlocking = await deps.dqBlockingFindings(pool);
+    } catch {
+      dqBlocking = 0; // same reasoning: sms.dq_finding missing must not fail the probe
+    }
   }
+  const backup = deps.backupHealth(opts.backupDir);
   const reason = degradedReason();
-  const status = foldStatus(db, acq, reason != null);
+  const status = foldStatus(db, acq, reason != null, dqBlocking, backup.warning);
   const pct = db.sizeMb == null ? null : Math.round((db.sizeMb / EXPRESS_CAP_MB) * 1000) / 10;
   const a = opts.authenticated;
   return {
@@ -348,7 +415,7 @@ export async function getHealth(
     acquisition: a && acq
       ? { kind: acq.kind, ageSeconds: acq.ageSeconds, cadenceSeconds: acq.cadenceSeconds, halted: acq.halted }
       : { kind: null, ageSeconds: null, cadenceSeconds: null, halted: null },
-    backup: a ? deps.backupHealth(opts.backupDir) : null,
+    backup: a ? backup : null,
     degradedReason: a ? reason : null,
   };
 }

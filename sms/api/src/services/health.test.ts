@@ -19,31 +19,53 @@ import {
 
 const okDb = { ok: true, latencyMs: 3, sizeMb: 500 };
 const okAcq: AcquisitionFacts = { kind: 'ok', ageSeconds: 30, cadenceSeconds: 60, halted: [] };
+/** foldStatus's own positional args beyond (db, acq, degradedNow): no
+ *  blocking DQ findings, no backup warning — the "everything else is fine"
+ *  baseline every other case in this describe block starts from. */
+const clean = [0, false] as const;
 
 beforeEach(() => clearDegraded());
 
 describe('foldStatus', () => {
   it('down when the database did not answer, whatever else is true', () => {
-    expect(foldStatus({ ok: false, latencyMs: null, sizeMb: null }, okAcq, false)).toBe('down');
+    expect(foldStatus({ ok: false, latencyMs: null, sizeMb: null }, okAcq, false, ...clean)).toBe('down');
   });
   it('degraded when the pool reported an error since the last good probe', () => {
-    expect(foldStatus(okDb, okAcq, true)).toBe('degraded');
+    expect(foldStatus(okDb, okAcq, true, ...clean)).toBe('degraded');
   });
   it('degraded at 80 % of the Express cap, ok just under', () => {
-    expect(foldStatus({ ...okDb, sizeMb: 8192 }, okAcq, false)).toBe('degraded');
-    expect(foldStatus({ ...okDb, sizeMb: 8100 }, okAcq, false)).toBe('ok');
+    expect(foldStatus({ ...okDb, sizeMb: 8192 }, okAcq, false, ...clean)).toBe('degraded');
+    expect(foldStatus({ ...okDb, sizeMb: 8100 }, okAcq, false, ...clean)).toBe('ok');
   });
   it('degraded when the acquisition is stale, late or has a halted table', () => {
-    expect(foldStatus(okDb, { ...okAcq, kind: 'stale' }, false)).toBe('degraded');
-    expect(foldStatus(okDb, { ...okAcq, kind: 'late' }, false)).toBe('degraded');
-    expect(foldStatus(okDb, { ...okAcq, halted: ['cone_raw'] }, false)).toBe('degraded');
+    expect(foldStatus(okDb, { ...okAcq, kind: 'stale' }, false, ...clean)).toBe('degraded');
+    expect(foldStatus(okDb, { ...okAcq, kind: 'late' }, false, ...clean)).toBe('degraded');
+    expect(foldStatus(okDb, { ...okAcq, halted: ['cone_raw'] }, false, ...clean)).toBe('degraded');
   });
   it('no_data is not a degradation — an empty database is not a broken one', () => {
-    expect(foldStatus(okDb, { ...okAcq, kind: 'no_data' }, false)).toBe('ok');
+    expect(foldStatus(okDb, { ...okAcq, kind: 'no_data' }, false, ...clean)).toBe('ok');
   });
   it('ok otherwise, including when acquisition could not be read', () => {
-    expect(foldStatus(okDb, okAcq, false)).toBe('ok');
-    expect(foldStatus(okDb, null, false)).toBe('ok');
+    expect(foldStatus(okDb, okAcq, false, ...clean)).toBe('ok');
+    expect(foldStatus(okDb, null, false, ...clean)).toBe('ok');
+  });
+
+  /* THE DEFECT (21 Sep 2026, three independent audits): ?s=health printed
+     "Everything is healthy." beside "Blocking findings: 2" and "Last backup
+     8 days ago" in the same render, because foldStatus never read either
+     fact. This is the regression case — it fails against the old two-arg
+     foldStatus (TypeScript would refuse the call outright; the pre-fix
+     *behaviour* it stands in for is foldStatus(okDb, okAcq, false) with
+     these same blocking/backup facts silently discarded, which returned
+     'ok') and passes now that both facts are folded in. */
+  it('degraded when a standing ERROR/CRITICAL data-quality finding exists, even with nothing else wrong', () => {
+    expect(foldStatus(okDb, okAcq, false, 2, false)).toBe('degraded');
+  });
+  it('ok when there are zero blocking findings and nothing else is wrong — proves the healthy path still exists', () => {
+    expect(foldStatus(okDb, okAcq, false, 0, false)).toBe('ok');
+  });
+  it('degraded when the backup is stale, even with nothing else wrong', () => {
+    expect(foldStatus(okDb, okAcq, false, 0, true)).toBe('degraded');
   });
 });
 
@@ -96,6 +118,7 @@ describe('getHealth — redaction and the degraded marker', () => {
   const deps = (over: Partial<Parameters<typeof getHealth>[2]> = {}) => ({
     probeDatabase: async () => okDb,
     acquisitionHealth: async () => okAcq,
+    dqBlockingFindings: async () => 0,
     backupHealth: (dir: string) => ({ dir, newestFile: 'sms.bak', newestAtUtc: null, ageDays: 0.5, warning: false }),
     now: () => Date.now(),
     ...over,
@@ -108,6 +131,47 @@ describe('getHealth — redaction and the degraded marker', () => {
     expect(h.database.pctOfCap).toBeNull();
     expect(h.acquisition).toEqual({ kind: null, ageSeconds: null, cadenceSeconds: null, halted: null });
     expect(h.backup).toBeNull();
+  });
+
+  /* THE DEFECT, at the getHealth level rather than the pure fold: the exact
+     shape the live screen hit — a fully-reachable database, healthy
+     acquisition, but 2 standing blocking findings and an 8-day-old backup.
+     Before this fix neither fact reached `status`, so this returned 'ok'
+     ("Everything is healthy.") beside the two contradicting facts the
+     screen renders a few lines below. */
+  it('a live-shaped case: healthy database and acquisition, but blocking DQ findings and a stale backup — status must not be ok', async () => {
+    const h = await getHealth(
+      pool,
+      { lineId: 1, backupDir: 'C:\\b', authenticated: true },
+      deps({
+        dqBlockingFindings: async () => 2,
+        backupHealth: (dir) => ({ dir, newestFile: 'sms-old.bak', newestAtUtc: null, ageDays: 8, warning: true }),
+      }),
+    );
+    expect(h.status).toBe('degraded');
+    expect(h.status).not.toBe('ok');
+  });
+
+  /* The other half of the same case, proven rather than assumed: with the
+     blocking-findings count read back to zero and the backup fresh, the
+     healthy status still appears — folding the new facts in did not just
+     make everything permanently degraded. */
+  it('the same shape with zero blocking findings and a fresh backup: status is ok', async () => {
+    const h = await getHealth(
+      pool,
+      { lineId: 1, backupDir: 'C:\\b', authenticated: true },
+      deps({ dqBlockingFindings: async () => 0, backupHealth: (dir) => ({ dir, newestFile: 'sms.bak', newestAtUtc: null, ageDays: 0.2, warning: false }) }),
+    );
+    expect(h.status).toBe('ok');
+  });
+
+  it('the DQ probe throwing (unmigrated database) does not fail the whole probe', async () => {
+    const h = await getHealth(
+      pool,
+      { lineId: 1, backupDir: 'C:\\b', authenticated: true },
+      deps({ dqBlockingFindings: async () => { throw new Error('Invalid object name sms.dq_finding'); } }),
+    );
+    expect(h.status).toBe('ok');
   });
 
   it('signed in: everything, and pctOfCap to one decimal', async () => {
