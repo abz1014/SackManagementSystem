@@ -27,12 +27,13 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
 2. **Get from IFL:** a dedicated **read-only** SQL login (not `sa`, not the vendor app account) with **`db_datareader` on BOTH `DATA_TP1U2` and `PDAS_TP1U2`**, and the server\instance + port. Enable TCP on the plant SQL Server if needed.
    **This is a hard requirement, not a preference.** IFL's own engineering login (`ibrahim`, seen in the Sep 2026 sample) has EXECUTE on PDAS's stored procedures and **no table read at all** on PDAS. Handed that login, the product mirror (`seedProducts`) fails on cutover day and every screen loses its targets and limits. Ask for `db_datareader` on PDAS by name, and test it with `SELECT TOP 1 * FROM PDAS_TP1U2.dbo.Materials` before the day. **The exact SQL to hand IFL's DBA is `db/bootstrap/10_ifl_readonly_login.template.sql`**, with the four pre-day test queries at the bottom. Note that a login without table read on PDAS stops **all** ingestion, not only the product mirror: the product seed runs before the cone/sack/reject reader on every pass.
    *(Separately and later — only if IFL confirms in writing that SMS may write product data: an `sms_pdas_writer` login for the Add / Retire / Change-limits path, see `PDAS_WRITE_*` in `.env.example`. It is a different login, never the read-only one.)*
-3. **Create the app DB + its login** — run `db/bootstrap/00_create_app_database.sql` once as a sysadmin:
-   `sqlcmd -S <server\instance> -E -i db\bootstrap\00_create_app_database.sql -v AppPassword="<strong unique password>"`
-   It creates `[sms]` (recovery model SIMPLE — see the file header for why), the `sms_app` login, and grants it `db_datareader`, `db_datawriter` and `db_ddladmin` — the last because `npm run db:migrate` runs as `sms_app`. Nothing more; backups use a separate login (below). Idempotent.
+3. **Create the app DB + its two logins** — run `db/bootstrap/00_create_app_database.sql` once as a sysadmin:
+   `sqlcmd -S <server\instance> -E -i db\bootstrap\00_create_app_database.sql -v AppPassword="<strong unique password>" -v MigratePassword="<a DIFFERENT strong unique password>"`
+   It creates `[sms]` (recovery model SIMPLE — see the file header for why), the `sms_app` login (`db_datareader` + `db_datawriter` — the runtime login every unattended process uses), and a separate `sms_migrate` login (adds `db_ddladmin`, used only for `db:migrate`, run by hand). `sms_app` no longer gets `db_ddladmin` — that split is the fix for defect R-13 (an unattended login able to alter/drop the append-only trigger on `sms.audit_log`); see the file's own header and *Credentials and secrets* below. Neither login is `db_owner`; backups use a separate login (below). Idempotent — safe, and the intended remediation, to re-run against a database bootstrapped before this fix.
 4. **Configure** `.env` from `.env.example`:
    - `IFL_DB_*` → the plant server + the read-only login. **This is the only dev→live change.**
    - `APP_DB_*` → the local app DB + `sms_app` (a **strong, unique** password — never the dev password).
+   - `MIGRATE_DB_USER`/`MIGRATE_DB_PASSWORD` → NOT set in the persistent `.env` a service reads; set them only in the shell that runs `npm run db:migrate` (step 6), then leave them unset.
    - No `SESSION_SECRET` to set — sessions are server-side random UUIDs, not signed cookies (see `.env.example`).
    - `WEB_DIST=./web/dist`.
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
@@ -189,7 +190,7 @@ the font exists to prevent.
    **A note on what actually lands on the plant host.** `npm ci` above is run with no `--omit=dev`, and it has to be — the build needs `typescript` and `vite`, both devDependencies. So every devDependency already installs on the plant PC today, `vitest` included; jsdom and `@testing-library/react`/`@testing-library/dom` (added UX Phase 8 Brief A, 21 Sep 2026, for component tests) simply join that same set, on disk and wherever this install reaches the npm registry from. None of the three is imported by anything under `web/src` that ships in the built bundle (only by `*.test.tsx` files, which `vite build` never touches) — the sha256 check `verify:release`/this brief's own acceptance run performs on `web/dist` is the evidence, not an assumption.
 
 
-6. **Migrate the app DB:** `npm run db:migrate` (from `sms/`). Not `sqlcmd` over the files by hand: the migration files do not write `sms.schema_migration` themselves — the runner does — so a hand-applied set leaves an empty history, and the next `db:migrate` re-applies everything and fails inside 026 (the hazard described below). If that has already happened, `--mark-applied-through` is the way back.
+6. **Migrate the app DB:** set `MIGRATE_DB_USER=sms_migrate` and `MIGRATE_DB_PASSWORD=<its password>` for this one command (in the shell, not in `.env`), then `npm run db:migrate` (from `sms/`). The runner prefers `MIGRATE_DB_USER`/`MIGRATE_DB_PASSWORD` and falls back to `APP_DB_USER`/`APP_DB_PASSWORD` only if the former are unset — on a database bootstrapped after the R-13 fix, `sms_app` no longer has `db_ddladmin`, so that fallback will fail on any file with DDL (which is nearly all of them). Not `sqlcmd` over the files by hand: the migration files do not write `sms.schema_migration` themselves — the runner does — so a hand-applied set leaves an empty history, and the next `db:migrate` re-applies everything and fails inside 026 (the hazard described below). If that has already happened, `--mark-applied-through` is the way back.
    - **Stop the sync-worker service first when migrating an app DB that already holds data.**
      Some migrations build indexes on `cone_event`/`reject_event`, which take a
      schema-modification lock; against a service inserting every 60 s that means
@@ -224,7 +225,16 @@ the font exists to prevent.
      `sms.source_epoch` empty, 27 history rows. `--mark-applied-through=010`
      was then exercised on the same database with 001–010 forgotten from the
      history: 10 marked without execution, 17 skipped, 27 rows restored. The
-     throwaway database was dropped.
+     throwaway database was dropped. **This predates the R-13 fix (22 Sep
+     2026):** at that date `sms_app` still held `db_ddladmin`, which is
+     exactly why that run could apply DDL as `sms_app`. Repeated today
+     against a bootstrap run with the fix in place, the same rehearsal would
+     need `MIGRATE_DB_USER=sms_migrate` for the `db:migrate` step — the two
+     login/bootstrap changes were reasoned through against `migrate-core.mjs`
+     and the bootstrap script (no `db_ddladmin` right is used anywhere except
+     schema DDL, which every migration file is), but have not been
+     re-rehearsed from zero on a live SQL Server instance in this pass; see
+     the R-13 fix commit for what could and could not be proven without one.
 7. **Create the first admin:** `node cli/dist/index.js user:create --username=admin --password=<strong> --role=admin`.
 8. **Create IFL's users at `--role=manager`.** The software is used by the GM,
    managers and process-department engineers, and every one of them needs to
@@ -615,12 +625,13 @@ total.
 
 ## Credentials and secrets
 
-Four database logins exist by design, each for one job. None is ever written into source control; `.env` and `ops/sms-tunnel-policy.yml` are git-ignored (verified against every commit on every branch, 14 Sep 2026).
+Five database logins exist by design, each for one job. None is ever written into source control; `.env` and `ops/sms-tunnel-policy.yml` are git-ignored (verified against every commit on every branch, 14 Sep 2026).
 
 | Login | Where it lives | Rights | Issued by | Used by |
 |---|---|---|---|---|
 | `sms_readonly` | IFL's plant SQL Server | `db_datareader` on `DATA_TP1U2` **and** `PDAS_TP1U2`, nothing else | IFL's DBA (`db/bootstrap/10_ifl_readonly_login.template.sql`) | sync worker, CLI — `IFL_DB_USER/PASSWORD` |
-| `sms_app` | the sidecar server | `db_datareader`, `db_datawriter`, `db_ddladmin` on `[sms]` only | us, at install (`db/bootstrap/00_create_app_database.sql`) | API, sync worker, CLI, `db:migrate` — `APP_DB_USER/PASSWORD` |
+| `sms_app` | the sidecar server | `db_datareader`, `db_datawriter` on `[sms]` only — **no `db_ddladmin`, fixed 22 Sep 2026 (defect R-13)** | us, at install (`db/bootstrap/00_create_app_database.sql`) | API, sync worker, CLI (including `retention`) — `APP_DB_USER/PASSWORD`, every unattended process |
+| `sms_migrate` | the sidecar server | `db_datareader`, `db_datawriter`, `db_ddladmin` on `[sms]` only | us, at install (`db/bootstrap/00_create_app_database.sql`) | `db:migrate` ONLY, run by hand at install/upgrade time — `MIGRATE_DB_USER/PASSWORD`, never held by a long-running service |
 | `sms_backup` | the sidecar server | `db_backupoperator` on `[sms]` only | us, at install (SQL in *Backup & restore*) | `scripts/backup-appdb.ps1` — passed as `-Pass` |
 | `sms_sim` | **development machines only** | writer on `DATA_TP1U2_SIM` (a database whose name ends `_SIM`; the simulator refuses any other) | the developer, by hand (*Plant simulator*, above) | `scripts/simulate-plant.mjs` — `SIM_DB_NAME/USER/PASSWORD` in `.env`; never created on a plant server |
 | `sms_pdas_writer` | IFL's plant SQL Server (`TP1-PDAS\PDAS`, see below — **not** whatever host serves `DATA_TP1U2`) | **Nine rights** (finding H6, 15 Sep 2026 audit — this row used to name two): `EXECUTE` on `CreateMaterial`, `SetMaterialStatusActive`, `AddBlend`, `AddCount`, `AddTubeType`, `CreatePallet`, `SetPalletStatusActive`; `UPDATE` on `dbo.Materials` (the vendor supplies no UPDATE proc — changing a setpoint is one guarded single-row `UPDATE`); `INSERT` on `dbo.nhs_events`. **Does not exist yet.** | IFL's DBA — theirs to issue, and only after written authority that names all nine rights above, not the two this row used to state | API — `PDAS_WRITE_USER/PASSWORD`, behind `PDAS_WRITE_ENABLED` |
@@ -634,7 +645,7 @@ Four database logins exist by design, each for one job. None is ever written int
 
 The request to IFL should therefore ask for a new login provisioned for the application, scoped to the nine rights in the table above — not for the use of an existing person's credentials.
 
-**The migration login split (roadmap Phase 11, 14 Sep 2026).** `sms_app` holds `db_ddladmin` only so `npm run db:migrate` can run as it. That right also lets it drop the append-only trigger migration 030 puts on `sms.audit_log` — so the trigger stops accidents and ordinary misuse, but a party holding the app's own login could remove it, delete rows and put it back. Real tamper-evidence needs the migration login separated from the runtime login: create `sms_migrate` with `db_ddladmin` (and `db_datareader`/`db_datawriter`, for the data migrations), run `db:migrate` with `APP_DB_USER=sms_migrate` at upgrade time only, and **revoke `db_ddladmin` from `sms_app`** (`ALTER ROLE db_ddladmin DROP MEMBER sms_app`). `00_create_app_database.sql` does not yet do this — it is an install-time decision for the operator, recorded here so the trigger's guarantee is not overstated. Until it is done, the audit log is append-only against the code and against mistakes, not against the app's own credential.
+**The migration login split — DONE (defect R-13, HIGH, fixed 22 Sep 2026).** `sms_app` used to hold `db_ddladmin` so `npm run db:migrate` could run as it (roadmap Phase 11, 14 Sep 2026, first documented the risk without fixing it). That right also let it drop the append-only trigger migration 030 puts on `sms.audit_log` — so the trigger stopped accidents and ordinary misuse, but a party holding the app's own login could have removed it, deleted rows and put it back. `db/bootstrap/00_create_app_database.sql` now creates a **second** login, `sms_migrate` (`db_ddladmin` + `db_datareader`/`db_datawriter`, for migrations that touch data as well as schema), and no longer adds `sms_app` to `db_ddladmin`. Run `db:migrate` with `MIGRATE_DB_USER=sms_migrate` / `MIGRATE_DB_PASSWORD=<its password>` set for that one invocation (step 6 below) — never in the `.env` a long-running service reads. **Re-running the bootstrap script against a database provisioned before this fix is itself the remediation**: it detects `sms_app` still holding `db_ddladmin` and drops it (`ALTER ROLE db_ddladmin DROP MEMBER sms_app`), idempotently, alongside creating `sms_migrate`. Until that re-run happens on a given install, that install's audit log remains append-only against the code and against mistakes, but not yet against its own runtime credential — re-run the bootstrap script to close that gap.
 
 Storage: `.env` on the sidecar host, readable by the service account only; `scripts\backup-config.ps1` copies it into an ACL-restricted folder under `BACKUP_DIR\config`. Rotation: change the password at the source, update `.env`, restart the affected service. The scheduled backup runs as a Windows account holding `db_backupoperator` (`scripts\install-scheduled-tasks.ps1`), so no SQL password appears in any task argument; `-User sms_backup -Pass …` remains for a by-hand run.
 

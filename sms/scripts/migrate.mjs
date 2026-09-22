@@ -7,6 +7,25 @@
 //   node scripts/migrate.mjs --mark-applied-through=022 record files 001..022 as applied WITHOUT
 //                                                       running them, then apply the rest normally
 //
+// WHICH LOGIN THIS CONNECTS AS (fixes defect R-13, HIGH, 22 Sep 2026):
+// this file, and only this file among the app's runtime code, needs a login
+// with db_ddladmin — every migration is schema DDL. Every OTHER caller
+// (the API, the sync worker, the CLI's other commands) connects as sms_app,
+// which since db/bootstrap/00_create_app_database.sql's R-13 fix no longer
+// holds db_ddladmin — see that file's header for why an unattended runtime
+// login must not be able to alter or drop the append-only trigger migration
+// 030 puts on sms.audit_log. So this runner prefers MIGRATE_DB_USER /
+// MIGRATE_DB_PASSWORD (the sms_migrate login, db_ddladmin, used only for
+// this one command, run by hand at install/upgrade time) and falls back to
+// APP_DB_USER / APP_DB_PASSWORD only when those are unset — which keeps a
+// dev machine or CI box that has not yet provisioned sms_migrate working
+// exactly as before, and is why this fallback is not itself the fix: it is
+// the operator's job to actually SET MIGRATE_DB_USER/PASSWORD on a real
+// install so the fallback is never what actually runs there. The server,
+// port, database and TLS options are still shared with APP_DB_* — sms_app
+// and sms_migrate are two logins on the same [sms] database, not two
+// different databases.
+//
 // --mark-applied-through exists for ONE situation: a database that was migrated by
 // the pre-Sep-2026 runner, which kept no history table. On such a database this
 // runner's first run would see an empty sms.schema_migration and re-apply every
@@ -74,8 +93,10 @@ async function main() {
     server: process.env.APP_DB_SERVER ?? '.\\SQLEXPRESS',
     port: process.env.APP_DB_PORT ? Number(process.env.APP_DB_PORT) : undefined,
     database: process.env.APP_DB_NAME ?? 'sms',
-    user: process.env.APP_DB_USER,
-    password: process.env.APP_DB_PASSWORD,
+    // See the file header: prefer the migration-only login (db_ddladmin),
+    // fall back to the runtime login only when the former is not set.
+    user: process.env.MIGRATE_DB_USER ?? process.env.APP_DB_USER,
+    password: process.env.MIGRATE_DB_PASSWORD ?? process.env.APP_DB_PASSWORD,
     options: {
       encrypt: (process.env.APP_DB_ENCRYPT ?? 'true') === 'true',
       trustServerCertificate:
@@ -90,6 +111,15 @@ async function main() {
     // Ten minutes is a maintenance-path ceiling, not a per-statement target.
     requestTimeout: 10 * 60_000,
   };
+
+  if (!process.env.MIGRATE_DB_USER) {
+    console.warn(
+      `MIGRATE_DB_USER not set — connecting as ${config.user ?? '(no user configured)'} (APP_DB_USER fallback). ` +
+        'If that login no longer holds db_ddladmin (defect R-13 fix), this will fail on any file with DDL. ' +
+        'Set MIGRATE_DB_USER/MIGRATE_DB_PASSWORD to the sms_migrate login for this run.',
+    );
+  }
+  console.log(`Connecting to ${config.server}/${config.database} as ${config.user ?? '(no user configured)'}`);
 
   const pool = await sql.connect(config);
   await ensureHistoryTable(pool);
