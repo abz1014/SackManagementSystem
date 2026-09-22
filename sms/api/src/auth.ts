@@ -376,9 +376,14 @@ export interface AuthedRequest extends Request {
 
 export interface RoleGate {
   (req: Request, res: Response, next: NextFunction): void;
-  /** The rank this gate enforces — tagged on the closure so a test can walk
-   *  app._router.stack and discover every route's real minRank without
-   *  hand-maintaining a second copy of the list (auth.test.ts does this). */
+  /** The rank this gate enforces — tagged on the closure so it can be read
+   *  back without hand-maintaining a second copy of the list. `auth.test.ts`
+   *  exercises `requireRole` directly against synthetic req/res objects, not
+   *  by importing `app.ts` or walking its router stack (R-14 fix, 22 Sep
+   *  2026: this comment used to claim the latter, which no test in this repo
+   *  has ever done). `web/src/rank.crosscheck.test.ts` is the one that reads
+   *  each write route's `requireRole` call and checks it against the
+   *  client-side rank constant. */
   minRank: number;
 }
 
