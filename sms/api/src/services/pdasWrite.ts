@@ -346,7 +346,7 @@ export class PdasWriter {
     if (this.opts.writerPool) return this.opts.writerPool();
     if (!this.writer) {
       const db = this.cfg.db;
-      this.writer = new mssql.ConnectionPool({
+      const connecting = new mssql.ConnectionPool({
         server: db.server,
         port: db.port,
         database: db.database,
@@ -357,6 +357,15 @@ export class PdasWriter {
         pool: { max: 2, min: 0, idleTimeoutMillis: 30_000 },
         requestTimeout: 30_000,
       }).connect();
+      // R-1 fix: a failed connect must not poison every future write attempt.
+      // Without this, a transient PDAS outage cached the rejected promise
+      // forever (until process restart or an explicit close()), so every
+      // subsequent write failed immediately without ever retrying the
+      // connection once PDAS came back.
+      connecting.catch(() => {
+        if (this.writer === connecting) this.writer = null;
+      });
+      this.writer = connecting;
     }
     return this.writer;
   }
@@ -531,27 +540,48 @@ export class PdasWriter {
       }
 
       const now = new Date();
-      await this.mirrorProduct({ productId: newId, blendId: p.blendId, countId: p.countId, tubeTypeId: p.tubeTypeId, fields: p.fields });
-      await appendLimitVersion(this.appPool, {
-        productId: newId,
-        setpointG: p.fields.setpointG,
-        offsetMinusG: p.fields.offsetMinusG,
-        offsetPlusG: p.fields.offsetPlusG,
-        effectiveFromUtc: now,
-        effectiveIsLowerBound: false,
-        source: 'sms_write',
-        changedBy: p.actor.userId,
-        reason: p.reason,
-      });
-      await this.recordChange({
-        productId: newId, operation: 'create', before: null, after: p.fields, observedAfter: null,
-        outcome: 'ok', pdasErrorCode: null, message: null, effectiveFrom: now,
-        actor: p.actor, reason: p.reason,
-      });
-      await recordAudit(
-        this.appPool, p.actor.userId, 'product.create', 'product', newId,
-        `Created product ${newId}: ${p.fields.setpointG} g ± ${p.fields.offsetMinusG}/${p.fields.offsetPlusG} — ${p.reason}`,
-      );
+      // R-2 fix: the vendor proc has already committed the new material in
+      // PDAS by this point (newId is real). Bookkeeping from here on is
+      // this app's own follow-up, not the write itself — a failure here must
+      // not be recorded (or returned) as though the PDAS write failed, or a
+      // caller retrying "the failed create" would hit CreateMaterial's own
+      // duplicate refusal against a product that in fact already exists.
+      try {
+        await this.mirrorProduct({ productId: newId, blendId: p.blendId, countId: p.countId, tubeTypeId: p.tubeTypeId, fields: p.fields });
+        await appendLimitVersion(this.appPool, {
+          productId: newId,
+          setpointG: p.fields.setpointG,
+          offsetMinusG: p.fields.offsetMinusG,
+          offsetPlusG: p.fields.offsetPlusG,
+          effectiveFromUtc: now,
+          effectiveIsLowerBound: false,
+          source: 'sms_write',
+          changedBy: p.actor.userId,
+          reason: p.reason,
+        });
+        await this.recordChange({
+          productId: newId, operation: 'create', before: null, after: p.fields, observedAfter: null,
+          outcome: 'ok', pdasErrorCode: null, message: null, effectiveFrom: now,
+          actor: p.actor, reason: p.reason,
+        });
+        await recordAudit(
+          this.appPool, p.actor.userId, 'product.create', 'product', newId,
+          `Created product ${newId}: ${p.fields.setpointG} g ± ${p.fields.offsetMinusG}/${p.fields.offsetPlusG} — ${p.reason}`,
+        );
+      } catch (bookkeepingErr) {
+        const bkMessage = bookkeepingErr instanceof Error ? bookkeepingErr.message : String(bookkeepingErr);
+        // Best-effort: still record the change as the successful PDAS write
+        // it was, with the bookkeeping gap named in the message, rather than
+        // as 'error' (which would misleadingly imply the write itself
+        // failed). Swallow a failure here too — we already have newId and
+        // must still return it to the caller either way.
+        await this.recordChange({
+          productId: newId, operation: 'create', before: null, after: p.fields, observedAfter: null,
+          outcome: 'ok', pdasErrorCode: null,
+          message: `PDAS write succeeded (product ${newId}) but local bookkeeping failed: ${bkMessage}`,
+          effectiveFrom: now, actor: p.actor, reason: p.reason,
+        }).catch(() => {});
+      }
       return { ok: true, productId: newId };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

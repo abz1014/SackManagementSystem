@@ -232,3 +232,45 @@ describe('PdasWriter — every vendor-proc binding is within PROC_PARAMS (16 Sep
     expect(create?.params).toEqual(expect.arrayContaining(['materialDesc1', 'materialDesc2', 'materialDesc3', 'materialDesc4', 'materialDesc5']));
   });
 });
+
+describe('PdasWriter — createProduct bookkeeping failure after a successful PDAS write (R-2)', () => {
+  // Before this fix, mirrorProduct/appendLimitVersion/recordChange/recordAudit
+  // ran inside the SAME try as the vendor proc call, so a bookkeeping-only
+  // failure AFTER CreateMaterial had already committed a real new product in
+  // PDAS was caught by the outer catch and recorded as outcome 'error' —
+  // indistinguishable from the write itself failing. A caller retrying "the
+  // failed create" would hit CreateMaterial's own duplicate refusal against a
+  // product that, per PDAS, already exists.
+  it('still returns ok:true with the new productId, and records outcome ok (not error), when mirrorProduct throws', async () => {
+    const calls: Array<{ proc: string; params: string[] }> = [];
+    const log: Captured[] = [];
+    const appPool: ConnectionPool = {
+      request: () => {
+        const params: Record<string, unknown> = {};
+        const req = {
+          input: (name: string, _t: unknown, value: unknown) => {
+            params[name] = value;
+            return req;
+          },
+          query: async (sql: string) => {
+            if (/MERGE sms\.product\b/.test(sql)) throw new Error('deadlocked with another process');
+            log.push({ sql, params });
+            return { recordset: [], rowsAffected: [1] };
+          },
+        };
+        return req;
+      },
+    } as unknown as ConnectionPool;
+
+    const w = new PdasWriter(appPool, enabledCfg, 1, { writerPool: fakeWriterPool(calls) });
+    const r = await w.createProduct({ blendId: 2, countId: 8, tubeTypeId: 4, fields: FIELDS, bounds: BOUNDS, reason: REASON, actor: ACTOR });
+
+    expect(r).toMatchObject({ ok: true });
+    if (r.ok) expect(r.productId).toBeGreaterThan(0);
+
+    const rows = changeRows(log);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.params.outcome).toBe('ok');
+    expect(String(rows[0]?.params.msg)).toMatch(/PDAS write succeeded.*bookkeeping failed.*deadlocked/);
+  });
+});
