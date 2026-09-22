@@ -55,7 +55,7 @@
  * inventing a field label; if IFL ever uses more than one schema this needs
  * both a picker AND the missing string, not one without the other.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { W } from '../../lib/words';
 import { Block, Failed, SkelLines } from '../../ui/bits';
 import { fmtG, fmtInt } from '../../lib/fmt';
@@ -74,15 +74,12 @@ import {
   type ChangeoverOutcome,
   type ProductOption,
 } from '../../api';
+import { distinctProductLabels, productLabel } from '../../lib/productLabel';
 
 const MIN_REASON_CHARS = 10;
 
 function errText(e: unknown): string {
   return String((e as { message?: string })?.message ?? e);
-}
-
-function productLabel(p: { description: string | null; lotCode: string | null; productId: number }): string {
-  return p.description || p.lotCode || `Product ${p.productId}`;
 }
 
 /** Every plan step's `detail` is a flat record of primitives — rendered generically so a new field the server adds shows up without a code change here. */
@@ -429,6 +426,9 @@ function PickersForm({
   reason: string;
   setReason: (v: string) => void;
 }) {
+  // The disambiguator over the FULL product list, not just the retire
+  // filter's subset — a collision can involve an inactive product too.
+  const retireLabels = useMemo(() => distinctProductLabels(products), [products]);
   const toggle = (list: number[], id: number, on: (v: number[]) => void) =>
     on(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
@@ -463,6 +463,11 @@ function PickersForm({
         <div className="field">
           <span>{W.product.retire}</span>
           <div style={{ display: 'grid', gap: 4 }}>
+            {/* Six PDAS materials on this line share the description
+                "205-IL0-SD" (productLabel.ts's own header, first found on
+                Rejects 15 Sep 2026, recurring here); the plain label alone
+                made all six retire checkboxes read identically. Run through
+                the one disambiguator instead of the raw `description`. */}
             {products.filter((p) => p.activeFlag !== false).map((p) => (
               <label key={`product-${p.productId}`} className="row">
                 <input
@@ -470,19 +475,36 @@ function PickersForm({
                   checked={retireProductIds.includes(p.productId)}
                   onChange={() => toggle(retireProductIds, p.productId, setRetireProductIds)}
                 />
-                <span>{productLabel(p)} ({p.productId})</span>
+                <span>{retireLabels.get(p.productId) ?? productLabel(p)} ({p.productId})</span>
               </label>
             ))}
-            {refs.pallets.map((pl) => (
-              <label key={`pallet-${pl.palletId}`} className="row">
-                <input
-                  type="checkbox"
-                  checked={retirePalletIds.includes(pl.palletId)}
-                  onChange={() => toggle(retirePalletIds, pl.palletId, setRetirePalletIds)}
-                />
-                <span>{pl.productLabel ?? `product ${pl.productId}`}{pl.lot ? ` · ${pl.lot}` : ''} ({pl.palletId})</span>
-              </label>
-            ))}
+            {refs.pallets.map((pl) => {
+              // A pallet's own `lot` field IS the product's label at PDAS
+              // (Pallets.MatDesc, mirrored as `lot`) — printing it after the
+              // product label duplicated the same text twice on every one
+              // of the six pallets (e.g. "205-IL0-SD · 205-IL0-SD (id)").
+              // `sackColour` (PalletDesc1) is the pallet's own genuinely
+              // distinguishing attribute; the lot is shown only when it
+              // actually differs from the raw product description, and the
+              // pallet id is always appended as the guaranteed-unique
+              // fallback.
+              const productPart = retireLabels.get(pl.productId) ?? pl.productLabel ?? `product ${pl.productId}`;
+              const lotPart = pl.lot && pl.lot !== pl.productLabel ? pl.lot : null;
+              return (
+                <label key={`pallet-${pl.palletId}`} className="row">
+                  <input
+                    type="checkbox"
+                    checked={retirePalletIds.includes(pl.palletId)}
+                    onChange={() => toggle(retirePalletIds, pl.palletId, setRetirePalletIds)}
+                  />
+                  <span>
+                    {productPart}
+                    {pl.sackColour ? ` · ${pl.sackColour}` : ''}
+                    {lotPart ? ` · ${lotPart}` : ''} ({pl.palletId})
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </div>
       )}

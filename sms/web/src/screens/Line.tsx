@@ -34,12 +34,13 @@ import {
 } from '../ui/bits';
 import { fmtClock, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
 import {
-  getAttention, getProduction, getProductAt, getStations, stationLabel, getMachinesRunning,
+  getAttention, getProduction, getProductAt, getProducts, getStations, stationLabel, getMachinesRunning,
   type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
-  type StateCounts,
+  type StateCounts, type ProductOption,
 } from '../api';
 import type { Screen, ReadingsFilter } from '../ui/Bar';
 import { projectionSentence } from './StationSheet';
+import { distinctProductLabels } from '../lib/productLabel';
 
 /**
  * How long a station must be silent before it is worth saying so — measured
@@ -110,6 +111,13 @@ export function LineScreen({
   // the newest reading — never on the clock — and capped at the replay
   // instant, like everything else on this screen.
   const machines = usePolling(() => getMachinesRunning(period.tsTo), REFRESH_MS, `machines-running:${period.tsTo}`);
+  // PDAS holds several materials sharing one description (six read
+  // "205-IL0-SD" on this line) — machinesRunning's own SQL only ever
+  // resolves that plain description, so the parts that make them
+  // distinguishable (colour, blend, count, tube) come from the same
+  // product master Product › Running and Rejects already fetch for this
+  // purpose, run through the one disambiguator (productLabel.ts).
+  const products = usePolling(() => getProducts(), 5 * 60_000, 'products');
 
   if (loading && !line) return <Loading />;
   if (!line) return <Empty message={W.lag.noData} />;
@@ -213,7 +221,12 @@ export function LineScreen({
         ) : !machines.data ? (
           <SkelLines n={3} short />
         ) : (
-          <MachinesBlock data={machines.data.data} stations={stations.data?.stations ?? []} onOpen={onOpenStation} />
+          <MachinesBlock
+            data={machines.data.data}
+            stations={stations.data?.stations ?? []}
+            products={products.data?.products ?? []}
+            onOpen={onOpenStation}
+          />
         )}
 
         {product.error && !product.data ? (
@@ -596,14 +609,21 @@ function ProductFooter({
 function MachinesBlock({
   data,
   stations,
+  products,
   onOpen,
 }: {
   data: MachinesRunningData;
   stations: StationRow[];
+  /** The product master, for disambiguating names that collide (see the
+   *  import above) — empty while `/api/products` has not yet returned, in
+   *  which case the raw (possibly colliding) name from `machinesRunning` is
+   *  shown rather than blocking the block on a second fetch. */
+  products: ProductOption[];
   onOpen: (station: number) => void;
 }) {
   if (data.asOfUtc == null || data.machines.length === 0) return <Empty message={W.nothingHere} />;
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
+  const labels = distinctProductLabels(products);
   return (
     <>
       <table>
@@ -616,7 +636,9 @@ function MachinesBlock({
                   <span className="mut">{W.cone.quiet2h}</span>
                 ) : (
                   <>
-                    <span style={{ fontWeight: 500 }}>{m.productName ?? (m.materialId != null ? W.cone.noProductName(m.materialId) : W.cone.noMaterial)}</span>
+                    <span style={{ fontWeight: 500 }}>
+                      {(m.materialId != null ? labels.get(m.materialId) : null) ?? m.productName ?? (m.materialId != null ? W.cone.noProductName(m.materialId) : W.cone.noMaterial)}
+                    </span>
                     <span className="mut">
                       {' · '}
                       {m.sinceIsWindowStart || m.sinceUtc == null ? W.cone.sinceAtLeast : W.cone.since(fmtClock(m.sinceUtc))}

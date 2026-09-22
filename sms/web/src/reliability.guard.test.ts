@@ -110,6 +110,13 @@ const ALLOW_LIST: Record<string, string> = {
     'being silently OMITTED, identical in shape to the legitimate case where the period product differs from the ' +
     "currently-running one (the same code comment above `current`'s declaration). It never prints a wrong number or " +
     'a false state; checked 21 Sep 2026.',
+  'web/src/screens/Line.tsx:products':
+    "the product master (getProducts), fetched only so MachinesBlock can disambiguate PDAS materials that share a " +
+    'plain description (distinctProductLabels — see productLabel.ts) the way Rejects and Product › Running already ' +
+    'do. On failure `products.data` is undefined, so MachinesBlock falls back to `m.productName`, the same raw, ' +
+    'possibly-colliding text machinesRunning.ts already returned before this fetch existed — never a wrong or ' +
+    'invented name, and never blocks the block (the machine rows are its primary content, same reasoning as the ' +
+    "block's own `product` guard immediately below it). Added 22 Sep 2026 fixing the six-identical-headings defect.",
 };
 
 /**

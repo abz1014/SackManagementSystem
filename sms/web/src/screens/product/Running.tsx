@@ -20,7 +20,7 @@
  * anywhere in SMS, reaches a machine — the selection is written to this
  * application's own database only.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import type { Period } from '../../lib/period';
@@ -30,6 +30,7 @@ import {
   getProductAt, getProducts, getCurrentProduct, getMachinesRunning, getStations, setCurrentProduct, stationLabel,
   type ProductOption, type TimelineEntry, type MachineRunning, type StationRow,
 } from '../../api';
+import { distinctProductLabels } from '../../lib/productLabel';
 
 export function RunningTab({
   period,
@@ -103,6 +104,7 @@ export function RunningTab({
           <ByProduct
             data={machines.data.data.machines}
             names={names.data?.stations ?? []}
+            products={products.data?.products ?? []}
             onOpenStation={onOpenStation}
             onSeeStationReadings={onSeeStationReadings}
           />
@@ -279,24 +281,31 @@ function groupByProduct(machines: MachineRunning[]): ProductGroup[] {
 function ByProduct({
   data,
   names,
+  products,
   onOpenStation,
   onSeeStationReadings,
 }: {
   data: MachineRunning[];
   names: StationRow[];
+  /** The product master, run through the one disambiguator — this pivot's
+   *  entire purpose is grouping BY product, which the plain description
+   *  from `machinesRunning` cannot do on its own: six PDAS materials on
+   *  this line share the description "205-IL0-SD" (see productLabel.ts). */
+  products: ProductOption[];
   onOpenStation: (station: number) => void;
   onSeeStationReadings: (station: number) => void;
 }) {
   const groups = groupByProduct(data);
   if (groups.length === 0) return <Empty message={W.product.runningNowEmpty} />;
   const nameOf = new Map(names.map((n) => [n.stationId, n]));
+  const labels = useMemo(() => distinctProductLabels(products), [products]);
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
       {groups.map((g, i) => (
         <div key={g.materialId ?? `station-${i}`}>
           <p style={{ fontWeight: 500 }}>
-            {g.productName ?? (g.materialId != null ? W.cone.noProductName(g.materialId) : W.cone.noMaterial)}
+            {(g.materialId != null ? labels.get(g.materialId) : null) ?? g.productName ?? (g.materialId != null ? W.cone.noProductName(g.materialId) : W.cone.noMaterial)}
           </p>
           <table style={{ marginTop: 6 }}>
             <tbody>
