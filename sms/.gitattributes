@@ -1,0 +1,17 @@
+# R-16 fix (22 Sep 2026): this file did not exist, so every contributor's own
+# core.autocrlf setting decided line endings on checkout/commit — on a
+# Windows dev machine that is usually true, but nothing in the repo enforced
+# it, so a contributor on a different default could silently reintroduce
+# mixed line endings. `text=auto` lets git normalise text files to LF in the
+# repo and check them out using each platform's own convention; binaries are
+# marked explicitly so git never tries to diff or normalise them.
+
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.woff2 binary
+*.ico binary
+*.pdf binary
+*.xlsx binary
