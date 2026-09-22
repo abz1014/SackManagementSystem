@@ -35,7 +35,7 @@ import {
   Block, Chevron, Details, Empty, Failed, rowKeys, Toggle,
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
-import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
+import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
@@ -599,15 +599,53 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
 
   const g = spc.subgroups;
   const values = g.map((x) => x.mean);
-  const marks = [target, spc.spec.usl, spc.spec.lsl].filter((v): v is number => v != null);
-  const [lo, hi] = niceDomain([...values, ...marks], { pad: 0.15 });
+  // UX defect fix (22 Sep 2026): the y-domain used to fold the spec limits
+  // (target/USL/LSL) into `niceDomain` alongside the data. The limits sit
+  // ±40 g from target while the subgroup means span about 7 g, so the limits
+  // set the scale and the data collapsed to a measured 3.2 px inside a 204 px
+  // plot — 1.6% of the chart's height. The domain now comes from the data
+  // alone; a limit outside it is drawn as an edge annotation below, not
+  // folded into the range that decides how tall the real signal stands.
+  const [lo, hi] = niceDomain(values, { pad: 0.15 });
   const x = (i: number) => L + (i / Math.max(1, g.length - 1)) * (width - L - R);
   const y = (v: number) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+
+  // A limit inside [lo, hi] draws inline, at its own value. One off-scale
+  // (above `hi` or below `lo`) pins to the plot's own edge instead of being
+  // let to widen the domain — the reader still sees the limit exists and
+  // which side it sits on, never a distorted chart. When more than one mark
+  // lands off the SAME edge (target and the upper limit both above `hi` is
+  // routine once the domain hugs a ~7 g run of subgroup means — caught live:
+  // both printed "off scale" on the identical line and the two labels
+  // overlapped into unreadable text), each additional one stacks a further
+  // 13px in from that edge so the labels never share a baseline.
+  let offTop = 0;
+  let offBottom = 0;
+  const limitLine = (value: number | null, label: string, tone: 'ink' | 'muted' = 'muted') => {
+    if (value == null) return null;
+    const dashed = tone !== 'ink';
+    if (value >= lo && value <= hi) {
+      return <RefLine y={y(value)} x1={L} x2={width - R} label={label} tone={tone} dashed={dashed} />;
+    }
+    const atTop = value > hi;
+    const arrow = atTop ? '↑' : '↓';
+    const yy = atTop ? T + offTop++ * 13 : H - B - offBottom++ * 13;
+    return <RefLine y={yy} x1={L} x2={width - R} label={`${arrow} ${label} · off scale`} tone={tone} dashed={dashed} />;
+  };
 
   // Width-aware for the same reason as Rejects: a multi-day window labels
   // ticks "2 Sept 06:00", which is twice as wide as a bare time.
   const ticks = tickIndices(g.length, fittingTicks(width - L - R, multiDay ? 13 : 6, 13, g.length, 4));
   const h = hover != null ? g[hover] : null;
+
+  // The noise floor a subgroup of this size carries by chance alone —
+  // σ_within/√n, already computed per subgroup for the X̄ control limits
+  // (spc.ts). Stated in the resting readout rather than drawn as a band: a
+  // band was investigated and rejected (see the file this chart lives under)
+  // because per-subgroup n is ragged enough live to swing the band 4.5x
+  // across one shift. A sentence survives that; a drawn contour would not.
+  const avgN = spc.count / Math.max(1, g.length);
+  const noiseG = avgN > 0 ? (2 * spc.stdevWithin) / Math.sqrt(avgN) : 0;
 
   return (
     <div ref={box}>
@@ -622,14 +660,16 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
               }`
             : null
         }
-        resting={`${g.length} groups of about ${fmtInt(Math.round(spc.count / Math.max(1, g.length)))} ${kindWord(spc.unit)}`}
+        resting={`${g.length} groups of about ${fmtInt(Math.round(avgN))} ${kindWord(spc.unit)}${
+          noiseG > 0 ? ` · ${W.weight.noiseFloor(`±${Math.round(noiseG)}${String.fromCharCode(0xa0)}${spc.unit}`)}` : ''
+        }`}
       />
       <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img"
            aria-label={spc.unit === 'kg' ? 'Average sack weight over time' : 'Average cone weight over time'}
            onMouseLeave={() => setHover(null)}>
-        {spc.spec.usl != null && <RefLine y={y(spc.spec.usl)} x1={L} x2={width - R} label={`upper limit ${fmtW(spc.spec.usl, spc.unit)}`} dashed />}
-        {target != null && <RefLine y={y(target)} x1={L} x2={width - R} label={`target ${fmtG(target)}`} tone="ink" />}
-        {spc.spec.lsl != null && <RefLine y={y(spc.spec.lsl)} x1={L} x2={width - R} label={`lower limit ${fmtW(spc.spec.lsl, spc.unit)}`} dashed />}
+        {limitLine(spc.spec.usl, `upper limit ${fmtW(spc.spec.usl, spc.unit)}`)}
+        {limitLine(target, `target ${fmtG(target)}`, 'ink')}
+        {limitLine(spc.spec.lsl, `lower limit ${fmtW(spc.spec.lsl, spc.unit)}`)}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
         <path d={linePath(g.map((p, i) => ({ x: x(i), y: y(p.mean) })))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
         {g.map((p, i) =>
@@ -726,6 +766,73 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
 
 /* ---------------------------------------------------------- station table */
 
+/**
+ * UX experiment (22 Sep 2026): "which station has moved most over the last
+ * eleven days, and roughly when did it start?" used to need opening fourteen
+ * station sheets, one at a time — `vs line` is a single instant and cannot
+ * answer "when" at all, and `Pattern` renders '—' on every row on live data
+ * (it only ever holds a value when `flagged` is true). `row.days` — daily
+ * mean plus per-day Nelson flag, for every station — was already on the wire
+ * in `/api/weight-stations`; this is its first reader. No API change.
+ */
+export const SPARK_W = 120;
+export const SPARK_H = 28;
+/** Fewer points than this cannot honestly show a trend — render nothing
+ *  rather than a two-point line pretending to be one. Exported for its own
+ *  test. */
+export const SPARK_MIN_DAYS = 3;
+
+/** One shared y-domain for every row, or the strokes cannot be compared —
+ *  that is the entire point of the column. Includes the line mean so its
+ *  reference line never sits off a row's own scale. Exported for its own
+ *  test. */
+export function sparklineDomain(rows: WeightStationRow[], lineMeanG: number | null): [number, number] {
+  const vals = rows.flatMap((r) => r.days.map((d) => d.mean));
+  if (lineMeanG != null) vals.push(lineMeanG);
+  return niceDomain(vals, { pad: 0.15 });
+}
+
+export function Sparkline({
+  days,
+  domain,
+  lineMeanG,
+}: {
+  days: WeightStationRow['days'];
+  domain: [number, number];
+  lineMeanG: number | null;
+}) {
+  if (days.length < SPARK_MIN_DAYS) return <span className="mut">{'—'}</span>;
+  const [lo, hi] = domain;
+  const y = linear([lo, hi], [SPARK_H - 3, 3]);
+  const x = (i: number) => (days.length > 1 ? (i / (days.length - 1)) * SPARK_W : SPARK_W / 2);
+  const first = days[0]!;
+  const last = days[days.length - 1]!;
+  return (
+    <svg
+      className="spark"
+      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+      width={SPARK_W}
+      height={SPARK_H}
+      role="img"
+      aria-label={`Daily average over ${days.length} days: ${fmtG(first.mean)} to ${fmtG(last.mean)}`}
+    >
+      {lineMeanG != null && lineMeanG >= lo && lineMeanG <= hi && (
+        <line x1={0} x2={SPARK_W} y1={y(lineMeanG)} y2={y(lineMeanG)} stroke="var(--grid)" strokeWidth={1} />
+      )}
+      <path
+        d={linePath(days.map((d, i) => ({ x: x(i), y: y(d.mean) })))}
+        fill="none"
+        stroke="var(--graphite)"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+      />
+      {days.map((d, i) =>
+        d.nelson.length > 0 ? <circle key={i} cx={x(i)} cy={y(d.mean)} r={2} fill="var(--acc-fill)" /> : null,
+      )}
+    </svg>
+  );
+}
+
 function StationTable({
   rows,
   data,
@@ -739,6 +846,7 @@ function StationTable({
 }) {
   if (rows.length === 0) return <Empty message={W.nothingHere} />;
   const byId = new Map(names.map((n) => [n.stationId, n]));
+  const sparkDomain = sparklineDomain(rows, data.lineMeanG);
   // A rounded zero must not print as "−0 g", which reads as a measurement
   // that is very slightly negative rather than as no difference at all.
   const signed = (v: number | null) => {
@@ -773,49 +881,59 @@ function StationTable({
   };
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>{W.weight.colStation}</th>
-          <th className="n">{W.weight.colAverage}</th>
-          {/* Median and SD (roadmap Phase 9 items 1-2): the SD was computed
-              for every station and rendered nowhere; the median nowhere at all. */}
-          <th className="n">{W.calibration.colMedian}</th>
-          <th className="n">{W.calibration.colSd}</th>
-          <th className="n">{W.weight.colVsLine}</th>
-          <th className="n">{W.weight.colVsTarget}</th>
-          <th style={{ paddingLeft: 28 }}>{W.weight.colPattern}</th>
-          <th className="n">{W.weight.colRejects}</th>
-          <th style={{ paddingLeft: 28 }}>{W.weight.colShows}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr
-            key={r.station}
-            className="click"
-            tabIndex={0}
-            onClick={() => onOpen(r.station)}
-            onKeyDown={rowKeys(() => onOpen(r.station))}
-          >
-            <td className={r.flagged ? 'acc' : ''} style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>
-              {stationLabel(byId.get(r.station), r.station)}
-              <Chevron label={W.openRecord} />
-            </td>
-            <td className="n">{fmtG(r.meanG)}</td>
-            <td className="n">{r.medianG == null ? '—' : fmtG(r.medianG)}</td>
-            <td className="n">{r.sdG == null ? '—' : `${r.sdG.toFixed(1)} g`}</td>
-            <td className="n">{signed(r.vsLineG)}</td>
-            <td className="n">{vsTargetCell(r)}</td>
-            <td style={{ paddingLeft: 28, whiteSpace: 'nowrap' }} className={r.flagged ? 'acc' : ''}>
-              {r.flagged ? `${r.daysHeld} days` : '—'}
-            </td>
-            <td className="n">{r.rejectRatePct == null ? '—' : `${r.rejectRatePct.toFixed(1)}%`}</td>
-            <td style={{ paddingLeft: 28 }}>{verdict(r, data)}</td>
+    <>
+      <table>
+        <thead>
+          <tr>
+            <th>{W.weight.colStation}</th>
+            <th className="n">{W.weight.colAverage}</th>
+            {/* Median and SD (roadmap Phase 9 items 1-2): the SD was computed
+                for every station and rendered nowhere; the median nowhere at all. */}
+            <th className="n">{W.calibration.colMedian}</th>
+            <th className="n">{W.calibration.colSd}</th>
+            <th className="n">{W.weight.colVsTarget}</th>
+            {/* UX experiment (22 Sep 2026): replaces `vs line` and `Pattern`
+                — see the note above Sparkline. A single instant and a column
+                that reads '—' on every live row, for one mark that answers
+                "which station moved, and roughly when". */}
+            <th style={{ paddingLeft: 28 }}>{W.weight.colTrend}</th>
+            <th className="n">{W.weight.colRejects}</th>
+            <th style={{ paddingLeft: 28 }}>{W.weight.colShows}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.station}
+              className="click"
+              tabIndex={0}
+              onClick={() => onOpen(r.station)}
+              onKeyDown={rowKeys(() => onOpen(r.station))}
+            >
+              <td className={r.flagged ? 'acc' : ''} style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>
+                {stationLabel(byId.get(r.station), r.station)}
+                <Chevron label={W.openRecord} />
+              </td>
+              <td className="n">{fmtG(r.meanG)}</td>
+              <td className="n">{r.medianG == null ? '—' : fmtG(r.medianG)}</td>
+              <td className="n">{r.sdG == null ? '—' : `${r.sdG.toFixed(1)} g`}</td>
+              <td className="n">{vsTargetCell(r)}</td>
+              <td style={{ paddingLeft: 28 }}>
+                <Sparkline days={r.days} domain={sparkDomain} lineMeanG={data.lineMeanG} />
+              </td>
+              <td className="n">{r.rejectRatePct == null ? '—' : `${r.rejectRatePct.toFixed(1)}%`}</td>
+              <td style={{ paddingLeft: 28 }}>{verdict(r, data)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/* States the one shared scale every stroke in the column above is
+          drawn against — without it "which line is steeper" cannot be read
+          honestly from row to row. */}
+      <p className="mut sm" style={{ marginTop: 10 }}>
+        {W.weight.trendScale(fmtG(sparkDomain[0]), fmtG(sparkDomain[1]))}
+      </p>
+    </>
   );
 }
 

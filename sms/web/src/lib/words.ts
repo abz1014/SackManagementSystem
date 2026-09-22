@@ -531,6 +531,14 @@ export const W = {
        lands inside, and the population is a mixture of fourteen
        differently-biased stations, so the normal-theory 95% does not follow. */
     spreadNote: 'two standard deviations either side of the average',
+    /* The chart's y-domain excludes the spec limits (UX defect fix, 22 Sep
+       2026 — they used to set the scale and flatten the real ~7 g of
+       subgroup-to-subgroup movement to a few pixels). Zoomed in, a 3 g
+       wobble can read as a crisis; a drawn control band was investigated and
+       rejected (ragged subgroup n swings it 4.5x across one shift). This
+       states the same fact as a sentence instead: how much a group of this
+       size moves by chance alone, from σ_within/√n. */
+    noiseFloor: (span: string) => `groups this size vary by roughly ${span} by chance alone`,
     /* One pair of limit lines, one version of the tolerance. */
     limitsChanged: (n: number) =>
       n === 1
@@ -550,6 +558,11 @@ export const W = {
     colVsLine: 'vs line',
     colVsTarget: 'vs target',
     colPattern: 'Pattern',
+    /* UX experiment (22 Sep 2026): replaces `vs line` + `Pattern` in the
+       station table with the sparkline column — see Weight.tsx's
+       Sparkline/StationTable. */
+    colTrend: '11-day trend',
+    trendScale: (lo: string, hi: string) => `Trend column: one shared scale for every station, ${lo} to ${hi}.`,
     colRejects: 'Rejects',
     colShows: 'What the data shows',
     steady: 'Steady.',
