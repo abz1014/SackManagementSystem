@@ -2,11 +2,21 @@
  * Pieces every report section shares — roadmap Phase 8 (15 Sep 2026).
  * The figure, the line table and the day bars came out of Report.tsx
  * unchanged; the small helpers below are new.
+ *
+ * UX chart-primitives pass (22 Sep 2026): `RankBars` and `DeviationBars`,
+ * added below `Histogram`. A design review measured seven of fourteen
+ * report-shaped surfaces with zero graphical marks and found the actual
+ * cause: `ui/chart.tsx` had per-series primitives (a line, a bar-per-day)
+ * but no per-ROW mark, so every screen built after the handoff that needed
+ * "one number per category" (a Pareto, a per-station deviation) reached for
+ * a table instead. These two close that gap. GOVERNING RULE: each one draws
+ * a number the report already prints — no new statistic, so no new
+ * KPI-DEFINITIONS.md row and no new IFL approval.
  */
 import { useState } from 'react';
 import { W } from '../../lib/words';
 import { Empty } from '../../ui/bits';
-import { Readout, useChartWidth, edgeAnchor } from '../../ui/chart';
+import { Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine } from '../../ui/chart';
 import { fmtDayLong, fmtInt } from '../../lib/fmt';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -208,6 +218,190 @@ export function Histogram({ buckets, unit, label }: { buckets: { bucket: number;
         )}
         <text x={L - 8} y={T + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{fmtInt(max)}</text>
         <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
+      </svg>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- rank & deviation */
+
+export interface RankRow {
+  key: string;
+  label: string;
+  value: number;
+  /** A genuinely flagged row — the ONLY thing allowed to draw in the accent. */
+  flagged?: boolean;
+}
+
+/** Below this many rows a rank or comparison is not a chart, it is one bar. */
+const MIN_MULTIROW = 2;
+
+/**
+ * A ranked horizontal bar list: category, bar, value at the end — the shape
+ * a Pareto or a "top N" belongs in, and the primitive `Rejects.tsx`'s `.bars`
+ * (a CSS grid whose bar is an inline `background` on an `<i>`, app.css:748)
+ * should have been. A `background` does not print with background graphics
+ * off; an SVG `fill`, a presentation attribute rather than a style, does
+ * (see this module's file header and `chart.tsx`'s own one). `.bars` is not
+ * touched here — this is the primitive for screens built from now on.
+ *
+ * The table beside this chart stays the keyboard and screen-reader route
+ * (`chart.tsx:93-95`); this is a second, visual route to numbers the report
+ * already prints, not a replacement for the table.
+ */
+export function RankBars({
+  rows,
+  ariaLabel,
+  valueFmt = fmtInt,
+}: {
+  rows: RankRow[];
+  ariaLabel: string;
+  valueFmt?: (v: number) => string;
+}) {
+  const [box, width] = useChartWidth();
+  if (rows.length < MIN_MULTIROW) return null;
+
+  const L = 168; // label gutter
+  const R = 60; // value gutter
+  const T = 6;
+  const rowH = 28;
+  const barH = 14;
+  const H = T + rows.length * rowH + 6;
+
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
+  // Domain anchored at exactly 0 (not `niceDomain`'s padded lo) so every bar's
+  // length stays exactly proportional to its own value — a rank list is read
+  // by comparing bar lengths to each other, and any padding that shifts the
+  // zero point breaks that comparison.
+  const x = linear([0, max], [L, Math.max(L + 1, width - R)]);
+
+  return (
+    <div ref={box}>
+      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
+        {rows.map((r, i) => {
+          const rowY = T + i * rowH;
+          const barY = rowY + (rowH - barH) / 2;
+          const bw = Math.max(0, x(Math.abs(r.value)) - L);
+          return (
+            <g key={r.key}>
+              <text x={0} y={barY + barH - 3} fontSize="var(--fs-small)" fill="var(--ink)">
+                {r.label}
+              </text>
+              <rect x={L} y={barY} width={bw} height={barH} fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'} />
+              <text x={x(Math.abs(r.value)) + 8} y={barY + barH - 3} fontSize="var(--fs-tick)" fill="var(--muted)">
+                {valueFmt(r.value)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+export interface DeviationRow {
+  key: string;
+  label: string;
+  value: number;
+  /** A genuinely flagged row — the ONLY thing allowed to draw in the accent. */
+  flagged?: boolean;
+}
+
+/**
+ * Signed bars from a zero axis, one per row — "which of these N is off, and
+ * by how much" (a station's bias from the line, a day's deviation from a
+ * target). Draws numbers a report or table already states; it never derives
+ * a new one and never shades a control band — X-bar bands were suppressed
+ * everywhere in this app (commit 0877396) because the limit model does not
+ * fit this process's variable-n subgroups, and that finding is not
+ * reintroduced here under a different name. `threshold`, when given, draws
+ * two labelled `RefLine`s (muted, not accent — the accent is reserved for a
+ * row the caller has actually flagged, never for the line stating the rule).
+ */
+export function DeviationBars({
+  rows,
+  ariaLabel,
+  threshold,
+  thresholdLabel,
+  zeroLabel,
+  valueFmt = fmtSignedG,
+}: {
+  rows: DeviationRow[];
+  ariaLabel: string;
+  /** A symmetric flag distance either side of zero, in the same unit as `value`. */
+  threshold?: number;
+  thresholdLabel?: string;
+  /** Label on the zero line itself — e.g. what "zero" means here (the line mean, a target). */
+  zeroLabel?: string;
+  valueFmt?: (v: number) => string;
+}) {
+  const [box, width] = useChartWidth();
+  if (rows.length < MIN_MULTIROW) return null;
+
+  const H = 220;
+  const L = 48;
+  const R = 8;
+  const T = 18;
+  const B = 40;
+
+  const values = rows.map((r) => r.value);
+  const withThreshold = threshold != null ? [threshold, -threshold] : [];
+  // `0` is always in the values handed to `niceDomain` so the zero axis is
+  // never padded away, whichever side of it every row happens to sit.
+  const [lo, hi] = niceDomain([...values, 0, ...withThreshold], { pad: 0.15 });
+  const y = linear([lo, hi], [H - B, T]);
+  const slot = (width - L - R) / rows.length;
+  const bw = Math.max(4, slot * 0.55);
+  const cx = (i: number) => L + slot * i + slot / 2;
+  const zeroY = y(0);
+  const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / 60))));
+
+  return (
+    <div ref={box}>
+      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
+        {gridValues([lo, hi]).map((v) => (
+          <g key={v}>
+            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
+            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">
+              {valueFmt(v)}
+            </text>
+          </g>
+        ))}
+        {threshold != null && (
+          <>
+            <RefLine y={y(threshold)} x1={L} x2={width - R} label={thresholdLabel} tone="muted" dashed />
+            <RefLine y={y(-threshold)} x1={L} x2={width - R} tone="muted" dashed />
+          </>
+        )}
+        <RefLine y={zeroY} x1={L} x2={width - R} label={zeroLabel} tone="ink" />
+        {rows.map((r, i) => {
+          const barTop = Math.min(zeroY, y(r.value));
+          const h = Math.abs(y(r.value) - zeroY);
+          return (
+            <rect
+              key={r.key}
+              x={cx(i) - bw / 2}
+              y={barTop}
+              width={bw}
+              height={h}
+              fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'}
+            />
+          );
+        })}
+        {rows.map((r, i) =>
+          i % step === 0 || i === rows.length - 1 ? (
+            <text
+              key={`t${r.key}`}
+              x={cx(i)}
+              y={H - B + 16}
+              fontSize="var(--fs-tick)"
+              fill="var(--muted)"
+              textAnchor={edgeAnchor(i, rows.length)}
+            >
+              {r.label}
+            </text>
+          ) : null,
+        )}
       </svg>
     </div>
   );

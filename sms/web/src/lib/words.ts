@@ -738,6 +738,21 @@ export const W = {
     /* The label on the verdict mark — the one ink fill in the application,
        and the only thing that names it. */
     verdict: 'Verdict',
+    /* UX chart-primitives pass (22 Sep 2026), for `RankBars`/`DeviationBars`
+       (report/shared.tsx) — pre-added so the two workers who build report
+       graphics on top of them never need to open this file. Parameterised,
+       not screen-specific: a caller names its own metric and unit, these
+       state what the marks mean without repeating a colour rule in prose. */
+    rankedBy: (metric: string, unit: string) => `Ranked by ${metric}${unit ? `, ${unit}` : ''}.`,
+    deviationScale: (metric: string, unit: string) => `${metric}, in ${unit}, against zero.`,
+    refLineZero: 'Zero line',
+    refLineMean: 'Line mean',
+    refLineThreshold: (what: string) => `Flag threshold — ${what}`,
+    tooFewRows: 'Too few rows to draw a chart here — see the table.',
+    /* A per-day bar series scoped to one shift, for the Shift report — the
+       existing `conesPerDay` caption names no shift, so a chart drawn once
+       per shift needs its own label or two would print identically. */
+    conesPerDayFor: (shift: string) => `Cones per day — ${shift}`,
   } as const,
 
   /* ------------------------------------------------------------------ setup */
