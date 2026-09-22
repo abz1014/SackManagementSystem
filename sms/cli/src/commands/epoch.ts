@@ -19,6 +19,28 @@ import { inFlightProblem, passesInFlight, requireBackupFlag } from '../guards.js
 const asList = (v: unknown): string[] =>
   typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : [];
 
+/**
+ * R-10 fix: build a parameterised `IN (...)` clause instead of interpolating
+ * the epoch id list as a literal string. The ids were already filtered to
+ * `Number.isInteger(n) && n > 0` before this point, so the old string-built
+ * clause was not exploitable in practice — but it was the exact shape this
+ * codebase's own working rules forbid ("parameterised queries only, no
+ * string-concatenated SQL, ever"), and a future edit that relaxed the filter
+ * upstream would have turned a style violation into a real one. `bind` must
+ * be called on every fresh `.request()` that uses `sql`, since mssql inputs
+ * are per-request, not per-connection.
+ */
+export function idInClause(ids: number[]): { sql: string; bind: (req: mssql.Request) => mssql.Request } {
+  const names = ids.map((_, i) => `e${i}`);
+  return {
+    sql: `(${names.map((n) => `@${n}`).join(',')})`,
+    bind: (req) => {
+      ids.forEach((id, i) => req.input(`e${i}`, mssql.Int, id));
+      return req;
+    },
+  };
+}
+
 export async function epochList(): Promise<number> {
   const ctx = await openContext();
   try {
@@ -346,17 +368,18 @@ export async function epochPurge(argv: string[]): Promise<number> {
   const ctx = await openContext();
   try {
     const list = ids.join(',');
-    const counts = await ctx.app.request().query<{ t: string; n: number }>(`
-      SELECT 'sms.cone_event' t, COUNT(*) n FROM sms.cone_event   WHERE source_epoch IN (${list})
-      UNION ALL SELECT 'sms.sack_event',   COUNT(*) FROM sms.sack_event   WHERE source_epoch IN (${list})
-      UNION ALL SELECT 'sms.reject_event', COUNT(*) FROM sms.reject_event WHERE source_epoch IN (${list})
-      UNION ALL SELECT 'sms_raw.cone_raw', COUNT(*) FROM sms_raw.cone_raw WHERE source_epoch IN (${list})
-      UNION ALL SELECT 'sms_raw.sack_raw', COUNT(*) FROM sms_raw.sack_raw WHERE source_epoch IN (${list})
-      UNION ALL SELECT 'sms_raw.reject_qcs_raw',    COUNT(*) FROM sms_raw.reject_qcs_raw    WHERE source_epoch IN (${list})
-      UNION ALL SELECT 'sms_raw.reject_weight_raw', COUNT(*) FROM sms_raw.reject_weight_raw WHERE source_epoch IN (${list})`);
+    const inClause = idInClause(ids);
+    const counts = await inClause.bind(ctx.app.request()).query<{ t: string; n: number }>(`
+      SELECT 'sms.cone_event' t, COUNT(*) n FROM sms.cone_event   WHERE source_epoch IN ${inClause.sql}
+      UNION ALL SELECT 'sms.sack_event',   COUNT(*) FROM sms.sack_event   WHERE source_epoch IN ${inClause.sql}
+      UNION ALL SELECT 'sms.reject_event', COUNT(*) FROM sms.reject_event WHERE source_epoch IN ${inClause.sql}
+      UNION ALL SELECT 'sms_raw.cone_raw', COUNT(*) FROM sms_raw.cone_raw WHERE source_epoch IN ${inClause.sql}
+      UNION ALL SELECT 'sms_raw.sack_raw', COUNT(*) FROM sms_raw.sack_raw WHERE source_epoch IN ${inClause.sql}
+      UNION ALL SELECT 'sms_raw.reject_qcs_raw',    COUNT(*) FROM sms_raw.reject_qcs_raw    WHERE source_epoch IN ${inClause.sql}
+      UNION ALL SELECT 'sms_raw.reject_weight_raw', COUNT(*) FROM sms_raw.reject_weight_raw WHERE source_epoch IN ${inClause.sql}`);
 
-    const meta = await ctx.app.request().query<{ epoch_id: number; label: string; provenance: string }>(
-      `SELECT epoch_id, label, provenance FROM sms.source_epoch WHERE epoch_id IN (${list}) ORDER BY epoch_id`,
+    const meta = await inClause.bind(ctx.app.request()).query<{ epoch_id: number; label: string; provenance: string }>(
+      `SELECT epoch_id, label, provenance FROM sms.source_epoch WHERE epoch_id IN ${inClause.sql} ORDER BY epoch_id`,
     );
     if (meta.recordset.length === 0) {
       console.error(`no such epoch(s): ${list}`);
@@ -403,9 +426,9 @@ export async function epochPurge(argv: string[]): Promise<number> {
       for (const t of targets) {
         let cleared = 0;
         for (;;) {
-          const del = await ctx.app
-            .request()
-            .query(`DELETE TOP (5000) FROM ${t} WHERE source_epoch IN (${list})`);
+          const del = await inClause
+            .bind(ctx.app.request())
+            .query(`DELETE TOP (5000) FROM ${t} WHERE source_epoch IN ${inClause.sql}`);
           const n = del.rowsAffected[0] ?? 0;
           cleared += n;
           if (n === 0) break;
@@ -413,12 +436,12 @@ export async function epochPurge(argv: string[]): Promise<number> {
         if (cleared > 0) console.log(`  cleared ${String(cleared).padStart(9)} from ${t}`);
       }
 
-      await ctx.app.request().query(
+      await inClause.bind(ctx.app.request()).query(
         `UPDATE sms.source_epoch
             SET closed_utc = ISNULL(closed_utc, SYSUTCDATETIME()),
                 note = CONCAT(ISNULL(note, N''), N' Rows purged ',
                               CONVERT(varchar(19), SYSUTCDATETIME(), 126), N'.')
-          WHERE epoch_id IN (${list})`,
+          WHERE epoch_id IN ${inClause.sql}`,
       );
     });
     await ctx.app
