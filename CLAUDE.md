@@ -14,6 +14,8 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 **Phase 2 architecture — [`ARCHITECTURE.md`](ARCHITECTURE.md) — FROZEN BUILD CONTRACT (23 Jul 2026).** Raw→canonical layers, transform versioning, time-versioned attribution, reference-data tables, CDC-safe watermark (overlap window + schema fingerprint), DQ+Operations with severity, generalized+metadata API, CLI verify tool, retention/backup policy. Further architecture changes come from running-code evidence only. Build order: Models→Reader→Transform→CLI→Operations→API→**Dashboard (demo, step 7)**→analyses→Auth→Admin→Hardening.
 
+**Living defect register: [`DEFECTS.md`](DEFECTS.md)** — started 22 Sep 2026, the severity-graded register `ROADMAP-GAP-ANALYSIS.md` §14 named as missing. Check it before claiming "no critical/high unresolved defects."
+
 ## Current phase
 
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
