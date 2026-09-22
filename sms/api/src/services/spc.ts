@@ -11,7 +11,16 @@
  *
  * WHAT WE DO INSTEAD:
  *  1. X̄/S with TIME-BASED rational subgroups. Cones are grouped into short
- *     time buckets (auto-sized to keep ~80 readable points across the range).
+ *     time buckets, auto-sized from the DATA'S OWN occupied span (not the
+ *     requested period's calendar span) to hold ~20 readings each — see
+ *     pickBucketMinutes below. Fixed 21 Sep 2026 (DEFECTS.md D-1): the prior
+ *     "~80 readable points" framing here was aspirational, not measured, and
+ *     the code did not in fact achieve it — a month ran 197x over the
+ *     20-reading target, tightening the per-subgroup control band the chart
+ *     draws `xViolates` from. At this plant's production rate the achievable
+ *     floor is ~80-85 readings/subgroup (see pickBucketMinutes), fairly
+ *     constant across shift/day/week/month once sized correctly — read that
+ *     rather than "readable points" as the real design target now.
  *     The X̄-chart shows whether the LINE MEAN drifts over time; the S-chart
  *     shows whether the spread changes. σ_within is estimated from pooled
  *     within-subgroup variance — a valid short-term σ that (unlike MR here)
@@ -152,6 +161,30 @@ function round(n: number, dp = 2): number {
   return Math.round(n * f) / f;
 }
 
+const NICE: Array<{ minutes: number; label: string }> = [
+  { minutes: 15, label: '15-minute' },
+  { minutes: 30, label: '30-minute' },
+  { minutes: 60, label: 'hourly' },
+  { minutes: 120, label: '2-hour' },
+  { minutes: 240, label: '4-hour' },
+  { minutes: 360, label: '6-hour' },
+  { minutes: 720, label: '12-hour' },
+  { minutes: 1440, label: 'daily' },
+];
+
+const TARGET_PER_SUBGROUP = 20;
+const MIN_BUCKETS = 8;
+// Defensive-only: bounds the realised bucket COUNT (post NICE lookup), never
+// the target-driven desired count. Protects the SQL GROUP BY / payload size
+// on a pathologically long period (far beyond the shift/day/week/month this
+// screen supports) — it does not fight TARGET_PER_SUBGROUP the way the old
+// MAX_BUCKETS=72 clamp on `desiredBuckets` did (see D-1, DEFECTS.md): that
+// clamp bound the desired bucket COUNT, so once a period held much above
+// ~1,440 readings (most shifts, every multi-day period) the cap — not the
+// target — decided bucket width, and subgroups ballooned 8x-197x past
+// TARGET_PER_SUBGROUP in direct proportion to how far volume exceeded it.
+const MAX_REALISED_BUCKETS = 4000;
+
 /**
  * Pick a "nice" bucket size (minutes) so each subgroup holds a STABLE number
  * of events, not merely so the count of buckets looks tidy. Rational subgroups
@@ -159,26 +192,54 @@ function round(n: number, dp = 2): number {
  * reliably; sizing purely by time span breaks on low-rate streams — sacks run
  * ~13× fewer than cones, so a 30-min bucket that holds ~170 cones holds only
  * ~7 sacks (some n=1), producing unstable limits and false out-of-control
- * points. We target ~20 events/subgroup, clamped to a readable bucket count.
+ * points. We target ~20 events/subgroup.
+ *
+ * `occupiedMinutes` is the span the DATA actually occupies, not the calendar
+ * span of the requested period — see the caller. That fixes the other half
+ * of D-1: a single 8-hour shift filtered out of a 24-hour day used to be
+ * sized as if production ran the full 24 hours, inflating the chosen bucket
+ * width (and therefore n_i) by up to 3x before the clamp above even entered
+ * into it.
+ *
+ * HONEST LIMIT, not an oversight: NICE bottoms out at 15 minutes. Below that,
+ * a bucket risks not covering a full cycle of the line's ~14 interleaved
+ * stations (measured cycle ≈ 2.5 min at this line's rate), which is the
+ * "constant station mix per subgroup" assumption stdevWithin is built on (see
+ * file header) — going finer would trade that assumption for a closer-to-20
+ * n_i, which is not a trade this module makes silently. At this plant's
+ * measured rate (~5.5-6 cones/min), a 15-minute bucket holds roughly 80-85
+ * cones — about 4x TARGET_PER_SUBGROUP — REGARDLESS of the requested period's
+ * length, because the production rate is roughly constant: a shift, a day, a
+ * week and a month all land near the same n_i once occupied-span sizing
+ * replaces calendar-span sizing, rather than escalating with period length as
+ * before. See spc.subgroupSizing.test.ts for the measured before/after.
  */
-function pickBucketMinutes(days: number, count: number): { minutes: number; label: string } {
-  const NICE: Array<{ minutes: number; label: string }> = [
-    { minutes: 15, label: '15-minute' },
-    { minutes: 30, label: '30-minute' },
-    { minutes: 60, label: 'hourly' },
-    { minutes: 120, label: '2-hour' },
-    { minutes: 240, label: '4-hour' },
-    { minutes: 360, label: '6-hour' },
-    { minutes: 720, label: '12-hour' },
-    { minutes: 1440, label: 'daily' },
-  ];
-  const totalMinutes = Math.max(1, days) * 24 * 60;
-  const TARGET_PER_SUBGROUP = 20;
-  const MIN_BUCKETS = 8;
-  const MAX_BUCKETS = 72;
-  const desiredBuckets = Math.min(MAX_BUCKETS, Math.max(MIN_BUCKETS, Math.round(count / TARGET_PER_SUBGROUP) || MIN_BUCKETS));
-  const targetMinutes = totalMinutes / desiredBuckets;
-  return NICE.find((b) => b.minutes >= targetMinutes) ?? NICE[NICE.length - 1]!;
+/**
+ * The span used to size buckets, in minutes: the raw (max-min) span of the
+ * filtered population's own timestamps, capped at `occDays * 1440` so a
+ * genuine multi-day gap inside the period (idle days, or — concretely — the
+ * source-generation cutover CLAUDE.md documents as the 10 Jul - 5 Aug data
+ * gap) cannot inflate the span by days that produced nothing. `occDays` is
+ * the count of distinct calendar dates that actually produced a plausible
+ * reading, so `occDays * 1440` is "if the line had run flat out, wall-clock,
+ * on every day that produced anything" — a looser bound than the true
+ * running time (it doesn't know about idle time WITHIN a producing day), but
+ * one cheap COUNT(DISTINCT date) buys it without a second row-scanning query.
+ * Exported for spc.subgroupSizing.test.ts, which pins this against the exact
+ * gap shape found in the live copy.
+ */
+export function occupiedMinutesFor(rawSpanMinutes: number, occDays: number): number {
+  return occDays > 0 ? Math.min(Math.max(rawSpanMinutes, 1), occDays * 1440) : 0;
+}
+
+export function pickBucketMinutes(occupiedMinutes: number, count: number): { minutes: number; label: string } {
+  if (count <= 0 || occupiedMinutes <= 0) return NICE[NICE.length - 1]!;
+  const desiredBuckets = Math.max(MIN_BUCKETS, Math.round(count / TARGET_PER_SUBGROUP));
+  const targetMinutes = occupiedMinutes / desiredBuckets;
+  const chosen = NICE.find((b) => b.minutes >= targetMinutes) ?? NICE[NICE.length - 1]!;
+  const realisedBuckets = Math.max(1, Math.round(occupiedMinutes / chosen.minutes));
+  if (realisedBuckets > MAX_REALISED_BUCKETS) return NICE[NICE.length - 1]!;
+  return chosen;
 }
 
 export async function getSpec(
@@ -317,7 +378,6 @@ export async function getWeightSpc(
   // not bound, or it would be a SQL error rather than an empty chart.
   const stationFilter = type === 'cone' && station != null;
 
-  const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
   // Everything but the plausibility predicate, which plausibleWhere binds per
   // request below (its parameters must be on the request that runs).
   const base =
@@ -338,8 +398,18 @@ export async function getWeightSpc(
   if (stationFilter) sumReq.input('station', mssql.Int, station);
   const sumWhere = whereOn(sumReq);
   const sumRes = await sumReq
-    .query<{ n: number; mean: number | null; sd: number | null; excluded: number | null }>(
+    .query<{
+      n: number;
+      mean: number | null;
+      sd: number | null;
+      excluded: number | null;
+      minTs: Date | null;
+      maxTs: Date | null;
+      occDays: number | null;
+    }>(
       `SELECT COUNT(*) n, AVG(CAST(${col} AS float)) mean, STDEV(CAST(${col} AS float)) sd,
+              MIN(production_ts_utc) minTs, MAX(production_ts_utc) maxTs,
+              COUNT(DISTINCT CAST(production_ts_utc AS date)) occDays,
               (SELECT COUNT(*) FROM ${table} WHERE ${base} AND NOT (${col} BETWEEN @plausLo AND @plausHi)) excluded
        FROM ${table} WHERE ${sumWhere}`,
     );
@@ -367,7 +437,25 @@ export async function getWeightSpc(
 
   // Bucket size depends on the event rate (count), not just the time span —
   // so low-rate sacks get wider buckets and stay statistically stable.
-  const { minutes: bucketMinutes, label: bucketLabel } = pickBucketMinutes(days, count);
+  //
+  // OCCUPIED span, not the requested period's calendar span (D-1): raw
+  // (max-min) captures a narrow filter inside a wide `from`/`to` — a single
+  // shift filtered out of a full `from`/`to` day used to be sized as if
+  // production ran the whole day. Capping that raw span at
+  // `occDays * 1440 minutes` additionally keeps a genuine multi-day
+  // PRODUCTION GAP inside the period (e.g. the source generation cutover —
+  // see CLAUDE.md's "10 Jul – 5 Aug data gap") from inflating the span by the
+  // idle days in the middle: occDays counts only the calendar dates that
+  // actually produced a plausible reading, so the span used for sizing is
+  // bounded by how much the line was actually running, not by how far apart
+  // its first and last reading in the period happen to fall.
+  const rawSpanMinutes =
+    summ.minTs != null && summ.maxTs != null
+      ? (new Date(summ.maxTs).getTime() - new Date(summ.minTs).getTime()) / 60_000
+      : 0;
+  const occDays = Number(summ.occDays ?? 0);
+  const occupiedMinutes = occupiedMinutesFor(rawSpanMinutes, occDays);
+  const { minutes: bucketMinutes, label: bucketLabel } = pickBucketMinutes(occupiedMinutes, count);
 
   // Every later query binds the same filter through the same builder; `where`
   // is the text the builder returns and is identical on every request.
