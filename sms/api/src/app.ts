@@ -1444,6 +1444,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         })
         .safeParse(req.body);
       if (!b.success) {
+        // R-3 fix: every other outcome on this route (disabled, implausible,
+        // pdas_error, error) is audited by pdasWrite.ts's own recordChange —
+        // a validation failure caught here, before pdas.createProduct is
+        // even called, previously wasn't, so a rejected write attempt (e.g.
+        // a too-short retire reason) left no trace at all.
+        void recordAudit(pool, (req as AuthedRequest).user!.userId, 'product.create', 'product', null,
+          `Rejected: invalid request — ${JSON.stringify(b.error.flatten().fieldErrors)}`).catch((e) =>
+          console.error('audit write failed', e),
+        );
         res.status(400).json({ error: 'invalid product', detail: b.error.flatten().fieldErrors });
         return;
       }
@@ -1463,6 +1472,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = z.coerce.number().int().positive().safeParse(req.params.id);
       const b = z.object({ active: z.boolean(), reason: writeReason }).safeParse(req.body);
       if (!id.success || !b.success) {
+        // R-3 fix: see the matching comment on POST /api/products.
+        void recordAudit(pool, (req as AuthedRequest).user!.userId, 'product.set_active', 'product', req.params.id ?? null,
+          'Rejected: invalid request — productId, active and a reason of at least 10 characters are required').catch((e) =>
+          console.error('audit write failed', e),
+        );
         res.status(400).json({ error: 'productId, active and a reason of at least 10 characters are required' });
         return;
       }
@@ -1482,6 +1496,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const id = z.coerce.number().int().positive().safeParse(req.params.id);
       const b = z.object({ before: productFields, after: productFields, reason: writeReason }).safeParse(req.body);
       if (!id.success || !b.success) {
+        // R-3 fix: see the matching comment on POST /api/products.
+        void recordAudit(pool, (req as AuthedRequest).user!.userId, 'product.set_limits', 'product', req.params.id ?? null,
+          'Rejected: invalid request — productId, before, after and a reason of at least 10 characters are required').catch((e) =>
+          console.error('audit write failed', e),
+        );
         res.status(400).json({ error: 'productId, before, after and a reason of at least 10 characters are required' });
         return;
       }

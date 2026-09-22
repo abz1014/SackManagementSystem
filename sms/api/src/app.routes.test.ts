@@ -257,6 +257,46 @@ describe('POST /api/products/:id/active — booleans are booleans', () => {
   });
 });
 
+describe('R-3 fix — a request rejected by validation is still audited', () => {
+  // Before this fix: every outcome pdas.createProduct/setProductActive/
+  // updateProductLimits themselves can return (disabled, implausible,
+  // pdas_error, error) is recorded via pdasWrite.ts's own recordChange, but
+  // a body/params that failed zod validation returned 400 BEFORE any of
+  // those methods was even called — so it left no trace in sms.audit_log at
+  // all, unlike every other rejected write attempt on these same routes.
+  it('POST /api/products with a malformed body writes an audit row naming the rejection', async () => {
+    const before = audits().length;
+    const r = await call('manager', 'POST', '/api/products', { blendId: 'not-a-number' });
+    expect(r.status).toBe(400);
+    const rows = audits();
+    expect(rows.length).toBe(before + 1);
+    const a = rows[rows.length - 1]!;
+    expect(a.inputs.get('action')).toBe('product.create');
+    expect(String(a.inputs.get('detail'))).toMatch(/Rejected: invalid request/);
+  });
+
+  it('POST /api/products/:id/active with too short a reason writes an audit row', async () => {
+    const before = audits().length;
+    const r = await call('manager', 'POST', '/api/products/21/active', { active: false, reason: 'x' });
+    expect(r.status).toBe(400);
+    const rows = audits();
+    expect(rows.length).toBe(before + 1);
+    expect(rows[rows.length - 1]!.inputs.get('action')).toBe('product.set_active');
+  });
+
+  it('POST /api/products/:id/limits with a missing "after" writes an audit row', async () => {
+    const before = audits().length;
+    const r = await call('manager', 'POST', '/api/products/21/limits', {
+      before: { setpointG: 1960, offsetMinusG: 50, offsetPlusG: 50, active: true },
+      reason: 'a perfectly good reason',
+    });
+    expect(r.status).toBe(400);
+    const rows = audits();
+    expect(rows.length).toBe(before + 1);
+    expect(rows[rows.length - 1]!.inputs.get('action')).toBe('product.set_limits');
+  });
+});
+
 describe('POST /api/admin/rules/* — what reaches the database', () => {
   it('weight: inserts a new version with the admin as changed_by and the reason', async () => {
     const r = await call('admin', 'POST', '/api/admin/rules/weight', {
