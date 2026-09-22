@@ -197,3 +197,61 @@ describe('Weight — the headline', () => {
     expect(h1.textContent).not.toContain(W.weight.allStationsSteady);
   });
 });
+
+/**
+ * DEFECTS.md (22 Sep 2026), reacting to D-1 (62263da): correctly sizing SPC
+ * subgroups exposed that the X̄ control band itself does not fit this
+ * process — measured ~16% of subgroups "out of control" at month scale
+ * against an expected ~0.3% for a stable process. The owner's decision was
+ * to suppress the violation/pattern marks and the sentence naming their
+ * counts until the limit model is fixed, while leaving spc.ts's computation
+ * on the wire. This pins that suppression so it cannot quietly come back
+ * before the limit model is actually corrected.
+ */
+describe('Weight — X̄ violation/pattern suppression (DEFECTS.md, 22 Sep 2026)', () => {
+  it('a subgroup with xViolates AND a Nelson pattern draws no accent-fill dot, and no sentence states the violation/pattern counts', async () => {
+    const violating: Envelope<SpcData> = spcFixture(500, 1948);
+    violating.data.xbarOutOfControl = 3;
+    violating.data.nelsonFlagged = 2;
+    violating.data.subgroups = [
+      {
+        ts: '2026-09-07T09:00:00.000Z', n: 82, mean: 1948, s: 3.0,
+        xUcl: 1949, xLcl: 1947, sUcl: 4, sLcl: 2,
+        xViolates: true, sViolates: false, nelson: [2, 3],
+      },
+      {
+        ts: '2026-09-07T09:15:00.000Z', n: 80, mean: 1949, s: 3.1,
+        xUcl: 1949, xLcl: 1947, sUcl: 4, sLcl: 2,
+        xViolates: false, sViolates: false, nelson: [],
+      },
+    ];
+
+    installFakeFetch({
+      '/api/weight-stations': WEIGHT_STATIONS_OK,
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': violating,
+    });
+
+    const { container, findByRole } = render(<WeightScreen {...baseProps()} />);
+    await findByRole('heading', { level: 1 });
+    await waitFor(() => expect(container.querySelectorAll('svg.chart path').length).toBeGreaterThan(0));
+
+    // The dot mark: previously `p.nelson.length > 0 || p.xViolates` drew a
+    // <circle fill="var(--acc-fill)">. With a genuinely violating subgroup in
+    // the fixture, none should be drawn.
+    const accentDots = Array.from(container.querySelectorAll('svg.chart circle')).filter(
+      (c) => c.getAttribute('fill') === 'var(--acc-fill)',
+    );
+    expect(accentDots).toHaveLength(0);
+
+    // The "Over this period" sentence must not assert the band's counts —
+    // that was the same over-claim in words rather than a mark.
+    const bodyText = container.textContent ?? '';
+    expect(bodyText).not.toContain('control band');
+    expect(bodyText).not.toContain('non-random pattern');
+    // And nothing may say the process IS in control either — that would be
+    // the same unsupported claim inverted.
+    expect(bodyText).not.toMatch(/in control/i);
+  });
+});

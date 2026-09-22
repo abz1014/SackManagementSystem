@@ -38,7 +38,7 @@ import {
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
-  getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
+  getSpc, getWeightStations, getStations, getProduction, stationLabel,
   type SpcData, type SpcType, type StationRow, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
@@ -474,11 +474,20 @@ export function WeightScreen({
                 chart toggle now, so its population word and its unit (spc.ts's
                 own `unit`, 'g' for cones or 'kg' for sacks) must too — this
                 used to hardcode "cones" and "g" unconditionally. */}
+            {/* DEFECTS.md (22 Sep 2026): the sentence naming s.xbarOutOfControl /
+                s.nelsonFlagged as counts of flagged groups is removed — it
+                stated the same band D-1 showed does not fit this process (503
+                of ~3,130 subgroups "out of control" at month scale, ~16% vs an
+                expected ~0.3%) as if it were a finding about the line. The two
+                fields stay on the wire (spc.ts) for whoever fixes the limit
+                model; nothing on screen asserts them until then. No replacement
+                sentence is added — see the worker's report for the string this
+                would need if one is wanted (words.ts is owned by another
+                worker this pass). */}
             Over this period: {fmtInt(s.count)} {kindWord(s.unit)}, mean {fmtW(s.mean, s.unit)}
             {s.median != null ? `, median ${fmtW(s.median, s.unit)}` : ''}, standard deviation{' '}
             {s.stdevOverall.toFixed(2)} {s.unit} overall and {s.stdevWithin.toFixed(2)} {s.unit} within{' '}
-            {s.bucketLabel} groups. {s.xbarOutOfControl} group averages fell outside the control band and{' '}
-            {s.nelsonFlagged} carried a non-random pattern.
+            {s.bucketLabel} groups.
             {s.capability.cpk != null && ` Cp ${s.capability.cp?.toFixed(2)}, Cpk ${s.capability.cpk.toFixed(2)}.`}
           </p>
         )}
@@ -652,12 +661,17 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
       <Readout
         hovered={
           h
-            // The pattern named on hover (roadmap Phase 9 item 3): the rule
-            // labels were defined for the UI and never rendered — this read
-            // "non-random pattern" for every one of the eight.
-            ? `${tickLabel(h.ts, multiDay)} · ${fmtW(h.mean, spc.unit)}, the average of ${fmtInt(h.n)} ${kindWord(spc.unit)}${
-                h.nelson.length ? ` · ${W.calibration.patternOn(h.nelson.map((id) => NELSON_RULE_LABEL[id]).join(', '))}` : h.xViolates ? ` · ${W.calibration.patternOn(NELSON_RULE_LABEL[1])}` : ''
-              }`
+            // DEFECTS.md (22 Sep 2026, reacting to D-1/62263da): this used to
+            // append a "non-random pattern" clause driven by h.nelson/h.xViolates
+            // — both are zone tests against the SAME per-subgroup X̄ control
+            // limits (grandMean ± 3·σ_within/√n) that D-1 showed do not fit this
+            // process (16% of points "out of control" at month scale against an
+            // expected ~0.3%). Rule 1 (xViolates) and rules 2-8 (nelson) share
+            // that one band, so both are suppressed together here, not just
+            // xViolates alone. The per-station drift sparkline below uses a
+            // wholly separate day-level computation (calibration.ts) and is
+            // untouched — see the dated note on its own dot rendering.
+            ? `${tickLabel(h.ts, multiDay)} · ${fmtW(h.mean, spc.unit)}, the average of ${fmtInt(h.n)} ${kindWord(spc.unit)}`
             : null
         }
         resting={`${g.length} groups of about ${fmtInt(Math.round(avgN))} ${kindWord(spc.unit)}${
@@ -672,9 +686,12 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
         {limitLine(spc.spec.lsl, `lower limit ${fmtW(spc.spec.lsl, spc.unit)}`)}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
         <path d={linePath(g.map((p, i) => ({ x: x(i), y: y(p.mean) })))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
-        {g.map((p, i) =>
-          p.nelson.length > 0 || p.xViolates ? <circle key={i} cx={x(i)} cy={y(p.mean)} r={4} fill="var(--acc-fill)" /> : null,
-        )}
+        {/* DEFECTS.md (22 Sep 2026): violation/pattern dots (p.xViolates, rule 1,
+            and p.nelson, rules 2-8) suppressed — both are zone tests against
+            the same per-subgroup X̄ band D-1 showed does not fit this process
+            (503 flagged of ~3,130 subgroups at month scale, ~16% vs an
+            expected ~0.3%). The computation stays on the wire in spc.ts;
+            nothing here draws it until the limit model is fixed. */}
         {g.map((_, i) => (
           <rect key={`h${i}`} className="hit" x={x(i) - (width - L - R) / Math.max(1, g.length) / 2}
                 y={T} width={(width - L - R) / Math.max(1, g.length)} height={H - T - B}
