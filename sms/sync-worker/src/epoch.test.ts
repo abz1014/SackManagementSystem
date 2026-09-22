@@ -104,6 +104,37 @@ describe('resolveEpoch', () => {
     source.createdKey = null;
     await expect(resolveEpoch(appPool, iflPool, def, 1, iflDb)).rejects.toThrow(/Cannot read create_date/);
   });
+
+  // D-8 fix (22 Sep 2026): migration 025 defined last_seen_utc but nothing
+  // ever wrote it. resolveEpoch is the one place that has already proven,
+  // this pass, that the source IS the open generation — so it is the right
+  // place to stamp it.
+  it('stamps last_seen_utc on the resolved epoch once identity and schema both match', async () => {
+    const statements: { sql: string; inputs: Map<string, unknown> }[] = [];
+    const trackingPool = {
+      request: () => {
+        const inputs = new Map<string, unknown>();
+        const req = {
+          input: (name: string, _t: unknown, value: unknown) => {
+            inputs.set(name, value);
+            return req;
+          },
+          query: async (sql: string) => {
+            statements.push({ sql, inputs: new Map(inputs) });
+            return { recordset: openRows };
+          },
+        };
+        return req;
+      },
+    } as unknown as ConnectionPool;
+
+    await resolveEpoch(trackingPool, iflPool, def, 1, iflDb);
+
+    const upd = statements.find((s) => /UPDATE sms\.source_epoch SET last_seen_utc/.test(s.sql));
+    expect(upd).toBeDefined();
+    expect(upd!.sql).toMatch(/WHERE epoch_id = @id/);
+    expect(upd!.inputs.get('id')).toBe(OPEN.epoch_id);
+  });
 });
 
 describe('readSourceIdentity', () => {

@@ -169,6 +169,16 @@ export async function resolveEpoch(
   // means. See observeArchivedFloor for what a rise vs a fall does.
   await observeArchivedFloor(appPool, iflPool, def, open);
 
+  // D-8 fix (22 Sep 2026): stamp last_seen_utc now that the identity and
+  // schema checks above have proven the source is still this generation —
+  // migration 025 defined the column but nothing ever wrote it, so
+  // System History showed it as permanently blank. Reached once per table
+  // per pass, so this is a cheap single-row UPDATE, not a hot-path cost.
+  await appPool
+    .request()
+    .input('id', mssql.Int, open.epoch_id)
+    .query(`UPDATE sms.source_epoch SET last_seen_utc = SYSUTCDATETIME() WHERE epoch_id = @id`);
+
   return open;
 }
 
