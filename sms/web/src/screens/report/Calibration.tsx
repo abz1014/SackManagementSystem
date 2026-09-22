@@ -15,10 +15,22 @@ import { W } from '../../lib/words';
 import { Block, Empty, SkelLines } from '../../ui/bits';
 import { fmtAppInstant, fmtInt } from '../../lib/fmt';
 import { listAdjustments, stationLabel, type CalibrationAdjustment, type CalibrationReportData, type StationRow } from '../../api';
-import { fmtG1, fmtSignedG } from './shared';
+import { DeviationBars, fmtG1, fmtSignedG, type DeviationRow } from './shared';
 
 export function CalibrationSection({ d, names }: { d: CalibrationReportData; names: StationRow[] }) {
   const nameOf = (n: number | null) => (n == null ? W.reports.wholeLine : stationLabel(names.find((s) => s.stationId === n), n));
+  // This report's own subject is drift against TARGET (not against the
+  // line), so the bar is `vsTargetG` — the same column the table already
+  // prints — with the reference lines at the same `thresholdG` that feeds
+  // the "flagged" column.
+  const devRows: DeviationRow[] = d.stations
+    .filter((s) => s.vsTargetG != null)
+    .map((s) => ({
+      key: String(s.station),
+      label: nameOf(s.station),
+      value: s.vsTargetG as number,
+      flagged: s.flagged,
+    }));
   return (
     <>
       <Block first>
@@ -37,6 +49,13 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
 
       {d.stations.length > 0 && (
         <Block label={W.reports.colStation}>
+          <DeviationBars
+            rows={devRows}
+            ariaLabel={W.report.deviationScale(W.reports.colVsTarget, 'g')}
+            threshold={d.thresholdG}
+            thresholdLabel={W.report.refLineThreshold(fmtSignedG(d.thresholdG))}
+            zeroLabel={W.report.refLineZero}
+          />
           <div className="tw">
             <table>
               <thead>

@@ -3,7 +3,7 @@ import { W } from '../../lib/words';
 import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
 import { fmtAppInstant, fmtInt, fmtPct1 } from '../../lib/fmt';
 import { stationLabel, type StationReportData, type StationRow } from '../../api';
-import { fmtG1, fmtSignedG, StateCells, StateHeads } from './shared';
+import { DeviationBars, fmtG1, fmtSignedG, StateCells, StateHeads, type DeviationRow } from './shared';
 
 /**
  * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.6):
@@ -23,6 +23,14 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
   }
   const nameOf = (n: number) => stationLabel(names.find((s) => s.stationId === n), n);
   const targetNote = d.targetG != null ? W.reports.target(fmtG1(d.targetG), d.productLabel ?? '') : W.reports.noTarget;
+  // The bar IS `vsLineG`, already the "vs line" column; the threshold IS
+  // `thresholdG`, already the input to the "flagged" column. Nothing new.
+  const devRows: DeviationRow[] = d.rows.map((r) => ({
+    key: String(r.station),
+    label: nameOf(r.station),
+    value: r.vsLineG ?? 0,
+    flagged: r.flagged,
+  }));
   return (
     <>
       <Block first>
@@ -33,6 +41,13 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
         <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>
       </Block>
       <Block label={W.reports.colStation}>
+        <DeviationBars
+          rows={devRows}
+          ariaLabel={W.report.deviationScale(W.reports.colVsLine, 'g')}
+          threshold={d.thresholdG}
+          thresholdLabel={W.report.refLineThreshold(fmtSignedG(d.thresholdG))}
+          zeroLabel={W.report.refLineZero}
+        />
         <div className="tw">
           <table>
             <thead>
