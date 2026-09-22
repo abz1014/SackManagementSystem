@@ -18,7 +18,7 @@
  *
  * UX Phase 8 Brief C (21 Sep 2026).
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import { installFakeFetch, type RouteRequest } from '../testkit/fetchRouter';
 import { renderWithLive } from '../testkit/render';
@@ -27,6 +27,19 @@ import { W } from '../lib/words';
 import { fmtInt } from '../lib/fmt';
 import type { Period } from '../lib/period';
 import { ReadingsScreen } from './Readings';
+
+// `fetchRouter.ts`'s own contract: "a test that installs its own router must
+// restore it itself ... or rely on Vitest's own vi.unstubAllGlobals() in a
+// project-wide afterEach, which this repo does not configure." This file
+// calls installFakeFetch() fresh inside every `it()` without ever restoring
+// it (found during the D-7 flake hunt, DEFECTS.md — not itself the D-7
+// mechanism, but a real violation of the same contract). Harmless today
+// because each `it()` reinstalls a full route set before rendering, but a
+// stacked, never-restored fake fetch is exactly the kind of latent
+// cross-test contamination that race was hard to diagnose because of.
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const PERIOD: Period = {
   key: 'shift',

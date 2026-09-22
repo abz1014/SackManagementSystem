@@ -213,7 +213,7 @@ export function WeightScreen({
     <>
       <div className="page">
         <p className="q">{W.question.weight}</p>
-        <h1 className="wide">{headline(d, sLine, coneLine.error)}</h1>
+        <h1 className="wide">{headline(d, sLine, coneLine.error, coneLine.loading)}</h1>
       </div>
 
       <Block first>
@@ -508,7 +508,12 @@ export function WeightScreen({
 
 /* --------------------------------------------------------------- headline */
 
-function headline(d: WeightStationsData | null, s: SpcData | null, coneLineError?: string | null): string {
+function headline(
+  d: WeightStationsData | null,
+  s: SpcData | null,
+  coneLineError?: string | null,
+  coneLineLoading?: boolean,
+): string {
   // UX Phase 7 Brief 1: a FAILED /api/spc fetch used to fall through to the
   // `!s` branch below and print "No cones were weighed in this period" — the
   // app asserting an empty plant when the true state is "the request failed
@@ -518,6 +523,27 @@ function headline(d: WeightStationsData | null, s: SpcData | null, coneLineError
   // failure (coneLineError set but `s` still holding the last good answer)
   // is not this case — that falls through to the ordinary headline below.
   if (coneLineError && !s) return W.couldNotLoad;
+  // DEFECTS.md D-7 (captured 22 Sep 2026, fixed here): `s` reads exactly the
+  // same — null, no error — while `coneLine` is genuinely still loading as it
+  // does the instant after its poll KEY changes (`usePolling` deliberately
+  // clears stale data/error on a key change, `lib/live.tsx`'s
+  // `keepDataAcrossKeyChange`, so a refetch for a new question never shows
+  // the old question's answer or its error under a new heading). `coneLine`'s
+  // own key is `productId`-dependent, and `productId` itself arrives from a
+  // SEPARATE fetch (`getWeightStations`, `st` above) — so the moment `st`
+  // resolves after `coneLine`'s first attempt has already failed, `coneLine`
+  // restarts: for one render `error` and `data` are both null although a real
+  // failure was just observed and a real refetch is already in flight. Before
+  // this check, that render fell into the `!s` branch below and asserted "No
+  // cones were weighed" — a failed fetch reading as an empty plant, the exact
+  // defect class UX Phase 7 exists to close, just reached through a race
+  // instead of a permanent failure. `loading` is set `true` in the very same
+  // state batch that clears `data`/`error` on a key change (`live.tsx`'s
+  // effect calls `setData(null); setError(null); ...; setLoading(true)`
+  // together before the new fetch starts), so checking it here distinguishes
+  // "no answer yet" from "no cones exist" without touching `usePolling`
+  // itself or any other of its ~20 consumers.
+  if (coneLineLoading && (!s || s.count === 0)) return W.loading;
   // `s` is non-null but EMPTY for a period that holds no readings: /api/spc
   // answers with count 0 and mean 0 rather than with nothing at all, so `!s`
   // alone only ever catches loading and error. Without the count check this

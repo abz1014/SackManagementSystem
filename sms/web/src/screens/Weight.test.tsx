@@ -15,8 +15,8 @@
  *
  * UX Phase 8 Brief C (21 Sep 2026).
  */
-import { describe, expect, it } from 'vitest';
-import { waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, waitFor, within } from '@testing-library/react';
 import { installFakeFetch } from '../testkit/fetchRouter';
 import { render } from '../testkit/render';
 import { META_FIXTURE } from '../testkit/fixtures';
@@ -25,6 +25,19 @@ import { fmtG } from '../lib/fmt';
 import type { Period } from '../lib/period';
 import type { Envelope, SpcData, WeightStationsData, ProductionData } from '../api';
 import { WeightScreen } from './Weight';
+
+// `fetchRouter.ts`'s own contract: "a test that installs its own router must
+// restore it itself ... or rely on Vitest's own vi.unstubAllGlobals() in a
+// project-wide afterEach, which this repo does not configure." This file
+// calls installFakeFetch() fresh inside every `it()` without ever restoring
+// it (found during the D-7 flake hunt, DEFECTS.md — not itself the D-7
+// mechanism, but a real violation of the same contract). Harmless today
+// because each `it()` reinstalls a full route set before rendering, but a
+// stacked, never-restored fake fetch is exactly the kind of latent
+// cross-test contamination that race was hard to diagnose because of.
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const PERIOD: Period = {
   key: 'shift',
@@ -158,6 +171,112 @@ describe('Weight — the headline', () => {
 
     await waitFor(() => expect(h1.textContent).toBe(W.couldNotLoad));
     expect(h1.textContent).not.toContain('No cones were weighed in this period.');
+  });
+
+  /**
+   * DEFECTS.md D-7 (captured 22 Sep 2026, fixed alongside this test): the
+   * original flake needed a lucky Promise-resolution order across 124 test
+   * files' worth of scheduler contention to become visible (roughly 1 in 74
+   * full-suite runs). This test does not rely on luck: it holds `coneLine`'s
+   * SECOND `/api/spc` call open on a promise this test controls, so the
+   * exact intermediate render the race produces — `coneLine`'s key just
+   * changed, its error/data just cleared, its refetch still in flight — can
+   * be inspected directly and deterministically, on demand, every run.
+   *
+   * Mechanism reproduced: the screen's own top-of-screen guard
+   * (`Weight.tsx:196`, `if (!st.data && !st.error) return <ScreenSkeleton/>`)
+   * means the heading cannot exist at all until `/api/weight-stations` (`st`)
+   * has resolved at least once, so the race is not reachable on first mount
+   * (`productId` cannot visibly go null → real before the heading exists).
+   * It IS reachable the way a real user hits it: `st` fails first
+   * (`productId` stays `null`, the guard opens because `st.error` is set,
+   * and the Stations block's own `Failed`+retry appears, `Weight.tsx:412`),
+   * `coneLine`'s first `/api/spc` attempt (key `...:none`) also fails, and
+   * THEN the user retries the stations fetch, which this time succeeds with
+   * a real `productId`. `coneLine`'s poll key (`Weight.tsx:131`) carries
+   * that `productId`, so the retry's success changes the key from `...:none`
+   * to `...:231` the moment it lands, clearing `coneLine`'s own (real,
+   * already-observed) error while its second attempt — held open here — is
+   * still in flight.
+   */
+  it('deterministic: coneLine\'s error is cleared by a productId-driven key change while its refetch is still in flight — the heading must not read as empty', async () => {
+    // `WeightScreen` fires TWO independent `usePolling` calls against
+    // `/api/spc` with identical query params whenever `chartType === 'cone'`
+    // and `chartStation === null` (this fixture's props) — `coneLine`
+    // (feeds the headline) and `spc` (feeds the chart). Both carry
+    // `productId` in their key, so both experience the same key-change race
+    // at the same time; the fake router cannot tell their requests apart
+    // (same pathname, same query string), so this test tracks /api/spc calls
+    // as one combined count rather than pretending to isolate `coneLine`'s.
+    let statsCalls = 0;
+    let spcCallCount = 0;
+    let rejectHeldSpc!: (e: Error) => void;
+    const heldSpcPromise = new Promise<never>((_, rej) => {
+      rejectHeldSpc = rej;
+    });
+    // vitest/node would otherwise report this as an unhandled rejection the
+    // instant it settles, before the test's own `await` reaches it below.
+    heldSpcPromise.catch(() => {});
+
+    installFakeFetch({
+      '/api/weight-stations': () => {
+        statsCalls += 1;
+        if (statsCalls === 1) throw new Error('plant connection down');
+        return WEIGHT_STATIONS_OK;
+      },
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': () => {
+        spcCallCount += 1;
+        // Calls 1-2: coneLine's and spc's first attempts, both key
+        // `...:none` (weight-stations hasn't resolved yet) — fail fast, the
+        // way the flake capture's mock did.
+        if (spcCallCount <= 2) throw new Error('plant connection down');
+        // Calls 3+: coneLine's and spc's refetches after the key changes to
+        // `...:231` — held open deliberately so the cleared-but-not-yet-
+        // answered render can be inspected on demand rather than hoped for.
+        return heldSpcPromise;
+      },
+    });
+
+    const { container, findByRole } = render(<WeightScreen {...baseProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+
+    // First render: /api/weight-stations already failed (st.error, no
+    // productId) and both /api/spc calls failed too (key `...:none`) — the
+    // `couldNotLoad` state the original flake's `waitFor` observed.
+    await waitFor(() => expect(h1.textContent).toBe(W.couldNotLoad));
+    expect(statsCalls).toBe(1);
+    expect(spcCallCount).toBe(2);
+
+    // Retry the stations fetch (the Stations block's own Failed+retry). This
+    // time it succeeds and carries productId: 231, changing coneLine's (and
+    // spc's) key the instant it lands — while coneLine's error from its
+    // first /api/spc rejection is still showing on screen.
+    const stationsSection = within(container).getByText(W.weight.stationsTable).closest('section');
+    if (!stationsSection) throw new Error('Stations block not found');
+    fireEvent.click(within(stationsSection).getByRole('button', { name: W.retry }));
+
+    // Wait for both post-retry /api/spc calls to have been issued — proof
+    // the key change happened and coneLine's refetch is now in flight. Per
+    // `keepDataAcrossKeyChange` (`lib/live.tsx`), coneLine's error and data
+    // are cleared the instant this happens, before this call answers.
+    await waitFor(() => expect(spcCallCount).toBe(4));
+
+    // THE ASSERTION: with the post-retry /api/spc calls deliberately held
+    // open, coneLine has no error (cleared by the key change) and no data
+    // (never had any) — exactly "loading", not "empty". Before this pass's
+    // fix, `headline()` could not tell the two apart and asserted the
+    // honest-empty sentence about a plant it had not actually checked. This
+    // state is stable (the held-open promise means nothing further updates
+    // it), so a direct synchronous check is the honest assertion — a
+    // `waitFor` wrapping it would only obscure a real failure as a timeout.
+    expect(h1.textContent).not.toBe('No cones were weighed in this period.');
+
+    // Resolve the held-open calls (rejecting, like their predecessors) and
+    // confirm the headline settles back to the true failure state.
+    rejectHeldSpc(new Error('plant connection down'));
+    await waitFor(() => expect(h1.textContent).toBe(W.couldNotLoad));
   });
 
   it('/api/spc RESOLVES with count 0: headline IS the honest-empty sentence', async () => {

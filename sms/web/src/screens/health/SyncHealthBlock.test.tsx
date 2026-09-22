@@ -14,12 +14,25 @@
  *
  * UX Phase 8 Brief C (21 Sep 2026).
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installFakeFetch } from '../../testkit/fetchRouter';
 import { renderWithLive } from '../../testkit/render';
 import { LIVE_FIXTURE, OPERATIONS_FIXTURE } from '../../testkit/fixtures';
 import { W } from '../../lib/words';
 import { SyncHealthBlock } from './SyncHealthBlock';
+
+// `fetchRouter.ts`'s own contract: "a test that installs its own router must
+// restore it itself ... or rely on Vitest's own vi.unstubAllGlobals() in a
+// project-wide afterEach, which this repo does not configure." This file
+// calls installFakeFetch() fresh inside every `it()` without ever restoring
+// it (found during the D-7 flake hunt, DEFECTS.md — not itself the D-7
+// mechanism, but a real violation of the same contract). Harmless today
+// because each `it()` reinstalls a full route set before rendering, but a
+// stacked, never-restored fake fetch is exactly the kind of latent
+// cross-test contamination that race was hard to diagnose because of.
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('SyncHealthBlock — /api/operations blocking-findings figure', () => {
   it('REJECTS: reads dqBlockingCouldNotLoad, and the page never prints the bare "None" it used to show blind', async () => {
