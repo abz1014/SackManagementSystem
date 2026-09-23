@@ -479,6 +479,23 @@ function issueFor(dataIssues: ProductionDataIssue[] | undefined, field: Producti
   return !!dataIssues?.some((i) => i.field === field && i.group === group);
 }
 
+/**
+ * True when `field` is not a key of `r` at all — a structural hole the
+ * SERVER never had the chance to name in `dataIssues` (WS-CH, 23 Sep 2026
+ * red-team remediation). `dataIssues` only ever reports what the server's own
+ * query noticed was missing; a key deleted downstream of that — a stale
+ * cache entry, a partial write, a proxy, a truncated response — reaches the
+ * client as a row that is otherwise well-formed but simply does not carry
+ * the key. `r?.cones ?? 0` cannot tell that apart from a genuine 0, because
+ * `?? 0` treats "absent" and "present as 0" identically. This is the client's
+ * OWN check, independent of and in addition to `issueFor` above — see
+ * `missingField.fuzz.test.tsx`'s Line KNOWN_DEFECTS entry for the shape this
+ * closes: a stripped key with an EMPTY `dataIssues` array.
+ */
+function fieldMissing(r: ProductionRow | null, field: keyof ProductionRow): boolean {
+  return r != null && !(field in r);
+}
+
 function periodFigures(
   r: ProductionRow | null,
   states: StateCounts | null,
@@ -493,9 +510,11 @@ function periodFigures(
   // so a bare `?? 0` here cannot tell that 0 from a genuine empty period.
   // Each figure checks its own field(s) and shows a dash with a caveat
   // instead of asserting the server's placeholder as a measurement.
-  const conesUnreadable = issueFor(dataIssues, 'cones', group);
-  const sacksUnreadable = issueFor(dataIssues, 'sacks', group) || issueFor(dataIssues, 'sackWeightKg', group);
-  const rejectedUnreadable = issueFor(dataIssues, 'rejectedCones', group);
+  const conesUnreadable = issueFor(dataIssues, 'cones', group) || fieldMissing(r, 'cones');
+  const sacksUnreadable =
+    issueFor(dataIssues, 'sacks', group) || issueFor(dataIssues, 'sackWeightKg', group)
+    || fieldMissing(r, 'sacks') || fieldMissing(r, 'sackWeightKg');
+  const rejectedUnreadable = issueFor(dataIssues, 'rejectedCones', group) || fieldMissing(r, 'rejectedCones');
 
   const cones = r?.cones ?? 0;
   const rejected = r?.rejectedCones ?? 0;
@@ -586,8 +605,11 @@ function kpiBlockNote(
   // same period; this note is what must stop that reading as "nothing was
   // made" when the true answer is "the server could not read part of it".
   const group = r?.group ?? null;
+  // Same two-part check as periodFigures above: a server-flagged issue OR a
+  // structurally missing key, so this note and the figures it sits beside
+  // can never disagree about whether the row was actually readable.
   const anyUnreadable = (['cones', 'sacks', 'rejectedCones'] as const)
-    .some((f) => issueFor(dataIssues, f, group));
+    .some((f) => issueFor(dataIssues, f, group) || fieldMissing(r, f));
   if (anyUnreadable) return W.dataIssueThisPeriod;
   const cones = r?.cones ?? 0;
   const sacks = r?.sacks ?? 0;

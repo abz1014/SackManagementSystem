@@ -73,6 +73,21 @@ import {
  */
 const never = (): Promise<never> => new Promise<never>(() => {});
 
+/**
+ * The SAME guard as Sacks.tsx's own `finiteOrNull` (WS-B2, 23 Sep 2026) —
+ * reused here rather than reinvented, per this pass's brief. `q.totalRejects
+ * + w.totalRejects` is arithmetic done on two independently-polled fields
+ * BEFORE either is formatted; a stripped `totalRejects` (a stale cache entry,
+ * a partial write, the exact shape `missingField.fuzz.test.tsx`'s Rejects
+ * KNOWN_DEFECTS entry names) turns the sum into `NaN`. `fmtInt`/`fmtPct1`'s
+ * own `n == null` guard does not catch it — `NaN == null` is `false` — so an
+ * un-guarded `NaN` walks straight past formatting onto the screen as the
+ * literal word "NaN". This turns that specific NaN into `null` so it falls
+ * into the SAME `CountState`/dash handling a missing fetch already uses,
+ * never a fabricated number.
+ */
+const finiteOrNull = (n: number): number | null => (Number.isFinite(n) ? n : null);
+
 /** What the by-day table hands the reason sheet. */
 export interface ReasonRef {
   day: string;
@@ -261,10 +276,24 @@ export function RejectsScreen({
    * when BOTH series have answered, so there is no longer any way to compute
    * a rate from a denominator one of them was going to supply.
    */
+  // WS-CH (23 Sep 2026 red-team remediation, defect 2): `q`/`w` being
+  // non-null only proves the FETCH answered, not that every field on the
+  // envelope it carried survived intact — `finiteOrNull` is what actually
+  // catches a stripped `totalRejects` turning this sum into `NaN`. A `NaN`
+  // sum is treated the same as a fetch that has not answered: no fabricated
+  // count, no fabricated rate, same `CountState` the loading/failed states
+  // already use.
+  const rejectSum = q && w ? finiteOrNull(q.totalRejects + w.totalRejects) : null;
+  // `q && w` both truthy but `rejectSum` null means the fetches answered and
+  // still could not be trusted — the same "explicit could not load" bucket a
+  // genuine fetch failure uses (Failed's own `error == null` case renders
+  // `W.couldNotLoad` plus Retry), never the silent `pending` a poll still in
+  // flight uses. `figuresFailed` alone missed this: both polls are `error:
+  // null` on a 200 with a hole in it.
   const rejectCount: CountState =
-    q && w
-      ? { kind: 'ok', n: q.totalRejects + w.totalRejects }
-      : figuresFailed
+    rejectSum != null
+      ? { kind: 'ok', n: rejectSum }
+      : figuresFailed || (q != null && w != null)
         ? { kind: 'failed' }
         : { kind: 'pending' };
   /**
@@ -284,7 +313,12 @@ export function RejectsScreen({
    * population `rejectRateThreeWayAgreement.test.ts` pins report.ts,
    * weightStations.ts and rejectSpc.ts's own p-chart to on the server side.
    */
-  const inspected = q && w ? q.generations.reduce((sum, g) => sum + g.totalInspected, 0) : null;
+  // Same guard as `rejectSum` above: a stripped `totalInspected` on any one
+  // generation row poisons the whole `reduce` into `NaN`, which `inspected >
+  // 0` below would pass straight through (`NaN > 0` is `false`... but so is
+  // `NaN === 0`, and neither branch of a strict comparison is a safe place to
+  // discover a NaN silently) — `finiteOrNull` catches it explicitly instead.
+  const inspected = q && w ? finiteOrNull(q.generations.reduce((sum, g) => sum + g.totalInspected, 0)) : null;
   const ratePct =
     rejectCount.kind === 'ok' && inspected != null && inspected > 0
       ? (100 * rejectCount.n) / inspected
@@ -398,7 +432,14 @@ export function RejectsScreen({
                 <div className="skel fig" />
               ) : (
                 <>
-                  <b className="fig-val">{topReason.row ? `${Math.round(topReason.row.pct)}%` : '—'}</b>
+                  {/* Same class of hole as rejectCount above, on a field this
+                      screen does not otherwise guard: `Math.round(undefined)`
+                      is `NaN`, and the template literal below has no
+                      `fmtInt`/`fmtPct1` in front of it to catch that — the
+                      literal string "NaN%" would print instead of a dash. */}
+                  <b className="fig-val">
+                    {topReason.row && finiteOrNull(topReason.row.pct) != null ? `${Math.round(topReason.row.pct)}%` : '—'}
+                  </b>
                   <span className="fig-note">
                     {topReason.row ? M.topReasonThisPeriod(reasonName(topReason.row)) : W.rejects.none}
                   </span>
