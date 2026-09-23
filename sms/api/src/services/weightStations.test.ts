@@ -12,6 +12,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
+import { fakePositionalPool, ONE_REAL_GENERATION } from '../testkit/generations.js';
 
 // The dependencies getWeightStations pulls in are all DB-backed; stub them so
 // the test exercises the rate arithmetic and nothing else.
@@ -60,13 +61,14 @@ const { getWeightStations } = await import('./weightStations.js');
  * since the 23 Sep 2026 denominator correction — the unmatched-reject
  * counts grouped by station, with station-less rows under `__no_station__`.
  */
+// WS-A1 (23 Sep 2026): wraps testkit's fakePositionalPool so every existing
+// varargs call site (`fakePool([], [...], ...)`) is untouched — the two
+// scope queries `resolveGenerationScope` now issues inside
+// rejectRatesByStation/stationMaterialCounts are answered transparently from
+// ONE_REAL_GENERATION and consume no response slot. See
+// testkit/generations.ts's own header for why this beats a rewrite.
 function fakePool(...responses: unknown[][]): ConnectionPool {
-  let i = 0;
-  const req = {
-    input: () => req,
-    query: async () => ({ recordset: responses[i++] ?? [] }),
-  };
-  return { request: () => req } as unknown as ConnectionPool;
+  return fakePositionalPool(ONE_REAL_GENERATION, responses).pool;
 }
 
 describe('getWeightStations — line reject rate (finding H2)', () => {

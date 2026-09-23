@@ -69,6 +69,18 @@ import { resolvePeriodTarget } from './reports/common.js';
 import { driftThresholdG, MIN_DAYS_HELD } from './attention.js';
 import { consecutiveProductionDays } from './plantClock.js';
 import { getUnmatchedRejects } from './rejects.js';
+// WS-A1 (23 Sep 2026, red-team remediation): this file's own reject-rate
+// queries — rejectRatesByStation's per-station/totals SQL and
+// stationMaterialCounts — read sms.cone_event/sms.reject_event with NO
+// generation predicate at all, so a window spanning IFL's 2026-08-05 table
+// rebuild (or, on this dev copy, the plant simulator's overlapping
+// DATA_TP1U2_SIM generation) pools two physical generations of a table whose
+// identities both start at 1. Each function resolves ITS OWN scope —
+// generation.ts's file header explains why that is safe: keyed on
+// (lineId, from, to) only, so two independent resolves over the same window
+// are guaranteed to agree — rather than threading one scope object through
+// this file's signatures.
+import { andEpoch, epochWhere, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 /**
  * Group key for unmatched rejects that carry no station id. A literal that
@@ -339,6 +351,15 @@ export interface WeightStationsData {
   stations: WeightStationRow[];
   /** The pattern rules, with the run length each needs, for naming a flag and stating which could not fire. */
   rules: NelsonRuleInfo[];
+  /**
+   * WS-A1 (23 Sep 2026): which source generation `lineRejectRatePct`, every
+   * station's `rejectRatePct` and `targetBasis: 'station_material'` counts
+   * were confined to, and what was left out — `rejectRatesByStation`'s own
+   * resolve. `stationMaterialCounts` resolves the SAME generation
+   * independently (generation.ts's guarantee: keyed on (lineId, from, to)
+   * only), so one note describes both.
+   */
+  generationNote: GenerationNote;
 }
 
 const sign = (n: number) => (n > 0 ? 1 : n < 0 ? -1 : 0);
@@ -434,6 +455,7 @@ export async function getWeightStations(
   ]);
   const rejects = rejectStats.rates;
   const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility);
+  const generationNote = rejectStats.generationNote;
 
   const active = drift.stations.filter((s) => s.n > 0);
   const totalN = active.reduce((s, x) => s + x.n, 0);
@@ -610,6 +632,7 @@ export async function getWeightStations(
     lineRejectRatePct,
     stations,
     rules: drift.rules ?? [],
+    generationNote,
   };
 }
 
@@ -627,12 +650,22 @@ async function stationMaterialCounts(
   to: string,
   plausibility: PlausibilityRule,
 ): Promise<Map<number, { materialId: number | null; n: number }[]>> {
+  // WS-A1: this function's own scope, resolved independently of
+  // rejectRatesByStation's (see this file's import header) — the two are
+  // guaranteed to agree over the same (lineId, from, to) by construction.
+  const scope = await resolveGenerationScope(pool, lineId, { from, to });
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const plaus = plausibleWhere(req, 'weight_g', { loG: plausibility.coneLoG, hiG: plausibility.coneHiG });
+  const where = andEpoch(
+    `line_id=@line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL AND ${plaus}`,
+    req,
+    scope,
+    'cone_event',
+  );
   const r = await req.query<{ st: number; mat: number | null; n: number }>(
     `SELECT source_station st, material_id mat, COUNT(*) n
        FROM sms.cone_event
-      WHERE line_id=@line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL AND ${plaus}
+      WHERE ${where}
       GROUP BY source_station, material_id`,
   );
   const out = new Map<number, { materialId: number | null; n: number }[]>();
@@ -686,23 +719,36 @@ export async function rejectRatesByStation(
   lineId: number,
   from: string,
   to: string,
-): Promise<{ rates: Map<number, number>; totalCones: number; totalRejects: number; totalUnmatchedRejects: number }> {
-  const r = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
-    .query<{ st: number; cones: number; rejects: number }>(`
+): Promise<{
+  rates: Map<number, number>;
+  totalCones: number;
+  totalRejects: number;
+  totalUnmatchedRejects: number;
+  /** WS-A1, 23 Sep 2026: this function's own generation scope — see this file's import header. */
+  generationNote: GenerationNote;
+}> {
+  // Resolved ONCE and reused for every query below (the per-station query,
+  // the totals query, and the getUnmatchedRejects call) so this function's
+  // own three queries cannot land on different generations of the same
+  // window — but NOT shared with stationMaterialCounts's own resolve (see
+  // that function), which is the point: each service/function resolves for
+  // itself rather than threading one object across the file's exports.
+  const scope = await resolveGenerationScope(pool, lineId, { from, to });
+
+  const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
+  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, scope, 'cone_event', { prefix: 'wsc' });
+  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, scope, 'reject_event', { prefix: 'wsr' });
+  const r = await req.query<{ st: number; cones: number; rejects: number }>(`
       WITH c AS (
         SELECT source_station AS st, COUNT(*) AS n
           FROM sms.cone_event
-         WHERE line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL
+         WHERE ${coneWhere}
          GROUP BY source_station
       ),
       r AS (
         SELECT source_station AS st, COUNT(*) AS n
           FROM sms.reject_event
-         WHERE line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL
+         WHERE ${rejWhere}
          GROUP BY source_station
       )
       SELECT COALESCE(c.st, r.st) AS st, COALESCE(c.n, 0) AS cones, COALESCE(r.n, 0) AS rejects
@@ -720,17 +766,15 @@ export async function rejectRatesByStation(
    * disagreed the moment such a row appeared. Today there are none in the
    * real data, which is exactly why this had gone unnoticed.
    */
-  const totals = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to)
-    .query<{ cones: number; rejects: number }>(`
+  const totalsReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
+  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, scope, 'cone_event', { prefix: 'wstc' });
+  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, scope, 'reject_event', { prefix: 'wstr' });
+  const totals = await totalsReq.query<{ cones: number; rejects: number }>(`
       SELECT
         (SELECT COUNT(*) FROM sms.cone_event
-          WHERE line_id = @line AND shift_date BETWEEN @from AND @to) AS cones,
+          WHERE ${coneTotalsWhere}) AS cones,
         (SELECT COUNT(*) FROM sms.reject_event
-          WHERE line_id = @line AND shift_date BETWEEN @from AND @to) AS rejects`);
+          WHERE ${rejTotalsWhere}) AS rejects`);
   const t = totals.recordset[0];
 
   /**
@@ -740,11 +784,21 @@ export async function rejectRatesByStation(
    * see this function's header. Grouped by station with the station-less
    * rows collected under `NO_STATION` so a single query answers both the
    * per-station denominators and the line total.
+   *
+   * WS-A1, 23 Sep 2026: `scope` is now carried onto the filter bag, so both
+   * sides of getUnmatchedRejects's own NOT EXISTS match — the reject_event
+   * side (bindRejectFilters -> andEpoch) and the cone_event side it matches
+   * against (the `um`-prefixed epochWhere already in rejects.ts) — are
+   * confined to THIS function's own resolved generation. Before this, a
+   * reject in one generation could be "matched" by a cone in another that
+   * happened to share (production_ts_utc_ms, hanger_num) — the audit's own
+   * planning note; see this file's `weightStations.generations.test.ts` for
+   * the proof.
    */
   const unmatchedOf = await getUnmatchedRejects(
     pool,
     lineId,
-    { from, to },
+    { from, to, scope },
     `ISNULL(CAST(re.source_station AS varchar(12)), '${NO_STATION}')`,
   );
   let totalUnmatchedRejects = 0;
@@ -768,5 +822,6 @@ export async function rejectRatesByStation(
     totalCones: Number(t?.cones ?? 0),
     totalRejects: Number(t?.rejects ?? 0),
     totalUnmatchedRejects,
+    generationNote: noteOf(scope),
   };
 }

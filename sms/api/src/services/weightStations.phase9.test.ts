@@ -7,6 +7,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
+import { fakePositionalPool, ONE_REAL_GENERATION } from '../testkit/generations.js';
 
 const day = (date: string, mean: number, nelson: number[] = []) => ({ date, n: 600, mean, nelson });
 
@@ -53,13 +54,14 @@ vi.mock('./productLimits.js', () => ({
 const { getWeightStations } = await import('./weightStations.js');
 const { nelsonRuleTable } = await import('./nelson.js');
 
+// WS-A1 (23 Sep 2026): wraps testkit's fakePositionalPool so every existing
+// varargs call site (`fakePool([], [...], ...)`) is untouched — the two
+// scope queries `resolveGenerationScope` now issues inside
+// rejectRatesByStation/stationMaterialCounts are answered transparently from
+// ONE_REAL_GENERATION and consume no response slot. See
+// testkit/generations.ts's own header for why this beats a rewrite.
 function fakePool(...responses: unknown[][]): ConnectionPool {
-  let i = 0;
-  const req = {
-    input: () => req,
-    query: async () => ({ recordset: responses[i++] ?? [] }),
-  };
-  return { request: () => req } as unknown as ConnectionPool;
+  return fakePositionalPool(ONE_REAL_GENERATION, responses).pool;
 }
 
 describe('getWeightStations — Phase 9 columns and the projection', () => {
