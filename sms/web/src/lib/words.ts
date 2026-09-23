@@ -2029,6 +2029,17 @@ export const W = {
     stockBasis: 'Line-level stock; no sack is attributed to a machine.',
     /* Calibration report. */
     stationsFlagged: (n: number) => (n === 1 ? '1 station flagged for drift' : `${n} stations flagged for drift`),
+    /* WS-OR (23 Sep 2026 red-team remediation, missingField.fuzz.test.tsx):
+       `stationsFlagged(n)` was interpolated with no null guard, so a
+       stripped `flaggedStationCount` on an otherwise-real 200 response made
+       `n === 1` false and fell to the else branch, printing the literal
+       string "undefined stations flagged for drift" — worse than a
+       confident zero, since it does not even read as a plausible count.
+       Reworded as a full sentence for this report's one-line summary, the
+       same idiom `Weight.tsx`'s `countCouldNotRead` and `Line.tsx`'s
+       `fig.couldNotRead` already use for "state the absence, never a
+       number". */
+    stationsFlaggedUnknown: 'How many stations are flagged for drift could not be read this period.',
     colDaysFlagged: 'Days flagged',
     colAdjustments: 'Adjustments',
     adjustments: 'Adjustments in the period',

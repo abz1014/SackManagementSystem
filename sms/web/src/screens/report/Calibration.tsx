@@ -39,7 +39,14 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
         ) : (
           <>
             <p className="g">
-              {W.reports.stationsFlagged(d.flaggedStationCount)} · {W.reports.lineMean(fmtG1(d.lineMeanG))}
+              {/* WS-OR (23 Sep 2026 red-team remediation, missingField.fuzz.test.tsx):
+                  no null guard here meant a stripped `flaggedStationCount` on an
+                  otherwise-real 200 fell through `n === 1` to the else branch and
+                  printed the literal "undefined stations flagged for drift" — the
+                  same "state the absence, never a number" rule Line.tsx's
+                  `fig.couldNotRead` and Weight.tsx's `countCouldNotRead` already
+                  apply elsewhere, reworded as a full sentence for this summary. */}
+              {d.flaggedStationCount != null ? W.reports.stationsFlagged(d.flaggedStationCount) : W.reports.stationsFlaggedUnknown} · {W.reports.lineMean(fmtG1(d.lineMeanG))}
               {d.targetG != null ? ` · ${W.reports.target(fmtG1(d.targetG), d.productLabel ?? '')}` : ` · ${W.reports.noTarget}`}
             </p>
             <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>

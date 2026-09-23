@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from '../../testkit/render';
 import { installFakeFetch } from '../../testkit/fetchRouter';
 import { CalibrationSection } from './Calibration';
+import { W } from '../../lib/words';
 import type { CalibrationReportData, CalibrationStationRow } from '../../api';
 
 function stationRow(n: number, vsTargetG: number, flagged: boolean): CalibrationStationRow {
@@ -98,5 +99,31 @@ describe('CalibrationSection', () => {
     expect(bodyRows.length).toBe(14);
     const heads = stationTable.querySelectorAll('thead th');
     expect(heads.length).toBe(10);
+  });
+
+  /**
+   * WS-FZ finding (missingField.fuzz.test.tsx, 23 Sep 2026): with
+   * `flaggedStationCount` absent from an otherwise-real, non-empty report,
+   * `W.reports.stationsFlagged(d.flaggedStationCount)`'s `n === 1` check was
+   * false for `undefined`, so the template fell to its else branch and
+   * printed the literal string "undefined stations flagged for drift" —
+   * worse than a confident zero, since it does not even read as a plausible
+   * count. Fixed by guarding the null case the same way `Weight.tsx`'s
+   * `countCouldNotRead` names an unreadable count in a full-sentence
+   * headline, rather than assuming an implicit `?? 0`.
+   */
+  it('flaggedStationCount MISSING on an otherwise-real report: never prints the literal "undefined", states the count could not be read', () => {
+    const d = { ...fixture(), flaggedStationCount: undefined as unknown as number };
+    const { container } = renderSection(d);
+    expect(container.textContent ?? '').not.toContain('undefined stations flagged for drift');
+    expect(container.textContent ?? '').not.toContain('undefined');
+    expect(container.textContent ?? '').toContain(W.reports.stationsFlaggedUnknown);
+  });
+
+  it('two-sided partner: flaggedStationCount PRESENT as the real number 0 still reads as "0 stations flagged for drift"', () => {
+    const d = { ...fixture(), flaggedStationCount: 0 };
+    const { container } = renderSection(d);
+    expect(container.textContent ?? '').toContain('0 stations flagged for drift');
+    expect(container.textContent ?? '').not.toContain(W.reports.stationsFlaggedUnknown);
   });
 });
