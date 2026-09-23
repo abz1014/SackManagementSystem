@@ -140,7 +140,7 @@ vi.mock('../context.js', async () => {
   };
 });
 
-const { epochAccept } = await import('./epoch.js');
+const { epochAccept, epochDrop } = await import('./epoch.js');
 
 beforeEach(() => {
   world.app = fakePool();
@@ -357,5 +357,47 @@ describe('sms epoch:accept — a generation must say what it is (epoch 13 regres
     expect(insert).toBeDefined();
     expect(insert!.inputs.get('prov')).toBe('simulator');
     expect(insert!.inputs.get('db')).toBe('DATA_TP1U2_SIM');
+  });
+});
+
+/**
+ * R-10, the instance the first sweep missed. `epochDrop` interpolated its
+ * `--epoch=N` straight into five statements as a SQL literal — four COUNTs and
+ * the DELETE that removes the epoch row. `Number.isInteger(id) && id > 0` above
+ * it meant it was never exploitable, but working rule 3 admits no "unless it is
+ * a number" exemption, and a future edit relaxing that filter upstream would
+ * have turned a style violation into a real one. These assert the parameterised
+ * shape rather than the guard, so removing the guard cannot make them pass.
+ */
+describe('sms epoch:drop — parameterised, never a literal id', () => {
+  it('the row-count probe binds the id and carries no bare number', async () => {
+    const code = await epochDrop(['--epoch=13']);
+    expect(code).toBe(2); // no --confirm: would-delete only
+    const probe = world.app.statements.find((s) => /FROM sms_raw\.cone_raw/.test(s.sql));
+    expect(probe).toBeDefined();
+    expect(probe!.sql).not.toMatch(/source_epoch = 13/);
+    expect(probe!.sql).toMatch(/source_epoch IN \(@e0\)/);
+    expect(probe!.inputs.get('e0')).toBe(13);
+  });
+
+  it('the DELETE binds the id too, and only runs with --confirm', async () => {
+    expect(await epochDrop(['--epoch=13'])).toBe(2);
+    expect(world.app.statements.some((s) => /^DELETE FROM sms\.source_epoch/.test(s.sql.trim()))).toBe(false);
+
+    world.app = fakePool();
+    expect(await epochDrop(['--epoch=13', '--confirm'])).toBe(0);
+    const del = world.app.statements.find((s) => /^DELETE FROM sms\.source_epoch/.test(s.sql.trim()));
+    expect(del).toBeDefined();
+    expect(del!.sql).not.toMatch(/epoch_id = 13/);
+    expect(del!.sql).toMatch(/epoch_id IN \(@e0\)/);
+    expect(del!.inputs.get('e0')).toBe(13);
+  });
+
+  it('no CLI statement anywhere in epoch:drop interpolates a value into its SQL text', async () => {
+    await epochDrop(['--epoch=13', '--confirm']);
+    expect(world.app.statements.length).toBeGreaterThan(0);
+    for (const s of world.app.statements) {
+      expect(s.sql).not.toMatch(/(source_epoch|epoch_id)\s*(=|IN \()\s*\d/);
+    }
   });
 });

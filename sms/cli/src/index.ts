@@ -16,7 +16,14 @@ function help(): void {
   sms sync                          run one full pass (reader→raw→transform→canonical)
   sms verify [--weights]            reconcile source ⇄ raw ⇄ canonical; list DQ findings
                                     (--weights: also COUNT/SUM/AVG/MIN/MAX of every weight column)
-  sms summary [--date=YYYY-MM-DD]   print totals (cones/rejects/sacks/weight) [--shift=]
+  sms summary [--date=YYYY-MM-DD] [--shift=] [--epoch=N[,M]]
+                                    print totals (cones/rejects/sacks/weight), ONE BLOCK PER
+                                    SOURCE GENERATION covering that date. Until 23 Sep 2026 it
+                                    had no epoch predicate and pooled overlapping generations
+                                    into one number silently. --epoch= narrows the scope and
+                                    names what it excluded; unlike rebuild's it is optional,
+                                    because this command is read-only and reports rather than
+                                    refusing.
   sms rebuild --table=<t> --snapshot-id=<id> (--epoch=N[,M] | --all-generations) --confirm
                                     delete a canonical table's rows for the NAMED source
                                     generation(s) and re-derive them from sms_raw.* (which is

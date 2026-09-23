@@ -541,11 +541,20 @@ export async function epochDrop(argv: string[]): Promise<number> {
   }
   const ctx = await openContext();
   try {
-    const c = await ctx.app.request().query<{ n: number }>(`
-      SELECT (SELECT COUNT(*) FROM sms_raw.cone_raw          WHERE source_epoch = ${id})
-           + (SELECT COUNT(*) FROM sms_raw.sack_raw          WHERE source_epoch = ${id})
-           + (SELECT COUNT(*) FROM sms_raw.reject_qcs_raw    WHERE source_epoch = ${id})
-           + (SELECT COUNT(*) FROM sms_raw.reject_weight_raw WHERE source_epoch = ${id}) AS n`);
+    // R-10 again, in the one command the original sweep missed (23 Sep 2026).
+    // These five statements interpolated `${id}` straight into the SQL as a
+    // literal. The `Number.isInteger(id) && id > 0` guard above meant it was
+    // not exploitable — but working rule 3 is "parameterised queries only, no
+    // string-concatenated SQL, ever", with no exemption for values that happen
+    // to be numbers, and this is the exact shape `idInClause` was written to
+    // remove. Fixed with that helper rather than by adding a second guard:
+    // another guard defends this line, the helper defends the pattern.
+    const inClause = idInClause([id]);
+    const c = await inClause.bind(ctx.app.request()).query<{ n: number }>(`
+      SELECT (SELECT COUNT(*) FROM sms_raw.cone_raw          WHERE source_epoch IN ${inClause.sql})
+           + (SELECT COUNT(*) FROM sms_raw.sack_raw          WHERE source_epoch IN ${inClause.sql})
+           + (SELECT COUNT(*) FROM sms_raw.reject_qcs_raw    WHERE source_epoch IN ${inClause.sql})
+           + (SELECT COUNT(*) FROM sms_raw.reject_weight_raw WHERE source_epoch IN ${inClause.sql}) AS n`);
     const rows = Number(c.recordset[0]?.n ?? 0);
     if (rows > 0) {
       console.error(
@@ -558,7 +567,9 @@ export async function epochDrop(argv: string[]): Promise<number> {
       console.log(`would delete epoch ${id} (0 rows attached). Re-run with --confirm.`);
       return 2;
     }
-    await ctx.app.request().query(`DELETE FROM sms.source_epoch WHERE epoch_id = ${id}`);
+    await inClause
+      .bind(ctx.app.request())
+      .query(`DELETE FROM sms.source_epoch WHERE epoch_id IN ${inClause.sql}`);
     console.log(`deleted epoch ${id}`);
     return 0;
   } finally {
