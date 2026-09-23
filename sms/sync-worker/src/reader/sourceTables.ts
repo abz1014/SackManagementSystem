@@ -33,6 +33,32 @@ import { TABLE_SHAPES, TABLE_KINDS, rawShortName, type IflTableDef, type TableKi
 /** A plain SQL Server identifier — what a source table name must be to be bracket-quoted safely. */
 export const SOURCE_TABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
+/**
+ * The one gate every value of `sms.source_table.source_table` passes before it
+ * leaves this module, whichever loader read it.
+ *
+ * 23 Sep 2026. `defsFromRows` has applied `SOURCE_TABLE_NAME` since roadmap
+ * Phase 1, and `lineConfig.updateSourceTable` applies the same pattern on
+ * write — so the name that reaches `[${def.sourceTable}]` in the reader, in
+ * `epoch.ts` and in `verify.ts` was already validated at both ends.
+ * `loadSourceStreams` was the ONE exit from this module that returned the same
+ * operator-editable column without the check. Its callers today
+ * (`runTransform.ts`, `cli rebuild`) only bind it as a parameter or print it,
+ * so nothing was exploitable — but the next caller to interpolate it would
+ * have had no way to know that, and working rule 3 admits no "the current
+ * callers happen to bind it" exemption. Validated here, once, so the property
+ * belongs to the module rather than to a reading of its call sites.
+ */
+export function assertSourceTableName(name: string, lineId: number, kind: string): string {
+  if (!SOURCE_TABLE_NAME.test(name)) {
+    throw new Error(
+      `refusing to build SQL with an unsafe source table name: ${JSON.stringify(name)} ` +
+        `(line ${lineId}, kind ${kind}) — sms.source_table.source_table must be a plain SQL Server identifier`,
+    );
+  }
+  return name;
+}
+
 /** One row of sms.source_table joined to its data source, as the query returns it. */
 export interface SourceTableRow {
   kind: string;
@@ -65,12 +91,7 @@ export function defsFromRows(rows: SourceTableRow[], lineId: number): IflTableDe
           `worker has no column shape for (known: ${TABLE_KINDS.join(', ')}).`,
       );
     }
-    if (!SOURCE_TABLE_NAME.test(r.source_table)) {
-      throw new Error(
-        `refusing to build SQL with an unsafe source table name: ${JSON.stringify(r.source_table)} ` +
-          `(line ${lineId}, kind ${r.kind}) — sms.source_table.source_table must be a plain SQL Server identifier`,
-      );
-    }
+    assertSourceTableName(r.source_table, lineId, r.kind);
     const shape = TABLE_SHAPES[r.kind];
     if (r.raw_table !== shape.rawTable) {
       throw new Error(
@@ -166,7 +187,10 @@ export async function loadSourceStreams(
     const row = byKind.get(k);
     const systemCode = row?.system_code ?? fallback;
     if (!systemCode) throw noSourceTablesError(lineId);
-    out[k] = { systemCode, sourceTable: row?.source_table ?? rawShortName(TABLE_SHAPES[k].rawTable) };
+    // Same gate as defsFromRows: this loader returns the operator-editable
+    // column too, and a caller cannot tell the two loaders' outputs apart.
+    const name = row?.source_table ?? rawShortName(TABLE_SHAPES[k].rawTable);
+    out[k] = { systemCode, sourceTable: assertSourceTableName(name, lineId, k) };
   }
   return out;
 }

@@ -123,4 +123,35 @@ describe('loadSourceStreams — the system code and table name per kind, for the
     const pool = fakePool([]);
     await expect(loadSourceStreams(pool, 2)).rejects.toThrow(/No source tables are configured for line 2/);
   });
+
+  /**
+   * 23 Sep 2026. `sms.source_table.source_table` is operator-editable through
+   * Setup › Sources and is INTERPOLATED, bracket-quoted, wherever it reaches
+   * SQL — T-SQL cannot bind an identifier. `defsFromRows` has checked it since
+   * roadmap Phase 1 and `lineConfig.updateSourceTable` checks it on write, but
+   * `loadSourceStreams` read the same column and returned it unchecked. Its
+   * callers today bind it as a parameter (`cli rebuild`) or print it
+   * (`runTransform`), so nothing was exploitable — the point is that the next
+   * caller to interpolate it would have had no way to know that, and the two
+   * loaders' outputs are indistinguishable to a caller.
+   */
+  it('refuses an unsafe table name from this loader too, not only from defsFromRows', async () => {
+    const pool = fakePool([
+      { needle: 'FROM sms.source_table st', rows: [{ ...ROWS[0]!, source_table: 'pack1]; DROP TABLE x; --' }] },
+      { needle: "WHERE role = 'acquisition'", rows: [{ system_code: 'ifl_sql' }] },
+    ]);
+    await expect(loadSourceStreams(pool, 1)).rejects.toThrow(/unsafe source table name/);
+  });
+
+  it('refuses a schema-qualified name here as well — one gate, one pattern, both loaders', async () => {
+    const bad = fakePool([
+      { needle: 'FROM sms.source_table st', rows: [{ ...ROWS[0]!, source_table: 'dbo.pack1_TP1U2' }] },
+      { needle: "WHERE role = 'acquisition'", rows: [{ system_code: 'ifl_sql' }] },
+    ]);
+    await expect(loadSourceStreams(bad, 1)).rejects.toThrow(/plain SQL Server identifier/);
+    // …and the identical row is refused by the other loader, so the two agree.
+    expect(() => defsFromRows([{ ...ROWS[0]!, source_table: 'dbo.pack1_TP1U2' }], 1)).toThrow(
+      /plain SQL Server identifier/,
+    );
+  });
 });

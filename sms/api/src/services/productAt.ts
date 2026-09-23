@@ -33,6 +33,7 @@ import { classifyConeDetail, isPlausibleWeight, type ConeState } from '@sms/shar
 import { toPlantMs } from './plantClock.js';
 import { getPlausibilityRule } from './admin.js';
 import type { ProductCatalogue } from './productLimits.js';
+import { resolveGenerationScope, epochWhere, noteOf, type GenerationNote } from './generation.js';
 
 export interface ProductInForce {
   productId: number;
@@ -368,6 +369,12 @@ export interface ProductDisagreement {
   judged: number;
   /** Cones in the window with no product in force — stated, never assumed. */
   unjudged: number;
+  /**
+   * The source generation these four counts were taken over, and what was
+   * excluded (generation.ts). Optional per that module's contract: missing
+   * means "not stated", never "nothing was excluded".
+   */
+  generationNote?: GenerationNote;
 }
 
 export interface DayRange {
@@ -426,6 +433,16 @@ export interface DayRange {
  *
  * `catalogue` is optional so older callers keep their behaviour (timeline
  * only, applied to every row); every caller should pass one.
+ *
+ * ONE SOURCE GENERATION (23 Sep 2026, generation.ts). Every window above is
+ * app-owned and TIME-versioned — the limits in force at a reading's own
+ * instant. A source generation is not a time range: two generations can cover
+ * the same production days, so pooling them judges both generations' cones
+ * against the same versioned limits and reports the disagreement as one
+ * count. The four numbers this returns are then a ratio over a population
+ * that exists in no single source table, which is the defect the report
+ * builders were constrained for in ca34a23 — and this one is read on the
+ * attention list, where it decides whether the line is FLAGGED.
  */
 export async function productDisagreement(
   pool: ConnectionPool,
@@ -451,6 +468,9 @@ export async function productDisagreement(
   // the plausibility bound is not a product-limits concept and applies to
   // the base population regardless of where the windows came from.
   const plausibility = await getPlausibilityRule(pool, lineId);
+  // Resolved on line and day range only — never on `range.shift` — so the
+  // shift breakdown and the period total land on the same generation.
+  const scope = await resolveGenerationScope(pool, lineId, { from: range.from, to: range.to }, ['cone_event']);
 
   const req = pool
     .request()
@@ -494,6 +514,8 @@ export async function productDisagreement(
   const isOutside = outside.length ? `(${outside.join(' OR ')})` : '1 = 0';
   const isInside = inside.length ? `(${inside.join(' OR ')})` : '1 = 0';
 
+  const epochPredicate = epochWhere(req, scope, 'cone_event');
+
   const r = await req.query<{ total: number; judged: number; passedOut: number; rejectedIn: number }>(
     `SELECT COUNT(*) AS total,
             SUM(CASE WHEN in_range IS NOT NULL AND ${judgeable} THEN 1 ELSE 0 END) AS judged,
@@ -503,6 +525,7 @@ export async function productDisagreement(
       WHERE line_id = @line AND shift_date BETWEEN @from AND @to
         ${range.shift ? 'AND shift_code = @shift' : ''}
         ${range.tsTo ? 'AND production_ts_utc_ms <= @tsTo' : ''}
+        ${epochPredicate ? `AND ${epochPredicate}` : ''}
         AND weight_g BETWEEN @plausLo AND @plausHi`,
   );
   const row = r.recordset[0];
@@ -513,5 +536,6 @@ export async function productDisagreement(
     rejectedButInside: Number(row?.rejectedIn ?? 0),
     judged,
     unjudged: Math.max(0, total - judged),
+    generationNote: noteOf(scope),
   };
 }

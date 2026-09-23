@@ -72,12 +72,47 @@ import type { ConnectionPool } from 'mssql';
 import {
   loadSourceTables,
   readSourceIdentity,
+  assertSourceTableName,
+  TABLE_SHAPES,
   type IflTableDef,
   type SourceIdentity,
 } from '@sms/sync-worker';
 import { openContext, parseArgs, cliLog, cliVersion, type Ctx } from '../context.js';
 
 type TableDef = IflTableDef;
+
+/**
+ * IDENTIFIERS AT THE POINT OF USE (23 Sep 2026).
+ *
+ * This command interpolates three kinds of identifier into SQL, because
+ * T-SQL cannot bind an identifier: `def.sourceTable` (:168, :297),
+ * `def.rawTable` (:179, :317, :354, :371, :379) and `CANONICAL[].table` /
+ * `.typeFilter` (:191, :373, :377). Only the FIRST of the three comes from a
+ * database row an operator can edit — `sms.source_table.source_table`,
+ * writable from Setup › Sources at rank ≥ 4. The other two are module
+ * constants here and in `iflTables.ts`.
+ *
+ * That name is already validated twice: on write by
+ * `lineConfig.updateSourceTable`, and on read by `defsFromRows`, which is the
+ * only way `loadSourceTables` can return a def at all. This third check is
+ * DEFENCE IN DEPTH, not a missing gate — it costs one regex per table per run
+ * and it makes the safety of ten interpolations below visible in this file
+ * rather than inferable only by following an import into another package. It
+ * also pins `rawTable` to the compile-time set, so a def hand-built in a
+ * future refactor cannot reach a `FROM ${def.rawTable}` unchecked.
+ */
+function assertSafeDefs(defs: TableDef[], lineId: number): TableDef[] {
+  for (const d of defs) {
+    assertSourceTableName(d.sourceTable, lineId, d.key);
+    if (d.rawTable !== TABLE_SHAPES[d.key].rawTable) {
+      throw new Error(
+        `refusing to build SQL with an unexpected raw table: ${JSON.stringify(d.rawTable)} ` +
+          `(line ${lineId}, kind ${d.key}) — the raw table of a kind is fixed by migration.`,
+      );
+    }
+  }
+  return defs;
+}
 
 /** Where each raw table lands in canonical. reject_event is fed by TWO raw tables. */
 const CANONICAL: Record<TableDef['key'], { table: string; typeFilter: string }> = {
@@ -527,7 +562,7 @@ export async function verify(args: string[] = []): Promise<number> {
     // Phase 1), loaded here as the worker loads them at the start of a pass.
     // A line with none is the same halt the worker records: there is nothing
     // to reconcile, and saying so is the verdict.
-    const tables = await loadSourceTables(ctx.app, line);
+    const tables = assertSafeDefs(await loadSourceTables(ctx.app, line), line);
 
     // (b) The generations this line knows about.
     const epochs = (

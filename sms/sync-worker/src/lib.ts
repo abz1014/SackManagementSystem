@@ -34,6 +34,8 @@ export {
   loadSourceTables,
   loadSourceStreams,
   noSourceTablesError,
+  assertSourceTableName,
+  SOURCE_TABLE_NAME,
   type SourceStream,
 } from './reader/sourceTables.js';
 export {

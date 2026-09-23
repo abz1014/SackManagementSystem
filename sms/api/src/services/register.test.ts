@@ -92,7 +92,22 @@ describe('getEventDetail — two epochs sharing a source_row_id (§4.2)', () => 
  * the `AS prov_*` aliases the query asks for. It also records the SQL, so a
  * test can pin that the columns come from the epoch row and not from
  * anywhere else.
+ *
+ * `sms.source_epoch` as this sidecar actually holds it, for the epoch ids the
+ * fixtures below use — so the generation fold is tested against the real
+ * shape: one generation owns one epoch row PER SOURCE TABLE (3 and 4 are both
+ * generation 1's reject tables), and epoch 13 is the simulator recorded as
+ * `ifl_copy`, which is left standing deliberately.
  */
+const EPOCH_REGISTRY: Record<number, { source_db: string; ordinal: number; provenance: string }> = {
+  1: { source_db: 'DATA_TP1U2', ordinal: 1, provenance: 'ifl_copy' },
+  3: { source_db: 'DATA_TP1U2', ordinal: 1, provenance: 'ifl_copy' },
+  4: { source_db: 'DATA_TP1U2', ordinal: 1, provenance: 'ifl_copy' },
+  9: { source_db: 'DATA_TP1U2_SEP07', ordinal: 3, provenance: 'ifl_copy' },
+  11: { source_db: 'DATA_TP1U2_SEP07', ordinal: 3, provenance: 'ifl_copy' },
+  13: { source_db: 'DATA_TP1U2_SIM', ordinal: 4, provenance: 'ifl_copy' },
+};
+
 function registerPool(rows: Row[], sqlSeen: string[] = []): ConnectionPool {
   const mk = () => {
     const params = new Map<string, unknown>();
@@ -103,6 +118,26 @@ function registerPool(rows: Row[], sqlSeen: string[] = []): ConnectionPool {
       },
       query: async (sql: string) => {
         sqlSeen.push(sql);
+        // The register's count is a GROUP BY source_epoch since 23 Sep 2026
+        // (RegisterPage's header). Answered here the way SQL Server would:
+        // one row per distinct epoch, carrying that epoch's own registration.
+        if (/AS epoch_id/.test(sql) && /GROUP BY/.test(sql)) {
+          const by = new Map<number | null, Row[]>();
+          for (const r of rows) {
+            const e = (r.source_epoch as number | null) ?? null;
+            by.set(e, [...(by.get(e) ?? []), r]);
+          }
+          return {
+            recordset: [...by.entries()].map(([epoch_id, rs]) => ({
+              epoch_id,
+              source_db: EPOCH_REGISTRY[epoch_id ?? -1]?.source_db ?? null,
+              generation_ordinal: EPOCH_REGISTRY[epoch_id ?? -1]?.ordinal ?? null,
+              provenance: EPOCH_REGISTRY[epoch_id ?? -1]?.provenance ?? null,
+              label: (rs[0]!.prov_epoch_label as string | null) ?? null,
+              n: rs.length,
+            })),
+          };
+        }
         if (/SELECT COUNT\(\*\) n/.test(sql)) return { recordset: [{ n: rows.length }] };
         const m = /AND\s+(?:\w+\.)?(\w+)\s*=\s*@id\b/.exec(sql);
         const hit = m ? rows.filter((r) => r[m[1]!] === params.get('id')) : rows;
@@ -125,7 +160,7 @@ const SEPT_CONE_FULL: Row = {
   prov_source_row_id: 5, prov_raw_id: 275_113, prov_source_insert_utc: new Date('2026-09-07T03:30:51Z'),
   prov_ingested_at_utc: new Date('2026-09-07T03:31:02.417Z'), prov_ingest_run_id: 'C0FFEE00-0000-4000-8000-000000000001',
   prov_transform_version: 2, prov_attribution_method: 'source_column', prov_attribution_confidence: 'high',
-  prov_night_belongs_to: 'start_day',
+  prov_night_belongs_to: 'start_day', prov_epoch_id: 9,
 };
 // A quality reject transformed BEFORE the worker's Phase 3 change: migration
 // 029 added the attribution columns, nothing has filled them yet.
@@ -136,7 +171,7 @@ const OLD_REJECT: Row = {
   prov_source_row_id: 31, prov_raw_id: 31, prov_source_insert_utc: new Date('2026-07-01T12:40:00Z'),
   prov_ingested_at_utc: null, prov_ingest_run_id: 'C0FFEE00-0000-4000-8000-000000000002',
   prov_transform_version: 1, prov_attribution_method: null, prov_attribution_confidence: null,
-  prov_night_belongs_to: null,
+  prov_night_belongs_to: null, prov_epoch_id: 3,
 };
 
 const EXPECTED_SEPT_PROVENANCE = {
@@ -152,6 +187,7 @@ const EXPECTED_SEPT_PROVENANCE = {
   attributionMethod: 'source_column',
   attributionConfidence: 'high',
   nightBelongsTo: 'start_day',
+  epochId: 9,
 };
 
 describe('provenance — where a reading came from, on every row (Phase 3 item 4)', () => {
@@ -203,12 +239,12 @@ describe('provenance — where a reading came from, on every row (Phase 3 item 4
       'provenance.sourceSystem', 'provenance.sourceTable', 'provenance.epochLabel', 'provenance.sourceRowId',
       'provenance.rawId', 'provenance.sourceInsertUtc', 'provenance.ingestedAtUtc', 'provenance.ingestRunId',
       'provenance.transformVersion', 'provenance.attributionMethod', 'provenance.attributionConfidence',
-      'provenance.nightBelongsTo',
+      'provenance.nightBelongsTo', 'provenance.epochId',
     ]);
     const cells = line!.split(',');
     expect(cells.slice(own.length)).toEqual([
       'ifl_sql', 'pack1_TP1U2', 'Live source - cones', '5', '275113', '2026-09-07T03:30:51.000Z',
-      '2026-09-07T03:31:02.417Z', 'C0FFEE00-0000-4000-8000-000000000001', '2', 'source_column', 'high', 'start_day',
+      '2026-09-07T03:31:02.417Z', 'C0FFEE00-0000-4000-8000-000000000001', '2', 'source_column', 'high', 'start_day', '9',
     ]);
     // The object itself is never a cell.
     expect(headers).not.toContain('provenance');

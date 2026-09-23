@@ -126,7 +126,15 @@ describe('detail and CSV carry the same state', () => {
       { event_id: 1, weight_g: 1900, in_range: true, state: 'low', prov_source_system: 'ifl_sql', prov_epoch_label: 'x' },
     ]);
     const { csv } = await exportEventsCsv(pool, 1, 'cone', { sort: 'time', dir: 'desc', classification: CTX, states: ['low'] });
-    expect(calls[0]!.sql).toContain('AS state');
+    // Selected by SHAPE, not by position: since 23 Sep 2026 the export also
+    // runs a generation tally first (register.ts, RegisterPage's header), and
+    // that one is a COUNT with no column list to carry `state`.
+    const rowsQuery = calls.find((c) => c.sql.includes('SELECT TOP (@cap)'))!;
+    expect(rowsQuery.sql).toContain('AS state');
+    // The tally counts the SAME population the file does — the state filter
+    // is on it too, or the two would disagree about what was matched.
+    const tally = calls.find((c) => c.sql.includes('AS epoch_id'))!;
+    expect(tally.sql).toContain("IN (@state0)");
     const header = csv.split('\n')[0]!.split(',');
     expect(header.indexOf('state')).toBeGreaterThan(header.indexOf('in_range'));
     expect(header.indexOf('state')).toBeLessThan(header.indexOf('provenance.sourceSystem'));

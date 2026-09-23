@@ -26,10 +26,19 @@ const TABLES = [
     columns: [{ src: 'id', raw: 'src_id', type: 'int' }],
   },
 ];
-vi.mock('@sms/sync-worker', () => ({
-  loadSourceTables: () => world.tables(),
-  readSourceIdentity: () => world.identity(),
-}));
+// The identifier guard and the raw-table shapes are the REAL ones: verify's
+// `assertSafeDefs` is a point-of-use check on operator-editable configuration
+// (see its comment), and faking it would make the two tests at the bottom of
+// this file assert nothing.
+vi.mock('@sms/sync-worker', async () => {
+  const real = await vi.importActual<typeof import('@sms/sync-worker')>('@sms/sync-worker');
+  return {
+    loadSourceTables: () => world.tables(),
+    readSourceIdentity: () => world.identity(),
+    assertSourceTableName: real.assertSourceTableName,
+    TABLE_SHAPES: real.TABLE_SHAPES,
+  };
+});
 
 // parseArgs is kept REAL (importOriginal) — only openContext is faked. verify()
 // calls parseVerifyArgs, which calls parseArgs internally; a bare object mock
@@ -449,6 +458,44 @@ describe('sms verify — records sms.verify_run (migration 039)', () => {
   });
 
   it('a failure to write the row never changes the exit code (appPool() has no INSERT route)', async () => {
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    expect(await verify()).toBe(0);
+  });
+});
+
+/**
+ * OPERATOR-EDITABLE IDENTIFIERS (23 Sep 2026).
+ *
+ * `verify` interpolates `def.sourceTable` and `def.rawTable` into ten
+ * statements because T-SQL cannot bind an identifier, and `sourceTable` comes
+ * from `sms.source_table` — a row a rank-4 account edits in Setup › Sources.
+ * That name is already gated on write (`lineConfig.updateSourceTable`) and on
+ * read (`defsFromRows`); `assertSafeDefs` is a third, point-of-use check, so
+ * the safety of those interpolations is visible in verify.ts itself rather
+ * than only by following an import into another package. These two pin that
+ * the check is real: the fake `loadSourceTables` above bypasses
+ * `defsFromRows` entirely, which is exactly the shape of a future refactor
+ * that hand-builds a def.
+ */
+describe('verify — the identifiers it interpolates are checked where they are used', () => {
+  it('refuses a source table name that is not a plain identifier, before any SQL is built', async () => {
+    world.tables = async () => [{ ...TABLES[0]!, sourceTable: 'pack1]; DROP TABLE x; --' }];
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    await expect(verify()).rejects.toThrow(/unsafe source table name/);
+    // Nothing was asked of the source: the guard runs before the first read.
+    expect(world.ifl.calls).toHaveLength(0);
+  });
+
+  it('refuses a raw table that is not the one migration fixed for that kind', async () => {
+    world.tables = async () => [{ ...TABLES[0]!, rawTable: 'sms_raw.somewhere_else' }];
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    await expect(verify()).rejects.toThrow(/unexpected raw table/);
+  });
+
+  it('the real configured tables pass the guard unchanged', async () => {
     world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
     world.ifl = iflPool([1, 2, 3]);
     expect(await verify()).toBe(0);

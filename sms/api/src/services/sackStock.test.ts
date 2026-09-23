@@ -240,6 +240,13 @@ function recordingPool(responses: unknown[][] = []) {
         return req;
       },
       query: async (sql: string) => {
+        // The source-generation probe (generation.ts, 23 Sep 2026) runs before
+        // anything this fake is positioned for. Answered as a no-op and
+        // intercepted BEFORE the statement is recorded, exactly as the four
+        // fakes ca34a23 touched do, so no positional assertion below moves.
+        if (/GROUP BY source_epoch/.test(sql) || /FROM sms\.source_epoch/.test(sql)) {
+          return { recordset: [], rowsAffected: [0] };
+        }
         statements.push({ sql, inputs: new Map(inputs) });
         return { recordset: responses[i++] ?? [], rowsAffected: [1] };
       },

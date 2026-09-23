@@ -38,10 +38,37 @@
  *
  * `tsTo` caps the production INSTANT for a replay (`?at=`), as production.ts
  * does; without it the newest reading is the natural bound.
+ *
+ * ONE SOURCE GENERATION (23 Sep 2026, generation.ts). This derivation is the
+ * one in the application where pooling generations does not merely blur a
+ * figure — it INVENTS AN EVENT. A cell is keyed (station, day, shift) with no
+ * epoch in the key, so two generations covering the same production day put
+ * BOTH their materials in the same cell; `changedDuringShift` goes true and
+ * `foldCells` emits a `within_shift` change from one generation's material to
+ * the other's, timed at a real reading time. The `between_shifts` rule chains
+ * the same way across consecutive cells drawn from different generations.
+ * Nothing on the machine changed; the readings were simply filed twice.
+ *
+ * MEASURED on the dev sidecar, 23 Sep 2026, over 2026-08-21 – 2026-09-07,
+ * read-only:
+ *
+ *   pooled   380 of 756 (station, day, shift) cells carry more than one
+ *            material — i.e. 380 cells report a mid-shift changeover
+ *   epoch 9    2 of 390 cells do (IFL's own September generation, alone)
+ *
+ * 378 of the 380 changeovers a manager would have read off this grid did not
+ * happen. Both generations run the same six material ids in that window, so
+ * every fabricated change also names two plausible products. That is the
+ * defect; it is not a display problem, and no amount of labelling fixes it,
+ * because the fabricated row is not a reading — it is a conclusion.
+ *
+ * So this service FILTERS rather than labels: one generation, the newest real
+ * one in the window, with `generationNote` stating what was excluded.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { SHIFT_CODES, type ShiftCode } from '@sms/shared';
+import { resolveGenerationScope, andEpoch, noteOf, type GenerationNote } from './generation.js';
 
 export interface ShiftMaterial {
   /** material_id from the reading; null when the reading predates product recording (before 2026-08-05). */
@@ -95,6 +122,12 @@ export interface MachineProductShiftsData {
   changes: MachineProductChange[];
   /** Readings in the period carrying no station at all — they belong to no machine and are in no cell. */
   conesWithoutStation: number;
+  /**
+   * Which source generation the grid was derived from, and what was left out
+   * (generation.ts). Optional per that module's contract: a missing value
+   * means "not stated", never "nothing was excluded".
+   */
+  generationNote?: GenerationNote;
 }
 
 export interface MachineProductShiftsParams {
@@ -148,6 +181,12 @@ export async function getMachineProductShifts(
     .map((r) => ({ station: Number(r.station_id), stationName: r.name, machineName: r.machine_name }));
   const byStation = new Map(stations.map((s) => [s.station, s]));
 
+  // 1b. The one generation this grid is derived from. Resolved on line and
+  //     date range only (never on the station/shift filter), so changing a
+  //     filter cannot move the grid to a different generation under the
+  //     reader — generation.ts's own rule.
+  const scope = await resolveGenerationScope(pool, lineId, { from: p.from, to: p.to }, ['cone_event']);
+
   // 2. Every (station, day, shift, material) with its count and its span.
   const req = pool
     .request()
@@ -173,7 +212,7 @@ export async function getMachineProductShifts(
             COUNT(*) AS cones, MIN(c.production_ts_utc_ms) AS first_ms, MAX(c.production_ts_utc_ms) AS last_ms
        FROM sms.cone_event c
        LEFT JOIN sms.product p ON p.product_id = c.material_id
-      WHERE ${where.join(' AND ')} AND c.source_station IS NOT NULL
+      WHERE ${andEpoch(where.join(' AND '), req, scope, 'cone_event', { alias: 'c.' })} AND c.source_station IS NOT NULL
       GROUP BY c.source_station, c.shift_date, c.shift_code, c.material_id, COALESCE(p.description, p.lot_code)
       ORDER BY c.source_station, c.shift_date, c.shift_code, MIN(c.production_ts_utc_ms)`,
   );
@@ -190,9 +229,14 @@ export async function getMachineProductShifts(
     noStWhere.push('production_ts_utc_ms <= @tsTo');
     noSt.input('tsTo', mssql.BigInt, new Date(p.tsTo).getTime());
   }
+  // Scoped to the SAME generation as the grid: this count is read as "and
+  // these readings are in no cell", which is only true of the generation the
+  // cells came from.
   const noStation = p.station != null
     ? { recordset: [{ n: 0 }] }
-    : await noSt.query<{ n: number }>(`SELECT COUNT(*) AS n FROM sms.cone_event WHERE ${noStWhere.join(' AND ')}`);
+    : await noSt.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM sms.cone_event WHERE ${andEpoch(noStWhere.join(' AND '), noSt, scope, 'cone_event')}`,
+      );
 
   return {
     from: p.from,
@@ -201,6 +245,7 @@ export async function getMachineProductShifts(
     stations,
     ...foldCells(r.recordset, byStation),
     conesWithoutStation: Number(noStation.recordset[0]?.n ?? 0),
+    generationNote: noteOf(scope),
   };
 }
 

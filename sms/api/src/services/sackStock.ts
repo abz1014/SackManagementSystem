@@ -49,6 +49,33 @@
  * because IFL has not said which unit the ledger is kept in, nor whether kg
  * is gross or net (Q24/Q29). `kgMissing` counts the manual rows without a
  * weight so the kg balance is never presented as complete when it is not.
+ *
+ * ONE SOURCE GENERATION FOR THE WEIGHED SIDE (23 Sep 2026, generation.ts).
+ * A receipt here is one physical sack. When two generations of
+ * `sack1_TP1U2` cover the same production days, every sack recorded in both
+ * is counted TWICE as a receipt, and because this is a running BALANCE the
+ * double count compounds day after day rather than staying where it was
+ * made. Measured on the dev sidecar over 2026-08-21 – 2026-09-07, read-only:
+ * 8,509 weighed sacks pooled against 2,310 in IFL's own generation 3, and
+ * 402,169 kg against 109,248 kg.
+ *
+ * The weighed queries are therefore scoped to ONE generation, resolved over
+ * the period. The MANUAL side is not, and must not be:
+ * `sms.sack_stock_movement` is app-owned, carries no `source_epoch`, and a
+ * count a person wrote down does not belong to a generation of IFL's tables.
+ *
+ * THE OPENING BALANCE IS THE OPEN QUESTION, AND IT IS NOT SETTLED HERE.
+ * `priorWeighed` reaches back before `@from` with no lower bound at all, so
+ * after a rebuild "opening stock" could mean (a) sacks of this generation
+ * only or (b) every sack ever weighed, across generations. (b) double-counts
+ * exactly the physical sacks a re-ingest re-recorded; (a) drops real July
+ * stock on the day IFL's missing 10 Jul – 5 Aug data arrives. This code
+ * takes (a) — the only one of the two that cannot silently inflate a balance
+ * — and then NAMES the residue as `openingOtherGenerations`, so the screen
+ * can say how many prior weighed sacks the opening figure leaves out. That
+ * is a DISCLOSURE, not an answer: what an opening balance means across IFL's
+ * own 5 Aug rebuild belongs with Q28-32 and is an owner decision. Nothing
+ * here should be read as having made it.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
@@ -56,6 +83,7 @@ import { z } from 'zod';
 import { plantNowMs } from '@sms/shared';
 import { auditedWrite } from './audit.js';
 import { shiftWindowAt, type LiveShiftRule } from './live.js';
+import { resolveGenerationScope, epochFragment, epochWhere, noteOf, type GenerationNote } from './generation.js';
 
 export const MOVEMENT_TYPES = ['opening', 'receipt', 'issue', 'consumption', 'adjustment'] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
@@ -141,6 +169,23 @@ export interface StockLedger {
   byMaterial: MaterialLedger[];
   /** Manual rows in scope (before and inside the period) with no kg: the kg balance is short by them. */
   kgMissing: number;
+  /**
+   * The source generation the weighed receipts were taken from, and what was
+   * excluded (generation.ts). Optional per that module's contract: missing
+   * means "not stated", never "nothing was excluded".
+   */
+  generationNote?: GenerationNote;
+  /**
+   * Weighed sacks BEFORE `from` that belong to a generation other than the
+   * one above, and are therefore not in the opening balance. Named rather
+   * than folded in — see the header. Zero when the period holds one
+   * generation, which is every period at IFL today.
+   *
+   * Optional on the same terms as `generationNote`: always set by
+   * `getStockLedger`, declared optional so hand-built `StockLedger` fakes in
+   * other workers' open files did not break. Missing is "not stated".
+   */
+  openingOtherGenerations?: number;
 }
 
 export interface WeighedFact {
@@ -177,6 +222,9 @@ export interface LedgerFacts {
   tareKg: number;
   /** product_id → display name, for byMaterial. */
   products: ReadonlyMap<number, string>;
+  /** Passed through to the response; the arithmetic never reads them. */
+  generationNote?: GenerationNote;
+  openingOtherGenerations?: number;
 }
 
 const zero = (): LedgerFlow => ({ sacks: 0, kg: 0 });
@@ -350,6 +398,8 @@ export function buildLedger(f: LedgerFacts): StockLedger {
     days,
     byMaterial,
     kgMissing,
+    generationNote: f.generationNote,
+    openingOtherGenerations: f.openingOtherGenerations ?? 0,
   };
 }
 
@@ -380,14 +430,41 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
   };
   const productClause = (col: string) => (q.product != null ? ` AND ${col} = @product` : '');
 
-  // 1. Weighed sacks before the period, per material.
-  const priorWeighedReq = bind(pool.request(), false);
+  // 0. The one generation the weighed side is taken from, resolved over the
+  //    PERIOD (never over the unbounded prior window — a generation that
+  //    stopped before `from` is not what this period is about). Built once as
+  //    a fragment because the same predicate is bound onto four requests.
+  const scope = await resolveGenerationScope(pool, lineId, { from: q.from, to: q.to }, ['sack_event']);
+  const gen = epochFragment(scope, 'sack_event');
+  const bindGen = (req: mssql.Request): mssql.Request => {
+    for (const p of gen.params) req.input(p.name, mssql.Int, p.id);
+    return req;
+  };
+  const genClause = gen.sql ? ` AND ${gen.sql}` : '';
+
+  // 1. Weighed sacks before the period, per material — this generation's.
+  const priorWeighedReq = bindGen(bind(pool.request(), false));
   const priorWeighed = await priorWeighedReq.query<WeighedRow>(
     `SELECT NULL AS day, material_id, COUNT(*) n, ISNULL(SUM(weight_kg), 0) kg
        FROM sms.sack_event
-      WHERE line_id = @line AND shift_date < @from${productClause('material_id')}
+      WHERE line_id = @line AND shift_date < @from${productClause('material_id')}${genClause}
       GROUP BY material_id`,
   );
+  // 1b. The residue the opening balance leaves out — see the header. Counted
+  //     under exactly the same filters, with the generation predicate negated,
+  //     so the two are comparable. Skipped entirely (and therefore 0) when
+  //     nothing is being constrained.
+  const openingOtherGenerations = gen.sql
+    ? Number(
+        (
+          await bindGen(bind(pool.request(), false)).query<{ n: number }>(
+            `SELECT COUNT(*) n FROM sms.sack_event
+              WHERE line_id = @line AND shift_date < @from${productClause('material_id')}
+                AND NOT (${gen.sql})`,
+          )
+        ).recordset[0]?.n ?? 0,
+      )
+    : 0;
   // 2. Manual movements before the period, per material and type.
   const priorManualReq = bind(pool.request(), false);
   const priorManual = await priorManualReq.query<ManualRow>(
@@ -400,11 +477,11 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
   );
   // 3. Weighed sacks in the period, per day and material. production_ts_utc_ms
   //    leads the merge index, so the replay cap stays a seek (production.ts).
-  const weighedReq = bind(pool.request(), true);
+  const weighedReq = bindGen(bind(pool.request(), true));
   const weighed = await weighedReq.query<WeighedRow>(
     `SELECT CONVERT(varchar(10), shift_date, 120) AS day, material_id, COUNT(*) n, ISNULL(SUM(weight_kg), 0) kg
        FROM sms.sack_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${productClause('material_id')}` +
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${productClause('material_id')}${genClause}` +
       (tsToMs != null ? ' AND production_ts_utc_ms <= @tsTo' : '') +
       ` GROUP BY shift_date, material_id`,
   );
@@ -451,6 +528,8 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
     weightBasis: wr.recordset[0]?.basis ?? 'as_recorded',
     tareKg: Number(wr.recordset[0]?.tare ?? 0),
     products: new Map(prod.recordset.map((p) => [Number(p.product_id), p.name ?? `Product ${p.product_id}`])),
+    generationNote: noteOf(scope),
+    openingOtherGenerations,
   });
 }
 
@@ -482,6 +561,8 @@ export interface MovementsPage {
   /** Sacks the scale weighed on each day in the range: the derived receipts beside the manual rows. */
   weighed: { day: string; sacks: number; kg: number }[];
   machineLevel: { enabled: false; reason: string };
+  /** The generation `weighed` was taken from; the manual rows belong to none. */
+  generationNote?: GenerationNote;
 }
 
 interface MovementRow {
@@ -531,12 +612,17 @@ export async function listMovements(
       WHERE m.line_id = @line AND m.production_day BETWEEN @from AND @to${productClause}
       ORDER BY m.occurred_at_plant DESC, m.movement_id DESC`,
   );
+  // The same generation the ledger's receipts come from: this per-day weighed
+  // series is read BESIDE the ledger, and a series over a wider population
+  // than the balance it sits next to disagrees with it on every day.
+  const scope = await resolveGenerationScope(pool, lineId, { from: q.from, to: q.to }, ['sack_event']);
   const wReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, q.from).input('to', mssql.Date, q.to);
   if (q.product != null) wReq.input('product', mssql.Int, q.product);
+  const genSql = epochWhere(wReq, scope, 'sack_event');
   const weighed = await wReq.query<{ day: string; n: number; kg: number }>(
     `SELECT CONVERT(varchar(10), shift_date, 120) AS day, COUNT(*) n, ISNULL(SUM(weight_kg), 0) kg
        FROM sms.sack_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${q.product != null ? ' AND material_id = @product' : ''}
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${q.product != null ? ' AND material_id = @product' : ''}${genSql ? ` AND ${genSql}` : ''}
       GROUP BY shift_date ORDER BY shift_date`,
   );
   return {
@@ -545,6 +631,7 @@ export async function listMovements(
     movements: rows.recordset.map(mapMovement),
     weighed: weighed.recordset.map((w) => ({ day: w.day, sacks: Number(w.n), kg: round3(Number(w.kg)) })),
     machineLevel: { enabled: false, reason: MACHINE_LEVEL_REASON },
+    generationNote: noteOf(scope),
   };
 }
 

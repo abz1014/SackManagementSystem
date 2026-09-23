@@ -235,7 +235,7 @@ const PROVENANCE_COLS = `e.source_system AS prov_source_system, ep.source_table 
   e.ingest_ts_utc AS prov_source_insert_utc, e.ingested_at_utc AS prov_ingested_at_utc,
   e.ingest_run_id AS prov_ingest_run_id, e.transform_version AS prov_transform_version,
   e.attribution_method AS prov_attribution_method, e.attribution_confidence AS prov_attribution_confidence,
-  e.night_belongs_to AS prov_night_belongs_to`;
+  e.night_belongs_to AS prov_night_belongs_to, e.source_epoch AS prov_epoch_id`;
 
 /** Column alias → JSON key, in the order the CSV's trailing columns take. */
 const PROVENANCE_KEYS: readonly [column: string, key: string][] = [
@@ -251,6 +251,11 @@ const PROVENANCE_KEYS: readonly [column: string, key: string][] = [
   ['prov_attribution_method', 'attributionMethod'],
   ['prov_attribution_confidence', 'attributionConfidence'],
   ['prov_night_belongs_to', 'nightBelongsTo'],
+  // Appended LAST, 23 Sep 2026, so no existing CSV column moves. The label
+  // beside it is what a person reads; the id is what `sms summary --epoch=`
+  // and `sms rebuild --epoch=` take, so a row quoted back to an operator can
+  // be scoped without a lookup.
+  ['prov_epoch_id', 'epochId'],
 ];
 
 export interface Provenance {
@@ -266,6 +271,8 @@ export interface Provenance {
   attributionMethod: string | null;
   attributionConfidence: string | null;
   nightBelongsTo: string | null;
+  /** `sms.source_epoch.epoch_id` this reading was ingested under. */
+  epochId: number | null;
 }
 
 /**
@@ -337,11 +344,71 @@ const fromFor = (type: EventType) =>
 /** Every query aliases the event table `e` — see bindFilters for why it is explicit. */
 const ALIAS = 'e.';
 
+/**
+ * WHY THE REGISTER LABELS AND DOES NOT FILTER (23 Sep 2026).
+ *
+ * Every other consumer of the canonical tables was constrained to ONE source
+ * generation in ca34a23/8673ffd, because a mean, a rate or a LAG sequence
+ * fitted across IFL's 2026-08-05 rebuild is not a measurement of anything.
+ * The register is the one place where that reasoning does not carry: it is a
+ * LISTING of individual readings, every row already joins `sms.source_epoch`
+ * and carries `provenance.sourceTable` / `provenance.epochLabel`, and a
+ * reader who asks for "every reading in this period" and is silently shown
+ * one generation's has been lied to more than one who is shown both and told
+ * which is which. Filtering here would also break the drill-down hops: a
+ * screen's figure links to the rows behind it, and those rows must still be
+ * addressable.
+ *
+ * WHAT WAS NEVERTHELESS WRONG. `total` was a single `COUNT(*)` over both
+ * generations with nothing beside it — a pooled figure of exactly the kind
+ * `sms summary` stopped printing in 0a0f030, rendered as "N readings" at the
+ * top of the page. On the dev sidecar over 2026-08-21 – 2026-09-07 that read
+ * 190,306 cones where IFL's own generation holds 55,058, and 8,509 sacks
+ * where generation 3 holds 2,310. So the count is now DECOMPOSED rather than
+ * filtered: `total` still counts exactly the rows the register lists (it is
+ * what pagination is over, and it must stay that), and `generations` says
+ * what it is made of. One query does both — the old `COUNT(*)` became a
+ * `GROUP BY source_epoch` summed in memory, so this costs no extra round trip
+ * and no extra scan.
+ *
+ * THE CSV EXPORT carries the same breakdown for a different reason. Its rows
+ * are individually labelled, so it presents no pooled figure — but its
+ * 20,000-row cap is applied to a time-ordered pooled set, so on the range
+ * above an export would be 20,000 rows drawn almost entirely from whichever
+ * generation sorts first, with the other generation absent and nothing saying
+ * so. `truncated` said the list was cut; it could not say a whole generation
+ * was.
+ */
+export interface GenerationTally {
+  /** `${sourceDb}#${ordinal}` — one physical generation, as generation.ts keys it. */
+  key: string;
+  ordinal: number | null;
+  sourceDb: string | null;
+  label: string | null;
+  /** Derived from source_db/provenance, never provenance alone (generation.ts). */
+  simulator: boolean;
+  /** Rows of this generation matching the register's filters. */
+  rows: number;
+}
+
 export interface RegisterPage {
   rows: Record<string, unknown>[];
   total: number;
   page: number;
   pageSize: number;
+  /**
+   * What `total` is made of, newest generation first. One entry means the
+   * period holds one generation and `total` is a figure about it. More than
+   * one means `total` is a sum across physically distinct source tables and
+   * the screen must say so rather than print it bare.
+   *
+   * OPTIONAL for the same reason `GenerationNote` is (generation.ts):
+   * `listEvents` always sets it, and it is declared optional only so that
+   * adding it did not break the hand-built `RegisterPage` fakes in files
+   * other workers hold open (`services/reports/*.test.ts`). A CONSUMER must
+   * read a missing value as "not stated" — never as "one generation".
+   */
+  generations?: GenerationTally[];
 }
 
 export async function listEvents(
@@ -357,8 +424,9 @@ export async function listEvents(
 
   const countReq = pool.request();
   const where = bindFilters(countReq, lineId, type, q, ALIAS);
-  const countRes = await countReq.query<{ n: number }>(`SELECT COUNT(*) n FROM ${from} WHERE ${where}`);
-  const total = countRes.recordset[0]?.n ?? 0;
+  const { total, generations } = foldGenerationTally(
+    (await countReq.query<TallyRow>(TALLY_SQL(from, where))).recordset,
+  );
 
   const rowsReq = pool.request();
   bindFilters(rowsReq, lineId, type, q, ALIAS);
@@ -369,7 +437,80 @@ export async function listEvents(
      ORDER BY ${order}
      OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY`,
   );
-  return { rows: res.recordset.map(foldProvenance), total, page: q.page, pageSize: q.pageSize };
+  return { rows: res.recordset.map(foldProvenance), total, page: q.page, pageSize: q.pageSize, generations };
+}
+
+interface TallyRow {
+  epoch_id: number | null;
+  source_db: string | null;
+  generation_ordinal: number | null;
+  provenance: string | null;
+  label: string | null;
+  n: number;
+}
+
+/**
+ * The count, grouped by generation, over exactly the register's own FROM and
+ * WHERE — `fromFor` already LEFT JOINs `sms.source_epoch ep`, so this is the
+ * same scan `COUNT(*)` was, with a grouping on a column already in hand.
+ */
+const TALLY_SQL = (from: string, where: string): string =>
+  `SELECT ${ALIAS}source_epoch AS epoch_id, ep.source_db, ep.generation_ordinal,
+          ep.provenance, ep.label, COUNT(*) n
+     FROM ${from} WHERE ${where}
+    GROUP BY ${ALIAS}source_epoch, ep.source_db, ep.generation_ordinal, ep.provenance, ep.label`;
+
+/**
+ * Epoch rows → generations. Pure and exported so the folding is tested
+ * without SQL. Keyed on (source_db, generation_ordinal) and NOT on epoch_id,
+ * for the reason generation.ts gives: one physical generation of the plant's
+ * tables owns one `sms.source_epoch` row PER SOURCE TABLE, and `reject_event`
+ * is fed by two of them (11 and 12 on this sidecar). Keying on the id would
+ * report one reject listing as two generations.
+ *
+ * An epoch with no `sms.source_epoch` row, or one carrying no ordinal, gets
+ * its own entry labelled as unregistered rather than being merged into a
+ * neighbour — the same choice `sms summary` made in 0a0f030, and for the same
+ * reason: epoch 13 on this sidecar is mis-registered and must stay visible.
+ */
+export function foldGenerationTally(rows: readonly TallyRow[]): {
+  total: number;
+  generations: GenerationTally[];
+  /** epoch_id → generation key, so a row can be attributed without a second query. */
+  keyOfEpoch: Map<number, string>;
+} {
+  const by = new Map<string, GenerationTally>();
+  const keyOfEpoch = new Map<number, string>();
+  let total = 0;
+  for (const r of rows) {
+    const n = Number(r.n);
+    total += n;
+    const ordinal = r.generation_ordinal == null ? null : Number(r.generation_ordinal);
+    const key = ordinal == null ? `epoch:${r.epoch_id ?? 'none'}` : `${r.source_db ?? ''}#${ordinal}`;
+    if (r.epoch_id != null) keyOfEpoch.set(Number(r.epoch_id), key);
+    const cur = by.get(key);
+    if (cur) {
+      cur.rows += n;
+      continue;
+    }
+    by.set(key, {
+      key,
+      ordinal,
+      sourceDb: r.source_db,
+      label: ordinal == null ? (r.label ?? 'unregistered source generation') : r.label,
+      // Same test as generation.ts: source_db ending _SIM OR a provenance that
+      // says so. Provenance alone is not trusted — epochs 13-16 are the
+      // simulator's tables recorded as IFL's own and are left standing.
+      simulator: r.provenance === 'simulator' || /_SIM$/i.test(r.source_db ?? ''),
+      rows: n,
+    });
+  }
+  // Newest generation first; unordinalled entries last, so the figure a reader
+  // sees at the top is the one their period is mostly about.
+  const generations = [...by.values()].sort(
+    (a, b) => (b.ordinal ?? -1) - (a.ordinal ?? -1) || b.rows - a.rows,
+  );
+  return { total, generations, keyOfEpoch };
 }
 
 export async function getEventDetail(
@@ -406,10 +547,18 @@ export async function exportEventsCsv(
   lineId: number,
   type: EventType,
   f: RegisterFilters & { sort: SortField; dir: SortDir },
-): Promise<{ csv: string; truncated: boolean }> {
+): Promise<{ csv: string; truncated: boolean; generations: GenerationTally[]; exported: GenerationTally[] }> {
   const from = fromFor(type);
   const cols = colsFor(type);
   const order = `${ALIAS}${sortCol(type, f.sort)} ${f.dir === 'asc' ? 'ASC' : 'DESC'}`;
+
+  // What the filters MATCH, per generation — against which the caller can
+  // compare what the cap actually let through. See the RegisterPage header.
+  const tallyReq = pool.request();
+  const tallyWhere = bindFilters(tallyReq, lineId, type, f, ALIAS);
+  const { generations, keyOfEpoch } = foldGenerationTally(
+    (await tallyReq.query<TallyRow>(TALLY_SQL(from, tallyWhere))).recordset,
+  );
 
   const req = pool.request();
   const where = bindFilters(req, lineId, type, f, ALIAS);
@@ -420,7 +569,13 @@ export async function exportEventsCsv(
   );
   const truncated = res.recordset.length > CSV_ROW_CAP;
   const rows = (truncated ? res.recordset.slice(0, CSV_ROW_CAP) : res.recordset).map(foldProvenance);
-  if (rows.length === 0) return { csv: '', truncated: false };
+
+  // What the cap actually let through, per generation — attributed from each
+  // row's own epoch id, not inferred from the order. A generation present in
+  // `generations` and absent from `exported` was cut entirely; that is the
+  // fact `truncated` alone could never state.
+  const exported = countExported(rows, generations, keyOfEpoch);
+  if (rows.length === 0) return { csv: '', truncated: false, generations, exported };
 
   // The reading's own columns first, exactly as before; the provenance
   // fields follow as trailing columns named by their JSON path
@@ -444,5 +599,26 @@ export async function exportEventsCsv(
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.join(','), ...rows.map((r) => headers.map((h) => esc(cell(r, h))).join(','))];
-  return { csv: lines.join('\n'), truncated };
+  return { csv: lines.join('\n'), truncated, generations, exported };
+}
+
+/**
+ * The generations the exported rows actually contain, with their counts —
+ * same shape and order as the matched tally so the two can be read side by
+ * side. Pure and exported for the test. A generation that the filters matched
+ * but the cap excluded is simply absent here, which is the point.
+ */
+export function countExported(
+  rows: readonly Record<string, unknown>[],
+  generations: readonly GenerationTally[],
+  keyOfEpoch: ReadonlyMap<number, string>,
+): GenerationTally[] {
+  const n = new Map<string, number>();
+  for (const r of rows) {
+    const id = (r.provenance as Provenance | undefined)?.epochId;
+    const key = id == null ? undefined : keyOfEpoch.get(Number(id));
+    if (key === undefined) continue;
+    n.set(key, (n.get(key) ?? 0) + 1);
+  }
+  return generations.filter((g) => n.has(g.key)).map((g) => ({ ...g, rows: n.get(g.key)! }));
 }
