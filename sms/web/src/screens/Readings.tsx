@@ -174,8 +174,14 @@ export function ReadingsScreen({
   const stations = usePolling(() => getStations(), 10 * 60_000, 'stations');
   const stationList = stations.data?.stations ?? [];
 
-  const total = rows.data?.data.total ?? 0;
-  const rejectedTotal = rejected.data?.data.total ?? 0;
+  // The headline's two counts, as STATES rather than numbers — see CountState
+  // below. `?? 0` is what let a not-yet-arrived count reach the sentence as a
+  // real zero.
+  const totalState = countStateOf(rows.error, rows.data?.data.total);
+  const rejectedState = countStateOf(rejected.error, rejected.data?.data.total);
+  // For the body only, every branch of which already gates on rows.error /
+  // rows.loading / rows.data before it reads this.
+  const total = totalState.kind === 'ok' ? totalState.n : 0;
 
   return (
     <>
@@ -193,7 +199,7 @@ export function ReadingsScreen({
       <div className="page">
         <p className="q">{W.question.readings}</p>
         <h1 className="wide">
-          {countLine(period, listing, total, rejectedTotal, outsideOnly, states, !!rows.error && !rows.data, !!rejected.error && !rejected.data)}
+          {countLine(period, listing, totalState, rejectedState, outsideOnly, states)}
         </h1>
       </div>
 
@@ -304,53 +310,87 @@ function listingTitle(listing: Listing): string {
   }
 }
 
-function countLine(
+/**
+ * One of the headline's counts. The point of the type is that there is no
+ * way to hand `countLine` a number it has not actually been told.
+ *
+ * Before 23 Sep 2026 both counts arrived here as plain `number`s, defaulted
+ * with `?? 0` at the call site, plus two separate booleans saying whether
+ * their fetch had failed. That made "not loaded yet" and "genuinely none"
+ * the same value, so a half-loaded screen printed a count of zero as fact.
+ * The two counts come from two independent polls, so they can also be in
+ * DIFFERENT states at the same instant — which is how `0 weighed, 402
+ * rejected by the scale (0%)` reached the screen: the lighter reject query
+ * (pageSize 1) landed while the register's own count was still in flight.
+ * A pending count can no longer be confused with zero, and the combined
+ * "N weighed, M rejected (P%)" sentence is only reachable when BOTH counts
+ * are `ok`.
+ */
+export type CountState =
+  | { kind: 'ok'; n: number }
+  | { kind: 'pending' }
+  | { kind: 'failed' };
+
+/** A poll's error + data, as a CountState. Data wins: a poll that has a good
+ *  number and a later transient error keeps showing the number, which is
+ *  usePolling's own documented rule. */
+export function countStateOf(error: string | null, n: number | undefined): CountState {
+  if (n != null) return { kind: 'ok', n };
+  return error ? { kind: 'failed' } : { kind: 'pending' };
+}
+
+export function countLine(
   period: Period,
   listing: Listing,
-  total: number,
-  rejected: number,
+  total: CountState,
+  rejected: CountState,
   outsideOnly: boolean,
   states: ConeState[],
-  // UX Phase 7 Brief 1: `rows.error` and `rejected.error` (the two polls
-  // this headline is built from, in ReadingsScreen above) were never read
-  // here — `total` and `rejected` silently fell back to 0 on a failed
-  // fetch, so a dead /api/events read as "0 cones weighed, 0 rejected by
-  // the scale (0%)" in the headline while the body correctly showed Failed
-  // with a retry button two lines below it. One screen, two answers.
-  rowsFailed = false,
-  rejectedCountFailed = false,
 ): string {
   const what = fmtDayLong(period.from) === fmtDayLong(period.to) ? fmtDayLong(period.from) : `${period.from} to ${period.to}`;
   // The register itself failed to load: nothing below `total` can be
   // trusted, so the whole sentence is replaced rather than any of its
   // numbers — the body's own Failed block (rendered from the same
   // `rows.error && !rows.data` condition) carries the retry action.
-  if (rowsFailed) return W.readings.countLineFailed;
-  if (listing === 'sacks') return `${what}: ${fmtInt(total)} sacks weighed.`;
+  // UX Phase 7 Brief 1 established this branch; it now reads the state
+  // rather than a separate boolean.
+  if (total.kind === 'failed') return W.readings.countLineFailed;
+  // Not failed, not yet answered. Every sentence below states a number, and
+  // there is no number to state.
+  if (total.kind === 'pending') return `${what}: ${W.readings.countLinePending}`;
+  if (listing === 'sacks') return `${what}: ${fmtInt(total.n)} sacks weighed.`;
   // Corrected 23 Sep 2026 (reject-denominator brief): "before weighing"
   // asserted an order the data contradicts — matching reject_event to
   // cone_event finds a weighed cone (in_range = 1) for 98%+ of these,
   // rejected downstream of weighing, not before it. See words.ts
   // readings.inspectionRejects for the fuller note.
-  if (listing === 'inspectionRejects') return `${what}: ${fmtInt(total)} cones rejected by inspection.`;
+  if (listing === 'inspectionRejects') return `${what}: ${fmtInt(total.n)} cones rejected by inspection.`;
   // With state chips on, `total` is the filtered count — the same reason the
   // outside-limits sentence below does not reuse the "N weighed, M rejected
   // (P%)" form.
   if (listing === 'cones' && states.length > 0) {
-    return `${what}: ${W.cone.countLineState(fmtInt(total), states.map((st) => W.cone.state[st].toLowerCase()).join(' or '))}`;
+    return `${what}: ${W.cone.countLineState(fmtInt(total.n), states.map((st) => W.cone.state[st].toLowerCase()).join(' or '))}`;
   }
   // With the outside-limits filter on, `total` counts only the filtered cones
   // while `rejected` counts every scale-rejected cone in the period — two
   // different populations. Stating them as "N weighed, M rejected (P%)" made
   // P unbounded: 40 shown against 160 scale rejects printed "400.0%".
-  if (outsideOnly) return `${what}: ${W.readings.countLineOutside(fmtInt(total))}`;
-  if (listing === 'rejected') return `${what}: ${fmtInt(total)} cones rejected by the scale.`;
+  if (outsideOnly) return `${what}: ${W.readings.countLineOutside(fmtInt(total.n))}`;
+  if (listing === 'rejected') return `${what}: ${fmtInt(total.n)} cones rejected by the scale.`;
   // The register loaded fine (`total` is real) but the separate scale-reject
   // count did not — say what is known and name what is not, rather than
   // stating "0 rejected by the scale (0%)" as if the scale rejected nothing.
-  if (rejectedCountFailed) return `${what}: ${W.readings.countLineRejectUnknown(fmtInt(total))}`;
-  const pct = total > 0 ? `${Math.round((1000 * rejected) / total) / 10}%` : '0%';
-  return `${what}: ${W.readings.countLine(fmtInt(total), fmtInt(rejected), pct)}`;
+  if (rejected.kind === 'failed') return `${what}: ${W.readings.countLineRejectUnknown(fmtInt(total.n))}`;
+  // Same sentence, different reason: it has not arrived yet.
+  if (rejected.kind === 'pending') return `${what}: ${W.readings.countLineRejectPending(fmtInt(total.n))}`;
+  // Both counts are real from here down. A rate between them needs a
+  // non-zero denominator; "402 out of 0" is not 0%, so when the register
+  // genuinely returns none weighed the two numbers are stated without one.
+  if (total.n === 0 && rejected.n > 0) {
+    return `${what}: ${W.readings.countLineNoRate(fmtInt(total.n), fmtInt(rejected.n))}`;
+  }
+  const pct = total.n > 0 ? `${Math.round((1000 * rejected.n) / total.n) / 10}%` : '0%';
+  return `${what}: ${W.readings.countLine(fmtInt(total.n), fmtInt(rejected.n), pct)}`;
 }
 
 /* ------------------------------------------------------------ the filters */

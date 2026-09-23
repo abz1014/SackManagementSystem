@@ -418,11 +418,33 @@ function Chrome({
     dataAsOfUtc: line.dataAsOfUtc,
   }, route.period.picked);
 
-  // Remounts the screen-area boundary whenever the screen or the open sheet
-  // changes, so navigating away from a crash (via the Bar, still rendered
-  // OUTSIDE this boundary below) clears the failure rather than leaving the
-  // fallback stuck on screen until a hard reload.
-  const screenKey = `${route.view}:${route.sheet ? `${route.sheet.kind}:${route.sheet.id}` : 'none'}`;
+  // Remounts the screen-area boundary whenever the SCREEN changes, so
+  // navigating away from a crash (via the Bar, still rendered OUTSIDE this
+  // boundary below) clears the failure rather than leaving the fallback stuck
+  // on screen until a hard reload.
+  //
+  // The open sheet used to be part of this key as well (23 Sep 2026: it is
+  // not any more). It was there for a real reason — a sheet renders inside
+  // this same boundary, so a throw while drawing ONE caught here, and closing
+  // that sheet had to clear the fallback or the reader was stranded in it.
+  // But React remounts everything under a changed key, so every drilldown
+  // click also tore down and rebuilt the screen BEHIND the overlay: every
+  // `usePolling` on it lost its data and refetched from null, and for one to
+  // two seconds the screen asserted numbers it did not have. On Readings ›
+  // This month that printed `0 weighed, 0 rejected by the scale (0%)`, and —
+  // when the lighter of the two counts landed first — `0 weighed, 402
+  // rejected by the scale (0%)`, which is not a state that can exist.
+  //
+  // A sheet is an overlay. The screen underneath it did not change, so it is
+  // not rebuilt. What the sheet half of the key was protecting is preserved,
+  // and improved on, by `sheetKey` below: the sheets now sit in their OWN
+  // boundary, keyed on the open sheet. A sheet that throws is caught there
+  // first, so it no longer takes the screen down with it, and closing or
+  // changing the sheet still clears that fallback by unmounting it. If a
+  // sheet throws before it can draw its own close control, the Bar — outside
+  // both boundaries — clears it, because every `onNavigate` sets `sheet: null`.
+  const screenKey = route.view;
+  const sheetKey = route.sheet ? `${route.sheet.kind}:${route.sheet.id}` : 'none';
 
   return (
     <div className="app">
@@ -618,7 +640,15 @@ function Chrome({
         </main>
 
         {/* Drill-downs open over the screen and close with Escape, so the reader
-            never loses their filters, their page or their place in the list. */}
+            never loses their filters, their page or their place in the list.
+
+            Their own boundary, keyed on the open sheet (see the screenKey note
+            above): a throw while drawing a sheet is caught HERE rather than by
+            the screen boundary, so the screen behind the overlay stays
+            standing, and closing or changing the sheet clears the fallback by
+            unmounting it. Nothing inside `<main>` above is remounted when a
+            sheet opens. */}
+        <ErrorBoundary key={sheetKey} variant="default" label={route.sheet ? route.sheet.kind : undefined}>
         {route.sheet?.kind === 'station' && (
           <StationSheet
             station={Number(route.sheet.id)}
@@ -679,6 +709,7 @@ function Chrome({
             })}
           />
         )}
+        </ErrorBoundary>
       </ErrorBoundary>
     </div>
   );
