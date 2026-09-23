@@ -54,8 +54,26 @@
  * attribution on each side. Two consequences, both handled here:
  *   - p̄ is pooled WITHIN a generation, never across the boundary. One band
  *     over both would be a limit that nothing was actually measured against.
- *     With more than one generation in range, `pBar` reports the newest one's
- *     and `generations` carries each.
+ *     With more than one generation in range, `pBar` reports the PREFERRED
+ *     one's (see below) and `generations` carries each.
+ *   - WHICH generation is preferred, CORRECTED 23 Sep 2026 (WS-GP). Until this
+ *     pass, `pBar`/`totalProduced`/`totalRejects` reported the ORDINALLY
+ *     NEWEST generation (`Math.max(...perGen.keys())`) with no real-vs-
+ *     simulator preference at all — a DIFFERENT policy from
+ *     `resolveGenerationScope` (generation.ts), which prefers a REAL
+ *     generation over a simulator one regardless of recency. On the live dev
+ *     sidecar the simulator's generation (`DATA_TP1U2_SIM`) is ordinally
+ *     NEWER than IFL's real September one, so for 21 Aug - 7 Sep this file's
+ *     headline `pBar` silently resolved to the simulator's rate while every
+ *     other screen fed by `resolveGenerationScope` (Weight, the reports)
+ *     resolved to the real one — a genuine three-way disagreement, caught by
+ *     `rejectRateThreeWayAgreement.test.ts`'s "ordinally NEWER" case. Fixed
+ *     by adopting the SAME real-preferred rule here (the same predicate
+ *     `spc.ts` also carries its own copy of — see this file's policy
+ *     inventory in the 23 Sep 2026 remediation notes). At IFL there is no
+ *     simulator and their two generations never overlap, so on plant data
+ *     this change is a no-op; it only changes the answer on a contaminated
+ *     dev sidecar, which is exactly where the old rule was silently wrong.
  *   - "Consecutive" means consecutive in TIME, not adjacent in the array of
  *     buckets that happen to hold data. An out-of-control 10 Jul and an
  *     out-of-control 5 Aug are not one 26-day burst; an episode breaks at any
@@ -214,10 +232,24 @@ export async function getRejectSpc(
   // is the number they share (registered together by `sms epoch:accept --all`).
   const genRes = await pool
     .request()
-    .query<{ epoch_id: number; generation_ordinal: number }>(
-      `SELECT epoch_id, generation_ordinal FROM sms.source_epoch`,
+    .query<{ epoch_id: number; generation_ordinal: number; source_db: string | null; provenance: string | null }>(
+      `SELECT epoch_id, generation_ordinal, source_db, provenance FROM sms.source_epoch`,
     );
   const genOf = new Map(genRes.recordset.map((r) => [Number(r.epoch_id), Number(r.generation_ordinal)]));
+  // Which ORDINALS are simulator generations — same predicate `generation.ts`
+  // (`resolveGenerationScope`) and `spc.ts` each carry their own copy of: a
+  // generation is simulator when EITHER its recorded provenance says so OR
+  // its source_db ends in `_SIM` (the source_db test is the one actually
+  // guaranteed to hold — see generation.ts's file header, "IS READ FROM
+  // source_db, NOT FROM provenance"). An ordinal's epoch rows are always
+  // registered together (`sms epoch:accept --all`), so any one of them
+  // deciding "simulator" is enough to mark the whole ordinal.
+  const isSimulatorRow = (r: { provenance: string | null; source_db: string | null }) =>
+    r.provenance === 'simulator' || /_SIM$/i.test(r.source_db ?? '');
+  const simulatorOrdinals = new Set<number>();
+  for (const r of genRes.recordset) {
+    if (r.generation_ordinal != null && isSimulatorRow(r)) simulatorOrdinals.add(Number(r.generation_ordinal));
+  }
 
   const producedReq = pool.request();
   const producedWhere = bindConeFilters(producedReq, lineId, base);
@@ -357,8 +389,19 @@ export async function getRejectSpc(
   }
   const spansGenerations = perGen.size > 1;
   // Within one generation this IS the pooled p̄, exactly as before. Across a
-  // boundary it is the newest generation's — ordinals advance in time order.
-  const newestGen = perGen.size ? Math.max(...perGen.keys()) : null;
+  // boundary it is the PREFERRED generation's — see the file header's 23 Sep
+  // 2026 correction. Prefer a REAL generation over a simulator one
+  // regardless of recency (matches `resolveGenerationScope`, generation.ts);
+  // only when EVERY present generation is a simulator one do we fall back to
+  // picking among them, same as generation.ts's own fallback. `perGen` is
+  // keyed on ordinal alone, so `presentOrdinals` cannot contain a duplicate —
+  // no tie-break is needed (unlike generation.ts/spc.ts, which key on
+  // (source_db, ordinal) and so can see two distinct generations share one
+  // ordinal number).
+  const presentOrdinals = [...perGen.keys()];
+  const realOrdinals = presentOrdinals.filter((o) => !simulatorOrdinals.has(o));
+  const preferredOrdinals = realOrdinals.length > 0 ? realOrdinals : presentOrdinals;
+  const newestGen = preferredOrdinals.length ? Math.max(...preferredOrdinals) : null;
   const pBar = newestGen == null ? null : (pBarOf.get(newestGen) ?? null);
   // RT-002/RT-029 (23 Sep 2026 red-team audit): `totalProduced`/
   // `totalRejects` used to be summed over EVERY generation's rows

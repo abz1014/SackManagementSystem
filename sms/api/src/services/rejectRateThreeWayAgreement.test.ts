@@ -283,7 +283,11 @@ const TWO_GEN_POOLED = 18 / 1023;
  * does: an unscoped query (a reverted fix) is exercised honestly rather than
  * assumed to filter.
  */
-function evaluateTwoGen(sql: string, p: Map<string, unknown>): Record<string, unknown>[] {
+function evaluateTwoGen(
+  sql: string,
+  p: Map<string, unknown>,
+  registry: readonly { epoch_id: number; source_db: string; generation_ordinal: number; provenance: string; label: string }[] = TWO_GEN_REGISTRY,
+): Record<string, unknown>[] {
   // resolveGenerationScope's present-rows probe MUST be recognised before
   // any other branch below — it is a UNION ALL whose combined text also
   // contains "FROM sms.sack_event", which would otherwise hit the
@@ -299,7 +303,7 @@ function evaluateTwoGen(sql: string, p: Map<string, unknown>): Record<string, un
     if (sql.includes('FROM sms.reject_event')) byEpoch(TWO_GEN_REJECTS, 'reject_event');
     return rows;
   }
-  if (sql.includes('FROM sms.source_epoch')) return TWO_GEN_REGISTRY;
+  if (sql.includes('FROM sms.source_epoch')) return registry as unknown as Record<string, unknown>[];
   if (sql.includes('FROM sms.weight_rule') || sql.includes('FROM sms.sack_event')) return [];
 
   const boundEpochIds = new Set<number>();
@@ -349,18 +353,81 @@ function evaluateTwoGen(sql: string, p: Map<string, unknown>): Record<string, un
   return [{ grp: 'total', n: rows.length, inr: rows.filter((r) => r.in_range).length }];
 }
 
-function twoGenPool(): ConnectionPool {
+function twoGenPool(
+  registry?: readonly { epoch_id: number; source_db: string; generation_ordinal: number; provenance: string; label: string }[],
+): ConnectionPool {
   return {
     request: () => {
       const inputs = new Map<string, unknown>();
       const req = {
         input: (name: string, _t: unknown, v: unknown) => { inputs.set(name, v); return req; },
-        query: async (sql: string) => ({ recordset: evaluateTwoGen(sql, inputs) }),
+        query: async (sql: string) => ({ recordset: evaluateTwoGen(sql, inputs, registry) }),
       };
       return req;
     },
   } as unknown as ConnectionPool;
 }
+
+/**
+ * THE LIVE-SHAPE CASE (WS-GP, 23 Sep 2026) — the exact ordinal arrangement the
+ * dev sidecar actually has TODAY, not the real-newest arrangement the section
+ * above deliberately used (see that section's own comment on why it chose
+ * real=6 > sim=5). Here the SIMULATOR generation is the ordinally NEWER one
+ * (4 > 3), matching `DATA_TP1U2_SIM` (ordinal 4) versus IFL's real September
+ * generation (ordinal 3) on this machine right now, over the live 21 Aug -
+ * 7 Sep window this whole remediation wave concerns.
+ *
+ * `resolveGenerationScope` (generation.ts, used by production.ts and
+ * weightStations.ts) prefers the REAL generation regardless of recency — its
+ * own file header says so explicitly. Before this pass, `getRejectSpc`
+ * (rejectSpc.ts) picked the ORDINALLY NEWEST generation with no real-vs-
+ * simulator preference (`Math.max(...perGen.keys())`), so on exactly this
+ * arrangement it landed on the SIMULATOR's pBar while the other two paths
+ * landed on the REAL one — a genuine three-way disagreement, live on this
+ * sidecar today, that the section above's fixture was deliberately built not
+ * to exercise.
+ */
+const SIM_NEWER_REGISTRY = [
+  { epoch_id: 9, source_db: 'DATA_TP1U2_SEP07', generation_ordinal: 3, provenance: 'ifl_copy', label: 'September copy' },
+  { epoch_id: 11, source_db: 'DATA_TP1U2_SEP07', generation_ordinal: 3, provenance: 'ifl_copy', label: 'September copy' },
+  // Mislabelled `provenance: 'ifl_copy'` on a `_SIM` database, exactly as
+  // epochs 13-16 are registered on the live dev sidecar (generation.ts's own
+  // file header, "IS READ FROM source_db, NOT FROM provenance") — the
+  // predicate under test must detect this from `source_db`, not `provenance`.
+  { epoch_id: 13, source_db: 'DATA_TP1U2_SIM', generation_ordinal: 4, provenance: 'ifl_copy', label: 'simulator' },
+  { epoch_id: 14, source_db: 'DATA_TP1U2_SIM', generation_ordinal: 4, provenance: 'ifl_copy', label: 'simulator' },
+];
+
+describe('the three paths still agree when the SIMULATOR generation is ordinally NEWER (live dev-sidecar shape)', () => {
+  it('Rejects, the reports and Weight all land on the REAL generation alone, never the simulator one', async () => {
+    const prod = await getProduction(twoGenPool(SIM_NEWER_REGISTRY), 1, { from: DAY, to: DAY, groupBy: 'none' });
+    const reportPct = toReportLine(prod.rows[0]!).rejectRatePct;
+    const spc = await getRejectSpc(twoGenPool(SIM_NEWER_REGISTRY), 1, DAY, DAY, 'day', 'all');
+    const weight = await getWeightStations(twoGenPool(SIM_NEWER_REGISTRY), 1, DAY, DAY);
+
+    // Sanity: the real generation's own counts, untouched by the simulator's
+    // 1,000 cones sitting in the same window at a NEWER ordinal.
+    expect(prod.rows[0]!.cones).toBe(20);
+    expect(prod.rows[0]!.rejectedCones).toBe(8);
+    expect(prod.rows[0]!.unmatchedRejects).toBe(3);
+
+    const pct = Math.round(TWO_GEN_CORRECT * 10000) / 100; // 8/23, the real generation's own truth
+    expect(reportPct).toBe(pct);
+    expect(Math.round((spc.pBar ?? 0) * 10000) / 100).toBe(pct);
+    expect(weight.lineRejectRatePct).toBe(pct);
+    expect(weight.stations.find((s) => s.station === 1)!.rejectRatePct).toBe(pct);
+
+    // The simulator's own rate (10 rejects / 1000 cones, all self-matched,
+    // never diluted by the real generation) is what an ordinal-only policy
+    // would print instead. None of the three paths may land on it.
+    const simOnlyPct = Math.round((10 / 1000) * 10000) / 100;
+    expect(pct).not.toBe(simOnlyPct);
+    for (const v of [reportPct, weight.lineRejectRatePct, weight.stations.find((s) => s.station === 1)!.rejectRatePct]) {
+      expect(v).not.toBe(simOnlyPct);
+    }
+    expect(Math.round((spc.pBar ?? 0) * 10000) / 100).not.toBe(simOnlyPct);
+  });
+});
 
 describe('the three paths still agree when TWO source generations coexist in the window', () => {
   it('Rejects, the reports and Weight all land on the REAL generation alone, never the pooled figure', async () => {
