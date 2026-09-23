@@ -52,6 +52,7 @@ import type { PlausibilityRule } from './admin.js';
 import { nelsonViolations, nelsonRuleTable, type NelsonRuleId, type NelsonRuleInfo } from './nelson.js';
 import { consecutiveProductionDays, plantOffsetMinutes, toPlantIso, toPlantMs } from './plantClock.js';
 import { plausibleWhere } from './coneState.js';
+import { epochFragment, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 function round(n: number, dp = 2): number {
   const f = 10 ** dp;
@@ -116,6 +117,8 @@ export interface CalibrationData {
    *  screen can name a flag and say which rules this series could never
    *  complete. */
   rules: NelsonRuleInfo[];
+  /** Which source generation the drift series was fitted over, and what was left out. */
+  generationNote?: GenerationNote;
 }
 
 export interface StationDriftOptions {
@@ -178,8 +181,21 @@ export async function getStationDrift(
   plausibility: PlausibilityRule,
   opts: StationDriftOptions = {},
 ): Promise<CalibrationData> {
-  const r = await pool
-    .request()
+  // SOURCE GENERATIONS (generation.ts, 23 Sep 2026). Station drift is a model
+  // of one station's mean moving day by day. Two generations of the same
+  // source table interleaved in time give that station two daily means per
+  // day, silently averaged into one — and on this development sidecar one of
+  // them is the plant simulator, whose station bias is synthetic. A drift
+  // slope fitted across a generation boundary is not a measurement of
+  // anything physical.
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
+  const gen0 = epochFragment(scope, 'cone_event');
+  const genAnd = gen0.sql ? ' AND ' + gen0.sql : '';
+  const bindGen = (rq: mssql.Request) => {
+    for (const q of gen0.params) rq.input(q.name, mssql.Int, q.id);
+    return rq;
+  };
+  const r = await bindGen(pool.request())
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
     .input('to', mssql.Date, to)
@@ -189,7 +205,7 @@ export async function getStationDrift(
       `SELECT source_station st, shift_date d, COUNT(*) n,
               AVG(CAST(weight_g AS float)) mean, STDEV(CAST(weight_g AS float)) sd
        FROM sms.cone_event
-       WHERE line_id=@line AND shift_date BETWEEN @from AND @to
+       WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}
          AND weight_g IS NOT NULL AND weight_g BETWEEN @plausLo AND @plausHi
          AND source_station IS NOT NULL
        GROUP BY source_station, shift_date
@@ -199,8 +215,7 @@ export async function getStationDrift(
   // The per-station median over the window, from the SAME population as the
   // mean above (the one plausibility predicate, coneState.ts). PERCENTILE_CONT
   // is a window function, so one row per station is kept with DISTINCT.
-  const medReq = pool
-    .request()
+  const medReq = bindGen(pool.request())
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
     .input('to', mssql.Date, to);
@@ -209,7 +224,7 @@ export async function getStationDrift(
     `SELECT DISTINCT source_station st,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(weight_g AS float)) OVER (PARTITION BY source_station) med
      FROM sms.cone_event
-     WHERE line_id=@line AND shift_date BETWEEN @from AND @to
+     WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}
        AND weight_g IS NOT NULL AND ${medWhere}
        AND source_station IS NOT NULL`,
   );
@@ -319,6 +334,7 @@ export async function getStationDrift(
     stations,
     flaggedStationCount: stations.filter((s) => s.flagged).length,
     rules: nelsonRuleTable(),
+    generationNote: noteOf(scope),
   };
 }
 

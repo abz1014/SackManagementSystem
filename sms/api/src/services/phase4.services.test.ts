@@ -26,6 +26,13 @@ function fakePool(answer: (sql: string, params: Map<string, unknown>) => Record<
           return req;
         },
         query: async (sql: string) => {
+          // The source-generation probe (generation.ts `resolveGenerationScope`,
+          // 23 Sep 2026) runs before the service's own queries. Answered as
+          // "no epoch-tagged rows" — the UNSCOPED no-op — and intercepted
+          // BEFORE `calls` is appended to, so the positional assertions below
+          // still describe the queries they were written about. The predicate
+          // itself is covered by generation.test.ts.
+          if (sql.includes('AS tbl, source_epoch AS epoch_id')) return { recordset: [] };
           calls.push({ sql, params });
           return { recordset: answer(sql, params) };
         },

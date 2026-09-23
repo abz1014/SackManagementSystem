@@ -22,6 +22,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { epochFragment, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 export interface ShiftCheckDay {
   day: string;
@@ -48,6 +49,8 @@ export interface ShiftCheckData {
   /** The three hours of day with the most disagreements, most first. */
   topHours: ShiftCheckHour[];
   note: string;
+  /** Which source generation was compared, and what was left out. */
+  generationNote?: GenerationNote;
 }
 
 const pct = (part: number, of: number): number => (of > 0 ? Math.round((1000 * part) / of) / 10 : 0);
@@ -58,8 +61,18 @@ export async function getShiftCheck(
   from: string,
   to: string,
 ): Promise<ShiftCheckData> {
-  const bind = () =>
-    pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
+  // SOURCE GENERATIONS (generation.ts, 23 Sep 2026). `shift_code_legacy` is
+  // the SOURCE table's own Shift column, and each generation is a different
+  // physical table: pooling them compares two plants' filing against one
+  // recomputed answer and reports the disagreement as a single percentage.
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
+  const gen0 = epochFragment(scope, 'cone_event');
+  const genAnd = gen0.sql ? ' AND ' + gen0.sql : '';
+  const bind = () => {
+    const r = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
+    for (const q of gen0.params) r.input(q.name, mssql.Int, q.id);
+    return r;
+  };
 
   // Per production day: cones, and how many the plant filed differently.
   // A NULL legacy shift is neither a match nor a mismatch; it is counted
@@ -70,7 +83,7 @@ export async function getShiftCheck(
             SUM(CASE WHEN shift_code_legacy IS NOT NULL AND shift_code_legacy <> shift_code THEN 1 ELSE 0 END) AS mm,
             SUM(CASE WHEN shift_code_legacy IS NULL THEN 1 ELSE 0 END) AS nolegacy
        FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${genAnd}
       GROUP BY shift_date
       ORDER BY shift_date`,
   );
@@ -81,7 +94,7 @@ export async function getShiftCheck(
   const hours = await bind().query<{ h: number; mm: number }>(
     `SELECT DATEPART(HOUR, production_ts_utc) AS h, COUNT(*) AS mm
        FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${genAnd}
         AND shift_code_legacy IS NOT NULL AND shift_code_legacy <> shift_code
       GROUP BY DATEPART(HOUR, production_ts_utc)
       ORDER BY COUNT(*) DESC, DATEPART(HOUR, production_ts_utc)`,

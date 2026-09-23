@@ -10,6 +10,14 @@
  * report can print "N readings, of which M implausible excluded" from the
  * same query that computes the averages those M were excluded from.
  *
+ * SOURCE GENERATIONS (generation.ts, 23 Sep 2026). This census is read beside
+ * the period's own production figures, and those are now drawn from ONE
+ * source generation. A census over every generation would therefore disagree
+ * with the numbers it exists to reconcile — the opposite of its purpose — so
+ * it takes the same scope, and `generationNote` says which generation and
+ * what was left out. `sms verify --weights` remains the per-generation
+ * reconciliation against the SOURCE; this stays a census within canonical.
+ *
  * ONE QUERY, GROUPED BY THE STATE CASE coneState.ts builds. The plausibility
  * split is not a second query with a second predicate: 'unknown' readings
  * are further split by whether the population rule excluded them (implausible)
@@ -21,6 +29,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import type { ConeState } from '@sms/shared';
 import { bindStateCase, loadStateContext, plausibleWhere, type StateContext } from './coneState.js';
+import { epochWhere, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 export interface WeightAggregate {
   n: number;
@@ -47,6 +56,8 @@ export interface ReconciliationData {
   /** How many (product, limits-version) windows the classification had. */
   limitWindows: number;
   basis: 'as_recorded';
+  /** Which source generation this census covered, and what it left out. */
+  generationNote?: GenerationNote;
   note: string;
 }
 
@@ -77,6 +88,7 @@ export async function getReconciliation(
   ctx?: StateContext,
 ): Promise<ReconciliationData> {
   const context = ctx ?? (await loadStateContext(pool, lineId));
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
   const req = pool
     .request()
     .input('line', mssql.Int, lineId)
@@ -85,6 +97,7 @@ export async function getReconciliation(
   if (shift) req.input('shift', mssql.VarChar(10), shift);
   const stateCase = bindStateCase(req, context, '', 'cs');
   const plausible = plausibleWhere(req, 'weight_g', context.plausibility);
+  const gen = epochWhere(req, scope, 'cone_event');
 
   // One row per (state, plausibility bucket): 0 = plausible, 1 = implausible,
   // 2 = no weight. The buckets are exhaustive, so `total` is their sum.
@@ -95,6 +108,7 @@ export async function getReconciliation(
        FROM sms.cone_event
       WHERE line_id = @line AND shift_date BETWEEN @from AND @to
         ${shift ? 'AND shift_code = @shift' : ''}
+        ${gen ? `AND ${gen}` : ''}
       GROUP BY ${stateCase}, CASE WHEN weight_g IS NULL THEN 2 WHEN ${plausible} THEN 0 ELSE 1 END`,
   );
 
@@ -138,6 +152,7 @@ export async function getReconciliation(
     plausibility: context.plausibility,
     limitWindows: context.windows.length,
     basis: 'as_recorded',
+    generationNote: noteOf(scope),
     note:
       'Weights as the scale recorded them; no tube or tare adjustment. The plausibility window is the rule on file, ' +
       'which IFL has not yet confirmed. Every weight statistic in the application is computed over the plausible population.',
