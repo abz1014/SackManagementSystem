@@ -56,8 +56,27 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
             thresholdLabel={W.report.refLineThreshold(fmtSignedG(d.thresholdG))}
             zeroLabel={W.report.refLineZero}
           />
+          {/* UX overflow sweep (23 Sep 2026): ten columns needed 969px of an
+              816px content column — the same `.tw` overflow-x:auto shape
+              found on Weight's station table (Weight.tsx's own note on this
+              date). `table-layout: fixed` plus a `<colgroup>` (Weight's
+              pattern, reused rather than reinvented) fits it without
+              dropping a column; "Last adjusted" wraps to two lines on its
+              17%-wide column instead of forcing the table wider. */}
           <div className="tw">
-            <table>
+            <table className="calib-tbl">
+              <colgroup>
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '17%' }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>{W.reports.colStation}</th>

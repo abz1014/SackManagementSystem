@@ -68,8 +68,25 @@ export function SystemHistoryBlock() {
       ) : d.generations.length === 0 ? (
         <p className="mut" style={{ marginTop: 12 }}>{W.health.epochRegister.none}</p>
       ) : (
+        /* UX overflow sweep (23 Sep 2026): eight columns, two of them full
+           timestamps ("First seen", and "Status" for a closed generation),
+           needed 881px of an 816px content column — dropping the duplicate
+           timestamp `registeredBy` used to carry (see words.ts) was not
+           enough by itself. `table-layout: fixed` + `<colgroup>` is the
+           same fix Weight's station table and the Calibration report use
+           for the same shape of problem (their own comments this date). */
         <div className="tw" style={{ marginTop: 12 }}>
-          <table>
+          <table className="epoch-tbl">
+            <colgroup>
+              <col style={{ width: '21%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '10%' }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>{W.health.epochRegister.colTable}</th>
@@ -99,7 +116,7 @@ export function SystemHistoryBlock() {
                   <td className={g.closedUtc == null ? '' : 'mut'}>
                     {g.closedUtc == null ? W.health.epochRegister.open : W.health.epochRegister.closed(fmtAppInstant(g.closedUtc))}
                   </td>
-                  <td>{W.health.epochRegister.registeredBy(g.registeredBy, fmtAppInstant(g.firstSeenUtc))}</td>
+                  <td>{W.health.epochRegister.registeredBy(g.registeredBy)}</td>
                   <td className="n">{g.rawRowCount.toLocaleString('en-GB')}</td>
                 </tr>
               ))}

@@ -347,6 +347,14 @@ export const W = {
   /* -------------------------------------------------------------- stations */
   stations: 'Stations',
   stationsNote: 'cones this period',
+  /* The one comparative chart replacing the fourteen 85x56px per-cell marks
+     (UX chart-primitives pass, 23 Sep 2026) — see Line.tsx's StationCompare.
+     Deliberately not "vs line": Weight's own "vs line" language means grams
+     against the line's weight mean, a different measurement on a different
+     unit; this is cone counts against the row's own median, and reusing the
+     phrase would suggest the two charts measure the same thing. */
+  stationsCompareAria: 'Cones this period, each station against the row’s own median',
+  stationsCompareZero: 'row median',
   /* The wall has no period control: its per-station counts are measured
      from the start of the shift (live.ts), so it must not borrow Line's
      "this period" wording. */
@@ -416,6 +424,24 @@ export const W = {
        what is known (the weighed count) and names what is not. */
     countLineRejectUnknown: (n: string) =>
       `${n} weighed; how many the scale rejected could not be loaded.`,
+    /* 23 Sep 2026 (sheet-remount brief). A count that has not ARRIVED yet is
+       not a count of zero, and these three say so rather than letting the
+       headline fall back to 0. The screen used to print "0 weighed, 0
+       rejected by the scale (0%)" for the whole of the first fetch — and,
+       once a drilldown click made that happen on every sheet open, the
+       lighter reject count sometimes landed first and printed "0 weighed,
+       402 rejected by the scale (0%)": a pair that cannot exist. */
+    countLinePending: 'counting the readings in this period…',
+    countLineRejectPending: (n: string) =>
+      `${n} weighed; still counting how many the scale rejected.`,
+    /* Both counts are real and the register returned none weighed while the
+       scale rejected some. There is no rate to state between them (the old
+       sentence printed "(0%)", which is not what 402 out of 0 means), so
+       this states the two numbers and nothing more. Unreachable from a
+       half-loaded screen since the fix above; if it ever shows, the
+       contradiction is in the data, not in the fetch. */
+    countLineNoRate: (n: string, rejected: string) =>
+      `${n} weighed, ${rejected} rejected by the scale.`,
     /* The headline replaces the whole sentence, not just the numbers, when
        the register itself (not just the reject count) failed to load — the
        body below already shows Failed with its own retry. */
@@ -1288,7 +1314,15 @@ export const W = {
       colRows: 'Rows held',
       open: 'open',
       closed: (when: string) => `closed ${when}`,
-      registeredBy: (who: string, when: string) => `${who}, ${when}`,
+      /* UX overflow sweep (23 Sep 2026): this used to append `when` a second
+         time — `g.firstSeenUtc`, the exact instant already printed one column
+         over under "First seen" (both ARE the same fact per the comment
+         above: first_seen_utc IS the registration instant). Printing it
+         twice widened this column for no new information and was part of
+         why the whole table needed a horizontal scrollbar at 1366px. The
+         name alone is what "Registered by" asks; the "when" belongs to
+         "First seen", not to a second, redundant cell. */
+      registeredBy: (who: string) => who,
       provenanceLabel: (p: string) => (p === 'ifl_copy' ? 'IFL copy' : p === 'ifl_live' ? 'IFL live' : p === 'simulator' ? 'Simulator' : p),
       /* "First seen" is this row's REGISTRATION instant (first_seen_utc
          defaults to SYSUTCDATETIME() on insert — the epoch's own PK
@@ -1548,6 +1582,16 @@ export const W = {
     colAvg: 'Average',
     colInRange: 'Within range',
     noProduct: 'No product on the reading',
+    /* The daily bar chart (UX chart-primitives pass, 23 Sep 2026): the
+       screen's own question is answered by three numbers (how many, how
+       heavy, how many passed) and the register below lists every sack, but
+       nothing showed the day-to-day shape between them — this screen was
+       measured at 0% chart pixel area against 7,400+ px of page. Drawn from
+       the ledger's own `weighed` figures (never a new statistic), so it
+       cannot pool across the 5 Aug source-generation boundary any more than
+       the ledger table beside it already does. */
+    weighedPerDay: 'Sacks weighed per day',
+    weighedPerDayAria: 'Sacks weighed per day',
     /* The ledger. */
     ledger: 'Stock ledger',
     ledgerNote: 'line stock, not per machine',

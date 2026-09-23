@@ -33,6 +33,7 @@ import {
   SkelFigures, SkelLines, SkelStations, type FigureProps,
 } from '../ui/bits';
 import { fmtClock, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
+import { DeviationBars, type DeviationRow } from './report/shared';
 import {
   getAttention, getProduction, getProductAt, getProducts, getStations, stationLabel, getMachinesRunning,
   type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
@@ -198,12 +199,19 @@ export function LineScreen({
             }}
           />
         ) : (
-          <StationRowGrid
-            line={line}
-            stations={stations.data?.stations ?? []}
-            counts={perStation.data?.data.rows ?? null}
-            onOpen={onOpenStation}
-          />
+          <>
+            <StationCompare
+              ids={stationIds(line, stations.data?.stations ?? [])}
+              counts={perStation.data?.data.rows ?? null}
+              stations={stations.data?.stations ?? []}
+            />
+            <StationRowGrid
+              line={line}
+              stations={stations.data?.stations ?? []}
+              counts={perStation.data?.data.rows ?? null}
+              onOpen={onOpenStation}
+            />
+          </>
         )}
       </Block>
 
@@ -731,45 +739,45 @@ export function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
+/** "+1,204" / "−318" / "0" — a signed cone COUNT, never a gram figure, for
+ *  `StationCompare`'s deviation-from-median bars. `DeviationBars` defaults to
+ *  `fmtSignedG` (Weight's unit); this screen's numbers are cones. */
+function fmtSignedCount(v: number): string {
+  if (v === 0) return '0';
+  return `${v > 0 ? '+' : '−'}${fmtInt(Math.abs(v))}`;
+}
+
 /**
- * The bar + median line for one station (Roadmap UX Phase 11, 22 Sep 2026).
- * Unfilled (stroke only), never a solid `background`: [SPEC 11] and
- * [PHASE 9 PRINT P3] (app.css) already established that a CSS `background`
- * fill is dropped under "print background graphics off" — the verdict mark
- * and the Rejects Pareto bar both had to be redrawn around exactly that —
- * while a border/stroke survives it regardless of that setting. Using an
- * SVG stroke here means this bar needs no print-hide rule at all, unlike the
- * Wall's own `.w-st .bar` (app.css, `@media print`), which is hidden because
- * its filled version "would print as empty boxes". It also adds no second
- * solid ink fill — the app's one, the verdict mark, stays the only one.
- *
- * `medianPct` is drawn on every cell at the SAME fraction (the row's shared
- * median, on the row's shared 0..max basis), so fourteen short dashed
- * segments land at the same pixel row across the strip and read as one
- * reference line — no separate overlay element needed.
+ * One comparative chart for all fourteen stations, replacing the row of
+ * per-cell sparklines this screen carried until the UX chart-primitives pass
+ * (23 Sep 2026, roadmap Phase 11 having added the per-cell version the day
+ * before at 85x56px each). Measured live: fourteen marks that size read as
+ * texture, not data — none legible without zooming. `DeviationBars` (already
+ * built for the report screens' own per-station charts) draws the same fact
+ * — each station's count against the row's own median — ONCE, at a height a
+ * reader can actually compare bar-to-bar. No new statistic: `median()` below
+ * is the same function the removed per-cell dashed line used, and `flagged`
+ * is never set here — a station running above or below the row's median cone
+ * count is not a fault, only Weight's drift rule gets to say that.
  */
-function StationBar({ pct, medianPct }: { pct: number | null; medianPct: number | null }) {
+function StationCompare({ ids, counts, stations }: { ids: number[]; counts: ProductionRow[] | null; stations: StationRow[] }) {
+  if (counts == null) return null; // no invented bars while the count is still loading
+  const nameOf = new Map(stations.map((s) => [s.stationId, s]));
+  const countById = new Map(counts.map((r) => [Number(r.group), r.cones]));
+  const countValues = ids.map((id) => countById.get(id) ?? 0);
+  const med = median(countValues);
+  const rows: DeviationRow[] = ids.map((id) => ({
+    key: String(id),
+    label: stationLabel(nameOf.get(id), id),
+    value: (countById.get(id) ?? 0) - med,
+  }));
   return (
-    <span className="st-bar" aria-hidden="true">
-      {(pct != null || medianPct != null) && (
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          {medianPct != null && (
-            <line
-              x1={0} y1={100 - medianPct} x2={100} y2={100 - medianPct}
-              stroke="var(--muted)" strokeWidth={1.5} strokeDasharray="3 3"
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-          {pct != null && pct > 0 && (
-            <rect
-              x={20} width={60} y={100 - pct} height={pct}
-              fill="none" stroke="var(--graphite)" strokeWidth={4}
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-        </svg>
-      )}
-    </span>
+    <DeviationBars
+      rows={rows}
+      ariaLabel={W.stationsCompareAria}
+      zeroLabel={W.stationsCompareZero}
+      valueFmt={fmtSignedCount}
+    />
   );
 }
 
@@ -799,14 +807,6 @@ function StationRowGrid({
   const rejectById = new Map((counts ?? []).map((r) => [Number(r.group), r.rejectedCones]));
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
 
-  // The bar row's shared scale: every bar and the median line are read
-  // against the SAME 0..max basis, or none of them draws at all while
-  // counts is still null -- a bar against a loading total would be a number
-  // invented rather than measured.
-  const countValues = counts == null ? null : ids.map((id) => countById.get(id) ?? 0);
-  const maxCones = countValues ? Math.max(1, ...countValues) : 0;
-  const medianPct = countValues ? Math.min(100, (median(countValues) / maxCones) * 100) : null;
-
   return (
     <div className="stations" style={{ ['--st-count' as string]: String(ids.length) }}>
       {ids.map((id) => {
@@ -817,11 +817,6 @@ function StationRowGrid({
         // Quiet always wins (OVERVIEW-SPEC.md §3.3): a machine that stopped
         // is the bigger fact than one that rejected a few cones.
         const tag = quiet ? W.quiet : rejected > 0 ? W.stationRejected(rejected) : ' ';
-        // A non-zero count always draws a visible sliver (a 6% floor), so a
-        // low-but-nonzero station is not indistinguishable from a true zero
-        // -- the same "zero is the only genuine gap" rule the Wall board
-        // states outright (Wall.tsx's BAR_MIN_RATIO).
-        const barPct = cones == null ? null : cones <= 0 ? 0 : Math.max(6, (cones / maxCones) * 100);
         return (
           <button
             key={id}
@@ -830,7 +825,6 @@ function StationRowGrid({
             onClick={() => onOpen(id)}
             title={stationLabel(nameOf.get(id), id)}
           >
-            <StationBar pct={barPct} medianPct={medianPct} />
             {/* The number alone unless the station has a plant name: the block
                 is already headed "Stations", so repeating the word fourteen
                 times is noise that also overflowed every box past nine. */}

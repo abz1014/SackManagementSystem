@@ -892,7 +892,12 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
  * mean plus per-day Nelson flag, for every station — was already on the wire
  * in `/api/weight-stations`; this is its first reader. No API change.
  */
-export const SPARK_W = 120;
+/* UX overflow sweep (23 Sep 2026): was 120. The station table needed 905px
+   for 816px of column (see StationTable's own note below) and this column
+   was the single biggest lever that did not mean dropping a fact — the
+   sparkline is drawn to a `viewBox`, so it rescales losslessly; a station
+   name or a signed gram figure does not. */
+export const SPARK_W = 96;
 export const SPARK_H = 28;
 /** Fewer points than this cannot honestly show a trend — render nothing
  *  rather than a two-point line pretending to be one. Exported for its own
@@ -999,7 +1004,31 @@ function StationTable({
 
   return (
     <>
-      <table>
+      {/* UX overflow sweep (23 Sep 2026): this table needed 905px of the
+          816px a desktop content column has, so `.tw`'s overflow-x:auto
+          (app.css:658) put it behind a horizontal scrollbar with the Trend
+          column — the one column the caption below the table explicitly
+          describes — scrolled out of view. `table-layout: fixed` with an
+          explicit `<colgroup>` (below) replaces "grow every column to fit
+          its widest cell, whatever that costs" with a fixed budget that
+          sums to 100%; `.station-tbl td` (app.css) turns off the plain `td`
+          default's forced single line so "What the data shows" wraps inside
+          its own column instead of pushing the table wider. Paired with
+          SPARK_W dropping to 96 (above) and the Trend/Shows columns' left
+          padding dropping from 28px to 14px, this fits at 1366px AND 1920px
+          — the page caps at 1100px either way (app.css:450), so the
+          content column's width does not change between them. */}
+      <table className="station-tbl">
+        <colgroup>
+          <col style={{ width: '15%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '17%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '25%' }} />
+        </colgroup>
         <thead>
           <tr>
             <th>{W.weight.colStation}</th>
@@ -1013,9 +1042,9 @@ function StationTable({
                 — see the note above Sparkline. A single instant and a column
                 that reads '—' on every live row, for one mark that answers
                 "which station moved, and roughly when". */}
-            <th style={{ paddingLeft: 28 }}>{W.weight.colTrend}</th>
+            <th style={{ paddingLeft: 14 }}>{W.weight.colTrend}</th>
             <th className="n">{W.weight.colRejects}</th>
-            <th style={{ paddingLeft: 28 }}>{W.weight.colShows}</th>
+            <th style={{ paddingLeft: 14 }}>{W.weight.colShows}</th>
           </tr>
         </thead>
         <tbody>
@@ -1027,7 +1056,7 @@ function StationTable({
               onClick={() => onOpen(r.station)}
               onKeyDown={rowKeys(() => onOpen(r.station))}
             >
-              <td className={r.flagged ? 'acc' : ''} style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>
+              <td className={r.flagged ? 'acc' : ''} style={{ fontWeight: 500 }}>
                 {stationLabel(byId.get(r.station), r.station)}
                 <Chevron label={W.openRecord} />
               </td>
@@ -1035,11 +1064,11 @@ function StationTable({
               <td className="n">{r.medianG == null ? '—' : fmtG(r.medianG)}</td>
               <td className="n">{r.sdG == null ? '—' : `${r.sdG.toFixed(1)} g`}</td>
               <td className="n">{vsTargetCell(r)}</td>
-              <td style={{ paddingLeft: 28 }}>
+              <td style={{ paddingLeft: 14 }}>
                 <Sparkline days={r.days} domain={sparkDomain} lineMeanG={data.lineMeanG} />
               </td>
               <td className="n">{r.rejectRatePct == null ? '—' : `${r.rejectRatePct.toFixed(1)}%`}</td>
-              <td style={{ paddingLeft: 28 }}>{verdict(r, data)}</td>
+              <td style={{ paddingLeft: 14 }}>{verdict(r, data)}</td>
             </tr>
           ))}
         </tbody>

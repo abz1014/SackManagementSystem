@@ -212,7 +212,11 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
                   {/* [PHASE 11 R3] Same fraction on every station's cell, so the
                       dashed line lands at the same height across the row and
                       reads as one reference line, not fourteen disconnected
-                      ones — see Line.tsx's StationBar for the same technique. */}
+                      ones. Line.tsx's own per-cell version of this technique
+                      (its old StationBar) was replaced on 23 Sep 2026 by one
+                      comparative chart (StationCompare) — this Wall board is
+                      a fixed TV layout with no room for that, so its per-cell
+                      dashed line is unchanged. */}
                   <span className="bar-median" style={{ bottom: `calc(var(--bar-max) * ${rowMedianRatio.toFixed(4)})` }} />
                 </span>
                 <span className="cap">

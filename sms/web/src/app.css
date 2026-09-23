@@ -188,6 +188,17 @@
  *                 existing fill/floor/print-hide behaviour is UNCHANGED —
  *                 this pass's brief asked only for the median line there,
  *                 not a re-litigation of the Wall's fill contrast.
+ *
+ * UX chart-primitives pass (23 Sep 2026): R1/R2's `.st-bar` is REMOVED.
+ * Measured live the day after it shipped: fourteen 85x56px cells read as
+ * texture, not data — the exact "arithmetically correct, perceptually null"
+ * failure this comment's own opening paragraph diagnosed in the Wall's
+ * bars, reproduced at a size too small to read rather than fixed. Line.tsx's
+ * `StationCompare` draws the same fact (each station against the row's own
+ * median) ONCE, at real height, with `report/shared.tsx`'s `DeviationBars` —
+ * built for exactly this shape of chart. R3 (`.w-st`, the Wall's own median
+ * line) is UNCHANGED: the Wall is a fixed board with no room for a second,
+ * larger chart, and was not this pass's brief.
  * ------------------------------------------------------------------------- */
 
 /* ------------------------------------------------------------------ tokens */
@@ -622,15 +633,6 @@ h1 .acc, .headline .acc { color: var(--acc); }
 .st.quiet .st-val, .st.quiet .st-name { color: var(--grid); }
 .st.flag { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
 .st.flag .st-val { color: var(--acc); }
-/* [PHASE 11 R1/R2] The bar + median-line encoding, reserved above the name
-   whether or not this render has data yet (an empty <span> still holds the
-   line, so the row does not reflow once counts arrive) — same reflow
-   discipline as `.st-tag` above. Fixed px height, scaled by --ui-scale like
-   every other figure on this screen; the svg's own viewBox does the rest of
-   the scaling (preserveAspectRatio="none" stretches it to fill this box). */
-.st-bar { display: block; height: calc(56px * var(--ui-scale)); margin-bottom: 4px; }
-.st-bar svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.st.quiet .st-bar { opacity: 0.55; }
 
 /* ---- tables ------------------------------------------------------------- */
 
@@ -656,6 +658,22 @@ tr.click { cursor: pointer; }
 tr.click:hover td { background: var(--paper-3); }
 tbody tr:last-child td { border-bottom: 0; }
 .tw { overflow-x: auto; }                 /* wide tables scroll, the page never does */
+/* UX overflow sweep (23 Sep 2026): a `.two-col` half is 498px at the desktop
+   width both Daily's and Sack's "by shift"/"by day" LineTable live at — `th`'s
+   global `white-space: nowrap` (above) forced "Rejected at inspection" onto
+   one line regardless, which alone was wider than the half column, so `.tw`
+   silently grew a horizontal scrollbar under a five-column table with nothing
+   genuinely wide in it. Letting a `.two-col` table's headers wrap is the
+   narrowest fix: it costs one extra header line, never a scrollbar, and does
+   not touch any table that already fits (`th` elsewhere keeps `nowrap`). */
+.two-col .tw th { white-space: normal; }
+/* UX overflow sweep (23 Sep 2026): Weight's station table — see the comment
+   above its `<colgroup>` in Weight.tsx. `table-layout: fixed` makes the
+   `<colgroup>` percentages authoritative instead of advisory, so a long
+   "What the data shows" sentence wraps inside its own 25% column rather than
+   widening the table past its container. */
+.station-tbl, .calib-tbl, .epoch-tbl { table-layout: fixed; }
+.station-tbl th, .calib-tbl th, .epoch-tbl th { white-space: normal; }
 .chev { color: var(--grid); margin-left: 8px; }
 /* A row the scale rejected. Wash plus accent text — never a red left border,
    which would read as a card. */

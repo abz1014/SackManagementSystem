@@ -28,9 +28,11 @@ import { useState } from 'react';
 import { useLive, usePolling, usePlantNow, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period } from '../lib/period';
-import { Block, Details, Empty, Failed, Figures, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
+import { Block, Details, Empty, Failed, Figures, SkelChart, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
+import { Readout, edgeAnchor, useChartWidth } from '../ui/chart';
+import { fmtDayShort } from './report/shared';
 import { Pager, PAGE_SIZE, ReadingTable } from './Readings';
 import {
   getEvents, getProducts, getSackStock, getSackSummary, recordSackMovement, MOVEMENT_TYPES,
@@ -99,6 +101,27 @@ export function SacksScreen({
         )}
       </Block>
 
+      {/* UX chart-primitives pass (23 Sep 2026): this screen measured at 0%
+          chart pixel area against 7,400+ px of page — the worst offender the
+          brief that added this chart found. Placed second on the page (above
+          the fold) and given a real height, unlike the 14 x 85x56px marks
+          that Line's own station strip used to carry. Drawn from the SAME
+          `ledger` fetch the Stock ledger table below already reads — no new
+          request, no new statistic (`weighed.sacks`/`weighed.kg` per day are
+          the ledger's own figures, already printed in that table's
+          "Receipts" column via `weighed`). */}
+      {s && s.totals.sacks > 0 && (
+        <Block label={W.sacks.weighedPerDay}>
+          {ledger.error && !ledger.data ? (
+            <Failed error={ledger.error} onRetry={ledger.refresh} />
+          ) : !ledger.data ? (
+            <SkelChart />
+          ) : (
+            <SackWeighedChart days={ledger.data.data.days} />
+          )}
+        </Block>
+      )}
+
       {s && s.totals.sacks > 0 && (
         <Block>
           <div className="two-col">
@@ -136,6 +159,88 @@ export function SacksScreen({
 
       <History period={period} page={page} onPageChange={onPageChange} onOpenReading={onOpenReading} />
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ chart */
+
+/**
+ * One bar per production day in the ledger's own range: sacks weighed, the
+ * ledger's own `weighed.sacks` figure. Bars, not a line — the ledger can
+ * legitimately span the 5 Aug source-generation boundary (a picked range
+ * crossing it), and a LINE drawn across that gap would assert a continuity
+ * the data does not have (CLAUDE.md's "a line drawn across it is a lie
+ * about continuity"); a bar makes no such claim about the day beside it.
+ * Height and layout mirror `report/shared.tsx`'s `DayBars`, which this is
+ * not a copy of: that component's readout and axis are cone-shaped
+ * (`cones`/`sacks` together, always both), this screen's own question is
+ * sacks and kg, and the report module is not this screen's to import
+ * internals from for a shape that does not fit it.
+ */
+function SackWeighedChart({ days }: { days: LedgerDay[] }) {
+  const [box, width] = useChartWidth();
+  const [hover, setHover] = useState<number | null>(null);
+  const H = 240;
+  const L = 48;
+  const R = 8;
+  const T = 18;
+  const B = 30;
+
+  if (days.length === 0) return <Empty message={W.nothingHere} />;
+
+  const max = Math.max(...days.map((d) => d.weighed.sacks), 1);
+  const slot = (width - L - R) / days.length;
+  const bw = Math.max(4, slot * 0.62);
+  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
+  const cx = (i: number) => L + slot * i + slot / 2;
+  const step = Math.max(1, Math.ceil(days.length / Math.max(2, Math.floor((width - L - R) / 70))));
+  const grid = [0.25, 0.5, 0.75].map((f) => Math.round(max * f)).filter((v, i, a) => v > 0 && a.indexOf(v) === i);
+
+  const h = hover != null ? days[hover] : null;
+  const totalSacks = days.reduce((sum, d) => sum + d.weighed.sacks, 0);
+
+  return (
+    <div ref={box}>
+      <Readout
+        hovered={h ? `${fmtDayLong(h.day)} · ${fmtInt(h.weighed.sacks)} sacks · ${fmtInt(Math.round(h.weighed.kg))} kg` : null}
+        resting={`${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(totalSacks)} sacks weighed`}
+      />
+      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={W.sacks.weighedPerDayAria}>
+        {grid.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
+            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{fmtInt(v)}</text>
+          </g>
+        ))}
+        {days.map((d, i) => (
+          <rect
+            key={d.day}
+            x={cx(i) - bw / 2}
+            y={d.weighed.sacks > 0 ? y(d.weighed.sacks) : y(0)}
+            width={bw}
+            height={Math.max(0, H - B - y(d.weighed.sacks))}
+            fill={hover === i ? 'var(--ink)' : 'var(--graphite)'}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(null)}
+          />
+        ))}
+        {days.map((d, i) =>
+          i % step === 0 || i === days.length - 1 ? (
+            <text
+              key={`t${d.day}`}
+              x={cx(i)}
+              y={H - 8}
+              fontSize="var(--fs-tick)"
+              fill="var(--muted)"
+              textAnchor={edgeAnchor(i, days.length)}
+            >
+              {fmtDayShort(d.day)}
+            </text>
+          ) : null,
+        )}
+        <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
+      </svg>
+    </div>
   );
 }
 
