@@ -27,7 +27,18 @@
  *
  * UX Phase 8 Brief A (21 Sep 2026).
  */
-import type { Envelope, LiveData, LiveGenerationNote, LiveLine, Meta, OperationsData, RegisterPage, RegisterRow } from '../api';
+import type {
+  Envelope,
+  LiveData,
+  LiveGenerationNote,
+  LiveLine,
+  Meta,
+  OperationsData,
+  ProductionData,
+  ProductionRow,
+  RegisterPage,
+  RegisterRow,
+} from '../api';
 
 /** Genuine UTC — when the sync worker last wrote, per `plantClock.ts`. */
 export const META_FIXTURE: Meta = {
@@ -180,6 +191,89 @@ export const OPERATIONS_FIXTURE: Envelope<OperationsData> = {
       { table: 'sack1_TP1U2', fingerprint: 'abc123', status: 'enforced-by-worker', epochId: 2, epochLabel: 'September copy — sacks' },
     ],
     dq: { latestRunId: 'dq-2026-09-07T12:00:00Z', bySeverity: { info: 2, warn: 1 }, findings: [] },
+  },
+  metadata: META_FIXTURE,
+};
+
+/**
+ * SIMULATOR-GENERATION NOTE — for banner-vs-payload tests. `GENERATION_FIXTURE`
+ * above is the ordinary, quiet case (D-11): one real generation, nothing
+ * newer elsewhere, no sentence printed. This is its opposite: the CURRENT
+ * generation reported IS the simulator's, `spansGenerations` is true, and
+ * `newerElsewhere*` names a still-newer reading that was excluded — the
+ * shape a screen must turn into an on-screen sentence, not silence. Provenance
+ * says `ifl_copy` on the CURRENT generation deliberately (mirrors the real
+ * epoch-13 mislabelling documented in `api/src/testkit/generations.ts` and
+ * `api/src/services/generation.ts`'s file header) so a banner test built on
+ * this fixture cannot pass by reading `provenance` instead of `sourceDb`/
+ * `simulator` — the same trap the server-side predicate has to avoid.
+ */
+export const SIMULATOR_GENERATION_FIXTURE: LiveGenerationNote = {
+  generation: {
+    key: 'DATA_TP1U2_SIM#4',
+    ordinal: 4,
+    sourceDb: 'DATA_TP1U2_SIM',
+    provenance: 'ifl_copy',
+    label: 'pack1_TP1U2 gen 4',
+    simulator: true,
+  },
+  spansGenerations: true,
+  otherGenerationExcluded: 132_552,
+  newerElsewhereUtc: '2026-09-22T18:00:00Z',
+  newerElsewhereSourceDb: 'DATA_TP1U2_SIM',
+  newerElsewhereLabel: 'pack1_TP1U2 gen 4',
+  newerElsewhereSimulator: true,
+};
+
+/**
+ * RT-005 — A 200 OK RESPONSE WITH A HOLE IN IT. Every reliability guard
+ * Phase 7 built (`reliability.guard.test.ts`) catches a FAILED fetch: it
+ * scans for `.error` being read. This fixture is the shape none of them can
+ * see — the HTTP call succeeds, the envelope is well-formed, the row is
+ * PRESENT, and individual keys have been deleted from it (a partial-write,
+ * a stale cache entry, a backend field renamed under a client still on the
+ * old contract — the actual cause is deliberately left open; the point is
+ * the client cannot tell which). There is no `.error` to fail to read, so a
+ * screen that only guards on `.error` renders this fixture as if it were
+ * complete.
+ *
+ * `stripFields` is the general tool: given any fixture row, delete the named
+ * keys and return something that TYPE-CHECKS as the original type — which is
+ * a deliberate lie, made explicit at the one call site, standing in for what
+ * a real malformed wire payload does silently. Do not use this to build
+ * ordinary fixtures; it exists only to simulate the hole.
+ */
+export function stripFields<T extends object>(row: T, fields: readonly (keyof T)[]): T {
+  const copy = { ...row } as Record<string, unknown>;
+  for (const f of fields) delete copy[f as string];
+  return copy as unknown as T;
+}
+
+const PRODUCTION_ROW_FIXTURE: ProductionRow = {
+  group: '2026-09-07',
+  cones: 4820,
+  rejectedCones: 61,
+  sacks: 96,
+  sackWeightKg: 2649.6,
+  conesInRangePct: 97.8,
+  sacksPassedScalePct: 94.1,
+};
+
+/**
+ * `sackWeightKg` and `conesInRangePct` deleted — present in the wire type,
+ * absent on this row, response otherwise a normal 200. A screen reading
+ * `row.sackWeightKg` gets `undefined`, not the `null` its own type promises
+ * for "no sacks in this group" — the two are NOT the same fact, and code
+ * that treats them alike (`row.sackWeightKg ?? 0`, `row.sackWeightKg ===
+ * null`) is exactly what this fixture is built to catch.
+ */
+export const PRODUCTION_ROW_FIELD_STRIPPED_FIXTURE: Envelope<ProductionData> = {
+  data: {
+    groupBy: 'day',
+    rows: [stripFields(PRODUCTION_ROW_FIXTURE, ['sackWeightKg', 'conesInRangePct'])],
+    unattributed: null,
+    states: null,
+    implausible: null,
   },
   metadata: META_FIXTURE,
 };
