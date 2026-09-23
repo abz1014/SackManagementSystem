@@ -40,6 +40,53 @@ const REPO_ROOT = toPosix(fileURLToPath(new URL('../..', import.meta.url))).repl
 const relPath = (f: string) => toPosix(f).replace(REPO_ROOT, '').replace(/\/{2,}/g, '/');
 
 /**
+ * WS-GB (23 Sep 2026 red-team remediation). Every token check below (GUARD
+ * 1's `.error` read, GUARD 1B's joint-error pair, GUARD 1C's `?? 0`, GUARD
+ * 2's `rank >= N`) used to run its regex over the RAW file text, comments
+ * included — the identical shape that produced today's two guard incidents:
+ * `generationScope.guard.test.ts` false-PASSED because a doc comment in
+ * `weightStations.ts`'s `rejectRatesByStation` named a sibling's epoch token
+ * in prose, and `api.callers.test.ts` false-FAILED because a JSDoc comment
+ * named `getRejectSpc` while describing server behaviour. Both fixes strip
+ * comments first; this file reuses that idiom rather than inventing a third
+ * one, but needs a LINE-PRESERVING variant — `generationScope.guard.test.ts`'s
+ * own `commentMask`, not `api.callers.test.ts`'s regex-replace stripComments,
+ * because GUARD 1C reports 1-based line numbers in its violation messages,
+ * and a regex-replace that deletes newlines inside a JSDoc block would shift
+ * every line number after it.
+ */
+function commentMask(lines: string[]): boolean[] {
+  let inBlock = false;
+  return lines.map((l) => {
+    const t = l.trimStart();
+    if (inBlock) {
+      if (t.includes('*/')) inBlock = false;
+      return true;
+    }
+    if (t.startsWith('/*')) {
+      if (!t.includes('*/')) inBlock = true;
+      return true;
+    }
+    return t.startsWith('*') || t.startsWith('//');
+  });
+}
+
+/** Blanks out comment-only lines (see commentMask above) while keeping every
+ *  other line's own line number unchanged — a prose mention of a token this
+ *  file hunts for can no longer be mistaken for real code, in either
+ *  direction (hiding a real gap, or manufacturing a fake one). */
+function stripCommentsPreservingLines(src: string): string {
+  const lines = src.split('\n');
+  const mask = commentMask(lines);
+  return lines.map((l, i) => (mask[i] ? '' : l)).join('\n');
+}
+
+/** `readFileSync` + comment-stripping in one call, since every scan in this file reads a screen/App.tsx off disk before matching a token against it. */
+function readCode(file: string): string {
+  return stripCommentsPreservingLines(readFileSync(file, 'utf8'));
+}
+
+/**
  * UX Phase 8 Brief A (21 Sep 2026): skips `*.test.ts(x)` files and the
  * `testkit/` directory. Before this, a `.tsx?` glob with no exclusion would
  * scan a new component test (e.g. `Readings.test.tsx`, added by this same
@@ -81,7 +128,7 @@ interface PollingUse { file: string; rel: string; varName: string }
 function listPollingUses(): PollingUse[] {
   const uses: PollingUse[] = [];
   for (const file of listSourceFiles(SCREENS_DIR)) {
-    const src = readFileSync(file, 'utf8');
+    const src = readCode(file);
     for (const m of src.matchAll(USE_POLLING_DECL_RE)) {
       uses.push({ file, rel: relPath(file), varName: m[1]! });
     }
@@ -146,7 +193,7 @@ describe('GUARD 1 — every usePolling() error is read, surfaced, or a written e
   it('every usePolling() result has its .error read in the same file, or a written ALLOW_LIST/KNOWN_DEFECTS entry', () => {
     const violations: string[] = [];
     for (const use of uses) {
-      const src = readFileSync(use.file, 'utf8');
+      const src = readCode(use.file);
       const errorRe = new RegExp(`\\b${use.varName}\\.error\\b`);
       if (errorRe.test(src)) continue;
       const key = `${use.rel}:${use.varName}`;
@@ -173,7 +220,7 @@ describe('GUARD 1 — every usePolling() error is read, surfaced, or a written e
       const [rel, varName] = key.split(':');
       const use = uses.find((u) => u.rel === rel && u.varName === varName);
       if (!use) { stale.push(`${key} (no such usePolling() declaration found)`); continue; }
-      const src = readFileSync(use.file, 'utf8');
+      const src = readCode(use.file);
       const errorRe = new RegExp(`\\b${varName}\\.error\\b`);
       if (errorRe.test(src)) stale.push(`${key} (now HAS an .error read — the gap is closed, remove this entry)`);
     }
@@ -186,7 +233,7 @@ describe('GUARD 1 — every usePolling() error is read, surfaced, or a written e
       const [rel, varName] = key.split(':');
       const use = uses.find((u) => u.rel === rel && u.varName === varName);
       if (!use) { stale.push(`${key} (no such usePolling() declaration found — was it removed/renamed?)`); continue; }
-      const src = readFileSync(use.file, 'utf8');
+      const src = readCode(use.file);
       const errorRe = new RegExp(`\\b${varName}\\.error\\b`);
       if (errorRe.test(src)) stale.push(`${key} (now HAS an .error read — the bug is fixed, delete this KNOWN_DEFECTS entry)`);
     }
@@ -255,7 +302,7 @@ interface JointErrorUse { rel: string; a: string; b: string }
 function listJointErrorUses(): JointErrorUse[] {
   const out: JointErrorUse[] = [];
   for (const file of listSourceFiles(SCREENS_DIR)) {
-    const src = readFileSync(file, 'utf8');
+    const src = readCode(file);
     for (const m of src.matchAll(JOINT_ERROR_RE)) {
       out.push({ rel: relPath(file), a: m[1]!, b: m[2]! });
     }
@@ -433,7 +480,7 @@ interface ZeroDefault { rel: string; where: string; text: string }
 function listZeroDefaults(): ZeroDefault[] {
   const out: ZeroDefault[] = [];
   for (const file of listSourceFiles(SCREENS_DIR)) {
-    const src = readFileSync(file, 'utf8');
+    const src = readCode(file);
     const rel = relPath(file);
     const pollVars = [...src.matchAll(USE_POLLING_DECL_RE)].map((m) => m[1]!);
     if (pollVars.length === 0) continue;
@@ -600,7 +647,7 @@ function rankComparisons(src: string): string[] {
 const EXPECTED_RANK_TOKENS = ['4', '4', '4', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'EXPORT_RANK'];
 
 describe('GUARD 2, Part A — App.tsx grants no NEW read-tier rank gate (ONE AUDIENCE, CLAUDE.md)', () => {
-  const src = readFileSync(APP_TSX, 'utf8');
+  const src = readCode(APP_TSX);
 
   it('sanity: the scan actually found rank >= comparisons in App.tsx (canary on the scan itself)', () => {
     expect(rankComparisons(src).length).toBeGreaterThan(5);

@@ -79,6 +79,47 @@ function listSourceFiles(dir: string): string[] {
 
 const relPath = (f: string) => toPosix(f).replace(REPO_ROOT, '').replace(/\/{2,}/g, '/');
 
+/**
+ * WS-GB (23 Sep 2026 red-team remediation). Checks 2 and 3 below both ask
+ * "does this file MENTION inForceAtUtc/resolvePeriodTarget/etc anywhere" —
+ * `src.includes(...)` or a bare regex `.test(src)` over the RAW file text,
+ * comments included. That is a FALSE-PASS risk, not a false-fail one: a
+ * report file could declare a `target:` property and separately carry a doc
+ * comment that merely NAMES `inForceAtUtc` (e.g. cross-referencing another
+ * file's field, the same shape `coneState.ts:61` already does today in prose
+ * — "The same reason resolvePeriodTarget's is..." — for a file that calls
+ * neither `versionAt(` nor `resolvePeriodTarget(`), and this guard would call
+ * it scoped/dated without a single real line of code doing so. That is
+ * exactly the `generationScope.guard.test.ts` incident's shape (a doc comment
+ * satisfied a presence check), not check 1's below (check 1's own ALLOW_LIST
+ * entry for `reports.test.ts` explicitly WANTS a comment mention to count —
+ * see that entry's own reasoning — so check 1 is deliberately left scanning
+ * raw text; only checks 2 and 3, which read presence as "this file did the
+ * right thing", are fixed here). Reuses `reliability.guard.test.ts`'s
+ * `commentMask`/`readCode` idiom (itself reused from
+ * `generationScope.guard.test.ts`) rather than a fourth implementation.
+ */
+function commentMask(lines: string[]): boolean[] {
+  let inBlock = false;
+  return lines.map((l) => {
+    const t = l.trimStart();
+    if (inBlock) {
+      if (t.includes('*/')) inBlock = false;
+      return true;
+    }
+    if (t.startsWith('/*')) {
+      if (!t.includes('*/')) inBlock = true;
+      return true;
+    }
+    return t.startsWith('*') || t.startsWith('//');
+  });
+}
+function readCode(file: string): string {
+  const lines = readFileSync(file, 'utf8').split('\n');
+  const mask = commentMask(lines);
+  return lines.map((l, i) => (mask[i] ? '' : l)).join('\n');
+}
+
 /* ------------------------------------------------------------------ check 1 */
 
 const FORBIDDEN_IDENTIFIERS = ['nominalSetpointG', 'nominalSource', 'FALLBACK_CONE_SETPOINT_G'] as const;
@@ -197,7 +238,7 @@ describe('every report payload `target` field carries its own instant, never a b
   it('a file declaring a `target:` property also states inForceAtUtc or a \'none\' source', () => {
     const violations: string[] = [];
     for (const file of files) {
-      const src = readFileSync(file, 'utf8');
+      const src = readCode(file);
       if (!TARGET_PROP_RE.test(src)) continue; // this report payload has no `target` field at all
       const statesInstant = src.includes('inForceAtUtc');
       const statesNoneSource = NONE_SOURCE_RE.test(src);
@@ -313,7 +354,7 @@ describe('a service that resolves its own limits version may not drop the lower-
     expect(rels).toContain('api/src/services/spc.ts');
     expect(rels).toContain('api/src/services/weightStations.ts');
     expect(rels).toContain('api/src/services/reports/coneWeight.ts');
-    const resolvers = files.filter((f) => RESOLVES_A_VERSION_RE.test(readFileSync(f, 'utf8')));
+    const resolvers = files.filter((f) => RESOLVES_A_VERSION_RE.test(readCode(f)));
     expect(
       resolvers.length,
       'no service calls versionAt( any more — if the resolution moved, move this check with it',
@@ -325,7 +366,7 @@ describe('a service that resolves its own limits version may not drop the lower-
     for (const file of files) {
       const rel = relPath(file);
       if (VERSION_RESOLVER_ALLOW_LIST[rel]) continue;
-      const src = readFileSync(file, 'utf8');
+      const src = readCode(file);
       if (!RESOLVES_A_VERSION_RE.test(src)) continue;
       if (!PUBLISHES_AN_INSTANT_RE.test(src)) continue; // resolves a version but publishes no instant
       if (!HANDLES_LOWER_BOUND_RE.test(src)) violations.push(rel);
@@ -350,7 +391,7 @@ describe('a service that resolves its own limits version may not drop the lower-
     for (const rel of Object.keys(VERSION_RESOLVER_ALLOW_LIST)) {
       const file = files.find((f) => relPath(f) === rel);
       if (!file) { stale.push(`${rel} (file not found)`); continue; }
-      if (!RESOLVES_A_VERSION_RE.test(readFileSync(file, 'utf8'))) stale.push(`${rel} (no longer calls versionAt)`);
+      if (!RESOLVES_A_VERSION_RE.test(readCode(file))) stale.push(`${rel} (no longer calls versionAt)`);
     }
     expect(stale, `stale VERSION_RESOLVER_ALLOW_LIST entries (remove them): ${stale.join(', ')}`).toEqual([]);
   });
