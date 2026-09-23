@@ -130,6 +130,22 @@ export interface SpcData {
    * with the same figure the reconciliation and the report print.
    */
   implausible: number;
+  /**
+   * The source generation this chart is drawn from (DEFECTS.md D-10 follow-up,
+   * 23 Sep 2026): null when the window's readings carry no epoch information
+   * at all (pre-epoch data, or a test fixture). When non-null, every query
+   * behind this payload is scoped to exactly this one epoch — see
+   * `otherGenerationExcluded`.
+   */
+  generation: { epochId: number; ordinal: number; label: string | null; provenance: string | null } | null;
+  /** Rows in the requested window that belong to a DIFFERENT generation than
+   *  the one this chart was drawn from (including rows with no source_epoch
+   *  at all) — excluded, not pooled in. 0 when the window sits inside one
+   *  generation, which is the common case once a plant is live. */
+  otherGenerationExcluded: number;
+  /** True iff `otherGenerationExcluded` > 0 — the requested window touched
+   *  more than one physical source generation. */
+  spansGenerations: boolean;
   mean: number;
   /** Median of the same population as `mean` (roadmap Phase 9 item 1, 15 Sep
    *  2026) — the Weight screen prints the two side by side, so they must come
@@ -154,6 +170,15 @@ export interface SpcData {
   histogram: HistBin[];
   spec: SpecLimits;
   capability: { cp: number | null; cpk: number | null; pp: number | null; ppk: number | null };
+  /**
+   * The X̄ band itself (DEFECTS.md D-10 fix, 23 Sep 2026) — an I-MR band on
+   * the subgroup means, not the old σ_within/√n band. `valid` is false (and
+   * every subgroup's `xViolates` is forced false, and `nelson` never fires)
+   * when fewer than 3 time-contiguous subgroup-mean pairs exist to estimate
+   * MR̄ from — there is then no trustworthy band, not a generously wide one.
+   * `pairs` excludes any pair spanning a genuine data gap (a missing bucket).
+   */
+  xLimits: { valid: boolean; mrBar: number; sigmaBetween: number; halfWidth: number; pairs: number };
 }
 
 function round(n: number, dp = 2): number {
@@ -378,12 +403,102 @@ export async function getWeightSpc(
   // not bound, or it would be a SQL error rather than an empty chart.
   const stationFilter = type === 'cone' && station != null;
 
-  // Everything but the plausibility predicate, which plausibleWhere binds per
-  // request below (its parameters must be on the request that runs).
-  const base =
+  // Base filter BEFORE the generation predicate — used only to resolve which
+  // generation(s) are actually present in the requested window (below).
+  const base0 =
     `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL` +
     (shift ? ' AND shift_code=@shift' : '') +
     (stationFilter ? ' AND source_station=@station' : '');
+
+  // GENERATION PREDICATE (DEFECTS.md D-10 follow-up, 23 Sep 2026). Until this
+  // pass, getWeightSpc carried no generation filter at all — unlike
+  // rejectSpc.ts, which has refused to pool p̄ across the 5 Aug rebuild since
+  // roadmap Phase 5 for exactly the right reason. On this dev copy that meant
+  // silently pooling real epoch-9 cones (5 Aug-7 Sep) with plant-simulator
+  // epoch-13 cones into ONE control chart the moment a query's date range
+  // spanned both — a chart drawn from two physically different populations
+  // with no boundary marked on it.
+  //
+  // Resolution: find every source_epoch present in the base-filtered window,
+  // map each to its sms.source_epoch.generation_ordinal, provenance AND
+  // source_db, and keep only ONE generation:
+  //  - prefer a REAL generation over a SIMULATOR one when both are present
+  //    in the window. This is not merely "newest": CLAUDE.md's live-
+  //    rehearsal warning and this pass's own measurement (see DEFECTS.md
+  //    D-10) both establish that the simulator does NOT reproduce the
+  //    plant's between-subgroup wander (ratio 1.38x on simulator-dominated
+  //    late-Sep data vs 2.81-3.62x on real data) — silently drawing this
+  //    chart over simulator rows, even alone, would corrupt the very MR̄
+  //    this fix depends on with a variance shape that isn't the plant's.
+  //
+  //    "Simulator" is determined from `source_db`, NOT `se.provenance` —
+  //    verified live against this dev copy (23 Sep 2026): epoch 13
+  //    (pack1_TP1U2, `DATA_TP1U2_SIM`, 212,873 rows spanning 21 Aug-22 Sep)
+  //    is registered with `provenance='ifl_copy'`, not 'simulator' — almost
+  //    certainly a bootstrap/registration slip, but it makes `provenance`
+  //    alone unsafe to trust here. `scripts/simulate-plant.mjs` enforces
+  //    `/_SIM$/i` on its target database name as a hard refusal (its own
+  //    line 96-98) — that is the one invariant actually guaranteed to hold,
+  //    so a generation is treated as simulator when EITHER its provenance
+  //    says so OR its source_db ends in `_SIM`.
+  //  - among generations of the preferred kind, take the NEWEST ordinal
+  //    (ties cannot occur — UX_source_epoch_open allows at most one open
+  //    epoch per line/table, and ordinals are assigned in time order).
+  //  - with no real generation in the window at all, fall back to the
+  //    newest simulator one — still a single generation, still counted
+  //    honestly, and the caller can see `generation.provenance` says so.
+  // Rows from any other generation — including rows with a NULL
+  // source_epoch, i.e. "ingested before epoch tracking existed" — are
+  // excluded and counted, never silently pooled in. With zero or one
+  // generation present (the common case once a plant is live) this is a
+  // no-op: `otherGenerationExcluded` is 0 and no predicate is added.
+  const genReq = pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('from', mssql.Date, from)
+    .input('to', mssql.Date, to);
+  if (shift) genReq.input('shift', mssql.VarChar(10), shift);
+  if (stationFilter) genReq.input('station', mssql.Int, station);
+  const genWhere =
+    `e.line_id=@line AND e.shift_date BETWEEN @from AND @to AND e.${col} IS NOT NULL` +
+    (shift ? ' AND e.shift_code=@shift' : '') +
+    (stationFilter ? ' AND e.source_station=@station' : '');
+  const genRes = await genReq.query<{
+    epoch_id: number | null;
+    gen: number | null;
+    label: string | null;
+    provenance: string | null;
+    source_db: string | null;
+    n: number;
+  }>(
+    `SELECT e.source_epoch AS epoch_id, se.generation_ordinal AS gen, se.label AS label,
+            se.provenance AS provenance, se.source_db AS source_db, COUNT(*) AS n
+     FROM ${table} e LEFT JOIN sms.source_epoch se ON se.epoch_id = e.source_epoch
+     WHERE ${genWhere}
+     GROUP BY e.source_epoch, se.generation_ordinal, se.label, se.provenance, se.source_db`,
+  );
+  const genRows = genRes.recordset;
+  const isSimulator = (r: { provenance: string | null; source_db: string | null }) =>
+    r.provenance === 'simulator' || /_SIM$/i.test(r.source_db ?? '');
+  const totalGenRows = genRows.reduce((s, r) => s + Number(r.n), 0);
+  let genEpochId: number | null = null;
+  let generation: SpcData['generation'] = null;
+  let otherGenerationExcluded = 0;
+  const withOrdinal = genRows.filter((r) => r.gen != null && r.epoch_id != null);
+  const realGenerations = withOrdinal.filter((r) => !isSimulator(r));
+  const candidates = realGenerations.length > 0 ? realGenerations : withOrdinal;
+  if (candidates.length > 0) {
+    const chosen = candidates.reduce((a, b) => (Number(b.gen) > Number(a.gen) ? b : a));
+    genEpochId = Number(chosen.epoch_id);
+    generation = { epochId: genEpochId, ordinal: Number(chosen.gen), label: chosen.label, provenance: chosen.provenance };
+    const inChosen = genRows.filter((r) => r.epoch_id === chosen.epoch_id).reduce((s, r) => s + Number(r.n), 0);
+    otherGenerationExcluded = totalGenRows - inChosen;
+  }
+  const spansGenerations = otherGenerationExcluded > 0;
+
+  // Everything but the plausibility predicate, which plausibleWhere binds per
+  // request below (its parameters must be on the request that runs).
+  const base = base0 + (genEpochId != null ? ' AND source_epoch=@genEpoch' : '');
   const whereOn = (r: SqlRequest) => `${base} AND ${plausibleWhere(r, col, plaus)}`;
 
   // 1. Overall summary — one pass, no row transfer. Drives the bucket sizing.
@@ -396,6 +511,7 @@ export async function getWeightSpc(
     .input('to', mssql.Date, to);
   if (shift) sumReq.input('shift', mssql.VarChar(10), shift);
   if (stationFilter) sumReq.input('station', mssql.Int, station);
+  if (genEpochId != null) sumReq.input('genEpoch', mssql.Int, genEpochId);
   const sumWhere = whereOn(sumReq);
   const sumRes = await sumReq
     .query<{
@@ -426,6 +542,7 @@ export async function getWeightSpc(
     .input('to', mssql.Date, to);
   if (shift) medReq.input('shift', mssql.VarChar(10), shift);
   if (stationFilter) medReq.input('station', mssql.Int, station);
+  if (genEpochId != null) medReq.input('genEpoch', mssql.Int, genEpochId);
   const medWhere = whereOn(medReq);
   const medRes = await medReq.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(${col} AS float)) OVER () med
@@ -468,6 +585,7 @@ export async function getWeightSpc(
       .input('bucketMin', mssql.Int, bucketMinutes);
     if (shift) r.input('shift', mssql.VarChar(10), shift);
     if (stationFilter) r.input('station', mssql.Int, station);
+    if (genEpochId != null) r.input('genEpoch', mssql.Int, genEpochId);
     whereOn(r);
     extra?.(r);
     return r;
@@ -499,15 +617,73 @@ export async function getWeightSpc(
   const stdevWithin = pooledDen > 0 ? Math.sqrt(pooledNum / pooledDen) : 0;
   const grandMean = mean;
 
-  // X̄ limits are per-subgroup (variable n): X̿ ± 3σ_within/√n_i.
-  // S limits use the large-sample normal approx σ_within·(1 ± 3/√(2n_i)),
-  // valid here since n_i is large (c4 ≈ 1); avoids per-n B3/B4 table lookups.
-  const ses: number[] = [];
+  // X̄ LIMITS — an I-MR band on the SUBGROUP MEANS (DEFECTS.md D-10 fix,
+  // 23 Sep 2026), replacing the old X̿ ± 3σ_within/√n_i band.
+  //
+  // WHY the old band was wrong, not just narrow: σ_within is the pooled
+  // WITHIN-subgroup spread — valid for the S-chart below, which is exactly
+  // what it's measuring — but the X̄ band's job is to bound BETWEEN-subgroup
+  // variation, which σ_within never models at all (it implicitly assumes
+  // zero). Measured live against this data (see DEFECTS.md D-10, 23 Sep 2026
+  // update): the observed SD of subgroup means runs 1.76×-3.62× wider than
+  // σ_within/√n predicts, and the ratio GROWS with period length — the
+  // signature of genuine level wander (drift, shift effects, product
+  // changes), not noise. That is why the old band flagged 16-38.5% of points
+  // against an expected ~0.3%: it was measuring the right process against
+  // the wrong source of variation.
+  //
+  // Fix: treat the subgroup means themselves as an I-chart. MR̄ = the mean
+  // moving range between TIME-CONTIGUOUS subgroup means (a bucket-to-bucket
+  // step, not a step across a missing bucket); limits are X̿ ± 2.66·MR̄, the
+  // standard I-MR-derived band (2.66 = 3/d2, d2=1.128 for n=2 moving ranges).
+  // This band is ONE width for the whole chart, not per-subgroup — a genuine
+  // change from the old shape, and correct: I-MR does not scale with a
+  // subgroup's own n, because what it is bounding is not a per-subgroup
+  // sampling error at all.
+  //
+  // "Contiguous" excludes exactly the two things the old band conflated: a
+  // pair spanning a genuine data gap (the source-generation cutover, or any
+  // idle stretch) is not evidence of process wander, only of missing data —
+  // including such a pair would inflate MR̄ with a spurious jump. The
+  // generation predicate above already keeps two different physical
+  // populations out of one chart; this keeps a same-generation GAP from
+  // corrupting the moving range within it.
+  //
+  // NOT segmented by product: unlike weightStations.ts's per-station-
+  // per-material split, a time bucket here carries no product dimension (up
+  // to six materials can run concurrently across stations in one bucket), so
+  // "same-product contiguity" is not implemented — read the resulting MR̄ as
+  // a line-wide figure, not a per-product one. That is a scope limit of this
+  // pass, not an oversight: it would be a genuinely new statistic (a
+  // per-product subgroup split), which this pass was explicitly asked not to
+  // add.
+  const bucketSpanMs = bucketMinutes * 60_000;
+  const orderedMeans = rawSg.map((g) => ({ t: new Date(g.b).getTime(), mean: g.mean }));
+  const movingRanges: number[] = [];
+  for (let i = 1; i < orderedMeans.length; i++) {
+    const gapMs = orderedMeans[i]!.t - orderedMeans[i - 1]!.t;
+    // Allow slack for the daily bucketExpr's CAST(shift_date AS datetime2),
+    // whose calendar-day steps do not land on exact multiples of bucketMs in
+    // every timezone edge case; still rejects a genuine multi-bucket gap.
+    if (gapMs > 0 && gapMs <= bucketSpanMs * 1.5) movingRanges.push(Math.abs(orderedMeans[i]!.mean - orderedMeans[i - 1]!.mean));
+  }
+  // Below this many contiguous pairs, MR̄ is not a trustworthy estimate — say
+  // so rather than draw a band from (e.g.) one pair, same philosophy as
+  // rejectSpc's MIN_EXPECTED_REJECTS_FOR_VALID_LIMITS.
+  const MIN_MR_PAIRS = 3;
+  const mrBar = movingRanges.length > 0 ? movingRanges.reduce((a, b) => a + b, 0) / movingRanges.length : 0;
+  const xLimitsValid = movingRanges.length >= MIN_MR_PAIRS && mrBar > 0;
+  const MR_D2_N2 = 1.128; // moving-range-of-2 control-chart constant
+  const sigmaBetween = xLimitsValid ? mrBar / MR_D2_N2 : 0; // implied 1σ of the subgroup-mean series
+  const xHalfWidth = xLimitsValid ? 2.66 * mrBar : 0; // = 3 · sigmaBetween
+
+  // S limits stay exactly as they were — per-subgroup, from σ_within, the
+  // large-sample normal approx σ_within·(1 ± 3/√(2n_i)) (valid since n_i is
+  // large, c4 ≈ 1). The S-chart compares within-subgroup spread against
+  // within-subgroup sigma — internally consistent — and D-10 never implicated it.
   const subgroups: Subgroup[] = rawSg.map((g) => {
-    const se = g.n > 0 ? stdevWithin / Math.sqrt(g.n) : 0;
-    ses.push(se);
-    const xUcl = grandMean + 3 * se;
-    const xLcl = grandMean - 3 * se;
+    const xUcl = grandMean + xHalfWidth;
+    const xLcl = grandMean - xHalfWidth;
     let sUcl: number | null = null;
     let sLcl: number | null = null;
     let sViolates = false;
@@ -526,17 +702,24 @@ export async function getWeightSpc(
       xLcl: round(xLcl, 2),
       sUcl: sUcl != null ? round(sUcl, 2) : null,
       sLcl: sLcl != null ? round(sLcl, 2) : null,
-      xViolates: g.mean > xUcl || g.mean < xLcl,
+      xViolates: xLimitsValid && (g.mean > xUcl || g.mean < xLcl),
       sViolates,
       nelson: [], // filled below — needs the whole series, not just this one subgroup
     };
   });
   const xbarOutOfControl = subgroups.filter((g) => g.xViolates).length;
 
-  // Rule 1 is exactly xViolates above (same centerline, same per-subgroup se) —
-  // kept out of `nelson` so the two never say the same thing under different names.
+  // Rule 1 is exactly xViolates above (same centerline, same band) — kept
+  // out of `nelson` so the two never say the same thing under different
+  // names. Every point now shares the ONE band-derived sigma (sigmaBetween),
+  // not a per-subgroup σ_within/√n — the same fix as xUcl/xLcl above, so
+  // rule 1 and rules 2-8 are drawn from the same corrected model rather than
+  // rules 2-8 quietly keeping the old ill-fitting one. When xLimitsValid is
+  // false, sigmaBetween is 0 and nelsonViolations treats every point as
+  // sitting exactly on the centerline (its own documented behaviour for an
+  // unusable scale) — no rule fires on an unmeasurable band, same as rule 1.
   const nelsonPerPoint = nelsonViolations(
-    rawSg.map((g, i) => ({ value: g.mean, se: ses[i]! })),
+    rawSg.map((g) => ({ value: g.mean, se: sigmaBetween })),
     grandMean,
   );
   subgroups.forEach((g, i) => {
@@ -666,6 +849,9 @@ export async function getWeightSpc(
     station: stationFilter ? station : null,
     count,
     implausible,
+    generation,
+    otherGenerationExcluded,
+    spansGenerations,
     mean: round(mean, 2),
     median: median == null ? null : round(median, 2),
     stdevOverall: round(stdevOverall, 3),
@@ -684,5 +870,12 @@ export async function getWeightSpc(
     histogram,
     spec,
     capability: { cp, cpk, pp, ppk },
+    xLimits: {
+      valid: xLimitsValid,
+      mrBar: round(mrBar, 3),
+      sigmaBetween: round(sigmaBetween, 3),
+      halfWidth: round(xHalfWidth, 3),
+      pairs: movingRanges.length,
+    },
   };
 }
