@@ -191,8 +191,21 @@ export function SyncHealthBlock({
             could not be read must never render identically to a count of
             zero. ops.error with no data at all means this figure was never
             answered, not that nothing is blocking. */}
+        {/* 23 Sep 2026 sweep: the failed case was closed by Phase 7, the
+            PENDING case was not. With no error yet and no data yet,
+            `blocking.length === 0` is trivially true and this printed "None"
+            — the same false all-clear, from the same absence of an answer,
+            differing only in whether the first fetch had come back yet. The
+            <Details> list immediately below already drew a skeleton in that
+            state, so the count and its own itemisation disagreed. */}
         <dd>
-          {ops.error && !ops.data ? W.health.dqBlockingCouldNotLoad : blocking.length === 0 ? W.sync.none : `${blocking.length}`}
+          {ops.error && !ops.data
+            ? W.health.dqBlockingCouldNotLoad
+            : !ops.data
+              ? W.loading
+              : blocking.length === 0
+                ? W.sync.none
+                : `${blocking.length}`}
         </dd>
       </dl>
 

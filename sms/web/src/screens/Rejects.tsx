@@ -48,6 +48,11 @@ import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, 
 import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
 import { vitalFew } from '../lib/pareto';
 import { RejectTrendChart } from './report/shared';
+// The SAME type Readings.tsx's headline uses, imported rather than restated,
+// so this app has one idiom for "a count I have / have not been told" and not
+// two. Type-only, so nothing of Readings is pulled into this module at
+// runtime. If a third screen needs it, promote it to lib/ — do not copy it.
+import type { CountState } from './Readings';
 import {
   getRange, getStations, getProducts, stationLabel, setRejectLabel,
   getRejectsFiltered, getRejectSpcFiltered, getRejectsByDayCode, rejectCodeParam,
@@ -229,9 +234,44 @@ export function RejectsScreen({
   // The band is drawn only where the period intersects the trailing window.
   const periodOverlapsWindow = period.from <= win.to && period.to >= win.from;
   const anyReasonUnnamed = reasonRows.some((r) => !r.label);
-  const totalRejects = (q?.totalRejects ?? 0) + (w?.totalRejects ?? 0);
-  const produced = q?.totalProduced ?? 0;
-  const ratePct = produced + totalRejects > 0 ? (100 * totalRejects) / (produced + totalRejects) : null;
+
+  /**
+   * THE HEADLINE COUNT AS A STATE, not a number (23 Sep 2026 sweep, the same
+   * defect and the same idiom as Readings.tsx's CountState — `git show
+   * b759c88`).
+   *
+   * This used to be `(q?.totalRejects ?? 0) + (w?.totalRejects ?? 0)` with the
+   * denominator `q?.totalProduced ?? 0` beside it. Two independent polls, two
+   * `?? 0`s, so a half-loaded screen asserted a count and a RATE it had not
+   * been told. Both states were reproduced on screen at 1366x768 on this
+   * screen, by delaying /api/rejects* and changing the period:
+   *
+   *   "0 rejected · —"                     both polls still in flight
+   *   "23 rejected · 100.0% of everything  the WEIGHT series landed alone:
+   *    weighed"                            23 / (0 + 23), a rate whose
+   *                                        denominator was the other poll's
+   *                                        missing `totalProduced`
+   *
+   * The second is the arithmetically-impossible pair again: the headline two
+   * lines above correctly printed "…" at that instant because it gates on
+   * `q == null || w == null`, while this tile printed 100 %. One screen, two
+   * answers — the exact shape Phase 7 fixed elsewhere.
+   *
+   * Both counts and the rate now hang off ONE state. `ok` is reachable only
+   * when BOTH series have answered, so there is no longer any way to compute
+   * a rate from a denominator one of them was going to supply.
+   */
+  const rejectCount: CountState =
+    q && w
+      ? { kind: 'ok', n: q.totalRejects + w.totalRejects }
+      : figuresFailed
+        ? { kind: 'failed' }
+        : { kind: 'pending' };
+  const produced = q && w ? q.totalProduced : null;
+  const ratePct =
+    rejectCount.kind === 'ok' && produced != null && produced + rejectCount.n > 0
+      ? (100 * rejectCount.n) / (produced + rejectCount.n)
+      : null;
 
   // The verdict follows what the trend shows: the chosen reason when one is
   // chosen, otherwise quality then weight.
@@ -251,40 +291,102 @@ export function RejectsScreen({
     windowEpisodes.length > 0 && lastEnded
       ? W.rejects.steadyAfterRises(windowEpisodes.length, dayLabel(lastEnded))
       : W.rejects.steady;
+  /**
+   * "Steady." IS A VERDICT, AND A VERDICT NEEDS THE TREND (23 Sep 2026 sweep).
+   *
+   * `rising` is null and `windowEpisodes` is empty in two completely different
+   * situations: the detector looked at the trailing window and found no rise,
+   * and the trailing-window fetch never answered. Both fell through to
+   * `W.rejects.steady` — "Steady." — so a dead /api/reject-spc printed the
+   * all-clear verdict, in the headline, over a chart that was showing its own
+   * `<Failed>` two blocks below.
+   *
+   * This is GUARD 1 satisfied in letter and defeated in spirit: `quality.error`
+   * and `weight.error` ARE read in this file (the chart block reads both), so
+   * the guard passes — the headline simply never consulted them.
+   *
+   * The verdict is now stated only when the series it is a verdict ON has
+   * answered. When it has not, the headline states the counts alone and stops,
+   * which is the whole of what is known.
+   */
+  const verdictKnown = codedTrend != null || quality.data != null || weight.data != null;
 
-  const top = reasonRows[0] ?? null;
   const unattributed = reasons.data?.data.unattributed ?? null;
   const M = W.rejectsMore;
+
+  /**
+   * The top-reason tile, as a state for the same reason as `rejectCount`.
+   *
+   * `reasonRows[0] ?? null` made a failed or in-flight /api/rejects render
+   * `W.rejects.none` — "No cones were rejected in this period." — which is not
+   * a hedge, it is a sentence asserting a fact. Observed on screen beside the
+   * OTHER tile in the same block reading "1,271 rejected": the two tiles
+   * contradicted each other, and the false one was the one written in words.
+   *
+   * The file header's own rule ("EVERY FETCH HAS A FAILURE STATE ... 'No cones
+   * were rejected' used to render when /api/rejects failed") was applied to the
+   * reasons LIST below and never to this tile, which reads the same poll.
+   *
+   * CountState is not reused here: it carries a count, and this tile's answer
+   * is a ROW (or the genuine absence of one). It keeps the identical
+   * ok/pending/failed discipline, which is the part that matters.
+   */
+  const topReason: { kind: 'ok'; row: RejectReason | null } | { kind: 'pending' } | { kind: 'failed' } =
+    reasons.data ? { kind: 'ok', row: reasonRows[0] ?? null } : reasons.error ? { kind: 'failed' } : { kind: 'pending' };
 
   return (
     <>
       <div className="page">
       <p className="q">{W.question.rejects}</p>
       <h1 className="wide">
-        {figuresFailed
+        {rejectCount.kind === 'failed'
           ? '—'
-          : q == null || w == null
+          : rejectCount.kind === 'pending' || q == null || w == null
             ? '…'
-            : `${W.rejects.headline(fmtInt(totalRejects), fmtPct1(ratePct), q.totalRejects, w.totalRejects)} — ${
-                rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : settledTail
+            : `${W.rejects.headline(fmtInt(rejectCount.n), fmtPct1(ratePct), q.totalRejects, w.totalRejects)}${
+                verdictKnown
+                  ? ` — ${rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : settledTail}`
+                  : ''
               }.`}
       </h1>
       </div>
 
       <Block first>
-        {figuresFailed ? (
-          <Failed error={periodQ.error ?? periodW.error} onRetry={() => { periodQ.refresh(); periodW.refresh(); }} />
+        {/* The two tiles answer from two DIFFERENT polls (the period series,
+            and the reasons list), so they state their outcomes separately —
+            one failing must not blank or, worse, falsify the other. */}
+        {rejectCount.kind === 'failed' && topReason.kind === 'failed' ? (
+          <Failed
+            error={periodQ.error ?? periodW.error ?? reasons.error}
+            onRetry={() => { periodQ.refresh(); periodW.refresh(); reasons.refresh(); }}
+          />
         ) : (
           <div className="figs two">
             <div>
-              <b className="fig-val">{fmtInt(totalRejects)}<span className="fig-unit">{W.fig.rejected}</span></b>
-              <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtPct1(ratePct))}</span>
+              {rejectCount.kind === 'failed' ? (
+                <Failed error={periodQ.error ?? periodW.error} onRetry={() => { periodQ.refresh(); periodW.refresh(); }} />
+              ) : rejectCount.kind === 'pending' ? (
+                <div className="skel fig" />
+              ) : (
+                <>
+                  <b className="fig-val">{fmtInt(rejectCount.n)}<span className="fig-unit">{W.fig.rejected}</span></b>
+                  <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtPct1(ratePct))}</span>
+                </>
+              )}
             </div>
             <div>
-              <b className="fig-val">{top ? `${Math.round(top.pct)}%` : '—'}</b>
-              <span className="fig-note">
-                {top ? M.topReasonThisPeriod(reasonName(top)) : W.rejects.none}
-              </span>
+              {topReason.kind === 'failed' ? (
+                <Failed error={reasons.error} onRetry={reasons.refresh} />
+              ) : topReason.kind === 'pending' ? (
+                <div className="skel fig" />
+              ) : (
+                <>
+                  <b className="fig-val">{topReason.row ? `${Math.round(topReason.row.pct)}%` : '—'}</b>
+                  <span className="fig-note">
+                    {topReason.row ? M.topReasonThisPeriod(reasonName(topReason.row)) : W.rejects.none}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}

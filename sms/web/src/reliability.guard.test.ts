@@ -325,6 +325,210 @@ describe('GUARD 1B — two different usePolling() errors are not OR-combined int
 });
 
 /* =================================================================== *
+ * GUARD 1C — a fetched FIGURE may not default to the number zero.      *
+ * =================================================================== *
+ *
+ * 23 Sep 2026. GUARD 1 and GUARD 1B both check that a poll's `.error` is
+ * READ. Neither noticed the defect that actually shipped, twice, because in
+ * both cases the error WAS read — the value simply defaulted to 0 anyway, on
+ * a different line, and the zero reached the screen before the error branch
+ * ever mattered.
+ *
+ *   Readings.tsx, fixed 23 Sep 2026 (`git show b759c88`):
+ *       const total = rows.data?.data.total ?? 0;
+ *       const rejectedTotal = rejected.data?.data.total ?? 0;
+ *     -> "0 weighed, 402 rejected by the scale (0%)."
+ *
+ *   Rejects.tsx, found and fixed by this sweep:
+ *       const q = periodQ.data?.data ?? null;
+ *       const totalRejects = (q?.totalRejects ?? 0) + (w?.totalRejects ?? 0);
+ *       const produced = q?.totalProduced ?? 0;
+ *     -> "23 rejected · 100.0% of everything weighed", the weight series
+ *        landing alone and dividing by the quality series' missing
+ *        denominator. Reproduced on screen at 1366x768.
+ *
+ * Both files PASSED guards 1 and 1B throughout. The difference between "the
+ * fetch failed" and "the answer is zero" has to be guarded at the DEFAULT,
+ * not only at the error read, which is what this guard does.
+ *
+ * THE CHECK: inside `screens/`, no `?? 0` / `|| 0` may be applied to
+ *   (a) a `usePolling()` result's own `.data` chain, or
+ *   (b) a local `const` alias of one — `const q = periodQ.data?.data ?? null`
+ *       and then `q?.totalRejects ?? 0`.
+ * (b) is the half that matters most: it is the form the Rejects defect took,
+ * and a guard that only understood (a) would have watched it ship.
+ *
+ * ZERO IS THE WHOLE SUBJECT. `?? []` is deliberately NOT flagged. An empty
+ * roster or an empty option list degrades to a missing label or an absent
+ * filter chip — the ALLOW_LIST above already holds the reviewed cases — while
+ * a zero is a printed NUMBER that a reader takes as measured. This guard is
+ * about the numbers.
+ *
+ * WHAT IT CANNOT CATCH, stated plainly, in GUARD 1B's idiom:
+ *  - An alias of an alias (`const d = rec.data?.data; const n = d?.inner;`
+ *    then `n?.x ?? 0`). One hop is followed, not a chain.
+ *  - A default written any other way: `Number(x) || 0` via a helper,
+ *    `x?.n ?? someZeroConstant`, a `?? 0` inside a function that RECEIVES
+ *    fetched data as a parameter (every `screens/report/*` component takes
+ *    its already-loaded `d` as a prop and is invisible here — those are
+ *    gated by Report.tsx's own error/loading branches instead).
+ *  - A zero that is genuinely correct. Hence ALLOW_LIST_ZERO: a hit is not
+ *    automatically a bug, but every exemption must name the evidence.
+ */
+
+/**
+ * `const NAME = <poll>.data` — one hop from a poll result to a local name.
+ *
+ * A declaration that itself ends in `?? 0` is NOT collected as an alias: it is
+ * already a direct (a)-shape hit on its own line, and collecting it would make
+ * the alias pass re-report the same expression a second time under a different
+ * name (`rows.data?.data.total ?? 0` also reading as `total ?? 0`).
+ */
+function listDataAliases(src: string, pollVars: string[]): string[] {
+  const out: string[] = [];
+  for (const v of pollVars) {
+    const re = new RegExp(`\\bconst\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${v}\\.data\\b([^\\n]*)`, 'g');
+    for (const m of src.matchAll(re)) {
+      if (/(\?\?|\|\|)\s*0\b/.test(m[2]!)) continue;
+      out.push(m[1]!);
+    }
+  }
+  return out;
+}
+
+/**
+ * `<poll>.data… ?? 0` (viaData) or `<alias>?.… ?? 0`.
+ *
+ * TWO DELIBERATE NARROWINGS, each of which removes a whole class of false
+ * positive without weakening the check against either real defect:
+ *
+ *  - `.data` must be a WHOLE property name (`(?![\w$])`), or `r.database`
+ *    reads as a poll access.
+ *  - the alias form requires OPTIONAL chaining off the alias itself (`q?.x`,
+ *    not `r.x`). That is the discriminator, not a convenience: `q?.` is the
+ *    author writing down that `q` may not have arrived — which is exactly the
+ *    case where the `?? 0` beside it substitutes a number for an absent fetch.
+ *    `r.backup.ageDays ?? 0` (Health.tsx, inside a `!r ? <SkelLines/> :` branch)
+ *    is a null FIELD of data that did arrive; the API said null, and that is a
+ *    different subject from this guard's.
+ */
+function zeroDefaultsFor(src: string, names: string[], viaData: boolean): string[] {
+  const hits: string[] = [];
+  const lines = src.split('\n');
+  for (const name of names) {
+    const head = viaData ? `\\.data(?![\\w$])` : `\\?\\.`;
+    const re = new RegExp(`\\b${name}${head}[\\w$?.[\\]]*\\s*(?:\\?\\?|\\|\\|)\\s*0(?![\\w.])`, 'g');
+    lines.forEach((line, i) => {
+      if (line.trimStart().startsWith('*') || line.trimStart().startsWith('//')) return; // prose, not code
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line))) hits.push(`${i + 1}:${m[0].trim()}`);
+    });
+  }
+  return hits;
+}
+
+interface ZeroDefault { rel: string; where: string; text: string }
+
+function listZeroDefaults(): ZeroDefault[] {
+  const out: ZeroDefault[] = [];
+  for (const file of listSourceFiles(SCREENS_DIR)) {
+    const src = readFileSync(file, 'utf8');
+    const rel = relPath(file);
+    const pollVars = [...src.matchAll(USE_POLLING_DECL_RE)].map((m) => m[1]!);
+    if (pollVars.length === 0) continue;
+    const aliases = listDataAliases(src, pollVars);
+    for (const hit of [...zeroDefaultsFor(src, pollVars, true), ...zeroDefaultsFor(src, aliases, false)]) {
+      const [lineNo, ...rest] = hit.split(':');
+      out.push({ rel, where: lineNo!, text: rest.join(':') });
+    }
+  }
+  return out;
+}
+
+/**
+ * Written, evidenced exemptions, keyed by `${path relative to sms/}:${expression
+ * text}` — keyed on the EXPRESSION, not the line number, so an unrelated edit
+ * elsewhere in the file does not stale an entry (these two sit in files owned
+ * by other work in progress). Each was read at its site on 23 Sep 2026 and
+ * traced to every place the value is consumed, not assumed from its shape.
+ */
+const ALLOW_LIST_ZERO: Record<string, string> = {
+  'web/src/screens/Line.tsx:attention.data?.data.totalFindings ?? 0':
+    "Line.tsx's AttentionList `total` prop. Traced to its ONLY consumer, the \"and N more\" footer (`{total > " +
+    'findings.length && ...}`, AttentionList): with the fetch pending, `findings` is `[]` from the same payload, so ' +
+    '`0 > 0` is false and the footer does not render at all. The block also has its own `attention.error && ' +
+    '!attention.data` -> <Failed> branch above it. No zero is ever PRINTED — the value only ever decides whether an ' +
+    'optional line appears. Cosmetic, tier 3.',
+  'web/src/screens/Sacks.tsx:rows.data?.data.total ?? 0':
+    "Sacks.tsx's history block. Identical TEXT to the Readings defect but not the same situation: every consumer sits " +
+    'inside a chain that has already excluded both the failed and the pending states (`rows.error && !rows.data` -> ' +
+    '<Failed>, then `rows.loading && !rows.data` -> <SkelLines>), and the block note is separately gated on ' +
+    '`rows.data`. usePolling clears `loading` only after a success or an error, so reaching the `total === 0` branch ' +
+    'implies `rows.data` exists. The zero is real when it is shown. Tier 3.',
+};
+
+describe('GUARD 1C — no fetched figure defaults to the number zero', () => {
+  it("sanity: the scan can see the shape it hunts (canary on the scan itself)", () => {
+    // A synthetic file proves the matcher without depending on a real defect
+    // being present — the whole point is that the codebase should have none.
+    const fake = [
+      "const rows = usePolling(() => getEvents(), 1, 'k');",
+      'const d = rows.data?.data ?? null;',
+      'const a = rows.data?.data.total ?? 0;',
+      'const b = d?.totalRejects ?? 0;',
+    ].join('\n');
+    const vars = [...fake.matchAll(USE_POLLING_DECL_RE)].map((m) => m[1]!);
+    expect(vars).toEqual(['rows']);
+    expect(listDataAliases(fake, vars)).toEqual(['d']);
+    expect(zeroDefaultsFor(fake, vars, true)).toHaveLength(1); // (a) direct
+    expect(zeroDefaultsFor(fake, listDataAliases(fake, vars), false)).toHaveLength(1); // (b) aliased
+  });
+
+  it('does not mistake a property merely STARTING with "data" for a poll access', () => {
+    // Health.tsx:170's `r.database.latencyMs ?? 0`, one of three false
+    // positives an earlier draft of this regex produced. Both passes must
+    // reject it: as a poll access (`h.data`) and as an alias read (`r.`).
+    expect(zeroDefaultsFor('const x = r.database.latencyMs ?? 0;', ['r'], true)).toEqual([]);
+    expect(zeroDefaultsFor('const x = r.database.latencyMs ?? 0;', ['r', 'd'], false)).toEqual([]);
+  });
+
+  it('does not report a direct hit a second time under its own alias name', () => {
+    // `const total = rows.data?.data.total ?? 0;` is one defect, not two.
+    const fake = "const rows = usePolling(() => x(), 1, 'k');\nconst total = rows.data?.data.total ?? 0;";
+    expect(listDataAliases(fake, ['rows'])).toEqual([]);
+  });
+
+  it('every `?? 0` on fetched data has a written ALLOW_LIST_ZERO entry', () => {
+    const violations: string[] = [];
+    for (const z of listZeroDefaults()) {
+      if (ALLOW_LIST_ZERO[`${z.rel}:${z.text}`] !== undefined) continue;
+      violations.push(`${z.rel}:${z.where} — ${z.text}`);
+    }
+    expect(
+      violations,
+      violations.length === 0
+        ? ''
+        : `these expressions turn a not-yet-arrived or failed fetch into the NUMBER ZERO: ${violations.join('; ')}. ` +
+            `A reader cannot tell that zero from a measured one, and a rate computed against it is worse still ` +
+            `(Rejects.tsx printed "100.0% of everything weighed" this way, 23 Sep 2026). Model the value as a state ` +
+            `instead — see Readings.tsx's CountState (ok | pending | failed) and Rejects.tsx's use of it — or, if the ` +
+            `zero is genuinely unreachable/unprinted, add a reviewed ALLOW_LIST_ZERO entry naming every consumer you ` +
+            `traced, not just the declaration.`,
+    ).toEqual([]);
+  });
+
+  it('ALLOW_LIST_ZERO names only expressions that are still in the source', () => {
+    const found = new Set(listZeroDefaults().map((z) => `${z.rel}:${z.text}`));
+    const stale = Object.keys(ALLOW_LIST_ZERO).filter((k) => !found.has(k));
+    expect(
+      stale,
+      `ALLOW_LIST_ZERO entries whose expression is gone (the default was removed — delete the entry): ${stale.join(', ')}`,
+    ).toEqual([]);
+  });
+});
+
+/* =================================================================== *
  * GUARD 2, Part A — the exact set of client-side read-tier rank gates  *
  * (Part B, the server-side route enumeration, is in                    *
  * api/src/app.rbac.test.ts.)                                           *

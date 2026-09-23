@@ -26,9 +26,16 @@
  * last good figures stay and the footer carries the error. There are no
  * skeletons either: motion at this size is a distraction, and the state line
  * says "waiting" in words.
+ *
+ * KEEPING THE FIGURES IS NOT THE SAME AS KEEPING THE VERDICT (23 Sep 2026).
+ * A frozen count is a true statement about a past instant, and the footer says
+ * which instant. "Line 3 is running" is a claim about NOW, and a frozen payload
+ * cannot support it. So the counts stay when the link drops and the state
+ * sentence stops — see OUT_OF_CONTACT_MS below for what was on screen before
+ * this rule existed.
  */
 import { useEffect, useMemo } from 'react';
-import { useLive, usePlantNow, usePolling } from '../lib/live';
+import { LIVE_POLL_MS, useLive, usePlantNow, usePolling, useTicker } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import { fmtClock, fmtClockSec, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
@@ -56,6 +63,38 @@ const QUIET_AFTER_SECONDS = 20 * 60;
  */
 const BAR_MIN_RATIO = 0.045;
 
+/**
+ * How long /api/live may go unanswered before this board stops asserting
+ * whether the line is running. Three poll cycles: two consecutive misses.
+ *
+ * WHY THIS EXISTS (23 Sep 2026 sweep; reproduced at 1920×1080 by failing every
+ * /api/live request and waiting). Everything the board says about the line is
+ * computed from ONE payload — `assessHealth(line)` compares `line.plantNowUtc`
+ * against `line.dataAsOfUtc`, and both of those are fields of that payload.
+ * When the fetch stops succeeding the payload FREEZES, so the two fields keep
+ * their old relationship and the health verdict stays `ok` for as long as the
+ * link is down. The board went on printing
+ *
+ *     "Line 3 is running"                                   (79px, the headline)
+ *     "Readings to 10:59 AM · they reach this system
+ *      about 17 min after weighing."                        (the all-clear lag line)
+ *
+ * with the server unreachable for half a minute and counting — the two
+ * most-reassuring sentences it owns, asserted while blind. The only contrary
+ * signal was six words at the tail of the footer's second line.
+ *
+ * That is the CLAUDE.md rule inverted: "when it is not `ok`, no screen asserts
+ * whether the line is running." It never became not-`ok`, because nothing
+ * measured the age of the FETCH as distinct from the age of the READING.
+ *
+ * ON THE CLOCK THIS USES. This is the one measurement on the board that is
+ * allowed to read the browser's clock, and it does not break the TWO CLOCKS
+ * rule: it asks "how long since THIS BROWSER last got an answer", which is a
+ * fact about this browser, not about the plant. No plant timestamp is compared
+ * to `Date.now()` here.
+ */
+const OUT_OF_CONTACT_MS = 3 * LIVE_POLL_MS;
+
 /** The middle value of a set of station counts — see Line.tsx's own copy of
  *  this (StationRowGrid's `median`) for why median rather than mean. Kept
  *  as a separate local copy rather than a shared import: both are small,
@@ -69,9 +108,16 @@ function medianOf(values: number[]): number {
 }
 
 export function WallScreen({ onExit }: { onExit: () => void }) {
-  const { line, error } = useLive();
+  const { line, error, updatedAt } = useLive();
   const plantNow = usePlantNow();
+  const browserNow = useTicker(1000);
   const stations = usePolling(() => getStations(), 10 * 60_000, 'stations');
+
+  // See OUT_OF_CONTACT_MS. `error` alone is not enough: one missed poll on a
+  // plant LAN is ordinary and must not make a working board go blank. Both
+  // conditions together mean the last answer is old AND the retries are still
+  // failing.
+  const outOfContact = !!error && updatedAt != null && browserNow - updatedAt > OUT_OF_CONTACT_MS;
 
   // The board marks a station the drift test has flagged, so it can be
   // identified from the doorway. Same finding the Line screen names in words.
@@ -120,8 +166,12 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
   }
 
   const health = assessHealth(line);
-  const knowable = stateIsKnowable(health);
-  const alarm = health.kind !== 'ok';
+  // Out of contact is a SECOND reason the state is unknowable, on top of the
+  // reading's own age. The figures below stay (a blank wall reads as a dead
+  // PC — see the file header), but the sentence that says what the line is
+  // doing stops claiming to know.
+  const knowable = stateIsKnowable(health) && !outOfContact;
+  const alarm = health.kind !== 'ok' || outOfContact;
   const t = line.thisShift;
   const names = stations.data?.stations ?? [];
   const anchor = line.dataAsOfUtc ?? line.plantNowUtc;
@@ -231,14 +281,24 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
 
       <div className={`w-foot${alarm ? ' acc' : ''}`}>
         <span>
-          <span className={`dot live${health.kind === 'stale' ? ' bad' : health.kind === 'late' ? ' warn' : ''}`} />
-          {lagSentence(line, health)}
+          {/* The pulse stops when the board is blind, for the same reason it
+              stops when the readings are stale: motion on a TV reads as
+              "this is live". */}
+          <span className={`dot live${health.kind === 'stale' || outOfContact ? ' bad' : health.kind === 'late' ? ' warn' : ''}`} />
+          {/* Out of contact REPLACES the lag sentence rather than sitting
+              beside it. "Readings to 10:59 AM · they reach this system about
+              17 min after weighing" is the all-clear, and printing it next to
+              an outage notice invites reading the reassuring half. */}
+          {outOfContact ? W.offline : lagSentence(line, health)}
         </span>
         <span>
           {line.lastSack && `${W.lastSack} ${fmtKg(line.lastSack.weightKg)} ${fmtClock(line.lastSack.ts)}`}
           {line.lastCone &&
             ` · ${W.lastCone} ${fmtG(line.lastCone.weightG)} ${fmtClock(line.lastCone.ts)}`}
-          {error && ` · ${W.offline}`}
+          {/* Below the out-of-contact threshold a single missed poll still gets
+              said, quietly, here — where it has always been said. Above it the
+              lag line above carries the same words, so it is not said twice. */}
+          {error && !outOfContact && ` · ${W.offline}`}
           {/* UX Phase 7 Brief 1: a failed roster/attention fetch used to be
               invisible here — the board just quietly drew fewer bars, which
               on a TV nobody is retrying reads as "that station is fine"
