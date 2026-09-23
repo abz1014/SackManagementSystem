@@ -2,7 +2,7 @@
  * `sms epoch:*` — manage source generations.
  *
  *   sms epoch:list
- *   sms epoch:accept --all|--table=<t> --confirm [--label "…"] [--provenance ifl_copy]
+ *   sms epoch:accept --all|--table=<t> --confirm --provenance=<ifl_live|ifl_copy|simulator> [--label="…"]
  *   sms epoch:purge  --epoch=5,6,7,8 --confirm
  *   sms epoch:drop   --epoch=N --confirm
  *
@@ -147,8 +147,27 @@ export async function epochAccept(argv: string[]): Promise<number> {
       return 2;
     }
 
-    const provenance = typeof args.provenance === 'string' ? args.provenance : 'ifl_copy';
-    if (!['ifl_live', 'ifl_copy', 'simulator'].includes(provenance)) {
+    // NO DEFAULT. This line used to read `: 'ifl_copy'`, and that default is how
+    // epochs 13-16 on the development sidecar came to say `provenance='ifl_copy'`
+    // while sitting on `source_db = 'DATA_TP1U2_SIM'` — 212,873 simulator cones
+    // registered, on 2026-09-22, as if they were IFL's. Nobody typed a wrong
+    // value; a bare `sms epoch:accept --all --confirm` against a `.env` pointed
+    // at the simulator supplied one silently (the auto-generated labels,
+    // "pack1_TP1U2 gen 4", show no optional flag was passed at all).
+    //
+    // That is a registration-path defect, not a one-off of this dev copy: the
+    // SAME omission at IFL's cutover registers the LIVE plant generation as
+    // 'ifl_copy' just as quietly (DEPLOY.md step 5 names --provenance=ifl_live,
+    // but nothing enforced it). The column whose entire job is to say what a
+    // generation IS must not be able to fill itself in — the same rule
+    // migration 025 already applies to `source_epoch` itself ("no DEFAULT,
+    // ever: a column whose entire job is to prevent cross-generation confusion
+    // must not quietly fill itself in when an insert path forgets it").
+    //
+    // Required only for a REGISTER (below), never for the in-generation update
+    // path, which does not write provenance at all.
+    const provenance = typeof args.provenance === 'string' ? args.provenance : null;
+    if (provenance !== null && !['ifl_live', 'ifl_copy', 'simulator'].includes(provenance)) {
       console.error(`--provenance must be ifl_live | ifl_copy | simulator`);
       return 2;
     }
@@ -220,6 +239,9 @@ export async function epochAccept(argv: string[]): Promise<number> {
         console.log(`      no open generation (first registration)`);
       }
       console.log(`        new: ${now.server}/${now.database} created ${now.createdKey} fp ${now.fingerprint}`);
+      // Printed in the plan, not just stored, so the operator confirms what
+      // this generation will be RECORDED AS and not only where it came from.
+      console.log(`        provenance: ${provenance ?? '(not given — --provenance is required, see below)'}`);
 
       plan.push({
         kind: 'register',
@@ -234,6 +256,45 @@ export async function epochAccept(argv: string[]): Promise<number> {
       console.log('\nnothing to accept.');
       return 0;
     }
+
+    // What a new generation IS must be stated, not inherited from a default —
+    // see the `provenance` declaration above for the row that proves why.
+    // Checked here, before the --confirm gate, so a dry run says so too.
+    const registers = plan.filter((p): p is RegisterPlan => p.kind === 'register');
+    if (registers.length > 0) {
+      if (provenance === null) {
+        console.error(
+          `\nREFUSED: ${registers.length} new generation(s) would be registered from ` +
+            `${ctx.cfg.iflData.server}/${ctx.cfg.iflData.database}, and --provenance was not given.\n` +
+            `  --provenance=ifl_live    the plant's own live database\n` +
+            `  --provenance=ifl_copy    a restored sample/copy of IFL's data\n` +
+            `  --provenance=simulator   scripts/simulate-plant.mjs output\n` +
+            `There is no default: a generation that mislabels itself is invisible ` +
+            `afterwards. Nothing has been changed.`,
+        );
+        return 2;
+      }
+      // The one case the machine CAN check, so it does. simulate-plant.mjs
+      // refuses any target whose name does not end in _SIM (scripts/
+      // simulate-plant.mjs:96), so a _SIM database is simulator output by the
+      // simulator's own construction — and calling it anything else is exactly
+      // the mislabelling that put 212,873 synthetic cones on a real control
+      // chart. Declaring 'simulator' for a database NOT named _SIM stays
+      // allowed: that direction excludes data from analyses, never smuggles
+      // synthetic rows into them.
+      const sim = registers.filter((p) => /_SIM$/i.test(p.now.database));
+      if (sim.length > 0 && provenance !== 'simulator') {
+        console.error(
+          `\nREFUSED: ${sim.map((p) => p.def.sourceTable).join(', ')} would be registered as ` +
+            `provenance='${provenance}' from database "${sim[0]!.now.database}", whose name ends in _SIM.\n` +
+            `The plant simulator only ever writes to a _SIM database and refuses anything else, so this ` +
+            `is simulator output. Re-run with --provenance=simulator, or check IFL_DB_NAME_DATA in .env — ` +
+            `pointing at the simulator by accident looks exactly like this. Nothing has been changed.`,
+        );
+        return 2;
+      }
+    }
+
     if (args.confirm !== true) {
       console.log('\nREFUSED: re-run with --confirm to register. Nothing has been changed.');
       return 2;
@@ -276,6 +337,11 @@ export async function epochAccept(argv: string[]): Promise<number> {
       // per table, not one across --all, so a partial --all leaves the tables
       // it already did correctly registered.
       const tableName = p.def.sourceTable;
+      // Unreachable: the guard above returns 2 before any write when a register
+      // is planned without --provenance. Asserted rather than defaulted, so a
+      // future edit that moves the guard fails loudly instead of silently
+      // reintroducing the 'ifl_copy' default this replaced.
+      if (provenance === null) throw new Error(`internal: no provenance for a register of ${tableName}`);
       const tx = ctx.app.transaction();
       await tx.begin();
       try {

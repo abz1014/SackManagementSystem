@@ -31,8 +31,11 @@ function help(): void {
                                     account's sessions
 
   sms epoch:list                    show every source generation and its rows
-  sms epoch:accept --all|--table=<t> --confirm [--label ".."] [--provenance ifl_copy]
-                                    register the generation the source now reports
+  sms epoch:accept --all|--table=<t> --confirm --provenance=<ifl_live|ifl_copy|simulator> [--label=".."]
+                                    register the generation the source now reports.
+                                    --provenance is REQUIRED and has no default: see
+                                    cli/src/commands/epoch.ts for the mislabelled
+                                    generation that removed it.
   sms epoch:purge --epoch=N[,M] --confirm --backup=<path.bak>
                                     delete an epoch's rows, keep the tombstone (same gates as cutover)
   sms epoch:drop --epoch=N --confirm        remove an epoch row that has no rows

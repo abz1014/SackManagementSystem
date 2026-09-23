@@ -162,7 +162,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const CONFIRM = ['--table=pack1_TP1U2', '--confirm'];
+// --provenance is REQUIRED for any plan that registers a new generation
+// (23 Sep 2026): it used to default to 'ifl_copy', and that default is how the
+// dev sidecar's epochs 13-16 came to claim IFL provenance while sitting on
+// DATA_TP1U2_SIM. Carried on the shared arg list so every existing case still
+// exercises the path it was written for rather than tripping the new guard.
+const CONFIRM = ['--table=pack1_TP1U2', '--confirm', '--provenance=ifl_copy'];
 
 describe('sms epoch:accept — same identity, in-generation drift', () => {
   it('same identity, differing fingerprint: updates in place — one UPDATE, no INSERT, no closed_utc write', async () => {
@@ -272,12 +277,85 @@ describe('sms epoch:accept — idempotence and the --confirm gate', () => {
       label: 'July copy',
     };
 
-    const code = await epochAccept(['--table=pack1_TP1U2']);
+    const code = await epochAccept(['--table=pack1_TP1U2', '--provenance=ifl_copy']);
 
     expect(code).toBe(2);
     expect(world.app.transactions).toHaveLength(0);
     const sqls = world.app.statements.map((s) => s.sql);
     expect(sqls.some((q) => /^UPDATE sms\.source_epoch/.test(q.trim()))).toBe(false);
     expect(sqls.some((q) => /^INSERT INTO sms\.source_epoch/.test(q.trim()))).toBe(false);
+  });
+});
+
+/**
+ * Regression guard for a LIVE, MEASURED defect, not a hypothetical one
+ * (23 Sep 2026).
+ *
+ * `sms.source_epoch` epochs 13-16 on the development sidecar are the plant
+ * simulator's four tables — `source_db = 'DATA_TP1U2_SIM'`, registered
+ * 2026-09-22 07:17 by `cli:epoch-accept` — and every one of them says
+ * `provenance = 'ifl_copy'`. 212,873 synthetic cones, 9,715 synthetic sacks
+ * and 4,868 synthetic rejects are therefore indistinguishable from IFL's own
+ * data by the single column whose job is to distinguish them, and they overlap
+ * IFL's real September generation IN TIME (21 Aug - 22 Sep vs 5 Aug - 7 Sep),
+ * so every date-ranged query that does not constrain the generation pools them.
+ *
+ * Nobody typed a wrong value. `--provenance` defaulted to 'ifl_copy' when
+ * omitted, and the auto-generated labels on those rows ("pack1_TP1U2 gen 4")
+ * prove no optional flag was passed at all. That makes it a defect of the
+ * REGISTRATION PATH, which is what makes it recur: the identical omission at
+ * IFL's go-live cutover registers the plant's own LIVE generation as a copy,
+ * equally silently.
+ *
+ * These three cases pin the two halves of the fix. Do not reintroduce a
+ * default to make them pass.
+ */
+describe('sms epoch:accept — a generation must say what it is (epoch 13 regression)', () => {
+  const NEW_GENERATION = {
+    epoch_id: 3,
+    source_server: 'SRV',
+    source_db: 'DATA_TP1U2',
+    source_created_key: '2026-07-01T00:00:00.000', // differs from world.identity -> register path
+    schema_fingerprint: 'fp-old',
+    label: 'July copy',
+  };
+  const writesOf = (p: ReturnType<typeof fakePool>) =>
+    [...p.statements, ...p.transactions.flatMap((t) => t.statements)].map((s) => s.sql);
+
+  it('--provenance omitted on a REGISTER: refuses, exits 2, writes nothing — there is no default any more', async () => {
+    world.openEpochRow = NEW_GENERATION;
+
+    const code = await epochAccept(['--table=pack1_TP1U2', '--confirm']);
+
+    expect(code).toBe(2);
+    expect(world.app.transactions).toHaveLength(0);
+    expect(writesOf(world.app).some((q) => /^INSERT INTO sms\.source_epoch/.test(q.trim()))).toBe(false);
+    expect(writesOf(world.app).some((q) => /UPDATE sms\.source_epoch SET closed_utc/.test(q))).toBe(false);
+  });
+
+  it('a _SIM database declared as ifl_copy — exactly how epoch 13 was written — is refused, not recorded', async () => {
+    world.openEpochRow = NEW_GENERATION;
+    world.identity = { ...world.identity, database: 'DATA_TP1U2_SIM' };
+
+    const code = await epochAccept(['--table=pack1_TP1U2', '--confirm', '--provenance=ifl_copy']);
+
+    expect(code).toBe(2);
+    expect(world.app.transactions).toHaveLength(0);
+    expect(writesOf(world.app).some((q) => /^INSERT INTO sms\.source_epoch/.test(q.trim()))).toBe(false);
+  });
+
+  it('the same _SIM database declared honestly as simulator registers, and the row carries "simulator"', async () => {
+    world.openEpochRow = NEW_GENERATION;
+    world.identity = { ...world.identity, database: 'DATA_TP1U2_SIM' };
+
+    const code = await epochAccept(['--table=pack1_TP1U2', '--confirm', '--provenance=simulator']);
+
+    expect(code).toBe(0);
+    const tx = world.app.transactions[0]!;
+    expect(tx.committed).toBe(true);
+    const insert = tx.statements.find((s) => /^INSERT INTO sms\.source_epoch/.test(s.sql.trim()));
+    expect(insert).toBeDefined();
+    expect(insert!.inputs.get('prov')).toBe('simulator');
+    expect(insert!.inputs.get('db')).toBe('DATA_TP1U2_SIM');
   });
 });
