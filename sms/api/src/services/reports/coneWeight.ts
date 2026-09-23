@@ -1,10 +1,13 @@
 /**
  * Cone weight report — roadmap Phase 8 item 1 (15 Sep 2026).
  *
- * Mean, median, spread, the five-state counts, the 20 g histogram, and the
+ * Mean, median, spread, the five-state counts, the histogram, and the
  * per-station table — the Weight screen's figures on paper. Every one comes
  * from the service the screen uses: weights.ts for the mean, SD and the
- * histogram (its CONE_BUCKET is already 20 g), production.ts for the state
+ * histogram (whose bucket width is derived from the readings' own spread —
+ * it was a hardcoded 20 g until 23 Sep 2026, which put 76 % of the cones in
+ * one bar; `bucketSizeG` below carries whatever it resolved to and must be
+ * printed), production.ts for the state
  * counts, weightStations.ts for the station rows, all over the ONE
  * population rule.
  *

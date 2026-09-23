@@ -108,6 +108,16 @@ export interface ReportLine {
   sackWeightKg: number;
   avgSackKg: number | null;
   conesPerSack: number | null;
+  /**
+   * Share of this group's sacks that the SCALE passed — the sack counterpart
+   * of `conesInRangePct`, carried here so the sack report's per-day rows stop
+   * answering a cone question (production.ts `sacksPassedScalePct`, which
+   * documents whose verdict it is and why there is no tolerance figure beside
+   * it). Null when no sack in the group carried a verdict; optional for the
+   * same hand-built-fake reason `ProductionRow` documents, though
+   * `toReportLine` always sets it.
+   */
+  sacksPassedScalePct?: number | null;
 }
 
 export interface ReportCoverage {
@@ -181,6 +191,7 @@ export function toReportLine(r: ProductionRow): ReportLine {
     rejectedCones: rejected,
     rejectRatePct: weighed > 0 ? Math.round((10000 * rejected) / weighed) / 100 : null,
     conesInRangePct: r.conesInRangePct,
+    sacksPassedScalePct: r.sacksPassedScalePct ?? null,
     sacks,
     sackWeightKg: round1(kg),
     avgSackKg: sacks > 0 ? Math.round((100 * kg) / sacks) / 100 : null,
@@ -198,6 +209,7 @@ const EMPTY_LINE: ReportLine = {
   sackWeightKg: 0,
   avgSackKg: null,
   conesPerSack: null,
+  sacksPassedScalePct: null,
 };
 
 /** Shift order as the plant runs them, not alphabetical. */

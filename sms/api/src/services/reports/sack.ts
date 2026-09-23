@@ -71,7 +71,7 @@ export async function getSackReport(
     // basis, not a hardcoded fallback — so fetch just the basis, the cheap way.
     shift ? getConfiguredBasis(pool, lineId) : Promise.resolve(null),
   ]);
-  const totals = total.rows[0] ? toReportLine(total.rows[0]) : toReportLine({ group: 'total', cones: 0, rejectedCones: 0, sacks: 0, sackWeightKg: 0, conesInRangePct: null });
+  const totals = total.rows[0] ? toReportLine(total.rows[0]) : toReportLine({ group: 'total', cones: 0, rejectedCones: 0, sacks: 0, sackWeightKg: 0, conesInRangePct: null, sacksPassedScalePct: null });
   const order = ['morning', 'evening', 'night'];
   return {
     period: resolved,
@@ -112,6 +112,12 @@ export async function getSackReport(
 
 export const SACK_CSV_HEADERS = [
   'section', 'group', 'sacks', 'sack_weight_kg', 'avg_sack_kg', 'cones', 'cones_per_sack', 'rejected_by_scale', 'in_range_pct',
+  // 23 Sep 2026: the per-row SACK verdict share. Until this column the only
+  // in-range figure on any row of this file was `in_range_pct`, which is
+  // populated on the TOTAL row alone; a shift or day row carried no sack
+  // quality figure at all, so the period could not be charted from the
+  // export either. Named for the scale, like the header above it.
+  'sacks_passed_by_scale_pct',
   'bucket_kg', 'count',
   // F7 (23 Sep 2026): the `group` column carries the product NAME, and a
   // name that is unique on this dataset is not guaranteed unique in general.
@@ -121,15 +127,15 @@ export const SACK_CSV_HEADERS = [
 ] as const;
 
 export function sackCsv(d: SackReportData): CsvTable {
-  const line = (section: string, r: ReportLine): CsvRow => [section, r.group, r.sacks, r.sackWeightKg, r.avgSackKg, r.cones, r.conesPerSack, null, null, null, null, null];
+  const line = (section: string, r: ReportLine): CsvRow => [section, r.group, r.sacks, r.sackWeightKg, r.avgSackKg, r.cones, r.conesPerSack, null, null, r.sacksPassedScalePct, null, null, null];
   const rows: CsvRow[] = [
-    ['total', 'total', d.totals.sacks, d.totals.sackWeightKg, d.totals.avgSackKg, d.totals.cones, d.conesPerSack, d.rejectedByScale, d.inRangePct, null, null, null],
+    ['total', 'total', d.totals.sacks, d.totals.sackWeightKg, d.totals.avgSackKg, d.totals.cones, d.conesPerSack, d.rejectedByScale, d.inRangePct, d.totals.sacksPassedScalePct, null, null, null],
     ...d.byShift.map((r) => line('shift', r)),
     ...d.byDay.map((r) => line('day', r)),
-    ...d.byProduct.map((p): CsvRow => ['product', p.productLabel, p.sacks, p.sackWeightKg, p.avgSackKg, null, null, null, null, null, null, p.productId]),
+    ...d.byProduct.map((p): CsvRow => ['product', p.productLabel, p.sacks, p.sackWeightKg, p.avgSackKg, null, null, null, null, null, null, null, p.productId]),
   ];
   if (d.distribution) {
-    for (const b of d.distribution.histogram) rows.push(['histogram', null, null, null, null, null, null, null, null, b.bucket, b.count, null]);
+    for (const b of d.distribution.histogram) rows.push(['histogram', null, null, null, null, null, null, null, null, null, b.bucket, b.count, null]);
   }
   return { headers: SACK_CSV_HEADERS, rows };
 }

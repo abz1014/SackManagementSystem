@@ -25,7 +25,7 @@ import { usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import type { Period } from '../../lib/period';
 import { Block, Chevron, Empty, Failed, SkelLines, rowKeys } from '../../ui/bits';
-import { fmtClock, fmtDayLong, fmtG, fmtInt } from '../../lib/fmt';
+import { fmtClock, fmtDay, fmtDayLong, fmtG, fmtInt } from '../../lib/fmt';
 import {
   getProductAt, getProducts, getCurrentProduct, getMachinesRunning, getStations, setCurrentProduct, stationLabel,
   type ProductOption, type TimelineEntry, type MachineRunning, type StationRow,
@@ -103,6 +103,7 @@ export function RunningTab({
         ) : (
           <ByProduct
             data={machines.data.data.machines}
+            asOfUtc={machines.data.data.asOfUtc}
             names={names.data?.stations ?? []}
             products={products.data?.products ?? []}
             onOpenStation={onOpenStation}
@@ -280,12 +281,19 @@ function groupByProduct(machines: MachineRunning[]): ProductGroup[] {
 
 function ByProduct({
   data,
+  asOfUtc,
   names,
   products,
   onOpenStation,
   onSeeStationReadings,
 }: {
   data: MachineRunning[];
+  /** The instant the two-hour window ENDS — the newest reading on record,
+   *  never the clock. Printed rather than implied: this pivot, like Line's
+   *  own machine block, is not period-filtered, so its window can sit days
+   *  away from whatever period the reader has selected (see words.ts
+   *  `cone.machinesNote`). */
+  asOfUtc: string | null;
   names: StationRow[];
   /** The product master, run through the one disambiguator — this pivot's
    *  entire purpose is grouping BY product, which the plain description
@@ -346,7 +354,9 @@ function ByProduct({
           </table>
         </div>
       ))}
-      <p className="mut sm">{W.cone.machinesWindow}</p>
+      {asOfUtc && (
+        <p className="mut sm">{W.cone.machinesWindow(`${fmtDay(asOfUtc)}, ${fmtClock(asOfUtc)}`)}</p>
+      )}
     </div>
   );
 }

@@ -16,6 +16,8 @@ export interface ProductionRow {
   sacks: number | null;
   sackWeightKg: number | null;
   conesInRangePct: number | null;
+  /** Share of the group's sacks the SCALE passed (api production.ts `sacksPassedScalePct`). */
+  sacksPassedScalePct?: number | null;
 }
 
 export interface ProductionData {
@@ -716,6 +718,16 @@ export interface SpecLimits {
   limitsEffectiveFromUtc?: string;
   limitsAreLowerBound?: boolean;
   limitsChangedInPeriod?: number;
+  /**
+   * Why the chart is drawing NO limit band, Cp/Cpk or scale-vs-product
+   * agreement: the limits on record post-date the period, so applying them
+   * would judge these readings by a tolerance that did not exist when they
+   * were taken (719fbee). Composed SERVER-side, in `spc.ts`
+   * (`CHART_LIMITS_WITHHELD`) — not a `words.ts` key, like
+   * `weightStations.ts`'s `targetOmittedReason` before it. Absent means
+   * nothing was withheld; it never means "no reason given".
+   */
+  limitsOmittedReason?: string;
 }
 export interface SpecAgreement {
   evaluated: number;
@@ -1135,6 +1147,8 @@ export interface ReportLine {
   sackWeightKg: number;
   avgSackKg: number | null;
   conesPerSack: number | null;
+  /** Share of the group's sacks the SCALE passed. Null when none carried a verdict. */
+  sacksPassedScalePct?: number | null;
 }
 export interface ReportData {
   period: { period: ReportPeriod; from: string; to: string };
@@ -2229,6 +2243,16 @@ export interface ConeWeightReportData {
     inForceAtUtc: string | null;
     /** How many times this target's own limits changed inside the period. */
     limitsChangedInPeriod: number;
+    /**
+     * `inForceAtUtc` is the EARLIEST this target can be shown to have
+     * applied, not necessarily when it began: all 14 rows of
+     * `sms.product_limit_version` are migration-027 bootstraps stamped
+     * 2026-09-11, so SMS holds no record of what was in force in August
+     * (719fbee).
+     */
+    inForceIsLowerBound?: boolean;
+    /** Why no target is stated, composed server-side. Null = nothing omitted. */
+    omittedReason?: string | null;
     source: 'in_force_at_period_end' | 'none';
   };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];

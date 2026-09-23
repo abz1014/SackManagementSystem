@@ -43,9 +43,103 @@ export interface WeightStats {
   max: number | null;
   stdev: number | null;
   unit: 'g' | 'kg';
+  /**
+   * The histogram's bucket width, in `unit`, DERIVED from this population's
+   * own spread rather than declared (see TARGET_BINS below). It therefore
+   * varies between calls — by period, by basis and by source generation —
+   * and it is fractional for sacks. Always print it beside the chart: two
+   * histograms of the same readings at different widths are not comparable
+   * bar for bar, and a reader who cannot see the width cannot know that.
+   */
   bucketSize: number;
+  /** Bucket START value (not the index), spaced `bucketSize` apart. Sparse: empty buckets are omitted. */
   histogram: Bucket[];
   outliers: Outlier[];
+}
+
+/**
+ * HISTOGRAM RESOLUTION — derived from the readings, never declared.
+ *
+ * Until 23 Sep 2026 the two histograms were binned at two hardcoded widths,
+ * 20 g for cones and 1 kg for sacks, and both were wrong for the data IFL
+ * actually sends. Measured on this sidecar, over IFL's own generations only:
+ *
+ *   sacks, gen 1 (epoch 2, 22 Jun - 10 Jul): sd 0.121 kg — 5,438 of 5,459
+ *     readings (99.6 %) fell in the single 47 kg bucket. The chart was ONE
+ *     BAR. Gen 3 (epoch 10) is the same: 5,398 of 5,431.
+ *   cones, gen 1 (epoch 1): sd 8.86 g — 107,834 of 142,296 (75.8 %) in the
+ *     single 1940 g bucket, three bars in total. Less visibly broken than
+ *     the sack chart, and broken the same way: a 20 g bucket is 2.3 sd wide.
+ *
+ * A histogram whose bucket is wider than the spread it is drawing cannot
+ * show a distribution, which is the only thing it is for. So the width is
+ * now computed from each population's OWN spread, per call, per basis, per
+ * generation — a sack chart and a cone chart no longer share a rule beyond
+ * the target resolution below, and neither carries a constant in grams or
+ * kilograms anywhere.
+ *
+ *  1. Aim for `TARGET_BINS` bins across +/-4 sd of the readings in hand, so
+ *     raw width = 8 sd / TARGET_BINS. This is NOT a new idea in this
+ *     application: `spc.ts` bins its own distribution chart over exactly
+ *     +/-4 sd at exactly 32 bins (its `HIST_BINS`), and matching it keeps
+ *     ONE histogram resolution in the app rather than a second one that has
+ *     to be explained beside the first. It is duplicated rather than
+ *     imported because it is a local rendering target, not a shared
+ *     contract, and spc.ts is held open by another worker.
+ *  2. Snap that to the nearest 1/2/5 x 10^k, so the x-axis labels a reader
+ *     sees are round numbers (47.20, 47.22) and not 47.2094.
+ *
+ * FREEDMAN-DIACONIS WAS TRIED FIRST AND REJECTED, with numbers: 2*IQR*n^-1/3
+ * gives 0.46 g for the cone population (IQR 12 g, n 142,296), which is ~990
+ * bins across the plausible range — far past what `Histogram` can draw, its
+ * bars having a 2px floor. FD is the right rule at survey sample sizes and
+ * the wrong one at n in the hundreds of thousands, where it optimises for a
+ * resolution no screen has. The sd rule degrades gracefully at both ends.
+ *
+ * What this produces on the real generations, verified by query before it
+ * was written: cones 2 g (81 non-empty bars, modal bar 9.5 % of readings —
+ * a bell), sacks 0.02 kg on gen 1 (47 bars) and 0.05 kg on gen 3 (31 bars).
+ */
+const TARGET_BINS = 32;
+
+/**
+ * The nearest 1, 2 or 5 times a power of ten — the standard axis-tick
+ * ladder. Written out rather than pulled in because the app has no charting
+ * dependency and is not getting one.
+ */
+export function niceWidth(raw: number): number {
+  const e = Math.floor(Math.log10(raw));
+  const f = raw / 10 ** e;
+  const m = f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10;
+  // Built by division for a negative exponent so 2 x 10^-2 is 0.02 exactly
+  // and not 0.020000000000000004 printed as a bucket label.
+  return e >= 0 ? m * 10 ** e : m / 10 ** -e;
+}
+
+/**
+ * The bucket width for one population. `stdev` is the measure of spread we
+ * already have from the same query and the same population predicate.
+ *
+ * Both fallbacks are for degenerate populations, not for missing data:
+ * STDEV() is NULL at n < 2, and zero when every reading is identical. A
+ * single distinct value genuinely IS one bar, so the last resort returns a
+ * positive width rather than pretending to a resolution the data has not
+ * got.
+ */
+export function binWidth(stdev: number | null, min: number | null, max: number | null): number {
+  const spread =
+    stdev != null && stdev > 0
+      ? 8 * stdev
+      : min != null && max != null && max > min
+        ? max - min
+        : 0;
+  if (!(spread > 0) || !Number.isFinite(spread)) return 1;
+  return niceWidth(spread / TARGET_BINS);
+}
+
+/** Decimals a bucket label needs at this width: 0.02 -> 2, 2 -> 0. */
+function bucketDecimals(width: number): number {
+  return Math.max(0, -Math.floor(Math.log10(width)));
 }
 
 /** Where the nominal the giveaway is measured against actually came from. */
@@ -181,8 +275,6 @@ export async function getWeights(
   const plausibility = await getPlausibilityRule(pool, lineId);
   const conePlaus = { loG: plausibility.coneLoG, hiG: plausibility.coneHiG };
   const sackPlaus = { loG: plausibility.sackLoKg, hiG: plausibility.sackHiKg };
-  const CONE_BUCKET = 20;
-  const SACK_BUCKET = 1;
 
   // Every value that varies at runtime is bound, not interpolated. The tare/tube
   // adjustments come from sms.weight_rule (database-sourced, so not user input)
@@ -196,8 +288,6 @@ export async function getWeights(
     if (to) r.input('to', mssql.Date, to);
     r.input('coneAdj', mssql.Float, coneAdj);
     r.input('sackAdj', mssql.Float, sackAdj);
-    r.input('coneBucket', mssql.Int, CONE_BUCKET);
-    r.input('sackBucket', mssql.Int, SACK_BUCKET);
     for (const pr of [...coneEpoch.params, ...sackEpoch.params]) r.input(pr.name, mssql.Int, pr.id);
     return r;
   };
@@ -225,11 +315,24 @@ export async function getWeights(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight_g - @coneAdj) OVER () med
      FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${cmPlaus}`,
   );
+  // The width comes from the population just measured — see binWidth. Note
+  // the BIN INDEX is what SQL groups and returns; the bucket's start value is
+  // multiplied out in JS below. Doing the multiply in SQL over a float width
+  // produced labels like 47.120000000000005, which is a real thing a reader
+  // would have had to look at.
+  const cs0 = coneStat.recordset[0]!;
+  const coneBucket = binWidth(
+    cs0.sd == null ? null : Number(cs0.sd),
+    cs0.mn == null ? null : Number(cs0.mn),
+    cs0.mx == null ? null : Number(cs0.mx),
+  );
+  const coneDp = bucketDecimals(coneBucket);
   const [chReq, chPlaus] = coneReq();
-  const coneHist = await chReq.query<{ bucket: number; count: number }>(
-    `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket bucket, COUNT(*) count
+  chReq.input('coneBucket', mssql.Float, coneBucket);
+  const coneHist = await chReq.query<{ bin: number; count: number }>(
+    `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket) bin, COUNT(*) count
      FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${chPlaus}
-     GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket ORDER BY bucket`,
+     GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket) ORDER BY bin`,
   );
   // The excluded readings themselves, lightest first — shown, on purpose.
   const [coReq, coAll] = coneReq({ includeImplausible: true });
@@ -250,11 +353,19 @@ export async function getWeights(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight_kg - @sackAdj) OVER () med
      FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${smPlaus}`,
   );
+  const ss0 = sackStat.recordset[0]!;
+  const sackBucket = binWidth(
+    ss0.sd == null ? null : Number(ss0.sd),
+    ss0.mn == null ? null : Number(ss0.mn),
+    ss0.mx == null ? null : Number(ss0.mx),
+  );
+  const sackDp = bucketDecimals(sackBucket);
   const [shReq, shPlaus] = sackReq();
-  const sackHist = await shReq.query<{ bucket: number; count: number }>(
-    `SELECT FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket bucket, COUNT(*) count
+  shReq.input('sackBucket', mssql.Float, sackBucket);
+  const sackHist = await shReq.query<{ bin: number; count: number }>(
+    `SELECT FLOOR((weight_kg - @sackAdj)/@sackBucket) bin, COUNT(*) count
      FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${shPlaus}
-     GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket ORDER BY bucket`,
+     GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket) ORDER BY bin`,
   );
   const [soReq, soAll] = sackReq({ includeImplausible: true });
   const sackOut = await soReq.query<{ w: number; d: string; id: number }>(
@@ -304,6 +415,12 @@ export async function getWeights(
   }
 
   const num = (v: unknown) => (v == null ? null : Math.round(Number(v) * 100) / 100);
+  /** Bin index -> the bucket's start value, at the width's own precision. */
+  const toBuckets = (rs: { bin: number; count: number }[], width: number, dp: number): Bucket[] =>
+    rs.map((b) => ({
+      bucket: Math.round(Number(b.bin) * width * 10 ** dp) / 10 ** dp,
+      count: b.count,
+    }));
   const cs = coneStat.recordset[0]!;
   const coneAvg = num(cs.avg);
   const giveawayPerConeG = coneAvg == null ? null : Math.round((coneAvg - nominalSetpointG) * 10) / 10;
@@ -317,16 +434,16 @@ export async function getWeights(
     basis,
     cone: {
       count: cs.n, implausible: Number(cs.excluded ?? 0), avg: coneAvg, median: num(coneMed.recordset?.[0]?.med), min: num(cs.mn), max: num(cs.mx), stdev: num(cs.sd),
-      unit: 'g', bucketSize: CONE_BUCKET,
-      histogram: coneHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
+      unit: 'g', bucketSize: coneBucket,
+      histogram: toBuckets(coneHist.recordset, coneBucket, coneDp),
       outliers: mapOut(coneOut.recordset),
       nominalSetpointG, nominalSource, nominalLabel, provisionalReasons,
       giveawayPerConeG, giveawayTotalKg,
     },
     sack: {
       count: ss.n, implausible: Number(ss.excluded ?? 0), avg: num(ss.avg), median: num(sackMed.recordset?.[0]?.med), min: num(ss.mn), max: num(ss.mx), stdev: num(ss.sd),
-      unit: 'kg', bucketSize: SACK_BUCKET,
-      histogram: sackHist.recordset.map((b) => ({ bucket: Number(b.bucket), count: b.count })),
+      unit: 'kg', bucketSize: sackBucket,
+      histogram: toBuckets(sackHist.recordset, sackBucket, sackDp),
       outliers: mapOut(sackOut.recordset),
     },
     note:

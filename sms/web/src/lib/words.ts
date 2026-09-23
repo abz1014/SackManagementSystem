@@ -1499,9 +1499,39 @@ export const W = {
        running" with the line-wide product record, so the label asks the
        single question both answers. Sole use is Line.tsx. */
     machinesTitle: 'What is being made',
-    machinesNote: (n: number) => (n === 1 ? '1 product running' : `${n} products running`),
-    machinesWindow: 'from each machine\u2019s newest cones in the last 2 hours of plant time',
-    quiet2h: 'nothing in the last 2 h',
+    /**
+     * THE AS-OF IS PART OF THE NOTE, NOT DECORATION (23 Sep 2026).
+     *
+     * `/api/machines/running` anchors its two-hour window on the newest
+     * reading ON RECORD \u2014 never on the clock, for the acquisition-lag reason
+     * above \u2014 and it does NOT take the selected period. Those are both
+     * correct, and together they mean the window can sit hours, days or
+     * weeks away from the period the rest of the screen is reporting.
+     *
+     * Reproduced on this sidecar: with the period on the current day, Line's
+     * "Stations \u2014 cones this period" block showed all fourteen stations at 0
+     * (true: the day holds no readings) while this block showed the same
+     * fourteen running 34-51 cones each (also true: the two hours to
+     * 22 Sep 12:29 PM, the newest reading, a day earlier). One screen, two
+     * opposite-sounding statements about fourteen machines, and nothing on
+     * either block named its own window.
+     *
+     * They measure different things and must stay different \u2014 making the
+     * numbers agree would destroy the answer this block exists to give. So
+     * the WINDOW IS NAMED instead, everywhere it is shown.
+     */
+    machinesNote: (n: number, when: string | null) => {
+      const products = n === 1 ? '1 product running' : `${n} products running`;
+      return when == null ? products : `${products} \u00b7 as of ${when}`;
+    },
+    machinesWindow: (when: string) =>
+      `From each machine\u2019s newest cones, in the two hours ending ${when} \u2014 the newest reading on record. This window is anchored on that reading, not on the selected period, and does not move with it.`,
+    /* Shown only when the as-of demonstrably falls outside the selected
+       period, so the reader is never left to reconcile this block with the
+       per-period counts above it by themselves. */
+    machinesOutsidePeriod: (when: string, period: string) =>
+      `These readings are from ${when}, outside the selected period (${period}). The per-station counts above cover the period; these do not.`,
+    quietWindow: 'nothing in this window',
     since: (t: string) => `since ${t}`,
     sinceAtLeast: 'for at least 2 h',
     conesInWindow: (n: string) => `${n} cones`,
@@ -1820,6 +1850,13 @@ export const W = {
     /* The two reject populations, named apart (the gap analysis found them one word). */
     rejectedByScale: 'Rejected by the scale',
     rejectedAtInspection: 'Rejected at inspection',
+    /* The SACK counterpart of the cone in-range share, worded as the SCALE's
+       own verdict (CLAUDE.md, ONE STATUS VOCABULARY). There is deliberately
+       no "within tolerance" column beside it: IFL's sack table carries an
+       inRange bit and no limits of any kind, so a tolerance figure for a
+       sack would have to be invented. See production.ts
+       `sacksPassedScalePct`. */
+    colSacksPassedScale: 'Sacks passed by scale',
     ofConesWeighed: (p: string) => `${p} of cones weighed`,
     ofInspected: (p: string) => `${p} of cones plus rejects`,
     timeLostNotSplit: 'Time lost is not split by shift.',

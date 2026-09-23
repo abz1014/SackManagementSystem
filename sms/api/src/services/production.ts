@@ -74,6 +74,42 @@ export interface ProductionRow {
   sacks: number | null;
   sackWeightKg: number | null;
   conesInRangePct: number | null;
+  /**
+   * THE SACK EQUIVALENT of `conesInRangePct`, and named at length on purpose
+   * (23 Sep 2026). Until this existed the sack report's per-day rows carried
+   * `conesInRangePct` and nothing else — a CONE figure on a SACK report — so
+   * "how did sack packing go over the period?" could not be answered or
+   * charted from any endpoint. A field called `inRangePct` sitting beside a
+   * cone figure of the same shape is how that confusion started; this one
+   * says which readings and whose verdict in its own name.
+   *
+   * WHOSE VERDICT: the SCALE's. This is `sack_event.in_range`, the bit
+   * IFL's own `sack1_TP1U2.inRange` column carries, and nothing else. Per
+   * CLAUDE.md's ONE STATUS VOCABULARY rule it is named as the scale's, and
+   * there is deliberately NO second "within product tolerance" companion
+   * beside it, because no such tolerance exists to compute one from —
+   * verified 23 Sep 2026 against the attached copies: `sack1_TP1U2` holds
+   * only (id, Date, Shift, Area, SackNum, Weight, inRange, MaterialId), and
+   * `PDAS.Materials`'s MaterialSetpointWeight / WeightOffsetMinus /
+   * WeightOffsetPlus are the CONE setpoint (~1950 g), not a sack limit.
+   * IFL's data carries no sack tolerance at all. Do not invent one.
+   *
+   * Null when the group weighed no sack carrying a verdict, and null on a
+   * station grouping (sacks have no station — see `bindFilters`). The
+   * DENOMINATOR is sacks whose flag is non-null, not every sack: the column
+   * is nullable, and a sack the scale never judged is neither passed nor
+   * failed. (It differs from `conesInRangePct`'s COUNT(*) denominator for
+   * that reason; on every generation held here both flags are 100 % non-null,
+   * so the two agree today and this only ever matters if that changes.)
+   *
+   * DECLARED OPTIONAL, and not because stating it is optional — `getProduction`
+   * always sets it on every row it builds. It is optional for exactly the
+   * reason `generationNote?:` is (generation.ts, one commit earlier): a
+   * REQUIRED field would have broken the hand-built row fakes in report and
+   * summary test files that other workers hold open mid-flight. A CONSUMER
+   * must read a missing value as "not stated", never as 0 %.
+   */
+  sacksPassedScalePct?: number | null;
 }
 
 /** SQL expression that yields the grouping key per dimension. */
@@ -310,12 +346,19 @@ export async function getProduction(
   const unmatchedOf = await getUnmatchedRejects(pool, lineId, unmatchedFilters, unmatchedGroupExpr(p.groupBy));
 
   // sacks — no station dimension; skip when grouping by station
-  let sacks: { grp: string; n: number; kg: number }[] = [];
+  let sacks: { grp: string; n: number; kg: number; judged: number; passed: number }[] = [];
   if (!byStation) {
     const sackReq = pool.request();
     const sackWhere = bindFilters(sackReq, p, lineId, false, scope, 'sack_event');
-    const res = await sackReq.query<{ grp: string; n: number; kg: number }>(
-      `SELECT ${g} AS grp, COUNT(*) n, ISNULL(SUM(weight_kg),0) kg
+    // `judged`/`passed` are the SCALE's own verdict and its denominator —
+    // see ProductionRow.sacksPassedScalePct. Same query, same filters, same
+    // generation as the count and the kilograms beside them, so a sack's
+    // weight and the scale's verdict on it can never come from two
+    // different populations.
+    const res = await sackReq.query<{ grp: string; n: number; kg: number; judged: number; passed: number }>(
+      `SELECT ${g} AS grp, COUNT(*) n, ISNULL(SUM(weight_kg),0) kg,
+              SUM(CASE WHEN in_range IS NOT NULL THEN 1 ELSE 0 END) judged,
+              SUM(CASE WHEN in_range = 1 THEN 1 ELSE 0 END) passed
        FROM sms.sack_event WHERE ${sackWhere} ${groupClause}`,
     );
     sacks = res.recordset;
@@ -332,7 +375,7 @@ export async function getProduction(
   const map = new Map<string, ProductionRow>();
   const row = (grp: string): ProductionRow =>
     map.get(grp) ??
-    map.set(grp, { group: grp, cones: 0, rejectedCones: 0, unmatchedRejects: 0, sacks: byStation ? null : 0, sackWeightKg: byStation ? null : 0, conesInRangePct: null }).get(grp)!;
+    map.set(grp, { group: grp, cones: 0, rejectedCones: 0, unmatchedRejects: 0, sacks: byStation ? null : 0, sackWeightKg: byStation ? null : 0, conesInRangePct: null, sacksPassedScalePct: null }).get(grp)!;
 
   for (const c of cones.recordset) {
     const r = row(c.grp);
@@ -351,6 +394,10 @@ export async function getProduction(
     let kg = Number(s.kg);
     if (basis === 'net') kg -= tare * s.n;
     r.sackWeightKg = Math.round(kg * 10) / 10;
+    const judged = Number(s.judged ?? 0);
+    // Null, not 0: no sack carrying a verdict is "not stated", and rendering
+    // it as 0 % would say the scale failed every sack in the group.
+    r.sacksPassedScalePct = judged > 0 ? Math.round((1000 * Number(s.passed ?? 0)) / judged) / 10 : null;
   }
 
   // 'station' and 'product' groups are numeric strings (varchar-cast for the

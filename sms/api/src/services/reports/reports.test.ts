@@ -603,13 +603,17 @@ describe('sack report', () => {
     expect(d.caveats.conesPerSack).toMatch(/approximation/);
     const t = sackCsv(d);
     expect(t.headers).toEqual(SACK_CSV_HEADERS);
-    expect(t.rows[0]).toEqual(['total', 'total', 40, 1880, 47, 1000, 25, 17, 57.5, null, null, null]);
+    // The 10th column is `sacks_passed_by_scale_pct` (23 Sep 2026), the
+    // per-row SACK verdict share — null here because this fixture's totals
+    // row is hand-built and carries no `sacksPassedScalePct`, which is
+    // exactly the "missing means not stated" contract the field documents.
+    expect(t.rows[0]).toEqual(['total', 'total', 40, 1880, 47, 1000, 25, 17, 57.5, null, null, null, null]);
     // F7 (23 Sep 2026): the product rows carry the PDAS id alongside the
     // name, because the sack CSV's `group` column is a NAME and a name that
     // happens to be unique on this dataset is not an identifier.
     const prodRow = t.rows.find((r) => r[0] === 'product')!;
     expect(prodRow[1]).toBe('205-IL0-SD');
-    expect(prodRow[11]).toBe(21);
+    expect(prodRow[SACK_CSV_HEADERS.indexOf('material_id')]).toBe(21);
   });
   it('H8 (15 Sep 2026): weightBasis is whatever getWeights resolves, never a hardcoded literal', async () => {
     vi.mocked(getWeights).mockResolvedValueOnce({ ...fakeWeights(), basis: 'net' } as never);

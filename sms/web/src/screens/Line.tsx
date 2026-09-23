@@ -32,7 +32,7 @@ import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
   SkelChart, SkelFigures, SkelLines, SkelStations, type FigureProps,
 } from '../ui/bits';
-import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
+import { fmtClock, fmtDay, fmtDayLong, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
 import { CategoryBars, type BarDatum } from '../ui/chart';
 import { DeviationBars, fmtDayShort, type DeviationRow } from './report/shared';
 import {
@@ -264,7 +264,11 @@ export function LineScreen({
           independent guards. */}
       <Block
         label={W.cone.machinesTitle}
-        note={machines.data ? W.cone.machinesNote(machines.data.data.materialsRunning) : null}
+        note={
+          machines.data
+            ? W.cone.machinesNote(machines.data.data.materialsRunning, windowAsOfText(machines.data.data.asOfUtc))
+            : null
+        }
       >
         {machines.error && !machines.data ? (
           <Failed error={machines.error} onRetry={machines.refresh} />
@@ -273,6 +277,7 @@ export function LineScreen({
         ) : (
           <MachinesBlock
             data={machines.data.data}
+            period={period}
             stations={stations.data?.stations ?? []}
             products={products.data?.products ?? []}
             onOpen={onOpenStation}
@@ -734,13 +739,47 @@ function ProductFooter({
  * this block sits between the product and the station grid and must not
  * push either off the first screen.
  */
+/**
+ * "Tue 22 Sep, 12:29 PM" — a window anchor, in the PLANT's clock.
+ *
+ * `fmtDay`/`fmtClock` both pin UTC on purpose (lib/fmt.ts): a production
+ * instant is the plant's wall clock labelled UTC, and converting it to the
+ * viewer's zone would apply the plant's offset twice. The browser's own
+ * clock is never consulted here, per the TWO CLOCKS rule.
+ */
+export function windowAsOfText(asOfUtc: string | null): string | null {
+  return asOfUtc == null ? null : `${fmtDay(asOfUtc)}, ${fmtClock(asOfUtc)}`;
+}
+
+/**
+ * Does the machines window's as-of fall demonstrably outside the selected
+ * period?
+ *
+ * The one-day tolerance is not slack, it is correctness: `period.from`/`to`
+ * are shift_date (production days) while `asOfUtc` is a production instant,
+ * and a night shift's cones carry the START day's shift_date, so the two
+ * legitimately differ by up to a calendar day at a boundary. Asserting
+ * "outside the period" on a one-day difference would be a false statement on
+ * paper roughly a third of the time. Beyond a day it cannot be shift
+ * attribution, so it is safe to say.
+ */
+export function windowOutsidePeriod(asOfUtc: string, period: Period): boolean {
+  const DAY = 86_400_000;
+  const at = (d: string) => Date.parse(`${d.slice(0, 10)}T00:00:00Z`);
+  const day = at(asOfUtc);
+  return day > at(period.to) + DAY || day < at(period.from) - DAY;
+}
+
 function MachinesBlock({
   data,
+  period,
   stations,
   products,
   onOpen,
 }: {
   data: MachinesRunningData;
+  /** For the window-vs-period sentence only; nothing here is period-filtered. */
+  period: Period;
   stations: StationRow[];
   /** The product master, for disambiguating names that collide (see the
    *  import above) — empty while `/api/products` has not yet returned, in
@@ -752,6 +791,8 @@ function MachinesBlock({
   if (data.asOfUtc == null || data.machines.length === 0) return <Empty message={W.nothingHere} />;
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
   const labels = distinctProductLabels(products);
+  const when = windowAsOfText(data.asOfUtc)!;
+  const outside = windowOutsidePeriod(data.asOfUtc, period);
   return (
     <>
       <table>
@@ -761,7 +802,7 @@ function MachinesBlock({
               <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>{stationLabel(nameOf.get(m.station), m.station)}</td>
               <td>
                 {m.quiet ? (
-                  <span className="mut">{W.cone.quiet2h}</span>
+                  <span className="mut">{W.cone.quietWindow}</span>
                 ) : (
                   <>
                     <span style={{ fontWeight: 500 }}>
@@ -781,7 +822,16 @@ function MachinesBlock({
           ))}
         </tbody>
       </table>
-      <p className="mut sm" style={{ marginTop: 8 }}>{W.cone.machinesWindow}</p>
+      <p className="mut sm" style={{ marginTop: 8 }}>{W.cone.machinesWindow(when)}</p>
+      {/* The friction audit's "two blocks, one screen, opposite statements"
+          (23 Sep 2026): the per-station counts above are the SELECTED
+          PERIOD, these rows are the two hours to the newest reading. Both
+          were right; neither said which it was. */}
+      {outside && (
+        <p className="mut sm" style={{ marginTop: 6 }}>
+          {W.cone.machinesOutsidePeriod(when, periodLabel(period))}
+        </p>
+      )}
     </>
   );
 }

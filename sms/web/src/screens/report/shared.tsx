@@ -20,7 +20,7 @@ import {
   Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine,
   linePath, fittingTicks, tickIndices,
 } from '../../ui/chart';
-import { fmtDayLong, fmtInt } from '../../lib/fmt';
+import { fmtDayLong, fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ReportLine, StateCounts } from '../../api';
 
 export function Fig({ v, u, n }: { v: string; u: string; n: string | null }) {
@@ -91,7 +91,15 @@ export function StateHeads() {
 
 /* ------------------------------------------------------------- the tables */
 
-export function LineTable({ rows, head }: { rows: ReportLine[]; head: string }) {
+/**
+ * `sackScale` adds the share of each group's sacks the SCALE passed — the
+ * one column that makes "how did sack packing go over the period?" readable
+ * per day. Opt-in rather than always-on because this table also builds the
+ * Daily and Shift reports, which are about cones; a sack column on those
+ * would be the "no two screens answer the same question" rule read
+ * backwards. The Sack report passes it; nothing else does.
+ */
+export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[]; head: string; sackScale?: boolean }) {
   const body = rows.filter((r) => r.group !== 'total');
   if (body.length === 0) return <Empty message={W.nothingHere} />;
   return (
@@ -102,6 +110,7 @@ export function LineTable({ rows, head }: { rows: ReportLine[]; head: string }) 
           <th className="n">{W.report.colCones}</th>
           <th className="n">{W.report.colSacks}</th>
           <th className="n">{W.report.colSackWeight}</th>
+          {sackScale && <th className="n">{W.reports.colSacksPassedScale}</th>}
           <th className="n">{W.reports.rejectedAtInspection}</th>
         </tr>
       </thead>
@@ -112,6 +121,10 @@ export function LineTable({ rows, head }: { rows: ReportLine[]; head: string }) 
             <td className="n">{fmtInt(r.cones)}</td>
             <td className="n">{fmtInt(r.sacks)}</td>
             <td className="n">{fmtInt(Math.round(r.sackWeightKg))} {W.fig.kg}</td>
+            {/* An em dash, never 0 %: null means no sack here carried the
+                scale's verdict, which is not the same as the scale failing
+                every one of them. */}
+            {sackScale && <td className="n">{r.sacksPassedScalePct == null ? '—' : fmtPct1(r.sacksPassedScalePct)}</td>}
             <td className="n">{fmtInt(r.rejectedCones)}</td>
           </tr>
         ))}

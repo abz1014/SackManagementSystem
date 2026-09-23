@@ -46,11 +46,11 @@ export function SackSection({ d, products }: { d: SackReportData; products: Prod
             <div className="two-col">
               <div>
                 <p className="h2"><span>{W.report.byShift}</span></p>
-                <div className="tw"><LineTable rows={d.byShift} head={W.report.colShift} /></div>
+                <div className="tw"><LineTable rows={d.byShift} head={W.report.colShift} sackScale /></div>
               </div>
               <div>
                 <p className="h2"><span>{W.report.byDay}</span></p>
-                <div className="tw"><LineTable rows={d.byDay} head={W.report.colDay} /></div>
+                <div className="tw"><LineTable rows={d.byDay} head={W.report.colDay} sackScale /></div>
               </div>
             </div>
           </Block>
