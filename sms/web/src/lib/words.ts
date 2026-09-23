@@ -104,6 +104,12 @@ export const W = {
   state: {
     running: 'is running',
     stopped: (span: string) => `has been stopped for ${span}`,
+    /* UX Phase WS-B2 (23 Sep 2026): the SAME "stopped" fact as `stopped`
+       above, for when `behindSeconds` itself is null — `fmtSpan(null ?? 0)`
+       used to print a real-looking "0 s", claiming a duration the server
+       never measured. Never used together with `stopped` on the same line;
+       a caller picks one OR the other depending on whether it has a span. */
+    stoppedUnknownDuration: 'has been stopped — for how long is not known',
     idle: (since: string) => `has had no readings since ${since}`,
     unknown: 'Cannot tell whether the line is running',
     intoShift: (span: string, shift: string, from: string, to: string) =>
@@ -1222,6 +1228,13 @@ export const W = {
     bandNote: 'The shaded band is the usual range for quality rejects at that day’s volume; the dashed line is the same ceiling for weight rejects. A marked day sits above its ceiling.',
     bandNoteOneSeries: 'The shaded band is the usual range for this reason at that day’s volume. A marked day sits above it.',
     aboveUsual: 'above the usual range',
+    /* UX Phase WS-B2 (23 Sep 2026): the reject-trend hover readout, for the
+       day under the cursor when that bucket has no valid rate at all — a
+       gap in the series (rejectSpc.ts sets no `rate` for a day too thin, or
+       the weight series simply has no matching bucket that day), not a
+       measured 0%. Reported by `report/shared.tsx`'s own `fmtRateOrGap`,
+       which used a local constant of the same text pending this entry. */
+    noReadingThisDay: 'no reading this day',
     /* The per-day-per-code breakdown. */
     byDayTitle: 'By day and reason',
     byDayNote: 'Rate is that day’s share of everything inspected. A day here is the production day, 06:00 to 06:00.',

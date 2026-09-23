@@ -461,11 +461,24 @@ const ALLOW_LIST_ZERO: Record<string, string> = {
     '!attention.data` -> <Failed> branch above it. No zero is ever PRINTED — the value only ever decides whether an ' +
     'optional line appears. Cosmetic, tier 3.',
   'web/src/screens/Sacks.tsx:rows.data?.data.total ?? 0':
-    "Sacks.tsx's history block. Identical TEXT to the Readings defect but not the same situation: every consumer sits " +
-    'inside a chain that has already excluded both the failed and the pending states (`rows.error && !rows.data` -> ' +
-    '<Failed>, then `rows.loading && !rows.data` -> <SkelLines>), and the block note is separately gated on ' +
-    '`rows.data`. usePolling clears `loading` only after a success or an error, so reaching the `total === 0` branch ' +
-    'implies `rows.data` exists. The zero is real when it is shown. Tier 3.',
+    'REOPENED 23 Sep 2026 (WS-B1, on evidence from the same day\'s WS-P fix to production.ts) — this entry\'s original ' +
+    'reasoning ("every consumer sits inside a chain that has already excluded failed/pending, so the zero is real when ' +
+    'shown") assumed only TWO states reach the `total === 0` branch: a genuinely empty period, or one already routed to ' +
+    '<Failed>/<SkelLines>. WS-P proved a THIRD state exists for the identical shape on production.ts: a well-formed 200 ' +
+    'response whose COUNT aggregate row comes back with its column absent (a malformed/truncated driver row), which ' +
+    '`Number(undefined)` turns into NaN — and `JSON.stringify({total: NaN})` serialises as `{"total":null}` over the ' +
+    'wire (verified: `node -e "console.log(JSON.stringify({total: NaN}))"` -> `{"total":null}`). On the client, ' +
+    '`null ?? 0` reads that as a genuine zero indistinguishable from an empty period, while `rows.data.data.rows` — a ' +
+    'SEPARATE query in `register.ts`\'s `listEvents`, unaffected by the tally query\'s own malformation — can still hold ' +
+    'real rows that the `total === 0` branch never lets the reader see. `register.ts`\'s `foldGenerationTally` ' +
+    '(`const n = Number(r.n); total += n;`) has no defensive read comparable to `production.ts`\'s WS-P `readNum` ' +
+    '(which turns a non-finite value into `{value: 0, ok: false}` PLUS a `dataIssues[]` entry the client can act on) — ' +
+    'so this path is not merely theoretically similar to the Line.tsx defect this same commit fixed, it is the same ' +
+    'mechanism, unguarded, on a screen this guard was trusting as cosmetic. NOT downgraded to cosmetic any further: ' +
+    'kept allow-listed only because fixing it means touching `register.ts` (server-side defensive count reads, mirroring ' +
+    'WS-P) and `Sacks.tsx` (client-side consumption of the resulting data issue), neither of which is this file\'s to ' +
+    'edit. Recorded as a live, unresolved defect for assignment — see WS-B1\'s report, not a closed cosmetic case. Tier ' +
+    'raised from 3 to 2 pending a fix.',
 };
 
 describe('GUARD 1C — no fetched figure defaults to the number zero', () => {
