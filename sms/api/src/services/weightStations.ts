@@ -13,6 +13,18 @@
  *    from the line", which reads "Fine" for all fourteen stations on a line
  *    that is twelve grams heavy everywhere — the exact case a process engineer
  *    most needs to see.
+ *
+ *    ONE POPULATION PER ROW (friction audit F4, 23 Sep 2026). `meanG`,
+ *    `medianG`, `sdG`, `n`, `vsLineG` and `vsTargetG` are ALL computed over
+ *    the whole window. They are printed side by side and an engineer
+ *    subtracts one from another without being told not to, so they must
+ *    reconcile. Before this they did not: the two signed columns were
+ *    computed over the recent drift RUN, and on real data (epoch 9, 5 Aug -
+ *    7 Sep) five of fourteen rows carried a `vs line` whose sign contradicted
+ *    their own `Mean`. The run figure is still reported — `runMeanG` /
+ *    `runVsLineG`, under its own name, beside `daysHeld` which states the
+ *    run's length — and it is still what `flagged` and `projection` are
+ *    computed from, because those are claims about a recent run and say so.
  *  - MEDIAN and SD beside the mean (roadmap Phase 9 items 1 and 2, 15 Sep
  *    2026). The SD was computed all along and rendered nowhere; the median
  *    was computed nowhere. A station whose mean and median disagree has a
@@ -66,15 +78,59 @@ export interface WeightStationRow {
   medianG: number | null;
   /** Within-day standard deviation of the station's cone weights, pooled over the window (Phase 9). */
   sdG: number;
-  /** Signed grams against the line's own mean. */
+  /**
+   * Signed grams against the line's own mean, over THE SAME POPULATION AS
+   * `meanG` — the whole window. `meanG - lineMeanG` to within rounding, and
+   * a test (`weightStations.basis.test.ts`) fails if it ever stops being.
+   *
+   * FRICTION AUDIT F4, 23 Sep 2026 — this used to be computed from `runMean`,
+   * the mean over the station's most recent consecutive-drift run (`daysHeld`
+   * days: 1, 2, 3, 7, 15 in the Aug-Sep period), while the `Mean` column
+   * printed beside it was the period mean. Two populations, adjacent columns,
+   * nothing saying so — and on real data (epoch 9, 5 Aug - 7 Sep) they
+   * disagreed in SIGN on five of fourteen stations. Station 11 printed
+   * `Mean 1950.4 g` against a line mean of `1951.5 g` and `vs line +1.2 g`:
+   * the row said the station read heavy while its own mean said it read
+   * light. On the calibration table, whose whole purpose is to say which
+   * scale is off and in which direction, that is worse than printing no
+   * column at all.
+   *
+   * The run mean is not discarded — it is a genuinely different and useful
+   * quantity, and it survives under its own name as `runVsLineG` below, and
+   * as the basis of `flagged` and `projection`, which are about a RECENT RUN
+   * and are labelled as such by `daysHeld`. What it may not do is sit
+   * unlabelled next to a period figure.
+   */
   vsLineG: number;
   /**
    * Signed grams against this row's own target (see `targetBasis`) — null
    * when no target could be resolved, or when the station ran more than one
    * material in the window and there is therefore no single target to be
    * signed against.
+   *
+   * Same population as `meanG` and `vsLineG` (F4): `meanG - targetG`. The
+   * Weight screen's `lineOffsetSentence` already assumed exactly this — it
+   * derives each station's implied target as `meanG - vsTargetG` and refuses
+   * to speak when they disagree (`web/src/screens/Weight.tsx:629`), so the
+   * run basis was silently poisoning that check too.
    */
   vsTargetG: number | null;
+  /**
+   * THE RUN BASIS, NAMED (F4). The mean over the most recent consecutive run
+   * of production days on one side of the line — `daysHeld` days long, the
+   * population the pattern test and the projection are computed over. Null
+   * when there is no run (no days after the last logged adjustment, or no
+   * line mean to take a side against).
+   *
+   * This is the more sensitive figure for "where does this scale sit NOW",
+   * and the less representative one for "what did this station weigh over
+   * the period". Both are true; neither may be printed as the other. A
+   * consumer that shows `runVsLineG` must also show `daysHeld` beside it, or
+   * it has reintroduced F4 under a new name.
+   */
+  runMeanG: number | null;
+  /** `runMeanG - lineMeanG`. Null exactly when `runMeanG` is. See `runMeanG`. */
+  runVsLineG: number | null;
   /**
    * Where this row's target came from (roadmap Phase 9 item 4 / UX Phase 5
    * Brief 1, 16 Sep 2026): up to six materials can run concurrently on
@@ -95,6 +151,22 @@ export interface WeightStationRow {
   targetBasis: 'station_material' | 'mixed' | 'line_product';
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
+  /**
+   * F6 (23 Sep 2026), the row-level half of the same defect as
+   * `WeightStationsData.targetEffectiveIsLowerBound`: this row's target came
+   * from a limits version that the app merely OBSERVED already in place, so
+   * its instant means NO LATER THAN, not exactly then. False when the version
+   * is dated, or when there is no target at all.
+   */
+  targetIsLowerBound: boolean;
+  /**
+   * F6: this row's target version's effective instant falls AFTER the
+   * window's end — limits that demonstrably did not exist while these
+   * readings were taken. `vsTargetG` is still computed (narrowly, so this
+   * cannot quietly blank a column it was not written to doubt) but a consumer
+   * that prints the target MUST print this qualifier or withhold the number.
+   */
+  targetAfterWindowEnd: boolean;
   /** Consecutive most-recent production days on the same side of the line. */
   daysHeld: number;
   /** The pattern test fired inside that run. */
@@ -133,6 +205,39 @@ export interface WeightStationsData {
    * beside the figure instead of a bare number.
    */
   targetEffectiveFromUtc: string | null;
+  /**
+   * FRICTION AUDIT F6, 23 Sep 2026 — `ProductCatalogue.versionAt` is already
+   * honest: when NO version began at or before the asked-for instant it
+   * returns the nearest one and marks it `effectiveIsLowerBound: true`. This
+   * service read `.effectiveFromUtc` off that result and DROPPED the flag, so
+   * `targetEffectiveFromUtc` reached three report types as a bare instant and
+   * was printed under captions promising "in force at the end of this
+   * period". Carried through at last.
+   *
+   * True means `targetEffectiveFromUtc` is a LOWER BOUND — the limits were in
+   * place NO LATER THAN that instant, and may have been in place long before.
+   * Product › Catalogue already renders exactly this case as "no later than
+   * …" (`web/src/screens/product/ProductLimitsBlock.tsx:137`); a consumer
+   * printing this instant without the qualifier is restating F6.
+   */
+  targetEffectiveIsLowerBound: boolean;
+  /**
+   * F6's demonstrated case, separated from the one above because they are not
+   * the same claim. True when the resolved version's effective instant falls
+   * AFTER the window's end: limits that demonstrably did not exist while the
+   * readings were taken. Observed on the dev copy for the period
+   * 2026-08-05 → 2026-09-07, whose only version for product 12 begins
+   * 2026-09-11 — four days after the period ended.
+   *
+   * `targetG` is still reported when this is true; withholding it is the
+   * CONSUMER's call (reports/coneWeight.ts already does exactly that through
+   * reports/common.ts's `resolvePeriodTarget`), because this service is also
+   * read by the Weight screen, which states the target as the product's own
+   * recorded figure rather than as a claim about the period. What this
+   * service must never do again is hand out the instant with no way to tell
+   * the two cases apart.
+   */
+  targetEffectiveAfterWindowEnd: boolean;
   /**
    * How many times the line-wide product's OWN limits changed inside the
    * window — a version that BEGAN inside `[from, to]`, mirroring spc.ts's
@@ -201,7 +306,18 @@ export async function getWeightStations(
   const limitsChangedInWindow = product
     ? catalogue.versionsAscending(product.productId).filter((v) => v.effectiveFromMs > startMs && v.effectiveFromMs <= endMs).length
     : null;
-  const targetEffectiveFromUtc = product ? (catalogue.versionAt(product.productId, endMs)?.effectiveFromUtc ?? null) : null;
+  // F6 (23 Sep 2026): read the VERSION, not just its instant, so the two
+  // qualifiers travel with the date. See WeightStationsData's fields.
+  const versionProvenance = (productId: number | null) => {
+    const v = productId == null ? null : catalogue.versionAt(productId, endMs);
+    return {
+      effectiveFromUtc: v?.effectiveFromUtc ?? null,
+      isLowerBound: v?.effectiveIsLowerBound === true,
+      afterWindowEnd: v != null && v.effectiveFromMs > endMs,
+    };
+  };
+  const lineTargetProvenance = versionProvenance(product?.productId ?? null);
+  const targetEffectiveFromUtc = lineTargetProvenance.effectiveFromUtc;
   // How many times the line-wide Current Product itself changed (a new
   // product_timeline entry), not merely a limits revision on the same product.
   const productChangesInWindow = timeline.entries.filter((e) => e.effectiveFromMs > startMs && e.effectiveFromMs <= endMs).length;
@@ -254,6 +370,8 @@ export async function getWeightStations(
     let daysHeld = 0;
     let flagged = false;
     let runMean = st.grandMean;
+    /** Whether `runMean` is actually a RUN mean, or merely the period mean standing in for one. */
+    let runMeanIsRun = false;
     let run: StationDriftDay[] = [];
     if (days.length > 0 && lineMeanG != null) {
       const side = sign(days[days.length - 1]!.mean - lineMeanG);
@@ -269,7 +387,10 @@ export async function getWeightStations(
       }
       daysHeld = run.length;
       const runN = run.reduce((s, d) => s + d.n, 0);
-      if (runN > 0) runMean = run.reduce((s, d) => s + d.n * d.mean, 0) / runN;
+      if (runN > 0) {
+        runMean = run.reduce((s, d) => s + d.n * d.mean, 0) / runN;
+        runMeanIsRun = true;
+      }
       // EXACTLY the rule the attention list uses. When these differed, the
       // table said "3 stations need a look" on a screen whose home page said
       // "Nothing needs attention" — two screens disagreeing about the same
@@ -293,17 +414,24 @@ export async function getWeightStations(
     let targetBasis: WeightStationRow['targetBasis'] = 'line_product';
     let materialsInWindow: number | undefined;
     let stationLimits: { loG: number; hiG: number; targetG: number } | null = limits;
-    let rowVsTargetG: number | null = limits == null ? null : round(runMean - limits.targetG);
+    // F4: signed against `st.grandMean`, the same population `meanG` prints —
+    // NEVER `runMean`. See WeightStationRow.vsTargetG.
+    let rowVsTargetG: number | null = limits == null ? null : round(st.grandMean - limits.targetG);
+    // F6: the line-wide fallback's provenance is the line target's own.
+    let rowTargetProvenance = lineTargetProvenance;
     if (distinctMaterials.length === 1) {
       targetBasis = 'station_material';
       const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
       stationLimits = mLimits;
-      rowVsTargetG = mLimits == null ? null : round(runMean - mLimits.targetG);
+      rowVsTargetG = mLimits == null ? null : round(st.grandMean - mLimits.targetG);
+      rowTargetProvenance = versionProvenance(distinctMaterials[0]!);
     } else if (distinctMaterials.length > 1) {
       targetBasis = 'mixed';
       materialsInWindow = distinctMaterials.length;
       stationLimits = null; // no single target to project toward either
       rowVsTargetG = null; // NO NUMBER — there is no single target, so printing one would be over-claiming.
+      // No single target means no single target provenance either.
+      rowTargetProvenance = { effectiveFromUtc: null, isLowerBound: false, afterWindowEnd: false };
     }
 
     const r = rejects.get(st.station);
@@ -313,10 +441,16 @@ export async function getWeightStations(
       meanG: round(st.grandMean),
       medianG: st.medianG == null ? null : round(st.medianG),
       sdG: round(st.stdevWithin ?? 0),
-      vsLineG: lineMeanG == null ? 0 : round(runMean - lineMeanG),
+      // F4: `st.grandMean`, the same population `meanG` above prints. The run
+      // figure is below, under its own name.
+      vsLineG: lineMeanG == null ? 0 : round(st.grandMean - lineMeanG),
       vsTargetG: rowVsTargetG,
+      runMeanG: runMeanIsRun ? round(runMean) : null,
+      runVsLineG: runMeanIsRun && lineMeanG != null ? round(runMean - lineMeanG) : null,
       targetBasis,
       ...(materialsInWindow != null ? { materialsInWindow } : {}),
+      targetIsLowerBound: rowVsTargetG == null ? false : rowTargetProvenance.isLowerBound,
+      targetAfterWindowEnd: rowVsTargetG == null ? false : rowTargetProvenance.afterWindowEnd,
       daysHeld,
       flagged,
       rejectRatePct: r == null ? null : round(r, 2),
@@ -359,6 +493,8 @@ export async function getWeightStations(
     productId: product?.productId ?? null,
     productLabel: product?.label ?? null,
     targetEffectiveFromUtc,
+    targetEffectiveIsLowerBound: lineTargetProvenance.isLowerBound,
+    targetEffectiveAfterWindowEnd: lineTargetProvenance.afterWindowEnd,
     limitsChangedInWindow,
     productChangesInWindow,
     thresholdG,
