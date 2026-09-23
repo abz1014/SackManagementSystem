@@ -647,6 +647,23 @@ function kpiBlockNote(
 function OutputSpread({ rows, spread }: { rows: ProductionRow[]; spread: 'day' | 'shift' }) {
   const real = rows.filter((r) => r.group !== 'total');
   if (real.length < 2) return <p className="state">{W.onePointNoShape(spread)}</p>;
+  // WS-RG2 (23 Sep 2026 verification pass, gap 1): until this fix every field
+  // here was read bare (`r.cones`, `r.rejectedCones`, `r.sacks ?? 0`) with no
+  // `fieldMissing` check at all — unlike periodFigures/kpiBlockNote, which
+  // `affa9bd` already covers. A structurally stripped key on any one day's
+  // row (see `fieldMissing`'s own doc comment above) would otherwise reach
+  // the reader as a confident number TWICE over: in the `resting` sentence
+  // below ("busiest 0 cones on ...", built from `best`/`total`, both derived
+  // from `r.cones`) and in each bar's own hover `detail` text — both
+  // RENDERED TEXT a reader reads as a measurement, unlike a bar's raw pixel
+  // height, which cannot itself state a false fact in words. Silently
+  // dropping just the holed day would be its own lie by omission (a real
+  // day vanishing from the chart with no note), so the whole chart is
+  // withheld with the same sentence already used for a failed refresh
+  // (`W.conesPerDayUnavailable`) rather than drawn from a partly-fabricated
+  // dataset.
+  const holed = real.some((r) => fieldMissing(r, 'cones') || fieldMissing(r, 'rejectedCones') || fieldMissing(r, 'sacks'));
+  if (holed) return <p className="state">{W.conesPerDayUnavailable}</p>;
   const data: BarDatum[] = real.map((r) => ({
     key: r.group,
     label: spread === 'day' ? fmtDayShort(r.group) : (W.shiftName[r.group as 'morning'] ?? r.group),
@@ -1013,8 +1030,20 @@ function stationsNote(
   const parts: string[] = [];
   const quiet = quietNote(line, stationsRoster);
   if (quiet) parts.push(quiet);
-  const unattributed = unattributedRejectsCount(counts, stationIds(line, stationsRoster));
+  const ids = stationIds(line, stationsRoster);
+  const unattributed = unattributedRejectsCount(counts, ids);
   if (unattributed > 0) parts.push(W.unattributedRejects(unattributed));
+  // WS-RG2 (23 Sep 2026 verification pass, gap 1): stated once here for both
+  // charts below (StationCompare, StationRowGrid) — a station row present in
+  // `counts` but with `cones` or `rejectedCones` structurally stripped (see
+  // `fieldMissing`'s doc comment) is excluded from each chart's own bar/cell
+  // rather than shown as a false zero; this names how many, so the block
+  // does not just go quietly incomplete.
+  const holed = counts == null ? 0 : ids.filter((id) => {
+    const row = counts.find((r) => Number(r.group) === id) ?? null;
+    return fieldMissing(row, 'cones') || fieldMissing(row, 'rejectedCones');
+  }).length;
+  if (holed > 0) parts.push(`${holed} ${W.fig.couldNotRead}`);
   const body = parts.length > 0 ? parts.join(' · ') : null;
   if (healthOk || line.dataAsOfUtc == null) return body;
   const prefix = W.measuredToNewest(fmtClock(line.dataAsOfUtc));
@@ -1057,13 +1086,26 @@ function fmtSignedCount(v: number): string {
 function StationCompare({ ids, counts, stations }: { ids: number[]; counts: ProductionRow[] | null; stations: StationRow[] }) {
   if (counts == null) return null; // no invented bars while the count is still loading
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
-  const countById = new Map(counts.map((r) => [Number(r.group), r.cones]));
-  const countValues = ids.map((id) => countById.get(id) ?? 0);
+  const rowById = new Map(counts.map((r) => [Number(r.group), r] as const));
+  // WS-RG2 (23 Sep 2026 verification pass, gap 1): a station row PRESENT in
+  // `counts` but with its own `cones` key structurally stripped (see
+  // `fieldMissing`'s doc comment above) used to read through bare
+  // `countById.get(id) ?? 0` as a genuine "made nothing" station — dragging
+  // the row's own median toward a false zero (poisoning EVERY OTHER
+  // station's bar, not just this one's) and then drawing that station's own
+  // bar at a confident, wrong height with a confident, wrong signed-count
+  // LABEL (`fmtSignedCount`, rendered text). A station whose count could not
+  // be read is left OUT of both the median input and the drawn bars — a
+  // visibly missing bar among the rest, never a wrong one — and
+  // `stationsNote` (below) states how many were excluded this way, once, for
+  // this chart and the grid beside it.
+  const readableIds = ids.filter((id) => !fieldMissing(rowById.get(id) ?? null, 'cones'));
+  const countValues = readableIds.map((id) => rowById.get(id)?.cones ?? 0);
   const med = median(countValues);
-  const rows: DeviationRow[] = ids.map((id) => ({
+  const rows: DeviationRow[] = readableIds.map((id) => ({
     key: String(id),
     label: stationLabel(nameOf.get(id), id),
-    value: (countById.get(id) ?? 0) - med,
+    value: (rowById.get(id)?.cones ?? 0) - med,
   }));
   return (
     <DeviationBars
@@ -1098,20 +1140,26 @@ function StationRowGrid({
   // holds, and when the station last produced. The second is inherently live
   // and is what decides "quiet"; the first follows the period control.
   const liveById = new Map(line.stations.map((s) => [s.station, s]));
-  const countById = new Map((counts ?? []).map((r) => [Number(r.group), r.cones]));
-  const rejectById = new Map((counts ?? []).map((r) => [Number(r.group), r.rejectedCones]));
+  const rowById = new Map((counts ?? []).map((r) => [Number(r.group), r] as const));
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
 
   return (
     <div className="stations" style={{ ['--st-count' as string]: String(ids.length) }}>
       {ids.map((id) => {
         const row = liveById.get(id);
-        const cones = counts == null ? null : (countById.get(id) ?? 0);
-        const rejected = counts == null ? 0 : (rejectById.get(id) ?? 0);
+        const prodRow = rowById.get(id) ?? null;
+        const conesUnreadable = counts != null && fieldMissing(prodRow, 'cones');
+        const rejectedUnreadable = counts != null && fieldMissing(prodRow, 'rejectedCones');
+        const cones = counts == null || conesUnreadable ? null : (prodRow?.cones ?? 0);
+        const rejected = counts == null || rejectedUnreadable ? 0 : (prodRow?.rejectedCones ?? 0);
         const quiet = row ? quietSeconds(line, row.lastTs) > QUIET_AFTER_SECONDS : true;
         // Quiet always wins (OVERVIEW-SPEC.md §3.3): a machine that stopped
         // is the bigger fact than one that rejected a few cones.
-        const tag = quiet ? W.quiet : rejected > 0 ? W.stationRejected(rejected) : ' ';
+        const tag = quiet
+          ? W.quiet
+          : conesUnreadable || rejectedUnreadable
+            ? W.fig.couldNotRead
+            : rejected > 0 ? W.stationRejected(rejected) : ' ';
         return (
           <button
             key={id}

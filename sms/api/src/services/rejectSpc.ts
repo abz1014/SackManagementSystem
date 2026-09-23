@@ -68,12 +68,37 @@
  *     other screen fed by `resolveGenerationScope` (Weight, the reports)
  *     resolved to the real one — a genuine three-way disagreement, caught by
  *     `rejectRateThreeWayAgreement.test.ts`'s "ordinally NEWER" case. Fixed
- *     by adopting the SAME real-preferred rule here (the same predicate
- *     `spc.ts` also carries its own copy of — see this file's policy
- *     inventory in the 23 Sep 2026 remediation notes). At IFL there is no
+ *     by adopting the SAME real-preferred rule here. At IFL there is no
  *     simulator and their two generations never overlap, so on plant data
  *     this change is a no-op; it only changes the answer on a contaminated
  *     dev sidecar, which is exactly where the old rule was silently wrong.
+ *   - RE-EXAMINED 23 Sep 2026 (WS-RG2 independent verification pass). This
+ *     file's `simulatorOrdinals`/`isSimulatorRow` block (below) is a LOCAL
+ *     COPY of `generation.ts`'s `isSimulator` predicate and
+ *     `resolveGenerationScope`'s real-preferred-then-newest-ordinal rule —
+ *     the exact shape that produced the WS-GP bug above. It was re-examined
+ *     rather than trusted on "it agrees today": `spc.ts` carried the SAME
+ *     duplicate until this same pass replaced it with a direct
+ *     `resolveGenerationScope` call (its own file header explains why THAT
+ *     was safe — one scope, one table, no reshaping needed) — this file's
+ *     `perGen` is keyed on ordinal alone, built by bucketing rows this
+ *     function already fetched and grouped by generation FOR OTHER REASONS
+ *     (the per-bucket partitioning `generation.ts`'s own file header singles
+ *     this file out for: "right for a chart whose x-axis can carry two
+ *     series"), so swapping in `resolveGenerationScope` would mean a second,
+ *     separately-shaped round trip rather than reusing data already in
+ *     hand — the same conclusion `spc.ts`'s comment on its own, now-removed,
+ *     duplicate reached independently. Additionally, `generation.ts` is
+ *     outside this verification pass's file ownership, so even the smaller
+ *     step of exporting `isSimulator` for direct reuse was not this pass's
+ *     call to make. The copy therefore stays, and
+ *     `rejectSpc.generations.test.ts`'s WS-RG2 block calls THIS file's
+ *     `getRejectSpc` and `resolveGenerationScope` directly, side by side, on
+ *     one fixture an ordinal-only rule would resolve differently on, and
+ *     asserts they agree — proven to fail (by deliberately reverting this
+ *     block to ordinal-only) before being left in place, so "they agree
+ *     today" is a standing, re-run assertion rather than a one-time
+ *     observation the way it was before D-17.
  *   - "Consecutive" means consecutive in TIME, not adjacent in the array of
  *     buckets that happen to hold data. An out-of-control 10 Jul and an
  *     out-of-control 5 Aug are not one 26-day burst; an episode breaks at any

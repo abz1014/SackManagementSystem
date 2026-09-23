@@ -13,7 +13,7 @@
  * `issueFor()`'s server-flagged check.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installFakeFetch } from '../testkit/fetchRouter';
+import { installFakeFetch, type RouteRequest } from '../testkit/fetchRouter';
 import { renderWithLive } from '../testkit/render';
 import { LIVE_FIXTURE, META_FIXTURE, stripFields } from '../testkit/fixtures';
 import { W } from '../lib/words';
@@ -145,5 +145,154 @@ describe('Line — periodFigures catches a structurally missing field with NO da
 
     const figVals = Array.from(container.querySelectorAll('.fig-val')).map((el) => el.textContent);
     expect(figVals[2]).toMatch(/^—/); // the rejected tile is the third of the four figures
+  });
+});
+
+/* ===================================================================== *
+ * WS-RG2 (23 Sep 2026 verification pass, gap 1) — the two-sided structural *
+ * guard extended past periodFigures/kpiBlockNote (affa9bd) to the three    *
+ * remaining Line.tsx call sites the verification pass found still on bare *
+ * `?? 0`: OutputSpread (the per-day/per-shift bar chart), StationCompare   *
+ * (the deviation-from-median chart) and StationRowGrid (the fourteen-box   *
+ * grid). See each function's own comment in Line.tsx for why it CAN lie   *
+ * in rendered text and is therefore fixed, not left as a documented       *
+ * exception (unlike, e.g., a bar's raw pixel height on its own).          *
+ * ===================================================================== */
+
+const STATION_ROWS_OK: ProductionRow[] = [
+  { group: '1', cones: 800, rejectedCones: 10, unmatchedRejects: 8, sacks: 0, sackWeightKg: 0, conesInRangePct: null, sacksPassedScalePct: null },
+  { group: '2', cones: 750, rejectedCones: 5, unmatchedRejects: 5, sacks: 0, sackWeightKg: 0, conesInRangePct: null, sacksPassedScalePct: null },
+  { group: '3', cones: 700, rejectedCones: 3, unmatchedRejects: 2, sacks: 0, sackWeightKg: 0, conesInRangePct: null, sacksPassedScalePct: null },
+];
+
+const SPREAD_ROWS_OK: ProductionRow[] = [
+  { group: '2026-09-06', cones: 20_000, rejectedCones: 400, unmatchedRejects: 350, sacks: 800, sackWeightKg: 22_000, conesInRangePct: 97, sacksPassedScalePct: 95 },
+  { group: '2026-09-07', cones: 22_000, rejectedCones: 420, unmatchedRejects: 360, sacks: 850, sackWeightKg: 23_000, conesInRangePct: 97, sacksPassedScalePct: 95 },
+];
+
+const TOTALS_ROW_OK: ProductionRow = {
+  group: 'total', cones: 42_000, rejectedCones: 820, unmatchedRejects: 710, sacks: 1650, sackWeightKg: 45_000, conesInRangePct: 97, sacksPassedScalePct: 95,
+};
+
+function groupedRoute(rows: ProductionRow[], groupBy: ProductionData['groupBy']): Envelope<ProductionData> {
+  return { data: { groupBy, rows, unattributed: null, states: null, implausible: null, dataIssues: [] }, metadata: META_FIXTURE };
+}
+
+/**
+ * `/api/production` answers three DIFFERENT groupings from ONE route
+ * (`totals`, `perStation`, `perSpread` — Line.tsx:94-114) — a static fixture
+ * would hand a station-grouped row set to the totals query and vice versa,
+ * so this keys off `groupBy` the same way the existing REJECTS fuzz cases
+ * above key off `rejectType`.
+ */
+function productionRouter(opts: { totals?: ProductionRow; stations?: ProductionRow[]; spread?: ProductionRow[] }) {
+  return (req: RouteRequest) => {
+    const groupBy = req.search.get('groupBy');
+    if (groupBy === 'station') return groupedRoute(opts.stations ?? STATION_ROWS_OK, 'station');
+    if (groupBy === 'day' || groupBy === 'shift') return groupedRoute(opts.spread ?? SPREAD_ROWS_OK, groupBy);
+    return groupedRoute([opts.totals ?? TOTALS_ROW_OK], 'none');
+  };
+}
+
+describe('OutputSpread — a structurally holed day is withheld from the whole chart, never drawn from a partly-fabricated dataset', () => {
+  it('one day\'s `cones` KEY absent: the chart is replaced by the same sentence a failed refresh uses, not drawn with a false "0" bar', async () => {
+    const holedSpread = [SPREAD_ROWS_OK[0]!, stripFields(SPREAD_ROWS_OK[1]!, ['cones'])];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ spread: holedSpread }) });
+
+    const { container, findByText } = renderWithLive(<LineScreen {...props()} />);
+    await findByText(W.conesPerDayUnavailable);
+
+    // Never drawn with the holed day silently read as a false zero: OutputSpread's
+    // own chart specifically (period.days === 1 here, so the per-shift aria
+    // label — StationCompare's own svg is a DIFFERENT chart and stays), and
+    // the resting sentence (which would have stated a false "busiest 0 cones
+    // on 7 Sept" from the stripped row) is absent.
+    expect(container.querySelector(`svg[aria-label="${W.conesPerShiftAria}"]`)).toBeNull();
+    expect(container.textContent ?? '').not.toContain('busiest 0');
+  });
+
+  it('two-sided partner: every day\'s fields PRESENT (including a genuine 0-cone day) draws the real chart, not the caveat', async () => {
+    const zeroDay = [SPREAD_ROWS_OK[0]!, { ...SPREAD_ROWS_OK[1]!, cones: 0 }];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ spread: zeroDay }) });
+
+    const { container, queryByText } = renderWithLive(<LineScreen {...props()} />);
+    await vi.waitFor(() => expect(container.querySelector(`svg[aria-label="${W.conesPerShiftAria}"]`)).not.toBeNull());
+    expect(queryByText(W.conesPerDayUnavailable)).toBeNull();
+  });
+});
+
+describe('StationRowGrid — a station row present but missing its own cones/rejectedCones key never reads as a false zero', () => {
+  it('station 2\'s `cones` KEY absent: its own cell reads "—", the other two stations still read their real counts', async () => {
+    const holedStations = [STATION_ROWS_OK[0]!, stripFields(STATION_ROWS_OK[1]!, ['cones']), STATION_ROWS_OK[2]!];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ stations: holedStations }) });
+
+    const { container } = renderWithLive(<LineScreen {...props()} />);
+    await vi.waitFor(() => expect(container.querySelectorAll('.st-val').length).toBeGreaterThan(0));
+
+    const vals = Array.from(container.querySelectorAll('.st-val')).map((el) => el.textContent);
+    // ids sorted ascending (Line.tsx stationIds): station 1, 2, 3 in order.
+    expect(vals).toEqual(['800', '—', '700']);
+  });
+
+  it('two-sided partner: station 2\'s `cones` PRESENT as a genuine 0 reads the real "0", never a dash', async () => {
+    const zeroStation = [STATION_ROWS_OK[0]!, { ...STATION_ROWS_OK[1]!, cones: 0 }, STATION_ROWS_OK[2]!];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ stations: zeroStation }) });
+
+    const { container } = renderWithLive(<LineScreen {...props()} />);
+    await vi.waitFor(() => expect(container.querySelectorAll('.st-val').length).toBeGreaterThan(0));
+
+    const vals = Array.from(container.querySelectorAll('.st-val')).map((el) => el.textContent);
+    expect(vals).toEqual(['800', '0', '700']);
+  });
+
+  it('station 2\'s `rejectedCones` KEY absent: its tag states the field could not be read, never a silent blank claiming zero rejects', async () => {
+    const holedStations = [STATION_ROWS_OK[0]!, stripFields(STATION_ROWS_OK[1]!, ['rejectedCones']), STATION_ROWS_OK[2]!];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ stations: holedStations }) });
+
+    const { container } = renderWithLive(<LineScreen {...props()} />);
+    await vi.waitFor(() => expect(container.querySelectorAll('.st-tag').length).toBeGreaterThan(0));
+
+    const tags = Array.from(container.querySelectorAll('.st-tag')).map((el) => el.textContent);
+    expect(tags[1]).toBe(W.fig.couldNotRead);
+    // Station 1's own real 5 rejects (see STATION_ROWS_OK) still reads normally.
+    expect(tags[0]).toBe(W.stationRejected(10));
+  });
+
+  it('two-sided partner: station 2\'s `rejectedCones` PRESENT as a genuine 0 shows no rejected tag (blank), not the could-not-read caveat', async () => {
+    const zeroStation = [STATION_ROWS_OK[0]!, { ...STATION_ROWS_OK[1]!, rejectedCones: 0 }, STATION_ROWS_OK[2]!];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ stations: zeroStation }) });
+
+    const { container } = renderWithLive(<LineScreen {...props()} />);
+    await vi.waitFor(() => expect(container.querySelectorAll('.st-tag').length).toBeGreaterThan(0));
+
+    const tags = Array.from(container.querySelectorAll('.st-tag')).map((el) => el.textContent);
+    expect(tags[1]).not.toBe(W.fig.couldNotRead);
+  });
+});
+
+describe('StationCompare / the shared stationsNote — a holed station is excluded from the median and the bars, and named in the note', () => {
+  it('station 2\'s `cones` KEY absent: the block note states one station could not be read, and only the two readable stations\' bars are drawn', async () => {
+    const holedStations = [STATION_ROWS_OK[0]!, stripFields(STATION_ROWS_OK[1]!, ['cones']), STATION_ROWS_OK[2]!];
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({ stations: holedStations }) });
+
+    const { container, findByText } = renderWithLive(<LineScreen {...props()} />);
+    await findByText(`1 ${W.fig.couldNotRead}`);
+
+    // StationCompare's own DeviationBars: one bar per READABLE station only
+    // (station 2 excluded, never drawn at a false median-relative height).
+    const compareSvg = container.querySelector(`svg[aria-label="${W.stationsCompareAria}"]`);
+    expect(compareSvg).not.toBeNull();
+    expect(compareSvg?.querySelectorAll('rect').length).toBe(2);
+  });
+
+  it('two-sided partner: every station\'s fields PRESENT (no holes) draws all three bars and states no note', async () => {
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter({}) });
+
+    const { container, queryByText } = renderWithLive(<LineScreen {...props()} />);
+    await vi.waitFor(() => {
+      const svg = container.querySelector(`svg[aria-label="${W.stationsCompareAria}"]`);
+      expect(svg?.querySelectorAll('rect').length).toBe(3);
+    });
+    expect(queryByText(/could not be read this period/)).toBeNull();
   });
 });

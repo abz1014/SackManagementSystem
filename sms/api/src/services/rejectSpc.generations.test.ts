@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { getRejectSpc } from './rejectSpc.js';
+import { resolveGenerationScope } from './generation.js';
 
 type Row = { source_epoch: number; bucket_ts: Date; n: number };
 const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -107,5 +108,128 @@ describe('getRejectSpc across a generation boundary', () => {
     expect(d.spansGenerations).toBe(false);
     expect(d.generations).toHaveLength(1);
     expect(d.pBar).toBeCloseTo(540 / 14540, 5);
+  });
+});
+
+/**
+ * WS-RG2 (23 Sep 2026 independent verification pass, gap 2) — THE DRIFT
+ * PROOF `53ae8a3`'s own reasoning asked for.
+ *
+ * `rejectSpc.ts` keeps its own copy of the "prefer a REAL generation over a
+ * simulator one, then newest ordinal" rule (its `simulatorOrdinals`/
+ * `preferredOrdinals` logic, ~line 239-404) rather than calling
+ * `resolveGenerationScope` (generation.ts) directly, because this file's
+ * `perGen` is keyed on ORDINAL ALONE (built from data this function already
+ * fetched, bucketed by generation) while `resolveGenerationScope` is keyed
+ * on `(source_db, ordinal)` and issues its OWN queries — `spc.ts`'s own
+ * comment on its identical call (spc.ts:501-521, "unlike rejectSpc.ts, which
+ * needs an ordinal-keyed `perGen` shape the canonical ... `GenerationScope`
+ * doesn't provide") already reaches the same conclusion independently. This
+ * pass re-examined that reasoning rather than taking it on faith, and it
+ * holds: `getRejectSpc` cannot swap in `resolveGenerationScope` without
+ * reshaping its whole bucket-then-group pipeline into a second query round
+ * trip per table, which `spc.ts`'s "ONE scope, ONE table" shape does not
+ * need and this file's does not either — its per-bucket partitioning is the
+ * reason `generation.ts`'s own file header lists `rejectSpc.ts` as the one
+ * caller PARTITION-AND-REPORT is right for rather than restrict-to-one.
+ *
+ * generation.ts is this workstream's READ-ONLY file (see the brief), so the
+ * `isSimulator` predicate itself cannot be exported and imported here either
+ * — the only way to remove the duplication a different way from "import the
+ * whole scope resolver" would be editing a file outside this pass's scope,
+ * which is reported rather than done quietly.
+ *
+ * So the copy stays, and per the brief's own two-honest-outcomes rule, the
+ * obligation that follows is a test that FAILS if the two rules are ever
+ * deliberately made to disagree — not "they match today" (53ae8a3's own
+ * fixture already proved that once and D-17 still happened). This test
+ * calls BOTH rules directly, on the SAME registry shape (a simulator
+ * generation ordinally NEWER than the real one — the exact live-dev-sidecar
+ * arrangement `rejectRateThreeWayAgreement.test.ts`'s SIM_NEWER_REGISTRY
+ * fixture already pins for production.ts/weightStations.ts), and asserts
+ * they agree on WHICH generation is preferred — a fixture an ORDINAL-ONLY
+ * rule (the pre-WS-GP bug) would resolve differently (it would pick the
+ * simulator, ordinal 4 > 3).
+ */
+describe('WS-RG2 — rejectSpc.ts\'s local real-preferred rule agrees with the canonical resolveGenerationScope', () => {
+  const DAY = '2026-09-10';
+  const DRIFT_REGISTRY = [
+    { epoch_id: 9, generation_ordinal: 3, source_db: 'DATA_TP1U2_SEP07', provenance: 'ifl_copy' },
+    { epoch_id: 11, generation_ordinal: 3, source_db: 'DATA_TP1U2_SEP07', provenance: 'ifl_copy' },
+    // Simulator, ordinally NEWER (4 > 3) — and its `provenance` is
+    // mislabelled 'ifl_copy', exactly as epochs 13-16 are registered on the
+    // live dev sidecar (generation.ts's own file header, "IS READ FROM
+    // source_db, NOT FROM provenance"). Both predicates under test must
+    // detect this from `source_db`, not `provenance`.
+    { epoch_id: 13, generation_ordinal: 4, source_db: 'DATA_TP1U2_SIM', provenance: 'ifl_copy' },
+    { epoch_id: 14, generation_ordinal: 4, source_db: 'DATA_TP1U2_SIM', provenance: 'ifl_copy' },
+  ];
+  // Real: 20 cones, 8 rejects (unmatched — this fixture is about GENERATION
+  // SELECTION, not the matched/unmatched split rejectSpc.test.ts covers).
+  const REAL_PRODUCED: Row[] = [{ source_epoch: 9, bucket_ts: day(DAY), n: 20 }];
+  const REAL_REJECTS: Row[] = [{ source_epoch: 11, bucket_ts: day(DAY), n: 8 }];
+  // Simulator: much larger, much cleaner — DILUTES a pooled/ordinal-only
+  // figure rather than merely shifting it, the shape the live sidecar
+  // actually shows over 21 Aug - 7 Sep.
+  const SIM_PRODUCED: Row[] = [{ source_epoch: 13, bucket_ts: day(DAY), n: 1000 }];
+  const SIM_REJECTS: Row[] = [{ source_epoch: 14, bucket_ts: day(DAY), n: 10 }];
+
+  /** Answers `resolveGenerationScope`'s own two queries — the present-rows
+   *  UNION ALL probe (its `AS tbl` column alias) and the WHERE-bound
+   *  `sms.source_epoch` read — reusing the same routing idiom
+   *  `rejectRateThreeWayAgreement.test.ts`'s `evaluateTwoGen` established. */
+  function canonicalPool(produced: Row[]): ConnectionPool {
+    const req = {
+      input: () => req,
+      query: async (sql: string) => {
+        if (sql.includes('AS tbl')) {
+          const m = new Map<number, number>();
+          for (const r of produced) m.set(r.source_epoch, (m.get(r.source_epoch) ?? 0) + r.n);
+          return { recordset: [...m.entries()].map(([epoch_id, n]) => ({ tbl: 'cone_event', epoch_id, n })) };
+        }
+        if (sql.includes('FROM sms.source_epoch')) {
+          return { recordset: DRIFT_REGISTRY.map((r) => ({ ...r, label: null })) };
+        }
+        throw new Error(`unexpected query in canonicalPool: ${sql}`);
+      },
+    };
+    return { request: () => req } as unknown as ConnectionPool;
+  }
+
+  it('rejectSpc.ts\'s own pBar lands on the REAL generation, never the ordinally-newer simulator', async () => {
+    const d = await getRejectSpc(
+      fakePool(DRIFT_REGISTRY, [...REAL_PRODUCED, ...SIM_PRODUCED], [...REAL_REJECTS, ...SIM_REJECTS], [...REAL_REJECTS, ...SIM_REJECTS], [...REAL_REJECTS, ...SIM_REJECTS]),
+      1, DAY, DAY, 'day', 'quality',
+    );
+    // p̄ = rejects / (produced + unmatched) — every reject in this fixture
+    // is unmatched (no cone_event counterpart), so inspected = 20 + 8 = 28.
+    expect(d.pBar).toBeCloseTo(8 / 28, 5); // the real generation's own truth
+    expect(d.pBar).not.toBeCloseTo(10 / 1000, 5); // what an ordinal-only rule would print (the simulator's own rate)
+  });
+
+  it('resolveGenerationScope, called directly on the SAME registry shape, also lands on the REAL generation (ordinal 3), never the simulator (ordinal 4)', async () => {
+    const scope = await resolveGenerationScope(
+      canonicalPool([...REAL_PRODUCED, ...SIM_PRODUCED]),
+      1,
+      { from: DAY, to: DAY },
+      ['cone_event'],
+    );
+    expect(scope.generation?.ordinal).toBe(3);
+    expect(scope.generation?.simulator).toBe(false);
+  });
+
+  it('the two rules AGREE: both name generation 3 as preferred, on a fixture an ordinal-only rule would resolve to generation 4', async () => {
+    const spc = await getRejectSpc(
+      fakePool(DRIFT_REGISTRY, [...REAL_PRODUCED, ...SIM_PRODUCED], [...REAL_REJECTS, ...SIM_REJECTS], [...REAL_REJECTS, ...SIM_REJECTS], [...REAL_REJECTS, ...SIM_REJECTS]),
+      1, DAY, DAY, 'day', 'quality',
+    );
+    const scope = await resolveGenerationScope(canonicalPool([...REAL_PRODUCED, ...SIM_PRODUCED]), 1, { from: DAY, to: DAY }, ['cone_event']);
+
+    // rejectSpc.ts reports its preferred generation only through its bucket
+    // rows' own `generation` field and `d.generations[]`, not a top-level
+    // scalar — find the one `pBar` above actually used.
+    const spcPreferred = spc.generations.find((g) => g.pBar === spc.pBar);
+    expect(spcPreferred?.generation).toBe(scope.generation?.ordinal);
+    expect(spcPreferred?.generation).toBe(3);
   });
 });
