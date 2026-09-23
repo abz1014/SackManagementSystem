@@ -17,24 +17,35 @@
  * 2026 red-team audit) found that count inflated ~29x (411 pooled vs 14
  * real) on a window that overlaps the local dev simulator's generation,
  * because `register.ts`'s `listEvents` carries no epoch predicate at all —
- * a file this pass does not own (`register.ts` is not one of the three
- * files this remediation wave assigned to a parallel worker either; it is a
+ * a file this pass did not own then (`register.ts` was not one of the three
+ * files that remediation wave assigned to a parallel worker either; it was a
  * genuine gap, reported, not silently absorbed). Rather than print a pooled
  * count beside `report.totals`, which IS already generation-scoped
  * (`report.ts`'s `getReport`, a held file this pass reads but does not
- * edit), this report now runs its OWN scoped count directly against
- * `sms.cone_event`, mirroring `listEvents`' own `in_range = 0` /
- * `shift_code` predicate shape closely enough to still be "the same number
- * Readings would show for a single-generation window" — the drift risk this
- * file's old comment warned against is accepted here as the lesser fault
- * until `register.ts` itself is scoped.
+ * edit), this report ran its OWN scoped count directly against
+ * `sms.cone_event` in the meantime.
+ *
+ * WS-CN (23 Sep 2026) SWITCHES THIS TO `register.ts`'s `countEvents`, now
+ * that `register.ts` is owned again and has its own scoped, tested count
+ * function (410c179) — the fix this file's own comment above said it should
+ * eventually call. `countEvents` resolves `resolveGenerationScope` on the
+ * exact same `(lineId, from, to)` key this file used to resolve for
+ * `generationNote` below, over the same `['cone_event']` table set, so the
+ * separate `resolveGenerationScope` call this file made is now redundant —
+ * `countEvents`'s own returned `note` IS `generationNote` (proved equal in
+ * `reports.test.ts`'s daily-report describe block, not assumed). No second
+ * implementation of one count is kept beside the shared one: see
+ * `countEvents`'s own doc for why splitting it out of `listEvents` in the
+ * first place was so a caller after a bare figure would have exactly one
+ * correct path, rather than a pooled one and a private one drifting apart
+ * the way `listEvents`/this file's old query already had.
  */
 import type { ConnectionPool } from 'mssql';
-import mssql from 'mssql';
-import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
+import { countEvents } from '../register.js';
 import { getReport, type ReportData, type ReportLine, type ResolvedPeriod } from '../report.js';
 import { pct, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import type { GenerationNote } from '../generation.js';
 
 export interface RejectPopulations {
   /** cone_event rows the scale's own bit marked out of range — what Readings lists as "Rejected cones". */
@@ -49,7 +60,7 @@ export interface RejectPopulations {
 
 export interface DailyReportData extends ReportData {
   rejectPopulations: RejectPopulations;
-  /** RT-002/RT-029: the scope `byScale`'s own query below was resolved and bound to. */
+  /** RT-002/RT-029: the scope `byScale` (via `countEvents`) was resolved and bound to. */
   generationNote: GenerationNote;
 }
 
@@ -61,26 +72,28 @@ export async function getDailyReport(
 ): Promise<DailyReportData> {
   const shift = filters.shift ?? null;
   const { from, to } = resolved;
-  const [report, scope] = await Promise.all([
+  // `countEvents` resolves its OWN `resolveGenerationScope` over exactly
+  // this `(lineId, from, to)` key, on `['cone_event']` — the same call this
+  // file used to make separately for `generationNote`. Its returned `note`
+  // IS that same value (register.ts's `countEvents` returns `noteOf(scope)`
+  // from the identical scope resolution), so the extra call is gone rather
+  // than duplicated. WS-CN: `scaleCount.dataIssues` is NOT consumed here —
+  // `countEvents` already guards the NaN-on-absent-column defect (readNum)
+  // so `byScale` never silently becomes a fabricated 0 from a malformed row,
+  // but surfacing "this count could not be confirmed" on the daily REPORT's
+  // own printed figure/CSV is a UI decision for whoever owns this report's
+  // rendering, out of this pass's two-file (Sacks.tsx, daily.ts) scope —
+  // flagged, not fixed, the way this file already flags other known gaps.
+  const [report, scaleCount] = await Promise.all([
     getReport(pool, lineId, resolved, shift),
-    // RT-002/RT-029: resolved over the same (lineId, from, to) key
-    // `report.ts`'s own getReport uses internally, so `byScale` below and
-    // `report.totals.cones` agree on which generation they describe.
-    resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
+    countEvents(pool, lineId, 'cone', { from, to, shift: shift ?? undefined, inRange: false }),
   ]);
-  const scaleReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
-  const scaleWhere0 = ['line_id = @line', 'shift_date BETWEEN @from AND @to', 'in_range = 0'];
-  if (shift) { scaleWhere0.push('shift_code = @shift'); scaleReq.input('shift', mssql.VarChar(10), shift); }
-  const scaleWhere = andEpoch(scaleWhere0.join(' AND '), scaleReq, scope, 'cone_event');
-  const scaleRejectedRes = await scaleReq.query<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM sms.cone_event WHERE ${scaleWhere}`,
-  );
-  const byScale = Number(scaleRejectedRes.recordset[0]?.n ?? 0);
+  const byScale = scaleCount.count;
   const cones = report.totals.cones;
   const atInspection = report.totals.rejectedCones;
   return {
     ...report,
-    generationNote: noteOf(scope),
+    generationNote: scaleCount.note,
     rejectPopulations: {
       byScale,
       byScalePct: pct(byScale, cones),

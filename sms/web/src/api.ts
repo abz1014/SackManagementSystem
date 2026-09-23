@@ -591,11 +591,31 @@ export interface Provenance {
   nightBelongsTo: NightBelongsTo | null;
 }
 
+/**
+ * WS-CN (23 Sep 2026), mirroring `api/src/services/register.ts`'s own
+ * `RegisterDataIssue`. `field` is always `'total'` here — `listEvents`'s own
+ * pooled tally, the only one `RegisterPage` carries; `'count'` is
+ * `countEvents`'s scoped figure and belongs to `EventCount`, not this type.
+ */
+export interface RegisterDataIssue {
+  field: 'total' | 'count';
+  generation: string | null;
+  reason: string;
+}
+
 export interface RegisterPage {
   rows: RegisterRow[];
   total: number;
   page: number;
   pageSize: number;
+  /**
+   * See RegisterDataIssue. OPTIONAL and, when present, empty on a healthy
+   * response — mirrors the server's own back-compat reasoning: a caller that
+   * does not read this field must not treat its absence as "known healthy",
+   * only as "not stated". Non-empty means `total` (and any zero it renders
+   * as) may be a hole, not a genuine count — see Sacks.tsx's History block.
+   */
+  dataIssues?: RegisterDataIssue[];
 }
 
 function registerParams(q: RegisterQuery): URLSearchParams {

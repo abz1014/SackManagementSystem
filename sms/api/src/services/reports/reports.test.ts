@@ -127,6 +127,11 @@ function fakeReport(over: Partial<ReportData> = {}): ReportData {
     downtime: { stoppageCount: 3, stoppedSeconds: 900, thresholdSeconds: 120 },
     readings: { states: STATES, implausible: 4 },
     shiftCheck: { compared: 1000, mismatched: 23, mismatchPct: 2.3, topHour: 13 },
+    // WS-GF (23 Sep 2026): getReport itself is mocked wherever this fixture
+    // is used (this file's own header), so its real coverageReq scoping code
+    // never runs here — a fixture-update only, for the type's new required
+    // field.
+    generationNote: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 },
     ...over,
   };
 }
@@ -346,24 +351,62 @@ describe('the header', () => {
 /* ------------------------------------------------------------ the reports */
 
 describe('daily report', () => {
-  it('delegates to getReport with the shift and names the two reject populations from its OWN scoped scale-rejected count (RT-002/RT-029, 23 Sep 2026: no longer the register)', async () => {
-    const { pool, calls } = fakePool((sql) => (sql.includes('in_range = 0') ? [{ n: 17 }] : []));
+  /**
+   * WS-CN (23 Sep 2026, RT-002/RT-029 follow-up). This report used to run
+   * its own private, hand-rolled scoped `COUNT(*)` against `sms.cone_event`
+   * (see the file's OLD header, before this pass) rather than calling
+   * `register.ts`'s `countEvents` — because `register.ts` was owned by
+   * another worker when RT-002/RT-029 was fixed. `register.ts` is owned
+   * again and `countEvents` (410c179) is now the one tested, shared
+   * scoped-count function; this test proves the SWITCH changes no number —
+   * `byScale`/`byScalePct` come out identical to what the private query
+   * produced (17 / 1.7%, this describe block's own long-standing fixture
+   * values), and `generationNote` is now exactly `countEvents`'s own
+   * returned `note`, not a second `resolveGenerationScope` call's.
+   */
+  beforeEach(() => {
+    vi.mocked(countEvents).mockReset();
+  });
+
+  it('delegates to getReport with the shift and calls countEvents(pool, line, "cone", {shift, inRange:false}) for the scale-rejected count — no more private query, no pooled register total', async () => {
+    const note = { generation: { key: 'DATA_TP1U2_SEP07#3', ordinal: 3, sourceDb: 'DATA_TP1U2_SEP07', provenance: 'ifl_copy', label: 'September copy', simulator: false }, spansGenerations: false, otherGenerationExcluded: 0 };
+    vi.mocked(countEvents).mockResolvedValueOnce({ count: 17, note, dataIssues: [] });
+    const { pool } = fakePool();
     const d = await getDailyReport(pool, 1, PERIOD, { shift: 'night' });
     expect(getReport).toHaveBeenCalledWith(expect.anything(), 1, PERIOD, 'night');
-    // The register's listEvents is no longer this report's source — see the
-    // file header for why (register.ts carries no epoch predicate and is not
-    // this pass's file to fix). The count now comes from this report's own
-    // query, shift-filtered the same way listEvents was.
+    // The register's listEvents (the pooled total) is still never this
+    // report's source — RT-002/RT-029's original finding.
     expect(listEvents).not.toHaveBeenCalled();
-    const scaleQuery = calls.find((c) => c.sql.includes('in_range = 0'))!;
-    expect(scaleQuery.sql).toContain('FROM sms.cone_event');
-    expect(scaleQuery.params.get('shift')).toBe('night');
+    expect(countEvents).toHaveBeenCalledWith(
+      expect.anything(), 1, 'cone',
+      { from: PERIOD.from, to: PERIOD.to, shift: 'night', inRange: false },
+    );
+    // THE INVARIANT THIS TEST EXISTS TO PROVE: the switch changed HOW the
+    // count is obtained, never WHAT it is. Same 17/1.7% the private query
+    // (and this describe block, before WS-CN) produced.
     expect(d.rejectPopulations.byScale).toBe(17);
     expect(d.rejectPopulations.byScalePct).toBe(1.7);
     expect(d.rejectPopulations.atInspection).toBe(20);
     expect(d.rejectPopulations.atInspectionPct).toBe(1.96);
+    // generationNote is now countEvents' own note, not a second resolved scope.
+    expect(d.generationNote).toBe(note);
     expect(d.downtime).toBeNull(); // a shift filter drops time lost rather than printing the whole day's
   });
+
+  it('a shiftless call passes shift: undefined through to countEvents, not the string "null"', async () => {
+    vi.mocked(countEvents).mockResolvedValueOnce({
+      count: 0,
+      note: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 },
+      dataIssues: [],
+    });
+    const { pool } = fakePool();
+    await getDailyReport(pool, 1, PERIOD, {});
+    expect(countEvents).toHaveBeenCalledWith(
+      expect.anything(), 1, 'cone',
+      { from: PERIOD.from, to: PERIOD.to, shift: undefined, inRange: false },
+    );
+  });
+
   it('CSV: column order, one row per scope, the scale figure only on the total', () => {
     const t = dailyCsv({ ...fakeReport(), rejectPopulations: { byScale: 17, byScalePct: 1.7, atInspection: 20, atInspectionPct: 1.96, note: '' }, generationNote: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 } });
     expect(t.headers).toEqual(DAILY_CSV_HEADERS);

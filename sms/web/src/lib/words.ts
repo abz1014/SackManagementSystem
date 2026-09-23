@@ -800,6 +800,19 @@ export const W = {
        state and from `couldNotLoad` (coneLine's total-failure headline) so
        the two can never be confused on screen. */
     headlineStationDataFailed: 'Station and target data could not be loaded; the chart below may still be usable.',
+    /* WS-GF (23 Sep 2026 red-team remediation, missingField.fuzz.test.tsx):
+       the empty-period gate below used to be `s.count === 0` alone, which a
+       field-stripped `count` (undefined — a valid 200 with a hole in it,
+       missingField.fuzz.test.tsx's own subject) does not satisfy, so the
+       headline fell through and stated the still-present `mean` as if the
+       response were whole. Distinct from BOTH `couldNotLoad` (the whole
+       fetch failed) and the genuine-empty sentence below (a real count of
+       0) — the count itself is the one thing unknown here, so no mean may
+       be printed beside it. Same "state the absence, never a confident
+       number" rule Line.tsx/Rejects.tsx's `fig.couldNotRead` closes for the
+       figure tiles (ae7a59b), reworded as a full sentence for this
+       screen's one-line headline. */
+    countCouldNotRead: 'How many cones were weighed could not be read this period, so no average is shown.',
     /* The figure tile's own note, when the target/station fetch failed
        rather than genuinely holding no target — distinct from `noTarget`
        above, which is the honest "none recorded" case. */
@@ -1816,6 +1829,11 @@ export const W = {
     /* The sack history list under the ledger. */
     history: 'Sack history',
     historyNote: (n: string) => `${n} in this period, newest first`,
+    /* WS-CN (23 Sep 2026): register.ts's countEvents/listEvents can now name
+       a hole in its own pooled total (dataIssues[], field 'total') rather
+       than silently letting a malformed tally row read as a genuine zero.
+       Mirrors dqBlockingCouldNotLoad's phrasing — "not the same as none". */
+    historyCountUnknown: 'The total for this period could not be confirmed — this is not the same as an empty period.',
   } as const,
   /* ---------------------------------------------------------------- reports */
   /* Roadmap Phase 8 (15 Sep 2026): the nine report types on one surface.

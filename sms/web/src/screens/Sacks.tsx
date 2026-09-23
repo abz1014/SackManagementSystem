@@ -731,7 +731,8 @@ function MovementForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =
 
 /* ---------------------------------------------------------------- history */
 
-function History({
+/** Exported for testing only — mounted from SacksScreen below. */
+export function History({
   period,
   page,
   onPageChange,
@@ -755,36 +756,56 @@ function History({
     period.live ? LIST_POLL_MS : 5 * 60_000,
     `sacks:history:${period.from}:${period.to}:${period.shift ?? 'all'}:${page}`,
   );
-  const total = rows.data?.data.total ?? 0;
+  const data = rows.data?.data;
+  const total = data?.total ?? 0;
+  /**
+   * WS-CN (23 Sep 2026, RT-002/RT-029/WS-R follow-up). `register.ts`'s
+   * `listEvents` now names, via `dataIssues[]`, when its own pooled tally
+   * (`foldGenerationTally`) could not read a generation's count row — the
+   * defect `ALLOW_LIST_ZERO` in reliability.guard.test.ts held open for
+   * exactly this: `total === 0` used to be read as a genuine empty period
+   * with no way to tell it apart from a hole in the tally while `rows` (a
+   * SEPARATE query, unaffected by the tally's own malformation) still held
+   * real data. A hole reads as "count unknown", never as `<Empty>` — the
+   * two-sided contract `production.presence.test.ts` established for
+   * Line.tsx, mirrored here for a LISTING rather than a single figure.
+   */
+  const countUnknown = !!data?.dataIssues?.some((i) => i.field === 'total');
   const lagText =
     health.kind === 'stale'
       ? W.lag.stale(health.readingUtc ? fmtClock(health.readingUtc) : '—')
       : health.kind === 'late'
         ? W.lag.late(fmtSpan(health.lagSeconds))
         : W.lag.noData;
+  const note = !data ? null : countUnknown ? W.sacks.historyCountUnknown : W.sacks.historyNote(fmtInt(total));
 
   return (
-    <Block label={W.sacks.history} note={rows.data ? W.sacks.historyNote(fmtInt(total)) : null}>
+    <Block label={W.sacks.history} note={note}>
       {rows.error && !rows.data ? (
         <Failed error={rows.error} onRetry={rows.refresh} />
       ) : rows.loading && !rows.data ? (
         <SkelLines n={8} />
-      ) : total === 0 ? (
+      ) : !countUnknown && total === 0 ? (
         <Empty message={W.readings.nothing} />
       ) : (
         <>
           <div className="tw">
-            <ReadingTable rows={rows.data?.data.rows ?? []} listing="sacks" onOpen={onOpenReading} />
+            <ReadingTable rows={data?.rows ?? []} listing="sacks" onOpen={onOpenReading} />
           </div>
+          {/* The caveat already runs once, as the Block's own `note` above —
+              a second copy here would duplicate the exact same sentence in
+              the same block, which is noise, not emphasis. */}
           <p className="row between mut sm" style={{ marginTop: 14 }}>
             <span>
               {period.live && <span className={`dot live${stale ? ' bad' : ''}`} aria-hidden="true" />}
               {stale ? lagText : period.live ? W.readings.liveNote : null}
             </span>
-            <span>
-              {W.readings.perPage(HISTORY_PAGE_SIZE, fmtInt(total))}
-              <Pager page={page} total={total} onPage={onPageChange} size={HISTORY_PAGE_SIZE} />
-            </span>
+            {!countUnknown && (
+              <span>
+                {W.readings.perPage(HISTORY_PAGE_SIZE, fmtInt(total))}
+                <Pager page={page} total={total} onPage={onPageChange} size={HISTORY_PAGE_SIZE} />
+              </span>
+            )}
           </p>
         </>
       )}
