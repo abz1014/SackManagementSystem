@@ -385,11 +385,20 @@ export const W = {
     sacks: 'Sacks',
     rejectedCones: 'Rejected cones',
     /* A different population from rejectedCones above: those are cones the
-       SCALE rejected (cone_event.in_range = 0); these are inspection rejects
-       that never became a cone_event row at all (reject_event). Added for
-       finding H4 (Sep 2026 audit) — Rejects' "see the rejected cones" link
-       had nowhere that actually listed this population until now. */
-    inspectionRejects: 'Rejected before weighing',
+       SCALE rejected (cone_event.in_range = 0); these are inspection rejects,
+       logged in a separate table (reject_event) with no join key back to
+       cone_event. Added for finding H4 (Sep 2026 audit) — Rejects' "see the
+       rejected cones" link had nowhere that actually listed this population
+       until now.
+       Corrected 23 Sep 2026 (Weight brief item 4): this used to read
+       "Rejected before weighing", asserting an order the data contradicts —
+       matching reject_event to cone_event by millisecond+station finds a
+       weighed cone for 5,933 of 6,049 quality rejects, 5,925 of those already
+       `in_range = 1` (weighed fine, THEN rejected). Most inspection rejects
+       are not "before weighing" at all; the two tables just carry no formal
+       link, so a raw inspection-reject row is described by what it is
+       (a separate check), not by a timing claim this system cannot support. */
+    inspectionRejects: 'Rejected by inspection',
     filterOutsideLimits: 'Outside product limits',
     /* The count sentence while the outside-limits filter is on. It may NOT
        reuse countLine's "N weighed, M rejected (P%)": with the filter on
@@ -434,8 +443,14 @@ export const W = {
     weight: 'Weight',
     status: 'Status',
     record: 'Record',
-    /* The reject sheet. A quality reject is pulled before the scale sees it
-       and so has no weight; a weight reject has one. Neither has in_range. */
+    /* The reject sheet. A quality reject's OWN row carries no weight column
+       (reject_event has none); a weight reject's does. Neither has in_range.
+       This used to say a quality reject "is pulled before the scale sees
+       it" — corrected 23 Sep 2026: matching reject_event to cone_event by
+       millisecond+station finds a weighed cone, already in-range, for most
+       quality rejects (see `readings.inspectionRejects` above). The row
+       having no weight of its own is a fact about this table; it is not
+       evidence the cone was never weighed. */
     notWeighed: 'not weighed',
     rejectedFor: (reason: string) => `Rejected \u2014 ${reason}`,
     weightReject: 'weight reject',
@@ -520,8 +535,37 @@ export const W = {
     headlineConfirmed: (mean: string, delta: string, target: string) =>
       `Average cone weight is ${mean}, ${delta} the ${target} target.`,
     headlineNoTarget: (mean: string) => `Average cone weight is ${mean}. No product target is recorded for this period.`,
-    stationsNeedLook: (n: number) => (n === 1 ? 'One station needs a look.' : `${n} stations need a look.`),
-    allStationsSteady: 'Every station is steady.',
+    /* This states the PATTERN-TEST verdict (weightStations.ts `flagged`, a
+       run of consecutive days on one side of the line — see calibration.ts),
+       not whether a station is on target. It used to read "Every station is
+       steady"/"N stations need a look" sitting directly beside the `vs
+       target` column, which reads as the on-target verdict to a scanning
+       eye — the exact confusion the audit found live (2026-09-23): a line
+       ~9 g under target on every station, printed with this sentence saying
+       "steady". Reworded, not deleted — the drift-pattern fact is still
+       true and still worth stating; it now names what it is a verdict ON. */
+    stationsNeedLook: (n: number) =>
+      n === 1 ? "One station's pattern shows drift — worth a look." : `${n} stations' patterns show drift — worth a look.`,
+    allStationsSteady: "No station's pattern shows drift.",
+    /* The line-level counterpart to the per-row `vs target` column — added
+       23 Sep 2026 (Weight brief item 1). `vsTargetG` was rendered only per
+       station (Weight.tsx, StationSheet.tsx, four report screens); a shared
+       offset across (nearly) every station therefore printed as fourteen
+       small numbers and was never once stated as the single fact it is.
+       States the READING, not a shortfall: whether the readings mean the
+       line is genuinely light is exactly the question the weight basis
+       (Q4/Q5, headlineUnconfirmed above) has not yet answered, and this
+       sentence needs no answer to that question because it only describes
+       what the scale recorded — never "the line is under weight". Only
+       shown when it is true: (nearly) all stations read the same side of a
+       single shared target; if stations disagree, or more than one target
+       is in force among them, nothing is said and the per-row column is left
+       to speak for itself. */
+    lineOffset: (n: number, total: number, lo: string, hi: string, dir: string, target: string) =>
+      (n === total
+        ? `All ${n} stations`
+        : `${n} of ${total} stations`) +
+      ` read ${lo}–${hi} g ${dir} the ${target} target. That is a line-wide offset, not a station fault; whether it is a real shortfall depends on the weight basis, which is not yet confirmed.`,
     above: 'above',
     below: 'below',
     spread: (lo: string, hi: string) => `${lo} to ${hi}`,
@@ -535,10 +579,19 @@ export const W = {
        2026 — they used to set the scale and flatten the real ~7 g of
        subgroup-to-subgroup movement to a few pixels). Zoomed in, a 3 g
        wobble can read as a crisis; a drawn control band was investigated and
-       rejected (ragged subgroup n swings it 4.5x across one shift). This
-       states the same fact as a sentence instead: how much a group of this
-       size moves by chance alone, from σ_within/√n. */
-    noiseFloor: (span: string) => `groups this size vary by roughly ${span} by chance alone`,
+       rejected (ragged subgroup n swings it 4.5x across one shift).
+       Formerly `noiseFloor`, stating how much a group of this size moves "by
+       chance alone" from σ_within/√n (±~2 g). Removed 23 Sep 2026 (Weight
+       brief item 3): on real plant data the subgroup MEANS themselves range
+       1937.3–1962.1 g, an SD about three times that theoretical figure — the
+       group-to-group movement is not sampling noise, it is real, and "by
+       chance alone" told a reader watching ±10 g swings that they were
+       looking at nothing. The limit model is being replaced in parallel to
+       measure the real between-subgroup variation properly; until it lands
+       this chart states only what it can measure directly — the actual
+       spread of the group means themselves, no distributional claim
+       attached. */
+    spanNote: (lo: string, hi: string) => `group means in this period have ranged ${lo} to ${hi}`,
     /* One pair of limit lines, one version of the tolerance. */
     limitsChanged: (n: number) =>
       n === 1
@@ -682,7 +735,10 @@ export const W = {
     // the SCALE-rejected cone toggle, but the link actually opens the
     // inspection-reject listing — a different population (reject_event, not
     // cone_event.in_range=0). See Readings.tsx's 'inspectionRejects' listing.
-    seeTheConesNote: 'opens Readings filtered to cones rejected before weighing, for this period',
+    // Corrected 23 Sep 2026 (Weight brief item 4), same reason as
+    // `readings.inspectionRejects` above: "before weighing" is an order this
+    // data does not support for most rows.
+    seeTheConesNote: 'opens Readings filtered to cones rejected by inspection, for this period',
     byStation: 'By station',
     // Fixed alongside finding M8 (Sep 2026 audit): described a reject-rate
     // sort that has never existed — weightStations.ts sorts flagged stations

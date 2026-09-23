@@ -318,6 +318,145 @@ describe('Weight — the headline', () => {
 });
 
 /**
+ * Weight brief item 1 (23 Sep 2026): the line-level counterpart of the
+ * per-row `vs target` column. `132,552 cones × ~9 g below target` was the
+ * largest fact in the audit's own evidence and had never been stated once —
+ * only restated fourteen times as fourteen small per-station numbers. These
+ * pin the new sentence to appear ONLY when the data makes the claim safe,
+ * per the brief's own conditions: (nearly) all stations agree on one side of
+ * a SINGLE shared target.
+ */
+function station(overrides: Partial<WeightStationsData['stations'][number]>): WeightStationsData['stations'][number] {
+  return {
+    station: 1,
+    n: 812,
+    meanG: 1949,
+    vsLineG: 1,
+    vsTargetG: -1,
+    daysHeld: 0,
+    flagged: false,
+    rejectRatePct: 2.0,
+    lastAdjustedUtc: null,
+    days: [],
+    medianG: 1949,
+    sdG: 3.2,
+    restartedOn: null,
+    centrelineG: 1949,
+    sigmaDayToDay: 1.1,
+    longestRun: 5,
+    projection: null,
+    targetBasis: 'station_material',
+    ...overrides,
+  };
+}
+
+function weightStationsFixture(stations: WeightStationsData['stations']): Envelope<WeightStationsData> {
+  return {
+    data: {
+      ...WEIGHT_STATIONS_OK.data,
+      stations,
+    },
+    metadata: META_FIXTURE,
+  };
+}
+
+describe('Weight — the line-level offset sentence', () => {
+  it('all stations read the same side of one shared 1,960 g target: states the offset as one line-wide fact', async () => {
+    // Ten stations, every one below the SAME 1,960 g target by 7-12 g —
+    // the audit's own live evidence, at a size that still clears the
+    // "nearly all" thresholds. meanG - vsTargetG is 1960 for every row.
+    const offsets = [12, 10, 9, 9, 9, 9, 8, 8, 8, 7];
+    const stations = offsets.map((off, i) =>
+      station({ station: i + 1, meanG: 1960 - off, vsTargetG: -off, targetBasis: 'station_material' }),
+    );
+    installFakeFetch({
+      '/api/weight-stations': weightStationsFixture(stations),
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': spcFixture(500, 1950.07),
+    });
+
+    const { findByRole } = render(<WeightScreen {...baseProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+
+    await waitFor(() =>
+      expect(h1.textContent).toContain(
+        W.weight.lineOffset(10, 10, '7', '12', W.weight.below, fmtG(1960)),
+      ),
+    );
+    expect(h1.textContent).toContain('line-wide offset');
+  });
+
+  it('stations disagree (split roughly evenly above/below): the offset sentence is absent', async () => {
+    // Same shared 1,960 g target, but five stations read above it and five
+    // below — no single side to state a fact about, so the per-row `vs
+    // target` column is left to speak for itself.
+    const stations = [
+      ...[12, 10, 9, 8, 7].map((off, i) => station({ station: i + 1, meanG: 1960 - off, vsTargetG: -off })),
+      ...[12, 10, 9, 8, 7].map((off, i) => station({ station: i + 6, meanG: 1960 + off, vsTargetG: off })),
+    ];
+    installFakeFetch({
+      '/api/weight-stations': weightStationsFixture(stations),
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': spcFixture(500, 1950.07),
+    });
+
+    const { findByRole } = render(<WeightScreen {...baseProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+    await waitFor(() => expect(h1.textContent).toContain(fmtG(1950.07)));
+
+    expect(h1.textContent).not.toContain('line-wide offset');
+  });
+
+  it('several targets are in force among the stations (different materials): the offset sentence is absent', async () => {
+    // All ten stations read below their own target — same SIGN — but half
+    // are judged against a 1,960 g material and half against a 2,050 g
+    // material, so there is no single shared target to name a range against.
+    const stations = [
+      ...[12, 10, 9, 9, 8].map((off, i) => station({ station: i + 1, meanG: 1960 - off, vsTargetG: -off })),
+      ...[12, 10, 9, 9, 8].map((off, i) => station({ station: i + 6, meanG: 2050 - off, vsTargetG: -off })),
+    ];
+    installFakeFetch({
+      '/api/weight-stations': weightStationsFixture(stations),
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': spcFixture(500, 1950.07),
+    });
+
+    const { findByRole } = render(<WeightScreen {...baseProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+    await waitFor(() => expect(h1.textContent).toContain(fmtG(1950.07)));
+
+    expect(h1.textContent).not.toContain('line-wide offset');
+  });
+
+  it('too few stations resolved a target (several materials mixed): the offset sentence is absent', async () => {
+    // Coverage below the "nearly all" threshold — most stations ran more
+    // than one material in the window and have no single target to be
+    // signed against (targetBasis 'mixed', vsTargetG null).
+    const stations = [
+      station({ station: 1, meanG: 1948, vsTargetG: -12, targetBasis: 'station_material' }),
+      ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+        station({ station: n, meanG: 1948, vsTargetG: null, targetBasis: 'mixed', materialsInWindow: 2 }),
+      ),
+    ];
+    installFakeFetch({
+      '/api/weight-stations': weightStationsFixture(stations),
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': spcFixture(500, 1950.07),
+    });
+
+    const { findByRole } = render(<WeightScreen {...baseProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+    await waitFor(() => expect(h1.textContent).toContain(fmtG(1950.07)));
+
+    expect(h1.textContent).not.toContain('line-wide offset');
+  });
+});
+
+/**
  * DEFECTS.md (22 Sep 2026), reacting to D-1 (62263da): correctly sizing SPC
  * subgroups exposed that the X̄ control band itself does not fit this
  * process — measured ~16% of subgroups "out of control" at month scale

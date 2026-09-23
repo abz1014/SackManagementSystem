@@ -563,6 +563,10 @@ function headline(
   // identically to "checked every station, none flagged").
   if (d == null) return `Average cone weight is ${mean}. ${W.weight.headlineStationDataFailed}`;
   const need = d.stations.filter((x) => x.flagged).length;
+  // "Steady"/"needs a look" is the PATTERN-TEST verdict (weightStations.ts
+  // `flagged`), not the on-target verdict `lineOffset` below states — see
+  // words.ts's comment on `allStationsSteady` for why the wording now names
+  // what question this answers.
   const tail = need === 0 ? W.weight.allStationsSteady : W.weight.stationsNeedLook(need);
   if (d.targetG == null) return `${W.weight.headlineNoTarget(mean)} ${tail}`;
   // Until the weight basis is confirmed the difference is not stated as a
@@ -571,7 +575,68 @@ function headline(
   // U2, 16 Sep 2026) — the bare "1,960 g" here used to name neither, so a
   // reader had no way to tell whether it was the same target the station
   // table below was judging against.
-  return `${W.weight.headlineUnconfirmed(mean, targetPhrase(d))} ${tail}`;
+  const offset = lineOffsetSentence(d);
+  return `${W.weight.headlineUnconfirmed(mean, targetPhrase(d))}${offset ? ` ${offset}` : ''} ${tail}`;
+}
+
+/**
+ * The line-level counterpart of the per-station `vs target` column (Weight
+ * brief item 1, 23 Sep 2026). 132,552 cones × a shared per-station offset is
+ * the largest fact in this dataset (~1.2 t/generation at 34 days) and it was
+ * never stated once — only restated fourteen times as fourteen small
+ * numbers, see `stationsTable` below.
+ *
+ * Deliberately conservative: returns null (says nothing) unless the data
+ * makes the claim safe —
+ *  - at least a handful of stations so "all"/"nearly all" means something,
+ *  - nearly every station resolved to SOME target (a run of `targetBasis:
+ *    'mixed'` rows means several materials are in force and there is no
+ *    single line-wide fact to state),
+ *  - every included station's own implied target (its mean minus its own
+ *    signed `vsTargetG`) agrees to within rounding — 'station_material' rows
+ *    can each carry a DIFFERENT material's limits, and this must never
+ *    average two products' tolerances into one number,
+ *  - nearly all of them sit on the SAME side of that target.
+ * If stations disagree, or more than one target is genuinely in force among
+ * them, the function returns null and the per-row `vs target` column is left
+ * to speak for itself, exactly as the brief requires.
+ */
+function lineOffsetSentence(d: WeightStationsData): string | null {
+  const total = d.stations.length;
+  const MIN_STATIONS = 3;
+  const COVERAGE_RATIO = 0.85; // nearly all stations must resolve to a target
+  const AGREE_RATIO = 0.85; // nearly all of those must sit on the same side
+  const TARGET_TOLERANCE_G = 1; // rounding slack for "a single shared target"
+  if (total < MIN_STATIONS) return null;
+
+  const rows = d.stations.filter((r) => r.vsTargetG != null);
+  if (rows.length / total < COVERAGE_RATIO) return null;
+
+  const impliedTargets = rows.map((r) => r.meanG - (r.vsTargetG as number));
+  const minTarget = Math.min(...impliedTargets);
+  const maxTarget = Math.max(...impliedTargets);
+  if (maxTarget - minTarget > TARGET_TOLERANCE_G) return null; // not one shared target
+
+  const signed = rows.map((r) => r.vsTargetG as number);
+  const negative = signed.filter((v) => v < 0).length;
+  const positive = signed.filter((v) => v > 0).length;
+  const dirNegative = negative >= positive;
+  const agreeing = dirNegative ? negative : positive;
+  if (agreeing === 0 || agreeing / rows.length < AGREE_RATIO) return null; // stations disagree
+
+  const magnitudes = signed.filter((v) => (dirNegative ? v < 0 : v > 0)).map((v) => Math.abs(v));
+  const lo = Math.round(Math.min(...magnitudes));
+  const hi = Math.round(Math.max(...magnitudes));
+  const target = (minTarget + maxTarget) / 2;
+
+  return W.weight.lineOffset(
+    agreeing,
+    total,
+    fmtInt(lo),
+    fmtInt(hi),
+    dirNegative ? W.weight.below : W.weight.above,
+    fmtG(target),
+  );
 }
 
 /** "1,960 g (201-IH0-SD), in force since 16/09/2026, 09:00:00" — the target
@@ -673,14 +738,21 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
   const ticks = tickIndices(g.length, fittingTicks(width - L - R, multiDay ? 13 : 6, 13, g.length, 4));
   const h = hover != null ? g[hover] : null;
 
-  // The noise floor a subgroup of this size carries by chance alone —
-  // σ_within/√n, already computed per subgroup for the X̄ control limits
-  // (spc.ts). Stated in the resting readout rather than drawn as a band: a
-  // band was investigated and rejected (see the file this chart lives under)
-  // because per-subgroup n is ragged enough live to swing the band 4.5x
-  // across one shift. A sentence survives that; a drawn contour would not.
   const avgN = spc.count / Math.max(1, g.length);
-  const noiseG = avgN > 0 ? (2 * spc.stdevWithin) / Math.sqrt(avgN) : 0;
+  // Formerly a modelled "noise floor" — σ_within/√n, the movement a subgroup
+  // of this size carries "by chance alone". Removed 23 Sep 2026 (Weight
+  // brief item 3, reacting to the same D-1 finding DEFECTS.md already made
+  // for the suppressed violation marks above): on real plant data the
+  // subgroup MEANS range 1937.3–1962.1 g, an SD about three times that
+  // theoretical figure, so the sentence told a reader watching ±10 g swings
+  // that they were looking at chance noise of ±2 g — the over-claim moved
+  // from the suppressed dots into this sentence. A drawn band was already
+  // investigated and rejected (see the file this chart lives under, ragged
+  // per-subgroup n swings it 4.5x across one shift); this states the one
+  // thing that needs no model at all — the actual range the group means in
+  // THIS period have covered — instead of an assumption the data contradicts.
+  const groupLo = values.length > 0 ? Math.min(...values) : null;
+  const groupHi = values.length > 0 ? Math.max(...values) : null;
 
   return (
     <div ref={box}>
@@ -701,7 +773,9 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
             : null
         }
         resting={`${g.length} groups of about ${fmtInt(Math.round(avgN))} ${kindWord(spc.unit)}${
-          noiseG > 0 ? ` · ${W.weight.noiseFloor(`±${Math.round(noiseG)}${String.fromCharCode(0xa0)}${spc.unit}`)}` : ''
+          groupLo != null && groupHi != null && groupHi > groupLo
+            ? ` · ${W.weight.spanNote(fmtW(groupLo, spc.unit), fmtW(groupHi, spc.unit))}`
+            : ''
         }`}
       />
       <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img"
