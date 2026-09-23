@@ -1,6 +1,52 @@
 # What we still need from IFL
 
-**Prepared 23 September 2026. Fifteen asks, in the order of what they unblock.**
+**Prepared 23 September 2026, re-verified the same day against the running databases
+(sidecar and both attached IFL copies, read-only) rather than re-quoted from earlier
+drafts. Fifteen asks, in the order of what they unblock.**
+
+## Covering note
+
+*Pasteable, to send as-is or edit before sending.*
+
+> Hi Hassan,
+>
+> Thank you again for the 15 September session — we've worked through all twenty-four
+> answers and updated the software accordingly (the process-engineer role, gross sack
+> weight, the reject-code settings screen, the tenth report, and the rest).
+>
+> A shorter list remains open on our side, grouped by how much it blocks. **Two items
+> matter far more than the rest, and everything else can wait for your convenience:**
+>
+> 1. A read-only database login on the live plant server (not `sa`, not the vendor
+>    application's own account), and the server/instance name it runs against.
+> 2. Confirmation that the PC we install this on can actually reach those databases —
+>    and, if the PLC and server networks are kept separate, which side it should sit on.
+>
+> The rest of the list covers historical data, a few numbers we'd like you to bless or
+> correct, and some one-line confirmations of things we inferred from the data you already
+> sent. None of it blocks installation the way the two above do.
+>
+> Full list attached (`IFL-OPEN-QUESTIONS.md`). Happy to walk through it on a call if
+> that's faster than reading it cold.
+>
+> Regards,
+> [owner]
+
+## If you answer only three things
+
+Tier 1 below has three items, in short — **but only two of them are in the covering note
+above.**
+
+1. **A read-only login on the live plant server, and the host it runs against.**
+   Without this the product cannot be installed — everything else is secondary to it.
+2. **Can the PC we supply actually reach those databases**, and if the PLC and server
+   networks are genuinely segregated, which side does it sit on.
+3. **Written authority for the PDAS write path — held back, not sent.** Our own records
+   contradict each other about whether this was already given (see item 3's note below).
+   Until the owner resolves which record is true, asking IFL for it again risks asking for
+   permission they already gave; asking is therefore paused on our side, not on theirs.
+   **The fifteen-item list below still carries it in full, for the record, but the
+   covering note above deliberately omits it.**
 
 This is the single list. It replaces hunting through `IFL-QUESTIONS-STATUS.md`,
 `PROJECT_STATUS.md` §5, `ROADMAP-GAP-ANALYSIS.md` §18 and `DECISIONS-PENDING.md` for the same
@@ -29,7 +75,9 @@ ever been executed against any database, live or local.
 A dedicated read-only SQL login (`db_datareader` on `DATA_TP1U2` and `PDAS_TP1U2`) on the
 plant's own server, not `sa` and not the vendor application's account, plus the server name
 and instance. A script IFL's DBA can run unchanged is ready at
-`sms/db/bootstrap/10_ifl_readonly_login.template.sql`.
+`sms/db/bootstrap/10_ifl_readonly_login.template.sql` (re-verified 23 Sep 2026: the file
+exists at that path, alongside two related bootstrap templates for PDAS procedure metadata
+and the PDAS writer login).
 
 **Blocked without it:** everything that makes this a live system rather than a demo. The
 cutover rehearsal, reconciliation against IFL's own data, the scheduled backup, and the
@@ -82,29 +130,43 @@ which is exactly what this was meant to replace.
 
 ## Tier 2 — Blocks numbers being true, not features existing.
 
-### 4. What weight limits were in force before September 2026?
-*(New — raised by the build)*
+### 4. Has a product's weight setpoint ever been changed by a direct database edit, outside your normal screens?
+*(New — raised by the build; substantially narrower than it was a day ago, see below)*
 
-For each product, the setpoint and the ± tolerance, with the dates they applied from. Even
-approximate dates are worth having.
+**This item changed today and is smaller than it was.** Until 23 September 2026 our software
+held no record of what any product's limits were before 11 September, when it first mirrored
+your product database — every one of the fourteen rows in our limit history was a guess dated
+"true start unknown." **That is no longer true.** Re-verified today (`sqlcmd -E`, read-only,
+against `PDAS_TP1U2_SEP07.dbo.Materials`): each product record carries its own creation
+timestamp, and we confirmed — four independent ways — that this timestamp is never moved once
+the record is created, including when a product is retired and reactivated. So we now date
+every product's limits from the moment your own system created it, not from when we happened
+to notice it. All fourteen products in the current data now carry a real creation date, from
+2026-05-06 (the earliest) to 2026-09-03 (the newest) — zero are still "unknown."
 
-**Why we are asking:** SMS's limit history contains fourteen rows, all written at one instant
-on 11 September 2026 when the software first mirrored PDAS, each carrying the reason *"true
-start unknown."* We hold no record of what any limit was before that moment.
+**What is genuinely still open, and it is the one thing we cannot determine from your data
+alone:** your product database gives us no way to log an *edit* to an existing product's
+setpoint, only a create and a retire — so if someone ever typed a direct update straight into
+SQL to change a setpoint (rather than retiring the old product and creating a new one), it
+would leave no trace we can find: it would not move the creation timestamp and it would not
+appear in your own event log. Has this ever been done, to your knowledge? A "no, changes
+always go through retire-and-recreate" is exactly as useful an answer as a "yes, here's when."
 
-**Blocked without it:** any report covering August or earlier can state what was weighed but
-must refuse to state whether it met target. It refuses rather than guessing, which is correct
-and looks like a gap.
+**Blocked without it:** nothing today — every report we can currently generate over your data
+now states a real, dated limit rather than an assumed one. What remains blocked is our
+*confidence* that a limit we show for a given date was the only one in force that day, rather
+than one changed by an edit we cannot see.
 
-**Cost of staying blocked:** every historical weight report is permanently half-blind. If
-IFL can supply the history, those reports become answerable retrospectively; if not, they
-never will be.
+**Cost of staying blocked:** low. This is a corroborating question, not a blocking one — ask
+it when convenient rather than urgently.
 
 ### 5. Do you approve the definitions behind the numbers on the reports?
 *(New — `KPI-DEFINITIONS.md`, 32 rows)*
 
 One sheet, 32 rows, each naming a number the reports print, what it is divided by, which
-clock it uses and what it excludes. Every row currently reads "IFL approval: awaiting".
+clock it uses and what it excludes. Every row currently reads "IFL approval: awaiting"
+(re-counted 23 Sep 2026 directly against `KPI-DEFINITIONS.md`: exactly 32 numbered rows,
+every one still "awaiting" — none has been approved since the sheet was written).
 
 **Blocked without it:** formal sign-off of the reporting phase.
 
@@ -119,7 +181,9 @@ first month-end where a figure does not match IFL's own expectation.
 sack" — was applied to a setting that governs the whole line, so cone weights are now
 computed on a gross basis too, on the strength of an answer that was about sacks. The two
 conversion constants sitting beside it, a 70 g cone tube and a 0.5 kg sack tare, are
-developer placeholders IFL has never seen.
+developer placeholders IFL has never seen (re-verified today directly against the live
+setting: `basis = gross`, `cone_tube_weight_g = 70.00`, `sack_tare_kg = 0.500`, reason on file
+"IFL answer Q24, 15 Sep 2026" — unchanged since it was written).
 
 **Blocked without it:** the Weight screen states the average and the target as two separate
 facts rather than as one difference, deliberately, because a difference computed on the wrong
@@ -168,11 +232,13 @@ re-litigate after a disputed reading.
 ### 9. The 10 July – 5 August 2026 data
 *(70-pack Q56 — **this has never actually been asked**)*
 
-Twenty-six days that exist at IFL and in no copy we hold. Re-measured on 23 September 2026
-against both attached copies rather than taken from any document: the first sample's last
-cone is **10 July 2026, 11:23**; the second sample's first real production row is **5 August
-2026** (the only two rows dated earlier are clock artefacts — one stamped 1970 and one 12
-July).
+Twenty-six days that exist at IFL and in no copy we hold. **Re-measured again today**
+(`sqlcmd -E`, read-only, against both attached copies directly rather than taken from any
+document or from this file's own earlier draft): `DATA_TP1U2.pack1_TP1U2`'s last row is
+**10 July 2026, 11:23:10**; `DATA_TP1U2_SEP07.pack1_TP1U2`'s first real production row is
+**5 August 2026, 12:30:44** (the only two rows dated earlier are clock artefacts — one
+stamped 1970-01-01 and one 2026-07-12). Both figures reproduced exactly on this pass — no
+change from the previous count.
 
 **Blocked without it:** a continuous production history. There is also a second, separate
 problem: even when the data arrives, the software cannot currently load it, because the
@@ -190,7 +256,11 @@ Cone and sack readings, rejects with their codes, product and machine identifier
 calibration records.
 
 **Blocked without it:** any predictive or trend work that deserves the name. Six months is
-the minimum before a calibration model is honest; we hold 53 production days.
+the minimum before a calibration model is honest; we hold **53 production days**
+(re-counted today directly against both attached copies: 19 distinct production days in the
+July sample, 2026-06-22 through 2026-07-10, excluding one clock-fault row dated
+2026-06-21; 34 distinct production days in the September sample, 2026-08-05 through
+2026-09-07; 19 + 34 = 53).
 
 **Cost of staying blocked:** the "AI" line in the original quotation stays a statistical
 advisory over eight weeks of data. That advisory is defensible and real — but it is not what
@@ -224,25 +294,36 @@ day — a report, not a stores ledger — which may make all three moot. Worth o
 confirm they are moot rather than assuming it.
 
 ### 15. Three things we concluded from your data rather than from you — please correct us if we are wrong
-*(70-pack Q29, Q49, Q50, plus two catalogue observations)*
+*(70-pack Q29, Q49, Q50, plus three catalogue observations)*
 
 - You hold **no records of past machine calibrations**, and none of weights before and after
   one. We built our own log from scratch on that assumption.
 - The sack timestamp is the moment the record was **saved**, not when weighing began or ended.
 - In your product master, `201-IHO-SD` (MaterialId 15) is spelled with the letter **O** while
-  `201-IH0-SD` (MaterialIds 11, 12, 13) is spelled with a **zero**. They sit next to each
+  `201-IH0-SD` (MaterialIds 11, 12, 13) is spelled with a **zero** (re-verified today directly
+  against `PDAS_TP1U2_SEP07.dbo.Materials`). They sit next to each
   other in the catalogue. All four are inactive and none appears on any reading we hold, so
   nothing is currently mis-recorded — we think it is a typing slip and only you can correct
   it.
 - **Six different products all share the display name `205-IL0-SD`** (MaterialIds 20, 21,
-  1021, 1022, 1023, 1024), told apart only by colour, yarn count and tube — and two of them
-  share the colour as well. These six are not obscure: they are every product that ran in the
+  1021, 1022, 1023, 1024 — re-verified today directly against the same table), told apart only
+  by colour, yarn count and tube — and two of them (1021, 1023) share the colour ORANGE as
+  well. These six are not obscure: they are every product that ran in the
   August–September data you sent. Our screens add the distinguishing detail so an operator is
   never shown six identical names, but the names themselves are yours. Is one name for six
   products intended?
 - And one open design point from the 15 September meeting itself: **does the machine take the
   running product from PDAS's active flag, or from the operator's HMI?** It decides whether a
   product change made in software reaches the machine or only the records.
+- **New, from today's build — a loose end on the 18 August story.** An earlier version of our
+  own project notes said your engineer hit a "duplicate product" refusal four times in six
+  minutes on 18 August while trying to change a setpoint. We looked again at the ten screenshots
+  that story rests on and found no error of any kind in any of them — every call shown returns
+  a clean, empty result. We no longer repeat the 18 August story as fact, and we are not asking
+  you to confirm it happened. We would still like to know, in general and not tied to that one
+  date: has an engineer ever hit a "this product already exists" message while trying to change
+  a setpoint by re-creating the product? It would confirm something we can currently only infer
+  from reading your stored procedures' own code.
 
 ---
 
