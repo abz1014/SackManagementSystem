@@ -67,7 +67,11 @@ export const KPI_DEFINITIONS: readonly KpiDefinition[] = [
   { key: 'cones_weighed', label: 'Cones weighed', unit: 'cones', shape: 'total', betterWhen: 'higher', definition: 'Cone readings in the period.' },
   { key: 'cones_in_range_pct', label: 'Cones in range', unit: '%', shape: 'rate', betterWhen: 'higher', definition: 'Share of cone readings the scale marked in range.' },
   { key: 'cones_rejected_by_scale', label: 'Rejected by the scale', unit: 'cones', shape: 'total', betterWhen: 'lower', definition: 'Cone readings the scale marked out of range.' },
-  { key: 'rejects_at_inspection', label: 'Rejected at inspection', unit: 'cones', shape: 'total', betterWhen: 'lower', definition: 'Cones the inspection stations rejected before they were weighed as cones.' },
+  // "before they were weighed as cones" corrected 23 Sep 2026 — see
+  // KPI-DEFINITIONS.md row 4: false for 98%+ of these, which match a
+  // cone_event row already weighed fine before the inspection station
+  // rejected them.
+  { key: 'rejects_at_inspection', label: 'Rejected at inspection', unit: 'cones', shape: 'total', betterWhen: 'lower', definition: 'Cones the inspection stations rejected.' },
   { key: 'inspection_reject_rate_pct', label: 'Inspection reject rate', unit: '%', shape: 'rate', betterWhen: 'lower', definition: 'Inspection rejects over cones plus inspection rejects.' },
   { key: 'cones_within_limits_pct', label: 'Within product limits', unit: '%', shape: 'rate', betterWhen: 'higher', definition: 'Cones classified within the limits in force at their own time, over cones that could be judged.' },
   { key: 'mean_cone_weight_g', label: 'Mean cone weight', unit: 'g', shape: 'rate', betterWhen: 'neither', definition: 'Average recorded cone weight over the plausible population.' },

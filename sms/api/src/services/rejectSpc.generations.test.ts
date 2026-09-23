@@ -30,7 +30,15 @@ const REGISTRY = [
   { epoch_id: 11, generation_ordinal: 3 }, // Sept quality rejects
 ];
 
-/** Serves getRejectSpc's queries in order: registry, produced, rejects, all rejects. */
+/**
+ * Serves getRejectSpc's queries in order: registry, produced, rejects,
+ * all-rejects (only for a narrowed numerator — every test below uses
+ * `quality`, so this always runs), unmatched-rejects (always, last — the 23
+ * Sep 2026 denominator correction). These fixtures treat every reject as
+ * UNMATCHED (the 5th arg repeats the rejects rows), which keeps this file's
+ * arithmetic (540 / 14,540) unchanged: this file tests generation-boundary
+ * handling, not the matched/unmatched split, which rejectSpc.test.ts covers.
+ */
 function fakePool(...responses: unknown[][]): ConnectionPool {
   let i = 0;
   const req = { input: () => req, query: async () => ({ recordset: responses[i++] ?? [] }) };
@@ -56,7 +64,7 @@ const rejects: Row[] = [
 
 describe('getRejectSpc across a generation boundary', () => {
   it('joins cones and rejects of one generation despite their different epoch ids', async () => {
-    const d = await getRejectSpc(fakePool(REGISTRY, produced, rejects, rejects), 1, '2026-07-01', '2026-08-31', 'day', 'quality');
+    const d = await getRejectSpc(fakePool(REGISTRY, produced, rejects, rejects, rejects), 1, '2026-07-01', '2026-08-31', 'day', 'quality');
 
     // Four days, not eight: each day's cones and rejects are ONE cell.
     expect(d.buckets).toHaveLength(4);
@@ -70,7 +78,7 @@ describe('getRejectSpc across a generation boundary', () => {
   });
 
   it('does NOT join out-of-control buckets across the hole into one episode', async () => {
-    const d = await getRejectSpc(fakePool(REGISTRY, produced, rejects, rejects), 1, '2026-07-01', '2026-08-31', 'day', 'quality');
+    const d = await getRejectSpc(fakePool(REGISTRY, produced, rejects, rejects, rejects), 1, '2026-07-01', '2026-08-31', 'day', 'quality');
     expect(d.episodes).toHaveLength(2);
     expect(d.episodes.every((e) => e.bucketCount === 1)).toBe(true);
   });
@@ -78,7 +86,7 @@ describe('getRejectSpc across a generation boundary', () => {
   it('is unchanged for a range inside one generation', async () => {
     const one = (rows: Row[], ...ids: number[]) => rows.filter((r) => ids.includes(r.source_epoch));
     const d = await getRejectSpc(
-      fakePool(REGISTRY, one(produced, 9), one(rejects, 11), one(rejects, 11)),
+      fakePool(REGISTRY, one(produced, 9), one(rejects, 11), one(rejects, 11), one(rejects, 11)),
       1, '2026-08-01', '2026-08-31', 'day', 'quality',
     );
     expect(d.spansGenerations).toBe(false);

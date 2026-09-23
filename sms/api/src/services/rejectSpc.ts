@@ -8,14 +8,41 @@
  * flat band — using a pooled/fixed band here would be wrong methodology and
  * would misjudge low-volume hours (e.g. around a stoppage).
  *
- * p̄ = total rejects / total INSPECTED, where inspected = cones + rejects of
- * every type, pooled across the whole range. Two things follow from "of every
- * type", and both are deliberate (finding H1 and its follow-up, Sep 2026):
- * a rejected cone was still an inspected unit, so it belongs in its own
- * denominator; and holding the denominator the same for the quality series
- * and the weight series is what makes them add up to the combined rate the
- * Rejects screen prints above them. A per-type denominator would make each
- * series individually defensible and the pair impossible to reconcile.
+ * p̄ = total rejects / total INSPECTED, where inspected = cones + the rejects
+ * that are NOT already counted as a cone, pooled across the whole range.
+ *
+ * CORRECTED 23 Sep 2026 (finding H1's own follow-up defect). H1 (below,
+ * unchanged) was right that a rejected cone is still an inspected unit and
+ * must be in the denominator; what it got wrong was assuming a reject_event
+ * row and a cone_event row are never the same physical cone. Measured
+ * directly against the September generation: matching rejectQCS1_TP1U2 to
+ * pack1_TP1U2 on (ProductionDate, HangerNum) — the same pair cone_event's own
+ * merge key uses — finds a cone_event row for 5,933 of 6,049 quality rejects
+ * (98.1 %), 5,925 of those already `in_range = 1` (weighed fine, THEN
+ * rejected by QCS downstream). rejectWeight1_TP1U2 matches 41 of 41 the same
+ * way. `produced` (cone_event) already counts that cone once; the old
+ * `inspected = produced + allRejects` counted it a second time for every
+ * reject that has a matching cone — 98%+ of them. Real-data magnitude:
+ * 4.393 % shown vs 4.590 % correct on the September generation (6,090 /
+ * 138,642 vs 6,090 / 132,668); 2.160 % vs 2.207 % on July. Every reject rate
+ * was UNDERSTATED, the opposite direction from what H1 itself fixed.
+ *
+ * The fix: only a reject with NO matching cone_event row at the same
+ * (production_ts_utc_ms, hanger_num) — 116 of 6,049 quality rejects in
+ * September, 0 of 41 weight rejects; 14 of 2,900 and 2 of 246 in July — was
+ * never counted in `produced`, and it alone is added to the denominator.
+ * These are genuinely a different population: scattered roughly 1-9/day
+ * across the whole range (not a one-day artefact), consistent with a cone the
+ * QCS/weight check caught before it was ever logged as weighed, rather than a
+ * bucketing or join-key defect. Re-verify with the same match query before
+ * relying on this further — it is measured against the local `_SEP07` dev
+ * copy, never against a live read of `DATA_TP1U2`.
+ *
+ * Holding the denominator the same for the quality series and the weight
+ * series is what makes them add up to the combined rate the Rejects screen
+ * prints above them (H1's original point, still true): a per-type denominator
+ * would make each series individually defensible and the pair impossible to
+ * reconcile.
  * UCL_i = p̄ + 3·√(p̄(1−p̄)/n_i),  LCL_i = max(0, p̄ − 3·√(p̄(1−p̄)/n_i))
  * A bucket is out-of-control if its rate exceeds its own UCL_i.
  * "Episodes" = runs of 1+ consecutive out-of-control buckets — a run of 2+ is
@@ -90,7 +117,13 @@ export interface RejectBucket {
   generation: number;
   /** Cones weighed in the bucket. NOT the rate's denominator — see `inspected`. */
   produced: number;
-  /** Cones + rejects of every type: the population `rate` divides by. */
+  /**
+   * Cones + rejects that have NO matching cone_event row (23 Sep 2026 — see
+   * the file header): the population `rate` divides by. Most rejects DO
+   * match a cone_event row (the same physical cone, weighed then separately
+   * rejected) and are already inside `produced`; adding them again would
+   * double-count.
+   */
   inspected: number;
   rejects: number;
   rate: number | null;
@@ -106,11 +139,11 @@ export interface RejectEpisode {
   /** Cones only. Do NOT divide by this — see `totalInspected`. */
   totalProduced: number;
   /**
-   * Cones + rejects of every type across the episode: the denominator that
-   * matches `pBar`. attention.ts states an episode's rate and p̄ in the SAME
-   * sentence on the Home screen, so dividing by `totalProduced` there put two
-   * different denominators side by side (100 cones + 10 rejects read "10.0%"
-   * against a p̄ computed as 9.1%).
+   * Cones + unmatched rejects across the episode (see RejectBucket.inspected):
+   * the denominator that matches `pBar`. attention.ts states an episode's
+   * rate and p̄ in the SAME sentence on the Home screen, so dividing by
+   * `totalProduced` there put two different denominators side by side (100
+   * cones + 10 rejects read "10.0%" against a p̄ computed as 9.1%).
    */
   totalInspected: number;
 }
@@ -158,10 +191,14 @@ export async function getRejectSpc(
   rejectType: RejectTypeFilter,
   filters: RejectSpcFilters = {},
 ): Promise<RejectSpcData> {
-  const bucketExprCone =
+  // Function, not a constant: the unmatched-rejects query below needs the
+  // same expression qualified with the `re.` alias (it joins against
+  // sms.cone_event under NOT EXISTS, so the unqualified column names the
+  // other queries use here would be ambiguous or bind to the wrong table).
+  const bucketExprCone = (alias = '') =>
     bucketSize === 'hour'
-      ? 'DATEADD(HOUR, DATEDIFF(HOUR, 0, production_ts_utc), 0)'
-      : 'CAST(shift_date AS DATETIME2(3))';
+      ? `DATEADD(HOUR, DATEDIFF(HOUR, 0, ${alias}production_ts_utc), 0)`
+      : `CAST(${alias}shift_date AS DATETIME2(3))`;
   // One filter object for all three queries below. The code filter narrows
   // the numerator only (see RejectSpcFilters); rejectType is folded in as a
   // second numerator-only predicate rather than a separate clause so both
@@ -185,9 +222,9 @@ export async function getRejectSpc(
   const producedReq = pool.request();
   const producedWhere = bindConeFilters(producedReq, lineId, base);
   const producedRes = await producedReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
-    `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
+    `SELECT source_epoch, ${bucketExprCone()} AS bucket_ts, COUNT(*) AS n
        FROM sms.cone_event WHERE ${producedWhere}
-      GROUP BY source_epoch, ${bucketExprCone}`,
+      GROUP BY source_epoch, ${bucketExprCone()}`,
   );
 
   // parameterised even though rejectType is already enum-validated upstream —
@@ -198,24 +235,50 @@ export async function getRejectSpc(
   const rejectsWhere = bindRejectFilters(rejectsReq, lineId, numerator);
   if (rejectType !== 'all') rejectsReq.input('rejType', mssql.VarChar(10), rejectType);
   const rejectsRes = await rejectsReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
-    `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
+    `SELECT source_epoch, ${bucketExprCone()} AS bucket_ts, COUNT(*) AS n
        FROM sms.reject_event WHERE ${rejectsWhere} ${typeClause}
-      GROUP BY source_epoch, ${bucketExprCone}`,
+      GROUP BY source_epoch, ${bucketExprCone()}`,
   );
 
-  // Every reject, whatever its type or code — the DENOMINATOR population.
-  // Only needed when the numerator is narrowed; otherwise it is the same
-  // query as above, so it is not run twice.
+  // Every reject, whatever its type or code — used ONLY to decide which
+  // buckets exist (see `cells` below): a bucket with a reject but zero cones
+  // must still appear. Only needed when the numerator is narrowed; otherwise
+  // it is the same query as above, so it is not run twice. This is NOT the
+  // denominator population any more — see `unmatchedRes`.
   let allRejectsRes = rejectsRes;
   if (numeratorIsNarrowed) {
     const allReq = pool.request();
     const allWhere = bindRejectFilters(allReq, lineId, base, '', false);
     allRejectsRes = await allReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
-      `SELECT source_epoch, ${bucketExprCone} AS bucket_ts, COUNT(*) AS n
+      `SELECT source_epoch, ${bucketExprCone()} AS bucket_ts, COUNT(*) AS n
          FROM sms.reject_event WHERE ${allWhere}
-        GROUP BY source_epoch, ${bucketExprCone}`,
+        GROUP BY source_epoch, ${bucketExprCone()}`,
     );
   }
+
+  // The DENOMINATOR addend (23 Sep 2026 — see file header): rejects of any
+  // type or code, under the base filters, that have NO matching cone_event
+  // row at the same (production_ts_utc_ms, hanger_num) — cone_event's own
+  // merge key (transform.ts `coneKey`). Always run, never narrowed by
+  // rejectType/code: the denominator is every inspected unit that `produced`
+  // does not already count, regardless of which reject series the numerator
+  // asks about. ISNULL on hanger_num matches the ISNULL(...,-999) convention
+  // bindRejectFilters already uses for the code predicate, though hanger_num
+  // is NOT NULL on every row observed so far.
+  const unmatchedReq = pool.request();
+  const unmatchedWhere = bindRejectFilters(unmatchedReq, lineId, base, 're.', false);
+  const unmatchedRes = await unmatchedReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
+    `SELECT re.source_epoch, ${bucketExprCone('re.')} AS bucket_ts, COUNT(*) AS n
+       FROM sms.reject_event re
+      WHERE ${unmatchedWhere}
+        AND NOT EXISTS (
+          SELECT 1 FROM sms.cone_event ce
+           WHERE ce.line_id = re.line_id
+             AND ce.production_ts_utc_ms = re.production_ts_utc_ms
+             AND ISNULL(ce.hanger_num, -1) = ISNULL(re.hanger_num, -1)
+        )
+      GROUP BY re.source_epoch, ${bucketExprCone('re.')}`,
+  );
 
   // Cells are (generation, bucket). Keyed on both: the same bucket instant can
   // never hold two generations (they do not overlap in time), but keying on
@@ -242,7 +305,11 @@ export async function getRejectSpc(
   };
   const producedMap = toMap(producedRes.recordset);
   const rejectsMap = toMap(rejectsRes.recordset);
+  // Cell existence only (which buckets to render) — NOT the denominator, see
+  // `unmatchedMap` below.
   const allRejectsMap = toMap(allRejectsRes.recordset);
+  // The denominator addend: rejects with no matching cone_event row.
+  const unmatchedMap = toMap(unmatchedRes.recordset);
   const cells = new Map<string, { generation: number; t: number }>();
   for (const r of [...producedRes.recordset, ...allRejectsRes.recordset]) {
     const e = epochOf(r);
@@ -253,21 +320,20 @@ export async function getRejectSpc(
 
   const totalProduced = [...producedMap.values()].reduce((s, v) => s + v, 0);
   const totalRejects = [...rejectsMap.values()].reduce((s, v) => s + v, 0);
-  // p̄ = rejects / (cones + rejects) — a rejected cone was still an inspected
-  // unit and belongs in the denominator. Fixed Sep 2026 (finding H1): this
-  // used to divide by cones alone, which understated the rate everywhere it
-  // fed (this chart, its tooltips, episode detection, the Home attention
-  // list) and contradicted Rejects.tsx's own headline formula immediately
-  // above it on screen. Real-data magnitude: 5.42% shown vs 5.14% correct on
-  // 2026-07-07; 2.208% vs 2.160% over the full 19-day range.
+  // p̄ = rejects / (cones + unmatched rejects) — see the file header (23 Sep
+  // 2026 correction of finding H1). A rejected cone IS still an inspected
+  // unit, but 98%+ of rejects are already counted in `produced` because the
+  // reject_event row and the cone_event row are the same physical cone,
+  // logged twice. Only a reject with no matching cone_event row was never
+  // counted and belongs in the denominator.
   //
   // Pooled PER GENERATION — see the header. One p̄ per source epoch in range.
-  const perGen = new Map<number, { produced: number; rejects: number; allRejects: number; first: number; last: number }>();
+  const perGen = new Map<number, { produced: number; rejects: number; unmatched: number; first: number; last: number }>();
   for (const c of sortedCells) {
-    const g = perGen.get(c.generation) ?? { produced: 0, rejects: 0, allRejects: 0, first: c.t, last: c.t };
+    const g = perGen.get(c.generation) ?? { produced: 0, rejects: 0, unmatched: 0, first: c.t, last: c.t };
     g.produced += producedMap.get(key(c.generation, c.t)) ?? 0;
     g.rejects += rejectsMap.get(key(c.generation, c.t)) ?? 0;
-    g.allRejects += allRejectsMap.get(key(c.generation, c.t)) ?? 0;
+    g.unmatched += unmatchedMap.get(key(c.generation, c.t)) ?? 0;
     g.first = Math.min(g.first, c.t);
     g.last = Math.max(g.last, c.t);
     perGen.set(c.generation, g);
@@ -275,7 +341,7 @@ export async function getRejectSpc(
   const generations: RejectGeneration[] = [...perGen.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([generation, g]) => {
-      const inspected = g.produced + g.allRejects;
+      const inspected = g.produced + g.unmatched;
       return {
         generation,
         totalProduced: g.produced,
@@ -288,7 +354,7 @@ export async function getRejectSpc(
     });
   const pBarOf = new Map<number, number | null>();
   for (const [generation, g] of perGen) {
-    const inspected = g.produced + g.allRejects;
+    const inspected = g.produced + g.unmatched;
     pBarOf.set(generation, inspected > 0 ? g.rejects / inspected : null);
   }
   const spansGenerations = perGen.size > 1;
@@ -301,9 +367,9 @@ export async function getRejectSpc(
     const k = key(generation, t);
     const produced = producedMap.get(k) ?? 0;
     const rejects = rejectsMap.get(k) ?? 0;
-    // Denominator counts rejects of EVERY type, not just the filtered one —
-    // see the p̄ note in the file header.
-    const inspected = produced + (allRejectsMap.get(k) ?? 0);
+    // Denominator counts only UNMATCHED rejects (of every type, not just the
+    // filtered one) — see the p̄ note in the file header.
+    const inspected = produced + (unmatchedMap.get(k) ?? 0);
     const genPBar = pBarOf.get(generation) ?? null;
     let rate: number | null = null;
     let ucl: number | null = null;
@@ -315,6 +381,17 @@ export async function getRejectSpc(
         const sigma = Math.sqrt((genPBar * (1 - genPBar)) / inspected);
         ucl = genPBar + 3 * sigma;
         lcl = Math.max(0, genPBar - 3 * sigma);
+        // `lcl` is kept and returned (rendered as the chart's lower band,
+        // reports/reject.ts lclPct / report/shared.tsx qLcl) even though
+        // `outOfControl` never fires on it — decided, not overlooked (23 Sep
+        // 2026 brief item 3). A rate BELOW lcl is a genuine "unusually good
+        // day" signal worth showing on the chart. But `outOfControl` also
+        // drives episodes/attention.ts's Home attention list, whose job is to
+        // flag something that needs a floor response; an unusually LOW reject
+        // rate needs no one's attention, so it stays one-sided rather than
+        // firing an "episode" for good days. Two different meanings under one
+        // flag would be the wrong fix; this keeps one flag with one meaning
+        // and still draws the second number on the chart.
         outOfControl = rate > ucl;
       }
     }

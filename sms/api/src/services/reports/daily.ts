@@ -4,7 +4,8 @@
  * The one report the application already produced (services/report.ts),
  * with the one thing the gap analysis found wrong with it fixed: its
  * "Rejected" figure counted INSPECTION rejects (`reject_event`, cones the
- * inspection stations threw out before they were weighed as cones) while the
+ * inspection stations rejected — corrected 23 Sep 2026: NOT "before they were
+ * weighed as cones", see KPI-DEFINITIONS.md row 4) while the
  * Readings screen's "Rejected cones" counted SCALE rejects (`cone_event` with
  * `in_range = 0`) — two populations under one word, unlabelled, and a manager
  * comparing the two screens had no way to see that they were not the same
@@ -65,9 +66,15 @@ export async function getDailyReport(
       byScalePct: pct(scaleRejected.total, cones),
       atInspection,
       atInspectionPct: report.totals.rejectRatePct,
+      // "before they were weighed as cones" corrected 23 Sep 2026 — see
+      // KPI-DEFINITIONS.md row 4. `atInspectionPct` (report.totals.
+      // rejectRatePct, services/report.ts toReportLine) still divides by
+      // cones plus EVERY inspection reject, not just the unmatched ones
+      // rejectSpc.ts now uses — flagged, not fixed, in KPI-DEFINITIONS.md's
+      // note on row 5; this daily report was out of this pass's scope.
       note:
         'Two populations, counted separately: cones the scale itself marked out of range (still weighed, listed on Readings as ' +
-        '"Rejected cones"), and cones the inspection stations rejected before they were weighed as cones (the Rejects screen). ' +
+        '"Rejected cones"), and cones the inspection stations rejected (the Rejects screen). ' +
         'The scale share is over cones weighed; the inspection rate is over cones plus inspection rejects.',
     },
   };

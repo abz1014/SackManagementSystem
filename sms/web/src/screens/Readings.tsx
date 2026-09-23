@@ -327,7 +327,12 @@ function countLine(
   // `rows.error && !rows.data` condition) carries the retry action.
   if (rowsFailed) return W.readings.countLineFailed;
   if (listing === 'sacks') return `${what}: ${fmtInt(total)} sacks weighed.`;
-  if (listing === 'inspectionRejects') return `${what}: ${fmtInt(total)} cones rejected before weighing.`;
+  // Corrected 23 Sep 2026 (reject-denominator brief): "before weighing"
+  // asserted an order the data contradicts — matching reject_event to
+  // cone_event finds a weighed cone (in_range = 1) for 98%+ of these,
+  // rejected downstream of weighing, not before it. See words.ts
+  // readings.inspectionRejects for the fuller note.
+  if (listing === 'inspectionRejects') return `${what}: ${fmtInt(total)} cones rejected by inspection.`;
   // With state chips on, `total` is the filtered count — the same reason the
   // outside-limits sentence below does not reuse the "N weighed, M rejected
   // (P%)" form.

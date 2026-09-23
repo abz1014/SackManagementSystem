@@ -156,8 +156,14 @@ describe('shift and tsTo reach the SQL', () => {
     const r = await get('/api/reject-spc?from=2026-09-07&to=2026-09-07&bucket=day&rejectType=quality&shift=morning&tsTo=2026-09-07T09:30:00Z&station=3');
     expect(r.status).toBe(200);
     const cones = stmt('FROM sms.cone_event')!;
+    // Three sms.reject_event statements since the 23 Sep 2026 denominator
+    // correction: numerator (quality only), the all-rejects query (cell
+    // existence, narrowed numerator only), and the always-run
+    // unmatched-rejects query (the actual denominator addend — a NOT EXISTS
+    // join back to sms.cone_event, so its own FROM clause also mentions
+    // sms.cone_event, but it still starts "FROM sms.reject_event re").
     const rejects = db.statements.filter((s) => s.sql.includes('FROM sms.reject_event'));
-    expect(rejects).toHaveLength(2); // numerator (quality) + denominator (all)
+    expect(rejects).toHaveLength(3); // numerator (quality) + all-rejects (cells) + unmatched (denominator)
     for (const s of [cones, ...rejects]) {
       expect(s.sql).toContain('shift_code = @shift');
       expect(s.sql).toContain('production_ts_utc_ms <= @tsTo');
@@ -167,6 +173,11 @@ describe('shift and tsTo reach the SQL', () => {
     }
     expect(rejects[0]!.sql).toContain('@rejType');
     expect(rejects[1]!.sql).not.toContain('@rejType');
+    expect(rejects[2]!.sql).not.toContain('@rejType');
+    // The unmatched-rejects query is the denominator fix itself: it must
+    // actually join back to cone_event, not just filter reject_event.
+    expect(rejects[2]!.sql).toContain('NOT EXISTS');
+    expect(rejects[2]!.sql).toContain('FROM sms.cone_event');
   });
 
   it('refuses an unknown shift and a malformed tsTo', async () => {

@@ -94,10 +94,19 @@ export async function getRejectReport(
     trend: spc.buckets.map(trendPoint),
     pBarPct: toPct(spc.pBar),
     spansGenerations: spc.spansGenerations,
+    // Corrected 23 Sep 2026 (reject-denominator brief): "before they were
+    // weighed as cones" and "divides by cones plus rejects" both asserted the
+    // premise rejectSpc.ts's own header shows is false for 98%+ of rejects —
+    // the reject_event row and a cone_event row are usually the same
+    // physical cone, weighed then separately rejected. `denominator` above
+    // (`cones_plus_rejects`) is byDayCode's own label, not this trend's; the
+    // trend divides by cones plus ONLY the rejects with no matching
+    // cone_event row, per getRejectSpc.
     note:
-      'Rejects are cones the inspection stations threw out before they were weighed as cones. The rate divides by cones plus ' +
-      'rejects. Days are production days (06:00 to 06:00 under the line’s shift rule); IFL has not confirmed production day ' +
-      'versus calendar date for reject reporting. Code names not yet supplied by IFL are printed as their raw pair.',
+      'Rejects are cones the inspection stations rejected. The trend’s rate divides by cones plus only the rejects that were ' +
+      'never logged as a weighed cone; most rejects were. Days are production days (06:00 to 06:00 under the line’s shift ' +
+      'rule); IFL has not confirmed production day versus calendar date for reject reporting. Code names not yet supplied by ' +
+      'IFL are printed as their raw pair.',
   };
 }
 

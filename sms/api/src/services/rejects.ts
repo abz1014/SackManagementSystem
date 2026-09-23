@@ -105,6 +105,23 @@ export function bindRejectFilters(
  * The same filters applied to cone_event, for a denominator. Cones have no
  * reject type or code, so those never bind; everything else is the same
  * column under the same name on both tables.
+ *
+ * KNOWN GAP, reported not fixed (23 Sep 2026 reject-denominator brief, item
+ * 4): unlike weights.ts (`plausibleWhere`, cone weight_g BETWEEN 1500 and
+ * 2100 g by default), this applies NO plausibility predicate and does not
+ * require `weight_g IS NOT NULL`, so the population behind a reject rate's
+ * `produced`/cones count is not exactly the population behind the Weight
+ * screen's own cone count — two populations under one name, structurally.
+ * Measured impact today: 4 rows differ on the September generation, 221 on
+ * July, against totals in the hundred-thousands — immaterial to any rate
+ * this file or rejectSpc.ts currently reports. Not fixed here because doing
+ * so needs the per-line plausibility window, which every other caller of
+ * this function fetches asynchronously from `sms.plausibility_rule`
+ * (`coneState.ts getPlausibilityRule`) before building filters; threading
+ * that through `bindConeFilters`, `bindRejectFilters` and every synchronous
+ * caller in this file and rejectSpc.ts is a real refactor, not a one-line
+ * change, and was judged not worth the risk for a currently-immaterial
+ * discrepancy in the same pass as the denominator fix above.
  */
 export function bindConeFilters(req: SqlRequest, lineId: number, f: RejectFilters, alias = ''): string {
   return bindRejectFilters(req, lineId, { ...f, code: undefined }, alias, false);
