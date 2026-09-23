@@ -182,7 +182,13 @@ export function LineScreen({
         ) : !perSpread.data ? (
           <SkelChart />
         ) : (
-          <OutputSpread rows={perSpread.data.data.rows} spread={spread} />
+          <>
+            <OutputSpread rows={perSpread.data.data.rows} spread={spread} />
+            {/* A failed refresh must not leave a confident mark unlabelled —
+                see W.chartStale. The bars stay (they were a true reading);
+                the sentence says they stopped moving. */}
+            {perSpread.error && <p className="mut sm" style={{ marginTop: 6 }}>{W.chartStale}</p>}
+          </>
         )}
       </Block>
 

@@ -131,7 +131,12 @@ export function SacksScreen({
         ) : !s ? (
           <SkelFigures n={4} />
         ) : (
-          <SummaryFigures s={s} />
+          <>
+            <SummaryFigures s={s} />
+            {/* One sentence for everything this fetch feeds — the figures
+                here and the by-product and by-shift charts below (W.chartStale). */}
+            {summary.error && <p className="mut sm" style={{ marginTop: 10 }}>{W.chartStale}</p>}
+          </>
         )}
       </Block>
 
@@ -152,7 +157,12 @@ export function SacksScreen({
           ) : !ledger.data ? (
             <SkelChart />
           ) : (
-            <SackWeighedChart days={ledger.data.data.days} />
+            <>
+              <SackWeighedChart days={ledger.data.data.days} />
+              {/* See W.chartStale: a chart drawn from a fetch that has since
+                  failed reads as current evidence unless it says otherwise. */}
+              {ledger.error && <p className="mut sm" style={{ marginTop: 6 }}>{W.chartStale}</p>}
+            </>
           )}
         </Block>
       )}
@@ -169,7 +179,10 @@ export function SacksScreen({
           ) : !report.data ? (
             <SkelChart />
           ) : (
-            <AvgWeightPerDay report={report.data.data.report} />
+            <>
+              <AvgWeightPerDay report={report.data.data.report} />
+              {report.error && <p className="mut sm" style={{ marginTop: 6 }}>{W.chartStale}</p>}
+            </>
           )}
         </Block>
       )}

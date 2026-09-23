@@ -370,6 +370,14 @@ export const W = {
   conesPerShiftAria: 'Cones weighed per shift',
   conesResting: (n: number, spread: 'day' | 'shift', total: string, most: string, mostLabel: string) =>
     `${n} ${spread === 'day' ? (n === 1 ? 'production day' : 'production days') : (n === 1 ? 'shift' : 'shifts')} · ${total} cones · busiest ${most} on ${mostLabel}`,
+  /* A MARK READS AS EVIDENCE, which is why a chart drawn from a fetch that
+     has since failed is worse than a stale number: nothing about a bar says
+     when it was read. usePolling keeps its last payload on failure, so the
+     chart stays on screen (dropping it would lose a true reading); this line
+     says the reading stopped refreshing. Found next door on Wall.tsx, 23 Sep
+     2026, where a frozen /api/live payload kept "Line 3 is running" on a TV
+     for as long as the fetch stayed dead. */
+  chartStale: 'This chart is the last reading that arrived — the latest request failed, so it is not refreshing.',
   conesPerDayUnavailable:
     'The per-day counts could not be read, so this chart is not drawn. The figures above come from a separate call and are unaffected.',
   /* Two points are the minimum a comparison can be made from, and WHICH kind
