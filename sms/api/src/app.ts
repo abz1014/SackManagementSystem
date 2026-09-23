@@ -729,10 +729,36 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
 
   // operations — sync health, schema, DQ roll-up
+  //
+  // Measured flat ~187-225ms on every Health load, no query params — the
+  // same shape as /api/live (also no params, also cached under this exact
+  // TTL, for the same reason: "a room of wall screens and floor PCs costs
+  // one set of queries per TTL, not one per viewer" — see /api/live above).
+  // This is the DQ+sync health rollup Phase 7's reliability work centers on,
+  // so the bar here is higher than an ordinary read: a cached response must
+  // never LOOK healthier than reality for longer than the app already
+  // tolerates elsewhere. Two things keep that true —
+  //  1. Only a SUCCESSFUL response is ever written to the cache (same as
+  //     every prodCache.set below): a failed fetch throws to next(err)
+  //     before reaching prodCache.set, so a real outage is never cached as
+  //     an all-clear — the next request (cached or not) still sees it fail.
+  //  2. The bound is CACHE_TTL_SECONDS (5s default), identical to /api/live,
+  //     which already carries the line's own "is it running" signal at this
+  //     same staleness. Health is opened far less often than Wall polls
+  //     /api/live, so this is a strictly smaller staleness exposure than one
+  //     already accepted in this codebase, not a new category of risk.
   app.get('/api/operations', async (_req: Request, res: Response, next: NextFunction) => {
     try {
+      const key = 'operations';
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
       const data = await getOperations(pool, cfg.lineId);
-      res.json(await envelope(pool, cfg.lineId, data));
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -787,10 +813,25 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
    * (UX Phase 7 Brief 2). Rank 1: all three are read-only reflections of the
    * app-owned sidecar's own audit trail, no more sensitive than /api/operations.
    */
+  // Measured flat ~90-122ms, no query params, no live-safety concern: this
+  // table is explicitly the record of a MANUAL run (sms verify / rebuild),
+  // written far less often than the TTL below, never a live sync signal —
+  // see the file header's own words on `sms.verify_run` / `sms.rebuild_audit`.
+  // Same cache idiom as every other route above; a failed fetch is never
+  // written to the cache (see /api/operations' comment just above, same
+  // guarantee).
   app.get('/api/system-history', async (_req: Request, res: Response, next: NextFunction) => {
     try {
+      const key = 'system-history';
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
       const data = await getSystemHistory(pool, cfg.lineId);
-      res.json(await envelope(pool, cfg.lineId, data));
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -873,10 +914,25 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
+      // Cache keyed on every parameter that can change the answer (the same
+      // idiom as /api/weight-stations above). This is the heaviest read in
+      // the app — a full-range chart on ~535 KB of readings took 1.6-2.0 s
+      // whether warm or cold, because there was no cache here at all. Key on
+      // the raw inputs, not on anything spc.ts derives, so a service change
+      // to the limit model can never be served under a stale computation
+      // shape for the same inputs.
+      const key = `spc:${q.data.type}:${q.data.from}:${q.data.to}:${q.data.productId ?? 'none'}:${q.data.usl ?? 'none'}:${q.data.lsl ?? 'none'}:${q.data.shift ?? 'all'}:${q.data.station ?? 'all'}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
       const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type, { from: q.data.from, to: q.data.to });
       const plausibility = await getPlausibilityRule(pool, cfg.lineId);
       const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null, q.data.station ?? null);
-      res.json(await envelope(pool, cfg.lineId, data));
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }
