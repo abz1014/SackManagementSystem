@@ -25,3 +25,10 @@ npm-debug.log*
 # developer-only scratch tools (hard-code a local path; not part of the product)
 /q.mjs
 /sync-trace.mjs
+
+# Playwright layout harness (WS-PW, 23 Sep 2026) — browser artefacts, cached
+# session storage state, HTML report. See layout-tests/README.md.
+/layout-tests/.auth/
+/layout-tests/.output/
+/playwright-report/
+/test-results/
