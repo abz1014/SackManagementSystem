@@ -71,6 +71,12 @@ function fakeReport(daysWithData: number, daysInPeriod: number, cones: number): 
     downtime: empty ? null : { stoppageCount: 4, stoppedSeconds: 1200, thresholdSeconds: 120 },
     readings: empty ? null : { states: { within: 900, low: 10, high: 5, rejected: 3, unknown: 82 }, implausible: 4 },
     shiftCheck: empty ? null : { compared: cones, mismatched: 23, mismatchPct: 2.3, topHour: 13 },
+    // WS-GF (23 Sep 2026): getReport is fully mocked in this file (line 27-30
+    // above) — its real coverageReq scoping code never runs here, so this is
+    // a fixture-update only, filling the type's new required field with a
+    // harmless single-generation default. No test in this file asserts on
+    // generationNote.
+    generationNote: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 },
   };
 }
 

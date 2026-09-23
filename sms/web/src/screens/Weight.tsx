@@ -623,7 +623,17 @@ function headline(
   // together before the new fetch starts), so checking it here distinguishes
   // "no answer yet" from "no cones exist" without touching `usePolling`
   // itself or any other of its ~20 consumers.
-  if (coneLineLoading && (!s || s.count === 0)) return W.loading;
+  if (coneLineLoading && (!s || s.count == null || s.count === 0)) return W.loading;
+  // WS-GF (23 Sep 2026 red-team remediation, missingField.fuzz.test.tsx):
+  // `s.count` itself missing (a field-stripped response — a valid 200 with a
+  // hole in it, not an error and not a genuine zero) used to satisfy neither
+  // `!s` nor `s.count === 0`, so it fell all the way through to the
+  // confident-mean branch below and stated `s.mean` as if the count that
+  // mean is drawn from were known. Caught here, distinct from BOTH the
+  // genuine-empty sentence two lines down (a real count of 0) and the
+  // confident mean below (a real count) — the one thing unknown is the
+  // count itself, so no mean may be printed beside it.
+  if (s && s.count == null) return W.weight.countCouldNotRead;
   // `s` is non-null but EMPTY for a period that holds no readings: /api/spc
   // answers with count 0 and mean 0 rather than with nothing at all, so `!s`
   // alone only ever catches loading and error. Without the count check this

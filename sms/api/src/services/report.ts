@@ -28,6 +28,7 @@ import type { ShiftCode } from '@sms/shared';
 import { getProduction, type ProductionRow, type ProductionStates } from './production.js';
 import { getStoppagePatterns } from './downtime.js';
 import { getShiftCheck } from './shiftCheck.js';
+import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 /** Same 120 s split the downtime screen uses; see downtime.ts for why. */
 export const REPORT_STOP_THRESHOLD_SECONDS = 120;
@@ -165,6 +166,20 @@ export interface ReportData {
    * day they most often disagree at. Null when nothing could be compared.
    */
   shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null } | null;
+  /**
+   * WS-GF (23 Sep 2026 red-team remediation, `generationScope.guard.test.ts`
+   * KNOWN_DEFECTS): which source generation `coverage` above was computed
+   * from, and what was excluded. `coverageReq` used to carry no epoch
+   * predicate at all, unlike this file's other five queries (all already
+   * scoped through their own callees) — a period spanning IFL's 5 Aug 2026
+   * rebuild, or the dev sidecar's overlapping plant-simulator generation,
+   * pooled both generations' days into one coverage count and one
+   * first/last-day pair. Resolved by THIS function, over the same
+   * `(lineId, from, to)` key every other caller of `resolveGenerationScope`
+   * uses, so it lands on the same generation as `totals`/`byShift`/`byDay`
+   * (via `getProduction`) without threading a scope through that signature.
+   */
+  generationNote: GenerationNote;
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -225,12 +240,24 @@ export async function getReport(
   const { from, to } = resolved;
   const shiftArg = shift ?? undefined;
 
+  // WS-GF: resolved by THIS function, over the same (lineId, from, to) key
+  // every other caller of resolveGenerationScope uses — guaranteed to land
+  // on the same generation as getProduction's own scoping of totals/byShift/
+  // byDay below, without threading a scope through either signature. One
+  // extra round trip, accepted per the remediation brief (same trade-off
+  // reports/station.ts already made for the identical shape).
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
+
   const coverageReq = pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
     .input('to', mssql.Date, to);
   if (shift) coverageReq.input('shift', mssql.VarChar(10), shift);
+  const coverageWhere = andEpoch(
+    `line_id = @line AND shift_date BETWEEN @from AND @to${shift ? ' AND shift_code = @shift' : ''}`,
+    coverageReq, scope, 'cone_event',
+  );
 
   const [totalRes, shiftRes, dayRes, coverageRes, stops, shiftCheck] = await Promise.all([
     getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'none', withStates: true }),
@@ -241,7 +268,7 @@ export async function getReport(
                 CONVERT(varchar(10), MIN(shift_date), 120) AS firstDay,
                 CONVERT(varchar(10), MAX(shift_date), 120) AS lastDay
            FROM sms.cone_event
-          WHERE line_id = @line AND shift_date BETWEEN @from AND @to${shift ? ' AND shift_code = @shift' : ''}`,
+          WHERE ${coverageWhere}`,
     ),
     shift ? Promise.resolve(null) : getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS),
     getShiftCheck(pool, lineId, from, to),
@@ -296,5 +323,6 @@ export async function getReport(
             topHour: shiftCheck.topHours[0]?.hour ?? null,
           }
         : null,
+    generationNote: noteOf(scope),
   };
 }
