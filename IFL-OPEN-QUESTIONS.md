@@ -315,15 +315,19 @@ confirm they are moot rather than assuming it.
 - And one open design point from the 15 September meeting itself: **does the machine take the
   running product from PDAS's active flag, or from the operator's HMI?** It decides whether a
   product change made in software reaches the machine or only the records.
-- **New, from today's build — a loose end on the 18 August story.** An earlier version of our
-  own project notes said your engineer hit a "duplicate product" refusal four times in six
-  minutes on 18 August while trying to change a setpoint. We looked again at the ten screenshots
-  that story rests on and found no error of any kind in any of them — every call shown returns
-  a clean, empty result. We no longer repeat the 18 August story as fact, and we are not asking
-  you to confirm it happened. We would still like to know, in general and not tied to that one
-  date: has an engineer ever hit a "this product already exists" message while trying to change
-  a setpoint by re-creating the product? It would confirm something we can currently only infer
-  from reading your stored procedures' own code.
+- **New, from today's build — the 18 August incident, now confirmed and asking a different
+  question than before.** An earlier version of our project notes said your engineer hit a
+  "duplicate product" refusal four times in six minutes on 18 August, sourced from ten SSMS
+  screenshots that in fact show no error — so an earlier pass of this document marked the story
+  unverified. It no longer is. Your system's own event log records it directly (re-verified
+  today, read-only, against `PDAS_TP1U2_SEP07.dbo.nhs_events`): four "Material already exist"
+  refusals at **10:35, 10:39, 10:40 and 10:41** on 18 August, bracketed by your own software
+  deactivating and then reactivating MaterialId 1022 at 10:39:01 and 10:43:17. We are not
+  asking you to confirm this happened — we can see it happened. What we would like to know is
+  **why**: what was the engineer trying to achieve in that four-minute window? Our software can
+  already do a retire-and-recreate through this screen, so knowing the actual goal — a setpoint
+  correction, a new variant, something else — lets us offer it as one supported action instead
+  of leaving an engineer to find the same workaround in SSMS.
 
 ---
 
