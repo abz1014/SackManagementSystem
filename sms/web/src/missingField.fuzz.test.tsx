@@ -105,7 +105,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import { installFakeFetch, type RouteRequest } from './testkit/fetchRouter';
 import { render, renderWithLive } from './testkit/render';
-import { META_FIXTURE, stripFields } from './testkit/fixtures';
+import { LIVE_FIXTURE, META_FIXTURE, stripFields } from './testkit/fixtures';
 import { W } from './lib/words';
 import { fmtG } from './lib/fmt';
 import type { Period } from './lib/period';
@@ -114,15 +114,35 @@ import type {
   ConeWeightReportData,
   Envelope,
   ProductionData,
+  ProductionRow,
   RegisterPage,
   RegisterRow,
+  RejectSpcData,
+  SackSummaryData,
   SpcData,
   WeightStationsData,
 } from './api';
 import { ReadingsScreen } from './screens/Readings';
 import { WeightScreen } from './screens/Weight';
+import { LineScreen } from './screens/Line';
+import { RejectsScreen } from './screens/Rejects';
+import { SacksScreen } from './screens/Sacks';
 import { ConeWeightSection } from './screens/report/ConeWeight';
 import { CalibrationSection } from './screens/report/Calibration';
+
+/**
+ * KNOWN_DEFECTS — currently-OPEN findings from this pass (23 Sep 2026,
+ * WS-FZ2), each with a staleness canary of its own further down this file.
+ * Per this pass's own brief: record here and report; do not fix — every
+ * screen below is owned by a different worker. Delete an entry (and rewrite
+ * its canary test as a two-sided proof, the way the Calibration WS-OR entry
+ * was, and the Line/Rejects entries were on 23 Sep 2026 (WS-CR) once `affa9bd`
+ * fixed both) only once the production file it names actually changed.
+ *
+ * Empty as of WS-CR: both entries this file ever held (Line.tsx periodFigures,
+ * Rejects.tsx headline) were closed by `affa9bd` and converted below.
+ */
+const KNOWN_DEFECTS: Record<string, string> = {};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -550,5 +570,307 @@ describe('MISSING-FIELD FUZZ — Report / Calibration, CalibrationReportData.fla
     const { container } = render(<CalibrationSection d={zero} names={[]} />);
     expect(container.textContent ?? '').toContain('0 stations flagged for drift');
     expect(container.textContent ?? '').not.toContain('undefined');
+  });
+});
+
+/* ===================================================================== *
+ * LINE — screens/Line.tsx, ProductionRow.cones (periodFigures' own cones  *
+ * tile) — the screen the task brief names as the live proof of this       *
+ * defect class ("0 cones ... directly above its own chart still reading   *
+ * 77,492 cones"). ae7a59b closed the case where the SERVER names the      *
+ * field in `dataIssues[]`; `affa9bd` closed the remaining case below — a   *
+ * plain stripped key with NO dataIssues entry — by adding `fieldMissing()` *
+ * (Line.tsx), a structural `!(field in r)` check applied IN ADDITION TO   *
+ * `issueFor()`'s server-flagged check, across periodFigures and           *
+ * kpiBlockNote, for cones/sacks/sackWeightKg/rejectedCones. FIXED 23 Sep  *
+ * 2026 (WS-CH); converted from KNOWN_DEFECT to a two-sided regression     *
+ * proof 23 Sep 2026 (WS-CR). A fuller per-tile breakdown (sacks and       *
+ * rejectedCones individually, not just cones) now also lives in the       *
+ * dedicated `screens/Line.render.test.tsx`.                               *
+ * ===================================================================== */
+
+const LINE_BASE_ROUTES = {
+  '/api/live': LIVE_FIXTURE,
+  '/api/stations': STATIONS_OK,
+  '/api/product-at': { product: null, limits: null, neverRecorded: true },
+  '/api/products': { products: [] },
+  '/api/attention': {
+    data: {
+      window: { from: '2026-08-24', to: '2026-09-07', days: 14 },
+      period: { from: '2026-09-07', to: '2026-09-07', shift: null },
+      findings: [], totalFindings: 0, thresholds: { driftG: 15, minDaysHeld: 3 },
+    },
+    metadata: META_FIXTURE,
+  },
+  '/api/machines/running': {
+    data: {
+      asOfUtc: '2026-09-07T16:40:00Z',
+      windowMs: 7_200_000,
+      windowStartUtc: '2026-09-07T14:40:00Z',
+      machines: [],
+      materialsRunning: 0,
+      generation: LIVE_FIXTURE.data.lines[0]!.generation,
+    },
+    metadata: META_FIXTURE,
+  },
+};
+
+function lineProductionRoute(row: ProductionRow, dataIssues: ProductionData['dataIssues'] = []): Envelope<ProductionData> {
+  return {
+    data: { groupBy: 'none', rows: [row], unattributed: null, states: null, implausible: null, dataIssues },
+    metadata: META_FIXTURE,
+  };
+}
+
+const LINE_PERIOD = {
+  key: 'shift' as const,
+  from: '2026-09-07',
+  to: '2026-09-07',
+  tsTo: '2026-09-07T23:59:59.000Z',
+  live: true,
+  days: 1,
+};
+
+function lineProps() {
+  return {
+    period: LINE_PERIOD,
+    onNavigate: noop,
+    onOpenStation: noop,
+    onOpenReading: noop,
+    onOpenProduct: noop,
+    canWrite: false,
+  };
+}
+
+describe('KNOWN_DEFECTS — this file\'s own open-findings register (WS-FZ2, 23 Sep 2026)', () => {
+  it('every entry, if any, names a file this pass reports on, not fixes — currently empty (both prior entries closed by affa9bd, converted 23 Sep 2026 WS-CR)', () => {
+    const entries = Object.entries(KNOWN_DEFECTS);
+    for (const [key, note] of entries) {
+      expect(key.length).toBeGreaterThan(0);
+      expect(note.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('MISSING-FIELD FUZZ — Line, ProductionRow.cones (periodFigures, Line.tsx:500,531-538) — FIXED (WS-CH, affa9bd), regression-proven here', () => {
+  it('cones KEY DELETED (stripFields), dataIssues EMPTY (the server never flagged it): FIXED — the cones tile reads "—" with the could-not-read note, never a bare "0", because `fieldMissing()` catches the structural hole `issueFor()` alone cannot see', async () => {
+    const holedRow = stripFields(
+      { group: 'total', cones: 20_000, rejectedCones: 400, unmatchedRejects: 350, sacks: 800, sackWeightKg: 22_000, conesInRangePct: 97, sacksPassedScalePct: 95 } as ProductionRow,
+      ['cones'],
+    );
+    installFakeFetch({ ...LINE_BASE_ROUTES, '/api/production': lineProductionRoute(holedRow, []) });
+
+    const { findAllByText, container } = renderWithLive(<LineScreen {...lineProps()} />);
+
+    // The cones tile specifically (first of periodFigures' four tiles) —
+    // '—' as the value, the could-not-read note attached, never a bare '0'.
+    // Querying the whole-page '0' text would be vacuous: the fourth tile
+    // (outsideLimits) legitimately renders '0' here regardless of this
+    // field, so the precise claim has to be about the cones tile alone.
+    const notes = await findAllByText(W.fig.couldNotRead);
+    expect(notes.length).toBeGreaterThan(0);
+
+    const figVals = Array.from(container.querySelectorAll('.fig-val')).map((el) => el.textContent);
+    expect(figVals[0]).toMatch(/^—/);
+    expect(figVals[0]).not.toMatch(/^0/);
+  });
+
+  it('two-sided: a GENUINE real 0 (cones present, not stripped, no dataIssues) still renders the honest "0 cones", with no could-not-read caveat — proving the fix above does not turn a real empty reading into a false alarm', async () => {
+    const realRow: ProductionRow = {
+      group: 'total', cones: 0, rejectedCones: 0, unmatchedRejects: 0,
+      sacks: 800, sackWeightKg: 22_000, conesInRangePct: null, sacksPassedScalePct: null,
+    };
+    installFakeFetch({ ...LINE_BASE_ROUTES, '/api/production': lineProductionRoute(realRow, []) });
+
+    const { findAllByText, queryByText } = renderWithLive(<LineScreen {...lineProps()} />);
+    const zeros = await findAllByText('0');
+    expect(zeros.length).toBeGreaterThan(0);
+    expect(queryByText(W.fig.couldNotRead)).toBeNull();
+  });
+
+  it('fix holds: cones PRESENT as a real 0 AND named in dataIssues (the server-flagged shape ae7a59b actually fixes) shows the dash and the caveat, never a bare "0"', async () => {
+    const flaggedRow: ProductionRow = {
+      group: 'total', cones: 0, rejectedCones: 0, unmatchedRejects: 0,
+      sacks: 800, sackWeightKg: 22_000, conesInRangePct: null, sacksPassedScalePct: null,
+    };
+    installFakeFetch({
+      ...LINE_BASE_ROUTES,
+      '/api/production': lineProductionRoute(flaggedRow, [
+        { field: 'cones', group: 'total', reason: 'cone_event aggregate row is missing its count (n)' },
+      ]),
+    });
+
+    const { findAllByText } = renderWithLive(<LineScreen {...lineProps()} />);
+    const notes = await findAllByText(W.fig.couldNotRead);
+    expect(notes.length).toBeGreaterThan(0);
+  });
+});
+
+/* ===================================================================== *
+ * REJECTS — screens/Rejects.tsx, RejectSpcData.totalRejects (the headline  *
+ * count+rate, Rejects.tsx:266-289) — arithmetic done BEFORE formatting,    *
+ * the same shape Sacks.tsx's WS-B2 fix (finiteOrNull) exists to close.     *
+ * `affa9bd` added the identical guard here: `rejectSum = finiteOrNull(     *
+ * q.totalRejects + w.totalRejects)`, folded into the same `CountState`     *
+ * (ok/pending/failed) the rest of this screen already uses, so a NaN sum   *
+ * now renders the same '—' a genuine fetch failure does. FIXED 23 Sep      *
+ * 2026 (WS-CH); converted from KNOWN_DEFECT to a two-sided regression      *
+ * proof 23 Sep 2026 (WS-CR). A fuller breakdown (including the             *
+ * `totalInspected`-poisons-the-rate case) now also lives in the dedicated  *
+ * `screens/Rejects.headline.test.tsx`.                                    *
+ * ===================================================================== */
+
+const REJECTS_PERIOD: Period = {
+  key: 'shift', from: '2026-09-07', to: '2026-09-07',
+  tsFrom: '2026-09-07T09:00:00Z', tsTo: '2026-09-07T17:00:00Z',
+  shift: 'evening', live: true, days: 1,
+};
+
+const RANGE_OK = { minDate: '2026-08-24', maxDate: '2026-09-07' };
+
+function rejectGenerations(totalInspected: number) {
+  return [{ generation: 2, totalProduced: totalInspected - 40, totalRejects: 40, totalInspected, pBar: 0.02, firstBucketTs: '2026-08-24T00:00:00Z', lastBucketTs: '2026-09-07T17:00:00Z' }];
+}
+
+function rejectSpcFixture(rejectType: 'quality' | 'weight', totalRejects: number, totalProduced: number): RejectSpcData {
+  return {
+    bucketSize: 'day', rejectTypeFilter: rejectType, totalProduced, totalRejects,
+    pBar: totalProduced > 0 ? totalRejects / totalProduced : null,
+    spansGenerations: false,
+    generations: rejectGenerations(totalProduced + totalRejects),
+    outOfControlCount: 0, buckets: [], episodes: [],
+  };
+}
+
+function rejectsRoutes(quality: RejectSpcData, weight: RejectSpcData) {
+  return {
+    '/api/live': LIVE_FIXTURE,
+    '/api/range': RANGE_OK,
+    '/api/stations': STATIONS_OK,
+    '/api/products': { products: [] },
+    '/api/reject-spc': (req: RouteRequest) => {
+      const data = req.search.get('rejectType') === 'weight' ? weight : quality;
+      return { data, metadata: META_FIXTURE };
+    },
+    '/api/rejects': { data: { total: 0, reasons: [], unattributed: null }, metadata: META_FIXTURE },
+    '/api/rejects/by-day-code': { data: { dayBasis: 'production_day', denominator: 'cones_plus_rejects', days: 1, total: 0, rows: [] }, metadata: META_FIXTURE },
+  };
+}
+
+function rejectsProps() {
+  return {
+    period: REJECTS_PERIOD,
+    station: null, onStationChange: noop,
+    product: null, onProductChange: noop,
+    code: null, onCodeChange: noop,
+    onSeeCones: noop, onSeeStations: noop, onOpenReason: noop,
+    canName: false,
+  };
+}
+
+describe('MISSING-FIELD FUZZ — Rejects, RejectSpcData.totalRejects (headline, Rejects.tsx:266-289) — FIXED (WS-CH, affa9bd), regression-proven here', () => {
+  it('totalRejects KEY DELETED from the quality series, weight series real: FIXED — the headline reads "—", never the literal word "NaN", because `finiteOrNull` folds a NaN sum into the same failed CountState a genuine fetch failure uses', async () => {
+    const holedQuality = stripFields(rejectSpcFixture('quality', 25, 12_000), ['totalRejects']);
+    const weightOk = rejectSpcFixture('weight', 10, 12_000);
+    installFakeFetch(rejectsRoutes(holedQuality, weightOk));
+
+    const { findByRole } = renderWithLive(<RejectsScreen {...rejectsProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+
+    await waitFor(() => expect(h1.textContent).toBe('—'));
+    expect(h1.textContent).not.toContain('NaN');
+  });
+
+  it('two-sided: BOTH series genuinely reporting zero rejects (real 0, not stripped) renders the honest "0 cones rejected, 0.0% of everything weighed", never "NaN" — proves the NaN above is specific to the hole, not to zero itself', async () => {
+    const qualityZero = rejectSpcFixture('quality', 0, 12_000);
+    const weightZero = rejectSpcFixture('weight', 0, 12_000);
+    installFakeFetch(rejectsRoutes(qualityZero, weightZero));
+
+    const { findByRole } = renderWithLive(<RejectsScreen {...rejectsProps()} />);
+    const h1 = await findByRole('heading', { level: 1 });
+    await waitFor(() => expect(h1.textContent).toContain('0 cones rejected'));
+    expect(h1.textContent).not.toContain('NaN');
+  });
+});
+
+/* ===================================================================== *
+ * SACKS — screens/Sacks.tsx, SackGroup.kg (SummaryFigures + the headline, *
+ * Sacks.tsx:142-146,432) — the WS-B2 fix (`finiteOrNull`), fuzzed fresh    *
+ * here to prove it holds, and used below for the required revert-and-fail *
+ * demonstration (git diff pasted after restoring).                        *
+ * ===================================================================== */
+
+const SACKS_PERIOD: Period = {
+  key: 'shift', from: '2026-09-07', to: '2026-09-07',
+  tsFrom: '2026-09-07T09:00:00Z', tsTo: '2026-09-07T17:00:00Z',
+  shift: 'evening', live: true, days: 1,
+};
+
+const SACK_TOTALS_FIXTURE: SackSummaryData['totals'] = {
+  sacks: 96, kg: 2649.6, avgKg: 27.6, inRangePct: 94.1, inRange: 90, noFlag: 2, implausible: 0,
+  cones: 4820, conesPerSack: 50,
+};
+
+function sacksSummaryEnvelope(totals: SackSummaryData['totals']): Envelope<SackSummaryData> {
+  return {
+    data: {
+      from: SACKS_PERIOD.from, to: SACKS_PERIOD.to, shift: SACKS_PERIOD.shift ?? null, product: null,
+      totals, byShift: [], byProduct: [],
+      unattributed: { rows: 0, of: totals.sacks },
+      weightBasis: 'gross', tareKg: 0.6, plausibility: { loKg: 40, hiKg: 60 },
+      sackTimeIsInsertTime: true, conesPerSackApproximate: true,
+      machineLevel: { enabled: false, reason: 'no machine column on sack1_TP1U2' },
+    },
+    metadata: META_FIXTURE,
+  };
+}
+
+const SACKS_LEDGER_EMPTY = {
+  data: {
+    from: SACKS_PERIOD.from, to: SACKS_PERIOD.to, product: null, basis: 'line', machineLevel: { enabled: false, reason: 'n/a' },
+    dayBasis: 'production_day', sackTimeIsInsertTime: true, receiptMeaning: 'x', weightBasis: 'gross', tareKg: 0.6,
+    opening: { sacks: 0, kg: 0 }, closing: { sacks: 0, kg: 0 },
+    totals: { openingEntries: { sacks: 0, kg: 0 }, receipts: { sacks: 0, kg: 0 }, weighed: { sacks: 0, kg: 0 }, issues: { sacks: 0, kg: 0 }, consumption: { sacks: 0, kg: 0 }, adjustments: { sacks: 0, kg: 0 } },
+    days: [], byMaterial: [], kgMissing: 0,
+  },
+  metadata: META_FIXTURE,
+};
+
+function sacksRoutes(totals: SackSummaryData['totals']) {
+  return {
+    '/api/live': LIVE_FIXTURE,
+    '/api/sacks/summary': sacksSummaryEnvelope(totals),
+    '/api/sacks/stock': SACKS_LEDGER_EMPTY,
+    '/api/reports/sack': { data: { report: { byDay: [], totals: { avgSackKg: null } } }, metadata: META_FIXTURE },
+    '/api/products': { products: [] },
+    '/api/events': { data: { rows: [], total: 0, page: 1, pageSize: 25 }, metadata: META_FIXTURE },
+  };
+}
+
+function sacksProps() {
+  return {
+    period: SACKS_PERIOD, unit: 'sacks' as const, onUnitChange: noop,
+    page: 1, onPageChange: noop, canRecord: false, onOpenReading: noop, onOpenDay: noop,
+  };
+}
+
+describe('MISSING-FIELD FUZZ — Sacks, SackGroup.kg (SummaryFigures + headline) — proving the WS-B2 fix (finiteOrNull) holds under fresh field-stripping', () => {
+  it('kg KEY DELETED on an otherwise-real, non-empty totals row: headline and figure tile print "—", never the literal "NaN" (this is the REVERT-DEMONSTRATION case — see below)', async () => {
+    const holedTotals = stripFields(SACK_TOTALS_FIXTURE, ['kg']);
+    installFakeFetch(sacksRoutes(holedTotals));
+    const { container } = renderWithLive(<SacksScreen {...sacksProps()} />);
+
+    await waitFor(() => expect(container.textContent ?? '').toContain('94.1%'));
+    expect(container.textContent ?? '').not.toContain('NaN');
+    expect(container.textContent ?? '').toContain('—');
+  });
+
+  it('two-sided partner: kg PRESENT as the real number 0 correctly reads "0 kg", not a dash and not NaN', async () => {
+    const zeroKg: SackSummaryData['totals'] = { ...SACK_TOTALS_FIXTURE, kg: 0 };
+    installFakeFetch(sacksRoutes(zeroKg));
+    const { container } = renderWithLive(<SacksScreen {...sacksProps()} />);
+    await waitFor(() => expect(container.textContent ?? '').toContain('94.1%'));
+    expect(container.textContent ?? '').not.toContain('NaN');
+    expect(container.textContent ?? '').toContain('0 kg');
   });
 });
