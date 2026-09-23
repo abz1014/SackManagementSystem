@@ -1668,6 +1668,29 @@ export interface SpcData {
   median: number | null;
 }
 
+/**
+ * The source generation the X̄ chart is drawn from, and the X̄ band itself
+ * (api/src/services/spc.ts, 23 Sep 2026). Declared here as a separate merged
+ * block, the convention this file already uses, so nothing above changes.
+ *
+ *  - `generation` / `otherGenerationExcluded` / `spansGenerations`: every
+ *    query behind an /api/spc payload is scoped to ONE physical generation of
+ *    the source tables (IFL dropped and recreated theirs on 5 Aug 2026).
+ *    Readings in the requested period that belong to another generation are
+ *    excluded, not pooled — and the screen must SAY so, or it implies the
+ *    period is fully represented when it is not.
+ *  - `xLimits.valid`: false when there are too few time-contiguous subgroup
+ *    pairs to estimate MR̄ from. The server then also forces every
+ *    `Subgroup.xViolates` to false. Nothing may draw the band or its marks
+ *    when this is false.
+ */
+export interface SpcData {
+  generation: { epochId: number; ordinal: number; label: string | null; provenance: string | null } | null;
+  otherGenerationExcluded: number;
+  spansGenerations: boolean;
+  xLimits: { valid: boolean; mrBar: number; sigmaBetween: number; halfWidth: number; pairs: number };
+}
+
 /** The plant's UTC offset in minutes as the server sees it — the one the client converts with. */
 export interface LiveLine {
   plantOffsetMinutes: number;

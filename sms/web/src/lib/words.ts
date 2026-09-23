@@ -618,6 +618,45 @@ export const W = {
        spread of the group means themselves, no distributional claim
        attached. */
     spanNote: (lo: string, hi: string) => `group means in this period have ranged ${lo} to ${hi}`,
+    /* THE X̄ BAND, RESTORED 23 Sep 2026 (DEFECTS.md D-10). The band the dots
+       and this sentence report is no longer X̿ ± 3σ_within/√n — that model
+       assumed zero movement between one group and the next and flagged
+       16-38% of groups. It is now an I-MR band on the group averages
+       themselves, X̿ ± 2.66·MR̄, measured only from time-contiguous groups of
+       one source generation (api/src/services/spc.ts). The second clause is
+       not decoration: measured on this plant's own readings the band still
+       puts 5.6% (September) to 13.1% (July) of groups outside it, and
+       without saying WHY a reader counts 218 crises in a fortnight. A band
+       set from adjacent-group movement is by construction narrow against a
+       level that wanders over weeks. */
+    outsideBand: (n: string, total: string) =>
+      `${n} of ${total} group averages fell outside the control band — the band is set from the movement between one group and the next, so a slow change in level across the period puts many groups outside it.`,
+    /* spc.ts marks the band invalid below 3 time-contiguous group pairs and
+       forces every violation false. Nothing is drawn then, and the screen
+       says that rather than leaving an unexplained bare line. */
+    bandInvalid: 'No control band is drawn for this period: there are too few consecutive groups to measure one from.',
+    /* The pattern rules (runs, trends, zone tests — Nelson 2-8) stay
+       suppressed, and this says so rather than letting their absence read as
+       "no patterns found". Measured 23 Sep 2026 against the two real source
+       generations on the dev copy: 54.8% of groups flag on July's full
+       range, 38.8% and 37.6% on September's — mostly rule 2 (nine in a row
+       on one side) and rule 6 (four of five beyond 1σ), which is what an
+       autocorrelated, slowly wandering level looks like to rules written for
+       independent samples. A mark on two groups in five is not a finding. */
+    patternsWithheld:
+      'Run and trend patterns are not marked: measured against this line’s own readings they flag roughly two groups in every five, which is too many to act on.',
+    /* ONE SOURCE GENERATION (23 Sep 2026). IFL dropped and recreated their
+       four weighing tables on 5 Aug 2026, restarting every id at 1; the app
+       calls each physical instance a generation and refuses to pool them.
+       The chart is therefore right to exclude the others — but excluding
+       them SILENTLY is the no-over-claiming rule read backwards, because the
+       screen then implies the period is fully represented when it is not.
+       Measured on the dev copy: a 21 Aug - 15 Sep window held 219,942
+       readings and the chart drew 55,058 of them. Deliberately says
+       "generation", never how a particular generation arose — the case this
+       has to read correctly for is IFL's own table rebuild. */
+    oneGeneration: (shown: string, excluded: string) =>
+      `This chart covers one generation of the source tables: ${shown} readings. Another ${excluded} readings in this period belong to a different generation — the tables were rebuilt and their numbering restarted — and are left out rather than mixed in, because the two are not one continuous record.`,
     /* One pair of limit lines, one version of the tolerance. */
     limitsChanged: (n: number) =>
       n === 1

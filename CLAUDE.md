@@ -42,13 +42,25 @@ on both generations, confirming the match is exact. `SCHEMA.md`'s `rejectWeight1
 section, which claimed the reject and accept streams are disjoint, is corrected in place
 (dated, old claim kept, not deleted) — that claim is false by this same measurement.
 
-**A fourth copy was found and left unfixed, on purpose, to keep this pass's blast radius to
-the two screens named in the brief:** `api/src/services/weightStations.ts`'s
-`rejectRatesByStation` — the Weight screen's own per-station and line-wide reject rate, and
-`reports/station.ts`'s fallback — still computes `rejects / (cones + rejects)`. This is a
-real, measured disagreement (Weight screen vs. Rejects screen / management summary) waiting
-to surface the same way this one did; `KPI-DEFINITIONS.md` row 5's note names it explicitly
-so it is not lost.
+**The third copy was closed later the same day (23 Sep 2026).**
+`api/src/services/weightStations.ts`'s `rejectRatesByStation` — the Weight screen's own
+per-station and line-wide reject rate, and `reports/station.ts`'s fallback — computed
+`rejects / (cones + rejects)`, which is why Weight printed a lower figure than Rejects and
+the management summary for the same period. It now calls the same `getUnmatchedRejects`.
+**Per-station attribution was measured, not assumed:** an unmatched reject carries its own
+`source_station`, and across every real generation on the dev copy exactly three unmatched
+rejects (one per real epoch, all on the 1969-12-31 clock-fault day) carry none — excluded
+from the per-station denominators, included in the line total, the same asymmetry the line
+totals already had for station-less rows. Measured agreement, all three services driven
+against the live sidecar: **2026-08-05 → 2026-08-20 (September generation only) — 3.40 % on
+all three; 2026-06-22 → 2026-07-10 (July generation only) — 2.21 % on all three.**
+`api/src/services/rejectRateThreeWayAgreement.test.ts` fails if any of the three diverges,
+and was proven to fail against a deliberately reverted `weightStations.ts`.
+**One qualification, by design:** `rejectSpc.ts` reports p̄ for a SINGLE source generation,
+so over a window spanning the 5 Aug rebuild its figure describes one generation while the
+reports and Weight describe the whole window (measured: 2.23 % vs 3.39 % over
+2026-08-05 → 2026-09-07 on the dev copy, whose sidecar also holds simulator rows). Compare
+the three only over a single-generation period.
 
 A new test, `api/src/services/reportRejectRateAgreement.test.ts`, drives both `toReportLine`
 and `rejectSpc.ts` against one dataset with both matched and unmatched rejects (a dataset

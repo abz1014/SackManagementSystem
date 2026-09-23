@@ -55,9 +55,10 @@ const { getWeightStations } = await import('./weightStations.js');
 
 /**
  * Serves getWeightStations' own queries in order: first the per-station
- * reject counts, then the LINE totals. Two result sets, because the line
- * total is deliberately counted without the `source_station IS NOT NULL`
- * filter the per-station query needs.
+ * reject counts, then the LINE totals (counted without the
+ * `source_station IS NOT NULL` filter the per-station query needs), then —
+ * since the 23 Sep 2026 denominator correction — the unmatched-reject
+ * counts grouped by station, with station-less rows under `__no_station__`.
  */
 function fakePool(...responses: unknown[][]): ConnectionPool {
   let i = 0;
@@ -84,23 +85,50 @@ describe('getWeightStations — line reject rate (finding H2)', () => {
         { st: 2, cones: 1800, rejects: 18 },
       ],
       [{ cones: 2050, rejects: 40 }],
+      // Unmatched rejects (23 Sep 2026): of the 40 rejects, only 9 are NOT
+      // already one of the 2050 cones — 5 at station 1, 3 at station 2 and
+      // 1 carrying no station id at all. The other 31 were weighed, counted
+      // once in `cones`, and then rejected downstream.
+      [
+        { grp: '1', n: 5 },
+        { grp: '2', n: 3 },
+        { grp: '__no_station__', n: 1 },
+      ],
     );
 
     const data = await getWeightStations(pool, 1, '2026-07-01', '2026-07-19');
 
-    // 40 / (2050 + 40) — the whole line, station or not.
-    expect(data.lineRejectRatePct).toBeCloseTo((100 * 40) / 2090, 2);
-    // Summing only the stations would give 38/2038 and silently drop the
+    // 40 / (2050 + 9) — the whole line, station or not, counting each
+    // physical cone once.
+    expect(data.lineRejectRatePct).toBeCloseTo((100 * 40) / 2059, 2);
+    // The pre-23-Sep-2026 denominator, cones + EVERY reject, would read
+    // 40/2090 — lower, because 31 cones were counted twice.
+    expect(data.lineRejectRatePct).not.toBeCloseTo((100 * 40) / 2090, 2);
+    // Summing only the stations would give 39/2046 and silently drop the
     // station-less rows.
-    expect(data.lineRejectRatePct).not.toBeCloseTo((100 * 38) / 2038, 3);
-    // And a mean of the per-station rates would land near 5.04.
+    expect(data.lineRejectRatePct).not.toBeCloseTo((100 * 39) / 2046, 3);
+    // And a mean of the per-station rates would land near 5.4.
     expect(data.lineRejectRatePct!).toBeLessThan(3);
 
-    // The per-station rates themselves were always right; keep them pinned so
-    // a future "fix" to the line rate cannot quietly change these instead.
+    // The per-station rates use the same corrected denominator: the station's
+    // cones plus only ITS unmatched rejects.
     const s1 = data.stations.find((s) => s.station === 1)!;
     const s2 = data.stations.find((s) => s.station === 2)!;
-    expect(s1.rejectRatePct).toBeCloseTo((100 * 20) / 220, 2);
-    expect(s2.rejectRatePct).toBeCloseTo((100 * 18) / 1818, 2);
+    expect(s1.rejectRatePct).toBeCloseTo((100 * 20) / 205, 2);
+    expect(s2.rejectRatePct).toBeCloseTo((100 * 18) / 1803, 2);
+  });
+
+  it('a station whose rejects all matched a cone row divides by its cones alone', async () => {
+    // No group in the unmatched result at all for station 1 — a zero count
+    // produces no GROUP BY row. That is 0 unmatched, the real answer, not a
+    // missing value to fall back from.
+    const pool = fakePool(
+      [{ st: 1, cones: 1000, rejects: 40 }],
+      [{ cones: 1000, rejects: 40 }],
+      [],
+    );
+    const data = await getWeightStations(pool, 1, '2026-07-01', '2026-07-19');
+    expect(data.stations.find((s) => s.station === 1)!.rejectRatePct).toBeCloseTo(4, 2);
+    expect(data.lineRejectRatePct).toBeCloseTo(4, 2);
   });
 });

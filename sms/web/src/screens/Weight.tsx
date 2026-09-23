@@ -38,7 +38,7 @@ import {
 import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
-  getSpc, getWeightStations, getStations, getProduction, stationLabel,
+  getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
   type SpcData, type SpcType, type StationRow, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
@@ -474,22 +474,36 @@ export function WeightScreen({
                 chart toggle now, so its population word and its unit (spc.ts's
                 own `unit`, 'g' for cones or 'kg' for sacks) must too — this
                 used to hardcode "cones" and "g" unconditionally. */}
-            {/* DEFECTS.md (22 Sep 2026): the sentence naming s.xbarOutOfControl /
-                s.nelsonFlagged as counts of flagged groups is removed — it
-                stated the same band D-1 showed does not fit this process (503
-                of ~3,130 subgroups "out of control" at month scale, ~16% vs an
-                expected ~0.3%) as if it were a finding about the line. The two
-                fields stay on the wire (spc.ts) for whoever fixes the limit
-                model; nothing on screen asserts them until then. No replacement
-                sentence is added — see the worker's report for the string this
-                would need if one is wanted (words.ts is owned by another
-                worker this pass). */}
+            {/* DEFECTS.md D-10, restored 23 Sep 2026. The 22 Sep suppression
+                removed the s.xbarOutOfControl sentence because the band it
+                counted against (X̿ ± 3σ_within/√n) assumed no movement at all
+                between groups and flagged 16-38% of them. spc.ts replaced
+                that band with an I-MR band on the group averages themselves
+                (6052b69), so the count is now a statement about a defensible
+                model and comes back — with the band's own basis named in the
+                same sentence, because 5.6-13.1% of groups still fall outside
+                it on real data and a bare count would read as that many
+                crises. s.nelsonFlagged does NOT come back: see
+                W.weight.patternsWithheld and this file's OverTime chart. */}
             Over this period: {fmtInt(s.count)} {kindWord(s.unit)}, mean {fmtW(s.mean, s.unit)}
             {s.median != null ? `, median ${fmtW(s.median, s.unit)}` : ''}, standard deviation{' '}
             {s.stdevOverall.toFixed(2)} {s.unit} overall and {s.stdevWithin.toFixed(2)} {s.unit} within{' '}
-            {s.bucketLabel} groups.
+            {s.bucketLabel} groups.{' '}
+            {s.xLimits.valid
+              ? W.weight.outsideBand(fmtInt(s.xbarOutOfControl), fmtInt(s.subgroups.length))
+              : W.weight.bandInvalid}{' '}
+            {W.weight.patternsWithheld}
             {s.capability.cpk != null && ` Cp ${s.capability.cp?.toFixed(2)}, Cpk ${s.capability.cpk.toFixed(2)}.`}
           </p>
+        )}
+        {/* ONE SOURCE GENERATION (23 Sep 2026). getWeightSpc scopes every
+            query to a single generation of the source tables and reports how
+            much of the requested period that left out. Excluding the rest is
+            right; excluding it silently is not — on a 21 Aug - 15 Sep window
+            of the dev copy the chart drew 55,058 of the period's 219,942
+            readings and said nothing. */}
+        {s && s.spansGenerations && (
+          <p>{W.weight.oneGeneration(fmtInt(s.count), fmtInt(s.otherGenerationExcluded))}</p>
         )}
         {d != null && (
           <p>
@@ -759,17 +773,15 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
       <Readout
         hovered={
           h
-            // DEFECTS.md (22 Sep 2026, reacting to D-1/62263da): this used to
-            // append a "non-random pattern" clause driven by h.nelson/h.xViolates
-            // — both are zone tests against the SAME per-subgroup X̄ control
-            // limits (grandMean ± 3·σ_within/√n) that D-1 showed do not fit this
-            // process (16% of points "out of control" at month scale against an
-            // expected ~0.3%). Rule 1 (xViolates) and rules 2-8 (nelson) share
-            // that one band, so both are suppressed together here, not just
-            // xViolates alone. The per-station drift sparkline below uses a
-            // wholly separate day-level computation (calibration.ts) and is
-            // untouched — see the dated note on its own dot rendering.
-            ? `${tickLabel(h.ts, multiDay)} · ${fmtW(h.mean, spc.unit)}, the average of ${fmtInt(h.n)} ${kindWord(spc.unit)}`
+            // DEFECTS.md D-10, restored 23 Sep 2026: the hover names rule 1
+            // again, and ONLY rule 1 — under the same `xLimits.valid` gate as
+            // the dot, so the readout and the mark can never disagree about
+            // whether the band exists. h.nelson (rules 2-8) is still not
+            // read here; see the dot-rendering note below for the measured
+            // flag rates that keep it off.
+            ? `${tickLabel(h.ts, multiDay)} · ${fmtW(h.mean, spc.unit)}, the average of ${fmtInt(h.n)} ${kindWord(spc.unit)}${
+                spc.xLimits.valid && h.xViolates ? ` · ${W.calibration.patternOn(NELSON_RULE_LABEL[1])}` : ''
+              }`
             : null
         }
         resting={`${g.length} groups of about ${fmtInt(Math.round(avgN))} ${kindWord(spc.unit)}${
@@ -786,12 +798,26 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
         {limitLine(spc.spec.lsl, `lower limit ${fmtW(spc.spec.lsl, spc.unit)}`)}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
         <path d={linePath(g.map((p, i) => ({ x: x(i), y: y(p.mean) })))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
-        {/* DEFECTS.md (22 Sep 2026): violation/pattern dots (p.xViolates, rule 1,
-            and p.nelson, rules 2-8) suppressed — both are zone tests against
-            the same per-subgroup X̄ band D-1 showed does not fit this process
-            (503 flagged of ~3,130 subgroups at month scale, ~16% vs an
-            expected ~0.3%). The computation stays on the wire in spc.ts;
-            nothing here draws it until the limit model is fixed. */}
+        {/* DEFECTS.md D-10, restored 23 Sep 2026 — RULE 1 ONLY.
+            `p.xViolates` is now judged against spc.ts's I-MR band on the
+            group averages (X̿ ± 2.66·MR̄, time-contiguous same-generation
+            pairs), which replaced the σ_within/√n band that produced the
+            16-38% flag rates the 22 Sep suppression reacted to.
+            GATED ON `spc.xLimits.valid`, NOT merely on the field being
+            present: below 3 contiguous pairs the server marks the band
+            invalid and forces every `xViolates` false, and a screen must not
+            draw marks from a band it was told is untrustworthy — checking
+            `valid` explicitly means this stays true even if that forcing is
+            ever relaxed server-side.
+            The Nelson dots (p.nelson, rules 2-8) stay SUPPRESSED although
+            they now share the corrected sigma: measured 23 Sep 2026 on the
+            two real source generations they still flag 37.6-54.8% of groups
+            (mostly rules 2 and 6 — the signature of a slowly wandering level
+            read by rules written for independent samples), and a mark on two
+            groups in five is not a finding. W.weight.patternsWithheld says
+            so on screen rather than letting the absence read as "none". */}
+        {spc.xLimits.valid &&
+          g.map((p, i) => (p.xViolates ? <circle key={`v${i}`} cx={x(i)} cy={y(p.mean)} r={4} fill="var(--acc-fill)" /> : null))}
         {g.map((_, i) => (
           <rect key={`h${i}`} className="hit" x={x(i) - (width - L - R) / Math.max(1, g.length) / 2}
                 y={T} width={(width - L - R) / Math.max(1, g.length)} height={H - T - B}

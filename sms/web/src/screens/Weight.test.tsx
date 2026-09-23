@@ -21,7 +21,7 @@ import { installFakeFetch } from '../testkit/fetchRouter';
 import { render } from '../testkit/render';
 import { META_FIXTURE } from '../testkit/fixtures';
 import { W } from '../lib/words';
-import { fmtG } from '../lib/fmt';
+import { fmtG, fmtInt } from '../lib/fmt';
 import type { Period } from '../lib/period';
 import type { Envelope, SpcData, WeightStationsData, ProductionData } from '../api';
 import { WeightScreen } from './Weight';
@@ -150,6 +150,13 @@ function spcFixture(count: number, mean: number): Envelope<SpcData> {
       histogram: [],
       spec: { usl: null, lsl: null, nominal: null, source: 'none' },
       capability: { cp: null, cpk: null, pp: null, ppk: null },
+      // One source generation, and a valid X̄ band — see api.ts's merged
+      // SpcData block (23 Sep 2026). Tests that need the other cases override
+      // these two fields on the fixture they build.
+      generation: null,
+      otherGenerationExcluded: 0,
+      spansGenerations: false,
+      xLimits: { valid: true, mrBar: 2.5, sigmaBetween: 2.2, halfWidth: 6.6, pairs: 400 },
     },
     metadata: META_FIXTURE,
   };
@@ -457,21 +464,30 @@ describe('Weight — the line-level offset sentence', () => {
 });
 
 /**
- * DEFECTS.md (22 Sep 2026), reacting to D-1 (62263da): correctly sizing SPC
- * subgroups exposed that the X̄ control band itself does not fit this
- * process — measured ~16% of subgroups "out of control" at month scale
- * against an expected ~0.3% for a stable process. The owner's decision was
- * to suppress the violation/pattern marks and the sentence naming their
- * counts until the limit model is fixed, while leaving spc.ts's computation
- * on the wire. This pins that suppression so it cannot quietly come back
- * before the limit model is actually corrected.
+ * DEFECTS.md D-10, restored 23 Sep 2026.
+ *
+ * The 22 Sep suppression removed BOTH the rule-1 violation marks and the
+ * Nelson pattern marks, because both were judged against X̿ ± 3σ_within/√n —
+ * a band that assumes zero movement between one group and the next and
+ * flagged 16-38% of groups on real data. spc.ts replaced that band (6052b69)
+ * with an I-MR band on the group averages themselves. What comes back, and
+ * what does not, is measured, not assumed:
+ *
+ *  - RULE 1 (xViolates) IS restored, gated on `xLimits.valid`.
+ *  - RULES 2-8 (nelson) are NOT. They share the corrected sigma now, but
+ *    measured 23 Sep 2026 against the two real source generations they still
+ *    flag 54.8% (July full range), 38.8% and 37.6% (September) of groups.
+ *
+ * These four cases pin that split, and the band-invalid gate, so neither
+ * half can drift back on its own.
  */
-describe('Weight — X̄ violation/pattern suppression (DEFECTS.md, 22 Sep 2026)', () => {
-  it('a subgroup with xViolates AND a Nelson pattern draws no accent-fill dot, and no sentence states the violation/pattern counts', async () => {
-    const violating: Envelope<SpcData> = spcFixture(500, 1948);
-    violating.data.xbarOutOfControl = 3;
-    violating.data.nelsonFlagged = 2;
-    violating.data.subgroups = [
+describe('Weight — X̄ rule 1 restored, patterns still withheld (DEFECTS.md D-10, 23 Sep 2026)', () => {
+  /** One violating subgroup that ALSO carries Nelson patterns, and one clean one. */
+  function violatingFixture(): Envelope<SpcData> {
+    const f: Envelope<SpcData> = spcFixture(500, 1948);
+    f.data.xbarOutOfControl = 1;
+    f.data.nelsonFlagged = 1;
+    f.data.subgroups = [
       {
         ts: '2026-09-07T09:00:00.000Z', n: 82, mean: 1948, s: 3.0,
         xUcl: 1949, xLcl: 1947, sUcl: 4, sLcl: 2,
@@ -483,33 +499,78 @@ describe('Weight — X̄ violation/pattern suppression (DEFECTS.md, 22 Sep 2026)
         xViolates: false, sViolates: false, nelson: [],
       },
     ];
+    return f;
+  }
 
+  /** A subgroup carrying Nelson patterns but NOT a rule-1 violation. */
+  function patternOnlyFixture(): Envelope<SpcData> {
+    const f = violatingFixture();
+    f.data.xbarOutOfControl = 0;
+    f.data.subgroups[0]!.xViolates = false;
+    return f;
+  }
+
+  async function renderWith(spc: Envelope<SpcData>) {
     installFakeFetch({
       '/api/weight-stations': WEIGHT_STATIONS_OK,
       '/api/stations': STATIONS_OK,
       '/api/production': PRODUCTION_OK,
-      '/api/spc': violating,
+      '/api/spc': spc,
     });
+    const r = render(<WeightScreen {...baseProps()} />);
+    await r.findByRole('heading', { level: 1 });
+    await waitFor(() => expect(r.container.querySelectorAll('svg.chart path').length).toBeGreaterThan(0));
+    return r;
+  }
 
-    const { container, findByRole } = render(<WeightScreen {...baseProps()} />);
-    await findByRole('heading', { level: 1 });
-    await waitFor(() => expect(container.querySelectorAll('svg.chart path').length).toBeGreaterThan(0));
-
-    // The dot mark: previously `p.nelson.length > 0 || p.xViolates` drew a
-    // <circle fill="var(--acc-fill)">. With a genuinely violating subgroup in
-    // the fixture, none should be drawn.
-    const accentDots = Array.from(container.querySelectorAll('svg.chart circle')).filter(
+  const accentDots = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('svg.chart circle')).filter(
       (c) => c.getAttribute('fill') === 'var(--acc-fill)',
     );
-    expect(accentDots).toHaveLength(0);
 
-    // The "Over this period" sentence must not assert the band's counts —
-    // that was the same over-claim in words rather than a mark.
-    const bodyText = container.textContent ?? '';
-    expect(bodyText).not.toContain('control band');
-    expect(bodyText).not.toContain('non-random pattern');
-    // And nothing may say the process IS in control either — that would be
-    // the same unsupported claim inverted.
-    expect(bodyText).not.toMatch(/in control/i);
+  it('draws one accent dot for the rule-1 violation, and states the count', async () => {
+    const { container } = await renderWith(violatingFixture());
+    expect(accentDots(container)).toHaveLength(1);
+    expect(container.textContent ?? '').toContain(W.weight.outsideBand('1', '2'));
+  });
+
+  it('a Nelson pattern alone draws NO dot — rules 2-8 stay withheld, and the screen says so', async () => {
+    const { container } = await renderWith(patternOnlyFixture());
+    expect(accentDots(container)).toHaveLength(0);
+    const body = container.textContent ?? '';
+    expect(body).toContain(W.weight.patternsWithheld);
+    // The old over-claim must not return in words either.
+    expect(body).not.toContain('non-random pattern');
+    // And nothing may say the process IS in control — the same unsupported
+    // claim inverted.
+    expect(body).not.toMatch(/in control/i);
+  });
+
+  it('xLimits.valid === false: no dot is drawn even for a subgroup flagged xViolates, and the band is named as absent', async () => {
+    const f = violatingFixture();
+    f.data.xLimits = { valid: false, mrBar: 0, sigmaBetween: 0, halfWidth: 0, pairs: 1 };
+    const { container } = await renderWith(f);
+    expect(accentDots(container)).toHaveLength(0);
+    const body = container.textContent ?? '';
+    expect(body).toContain(W.weight.bandInvalid);
+    expect(body).not.toContain(W.weight.outsideBand('1', '2'));
+  });
+
+  it('a period spanning more than one source generation says how much it left out', async () => {
+    const f = violatingFixture();
+    f.data.count = 55058;
+    f.data.otherGenerationExcluded = 164884;
+    f.data.spansGenerations = true;
+    const { container } = await renderWith(f);
+    const body = container.textContent ?? '';
+    expect(body).toContain(W.weight.oneGeneration(fmtInt(55058), fmtInt(164884)));
+    // Never names HOW a generation arose — the case this must read correctly
+    // for at IFL is their own 5 Aug table rebuild.
+    expect(body.toLowerCase()).not.toContain('simulator');
+  });
+
+  it('a single-generation period adds no exclusion sentence at all', async () => {
+    const { container } = await renderWith(violatingFixture());
+    expect(container.textContent ?? '').not.toContain('one generation of the source tables');
   });
 });

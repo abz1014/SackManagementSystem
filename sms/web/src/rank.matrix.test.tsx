@@ -117,6 +117,9 @@ const SPC_FIXTURE: Envelope<SpcData> = {
     // SpcData's declaration merges in three places (api.ts:729/1538/1667) —
     // station/implausible/median all belong to the SAME wire type.
     station: null, implausible: 0, median: null,
+    // One source generation, and a valid X̄ band (api.ts, 23 Sep 2026).
+    generation: null, otherGenerationExcluded: 0, spansGenerations: false,
+    xLimits: { valid: true, mrBar: 2.5, sigmaBetween: 2.2, halfWidth: 6.6, pairs: 400 },
   },
   metadata: META_FIXTURE,
 };

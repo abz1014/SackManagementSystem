@@ -183,7 +183,73 @@ Per the brief for this pass, both are re-confirmed against the actual diffs (see
 - **Health's headline asserted "Everything is healthy" while the same page showed two blocking DQ findings and an 8-day-stale backup** — `foldStatus()` in `api/src/services/health.ts` computed status from database reachability, the degraded marker, database size and acquisition staleness only, and never consulted the blocking-findings count or backup staleness that the same page already rendered. **Fixed in `de607ce`** ("Health's headline must consult everything it claims to summarise") — both facts now fold into `foldStatus`, verified live: the headline now reads "Something needs attention." against the same data that used to read "Everything is healthy." Suite at that commit: 1253 passed / 4 skipped.
 - **Six PDAS materials sharing one plain description ("205-IL0-SD") collided into one indistinguishable entry on Line, Product › Running and Changeover's retire list** — the disambiguation helper `distinctProductLabels()` already existed (built for Rejects' product filter, 15 Sep 2026) but had not been reused on these three later-built screens. **Fixed in `a0c87ba`** ("Disambiguate colliding product names on Line, Product > Running and Changoever's retire list") — Line's 14 stations, Product › Running's six group headings, and Changeover's 12 retire entries are all now distinct, verified live against the running dev server, with a new regression test (`Running.test.tsx`) proven red before and green after. Suite at that commit: 1253 passed / 4 skipped (was 1246/4 immediately before).
 
-### D-10 — X̄ control limits do not fit the process; 503 of ~3,130 subgroups (~16%) "violate" at month scale — **HIGH, open, render suppressed 22 Sep 2026**
+### D-10 — X̄ control limits do not fit the process; 503 of ~3,130 subgroups (~16%) "violate" at month scale — **HIGH; limit model replaced and rule-1 rendering restored 23 Sep 2026. Rules 2-8 remain suppressed — see the RESOLUTION at the end of this entry.**
+
+> **RESOLUTION, 23 Sep 2026 — read this before the 22 Sep record below, which is kept
+> unedited as the account of what was found and why the marks came off.**
+>
+> **The limit model was replaced** (`6052b69`, `api/src/services/spc.ts`). The 22 Sep entry
+> below names station bias folded into σ_within as the probable mechanism and marks that as
+> *not investigated*; it was investigated, and it is **wrong** — station bias (σ_station =
+> 3.87 g) inflates σ_within, which WIDENS the band and would explain fewer flagged points,
+> not more. The real cause was an unmodelled BETWEEN-subgroup component: `X̿ ± 3·σ_within/√n`
+> assumes zero wander between one group and the next, and the observed SD of the subgroup
+> means runs 1.76x-3.62x wider than that assumption allows, growing with period length. The
+> band is now I-MR on the subgroup means — `X̿ ± 2.66·MR̄`, MR̄ taken only over
+> time-contiguous, single-generation pairs — and `spc.ts` reports `xLimits.valid` false
+> (forcing every `xViolates` false) below 3 such pairs.
+>
+> **Rule 1 (`xViolates`) is rendered again** on `Weight.tsx`'s OverTime chart, gated on
+> `spc.xLimits.valid` rather than merely on the field being present, together with a factual
+> count sentence (`W.weight.outsideBand`) that names the band's own basis in the same
+> breath. Measured after the model change, real generations only, on the dev sidecar:
+>
+> | window | generation | groups | rule 1 | rate |
+> |---|---|---|---|---|
+> | 2026-06-22 → 2026-07-10 | epoch 1 (July) | 1,660 | 218 | **13.1 %** |
+> | 2026-08-05 → 2026-08-20 | epoch 9 (September) | 1,438 | 88 | **6.1 %** |
+> | 2026-08-05 → 2026-09-07 | epoch 9 (September) | 2,837 | 159 | **5.6 %** |
+>
+> Live confirmation on the running app, `?s=weight&p=pick&from=2026-08-05&to=2026-08-20`:
+> exactly 88 accent dots drawn, and the sentence "88 of 1,438 group averages fell outside
+> the control band…". Forcing `xLimits.valid` false on the same payload took the dots from
+> 84 to **0** and printed `W.weight.bandInvalid` instead.
+>
+> **RULES 2-8 (the Nelson dots) STAY SUPPRESSED, and this is a decision with a number
+> behind it.** They now share the corrected `sigmaBetween`, so the old objection ("the same
+> ill-fitting band wearing a different name") no longer applies. They were measured anyway,
+> on the same three real windows: **54.8 %** of groups flag on July's full range, **38.8 %**
+> on 5-20 Aug and **37.6 %** on 5 Aug - 7 Sep — dominated by rule 2 (nine in a row on one
+> side: 702/395/713 groups) and rule 6 (four of five beyond 1σ: 731/351/671). That pattern
+> is what an autocorrelated, slowly wandering level looks like to rules written for
+> independent samples; it is not a plant in crisis and it is not actionable. A mark on two
+> groups in five is noise, and restoring a noisy signal is worse than leaving it off — which
+> is the whole reason this entry exists. `W.weight.patternsWithheld` now says so on screen,
+> so their absence cannot read as "no patterns found".
+>
+> **A second thing the screen now says, which it did not before.** `getWeightSpc` scopes
+> every query to ONE source generation and reports `otherGenerationExcluded` /
+> `spansGenerations`. Excluding the others is right — IFL dropped and recreated their
+> weighing tables on 5 Aug 2026 and the two are not one continuous record — but excluding
+> them *silently* is the no-over-claiming rule read backwards: the chart implied the period
+> was fully represented when, on a 21 Aug - 15 Sep window of the dev copy, it was drawing
+> 55,058 of the period's 219,942 readings. `W.weight.oneGeneration` states the split in
+> words. It deliberately never names HOW a generation arose: the case this must read
+> correctly for at IFL is their own rebuild, not this machine's simulator data.
+>
+> **What is still NOT established.** The new band has not been validated against a
+> known-good reference process, only against this plant's own two generations; 13.1 % on
+> July is still far above the textbook 0.3 %, which is why the on-screen sentence explains
+> what the band is measured from instead of leaving a bare count. Nothing here has been seen
+> on real live plant data. `reports/ConeWeight.tsx` and `reports/Calibration.tsx` still
+> render no `xViolates`/`nelson` field and were not changed. The per-station drift sparkline
+> (`calibration.ts`) remains a separate computation and remains untouched.
+>
+> Tests: `web/src/screens/Weight.test.tsx`, describe block *"Weight — X̄ rule 1 restored,
+> patterns still withheld (DEFECTS.md D-10, 23 Sep 2026)"* — five cases pinning the dot for
+> rule 1, no dot for a Nelson-only group, no dot and the band-invalid sentence when
+> `xLimits.valid` is false, the exclusion sentence when a period spans generations, and its
+> absence when it does not.
 
 `spc.ts`'s D-1 fix (`62263da`, same day) corrected a real defect — subgroups were sized from the requested period's *calendar* span rather than the data's own occupied span, running 8x–297x over the module's own `TARGET_PER_SUBGROUP = 20`. That fix is right and stays; **D-1's own commit message reported, honestly, that correcting the sizing would make the chart flag *more* points, not fewer** (month `xbarOutOfControl` went 44 → 503), and flagged this as expected, not a regression to review away.
 
@@ -237,4 +303,4 @@ New test: `web/src/screens/Weight.test.tsx`, describe block `Weight — X̄ viol
 | D-6 | — | Reports "with graphics" (Q30/Q36) — requirement gap, tracked in `PROJECT_STATUS.md`, not a numbered code defect here | open, IFL/owner decision — XLSX now has charts (`f61eb35`) and a PDF generator exists (`47ac224`, `pdf.ts`), narrowing but not closing the requirement-gap question |
 | D-7 | HIGH | Weight.tsx headline flips to the wrong sentence when `getWeightStations` resolves after `coneLine`'s first error, changing its poll key and wiping a real error (`usePolling` key-change semantics) | **fixed**, `441f3f9` — `headline()` now checks `coneLine.loading` instead of touching `usePolling`'s shared key-change semantics; deterministic regression test added |
 | D-8 | MEDIUM | `sms.source_epoch.last_seen_utc` has no writer | **fixed**, `b31d574` |
-| D-10 | **HIGH** | X̄ control limits (`grandMean ± 3σ_within/√n`) do not fit the process — ~16% of subgroups "violate" at month scale post-D-1 vs an expected ~0.3% | open — violation/pattern rendering suppressed this pass on `Weight.tsx`; proper limit model (likely moving-range-of-subgroup-means) not investigated |
+| D-10 | **HIGH** | X̄ control limits (`grandMean ± 3σ_within/√n`) do not fit the process — ~16% of subgroups "violate" at month scale post-D-1 vs an expected ~0.3% | **model replaced** (`6052b69`, I-MR on the subgroup means) and **rule-1 rendering restored** 23 Sep 2026, gated on `xLimits.valid`; rule-1 rate now 5.6–13.1% on real generations. **Rules 2-8 stay suppressed** — measured 37.6–54.8% flag rate on the same windows. Band not validated against a known-good reference process. |

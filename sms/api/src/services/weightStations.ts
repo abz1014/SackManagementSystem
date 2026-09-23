@@ -48,6 +48,14 @@ import { loadProductCatalogue } from './productLimits.js';
 import { plausibleWhere } from './coneState.js';
 import { driftThresholdG, MIN_DAYS_HELD } from './attention.js';
 import { consecutiveProductionDays } from './plantClock.js';
+import { getUnmatchedRejects } from './rejects.js';
+
+/**
+ * Group key for unmatched rejects that carry no station id. A literal that
+ * can never collide with `CAST(source_station AS varchar(12))`, which is
+ * only ever digits or a minus sign.
+ */
+const NO_STATION = '__no_station__';
 
 export interface WeightStationRow {
   station: number;
@@ -337,7 +345,9 @@ export async function getWeightStations(
   // handling 20,000, which is exactly wrong for a LINE total. Fixed Sep 2026
   // (finding H2): this used to average the per-station rates and read 2.03%
   // on real data where the true line rate is 2.16%.
-  const lineTotal = rejectStats.totalCones + rejectStats.totalRejects;
+  // Denominator corrected 23 Sep 2026 — see `rejectRatesByStation`'s header.
+  // Cones plus only the rejects that are not already one of those cones.
+  const lineTotal = rejectStats.totalCones + rejectStats.totalUnmatchedRejects;
   const lineRejectRatePct = lineTotal > 0 ? round((100 * rejectStats.totalRejects) / lineTotal, 2) : null;
   return {
     from,
@@ -393,8 +403,36 @@ async function stationMaterialCounts(
 /**
  * Reject rate per station: rejects over everything that station handled.
  *
- * The denominator is cones PLUS rejects, because a rejected cone never became
- * a cone_event row — dividing by cones alone would understate every station.
+ * The denominator is cones PLUS the rejects with NO matching cone_event row.
+ *
+ * CORRECTED 23 Sep 2026 — this was the third and last copy of finding H1's
+ * follow-up defect (`rejectSpc.ts` fixed in 4f68945, `report.ts` and
+ * `rejects.ts` in ede05e9; this file was named there as the known remaining
+ * instance). It used to divide by cones + EVERY reject, on the premise
+ * written above it that "a rejected cone never became a cone_event row".
+ * That premise is false: matching rejectQCS1_TP1U2/rejectWeight1_TP1U2 to
+ * pack1_TP1U2 on (ProductionDate, HangerNum) — cone_event's own merge key —
+ * finds an existing cone row for 98%+ of quality rejects and 41/41 (Sept) /
+ * 244/246 (July) weight rejects, so those cones were already counted once in
+ * `cones`. Adding them again inflated every denominator and understated
+ * every rate, which is why the Weight screen read 4.393% where the Rejects
+ * screen and the management summary read 4.590% for the same September
+ * period.
+ *
+ * The rule is NOT re-derived here: `getUnmatchedRejects` (rejects.ts, built
+ * on `coneMatchPredicate`) is the single definition every reject-rate path
+ * in the application now calls. Two copies of one rule is exactly how this
+ * divergence happened three times.
+ *
+ * PER-STATION ATTRIBUTION — measured, not assumed. An unmatched reject
+ * carries its own `source_station`, so it can be attributed to the station
+ * that produced it: across every real generation in the dev copy exactly ONE
+ * unmatched reject per real epoch (3 rows in total, all on the 1969-12-31
+ * clock-fault day) has a NULL station. Those rows cannot be attributed and
+ * are deliberately excluded from the per-station denominators and INCLUDED
+ * in the line total — the same asymmetry the line totals already had for
+ * station-less cones and rejects, and for the same reason (the Rejects
+ * screen counts them, so the line figure here must too).
  */
 /** Exported for the finding-H2 regression test — the line-rate volume-
  *  weighting is exercised through this function's totals, not by mocking the
@@ -404,7 +442,7 @@ export async function rejectRatesByStation(
   lineId: number,
   from: string,
   to: string,
-): Promise<{ rates: Map<number, number>; totalCones: number; totalRejects: number }> {
+): Promise<{ rates: Map<number, number>; totalCones: number; totalRejects: number; totalUnmatchedRejects: number }> {
   const r = await pool
     .request()
     .input('line', mssql.Int, lineId)
@@ -425,14 +463,6 @@ export async function rejectRatesByStation(
       )
       SELECT COALESCE(c.st, r.st) AS st, COALESCE(c.n, 0) AS cones, COALESCE(r.n, 0) AS rejects
         FROM c FULL OUTER JOIN r ON r.st = c.st`);
-
-  const out = new Map<number, number>();
-  for (const row of r.recordset) {
-    const cones = Number(row.cones);
-    const rejects = Number(row.rejects);
-    const total = cones + rejects;
-    if (total > 0) out.set(Number(row.st), (100 * rejects) / total);
-  }
 
   /**
    * The LINE totals are counted WITHOUT the station filter, unlike the
@@ -458,9 +488,41 @@ export async function rejectRatesByStation(
         (SELECT COUNT(*) FROM sms.reject_event
           WHERE line_id = @line AND shift_date BETWEEN @from AND @to) AS rejects`);
   const t = totals.recordset[0];
+
+  /**
+   * THIRD query on this pool, issued after the two above (their order is
+   * pinned positionally by several fixture-based sibling tests). The ONE
+   * shared definition of "this reject is not already a cone_event row" —
+   * see this function's header. Grouped by station with the station-less
+   * rows collected under `NO_STATION` so a single query answers both the
+   * per-station denominators and the line total.
+   */
+  const unmatchedOf = await getUnmatchedRejects(
+    pool,
+    lineId,
+    { from, to },
+    `ISNULL(CAST(re.source_station AS varchar(12)), '${NO_STATION}')`,
+  );
+  let totalUnmatchedRejects = 0;
+  for (const n of unmatchedOf.values()) totalUnmatchedRejects += n;
+
+  const out = new Map<number, number>();
+  for (const row of r.recordset) {
+    const cones = Number(row.cones);
+    const rejects = Number(row.rejects);
+    // A station whose rejects ALL matched a cone row has no group in
+    // `unmatchedOf` at all (a zero count produces no GROUP BY row), which is
+    // 0 unmatched, not "unknown" — so the `?? 0` here is the real answer and
+    // not a fallback. `rejects` stays the numerator: the cone WAS rejected,
+    // it is only the denominator that must not count it twice.
+    const total = cones + (unmatchedOf.get(String(row.st)) ?? 0);
+    if (total > 0) out.set(Number(row.st), (100 * rejects) / total);
+  }
+
   return {
     rates: out,
     totalCones: Number(t?.cones ?? 0),
     totalRejects: Number(t?.rejects ?? 0),
+    totalUnmatchedRejects,
   };
 }

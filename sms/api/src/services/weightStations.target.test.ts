@@ -22,7 +22,7 @@
  * and .gap.test.ts); the pure helpers (adjustmentRestarts, latestRestart,
  * projectDaysToLimit) stay real. The one NEW real query this brief adds
  * (stationMaterialCounts, weightStations.ts) runs against the recording
- * fakePool below, positioned AFTER rejectRatesByStation's two queries —
+ * fakePool below, positioned AFTER rejectRatesByStation's queries —
  * weightStations.ts deliberately sequences it there so the existing
  * positional fixtures in the other weightStations.*.test.ts files (which
  * supply exactly two responses) are untouched.
@@ -111,11 +111,14 @@ function fakePool(...responses: unknown[][]): ConnectionPool {
 }
 
 // Response order: rejectRatesByStation's per-station query, then its totals
-// query (both empty — no rejects), then stationMaterialCounts' single query.
+// query (both empty — no rejects), then (since 23 Sep 2026) its unmatched-
+// reject query — empty here, there are no rejects at all in this fixture —
+// and finally stationMaterialCounts' single query.
 function pool() {
   return fakePool(
     [],
     [{ cones: 300, rejects: 0 }],
+    [],
     [
       { st: 1, mat: 21, n: 100 },
       { st: 2, mat: 21, n: 60 },

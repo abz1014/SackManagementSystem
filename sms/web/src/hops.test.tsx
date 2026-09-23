@@ -112,6 +112,9 @@ const SPC_FIXTURE: Envelope<SpcData> = {
     subgroups: [], stations: [], practicalThresholdG: 9, distinguishableStationCount: 0, flaggedStationCount: 0,
     histogram: [], spec: { usl: 1990, lsl: 1910, nominal: 1950, source: 'product' },
     capability: { cp: 1.2, cpk: 1.1, pp: 1.2, ppk: 1.1 }, station: null, implausible: 0,
+    // One source generation, and a valid X̄ band (api.ts, 23 Sep 2026).
+    generation: null, otherGenerationExcluded: 0, spansGenerations: false,
+    xLimits: { valid: true, mrBar: 2.5, sigmaBetween: 2.2, halfWidth: 6.6, pairs: 400 },
   },
   metadata: META_FIXTURE,
 };
