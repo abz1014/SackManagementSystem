@@ -18,6 +18,60 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### Red-team audit and its 15-commit remediation wave (23 Sep 2026, later the same day than the entry below)
+
+`ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md` (commit `d2cba5e`, 13 workers) found **8 CRITICAL
+findings (RT-001…RT-008)** plus 28 more HIGH/MEDIUM/LOW, against the tree the entry
+immediately below this one had already produced — with the suite green (1660/4/0) and
+typecheck clean through every one of them. A fifteen-commit fix wave followed
+(`016a047`…`cf1c363`). Full disposition of every RT- finding, and nine further defects found
+*during* the fix wave that are not in the audit itself, are in `DEFECTS.md` Part 4 — this
+entry states only what changed and what did not.
+
+**What changed.** Almost every canonical-table query across production, weight, reject,
+register and report services now resolves one source generation and states what it excluded,
+closing most of the root cause behind RT-001–013/029/032 (Line/Rejects/Report disagreeing on
+the same period's reject rate; a station-report row with more within-tolerance cones than
+cones produced; a daily report inflated ~29× by pooling the local dev sidecar's plant-simulator
+generation with IFL's real one). A field silently stripped from an otherwise-200 response can
+no longer render as a confident zero anywhere it was checked — Line, Weight, Rejects, Wall,
+Sacks, Calibration (RT-005/012/013/033). The false "stopped" state from a zero-lag sample and a
+1970 clock-fault sentinel hijacking three anchor queries — one more than the audit's own text
+named — are both closed (RT-006/021). Line's own provenance banner can no longer call
+simulator figures real (RT-007).
+
+**What did not change, named rather than implied.** RT-014 (no server-side
+response-size/row-count cap independent of SQL) is untouched by any of the fifteen commits —
+this is the one finding that kept Phase 11 (Security & operations) from returning to COMPLETE
+in `PROJECT_STATUS.md`; see that file's phase board. RT-016 (an invalid calendar date crashes
+the DB driver), RT-017 (MachineProduct's on-screen column clipping — distinct from this file's
+own Phase 9 entry below, which suppressed it only in *print*), RT-018 (a retired product shown
+as the live target with no marker), RT-020 (no confidence interval on the days-to-limit
+projection), RT-022/RT-025/RT-026/RT-027/RT-028/RT-031/RT-034 are each confirmed still open by
+reading the code, not assumed from a missing commit message. RT-019 (Nelson rules 2–8 flagging
+37.6–54.8% of station-groups on real generations) stays a pending owner decision, unchanged
+from `DEFECTS.md` D-10 — four options already put to the owner, none chosen. RT-024's own
+finding is still true today: `sms/.env`'s comment reads "PDAS writes: ENABLED 22 Sep 2026 ...
+IFL granted permission" directly above a line reading `PDAS_WRITE_ENABLED=false`, and no
+document in the repository records who at IFL granted it or which of the nine write rights it
+covers (`DEFECTS.md` D-12) — this is a documentation contradiction, not a live write path: **no
+PDAS procedure has ever been executed against any database, local or plant**, and that remains
+true after this wave exactly as it was before it.
+
+**Suite and typecheck, measured directly this pass:** `npx vitest run` from `sms/` — **177
+files passed / 1 skipped, 1745 tests passed / 4 skipped**, no red files, one run, HEAD
+`cf1c363`. `npm run typecheck` (all five workspaces) — clean. The ~1-in-74 flake documented in
+`DEFECTS.md` D-7 was fixed 22 Sep; today's one clean run is not proof it cannot recur.
+
+**Verified against the local `_SEP07` + `_SIM` dev sidecar only, as every entry in this file
+must now say explicitly rather than let a reader assume otherwise.** At IFL, source
+generations are sequential and do not overlap in time, so most of this wave's fixes are no-ops
+there by construction — several of the commits say so themselves. Below-rank RBAC remains
+untested live; only an admin session exists and agents may not create logins. The branch is
+**179 commits ahead of `origin/main`** and **114 ahead of `origin/floor-first-rework`**
+(measured this pass with `git rev-list --count`; that remote branch was last pushed 16 Sep
+2026) — both numbers superseding any earlier count in this file below.
+
 ### Rejects screen and the management summary printed different reject rates for the same period — closed (23 Sep 2026)
 
 `api/src/services/report.ts`'s `toReportLine` (`weighed = cones + rejected`) had the same

@@ -629,3 +629,108 @@ worker has run against a database for a while — carried here so that follow-up
 | D-12 | MEDIUM | PDAS write authority exists only in commit `af420a4`'s message; `handover/IFL-ANSWERS-2026-09-15.md` says it was still verbal and no document records a grant | open — **owner's call**, blocks sending `IFL-OPEN-QUESTIONS.md` ask 3 |
 | D-13 | LOW | One `sms.weight_rule.basis` governs cones and sacks; IFL's 15 Sep answer covered sacks only, and `net` would apply placeholder tube/tare values | open — no wrong number today (`gross` is the identity conversion, `weights.ts:239`) |
 | D-14 | LOW | `CLAUDE.md` asserted in three places that `last_seen_utc` has no writer; it has had one since `b31d574` | **fixed** this pass (23 Sep 2026) |
+| RT-001…036 | mixed | Today's red-team audit findings — see Part 4 below for the full table | mixed, see Part 4 |
+| D-15…D-23 | mixed | Defects found DURING the RT- fix wave, not present in the audit itself | see Part 4 |
+
+---
+
+## Part 4 — `ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md` (commit `d2cba5e`) and its remediation wave
+
+**This part is written after Parts 1–3 above (D-1…D-14, committed through `b31d574`/`f3b0c4b`), which were already on `HEAD` when the red-team audit landed.** The audit (13 workers, committed `d2cba5e`) found 8 CRITICAL + 28 further HIGH/MEDIUM/LOW findings — RT-001…RT-036 — against the tree as it stood at that commit, i.e. **after** D-1…D-14 were already fixed. A fifteen-commit remediation wave followed, `016a047`…`cf1c363` (HEAD at the time of writing). Every status below was checked against the code at `cf1c363`, not taken from a commit message alone — file:line spot checks are noted where done.
+
+### RT- finding disposition
+
+| ID | Severity | One line | Status |
+|---|---|---|---|
+| RT-001 | CRITICAL | Line reject-rate figure disagreed with itself, contaminated by a mislabeled simulator generation | **fixed** — `ae7a59b` (Line.tsx denominator now matches `report.ts`'s `cones + unmatchedRejects`), `53ae8a3` (rejectSpc.ts headline prefers real generation over simulator) |
+| RT-002 | CRITICAL | Station-report row arithmetically impossible (more within-tolerance cones than cones produced) | **fixed** — `54601a6` (`reports/station.ts` now resolves and binds its own `resolveGenerationScope`) |
+| RT-003 | CRITICAL | Daily report's "rejected by the scale" inflated ~29× by simulator rows against a real-only denominator | **fixed** — `54601a6` (`reports/daily.ts` scoped query), then `b9ff556` switched it to the shared `register.ts::countEvents` once that existed |
+| RT-004 | CRITICAL | Client-side reject-rate re-derivation on Line/Rejects disagreed with the server's corrected figure | **fixed** — `ae7a59b` (both screens now sum the server's own scoped totals rather than re-deriving) |
+| RT-005 | CRITICAL | Line rendered a confident "0 cones / 0 sacks / 0 kg / 0 rejected" from a 200 with fields silently missing | **fixed** — `71757a3` (`production.ts`'s `readNum` distinguishes a real zero from an absent field, emits `dataIssues[]`), `ae7a59b` (Line.tsx consumes `dataIssues`), `016a047` (field-stripped fixture added to the test harness so this class is now reproducible in CI) |
+| RT-006 | CRITICAL | A zero-lag-sample edge case reprinted the "false stopped" defect a 2 Sep 2026 fix was built to kill | **fixed** — `7558854` (new `LiveHealthKind = 'lag_unknown'`, treated as unknowable rather than folding to `'ok'`) |
+| RT-007 | CRITICAL | Line's own provenance banner was false for the exact data it sat above | **fixed** — `19a4aa0` (`quietBecauseGeneration` now derives both halves of its claim from `generationNote`'s own `simulator` flags instead of only the excluded side) |
+| RT-008 | CRITICAL | Root cause: the currently-open live generation is the plant simulator, mislabeled as genuine IFL data | **fixed by owner decision, predates this wave** — the "five live sites" (`live.ts`, `health.ts`, `machinesRunning.ts`, `app.ts`×3, `envelope.ts`) were resolved in the pass immediately before the audit landed (commits `6052b69`/`8673ffd`/`ca34a23`/`fc27b60`, documented in Part 3's D-11 above): the owner chose "newest real generation, name what's excluded" over pooling. RT-001–007/009 are the same root cause surfacing in report/screen code that D-11's wave had not yet reached; this wave closes those. **Not re-verified live against a running server this pass** — verified by reading `generation.ts` and its ~20+ call sites only. |
+| RT-009 | HIGH | Per-product weight statistics pooled simulator with real data | **fixed** — `54601a6` (`reports/product.ts` scoped) |
+| RT-010 | HIGH | `getReport`'s "coverage" block ignored generation scoping | **fixed** — `26525ad` (`report.ts`'s `coverageReq` now resolves its own scope and applies `andEpoch`; the `generationScope.guard.test.ts` `KNOWN_DEFECTS` entry naming this gap was deleted, not just marked) |
+| RT-011 | HIGH | Reject-rate/SPC trend charts plotted a missing bucket as a literal, indistinguishable zero | **fixed** — `add32c5` (`report/shared.tsx`'s `RejectTrendChart` now breaks into a gap instead of drawing 0%) |
+| RT-012 | HIGH | Line/Wall's KPI layer collapsed "missing field" into "true zero" structurally | **fixed** — `ae7a59b` (Line), `add32c5` (Wall's `absent` station status, distinct from `quiet`) |
+| RT-013 | HIGH | Wall's per-station bars silently rendered a stripped field as "quiet", the one screen with no drilldown | **fixed** — `add32c5` (same commit as RT-012's Wall half) |
+| RT-014 | HIGH | No server-side response-size/row-count cap independent of SQL (DoS-adjacent) | **open — not addressed by this wave.** No commit among the fifteen touches request/response size limiting; grepped for `MAX_ROWS`/size-limit middleware, none found added. Carried into `COMMISSIONING-GAPS.md`. |
+| RT-015 | HIGH | Malformed/missing/null production rows silently coerced to zero, server-side | **fixed, at least for the two files exercised: `production.ts` and `register.ts`.** `71757a3` (`production.ts::readNum`), `410c179` (`register.ts::foldGenerationTally`/`countEvents`, a second NaN→null defect found mid-pass, see D-19 below). Not confirmed fixed everywhere the audit may have meant — no full-repo sweep for the same `?? 0` / bare `Number()` pattern was done this pass. |
+| RT-016 | MEDIUM/HIGH (audit rated as calendar-invalid-date crash) | A calendar-invalid date crashes the DB driver instead of app-level validation, on 9 of 9 endpoints tried | **open — not addressed by this wave.** No date-validation commit among the fifteen. |
+| RT-017 | HIGH | MachineProduct report clips ~82% of its columns on screen, no in-app fallback | **open — not addressed.** (CLAUDE.md's Phase 9, 21 Sep, suppresses this table in *print* only; the on-screen clipping RT-017 describes is untouched.) |
+| RT-018 | HIGH | A retired product is shown as the live weight target with no marker | **open — not addressed by this wave.** |
+| RT-019 | HIGH | Nelson rules, unsuppressed, flag 78.6% of stations / 12.7% of station-days | **open, owner decision pending** — this is the same item as `DEFECTS.md` D-10's "Rules 2-8 stay suppressed" resolution (23 Sep, predates this wave): four options were put to the owner, none chosen yet. Re-measured this wave at 37.6–54.8% on real generations after the limit-model replacement (still noise, still withheld). |
+| RT-020 | HIGH | Days-to-limit projections print precise numbers from 3–5 noisy points, no confidence interval | **open — not addressed by this wave.** |
+| RT-021 | HIGH | A 1970 clock-fault sentinel hijacks the live "anchor" under replay, at two independent call sites | **fixed, and a THIRD site was found while fixing it** — `7558854`'s own commit message names three anchor queries floored (`live.ts`'s data tip, `health.ts`'s acquisition tip, `machinesRunning.ts`'s running-grid anchor), one more than the audit's own header text ("at two independent call sites"). Recorded as D-15 below. |
+| RT-022 | HIGH | Weight basis/tare/shift-boundary rules read as "whatever is current", never "whatever was in force" | **open — not addressed by this wave.** Overlaps `DEFECTS.md` D-13 (LOW, already tracked, no wrong number today because `gross` is the identity conversion). |
+| RT-023 | MEDIUM | The running API process was serving code 26 minutes older than its own rebuilt `dist/` | **cannot determine — operational fact, not a code defect.** No commit fixes "restart the process"; whether the currently-running process (if any) is stale cannot be assessed by reading source. Not re-verified this pass. |
+| RT-024 | MEDIUM | `.env`'s `PDAS_WRITE_ENABLED` comment claims IFL authority was granted; the value says the gate is closed | **still open, re-confirmed today.** `sms/.env` read directly this pass: the comment still says "ENABLED 22 Sep 2026 ... IFL granted permission", `PDAS_WRITE_ENABLED=false` still holds. Same finding as `DEFECTS.md` D-12 (MEDIUM, owner's call) — not a duplicate entry, cross-referenced. |
+| RT-025 | MEDIUM | `shift_code` baked in at ingest, never recomputed; a brief mixed-shift-rule regime confirmed real | **open — not addressed by this wave.** |
+| RT-026 | MEDIUM | Client/server rank crosscheck covers only ~6 of ~25–32 elevated-rank routes | **open — not addressed by this wave.** `rank.crosscheck.test.ts` was not touched by any of the fifteen commits (checked by `git log --oneline -- web/src/rank.crosscheck.test.ts` since `d2cba5e`: no hits). |
+| RT-027 | MEDIUM | Misleading "Login failed" message masks three distinct DB-connection causes | **open — not addressed by this wave.** |
+| RT-028 | MEDIUM | `/api/production`/`/api/weights` missing the shared 366-day range cap | **open — not addressed by this wave.** |
+| RT-029 | MEDIUM | Two reject-headline fields on `Rejects.tsx` generation-mixed while `pBar` was correctly scoped | **fixed** — `ae7a59b` (Rejects.tsx headline now sums `q.generations[].totalInspected`, the population `report.ts`/`weightStations.ts`/`rejectSpc.ts`'s p-chart already agree on) |
+| RT-030 | MEDIUM | `CLAUDE.md`'s clock-fault-row count is stale | **not addressed by this wave** (this worker's remit is documentation, but this specific line was not touched this pass — see "What I did not get to" below) |
+| RT-031 | MEDIUM | `sms.plausibility_rule`/`weight_rule`/`shift_rule` time-versioning gap | **open — not addressed by this wave**, overlaps RT-022/D-13 |
+| RT-032 | MEDIUM | `medianConeWeight`'s report-query fallback unscoped | **fixed** — `54601a6` (`coneWeight.ts` gained an optional `GenerationScope` parameter, applied when the report runs the fallback query itself) |
+| RT-033 | LOW | Sacks summary headline has no presence guard on `t.sacks` | **fixed** — `add32c5` (the actual failure mode was `Math.round`/subtraction producing the literal string `"NaN"`, not a thrown error or a plain zero; a `finiteOrNull` guard closes it) |
+| RT-034 | LOW | Unknown filter id and valid-but-zero-data filter id indistinguishable | **open — not addressed by this wave.** |
+| RT-035 | LOW | Plain-HTTP cleartext session cookie (informational) | not a code defect; no fix expected or made |
+| RT-036 | LOW | A live ngrok tunnel exposes a different application (informational) | not a code defect; environmental, no fix expected or made |
+
+**Phase-board contradiction claims (`ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md`, "Roadmap phases directly contradicted", lines ~1381-1395), re-checked against the fix wave:**
+
+- **Phase 5 (Reject management)** — audit cited RT-001/003/004. **All three now fixed.** The contradiction the audit raised no longer holds against `cf1c363`.
+- **Phase 4 (Cone weight module)** — audit cited RT-002. **Fixed.** No longer contradicted.
+- **Phase 11 (Security & operations)** — audit cited RT-014 and RT-015. **RT-015 fixed** (production.ts/register.ts); **RT-014 still open** (no response-size cap exists anywhere in the fifteen commits). The contradiction is narrower than the audit stated but not closed — see `PROJECT_STATUS.md`.
+
+### New defects found DURING the fix wave, not present in the audit — D-15 through D-23
+
+**D-15 — RT-021's fix touched a THIRD anchor site the audit's own text did not name — LOW (documentation gap in the audit, not a code defect)**
+
+`ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md:859` headlines RT-021 "at two independent call sites"; commit `7558854`'s own message and diff floor **three**: `live.ts`'s data tip, `health.ts`'s acquisitionHealth tip, **and** `machinesRunning.ts`'s running-grid anchor. All three are fixed by the same commit, so this cost nothing to close, but the audit document itself (which this worker may not edit) undercounts its own finding by one site. Recorded here as the correction; `ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md` is left as the dated record of what was written.
+
+**D-16 — `getUnmatchedRejects` cross-generation false match — MEDIUM, fixed, `5b46d9b`**
+
+Found while scoping `weightStations.ts`'s reject-rate queries (WS-A1): `rejectRatesByStation` called `getUnmatchedRejects` with no generation scope, so a reject in one source generation could be "matched" — and wrongly excluded from the reject-rate denominator — by a cone in a *different* generation sharing `(production_ts_utc_ms, hanger_num)`. Not an RT- finding; found by the worker building the two-generation regression fixture, who then verified `getUnmatchedRejects`'s own scoping parameter (already built, previously unused) closed it. Proven: 4 truly-unmatched rejects when scoped vs 13 when called unscoped on the same window.
+
+**D-17 — `rejectSpc.ts`'s generation-selection policy silently diverged from the canonical rule — HIGH, fixed, `53ae8a3`**
+
+Found while building the two-generation fixture for `2e6acd1` (a coordinator review commit, not a fix): `rejectSpc.ts`'s headline `pBar` picked the ordinally NEWEST generation with no real-vs-simulator preference, while `generation.ts`'s `resolveGenerationScope` (used by `weightStations.ts`/`production.ts`) prefers a real generation regardless of recency. On the dev sidecar the simulator's generation is ordinally newer, so for the 21 Aug – 7 Sep window the Rejects screen's own headline resolved to the *simulator's* rate while Weight and the reports resolved to the *real* rate — a live three-way disagreement distinct from the pooling defect WS-A1 was fixing. Fixed by giving `rejectSpc.ts` the same real-preferred rule via its own copy of the predicate (see D-18 immediately below for why that copy was itself later closed).
+
+**D-18 — `spc.ts` carried a THIRD independent copy of the same generation-preference rule — HIGH, fixed, `e7534e9`**
+
+Found immediately after D-17 landed: `getWeightSpc` (`spc.ts`) had its own hand-rolled copy of "prefer real over simulator, then newest ordinal" — a third copy beside `generation.ts`'s canonical `resolveGenerationScope` (18 call sites) and `rejectSpc.ts`'s copy from D-17, which had *just* been shown to silently diverge. `spc.ts`'s inline copy agreed with the canonical rule only because nobody had yet made it diverge — the same precondition that was true of `rejectSpc.ts` until D-17. Fixed by importing `resolveGenerationScope`/`epochFragment` directly rather than re-deriving the rule a third time; this also dropped a second, smaller policy divergence (spc.ts had folded shift/station/`col IS NOT NULL` conditions into its own generation-detection query, which none of the 18 canonical call sites do).
+
+**D-19 — `register.ts` had two separate defects, both found in the same pass, both fixed, `410c179`**
+
+1. `register.ts::listEvents.total` (a bare `COUNT(*)`) was consumed by `reports/sack.ts` and `reports/summary.ts` as a scoped figure when it was in fact pooled across every generation in the window — the same class of defect as RT-002/003/029 but in a file none of those commits' authors owned at the time. Fixed by adding a new, separately-scoped `register.ts::countEvents`, rather than adding an optional scope parameter to `listEvents` (which is deliberately a row-listing with per-row generation labels, used correctly as-is by the register route itself).
+2. **Found mid-pass, a second and unrelated defect in the same file:** `foldGenerationTally` and `countEvents`'s own first draft used bare `Number(r.n)`/`Number(res.recordset[0]?.n ?? 0)`. A tally row with its `n` column *absent* (not SQL NULL) became `NaN`, and `JSON.stringify({total: NaN})` serializes as `{"total":null}` — confirmed directly in `register.presence.test.ts`. Downstream, `web/src/screens/Sacks.tsx`'s history block read `rows.data?.data.total ?? 0` and rendered `<Empty>` on that `null`-turned-0, i.e. a malformed count read as "no sacks this period" even while a separate, unaffected query (`rows`) still held real data. Fixed by mirroring `production.ts`'s `readNum`/`dataIssues` idiom in `register.ts` (own implementation, not a shared import) — see D-20 for the consumer-side half of this same chain.
+
+**D-20 — the NaN→null→false-empty chain's consumer half: Sacks.tsx history block — HIGH (misleading "no data" on a real-data period), fixed, `b9ff556`**
+
+Direct continuation of D-19.2: once `register.ts` started emitting `dataIssues` for a malformed tally, `Sacks.tsx`'s History block had to actually read it. Fixed: it now reads `dataIssues` and renders "count unknown" plus whatever rows did arrive, instead of `<Empty>`, when the tally itself (not the row listing) was the thing that failed. Two-sided test (`Sacks.history.test.tsx`): a genuine empty period (no `dataIssues`) still reads `<Empty>`; a malformed-tally-with-real-rows period reads "count unknown" and shows the rows.
+
+**D-21 — `report.ts`'s day-coverage query (`coverageReq`) was the one unscoped query among six siblings — HIGH, fixed, `26525ad`**
+
+`getReport`'s `Promise.all` ran six queries; five were already scoped through their own callees (production.ts, weightStations.ts, etc.) and the sixth — `coverageReq`, computing `COUNT(DISTINCT shift_date)` and first/last day with data — carried no epoch predicate at all. This is RT-010 by another name (the audit's own header called it "mechanism proven, live counterexample not found"); this pass found and fixed the live counterexample. Regression table in the commit shows single-generation windows byte-for-byte unchanged, a two-generation window correctly excludes the simulator's days, and a simulator-only window is honestly labelled rather than hidden.
+
+**D-22 — `Weight.tsx`'s headline gate was `s.count === 0`, which a field-stripped `count` does not satisfy — HIGH, fixed, `26525ad`**
+
+A 200 response with `count` itself deleted (the RT-005 shape, applied to a different screen) fell through the `=== 0` check to the confident-mean branch, stating `s.mean` as fact over an unreadable count. Fixed as a third, distinct state (`W.weight.countCouldNotRead`) — same precedent as Line/Rejects' `couldNotRead` treatment.
+
+**D-23 — `Calibration.tsx` printed the literal string "undefined stations flagged for drift" — MEDIUM (a worse failure mode than a confident zero, since it does not even read as a plausible number), fixed, `cf1c363`**
+
+`W.reports.stationsFlaggedCount(d.flaggedStationCount)` had no null guard. Not itself an RT- number; flagged by `missingField.fuzz.test.tsx`'s own canary (added by another worker, `26525ad`) as a documented finding rather than fixed at the time. Closed by adding `W.reports.stationsFlaggedUnknown` and a guard, following the same "state the absence in words" idiom as D-22/RT-005/RT-012.
+
+### Suite and typecheck, observed this pass (23 Sep 2026, HEAD `cf1c363`)
+
+`npx vitest run` from `sms/`: **177 files passed / 1 skipped (178), 1745 tests passed / 4 skipped (1749)**, no red files, run once at the end of this pass. `npm run typecheck` (all five workspaces via `tsc -b shared sync-worker cli api web`): clean, no errors. Both measured directly by this worker, not copied from a commit message. Carries the same standing caveat as every other "green" claim in this project: a ~1-in-74 flake was found and fixed 22 Sep (D-7 above); one clean run today is not proof it cannot recur.
+
+### What this worker did NOT get to, named rather than left implicit
+
+- **RT-030** (`CLAUDE.md`'s stale clock-fault-row count) was not corrected this pass — `CLAUDE.md` is shared with several other workers today and this pass prioritised the three files it was explicitly assigned. Left for a follow-up pass that owns a `CLAUDE.md` hunk cleanly.
+- **RT-014, RT-016, RT-017, RT-018, RT-020, RT-025, RT-026, RT-027, RT-028, RT-031, RT-034** are unaddressed by any of the fifteen commits — confirmed by reading each, not assumed from the absence of a matching commit message. Carried into `COMMISSIONING-GAPS.md` §2 and this table above.
+- **RT-023** (stale running process) is an operational fact this worker cannot check from source alone — marked cannot-determine, not fixed and not disproven.
+- No independent re-verification of RT-008's "five live sites" resolution was done this pass beyond reading `generation.ts` and its call sites; the live numbers in Part 3's D-11 above are from the pass that produced them, not re-measured here.
