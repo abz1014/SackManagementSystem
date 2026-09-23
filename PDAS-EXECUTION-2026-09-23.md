@@ -246,3 +246,183 @@ executed against any database SMS itself connects to, or against the
 plant, at any point — this pass ran entirely by hand via `sqlcmd -E`
 against the local `PDAS_TP1U2_SEP07` copy, and that copy has been restored
 to its exact pre-execution state.
+
+---
+
+## WS-PDAS2 — retire-and-recreate, executed (23 Sep 2026, later the same day)
+
+Second authorised pass, same boundary, same protocol, same Windows identity via `sqlcmd -E`.
+**Target: `PDAS_TP1U2_SEP07` on `.\SQLEXPRESS` only** — never the plant, never `.env`, never
+`PDAS_WRITE_ENABLED` (stays `false`), no login created, reset or guessed.
+
+### Backup and its proven restore (this pass's own, separate from WS-PDAS1's)
+
+- **Backup taken before any write:**
+  `D:\sms-backups\PDAS_TP1U2_SEP07-20260923-200411-preexec2.bak` (verified with
+  `RESTORE VERIFYONLY ... WITH CHECKSUM` → "The backup set on file 1 is valid.").
+- **Restorability proven before any write:** restored into a scratch database
+  `pdas_restore_test2` (`RESTORE DATABASE ... WITH MOVE ... MOVE ..., REPLACE`), row counts
+  checked and found to match the live copy exactly (Materials 24/max 1024, Blends 10, Counts 14,
+  TubeTypes 27, Pallets 25, nhs_events 3631/max 23445), then the scratch database was dropped
+  (`ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE ...`) and its
+  files removed.
+- **Restore command used to revert the live copy after testing:**
+  ```sql
+  ALTER DATABASE PDAS_TP1U2_SEP07 SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+  RESTORE DATABASE PDAS_TP1U2_SEP07
+    FROM DISK = N'D:\sms-backups\PDAS_TP1U2_SEP07-20260923-200411-preexec2.bak'
+    WITH REPLACE;
+  ALTER DATABASE PDAS_TP1U2_SEP07 SET MULTI_USER;
+  ```
+
+### Before-state (live `PDAS_TP1U2_SEP07`, re-confirmed identical to WS-PDAS1's post-restore state)
+
+| Table | Count | Max id |
+|---|---|---|
+| Materials | 24 | 1024 |
+| Blends | 10 | 10 |
+| Counts | 14 | 14 |
+| TubeTypes | 27 | 27 |
+| Pallets | 25 | 1022 |
+| nhs_events | 3631 | 23445 |
+
+Confirmed a fresh combo not already present: `Materials WHERE BlendId=2 AND CountId=3 AND
+TubeTypeId=4` → 0 rows, before any write.
+
+### Executions, verbatim inputs and outputs
+
+Four calls ran in one `sqlcmd -i` batch against `PDAS_TP1U2_SEP07`, current Windows identity,
+no other database touched.
+
+**Step A — `CreateMaterial`, fresh combo (BlendId=2, CountId=3, TubeTypeId=4).**
+Input: `@materialSetpointWeight=150, @materialWeightOffsetMinus=5,
+@materialWeightOffsetPlus=5, @materialActive=1, @materialDesc1='PDAS_TEST_RETIRE_23SEP'`.
+Output: `ret=1025, @error=NULL, @errorMsg=NULL, @materialId=1025` — row inserted
+(confirmed by direct row read: `MaterialId=1025, BlendId=2, CountId=3, TubeTypeId=4,
+MaterialActive=1, MaterialDesc1='PDAS_TEST_RETIRE_23SEP'`). `nhs_events` EventId 23446:
+`Src='storedProc CreateMaterial', Severity='info', Logtext='Create new MaterialId: 2'` — the
+same `@blendId`-not-`@materialId` logging bug WS-PDAS1 found (`@blendId` was `2` here; the real
+`MaterialId` is `1025`).
+
+**Step B — `SetMaterialStatusActive`, retire (`@materialId=1025, @materialActive=0`).**
+Output: `ret=0, @error=NULL, @errorMsg=NULL`. `nhs_events` EventId 23447: `Src='storedProc
+SetMaterialStatusActive', Severity='info', Logtext='Set active to : 0 on MaterialId: 1025'`.
+Direct row read confirmed `MaterialActive=0` on MaterialId 1025 after this call.
+
+**Step C — `CreateMaterial`, the SAME (BlendId=2, CountId=3, TubeTypeId=4) triple, immediately
+after retiring it.** Input: `@materialSetpointWeight=999, @materialActive=1,
+@materialDesc1='PDAS_TEST_RETIRE_23SEP_RECREATE'` (deliberately different desc/weight from
+Step A, to make a silent "found the old inactive row and updated it" behaviour visible had it
+occurred). Output: `ret=-1, @error=-7001, @errorMsg='Material already exist', @materialId=NULL`
+— **refused, identically to a non-retired duplicate.** No row inserted; the only row at
+`BlendId=2, CountId=3, TubeTypeId=4` after this call is still MaterialId 1025 with its
+Step-A values (`MaterialDesc1='PDAS_TEST_RETIRE_23SEP'`, not `..._RECREATE`), confirmed by
+direct read. `nhs_events` EventId 23448: `Src='storedProc CreateMaterial', Severity='error',
+Logtext='-7001: Material already exist'`.
+
+**Step D — `SetMaterialStatusActive`, reactivate (`@materialId=1025, @materialActive=1`).**
+Output: `ret=0, @error=NULL, @errorMsg=NULL`. `nhs_events` EventId 23449: `Src='storedProc
+SetMaterialStatusActive', Severity='info', Logtext='Set active to : 1 on MaterialId: 1025'`.
+Direct row read confirmed `MaterialActive=1` on MaterialId 1025 after this call, otherwise
+unchanged from Step A.
+
+No surprise this pass: every `PRINT` line appeared in `sqlcmd`'s output in the order issued,
+unlike WS-PDAS1's cosmetic PRINT-ordering finding (not investigated further there either since
+it did not bear on any question; consistent with it being a `sqlcmd`/proc PRINT-interleaving
+quirk rather than a repeatable defect).
+
+### What this establishes
+
+**Retire-and-recreate does not work. `CreateMaterial`'s uniqueness check takes no account of
+`MaterialActive` at all — confirmed by execution, not merely read from the proc body.** The
+proc's own `WHERE BlendId=@b AND CountId=@c AND TubeTypeId=@t` (no `MaterialActive` term,
+verified again by reading `OBJECT_DEFINITION` before this pass) predicted exactly this outcome;
+Steps A–D reproduce it as an observed fact rather than an inference. This directly reproduces
+IFL's own 18 Aug 2026 incident (`nhs_events` EventIds 23204/23206/23207/23208, four `-7001`
+refusals bracketed by a retire at 10:39:01 and a reactivate at 10:43:17 on MaterialId 1022) —
+their engineer was attempting precisely this sequence and hit precisely this refusal.
+
+**Consequence for the Changeover screen, checked this pass (`sms/api/src/services/changeover.ts`,
+read-only — not edited):** the plan-building code already treats a Blend/Count/TubeType combo
+that exists in the mirror, active or retired, as a clash and reports it as a blocker
+("already exists as product `<id>` (`<label>`, retired)") rather than silently attempting
+`CreateMaterial` against it — see `plan()`'s clash check around line 290 and the "Retirements:
+only rows the mirror knows" comment around line 320. **The screen does not currently offer
+"retire, then recreate the same triple" as an executable path at all** — it was already
+designed around the same constraint this pass confirms, which is good, but it is worth stating
+plainly to whoever next reads `CLAUDE.md`'s claim on this: the code's own defensive check, not
+this pass, is what keeps the UI from repeating IFL's 18 Aug mistake. **What IFL needs to be told
+directly, in the next round of answers:** the vendor's own procedures make retire-then-recreate
+categorically impossible for the same blend/count/tube — not a bug in SMS, not something a
+future fix can route around — and the correct operation for "change this yarn's setpoint" is
+editing the existing material's limits (the guarded single-row `UPDATE dbo.Materials` path this
+codebase already has), never retiring and recreating it.
+
+### After-state and diff
+
+| Table | Before | After | Diff |
+|---|---|---|---|
+| Materials | 24 (max 1024) | 25 (max 1025) | **+1**, id 1025 |
+| Blends | 10 (max 10) | 10 (max 10) | none |
+| Counts | 14 (max 14) | 14 (max 14) | none |
+| TubeTypes | 27 (max 27) | 27 (max 27) | none |
+| Pallets | 25 (max 1022) | 25 (max 1022) | none |
+| nhs_events | 3631 (max 23445) | 3635 (max 23449) | **+4**, ids 23446–23449 |
+
+Every added row is individually identified above (Materials id 1025, nhs_events ids
+23446–23449) — nothing else in the database was touched. No `DELETE`, `DROP`, `TRUNCATE` or
+`ALTER` (schema) statement was ever issued.
+
+### Restore confirmation
+
+The live copy was restored from this pass's own pre-execution backup
+(`RESTORE DATABASE PDAS_TP1U2_SEP07 ... WITH REPLACE`, single-user during restore, multi-user
+after). Post-restore counts:
+
+| Table | Post-restore | Matches before-state? |
+|---|---|---|
+| Materials | 24 (max 1024) | yes |
+| Blends | 10 (max 10) | yes |
+| Counts | 14 (max 14) | yes |
+| TubeTypes | 27 (max 27) | yes |
+| Pallets | 25 (max 1022) | yes |
+| nhs_events | 3631 (max 23445) | yes |
+
+Directly re-checked: `SELECT COUNT(*) FROM Materials WHERE MaterialDesc1 LIKE
+'PDAS_TEST_RETIRE%'` → 0. **The copy is back to its exact before-state; none of this pass's
+writes remain.**
+
+### Documentation corrected this pass
+
+- `CLAUDE.md`: new dated section ("Retire-and-recreate resolved by execution; PDAS error-code
+  attribution corrected", 23 Sep 2026, under "Current phase") records this pass's findings in
+  full; the three places elsewhere in that file that said "no PDAS procedure has ever been
+  executed against any database" (the 21 Sep `AddTubeType` section, the red-team-wave section,
+  and the H6 mention in the September 2026 source-generations section) were each corrected in
+  place with a pointer to the new section, rather than left to contradict it. H6 itself is
+  marked closed there, with both halves stated: the screenshots genuinely showed no error, and
+  the incident is now independently confirmed via `nhs_events` and via this pass's own
+  reproduction.
+- `DEFECTS.md`: D-12's "no PDAS procedure has ever executed against any database, local or
+  plant" parenthetical corrected with a pointer to this section; D-12's own MEDIUM severity and
+  open status (the grant is still undocumented outside a commit message) are unchanged by this
+  pass — local execution against `PDAS_TP1U2_SEP07` does not resolve that finding.
+- `sms/api/src/services/pdasWrite.ts` was read, not edited (documentation pass). Its file header
+  (~line 85) and `PROC_PARAMS` comment (~line 162) still say "no PDAS procedure has ever been
+  executed against any database" and need the same correction as above; its error-code
+  attribution (`-7001` → `CreateMaterial`, `-5001`/`-5002`/`-5003` → `AddTubeType`) was already
+  correct before this pass and needs no change.
+
+### What still requires the plant
+
+Unchanged from WS-PDAS1's list, plus: whether `sms_pdas_writer` (not yet created) or
+`pdasWrite.ts`'s own connection/transaction path would reproduce Steps A–D identically (this
+pass, like the first, ran entirely as the current Windows identity via `sqlcmd -E`, never
+through the app's code path); whether IFL's actual operational tooling reads `nhs_events`' text
+expecting a correct MaterialId (the mislabelling is now confirmed twice, on two different
+MaterialIds, but whether anyone depends on it is a question only IFL can answer); concurrent/
+production-load behaviour, untouched by either pass.
+
+`PDAS_WRITE_ENABLED` remains `false`. `.env` was not touched. No login was created, reset or
+guessed. The live `PDAS_TP1U2_SEP07` copy has been restored to its exact pre-execution state,
+confirmed by direct row counts and by direct absence checks on every test row this pass wrote.

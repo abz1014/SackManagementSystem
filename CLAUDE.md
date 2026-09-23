@@ -18,6 +18,88 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### Retire-and-recreate resolved by execution; PDAS error-code attribution corrected (23 Sep 2026, WS-PDAS2)
+
+Second authorised PDAS execution pass, same protocol and same boundary as the first
+(`PDAS-EXECUTION-2026-09-23.md`, commit `f5ac691`, appended to by this pass): **only
+`PDAS_TP1U2_SEP07` on `.\SQLEXPRESS`**, never the plant, never `.env`, never
+`PDAS_WRITE_ENABLED` (stays `false`), no login created. A fresh backup was taken and its
+restorability proven into a scratch database (row counts matched exactly) before any write;
+the live copy was restored from that same backup afterward and re-verified to match the
+pre-execution counts exactly (Materials 24/max 1024, Blends 10, Counts 14, TubeTypes 27,
+Pallets 25, nhs_events 3631/max 23445, before and after).
+
+**The last unanswered question from the first pass is now answered: retire-and-recreate does
+NOT work, confirmed by execution, not just by reading the proc body.** Sequence run:
+`CreateMaterial(Blend=2,Count=3,Tube=4)` → success, `MaterialId=1025`. `SetMaterialStatusActive
+1025, 0` (retire) → success. `CreateMaterial`, same `(Blend=2,Count=3,Tube=4)` triple again →
+**refused, `@error=-7001`, `@errorMsg='Material already exist'`, no row inserted** — identical
+refusal to a non-retired duplicate. `SetMaterialStatusActive 1025, 1` (reactivate) → success.
+This matches `CreateMaterial`'s own body exactly (`IF NOT EXISTS (... WHERE BlendId=@b AND
+CountId=@c AND TubeTypeId=@t)` — no `MaterialActive` term anywhere in the check) and matches
+what IFL's engineer hit on 18 Aug 2026. **Consequence for Changeover:** the screen must never
+offer "retire then create the same blend/count/tube again" as a way to change a setpoint —
+it cannot work, by the vendor's own design, active or not. The only path for a genuine setpoint
+change is the guarded single-row `UPDATE dbo.Materials` this codebase already uses for
+"change limits" (`pdasWrite.ts`), not a retire+recreate round trip. **IFL needs to be told this
+directly**: their engineers' own instinct (retire, then recreate with a new number) is exactly
+the operation this proc refuses, and the working alternative is "edit the existing material's
+limits", not "make a new one."
+
+**Error-code attribution, restated plainly (the first pass already established this; repeating
+it here because two places in this file still say something that reads as a live conflict when
+it is not one):** `-5001`/`-5002`/`-5003` belong to `AddTubeType` (duplicate name+form / invalid
+form / invalid weight). `-7001` belongs to `CreateMaterial`'s duplicate-triple refusal — the
+same code `SetMaterialStatusActive` also happens to reuse for "no such MaterialId". These were
+never in conflict; they are different procedures' own codes, both correct, both now observed
+firing by direct execution (this pass and the first PDAS-execution pass together).
+
+**Finding H6, closed.** The 15 Sep 2026 audit's "unverified" verdict on the 18 Aug 2026 incident
+was right about the screenshots (ten SSMS screenshots at `Desktop/SPS unzip/SPS/*.jpg` show no
+error — `@error`/`@errorMsg` = `NULL`/`NULL` on every call they capture) and wrong to conclude
+from that alone that the incident itself was unverified: the errors went to `nhs_events`, not
+the grid the screenshots show. `nhs_events` EventIds 23204/23206/23207/23208 (in the archive
+already on disk, `PDAS_TP1U2_SEP07`) record four `CreateMaterial` `-7001` refusals at
+2026-08-18 10:35–10:41, bracketed by `SetMaterialStatusActive` calls retiring MaterialId 1022
+at 10:39:01 and reactivating it at 10:43:17 — i.e. IFL's engineer tried exactly the
+retire-then-recreate sequence this pass just reproduced, and it failed the same way. Say both
+halves when citing this: the screenshot-based verdict was correct about what the screenshots
+show; the incident itself is now fully verified, by both the event log and by reproducing it.
+
+**A vendor logging bug, confirmed independently by both PDAS-execution passes:**
+`CreateMaterial`'s own `nhs_events` info row reads `'Create new MaterialId: ' +
+CAST(@blendId AS NVARCHAR)` — it logs `@blendId`, not the real `MaterialId` (the `SCOPE_IDENTITY()`
+value returned via `@materialId` OUTPUT and `RETURN`). In this pass's Test A, `MaterialId=1025`
+was created with `@blendId=2`, and the log line reads `'Create new MaterialId: 2'`. Anyone
+auditing PDAS activity via `nhs_events` text alone, rather than the real OUTPUT/return value,
+will misattribute created rows whenever `BlendId != MaterialId` — true for effectively every row.
+
+**Corrected here, and now no longer true anywhere else in this file that repeats it:** the
+statement **"no PDAS procedure has ever been executed against any database, local or plant"**
+is **false as of 23 Sep 2026** and must not be repeated as current fact. Two authorised passes
+this date executed `AddTubeType`, `CreateMaterial` and `SetMaterialStatusActive` — always
+against `PDAS_TP1U2_SEP07` on `.\SQLEXPRESS` only, always from a proven-restorable backup, always
+restored to the exact pre-execution state afterward, always by hand via `sqlcmd -E` under the
+current Windows identity — **never** through `sms_pdas_writer`, `pdasWrite.ts`'s own connection
+path, `PDAS_WRITE_ENABLED` (still `false`), or against the plant. Below, wherever this file still
+reads "no PDAS procedure has ever been executed", read it as describing the state before 23 Sep
+2026's two execution passes, not the state today.
+
+**What `sms/api/src/services/pdasWrite.ts` still needs, reported but not edited this pass**
+(it is production code; this was a documentation pass): its file header (~line 85) and the
+`PROC_PARAMS` comment (~line 162) both still say "no PDAS procedure has ever been executed
+against any database" — both need the same correction as above, citing this section and
+`PDAS-EXECUTION-2026-09-23.md`. Everything else in that file's error-code attribution
+(`-7001` → `CreateMaterial`, `-5001`/`-5002`/`-5003` → `AddTubeType`) was already correct before
+this pass and needs no change.
+
+**What still requires the plant, unchanged by this pass:** concurrent/production-load behaviour;
+whether the live PDAS's current `MAX(id)`s or schema have drifted since the 7 Sep 2026 export;
+whether `sms_pdas_writer` (not yet created) or `pdasWrite.ts`'s own connection path would behave
+identically to this pass's `sqlcmd -E` calls; whether IFL's own operational process depends on
+`nhs_events`' mislabelled MaterialId text. `PDAS_WRITE_ENABLED` remains `false`; none of this
+pass's findings change the fact that all nine write rights still await IFL's written authority.
+
 ### Red-team audit and its 15-commit remediation wave (23 Sep 2026, later the same day than the entry below)
 
 `ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md` (commit `d2cba5e`, 13 workers) found **8 CRITICAL
@@ -55,8 +137,11 @@ finding is still true today: `sms/.env`'s comment reads "PDAS writes: ENABLED 22
 IFL granted permission" directly above a line reading `PDAS_WRITE_ENABLED=false`, and no
 document in the repository records who at IFL granted it or which of the nine write rights it
 covers (`DEFECTS.md` D-12) — this is a documentation contradiction, not a live write path: **no
-PDAS procedure has ever been executed against any database, local or plant**, and that remains
-true after this wave exactly as it was before it.
+PDAS procedure had been executed against any database, local or plant, at the time this
+red-team wave was written**, and that remained true through this wave. **Superseded later the
+same day (23 Sep 2026):** see the WS-PDAS2 section above this one — two authorised passes
+executed PDAS procedures against the local `PDAS_TP1U2_SEP07` copy only, then restored it; the
+plant and `PDAS_WRITE_ENABLED` (still `false`) are unaffected.
 
 **Suite and typecheck, measured directly this pass:** `npx vitest run` from `sms/` — **177
 files passed / 1 skipped, 1745 tests passed / 4 skipped**, no red files, one run, HEAD
@@ -148,7 +233,7 @@ AddTubeType  5             @tubeForm    int        4           0
 AddTubeType  6             @tubeWeight  float      8           0
 ```
 
-This is an **exact match**, in both name and parameter order, to `PROC_PARAMS.AddTubeType` in `pdasWrite.ts` (`['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight']`). The presumed `typeTypeId` output name — guessed by analogy with the vendor's other `Add*` procedures' own typo — was correct. **What this verifies, and no more:** the procedure's *signature* — its parameter names, order, types and OUTPUT flags. It does **not** verify the procedure's *runtime behaviour*: the duplicate-refusal codes (-5001/-5002/-5003) are still read from the proc body text, not observed from an actual call, and **no PDAS procedure of any kind has ever been executed against any database, local or plant.** `PDAS_WRITE_ENABLED` stays `false`, and all nine write rights (see the Phase 1 hard-constraints section below) still await IFL's written authority — nothing about this changes that. Reproduce this yourself with the same query before relying on it further.
+This is an **exact match**, in both name and parameter order, to `PROC_PARAMS.AddTubeType` in `pdasWrite.ts` (`['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight']`). The presumed `typeTypeId` output name — guessed by analogy with the vendor's other `Add*` procedures' own typo — was correct. **What this verifies, and no more:** the procedure's *signature* — its parameter names, order, types and OUTPUT flags. At the time this section was written (21 Sep 2026) the procedure's *runtime behaviour* was still unobserved. **Superseded 23 Sep 2026:** two authorised execution passes (`PDAS-EXECUTION-2026-09-23.md`, and the WS-PDAS2 section above "Current phase") have since executed `AddTubeType`, `CreateMaterial` and `SetMaterialStatusActive` against the local `PDAS_TP1U2_SEP07` copy only — the duplicate-refusal codes are now observed firing (`AddTubeType` → `-5001`; `CreateMaterial` → `-7001`), not merely read from the proc body. The plant was never touched and `PDAS_WRITE_ENABLED` stays `false`; all nine write rights still await IFL's written authority — nothing about that changes. Reproduce this yourself with the same query before relying on it further.
 
 Two other points established the same day, by direct measurement rather than by inference:
 
@@ -579,7 +664,7 @@ A second sample from IFL (`SPS.rar`, 7 Sep) showed the plant **dropped and recre
 
 1. **Source generations ("epochs").** `sms.source_epoch` names each physical generation of each source table; the worker resolves its generation before every read and **halts** on an unknown one (`sms epoch:accept` registers it — never automatic). July's 142,511 cones and September's 132,552 coexist under different epochs. The sidecar is the archive of record; IFL keeps about a month. **`sms verify` reconciles per generation to the checksum (`SUM(id)`).** Full record: `SEPT-2026-EPOCH-DECISION.md`.
 2. **Product attribution is real.** `NullAttribution` is retired for rows that carry `MaterialId` (`attribution_method = 'source_column'`); older rows keep `'none'` honestly. Limits are **time-versioned** (`sms.product_limit_version`): a reading is judged by the limits in force at its own time, never by today's mirror. Up to six materials run concurrently on different machines, so the line-wide "Current Product" is now only the fallback for pre-`MaterialId` rows.
-3. **The PDAS write path exists and is OFF.** Add / Retire / Change-limits, through the vendor's own procs (there is no UPDATE proc; changing a setpoint is one guarded single-row UPDATE with the vendor's own event-log row), rank ≥ 3, `PDAS_WRITE_ENABLED=false`, a **separate** writer login. It stays off until IFL confirms **in writing** that SMS may write to PDAS — the read-only rule for `DATA_TP1U2` is unchanged. Retire-and-recreate is **not** an edit: `CreateMaterial` refuses a duplicate blend/count/tube regardless of active flag (IFL's own engineer hit this four times on 18 Aug — **unverified**, 15 Sep 2026 audit finding H6: the field notes this cites are ten SSMS screenshots at `Desktop/SPS unzip/SPS/*.jpg`, and they contain no error of any kind — every executed call shown returns `@error`/`@errorMsg` = `NULL`/`NULL`. The real behaviour is to be established by an offline proof against the local `_SEP07` copy, not repeated to IFL as fact until it is).
+3. **The PDAS write path exists and is OFF.** Add / Retire / Change-limits, through the vendor's own procs (there is no UPDATE proc; changing a setpoint is one guarded single-row UPDATE with the vendor's own event-log row), rank ≥ 3, `PDAS_WRITE_ENABLED=false`, a **separate** writer login. It stays off until IFL confirms **in writing** that SMS may write to PDAS — the read-only rule for `DATA_TP1U2` is unchanged. Retire-and-recreate is **not** an edit: `CreateMaterial` refuses a duplicate blend/count/tube regardless of active flag (IFL's own engineer hit this four times on 18 Aug). **Finding H6, closed 23 Sep 2026 (see the WS-PDAS2 section under "Current phase"):** the 15 Sep 2026 audit's "unverified" call was right about the ten SSMS screenshots at `Desktop/SPS unzip/SPS/*.jpg` (they show no error — every call shown returns `@error`/`@errorMsg` = `NULL`/`NULL`, because the errors went to `nhs_events`, not the grid) but wrong to conclude the incident itself was unverified. `nhs_events` EventIds 23204/23206/23207/23208 record the four `-7001` refusals at 10:35–10:41 on 18 Aug 2026, bracketed by `SetMaterialStatusActive` retiring and reactivating MaterialId 1022 — i.e. the engineer's own attempt at retire-then-recreate. A 23 Sep 2026 execution pass against the local `PDAS_TP1U2_SEP07` copy reproduced the identical sequence (create → retire → recreate same triple → **refused, `-7001`, no row inserted** → reactivate) and confirms it: retire-and-recreate cannot work, by the vendor's own uniqueness check, which never references `MaterialActive`.
 
 **Still to ask IFL for:** the 10 Jul – 5 Aug data (exists, not sent); `db_datareader` on both DBs; written authority for PDAS writes; whether the PLC reads limits live.
 

@@ -535,8 +535,18 @@ between what a governing document claims is true and what the code actually does
 same shape one level up — a grant that governs nine write rights against a client's production
 database exists in exactly one place, a commit message, which no IFL-facing document can cite
 and no auditor would accept. It is rated MEDIUM rather than HIGH only because the flag is off
-and **no PDAS procedure has ever executed against any database, local or plant** (the commit
-itself says so and `PDAS_WRITE_ENABLED=false` holds it).
+and **`PDAS_WRITE_ENABLED=false` holds it** — the plant itself has never been written to and
+this entry's severity does not change on that basis. **Correction, 23 Sep 2026 (WS-PDAS2):** the
+parenthetical this entry originally carried — "no PDAS procedure has ever executed against any
+database, local or plant" — is no longer accurate and should not be read as current. Two
+authorised passes on 23 Sep 2026 (`PDAS-EXECUTION-2026-09-23.md`, and `CLAUDE.md`'s WS-PDAS2
+section) executed `AddTubeType`, `CreateMaterial` and `SetMaterialStatusActive` **against the
+local `PDAS_TP1U2_SEP07` copy on `.\SQLEXPRESS` only**, each time from a proven-restorable
+backup, each time restored to the exact pre-execution state afterward, by hand via `sqlcmd -E`
+under Windows auth — never through `sms_pdas_writer`, never through `pdasWrite.ts`'s own
+connection path, never with `PDAS_WRITE_ENABLED` on, and never against the plant. That local
+execution does not resolve D-12's own finding (the grant is still undocumented outside a commit
+message) and does not change this entry's MEDIUM severity.
 
 **What it blocks in practice, today:** `IFL-OPEN-QUESTIONS.md` ask 3 cannot be sent. Asking a
 client to re-give permission they already gave reads as badly as switching a write path on
