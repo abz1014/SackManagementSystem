@@ -124,17 +124,44 @@ function AdjustmentsBlock({ d, nameOf }: { d: CalibrationReportData; nameOf: (n:
   // Phase 9's rows, kept to the period the report is bounded to (by id
   // against the report's own ledger read) so a route that ignored from/to
   // could never widen the table; the report's rows when the call failed.
-  const own = new Map(d.adjustments.map((a) => [a.adjustmentId, a]));
-  const rich: CalibrationAdjustment[] | null = p9.data
-    ? p9.data.adjustments.filter((a) => own.has(a.adjustmentId))
+  /**
+   * The report's own ledger is the spine; the richer route only DECORATES it
+   * — friction audit F5, 23 Sep 2026.
+   *
+   * This used to filter the richer route's rows by the report's ids and
+   * render THAT list. Two things went wrong at once and the table showed five
+   * headers over zero rows with no message, while the CSV for the same period
+   * carried the adjustment:
+   *
+   *   1. `/api/reports/calibration` returns `adjustmentId: 4` (number) and
+   *      `/api/calibration/adjustments` returns `"4"` (string), so the
+   *      cross-route match was `own.has("4")` against number keys — always
+   *      false, and the filtered list was always empty. Both sides are keyed
+   *      through `String()` here so the id's wire type cannot decide whether
+   *      a row is shown. (The API's id type still wants settling so this
+   *      cannot recur elsewhere — reported, not fixed here.)
+   *   2. The empty-state guard tested `d.adjustments`, the report's ledger,
+   *      which was NOT empty — so the "no adjustments" sentence never fired
+   *      for a table that was rendering nothing.
+   *
+   * Iterating the report's own rows fixes both by construction: the table can
+   * never be emptier than the ledger the guard tests, it stays bounded to the
+   * report's period (a route that ignored from/to still cannot widen it), and
+   * a row the richer call does not know about keeps its place with "—" in the
+   * two detail columns instead of vanishing.
+   */
+  const detailById = p9.data
+    ? new Map<string, CalibrationAdjustment>(p9.data.adjustments.map((a) => [String(a.adjustmentId), a]))
     : null;
+  const rows = d.adjustments.map((a) => ({ a, detail: detailById?.get(String(a.adjustmentId)) ?? null }));
+  const rich = rows.some((r) => r.detail != null);
   const detailsMissing = p9.error != null && !p9.data;
 
   return (
     <Block label={W.reports.adjustments}>
       {p9.loading && !p9.data && !p9.error ? (
         <SkelLines n={3} />
-      ) : d.adjustments.length === 0 ? (
+      ) : rows.length === 0 ? (
         <p className="mut">{W.reports.noAdjustments}</p>
       ) : (
         <>
@@ -153,14 +180,14 @@ function AdjustmentsBlock({ d, nameOf }: { d: CalibrationReportData; nameOf: (n:
                 </tr>
               </thead>
               <tbody>
-                {(rich ?? d.adjustments).map((a) => (
-                  <tr key={a.adjustmentId}>
+                {rows.map(({ a, detail }) => (
+                  <tr key={String(a.adjustmentId)}>
                     {/* An app-written instant (genuine UTC): the viewer's zone, never the plant formatters. */}
                     <td>{fmtAppInstant(a.adjustedAtUtc)}</td>
                     <td>{nameOf(a.stationId)}</td>
                     <td className="n">{fmtSignedG(a.amountG)}</td>
-                    {rich && <td className="n">{fmtG1((a as CalibrationAdjustment).beforeG)}</td>}
-                    {rich && <td className="n">{fmtG1((a as CalibrationAdjustment).afterG)}</td>}
+                    {rich && <td className="n">{detail ? fmtG1(detail.beforeG) : '—'}</td>}
+                    {rich && <td className="n">{detail ? fmtG1(detail.afterG) : '—'}</td>}
                     <td>{a.reason ?? '—'}{a.note ? ` · ${a.note}` : ''}</td>
                     <td>{a.recordedBy ?? '—'}</td>
                   </tr>

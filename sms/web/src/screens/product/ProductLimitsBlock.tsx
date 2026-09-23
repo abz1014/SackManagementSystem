@@ -23,12 +23,13 @@
  * in this file — because a rank the server stops honouring must not leave a
  * button here that only ever answers 403.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  getProductLimitHistory, getProductWriteStatus, setLocalLimitVersion,
-  type LimitHistoryProduct, type LimitHistoryVersion, type ProductWriteStatus,
+  getProductLimitHistory, getProductWriteStatus, getProducts, setLocalLimitVersion,
+  type LimitHistoryProduct, type LimitHistoryVersion, type ProductOption, type ProductWriteStatus,
 } from '../../api';
 import { fmtClock, fmtDay, fmtG } from '../../lib/fmt';
+import { distinctProductLabels } from '../../lib/productLabel';
 import { W } from '../../lib/words';
 import { Failed, SkelLines } from '../../ui/bits';
 import { Said, useResource, useWrite } from '../setup/shared';
@@ -51,10 +52,67 @@ export function canWriteLocal(status: ProductWriteStatus | undefined | null): bo
   return Boolean(status && typeof status === 'object' && status.local && status.local.canWrite === true);
 }
 
+/**
+ * One heading per product, distinct within this list — friction audit F15,
+ * 23 Sep 2026.
+ *
+ * `GET /api/products/limits/history` labels a product from `sms.product`'s
+ * description alone (productLimits.ts's `listLimitHistory`), and on this line
+ * that description is not unique: six materials are called "205-IL0-SD"
+ * (ids 20, 21, 1021-1024), three "201-IH0-SD" and three "204-ILT-BR". This
+ * block rendered one heading per product, so fourteen blocks carried nine
+ * repeated names — EACH with its own "Change limits" button, i.e. an
+ * ambiguous target on a write control.
+ *
+ * The disambiguating parts come from the server, `GET /api/products`
+ * (`color`/`blend`/`countText`/`tubeType`, PDAS's own columns), and are
+ * applied by the SAME helper every other screen uses —
+ * `lib/productLabel.ts`'s `distinctProductLabels`, ported rule-for-rule
+ * server-side for the CSV exports as `api/src/services/productNames.ts` — so
+ * Sacks, Rejects, Report and this block cannot invent different names for the
+ * same material. Measured on this dataset: `blend` is "PVSD8020" on all six
+ * and discriminates nothing; colour separates four of the six, and the count
+ * ("30" against "20 Slub") separates the remaining ORANGE pair.
+ *
+ * If `/api/products` has not arrived or failed, the helper still runs over the
+ * plain names alone and falls back to its own last resort, "· #20" — the PDAS
+ * MaterialId, the one field GUARANTEED distinct. A heading is therefore never
+ * ambiguous, whether or not the second fetch succeeded; it is only less
+ * friendly. That is why this block renders its history as soon as the history
+ * itself arrives rather than waiting on the catalogue.
+ */
+function headingLabels(
+  history: LimitHistoryProduct[],
+  catalogue: ProductOption[] | null,
+): Map<number, string> {
+  const parts = new Map((catalogue ?? []).map((p) => [p.productId, p]));
+  return distinctProductLabels(
+    history.map((p) => {
+      const c = parts.get(p.productId);
+      return {
+        productId: p.productId,
+        // The server's own plain name; `productLabel()` applies the same
+        // description -> lotCode -> "Product N" fallback it was built with.
+        description: p.label,
+        color: c?.color ?? null,
+        blend: c?.blend ?? null,
+        countText: c?.countText ?? null,
+        tubeType: c?.tubeType ?? null,
+      };
+    }),
+  );
+}
+
 export function ProductLimitsBlock() {
   const res = useResource(() => getProductLimitHistory());
   const status = useResource(() => getProductWriteStatus());
+  const cat = useResource(() => getProducts());
   const canWrite = canWriteLocal(status.data);
+  const products = res.data?.products;
+  const labels = useMemo(
+    () => headingLabels(products ?? [], cat.data?.products ?? null),
+    [products, cat.data],
+  );
 
   return (
     <div>
@@ -74,7 +132,19 @@ export function ProductLimitsBlock() {
       ) : (
         <div style={{ display: 'grid', gap: 18, marginTop: 12 }}>
           {res.data.products.map((p) => (
-            <ProductHistory key={p.productId} product={p} canWrite={canWrite} onChanged={res.reload} />
+            <ProductHistory
+              key={p.productId}
+              product={p}
+              /* The heading a reader picks the block by (see headingLabels). */
+              heading={labels.get(p.productId) ?? p.label}
+              /* The PDAS row itself, for the editor's restatement of WHICH
+                 product is about to gain a version. Absent while
+                 /api/products is in flight or if it failed — the editor says
+                 what it can and always states the id. */
+              parts={cat.data?.products.find((c) => c.productId === p.productId) ?? null}
+              canWrite={canWrite}
+              onChanged={res.reload}
+            />
           ))}
           <p className="mut sm">{W.cone.noLaterThanNote}</p>
         </div>
@@ -92,9 +162,11 @@ function limitsCell(v: LimitHistoryVersion, older: LimitHistoryVersion | undefin
 }
 
 function ProductHistory({
-  product, canWrite, onChanged,
+  product, heading, parts, canWrite, onChanged,
 }: {
   product: LimitHistoryProduct;
+  heading: string;
+  parts: ProductOption | null;
   canWrite: boolean;
   onChanged: () => void;
 }) {
@@ -103,7 +175,7 @@ function ProductHistory({
     <div>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
         <p style={{ fontWeight: 500 }}>
-          {product.label}
+          {heading}
           {product.activeFlag === false && <span className="mut"> · {W.cone.retired}</span>}
         </p>
         {canWrite && !editing && (
@@ -147,16 +219,22 @@ function ProductHistory({
         </div>
       )}
       {editing && (
-        <LocalLimitsForm product={product} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} />
+        <LocalLimitsForm
+          product={product}
+          parts={parts}
+          onDone={() => { setEditing(false); onChanged(); }}
+          onCancel={() => setEditing(false)}
+        />
       )}
     </div>
   );
 }
 
 function LocalLimitsForm({
-  product, onDone, onCancel,
+  product, parts, onDone, onCancel,
 }: {
   product: LimitHistoryProduct;
+  parts: ProductOption | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -186,6 +264,26 @@ function LocalLimitsForm({
         );
       }}
     >
+      {/* WHICH product is about to gain a version, restated before the fields
+          — friction audit F15, 23 Sep 2026. The heading above is distinct on
+          this dataset, but it is distinct by colour and count, which merely
+          HAPPEN to differ here; the PDAS MaterialId is the only field
+          guaranteed unique, so the restatement ends with it and the engineer
+          is agreeing to a row, not to a label. Uses the PLAIN name in the
+          first slot (the heading already carries the same parts spelled out
+          beside it) and the existing `changeLimitsHeading` string, the one
+          Product › Catalogue's PDAS editor states its own target with, so the
+          two editors identify a product the same way. `—` where
+          /api/products has not arrived: the id alone still identifies it. */}
+      <p style={{ fontSize: 'var(--fs-qual)' }}>
+        {W.product.changeLimitsHeading(
+          product.label,
+          parts?.blend ?? '—',
+          parts?.countText ?? '—',
+          parts?.tubeType ?? '—',
+          product.productId,
+        )}
+      </p>
       {/* Makes plain up front what this button does — a NEW version, never a
           rewrite (roadmap Phase 4 item 2, the point the task named). */}
       <p className="mut sm">{W.cone.changeLimitsLocalNote}</p>

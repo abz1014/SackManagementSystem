@@ -20,10 +20,11 @@
  * of this screen addressable by a single product; `ProductLimitsBlock`
  * always lists every product's history and is not filtered by it.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { W } from '../../lib/words';
 import { Block, Failed, SkelLines } from '../../ui/bits';
 import { fmtG } from '../../lib/fmt';
+import { distinctProductLabels } from '../../lib/productLabel';
 import { ProductLimitsBlock } from './ProductLimitsBlock';
 import {
   getProducts, getProductWriteStatus, getProductOptions, createProduct, setProductActive, updateProductLimits,
@@ -129,6 +130,21 @@ function PdasProducts({
   const [mode, setMode] = useState<{ kind: 'limits'; id: number } | { kind: 'active'; id: number; active: boolean } | { kind: 'create' } | null>(null);
   const linkedRef = useRef<HTMLTableRowElement | null>(null);
   const scrolledRef = useRef(false);
+  /**
+   * One name per row, distinct within this table — friction audit F15,
+   * 23 Sep 2026. Six of these materials are described "205-IL0-SD", three
+   * "201-IH0-SD" and three "204-ILT-BR", and every row carries a "Change
+   * weight limits" button onto the guarded single-row `UPDATE dbo.Materials`.
+   * The id column beside the name has always been the unambiguous answer, but
+   * it is a PDAS surrogate key: a reader scanning descriptions sees the same
+   * words six times. `distinctProductLabels` (lib/productLabel.ts — the same
+   * helper Sacks, Rejects, Line, Product › Running and the Sack/Product
+   * reports use, ported server-side for the CSVs as
+   * api/src/services/productNames.ts) appends the parts that actually differ,
+   * from PDAS's own columns already on this payload. The id column STAYS: the
+   * appended parts are unique on today's data, not unique by construction.
+   */
+  const labels = useMemo(() => distinctProductLabels(products), [products]);
 
   useEffect(() => {
     getProductWriteStatus().then(setStatus).catch(() => setStatus({ enabled: false, reason: 'status unavailable', canWrite: false, local: { canWrite: false } }));
@@ -163,7 +179,7 @@ function PdasProducts({
                 ref={linked ? linkedRef : undefined}
                 className={[p.activeFlag === false ? 'mut' : '', linked ? 'acc' : ''].filter(Boolean).join(' ')}
               >
-                <td>{label(p)}{p.activeFlag === false ? ` · ${W.product.retired}` : ''}</td>
+                <td>{labels.get(p.productId) ?? label(p)}{p.activeFlag === false ? ` · ${W.product.retired}` : ''}</td>
                 <td className="n">{p.productId}</td>
                 <td>{f ? `${fmtG(f.setpointG)} · ${rangeLabel(f)}` : '—'}</td>
                 {status?.canWrite && (
