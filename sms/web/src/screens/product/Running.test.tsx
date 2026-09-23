@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import { render } from '../../testkit/render';
 import { installFakeFetch } from '../../testkit/fetchRouter';
-import { META_FIXTURE } from '../../testkit/fixtures';
+import { META_FIXTURE, GENERATION_FIXTURE } from '../../testkit/fixtures';
 import type { Period } from '../../lib/period';
 import type { Envelope, MachinesRunningData, ProductOption, ProductAtData } from '../../api';
 import { RunningTab } from './Running';
@@ -77,6 +77,7 @@ const MACHINES: Envelope<MachinesRunningData> = {
     windowMs: 7_200_000,
     windowStartUtc: '2026-09-21T12:00:00Z',
     materialsRunning: 3,
+    generation: GENERATION_FIXTURE,
     machines: [
       { station: 1, stationName: 'S1', machineName: 'M1', materialId: 20, productName: SHARED_DESC, cones: 40, conesOnMaterial: 40, newestUtc: '2026-09-21T13:59:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false },
       { station: 2, stationName: 'S2', machineName: 'M2', materialId: 21, productName: SHARED_DESC, cones: 30, conesOnMaterial: 30, newestUtc: '2026-09-21T13:58:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false },

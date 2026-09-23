@@ -358,7 +358,10 @@ describe('GET /api/health — shape, redaction, status', () => {
     expect(typeof r.json.service.uptimeSeconds).toBe('number');
     expect(typeof r.json.service.pid).toBe('number');
     expect(r.json.database).toEqual({ ok: true, latencyMs: expect.any(Number), sizeMb: null, capMb: 10240, pctOfCap: null });
-    expect(r.json.acquisition).toEqual({ kind: null, ageSeconds: null, cadenceSeconds: null, halted: null });
+    // `generation` is redacted with the rest of the block: which physical
+    // generation of IFL's tables this server reads is not a fact an
+    // unauthenticated monitor probe is told (D-11, 23 Sep 2026).
+    expect(r.json.acquisition).toEqual({ kind: null, ageSeconds: null, cadenceSeconds: null, halted: null, generation: null });
     expect(r.json.backup).toBeNull();
     expect(r.json.degradedReason).toBeNull();
   });
@@ -368,7 +371,25 @@ describe('GET /api/health — shape, redaction, status', () => {
     expect(r.status).toBe(200);
     expect(r.json.database.sizeMb).toBe(512);
     expect(r.json.database.pctOfCap).toBe(5);
-    expect(r.json.acquisition).toEqual({ kind: 'ok', ageSeconds: 30, cadenceSeconds: 60, halted: ['sack_raw'] });
+    // The fake pool answers the generation probe as "no epoch-tagged rows",
+    // so the scope is the UNSCOPED no-op and the note says exactly that:
+    // no generation stated, nothing claimed to have been excluded. A
+    // consumer must read `generation: null` as "not stated" (generation.ts).
+    expect(r.json.acquisition).toEqual({
+      kind: 'ok',
+      ageSeconds: 30,
+      cadenceSeconds: 60,
+      halted: ['sack_raw'],
+      generation: {
+        generation: null,
+        spansGenerations: false,
+        otherGenerationExcluded: 0,
+        newerElsewhereUtc: null,
+        newerElsewhereSourceDb: null,
+        newerElsewhereLabel: null,
+        newerElsewhereSimulator: false,
+      },
+    });
     expect(r.json.backup).toMatchObject({ newestFile: null, ageDays: null, warning: true });
   });
 

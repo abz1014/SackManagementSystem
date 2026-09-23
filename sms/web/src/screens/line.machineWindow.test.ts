@@ -29,13 +29,23 @@
  * was that NEITHER BLOCK NAMED ITS OWN WINDOW, so the reader had no way to
  * know that.
  *
- * NOT FIXED HERE, AND DELIBERATELY: the 34-51 cones came entirely from
- * source epoch 13, the plant simulator's generation. `machinesRunning.ts` is
- * in the deliberately unconstrained set — whether "newest real generation" or
- * "the generation owning the tip" should win is an owner decision, not this
- * pass's — so it is reported, not scoped. At IFL there is no simulator, but
- * the window-vs-period mismatch these tests cover exists there too, on any
- * period that is not the newest data.
+ * THE GENERATION HALF OF THIS IS NOW FIXED, ELSEWHERE (23 Sep 2026). The
+ * 34-51 cones came entirely from source epoch 13, the plant simulator's
+ * generation, and this header used to end by recording that `machinesRunning`
+ * was deliberately left unconstrained pending an owner decision. That
+ * decision was made the same day — the newest REAL generation wins (D-11) —
+ * so `machinesRunning.ts` now anchors on `MAX(production_ts_utc_ms)` over ONE
+ * generation. Re-measured after the change: the anchor moves from 2026-09-22
+ * (simulator) to 2026-09-07 12:00 (IFL's own September generation), and the
+ * window holds 8 stations on 347 cones rather than 14 on 603.
+ *
+ * NOTHING IN THIS FILE CHANGES BECAUSE OF THAT, and that is the point. Rule 1
+ * is intact — the window is still anchored on the newest reading on record,
+ * never on the selected period or the clock — so the window-vs-period
+ * mismatch these tests cover still exists, at IFL too, on any period that is
+ * not the newest data. What was a simulator-shaped symptom here is now a
+ * generation-shaped one; the sentences that name the window are what make
+ * either of them readable.
  */
 import { describe, expect, it } from 'vitest';
 import type { Period } from '../lib/period';

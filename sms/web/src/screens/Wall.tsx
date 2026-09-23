@@ -38,6 +38,7 @@ import { useEffect, useMemo } from 'react';
 import { LIVE_POLL_MS, useLive, usePlantNow, usePolling, useTicker } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
+import { hasNewerElsewhere, quietBecauseGenerationShort } from '../lib/generationWords';
 import { fmtClock, fmtClockSec, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { getAttention, getStations, type LiveLine } from '../api';
 
@@ -170,8 +171,15 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
   // reading's own age. The figures below stay (a blank wall reads as a dead
   // PC — see the file header), but the sentence that says what the line is
   // doing stops claiming to know.
-  const knowable = stateIsKnowable(health) && !outOfContact;
-  const alarm = health.kind !== 'ok' || outOfContact;
+  // A THIRD reason, D-11 (23 Sep 2026): readings newer than anything the
+  // source generation in use holds exist. The line's state cannot be read off
+  // a generation that has ended — the arithmetic would be correct and the
+  // conclusion false — so the big sentence stops asserting it and the footer
+  // says why. This is the same rule as the other two, applied to a different
+  // reason for the same blindness.
+  const generationEnded = hasNewerElsewhere(line.generation);
+  const knowable = stateIsKnowable(health) && !outOfContact && !generationEnded;
+  const alarm = health.kind !== 'ok' || outOfContact || generationEnded;
   const t = line.thisShift;
   const names = stations.data?.stations ?? [];
   const anchor = line.dataAsOfUtc ?? line.plantNowUtc;
@@ -290,6 +298,18 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
               17 min after weighing" is the all-clear, and printing it next to
               an outage notice invites reading the reassuring half. */}
           {outOfContact ? W.offline : lagSentence(line, health)}
+          {/* D-11, 23 Sep 2026. The board's one job is not to over-claim.
+              It stopped asserting "Line 3 is running" while /api/live was
+              failing (fc0e3c3); asserting "Line 3 stopped 14 d ago" when
+              what it means is "the source generation I read ended 14 d ago"
+              is the same defect in the other direction. REPLACES nothing —
+              it is appended to the lag sentence, because both are true and
+              the lag sentence is not the one that is misleading. Printed
+              only when the server reports a newer reading outside the
+              generation in use, which at IFL never happens. */}
+          {!outOfContact && hasNewerElsewhere(line.generation) && (
+            <> · {quietBecauseGenerationShort(line.generation, fmtClock(line.dataAsOfUtc ?? line.plantNowUtc))}</>
+          )}
         </span>
         <span>
           {line.lastSack && `${W.lastSack} ${fmtKg(line.lastSack.weightKg)} ${fmtClock(line.lastSack.ts)}`}

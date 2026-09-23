@@ -1059,6 +1059,36 @@ export function getSystemHistory(): Promise<Envelope<SystemHistoryData>> {
 }
 
 // ---- live line state — polled by the floor screens and the wall display ----
+
+/**
+ * Which SOURCE GENERATION a live answer was read from, and what it left out.
+ *
+ * The plant dropped and recreated its four weighing tables on 2026-08-05
+ * (D-11). Since 23 Sep 2026 the live screens read ONE generation — the
+ * newest real one — so a figure is never a total across two physically
+ * different tables. The cost is that the newest real generation can end
+ * while rows keep arriving under another one, and then these screens go
+ * quiet. `newerElsewhereUtc` is what lets them say WHY instead of reporting
+ * a stopped line: null means nothing newer exists anywhere, which is the
+ * ordinary case and the case in which no sentence should be printed.
+ */
+export interface LiveGenerationNote {
+  generation: {
+    key: string;
+    ordinal: number;
+    sourceDb: string | null;
+    provenance: string | null;
+    label: string | null;
+    simulator: boolean;
+  } | null;
+  spansGenerations: boolean;
+  otherGenerationExcluded: number;
+  newerElsewhereUtc: string | null;
+  newerElsewhereSourceDb: string | null;
+  newerElsewhereLabel: string | null;
+  newerElsewhereSimulator: boolean;
+}
+
 export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
 export type LiveHealthKind = "ok" | "stale" | "late" | "no_data";
 export interface LiveHealth {
@@ -1103,6 +1133,8 @@ export interface LiveLine {
   ingestLagSeconds: number | null;
   /** Whether the figures can be trusted, decided server-side. */
   health: LiveHealth;
+  /** Which source generation every figure below came from. Always sent. */
+  generation: LiveGenerationNote;
   state: {
     status: LineStatus;
     /** Wall-clock age of the newest reading. */
@@ -1498,7 +1530,15 @@ export interface HealthReport {
   status: HealthStatus;
   service: { version: string; uptimeSeconds: number; startedAtUtc: string; pid: number };
   database: { ok: boolean; latencyMs: number | null; sizeMb: number | null; capMb: number; pctOfCap: number | null };
-  acquisition: { kind: LiveHealthKind | null; ageSeconds: number | null; cadenceSeconds: number | null; halted: string[] | null };
+  acquisition: {
+    kind: LiveHealthKind | null;
+    ageSeconds: number | null;
+    cadenceSeconds: number | null;
+    halted: string[] | null;
+    /** Which source generation the acquisition figures describe. Null for an
+     *  anonymous caller, like the rest of this block. */
+    generation: LiveGenerationNote | null;
+  };
   backup: { dir: string; newestFile: string | null; newestAtUtc: string | null; ageDays: number | null; warning: boolean } | null;
   degradedReason: string | null;
 }
@@ -1644,6 +1684,8 @@ export interface MachinesRunningData {
   windowStartUtc: string | null;
   machines: MachineRunning[];
   materialsRunning: number;
+  /** Which generation the anchor and the window belong to. Always sent. */
+  generation: LiveGenerationNote;
 }
 export function getMachinesRunning(at?: string | null): Promise<Envelope<MachinesRunningData>> {
   const p = new URLSearchParams();

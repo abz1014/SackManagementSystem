@@ -61,11 +61,16 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import {
   classifyHealth,
+  emptyLiveGenerationNote,
+  findNewerElsewhere,
   getSyncHealth,
   LAG_SAMPLE_ROWS,
   MAX_REPORTABLE_LAG_SECONDS,
+  resolveLiveScope,
+  type LiveGenerationNote,
   type LiveHealthKind,
 } from './live.js';
+import { epochFragment, noteOf } from './generation.js';
 
 /** SQL Server Express's per-database data-file ceiling, in MB (10 GB). */
 export const EXPRESS_CAP_MB = 10240;
@@ -101,6 +106,18 @@ export interface AcquisitionHealth {
   cadenceSeconds: number | null;
   /** Target tables whose latest pass halted or failed. */
   halted: string[] | null;
+  /**
+   * Which source generation the acquisition figures describe, and the newest
+   * reading on record that it does NOT contain (23 Sep 2026, D-11).
+   *
+   * Health is the screen whose whole job is to report breakage. Before this
+   * it read the newest production instant across EVERY generation, so on a
+   * sidecar carrying both IFL's September copy and the simulator it reported
+   * the simulator's tip as the plant's own freshness and the simulator's
+   * acquisition lag as IFL's. Null for an anonymous caller, like the rest of
+   * the acquisition block.
+   */
+  generation: LiveGenerationNote | null;
 }
 
 export interface BackupHealth {
@@ -215,28 +232,36 @@ export interface AcquisitionFacts extends Required<Omit<AcquisitionHealth, 'kind
  * so the strip and the Health screen cannot disagree.
  */
 export async function acquisitionHealth(pool: ConnectionPool, lineId: number): Promise<AcquisitionFacts> {
+  // Same scope, same cache, same rule as /api/live — so the Health screen and
+  // the strip on every other screen cannot disagree about which generation
+  // they are describing, any more than they can disagree about its kind.
+  const scope = await resolveLiveScope(pool, lineId);
+  const coneF = epochFragment(scope, 'cone_event');
+  const rejF = epochFragment(scope, 'reject_event');
+  const andF = (f: { sql: string | null }) => (f.sql ? ` AND ${f.sql}` : '');
+  const bindF = (req: mssql.Request, ...fs: { params: { name: string; id: number }[] }[]) => {
+    for (const f of fs) for (const p of f.params) req.input(p.name, mssql.Int, p.id);
+    return req;
+  };
+
   const [sync, tip, lag, halted] = await Promise.all([
     getSyncHealth(pool, lineId),
-    pool
-      .request()
-      .input('line', mssql.Int, lineId)
-      .query<{ tip: number | null }>(
-        `SELECT MAX(tip) AS tip FROM (
-           SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event WHERE line_id = @line
+    bindF(pool.request().input('line', mssql.Int, lineId), coneF, rejF).query<{ tip: number | null }>(
+      `SELECT MAX(tip) AS tip FROM (
+           SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event WHERE line_id = @line${andF(coneF)}
            UNION ALL
-           SELECT MAX(production_ts_utc_ms) FROM sms.reject_event WHERE line_id = @line
+           SELECT MAX(production_ts_utc_ms) FROM sms.reject_event WHERE line_id = @line${andF(rejF)}
          ) t`,
-      ),
-    pool
-      .request()
-      .input('line', mssql.Int, lineId)
-      .input('take', mssql.Int, LAG_SAMPLE_ROWS)
-      .query<{ lagSeconds: number }>(
-        `SELECT TOP (@take) DATEDIFF(SECOND, src_ProductionDate, src_Date) AS lagSeconds
+    ),
+    bindF(
+      pool.request().input('line', mssql.Int, lineId).input('take', mssql.Int, LAG_SAMPLE_ROWS),
+      coneF,
+    ).query<{ lagSeconds: number }>(
+      `SELECT TOP (@take) DATEDIFF(SECOND, src_ProductionDate, src_Date) AS lagSeconds
            FROM sms_raw.cone_raw
-          WHERE line_id = @line AND src_Date IS NOT NULL AND src_ProductionDate IS NOT NULL
+          WHERE line_id = @line AND src_Date IS NOT NULL AND src_ProductionDate IS NOT NULL${andF(coneF)}
           ORDER BY raw_id DESC`,
-      ),
+    ),
     pool
       .request()
       .input('line', mssql.Int, lineId)
@@ -255,11 +280,16 @@ export async function acquisitionHealth(pool: ConnectionPool, lineId: number): P
     .filter((n) => Number.isFinite(n) && n >= 0 && n <= MAX_REPORTABLE_LAG_SECONDS)
     .sort((a, b) => a - b);
   const ingestLagSeconds = samples.length ? samples[Math.floor(samples.length / 2)]! : null;
+  const newer =
+    dataAsOfMs != null && scope.spansGenerations
+      ? await findNewerElsewhere(pool, lineId, dataAsOfMs, Number.MAX_SAFE_INTEGER)
+      : null;
   return {
     kind: classifyHealth(dataAsOfMs, sync, ingestLagSeconds, false),
     ageSeconds: sync.ageSeconds,
     cadenceSeconds: sync.cadenceSeconds,
     halted: halted.recordset.map((r) => r.target_table),
+    generation: { ...emptyLiveGenerationNote(), ...noteOf(scope), ...(newer ?? {}) },
   };
 }
 
@@ -413,8 +443,14 @@ export async function getHealth(
       pctOfCap: a ? pct : null,
     },
     acquisition: a && acq
-      ? { kind: acq.kind, ageSeconds: acq.ageSeconds, cadenceSeconds: acq.cadenceSeconds, halted: acq.halted }
-      : { kind: null, ageSeconds: null, cadenceSeconds: null, halted: null },
+      ? {
+          kind: acq.kind,
+          ageSeconds: acq.ageSeconds,
+          cadenceSeconds: acq.cadenceSeconds,
+          halted: acq.halted,
+          generation: acq.generation,
+        }
+      : { kind: null, ageSeconds: null, cadenceSeconds: null, halted: null, generation: null },
     backup: a ? backup : null,
     degradedReason: a ? reason : null,
   };

@@ -45,6 +45,39 @@
  * Every range predicate is on production_ts_utc_ms, which leads the unique
  * merge index on all three event tables (line_id, production_ts_utc_ms, …),
  * so each of these queries is an index seek over one shift, not a scan.
+ *
+ * SOURCE GENERATIONS — THE OWNER'S DECISION, 23 Sep 2026
+ * -----------------------------------------------------
+ * D-11 left this file, health.ts, machinesRunning.ts, app.ts and envelope.ts
+ * unconstrained on purpose: the five are all "what is the NEWEST thing we
+ * have" queries, and two defensible rules conflicted. The owner has chosen:
+ * **the newest REAL generation** — prefer IFL's own data over simulator rows
+ * — knowing and accepting the stated cost, which is that the plant-simulator
+ * rehearsal stops driving the live screens (the simulator is never the real
+ * generation) while `.env` stays pointed at `DATA_TP1U2_SIM`.
+ *
+ * `resolveLiveScope` below is that rule, resolved over the WHOLE table rather
+ * than over a period: these screens have no period. At IFL it is a no-op —
+ * their generations do not overlap in time and none is synthetic, so "newest
+ * real" and "newest" are the same generation — which is exactly why it is
+ * safe to adopt and why the simulator is the only thing it visibly changes.
+ *
+ * BUT THE CONSEQUENCE IS STATED, NEVER SILENT. If the newest real generation
+ * ended on 7 Sep while rows keep arriving under another one, these screens
+ * must say *why* they have gone quiet. A board reporting "stopped" when it
+ * means "the data I trust ended two weeks ago" is the same over-claim the
+ * Wall fix (`fc0e3c3`) removed, wearing a different hat. `LiveLine.generation`
+ * carries the facts for that sentence: which generation is being read, how
+ * many rows were left out, and the newest reading on record that this
+ * generation does NOT contain, with the generation it belongs to.
+ *
+ * THE ACQUISITION LAG IS SCOPED WITH THE DATA, and this is not decoration.
+ * Measured on the dev sidecar 23 Sep 2026: all 200 of the newest
+ * `sms_raw.cone_raw` rows belong to epoch 13 (the simulator), so an unscoped
+ * lag sample reported 1,041 s — the SIMULATOR's lag — while every figure
+ * beside it came from IFL's September generation, whose own median lag is
+ * 616 s. Judging one generation's line state by another generation's
+ * acquisition delay is the defect D-11 is about, one level down.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
@@ -59,6 +92,13 @@ import {
 import { TtlCache } from '../cache.js';
 import { plantNowMs, plantOffsetMinutes } from './plantClock.js';
 import { getLineIdentity } from './lineConfig.js';
+import {
+  epochFragment,
+  noteOf,
+  resolveGenerationScope,
+  type GenerationNote,
+  type GenerationScope,
+} from './generation.js';
 
 export const STOP_THRESHOLD_SECONDS = 120;
 export const IDLE_THRESHOLD_SECONDS = 8 * 3600;
@@ -166,10 +206,128 @@ export interface LiveShiftRule {
 const shiftRuleCache = new TtlCache<LiveShiftRule>(CONFIG_CACHE_MS);
 const lineIdentityCache = new TtlCache<{ lineName: string; lineShortName: string; plantName: string; unitName: string }>(CONFIG_CACHE_MS);
 
+/**
+ * The one source generation the "newest thing we have" queries read.
+ *
+ * Lives HERE rather than in `generation.ts` for two reasons. It is not a
+ * second rule — it is `resolveGenerationScope` with no window, i.e. "over
+ * everything on record" — and the four other sites that need it
+ * (`health.ts`, `machinesRunning.ts`, `app.ts`, `envelope.ts`) all already
+ * sit above this module in the import graph, so no cycle is created and no
+ * file another worker holds is touched.
+ *
+ * CACHED, because /api/live is polled every ten seconds by every floor PC
+ * and every wall screen, and the probe is a GROUP BY over three tables with
+ * no date bound. Sixty seconds, the same TTL the line identity and the shift
+ * rule already use: a generation appears when a plant rebuilds its tables,
+ * which is a thing that has happened once.
+ */
+const liveScopeCache = new TtlCache<GenerationScope>(CONFIG_CACHE_MS);
+
+export async function resolveLiveScope(pool: ConnectionPool, lineId: number): Promise<GenerationScope> {
+  const key = String(lineId);
+  const hit = liveScopeCache.get(key);
+  if (hit) return hit;
+  const scope = await resolveGenerationScope(pool, lineId, {});
+  liveScopeCache.set(key, scope);
+  return scope;
+}
+
+/**
+ * What a live screen needs to say WHY it has gone quiet.
+ *
+ * `GenerationNote` says which generation was read and how much was left out.
+ * These two fields say the part that matters to someone looking at a board:
+ * there IS a newer reading, it is at this instant, and it belongs to that
+ * generation. Without them "idle since 7 Sep" is indistinguishable from a
+ * plant that has been dark for a fortnight.
+ *
+ * Null `newerElsewhereUtc` means no reading anywhere on record is newer than
+ * the one shown — the ordinary case at IFL, and the case in which none of
+ * these sentences should be printed at all.
+ */
+export interface LiveGenerationNote extends GenerationNote {
+  newerElsewhereUtc: string | null;
+  newerElsewhereSourceDb: string | null;
+  newerElsewhereLabel: string | null;
+  newerElsewhereSimulator: boolean;
+}
+
+export const emptyLiveGenerationNote = (): LiveGenerationNote => ({
+  generation: null,
+  spansGenerations: false,
+  otherGenerationExcluded: 0,
+  newerElsewhereUtc: null,
+  newerElsewhereSourceDb: null,
+  newerElsewhereLabel: null,
+  newerElsewhereSimulator: false,
+});
+
+interface NewerRow {
+  sourceDb: string | null;
+  provenance: string | null;
+  label: string | null;
+  ms: string | number | null;
+}
+
+/**
+ * The newest reading on record that the chosen generation does NOT contain,
+ * and which generation owns it.
+ *
+ * Keyed on `production_ts_utc_ms > @tip` rather than on `source_epoch NOT IN
+ * (…)`: `@tip` is by construction the newest instant inside the chosen
+ * generation, so anything past it belongs to another one. That keeps this an
+ * index seek on the merge index's leading columns and returns zero rows in
+ * the ordinary case — which is the case on every poll at IFL.
+ */
+export async function findNewerElsewhere(
+  pool: ConnectionPool,
+  lineId: number,
+  tipMs: number,
+  nowMs: number,
+): Promise<Pick<LiveGenerationNote, 'newerElsewhereUtc' | 'newerElsewhereSourceDb' | 'newerElsewhereLabel' | 'newerElsewhereSimulator'>> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .input('tip', mssql.BigInt, tipMs)
+    .input('now', mssql.BigInt, nowMs)
+    .query<NewerRow>(`
+      SELECT TOP 1 e.source_db AS sourceDb, e.provenance AS provenance, e.label AS label, MAX(t.ms) AS ms
+        FROM (
+          SELECT production_ts_utc_ms AS ms, source_epoch FROM sms.cone_event
+           WHERE line_id = @line AND production_ts_utc_ms > @tip AND production_ts_utc_ms <= @now
+          UNION ALL
+          SELECT production_ts_utc_ms, source_epoch FROM sms.reject_event
+           WHERE line_id = @line AND production_ts_utc_ms > @tip AND production_ts_utc_ms <= @now
+        ) t
+        LEFT JOIN sms.source_epoch e ON e.epoch_id = t.source_epoch
+       GROUP BY e.source_db, e.provenance, e.label
+       ORDER BY MAX(t.ms) DESC`);
+  const row = r.recordset[0];
+  if (!row || row.ms == null) {
+    return {
+      newerElsewhereUtc: null,
+      newerElsewhereSourceDb: null,
+      newerElsewhereLabel: null,
+      newerElsewhereSimulator: false,
+    };
+  }
+  return {
+    newerElsewhereUtc: new Date(Number(row.ms)).toISOString(),
+    newerElsewhereSourceDb: row.sourceDb,
+    newerElsewhereLabel: row.label,
+    // Same derivation as generation.ts: source_db first, because
+    // `cli epoch:accept` defaulted provenance to 'ifl_copy' and epoch 13 is
+    // registered as IFL's own while sitting on the simulator.
+    newerElsewhereSimulator: row.provenance === 'simulator' || /_SIM$/i.test(row.sourceDb ?? ''),
+  };
+}
+
 /** Called by the admin routes after a line rename or a new shift rule. */
 export function invalidateLiveConfigCache(): void {
   shiftRuleCache.clear();
   lineIdentityCache.clear();
+  liveScopeCache.clear();
 }
 
 /**
@@ -388,6 +546,12 @@ export interface LiveLine {
   ingestLagSeconds: number | null;
   /** Whether the figures below can be trusted, and why not when they cannot. */
   health: LiveHealth;
+  /**
+   * Which source generation every figure below was read from, and what was
+   * left out of it. Always set. A consumer must treat a missing value as
+   * "not stated", never as "nothing was excluded" (generation.ts).
+   */
+  generation: LiveGenerationNote;
   state: {
     status: LineStatus;
     /** Seconds since the newest cone reading, on the wall clock. */
@@ -489,6 +653,18 @@ export async function getLive(
   ]);
   const shift = shiftWindowAt(nowMs, shiftRule.nightBelongsTo, shiftRule.boundaries);
 
+  // The one generation every query below reads. See the file header for the
+  // rule and the owner's 23 Sep 2026 decision behind it.
+  const scope = await resolveLiveScope(pool, lineId);
+  const coneF = epochFragment(scope, 'cone_event');
+  const sackF = epochFragment(scope, 'sack_event');
+  const rejF = epochFragment(scope, 'reject_event');
+  const andF = (f: { sql: string | null }) => (f.sql ? ` AND ${f.sql}` : '');
+  const bindF = (req: mssql.Request, ...fs: { params: { name: string; id: number }[] }[]) => {
+    for (const f of fs) for (const p of f.params) req.input(p.name, mssql.Int, p.id);
+    return req;
+  };
+
   /**
    * Measure IFL's acquisition lag from their own two timestamps, over the most
    * recent rows. This reads the RAW layer rather than canonical because the
@@ -508,15 +684,25 @@ export async function getLive(
    * whole acquisition-lag and line-state machinery would then run on stale rows
    * with no visible symptom. `raw_id` is OUR identity column: monotone by
    * ingest, never reused, never reset.
+   *
+   * SCOPED TO THE SAME GENERATION as everything else (23 Sep 2026). `raw_id`
+   * ordering picks the newest INGESTED rows, which on this sidecar are all
+   * the simulator's: the lag came back 1,041 s from epoch 13 while the state
+   * it was used to judge came from epoch 9, whose own median is 616 s. The
+   * sample must be drawn from the generation being judged, or the two
+   * halves of the arithmetic describe different physical tables.
+   * `sms_raw.cone_raw.source_epoch` references the same `sms.source_epoch`
+   * rows the canonical tables do (migration 025), so the cone fragment is
+   * the right predicate here without translation.
    */
-  const lagRes = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('take', mssql.Int, LAG_SAMPLE_ROWS)
-    .query<{ lagSeconds: number }>(`
+  const lagReq = bindF(
+    pool.request().input('line', mssql.Int, lineId).input('take', mssql.Int, LAG_SAMPLE_ROWS),
+    coneF,
+  );
+  const lagRes = await lagReq.query<{ lagSeconds: number }>(`
       SELECT TOP (@take) DATEDIFF(SECOND, src_ProductionDate, src_Date) AS lagSeconds
         FROM sms_raw.cone_raw
-       WHERE line_id = @line AND src_Date IS NOT NULL AND src_ProductionDate IS NOT NULL
+       WHERE line_id = @line AND src_Date IS NOT NULL AND src_ProductionDate IS NOT NULL${andF(coneF)}
        ORDER BY raw_id DESC`);
   const lagSamples = lagRes.recordset
     .map((r) => Number(r.lagSeconds))
@@ -539,21 +725,35 @@ export async function getLive(
   // `dataAsOfUtc` and empty recent windows — a self-contradictory answer
   // during exactly the span M4 exists to describe: inspection rejecting
   // everything, no good cones.
-  const tipRes = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('now', mssql.BigInt, nowMs)
-    .query<{ tip: number | null }>(
-      `SELECT MAX(tip) AS tip FROM (
+  const tipReq = bindF(
+    pool.request().input('line', mssql.Int, lineId).input('now', mssql.BigInt, nowMs),
+    coneF,
+    rejF,
+  );
+  const tipRes = await tipReq.query<{ tip: number | null }>(
+    `SELECT MAX(tip) AS tip FROM (
          SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event
-          WHERE line_id = @line AND production_ts_utc_ms <= @now
+          WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(coneF)}
          UNION ALL
          SELECT MAX(production_ts_utc_ms) FROM sms.reject_event
-          WHERE line_id = @line AND production_ts_utc_ms <= @now
+          WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(rejF)}
        ) t`,
-    );
+  );
   const dataAsOfMs = tipRes.recordset[0]?.tip != null ? Number(tipRes.recordset[0].tip) : null;
   const anchorMs = dataAsOfMs ?? nowMs;
+
+  // Why the screens are quiet, when they are. Only asked once there IS a tip
+  // to be newer than, and only when the window genuinely holds more than one
+  // generation — so the ordinary single-generation poll pays nothing.
+  const newerElsewhere =
+    dataAsOfMs != null && scope.spansGenerations
+      ? await findNewerElsewhere(pool, lineId, dataAsOfMs, nowMs)
+      : {
+          newerElsewhereUtc: null,
+          newerElsewhereSourceDb: null,
+          newerElsewhereLabel: null,
+          newerElsewhereSimulator: false,
+        };
 
   const hourAgoMs = anchorMs - HOUR_MS;
   const tenMinAgoMs = anchorMs - 10 * 60_000;
@@ -569,45 +769,45 @@ export async function getLive(
       .input('tenAgo', mssql.BigInt, tenMinAgoMs);
 
   const [cones, sacks, rejects, lastCone, lastSack, lastReject, stations] = await Promise.all([
-    bind(pool.request()).query<{ cones: number; inRange: number; last10: number; lastHour: number }>(`
+    bindF(bind(pool.request()), coneF).query<{ cones: number; inRange: number; last10: number; lastHour: number }>(`
       SELECT
         SUM(CASE WHEN production_ts_utc_ms >= @shiftStart THEN 1 ELSE 0 END) AS cones,
         SUM(CASE WHEN production_ts_utc_ms >= @shiftStart AND in_range = 1 THEN 1 ELSE 0 END) AS inRange,
         SUM(CASE WHEN production_ts_utc_ms >= @tenAgo THEN 1 ELSE 0 END) AS last10,
         SUM(CASE WHEN production_ts_utc_ms >= @hourAgo THEN 1 ELSE 0 END) AS lastHour
       FROM sms.cone_event
-      WHERE line_id = @line AND production_ts_utc_ms >= @lo AND production_ts_utc_ms <= @now`),
-    bind(pool.request()).query<{ sacks: number; kg: number; lastHour: number }>(`
+      WHERE line_id = @line AND production_ts_utc_ms >= @lo AND production_ts_utc_ms <= @now${andF(coneF)}`),
+    bindF(bind(pool.request()), sackF).query<{ sacks: number; kg: number; lastHour: number }>(`
       SELECT
         SUM(CASE WHEN production_ts_utc_ms >= @shiftStart THEN 1 ELSE 0 END) AS sacks,
         SUM(CASE WHEN production_ts_utc_ms >= @shiftStart THEN weight_kg ELSE 0 END) AS kg,
         SUM(CASE WHEN production_ts_utc_ms >= @hourAgo THEN 1 ELSE 0 END) AS lastHour
       FROM sms.sack_event
-      WHERE line_id = @line AND production_ts_utc_ms >= @lo AND production_ts_utc_ms <= @now`),
-    bind(pool.request()).query<{ n: number }>(`
+      WHERE line_id = @line AND production_ts_utc_ms >= @lo AND production_ts_utc_ms <= @now${andF(sackF)}`),
+    bindF(bind(pool.request()), rejF).query<{ n: number }>(`
       SELECT COUNT(*) AS n FROM sms.reject_event
-      WHERE line_id = @line AND production_ts_utc_ms >= @shiftStart AND production_ts_utc_ms <= @now`),
-    bind(pool.request()).query<{
+      WHERE line_id = @line AND production_ts_utc_ms >= @shiftStart AND production_ts_utc_ms <= @now${andF(rejF)}`),
+    bindF(bind(pool.request()), coneF).query<{
       ts: Date; event_id: number; source_row_id: number; source_station: number | null; weight_g: number | null; in_range: boolean | null;
     }>(`
       SELECT TOP 1 production_ts_utc AS ts, cone_event_id AS event_id, source_row_id, source_station, weight_g, in_range
-      FROM sms.cone_event WHERE line_id = @line AND production_ts_utc_ms <= @now
+      FROM sms.cone_event WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(coneF)}
       ORDER BY production_ts_utc_ms DESC`),
-    bind(pool.request()).query<{
+    bindF(bind(pool.request()), sackF).query<{
       ts: Date; event_id: number; source_row_id: number; sack_num: number | null; weight_kg: number | null; in_range: boolean | null;
     }>(`
       SELECT TOP 1 production_ts_utc AS ts, sack_event_id AS event_id, source_row_id, sack_num, weight_kg, in_range
-      FROM sms.sack_event WHERE line_id = @line AND production_ts_utc_ms <= @now
+      FROM sms.sack_event WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(sackF)}
       ORDER BY production_ts_utc_ms DESC`),
-    bind(pool.request()).query<{ ts: Date; reject_type: string; source_station: number | null }>(`
+    bindF(bind(pool.request()), rejF).query<{ ts: Date; reject_type: string; source_station: number | null }>(`
       SELECT TOP 1 production_ts_utc AS ts, reject_type, source_station
-      FROM sms.reject_event WHERE line_id = @line AND production_ts_utc_ms <= @now
+      FROM sms.reject_event WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(rejF)}
       ORDER BY production_ts_utc_ms DESC`),
-    bind(pool.request()).query<{ station: number; cones: number; lastTs: Date }>(`
+    bindF(bind(pool.request()), coneF).query<{ station: number; cones: number; lastTs: Date }>(`
       SELECT source_station AS station, COUNT(*) AS cones, MAX(production_ts_utc) AS lastTs
       FROM sms.cone_event
       WHERE line_id = @line AND production_ts_utc_ms >= @shiftStart AND production_ts_utc_ms <= @now
-        AND source_station IS NOT NULL AND source_station > 0
+        AND source_station IS NOT NULL AND source_station > 0${andF(coneF)}
       GROUP BY source_station ORDER BY source_station`),
   ]);
 
@@ -635,21 +835,29 @@ export async function getLive(
   // was in fact producing rejects throughout it.
   let runStartUtc: string | null = null;
   if (state.status === 'running') {
-    const r = await pool
-      .request()
-      .input('line', mssql.Int, lineId)
-      .input('lo', mssql.BigInt, nowMs - DAY_MS)
-      .input('now', mssql.BigInt, nowMs)
-      .input('gapMs', mssql.BigInt, STOP_THRESHOLD_SECONDS * 1000)
-      .query<{ runStart: Date | null }>(`
+    const runReq = bindF(
+      pool
+        .request()
+        .input('line', mssql.Int, lineId)
+        .input('lo', mssql.BigInt, nowMs - DAY_MS)
+        .input('now', mssql.BigInt, nowMs)
+        .input('gapMs', mssql.BigInt, STOP_THRESHOLD_SECONDS * 1000),
+      coneF,
+      rejF,
+    );
+    // The predicate goes INSIDE the CTE, where LAG() reads its rows —
+    // exactly as downtime.ts had to (D-11). Applied to the CTE's output it
+    // would compile, run, and still let another generation's cones fill this
+    // one's gaps, so a run that genuinely broke would read as continuous.
+    const r = await runReq.query<{ runStart: Date | null }>(`
         WITH a AS (
           SELECT production_ts_utc AS ts, production_ts_utc_ms AS ms
             FROM sms.cone_event
-           WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now
+           WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now${andF(coneF)}
           UNION ALL
           SELECT production_ts_utc, production_ts_utc_ms
             FROM sms.reject_event
-           WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now
+           WHERE line_id = @line AND production_ts_utc_ms > @lo AND production_ts_utc_ms <= @now${andF(rejF)}
         ),
         c AS (
           SELECT ts, ms, LAG(ms) OVER (ORDER BY ms) AS prev_ms FROM a
@@ -696,6 +904,7 @@ export async function getLive(
       kind: classifyHealth(dataAsOfMs, sync, ingestLagSeconds, replay),
       lagCeilingSeconds: MAX_CREDIBLE_LAG_SECONDS,
     },
+    generation: { ...noteOf(scope), ...newerElsewhere },
     state: {
       status: state.status,
       sinceLastReadingSeconds: state.sinceLastReadingSeconds,

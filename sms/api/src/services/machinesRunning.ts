@@ -24,9 +24,29 @@
  *
  * A station with no cone in the window is listed as quiet with no product —
  * never with the product it was running yesterday.
+ *
+ * ONE SOURCE GENERATION (23 Sep 2026, D-11, owner's decision). The anchor
+ * above is `MAX(production_ts_utc_ms)` over the WHOLE table by design — rule
+ * 1, and `b91f7d5` added the sentences on screen that name the window it
+ * produces. That design is unchanged; what changed is that the table it takes
+ * the maximum over is now ONE generation, the newest real one, so the anchor
+ * is the newest reading in the data this screen claims to describe. Those
+ * sentences stay true because `asOfUtc` / `windowStartUtc` still report the
+ * window actually queried, and `generation` now says which generation it is a
+ * window into.
+ *
+ * Measured on the dev sidecar, 23 Sep 2026. Unscoped, the anchor landed on
+ * 2026-09-22 — a simulator instant — and the grid reported 14 stations
+ * running on 603 cones, none of which were IFL's. Scoped: anchor 2026-09-07
+ * 12:00, 8 stations, 347 cones. Even AT the same anchor the pooled grid
+ * counted six concurrent materials where IFL's own generation has four, so
+ * `materialsRunning` — the figure Product › Running leads with — was
+ * inflated by two products that were running in a different physical table.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { epochFragment, noteOf } from './generation.js';
+import { findNewerElsewhere, resolveLiveScope, type LiveGenerationNote } from './live.js';
 
 export const RUNNING_WINDOW_MS = 2 * 60 * 60 * 1000;
 
@@ -57,6 +77,12 @@ export interface MachinesRunningData {
   machines: MachineRunning[];
   /** Distinct materials running across the active stations. */
   materialsRunning: number;
+  /**
+   * Which source generation the anchor and the window belong to, and the
+   * newest reading on record outside it. Always set — a consumer must read a
+   * missing value as "not stated", never as "nothing was excluded".
+   */
+  generation: LiveGenerationNote;
 }
 
 export async function getMachinesRunning(
@@ -66,12 +92,26 @@ export async function getMachinesRunning(
 ): Promise<MachinesRunningData> {
   const windowMs = opts.windowMs ?? RUNNING_WINDOW_MS;
 
+  const scope = await resolveLiveScope(pool, lineId);
+  const coneF = epochFragment(scope, 'cone_event');
+  const andCone = coneF.sql ? ` AND ${coneF.sql}` : '';
+  const bindCone = (req: mssql.Request) => {
+    for (const p of coneF.params) req.input(p.name, mssql.Int, p.id);
+    return req;
+  };
+  const emptyNewer = {
+    newerElsewhereUtc: null,
+    newerElsewhereSourceDb: null,
+    newerElsewhereLabel: null,
+    newerElsewhereSimulator: false,
+  };
+
   // 1. The anchor: the newest production instant on record (capped for replay).
-  const anchorReq = pool.request().input('line', mssql.Int, lineId);
+  const anchorReq = bindCone(pool.request().input('line', mssql.Int, lineId));
   if (opts.asOfMs != null) anchorReq.input('asOf', mssql.BigInt, opts.asOfMs);
   const anchor = await anchorReq.query<{ ms: string | number | null }>(
     `SELECT MAX(production_ts_utc_ms) AS ms FROM sms.cone_event
-      WHERE line_id = @line ${opts.asOfMs != null ? 'AND production_ts_utc_ms <= @asOf' : ''}`,
+      WHERE line_id = @line ${opts.asOfMs != null ? 'AND production_ts_utc_ms <= @asOf' : ''}${andCone}`,
   );
   const asOfMs = anchor.recordset[0]?.ms == null ? null : Number(anchor.recordset[0]!.ms);
 
@@ -103,7 +143,14 @@ export async function getMachinesRunning(
   }));
 
   if (asOfMs == null) {
-    return { asOfUtc: null, windowMs, windowStartUtc: null, machines, materialsRunning: 0 };
+    return {
+      asOfUtc: null,
+      windowMs,
+      windowStartUtc: null,
+      machines,
+      materialsRunning: 0,
+      generation: { ...noteOf(scope), ...emptyNewer },
+    };
   }
   const startMs = asOfMs - windowMs;
 
@@ -112,11 +159,13 @@ export async function getMachinesRunning(
   //    on any other material, so an A-B-A sequence reports the second A run,
   //    not the first. No other material in the window means the run may
   //    predate it: `since_is_window_start` says so.
-  const r = await pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('start', mssql.BigInt, startMs)
-    .input('end', mssql.BigInt, asOfMs)
+  const r = await bindCone(
+    pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .input('start', mssql.BigInt, startMs)
+      .input('end', mssql.BigInt, asOfMs),
+  )
     .query<{
       st: number; material_id: number | null; product_name: string | null;
       cones: number; on_material: number; newest_ms: string | number; since_ms: string | number | null;
@@ -127,7 +176,7 @@ export async function getMachinesRunning(
                 ROW_NUMBER() OVER (PARTITION BY source_station ORDER BY production_ts_utc_ms DESC, cone_event_id DESC) AS rn
            FROM sms.cone_event
           WHERE line_id = @line AND source_station IS NOT NULL
-            AND production_ts_utc_ms > @start AND production_ts_utc_ms <= @end
+            AND production_ts_utc_ms > @start AND production_ts_utc_ms <= @end${andCone}
        ),
        newest AS (SELECT source_station, material_id, production_ts_utc_ms AS newest_ms FROM w WHERE rn = 1),
        tagged AS (
@@ -183,11 +232,19 @@ export async function getMachinesRunning(
   machines.sort((a, b) => a.station - b.station);
 
   const materials = new Set(machines.filter((m) => !m.quiet && m.materialId != null).map((m) => m.materialId));
+  // Why the grid is quiet, when it is: the newest reading anywhere on record
+  // that this generation does not hold. Capped at the replay instant when one
+  // is in force, so a replay does not advertise data from after the moment
+  // being replayed.
+  const newer = scope.spansGenerations
+    ? await findNewerElsewhere(pool, lineId, asOfMs, opts.asOfMs ?? Number.MAX_SAFE_INTEGER)
+    : emptyNewer;
   return {
     asOfUtc: new Date(asOfMs).toISOString(),
     windowMs,
     windowStartUtc: new Date(startMs).toISOString(),
     machines,
     materialsRunning: materials.size,
+    generation: { ...noteOf(scope), ...newer },
   };
 }

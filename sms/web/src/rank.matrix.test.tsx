@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { screen as rtlScreen, within, waitFor } from '@testing-library/react';
 import { renderApp } from './testkit/render';
-import { OPERATIONS_FIXTURE, META_FIXTURE } from './testkit/fixtures';
+import { OPERATIONS_FIXTURE, META_FIXTURE, GENERATION_FIXTURE } from './testkit/fixtures';
 import { W } from './lib/words';
 import type {
   Envelope, ProductionData, AttentionData, MachinesRunningData, ProductAtData, RegisterPage,
@@ -73,7 +73,7 @@ const ATTENTION_FIXTURE: Envelope<AttentionData> = {
 };
 
 const MACHINES_RUNNING_FIXTURE: Envelope<MachinesRunningData> = {
-  data: { asOfUtc: '2026-09-07T16:41:00Z', windowMs: 3_600_000, windowStartUtc: '2026-09-07T15:41:00Z', machines: [], materialsRunning: 0 },
+  data: { asOfUtc: '2026-09-07T16:41:00Z', windowMs: 3_600_000, windowStartUtc: '2026-09-07T15:41:00Z', machines: [], materialsRunning: 0, generation: GENERATION_FIXTURE },
   metadata: META_FIXTURE,
 };
 
@@ -216,7 +216,7 @@ const HEALTH_FIXTURE: HealthReport = {
   status: 'ok',
   service: { version: '1.0.0', uptimeSeconds: 3600, startedAtUtc: '2026-09-07T00:00:00Z', pid: 1234 },
   database: { ok: true, latencyMs: 4, sizeMb: 120, capMb: 10240, pctOfCap: 1.2 },
-  acquisition: { kind: 'ok', ageSeconds: 42, cadenceSeconds: 60, halted: null },
+  acquisition: { kind: 'ok', ageSeconds: 42, cadenceSeconds: 60, halted: null, generation: GENERATION_FIXTURE },
   backup: { dir: 'C:\\backups', newestFile: 'sidecar-20260907.bak', newestAtUtc: '2026-09-07T03:00:00Z', ageDays: 0.5, warning: false },
   degradedReason: null,
 };

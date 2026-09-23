@@ -21,7 +21,8 @@ import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { adjustmentRestarts, getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
-import { getLive, invalidateLiveConfigCache } from './services/live.js';
+import { getLive, invalidateLiveConfigCache, resolveLiveScope } from './services/live.js';
+import { epochFragment } from './services/generation.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
@@ -195,18 +196,43 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.set('trust proxy', cfg.trustProxy);
 
   /**
+   * The cone-side predicate for the ONE source generation the "newest thing
+   * we have" queries read — the owner's 23 Sep 2026 decision, D-11. Resolved
+   * and cached in `services/live.ts` (see its header for the rule and its
+   * cost); bound here, never interpolated with caller text.
+   */
+  async function coneGenerationFilter(): Promise<{ sql: string; bind: (req: mssql.Request) => mssql.Request }> {
+    const f = epochFragment(await resolveLiveScope(pool, cfg.lineId), 'cone_event');
+    return {
+      sql: f.sql ? ` AND ${f.sql}` : '',
+      bind: (req) => {
+        for (const p of f.params) req.input(p.name, mssql.Int, p.id);
+        return req;
+      },
+    };
+  }
+
+  /**
    * The newest production day on record.
    *
    * Every default period anchors here rather than on today's date: on a server
    * whose source data has stopped, "today" is an empty screen and the newest
    * day is the honest answer.
+   *
+   * Scoped to one generation (23 Sep 2026): unscoped it returned 2026-09-22
+   * on this sidecar — a simulator day — so every screen opened by default on
+   * a period that the period-scoped services then answered with IFL's own
+   * generation, i.e. with nothing. Scoped it returns 2026-09-07, the newest
+   * day of the data the app is actually reading. This and `/api/range` below
+   * MUST agree; a default day outside the offered range is a screen that
+   * cannot be loaded.
    */
   async function newestProductionDay(): Promise<string> {
-    const r = await pool
-      .request()
-      .input('line', mssql.Int, cfg.lineId)
+    const g = await coneGenerationFilter();
+    const r = await g
+      .bind(pool.request().input('line', mssql.Int, cfg.lineId))
       .query<{ d: string | null }>(
-        'SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line',
+        `SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line${g.sql}`,
       );
     return r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
   }
@@ -328,23 +354,74 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
    * Excluded days are returned, not swallowed: the app states them rather than
    * quietly narrowing the range, and the transform raises a `stale_timestamp`
    * finding so the underlying clock fault is visible on Sync.
+   *
+   * ONE SOURCE GENERATION (23 Sep 2026, D-11, owner's decision). The offered
+   * range is the newest REAL generation's days, because that is the data
+   * every screen reading this range will actually be given, and
+   * `newestProductionDay()` above anchors inside it. On this sidecar that is
+   * 34 days (2026-08-05 – 2026-09-07) where the pooled query offered 65,
+   * the extra 31 being the plant simulator's.
+   *
+   * THE DAYS THAT ARE NO LONGER OFFERED ARE NAMED, not dropped. `generations`
+   * lists every generation present with its own day range, marked
+   * `offered: true` for the one this range covers. The real cost is visible
+   * in it: IFL's July generation (2026-06-22 – 2026-07-10) is real data that
+   * this picker will no longer reach. Reaching it again means a generation
+   * selector on the period control, which is a screen this pass does not own
+   * — but it must not be possible for that history to disappear silently,
+   * which is what filtering without this list would have done.
    */
   const MIN_PRODUCTION_ROWS = 20;
   app.get('/api/range', async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      const r = await pool
-        .request()
-        .input('line', mssql.Int, cfg.lineId)
-        .input('minRows', mssql.Int, MIN_PRODUCTION_ROWS)
-        .query<{ shiftDate: string; n: number }>(
-          `SELECT CONVERT(varchar(10), shift_date, 120) AS shiftDate, COUNT(*) AS n
-             FROM sms.cone_event
-            WHERE line_id = @line AND shift_date >= '2020-01-01'
-            GROUP BY shift_date
-            ORDER BY shift_date`,
-        );
-      const kept = r.recordset.filter((d) => d.n >= MIN_PRODUCTION_ROWS);
-      const excluded = r.recordset
+      const scope = await resolveLiveScope(pool, cfg.lineId);
+      const [days, gens] = await Promise.all([
+        (async () => {
+          const f = epochFragment(scope, 'cone_event');
+          const req = pool
+            .request()
+            .input('line', mssql.Int, cfg.lineId)
+            .input('minRows', mssql.Int, MIN_PRODUCTION_ROWS);
+          for (const p of f.params) req.input(p.name, mssql.Int, p.id);
+          return req.query<{ shiftDate: string; n: number }>(
+            `SELECT CONVERT(varchar(10), shift_date, 120) AS shiftDate, COUNT(*) AS n
+               FROM sms.cone_event
+              WHERE line_id = @line AND shift_date >= '2020-01-01'${f.sql ? ` AND ${f.sql}` : ''}
+              GROUP BY shift_date
+              ORDER BY shift_date`,
+          );
+        })(),
+        pool
+          .request()
+          .input('line', mssql.Int, cfg.lineId)
+          .input('minRows', mssql.Int, MIN_PRODUCTION_ROWS)
+          .query<{
+            sourceDb: string | null; ordinal: number | null; provenance: string | null; label: string | null;
+            minDate: string | null; maxDate: string | null; days: number;
+          }>(
+            // Grouped by (source_db, generation_ordinal) — the key a
+            // generation actually has. One rebuild owns one source_epoch row
+            // per source table, so grouping by epoch_id would report one
+            // generation as several.
+            `WITH d AS (
+               SELECT c.source_epoch, c.shift_date, COUNT(*) AS n
+                 FROM sms.cone_event c
+                WHERE c.line_id = @line AND c.shift_date >= '2020-01-01'
+                GROUP BY c.source_epoch, c.shift_date
+             )
+             SELECT e.source_db AS sourceDb, e.generation_ordinal AS ordinal,
+                    e.provenance AS provenance, e.label AS label,
+                    CONVERT(varchar(10), MIN(d.shift_date), 120) AS minDate,
+                    CONVERT(varchar(10), MAX(d.shift_date), 120) AS maxDate,
+                    COUNT(*) AS days
+               FROM d LEFT JOIN sms.source_epoch e ON e.epoch_id = d.source_epoch
+              WHERE d.n >= @minRows
+              GROUP BY e.source_db, e.generation_ordinal, e.provenance, e.label
+              ORDER BY e.generation_ordinal`,
+          ),
+      ]);
+      const kept = days.recordset.filter((d) => d.n >= MIN_PRODUCTION_ROWS);
+      const excluded = days.recordset
         .filter((d) => d.n < MIN_PRODUCTION_ROWS)
         .map((d) => ({ date: d.shiftDate, rows: d.n }));
       res.json({
@@ -352,6 +429,20 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         maxDate: kept.length ? kept[kept.length - 1]!.shiftDate : null,
         excludedDays: excluded,
         minProductionRows: MIN_PRODUCTION_ROWS,
+        generation: scope.generation,
+        generations: gens.recordset.map((g) => ({
+          key: `${g.sourceDb ?? ''}#${g.ordinal ?? 0}`,
+          ordinal: g.ordinal == null ? null : Number(g.ordinal),
+          sourceDb: g.sourceDb,
+          label: g.label,
+          // Derived the same way generation.ts derives it: source_db first,
+          // because epoch 13 is registered `ifl_copy` and is the simulator.
+          simulator: g.provenance === 'simulator' || /_SIM$/i.test(g.sourceDb ?? ''),
+          minDate: g.minDate,
+          maxDate: g.maxDate,
+          days: Number(g.days),
+          offered: scope.generation != null && `${g.sourceDb ?? ''}#${g.ordinal ?? 0}` === scope.generation.key,
+        })),
       });
     } catch (err) {
       next(err);
@@ -554,11 +645,17 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       if (q.data.at) {
         atMs = new Date(q.data.at).getTime();
       } else {
-        const r = await pool
-          .request()
-          .input('line', mssql.Int, cfg.lineId)
+        // Scoped to one generation (23 Sep 2026, D-11). This is the instant
+        // the product timeline is evaluated AT when the caller names none,
+        // and the limits it resolves are time-versioned: an anchor taken
+        // from a generation whose rows this answer will never describe
+        // judges one generation's reading by the product in force at
+        // another generation's newest instant.
+        const g = await coneGenerationFilter();
+        const r = await g
+          .bind(pool.request().input('line', mssql.Int, cfg.lineId))
           .query<{ ms: string | number | null }>(
-            'SELECT MAX(production_ts_utc_ms) AS ms FROM sms.cone_event WHERE line_id=@line',
+            `SELECT MAX(production_ts_utc_ms) AS ms FROM sms.cone_event WHERE line_id=@line${g.sql}`,
           );
         // Finding M5 (Sep 2026 audit): the empty-database fallback used raw
         // Date.now() — genuine UTC — against a timeline whose effectiveFromMs

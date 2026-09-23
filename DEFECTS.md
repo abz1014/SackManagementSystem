@@ -381,11 +381,122 @@ Deferred with a reason, not forgotten:
 
 | Site | Why it was not done |
 |---|---|
-| `services/live.ts:548-651` (11 queries), `services/health.ts:225,227`, `services/machinesRunning.ts:73,128`, `app.ts:209,341,561`, `envelope.ts:34` | **Needs an owner decision, not a guess.** Two defensible rules conflict. *Newest real generation* (this pass's default) would make the live screens show IFL's 7 Sep data as "now", breaking the plant-simulator rehearsal `CLAUDE.md` documents as a working tool. *The generation owning the newest reading* keeps the simulator working and is correct at IFL — whose generations do **not** overlap in time, so an unconstrained `MAX()` already lands on the newest — but it would disagree with every other screen on this dev copy, which is worse than either rule alone. The exposure at IFL is genuinely low for exactly the reason that makes the choice hard |
+| ~~`services/live.ts:548-651`, `services/health.ts:225,227`, `services/machinesRunning.ts:73,128`, `app.ts:209,341,561`, `envelope.ts:34`~~ | **RESOLVED 23 Sep 2026 — the owner chose the newest REAL generation.** Measurements, the accepted cost, and the sentences the screens now print are in "The five live sites" below |
 | `services/register.ts:315` | Already JOINs `sms.source_epoch` for the generation **label** on every row; it does not filter. Listing two generations of rows, each labelled, is defensible for a register in a way it is not for a mean. Left as it is, on purpose |
 | `services/sackStock.ts:387,406,538` | Its `priorWeighed` opening-balance query reaches back before `@from` with no lower bound at all, so scoping it needs a decision about what an opening balance *means* across a rebuild. Not a one-line change |
 | `services/productAt.ts:502` | limits-vs-scale agreement count — not attempted this pass |
 | `services/machineProducts.ts:174,195` | per-machine product grid — not attempted this pass |
+
+### The five live sites — RESOLVED by owner decision (23 Sep 2026)
+
+`live.ts`, `health.ts`, `machinesRunning.ts`, `app.ts` (three queries) and `envelope.ts` were
+the five "what is the NEWEST thing we have" queries deferred above because two defensible
+rules conflicted. **The owner chose: the NEWEST REAL GENERATION — prefer IFL's own data over
+simulator rows.**
+
+They chose it **knowing the stated cost, and did not ask for it to be softened**: the plant-
+simulator rehearsal stops driving the live screens, because the simulator is never the real
+generation, and `.env` stays pointed at `DATA_TP1U2_SIM`. "Soften the rule to keep the
+rehearsal working" was the rejected option and must not be reintroduced.
+
+At IFL this rule is a **no-op**: their generations do not overlap in time and none is
+synthetic, so "newest real" and "newest" are the same generation. The simulator is the only
+thing it visibly changes, which is exactly why it is safe to adopt — and why the
+verification below must be read as a demonstration of the mechanism, not as a plant figure.
+
+**Measured read-only on the development sidecar (`sqlcmd -E` against the app-owned `sms`
+database, then re-run through the built services themselves), 23 Sep 2026:**
+
+| Site | Pooled (before) | One generation (after) |
+|---|---|---|
+| `live.ts` newest reading (cone ∪ reject) | 2026-09-22 12:29:22 | **2026-09-07 12:00:28** |
+| `live.ts` acquisition lag, median of 200 | **1,041 s** — all 200 newest raw rows are epoch 13 | **617 s**, epoch 9's own |
+| `health.ts` freshness/lag source | whichever generation held the newest rows | epoch 9, stated on screen |
+| `machinesRunning.ts` anchor · active stations · cones | 2026-09-22 · 14 · 603 | 2026-09-07 · **8** · **347** |
+| `machinesRunning.ts` materials running *at the same 7 Sep anchor* | **6** | **4** |
+| `app.ts:209` newest production day | 2026-09-22 | **2026-09-07** |
+| `app.ts:341` `/api/range` production days offered | 65 | **34** (2026-08-05 – 2026-09-07) |
+| `app.ts:561` product-at clock anchor | 2026-09-22 (a simulator instant) | 2026-09-07 12:00:28 |
+| `envelope.ts:34` `transformVersion` | `MAX` over every generation | `MAX` over the one being shown |
+
+**What a wrong answer looked like.** The landing screen defaulted to 2026-09-22, a day on
+which the period-scoped services (fixed in `8673ffd`/`ca34a23`) correctly found nothing — so
+the app opened on an empty screen. Product › Running reported fourteen machines running six
+materials; none of those readings were IFL's, and even at IFL's own newest instant the
+pooled grid counted two materials that were running in a different physical table. Worst of
+the set: the line state of IFL's September generation was judged against the **simulator's**
+acquisition delay, because `ORDER BY raw_id DESC` over `sms_raw.cone_raw` returns the newest
+INGESTED rows and all 200 of them are epoch 13. Two halves of one piece of arithmetic,
+describing two different tables.
+
+**The consequence is made VISIBLE, which was the condition of taking the rule.** When the
+newest real generation has ended while rows keep arriving under another one, the state
+arithmetic is correct and its conclusion — "stopped", "idle" — is false about the plant. A
+board that says "stopped" when it means "the data I trust ended two weeks ago" is the same
+over-claim `fc0e3c3` removed from the Wall, wearing a different hat. So:
+
+- `LiveLine.generation`, `AcquisitionHealth.generation` and `MachinesRunningData.generation`
+  carry `GenerationNote` **plus** `newerElsewhereUtc` / `newerElsewhereSourceDb` /
+  `newerElsewhereLabel` / `newerElsewhereSimulator` — the newest reading on record that the
+  chosen generation does not hold, and which generation owns it. Null means nothing newer
+  exists anywhere, the ordinary case at IFL, and then **no sentence is printed at all**.
+- **Line** prints the reason directly under its headline, and the headline stops asserting
+  the state — a generation that has ended is a third reason the state is not knowable,
+  alongside stale sync and a late feed.
+- **Wall** does the same: `knowable` is false, so the 79px sentence reads "The state of the
+  line is not known" instead of "Line 3 stopped 15 d", and the footer carries the short form
+  beside (never instead of) the lag sentence.
+- **Health** states which generation freshness, the lag and the newest reading were measured
+  from, and how many readings on record belong to a different one and were not measured.
+- **Product › Running** states which generation its window is a window into.
+- **`/api/range`** returns `generations`: every generation present, with its own day range
+  and `offered: true` for the one the range covers. This is not decoration. Scoping the range
+  means IFL's own **July generation (2026-06-22 – 2026-07-10) — real data — is no longer
+  reachable from the picker**. That is a genuine loss; it is on the wire rather than silently
+  gone, and reaching it again needs a generation selector on the period control. **Open
+  item**, owner's call, not decided here.
+
+**Invariants kept, each with a test:**
+
+- A generation is keyed **(source_db, generation_ordinal)** — cone gen 3 is epoch 9, sack
+  gen 3 is epoch 10, reject gen 3 is epochs 11 **and** 12. Each table binds its own.
+- **`provenance` is not trusted**: epoch 13 is registered `ifl_copy` and is the simulator,
+  and that row still stands deliberately. `simulator` is derived from `source_db` matching
+  `/_SIM$/i`. The rule **degrades to "newest"** when nothing is synthetic, which is the shape
+  at IFL; when the *only* generation present is synthetic it is used and `simulator` says so.
+- **The 18-minute acquisition lag still measures**, now from the generation it judges:
+  `sms_raw.cone_raw.source_epoch` references the same `sms.source_epoch` rows (migration
+  025), so the cone fragment applies without translation, and the ordering stays `raw_id`
+  (our monotone identity, never IFL's restarted `src_id`).
+- **Freshness still comes from the OLDEST source table.** `sms.sync_run` is the worker's own
+  log, not an event table, and is deliberately **not** generation-scoped — scoping it would
+  have broken the very rule that stops one dead feed hiding behind three healthy ones.
+- The run-start predicate is bound **inside** the CTE, where `LAG()` reads its rows — the
+  `downtime.ts` lesson, applied to the live screen's own query.
+- The scope probe is **cached 60 s** in `live.ts` (the TTL the line identity and shift rule
+  already use) and shared by all five sites, so a ten-second poll from every floor PC does
+  not add a three-table `GROUP BY` per request. The "what is newer elsewhere" query runs only
+  when more than one generation is present — never on a single-generation poll, which is
+  every poll at IFL.
+
+**Tests:** `api/src/services/generations.live.test.ts` (22),
+`api/src/app.generations.test.ts` (6, over the real Express app), and
+`web/src/generationQuiet.test.tsx` (9, two-sided — each also asserts the sentence is ABSENT
+in the ordinary single-generation case). The **1969-12-31 boundary** is exercised: 1 cone
+under epoch 1 and 1 under epoch 9, two of IFL's own generations with no simulator anywhere
+in it, which is the case that exists at the plant. So is the case where the **newest
+generation is simulated**.
+
+**Not done, and named.** The UI copy for these sentences lives in
+`web/src/lib/generationWords.ts` rather than in `web/src/lib/words.ts`, purely because
+`words.ts` was open and uncommitted in a parallel worker's tree when this was written and a
+pathspec commit would have swept it. **Fold it into `words.ts`.** `/api/range`'s
+`generations` list has no consumer yet — nothing offers the July generation back to the
+reader. Nothing here was verified against real plant data; it is the local `_SEP07` + `_SIM`
+sidecar throughout, and the running API process was stale, so the figures above come from
+the services themselves rather than from an HTTP response. No PDAS procedure was executed,
+no `epoch:accept` was run, `sms.source_epoch` was not hand-repaired, and no login was
+created.
 
 **A correction to the brief that prompted this work.** `services/operations.ts:473-492`
 `resolveDqDestination` was listed as a hazard because `raw_id` is "not unique across
@@ -514,7 +625,7 @@ worker has run against a database for a while — carried here so that follow-up
 | D-7 | HIGH | Weight.tsx headline flips to the wrong sentence when `getWeightStations` resolves after `coneLine`'s first error, changing its poll key and wiping a real error (`usePolling` key-change semantics) | **fixed**, `441f3f9` — `headline()` now checks `coneLine.loading` instead of touching `usePolling`'s shared key-change semantics; deterministic regression test added |
 | D-8 | MEDIUM | `sms.source_epoch.last_seen_utc` has no writer | **fixed**, `b31d574` |
 | D-10 | **HIGH** | X̄ control limits (`grandMean ± 3σ_within/√n`) do not fit the process — ~16% of subgroups "violate" at month scale post-D-1 vs an expected ~0.3% | **model replaced** (`6052b69`, I-MR on the subgroup means) and **rule-1 rendering restored** 23 Sep 2026, gated on `xLimits.valid`; rule-1 rate now 5.6–13.1% on real generations. **Rules 2-8 stay suppressed** — measured 37.6–54.8% flag rate on the same windows. Band not validated against a known-good reference process. |
-| D-11 | **HIGH** | Almost no query constrained which SOURCE GENERATION it read; `downtime.ts` ERASED 53 real stoppages on one measured day | **partly fixed** (`8673ffd`, `ca34a23`) — four shared filter builders plus downtime/calibration/shiftCheck/reconcile now read ONE generation and say what they excluded; reports, weightStations, live/health/machinesRunning, register, sackStock, productAt and machineProducts remain unconstrained, each listed by `file:line` in D-11 above |
+| D-11 | **HIGH** | Almost no query constrained which SOURCE GENERATION it read; `downtime.ts` ERASED 53 real stoppages on one measured day | **partly fixed** (`8673ffd`, `ca34a23`, `fc27b60`, and the 23 Sep live pass) — the shared filter builders, downtime/calibration/shiftCheck/reconcile, register/sackStock/productAt/machineProducts, and now the five live sites (`live.ts`, `health.ts`, `machinesRunning.ts`, `app.ts`, `envelope.ts`) read ONE generation and say what they excluded; **reports and `weightStations.ts` remain unconstrained**, listed by `file:line` in D-11 above |
 | D-12 | MEDIUM | PDAS write authority exists only in commit `af420a4`'s message; `handover/IFL-ANSWERS-2026-09-15.md` says it was still verbal and no document records a grant | open — **owner's call**, blocks sending `IFL-OPEN-QUESTIONS.md` ask 3 |
 | D-13 | LOW | One `sms.weight_rule.basis` governs cones and sacks; IFL's 15 Sep answer covered sacks only, and `net` would apply placeholder tube/tare values | open — no wrong number today (`gross` is the identity conversion, `weights.ts:239`) |
 | D-14 | LOW | `CLAUDE.md` asserted in three places that `last_seen_utc` has no writer; it has had one since `b31d574` | **fixed** this pass (23 Sep 2026) |

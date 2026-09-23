@@ -17,7 +17,8 @@ import { useState } from 'react';
 import { useLive, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import { Block, Details, Failed, SkelLines } from '../../ui/bits';
-import { fmtAppInstant, fmtSpan } from '../../lib/fmt';
+import { fmtAppInstant, fmtClock, fmtSpan } from '../../lib/fmt';
+import { healthExcludedLine, healthGenerationLine } from '../../lib/generationWords';
 import { noOpenEpochs } from '../../lib/syncHealth';
 import { adminGetSources, getOperations, getDqDestination, ApiError, type DqFinding } from '../../api';
 import { useResource } from '../setup/shared';
@@ -165,6 +166,30 @@ export function SyncHealthBlock({
     <Block first={first} label={W.setupTabs.sync}>
       <p className={h && h.kind !== 'ok' ? 'acc' : ''} style={{ fontSize: 'var(--fs-qual)' }}>{verdict}</p>
       <p className="mut sm" style={{ marginTop: 8 }}>{W.sync.source}</p>
+      {/* D-11, 23 Sep 2026. Health is the screen whose job is to report
+          breakage, and it reported freshness and the acquisition lag from
+          whichever generation happened to hold the newest rows. Both figures
+          are now measured from ONE generation — the newest real one — and
+          this states which, and what was left out of it. Without the second
+          sentence a reader looking at a quiet Line or Wall screen has no way
+          to tell "the plant stopped" from "the generation I am reading
+          ended"; with it, the two are different sentences. */}
+      {line?.generation && (
+        <>
+          <p className="mut sm" style={{ marginTop: 6 }}>{healthGenerationLine(line.generation)}</p>
+          {healthExcludedLine(
+            line.generation,
+            line.generation.newerElsewhereUtc ? fmtClock(line.generation.newerElsewhereUtc) : null,
+          ) && (
+            <p className={line.generation.newerElsewhereUtc ? 'acc sm' : 'mut sm'} style={{ marginTop: 6 }}>
+              {healthExcludedLine(
+                line.generation,
+                line.generation.newerElsewhereUtc ? fmtClock(line.generation.newerElsewhereUtc) : null,
+              )}
+            </p>
+          )}
+        </>
+      )}
 
       <dl className="kv" style={{ marginTop: 20 }}>
         <dt>{W.sync.lastPass}</dt>

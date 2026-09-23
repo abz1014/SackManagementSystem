@@ -27,6 +27,7 @@ import { useMemo } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
+import { hasNewerElsewhere, quietBecauseGeneration } from '../lib/generationWords';
 import type { Period } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
@@ -148,8 +149,34 @@ export function LineScreen({
       <div className="page">
         <p className="q">{W.question.line}</p>
         <h1 className="wide">
-          <Headline line={line} knowable={stateIsKnowable(health)} period={period} />
+          {/* A generation that has ended is a third reason the state is not
+              knowable, alongside stale sync and a late feed (D-11, 23 Sep
+              2026): the arithmetic below is correct and its conclusion —
+              "stopped" — would be false. The sentence under this headline
+              says which it is. */}
+          <Headline
+            line={line}
+            knowable={stateIsKnowable(health) && !hasNewerElsewhere(line.generation)}
+            period={period}
+          />
         </h1>
+        {/* D-11, 23 Sep 2026. Directly under the headline, because the
+            headline is what it corrects. When the newest REAL source
+            generation has ended while rows keep arriving under another one,
+            the state arithmetic above is working correctly and still says
+            "stopped" or "idle" — of a plant that may be running. This says
+            which it is. It appears only when the server reports a reading
+            newer than anything the generation in use holds, so at IFL, whose
+            generations do not overlap in time, it is never printed. */}
+        {hasNewerElsewhere(line.generation) && line.dataAsOfUtc && (
+          <p className="mut sm" style={{ marginTop: 10, maxWidth: '68ch' }}>
+            {quietBecauseGeneration(
+              line.generation,
+              fmtClock(line.dataAsOfUtc),
+              fmtClock(line.generation.newerElsewhereUtc!),
+            )}
+          </p>
+        )}
       </div>
 
       <Block first>

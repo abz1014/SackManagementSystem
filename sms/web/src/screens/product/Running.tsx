@@ -29,8 +29,10 @@ import { fmtClock, fmtDay, fmtDayLong, fmtG, fmtInt } from '../../lib/fmt';
 import {
   getProductAt, getProducts, getCurrentProduct, getMachinesRunning, getStations, setCurrentProduct, stationLabel,
   type ProductOption, type TimelineEntry, type MachineRunning, type StationRow,
+  type LiveGenerationNote,
 } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';
+import { machineGridGenerationLine } from '../../lib/generationWords';
 
 export function RunningTab({
   period,
@@ -104,6 +106,7 @@ export function RunningTab({
           <ByProduct
             data={machines.data.data.machines}
             asOfUtc={machines.data.data.asOfUtc}
+            generation={machines.data.data.generation}
             names={names.data?.stations ?? []}
             products={products.data?.products ?? []}
             onOpenStation={onOpenStation}
@@ -282,6 +285,7 @@ function groupByProduct(machines: MachineRunning[]): ProductGroup[] {
 function ByProduct({
   data,
   asOfUtc,
+  generation,
   names,
   products,
   onOpenStation,
@@ -294,6 +298,15 @@ function ByProduct({
    *  away from whatever period the reader has selected (see words.ts
    *  `cone.machinesNote`). */
   asOfUtc: string | null;
+  /** Which SOURCE GENERATION the anchor and the window belong to (D-11,
+   *  23 Sep 2026). This grid used to take its anchor from whichever
+   *  generation held the newest row in the table, which on the development
+   *  sidecar was the plant simulator's: fourteen machines reported running
+   *  on 603 cones, none of them IFL's. It now reads one generation, and
+   *  says which — and when that generation's readings have ENDED while
+   *  newer ones exist elsewhere, it says that too, rather than showing an
+   *  empty grid that reads as a stopped line. */
+  generation: LiveGenerationNote;
   names: StationRow[];
   /** The product master, run through the one disambiguator — this pivot's
    *  entire purpose is grouping BY product, which the plain description
@@ -356,6 +369,21 @@ function ByProduct({
       ))}
       {asOfUtc && (
         <p className="mut sm">{W.cone.machinesWindow(`${fmtDay(asOfUtc)}, ${fmtClock(asOfUtc)}`)}</p>
+      )}
+      {machineGridGenerationLine(
+        generation,
+        generation.newerElsewhereUtc
+          ? `${fmtDay(generation.newerElsewhereUtc)}, ${fmtClock(generation.newerElsewhereUtc)}`
+          : null,
+      ) && (
+        <p className={generation.newerElsewhereUtc ? 'acc sm' : 'mut sm'}>
+          {machineGridGenerationLine(
+            generation,
+            generation.newerElsewhereUtc
+              ? `${fmtDay(generation.newerElsewhereUtc)}, ${fmtClock(generation.newerElsewhereUtc)}`
+              : null,
+          )}
+        </p>
       )}
     </div>
   );

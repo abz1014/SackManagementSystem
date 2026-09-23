@@ -4,6 +4,8 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { epochFragment } from './services/generation.js';
+import { resolveLiveScope } from './services/live.js';
 
 export interface Meta {
   generatedAtUtc: string;
@@ -19,9 +21,27 @@ export interface Envelope<T> {
   metadata: Meta;
 }
 
-/** Read the active rule + freshness metadata for the response envelope. */
+/**
+ * Read the active rule + freshness metadata for the response envelope.
+ *
+ * `transformVersion` is scoped to ONE source generation (23 Sep 2026, D-11).
+ * It is the envelope's answer to "which transform produced what you are
+ * looking at", and `MAX(transform_version)` over every generation answers a
+ * different question: the highest version ever written for this line,
+ * including to rows no screen in this response is reading. On a sidecar
+ * holding a generation transformed at v2 beside one still at v1, every
+ * payload claimed v2. The generation chosen is the one the live screens
+ * read, for the same reason they chose it — see `services/live.ts`.
+ *
+ * The scope probe is the cached one, so this adds no round trip per request
+ * beyond the first in each sixty-second window.
+ */
 export async function loadMeta(pool: ConnectionPool, lineId: number): Promise<Meta> {
-  const r = await pool.request().input('line', mssql.Int, lineId).query<{
+  const scope = await resolveLiveScope(pool, lineId);
+  const coneF = epochFragment(scope, 'cone_event');
+  const req = pool.request().input('line', mssql.Int, lineId);
+  for (const p of coneF.params) req.input(p.name, mssql.Int, p.id);
+  const r = await req.query<{
     weightBasis: string | null;
     shiftMode: string | null;
     transformVersion: number | null;
@@ -31,7 +51,7 @@ export async function loadMeta(pool: ConnectionPool, lineId: number): Promise<Me
     SELECT
       (SELECT TOP 1 basis FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC) AS weightBasis,
       (SELECT TOP 1 mode  FROM sms.shift_rule  WHERE line_id=@line ORDER BY effective_from DESC) AS shiftMode,
-      (SELECT MAX(transform_version) FROM sms.cone_event WHERE line_id=@line) AS transformVersion,
+      (SELECT MAX(transform_version) FROM sms.cone_event WHERE line_id=@line${coneF.sql ? ` AND ${coneF.sql}` : ''}) AS transformVersion,
       (SELECT MAX(finished_at_utc) FROM sms.sync_run WHERE line_id=@line AND outcome='success') AS lastSyncUtc,
       DATEDIFF(SECOND,
         (SELECT MAX(finished_at_utc) FROM sms.sync_run WHERE line_id=@line AND outcome='success'),

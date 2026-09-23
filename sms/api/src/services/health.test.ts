@@ -18,7 +18,24 @@ import {
 } from './health.js';
 
 const okDb = { ok: true, latencyMs: 3, sizeMb: 500 };
-const okAcq: AcquisitionFacts = { kind: 'ok', ageSeconds: 30, cadenceSeconds: 60, halted: [] };
+const okAcq: AcquisitionFacts = {
+  kind: 'ok',
+  ageSeconds: 30,
+  cadenceSeconds: 60,
+  halted: [],
+  // One generation, nothing newer elsewhere — the ordinary shape at IFL, and
+  // the one the redaction cases below assert is withheld from an anonymous
+  // caller (23 Sep 2026, D-11).
+  generation: {
+    generation: { key: 'DATA_TP1U2_SEP07#3', ordinal: 3, sourceDb: 'DATA_TP1U2_SEP07', provenance: 'ifl_copy', label: 'September copy', simulator: false },
+    spansGenerations: false,
+    otherGenerationExcluded: 0,
+    newerElsewhereUtc: null,
+    newerElsewhereSourceDb: null,
+    newerElsewhereLabel: null,
+    newerElsewhereSimulator: false,
+  },
+};
 /** foldStatus's own positional args beyond (db, acq, degradedNow): no
  *  blocking DQ findings, no backup warning — the "everything else is fine"
  *  baseline every other case in this describe block starts from. */
@@ -129,7 +146,7 @@ describe('getHealth — redaction and the degraded marker', () => {
     expect(h.status).toBe('ok');
     expect(h.database.sizeMb).toBeNull();
     expect(h.database.pctOfCap).toBeNull();
-    expect(h.acquisition).toEqual({ kind: null, ageSeconds: null, cadenceSeconds: null, halted: null });
+    expect(h.acquisition).toEqual({ kind: null, ageSeconds: null, generation: null, cadenceSeconds: null, halted: null });
     expect(h.backup).toBeNull();
   });
 

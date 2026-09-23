@@ -27,7 +27,7 @@
  *
  * UX Phase 8 Brief A (21 Sep 2026).
  */
-import type { Envelope, LiveData, LiveLine, Meta, OperationsData, RegisterPage, RegisterRow } from '../api';
+import type { Envelope, LiveData, LiveGenerationNote, LiveLine, Meta, OperationsData, RegisterPage, RegisterRow } from '../api';
 
 /** Genuine UTC — when the sync worker last wrote, per `plantClock.ts`. */
 export const META_FIXTURE: Meta = {
@@ -39,7 +39,31 @@ export const META_FIXTURE: Meta = {
   sourceAgeSeconds: 42,
 };
 
+/**
+ * ONE SOURCE GENERATION, nothing newer elsewhere — the ordinary shape at IFL
+ * and the one every screen must render without printing a generation
+ * sentence at all (D-11, 23 Sep 2026). A fixture with
+ * `newerElsewhereUtc` set is what the quiet-screen tests build from this.
+ */
+export const GENERATION_FIXTURE: LiveGenerationNote = {
+  generation: {
+    key: 'DATA_TP1U2_SEP07#3',
+    ordinal: 3,
+    sourceDb: 'DATA_TP1U2_SEP07',
+    provenance: 'ifl_copy',
+    label: 'September copy - cones',
+    simulator: false,
+  },
+  spansGenerations: false,
+  otherGenerationExcluded: 0,
+  newerElsewhereUtc: null,
+  newerElsewhereSourceDb: null,
+  newerElsewhereLabel: null,
+  newerElsewhereSimulator: false,
+};
+
 const LIVE_LINE_FIXTURE: LiveLine = {
+  generation: GENERATION_FIXTURE,
   lineId: 1,
   lineName: 'TP1 Line 3 · Unit 2',
   lineShortName: 'Line 3',
