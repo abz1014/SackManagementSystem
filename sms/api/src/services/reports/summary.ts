@@ -24,7 +24,8 @@
  */
 import type { ConnectionPool } from 'mssql';
 import { getReport, type ReportData, type ResolvedPeriod } from '../report.js';
-import { listEvents } from '../register.js';
+import { countEvents } from '../register.js';
+import type { GenerationNote } from '../generation.js';
 import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { getWeights } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
@@ -161,6 +162,8 @@ export interface ManagementSummaryData {
   verdict: { cones: number; sacks: number; sackWeightKg: number };
   approval: 'awaiting';
   note: string;
+  /** RT-002/RT-029 follow-up (23 Sep 2026): the scope `cones_rejected_by_scale`'s own count was resolved and bound to, per period — see register.ts's countEvents. */
+  generationNote: { current: GenerationNote; prior: GenerationNote };
 }
 
 interface PeriodFigures {
@@ -171,6 +174,7 @@ interface PeriodFigures {
   productMix: { productId: number | null; cones: number }[];
   /** F12: share of this period's cone readings carrying a product, 0..1; null when the period holds none. */
   attributedShare: number | null;
+  generationNote: GenerationNote;
 }
 
 /**
@@ -227,7 +231,7 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange)
     // resolves that to the basis Setup has on file, like every other reader.
     getWeights(pool, lineId, undefined, range.from, range.to),
     getWeightStations(pool, lineId, range.from, range.to),
-    listEvents(pool, lineId, 'cone', { from: range.from, to: range.to, inRange: false, page: 1, pageSize: 1, sort: 'time', dir: 'desc' }),
+    countEvents(pool, lineId, 'cone', { from: range.from, to: range.to, inRange: false }),
     // U5 (16 Sep 2026): raw product-id + cones for the product-mix comparison
     // below; labelled once in getManagementSummary, not per period.
     getProduction(pool, lineId, { from: range.from, to: range.to, groupBy: 'product' }),
@@ -239,7 +243,7 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange)
   const values: Record<string, number | null> = {
     cones_weighed: t.cones,
     cones_in_range_pct: t.conesInRangePct,
-    cones_rejected_by_scale: empty ? null : scaleRejected.total,
+    cones_rejected_by_scale: empty ? null : scaleRejected.count,
     rejects_at_inspection: t.rejectedCones,
     inspection_reject_rate_pct: t.rejectRatePct,
     cones_within_limits_pct: st ? pct(st.within, judged) : null,
@@ -272,7 +276,7 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange)
   const mixCones = productMix.reduce((a, m) => a + m.cones, 0);
   const attributedCones = productMix.reduce((a, m) => a + (m.productId == null ? 0 : m.cones), 0);
   const attributedShare = mixCones > 0 ? attributedCones / mixCones : null;
-  return { coverage: report.coverage, values, totals: t, productMix, attributedShare };
+  return { coverage: report.coverage, values, totals: t, productMix, attributedShare, generationNote: scaleRejected.note };
 }
 
 export async function getManagementSummary(
@@ -339,6 +343,7 @@ export async function getManagementSummary(
     productMix,
     verdict: { cones: cur.totals.cones, sacks: cur.totals.sacks, sackWeightKg: cur.totals.sackWeightKg },
     approval: 'awaiting',
+    generationNote: { current: cur.generationNote, prior: prev.generationNote },
     note:
       'Each figure is shown beside the same figure for the period of equal length immediately before it. A comparison is ' +
       'withheld — shown as “not comparable”, with the reason — when the two periods differ too much in how many days held ' +

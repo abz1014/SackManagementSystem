@@ -20,7 +20,7 @@ vi.mock('../report.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../report.js')>();
   return { ...actual, getReport: vi.fn() };
 });
-vi.mock('../register.js', () => ({ listEvents: vi.fn() }));
+vi.mock('../register.js', () => ({ listEvents: vi.fn(), countEvents: vi.fn() }));
 vi.mock('../production.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../production.js')>();
   return { ...actual, getProduction: vi.fn() };
@@ -41,7 +41,7 @@ vi.mock('../coneState.js', async (importOriginal) => {
 });
 
 import { getReport, type ReportData } from '../report.js';
-import { listEvents } from '../register.js';
+import { listEvents, countEvents } from '../register.js';
 import { getProduction } from '../production.js';
 import { getWeights, getConfiguredBasis } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
@@ -164,6 +164,7 @@ const fakeWeights = () => ({
 beforeEach(() => {
   vi.mocked(getReport).mockReset();
   vi.mocked(listEvents).mockReset();
+  vi.mocked(countEvents).mockReset();
   vi.mocked(getProduction).mockReset();
   vi.mocked(getWeights).mockReset();
   vi.mocked(getConfiguredBasis).mockReset();
@@ -178,6 +179,16 @@ beforeEach(() => {
 
   vi.mocked(getReport).mockImplementation(async (_p, _l, resolved, shift) => fakeReport({ period: resolved, shift: shift ?? null, downtime: shift ? null : fakeReport().downtime }));
   vi.mocked(listEvents).mockResolvedValue({ rows: [], total: 17, page: 1, pageSize: 1 });
+  // RT-002/RT-029 follow-up (23 Sep 2026, WS-R): sack.ts/summary.ts now read
+  // their scale-rejected count through countEvents (register.ts), never
+  // listEvents.total — see register.generations.test.ts for why. 17 matches
+  // the listEvents fixture above so the pre-existing assertions (d.rejectedByScale
+  // === 17, etc.) still hold with no other numbers in this file changing.
+  vi.mocked(countEvents).mockResolvedValue({
+    count: 17,
+    note: { generation: { key: 'DATA_TP1U2_SEP07#3', ordinal: 3, sourceDb: 'DATA_TP1U2_SEP07', provenance: 'ifl_copy', label: null, simulator: false }, spansGenerations: false, otherGenerationExcluded: 0 },
+    dataIssues: [],
+  });
   vi.mocked(getProduction).mockImplementation(async (_p, _l, q) => {
     const rows =
       q.groupBy === 'none' ? [line('total', 1000, 20, 40, 1880)]
@@ -626,9 +637,14 @@ describe('cone weight report', () => {
 describe('sack report', () => {
   it('counts through production, the scale-rejected share through the register, and labels cones per sack approximate', async () => {
     const d = await getSackReport(fakePool().pool, 1, PERIOD, {});
-    expect(listEvents).toHaveBeenCalledWith(expect.anything(), 1, 'sack', expect.objectContaining({ inRange: false }));
+    // RT-002/RT-029 follow-up: the scale-rejected count comes through
+    // countEvents (a scoped figure), never listEvents (a pooled `.total`
+    // read alone) — see register.generations.test.ts.
+    expect(countEvents).toHaveBeenCalledWith(expect.anything(), 1, 'sack', expect.objectContaining({ inRange: false }));
+    expect(listEvents).not.toHaveBeenCalled();
     expect(d.totals.sacks).toBe(40);
     expect(d.rejectedByScale).toBe(17);
+    expect(d.generationNote.spansGenerations).toBe(false);
     expect(d.inRangePct).toBe(57.5);
     expect(d.conesPerSack).toBe(25);
     expect(d.byShift.map((s) => s.group)).toEqual(['morning', 'evening', 'night']);
@@ -723,6 +739,13 @@ describe('management summary', () => {
     expect(d.kpis.find((k) => k.key === 'cones_within_limits_pct')!.current).toBe(98); // 900 of 918 judged (unknown excluded)
     expect(d.kpis.find((k) => k.key === 'stations_flagged')!.current).toBe(1);
     expect(d.kpis.find((k) => k.key === 'cones_rejected_by_scale')!.current).toBe(17);
+    // RT-002/RT-029 follow-up: same scoped-count source as sack.ts, called
+    // once per period (current, prior) — never the pooled listEvents.total.
+    expect(countEvents).toHaveBeenCalledTimes(2);
+    expect(countEvents).toHaveBeenCalledWith(expect.anything(), 1, 'cone', expect.objectContaining({ inRange: false }));
+    expect(listEvents).not.toHaveBeenCalled();
+    expect(d.generationNote.current.spansGenerations).toBe(false);
+    expect(d.generationNote.prior.spansGenerations).toBe(false);
     expect(d.verdict).toEqual({ cones: 1000, sacks: 40, sackWeightKg: 1880 });
     expect(d.approval).toBe('awaiting');
     // U5's product mix: the same getProduction(groupBy:'product') fixture
@@ -771,6 +794,10 @@ describe('management summary', () => {
       kpis: [{ ...KPI_DEFINITIONS[0]!, current: 10, prior: 8, delta: { abs: 2, pct: 25 }, comparable: true, incomparableReason: null, approval: 'awaiting' }],
       productMix: { current: [], prior: [] },
       verdict: { cones: 10, sacks: 1, sackWeightKg: 47 }, approval: 'awaiting', note: '',
+      generationNote: {
+        current: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 },
+        prior: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 },
+      },
     });
     expect(t.headers).toEqual(SUMMARY_CSV_HEADERS);
     expect(t.rows[0]).toEqual(['cones_weighed', 'Cones weighed', 'cones', 10, 8, 2, 25, 'higher', '2026-09-01 to 2026-09-07', '2026-08-25 to 2026-08-31', 'awaiting', true, null, 100, 100]);

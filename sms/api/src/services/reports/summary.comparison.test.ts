@@ -28,7 +28,7 @@ vi.mock('../report.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../report.js')>();
   return { ...actual, getReport: vi.fn() };
 });
-vi.mock('../register.js', () => ({ listEvents: vi.fn() }));
+vi.mock('../register.js', () => ({ listEvents: vi.fn(), countEvents: vi.fn() }));
 vi.mock('../production.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../production.js')>();
   return { ...actual, getProduction: vi.fn() };
@@ -41,7 +41,7 @@ vi.mock('../productLimits.js', async (importOriginal) => {
 });
 
 import { getReport, type ReportData } from '../report.js';
-import { listEvents } from '../register.js';
+import { countEvents } from '../register.js';
 import { getProduction } from '../production.js';
 import { getWeights } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
@@ -89,7 +89,13 @@ const fakeStations = () => ({
 
 beforeEach(() => {
   vi.mocked(getReport).mockReset();
-  vi.mocked(listEvents).mockReset().mockResolvedValue({ rows: [], total: 17, page: 1, pageSize: 1 });
+  // RT-002/RT-029 follow-up (23 Sep 2026, WS-R): scaleRejected now comes
+  // through countEvents, never listEvents — see register.generations.test.ts.
+  vi.mocked(countEvents).mockReset().mockResolvedValue({
+    count: 17,
+    note: { generation: { key: 'DATA_TP1U2_SEP07#3', ordinal: 3, sourceDb: 'DATA_TP1U2_SEP07', provenance: 'ifl_copy', label: null, simulator: false }, spansGenerations: false, otherGenerationExcluded: 0 },
+    dataIssues: [],
+  });
   vi.mocked(getProduction).mockReset().mockResolvedValue({ groupBy: 'product', rows: [], unattributed: null, states: null, implausible: null } as never);
   vi.mocked(getWeights).mockReset().mockResolvedValue(fakeWeights() as never);
   vi.mocked(getWeightStations).mockReset().mockResolvedValue(fakeStations() as never);

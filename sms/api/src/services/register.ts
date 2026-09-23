@@ -34,6 +34,7 @@ import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { ConeState } from '@sms/shared';
 import { bindStateCase, type StateContext } from './coneState.js';
+import { andEpoch, noteOf, resolveGenerationScope, type EventTable, type GenerationNote } from './generation.js';
 
 export type EventType = 'cone' | 'sack' | 'reject';
 export type SortField = 'time' | 'weight';
@@ -409,6 +410,16 @@ export interface RegisterPage {
    * read a missing value as "not stated" — never as "one generation".
    */
   generations?: GenerationTally[];
+  /**
+   * See RegisterDataIssue. Empty on every healthy response — declared
+   * OPTIONAL for the same back-compat reason `generations` is: `listEvents`
+   * always sets it, and a missing value must read as "not stated", never as
+   * "known healthy". WS-R (23 Sep 2026): without this, a tally row with its
+   * count column absent silently became `total: NaN`, which
+   * `JSON.stringify` serialises as `null` — read by `Sacks.tsx` as a real
+   * empty period while `rows` still held real data.
+   */
+  dataIssues?: RegisterDataIssue[];
 }
 
 export async function listEvents(
@@ -424,7 +435,7 @@ export async function listEvents(
 
   const countReq = pool.request();
   const where = bindFilters(countReq, lineId, type, q, ALIAS);
-  const { total, generations } = foldGenerationTally(
+  const { total, generations, dataIssues } = foldGenerationTally(
     (await countReq.query<TallyRow>(TALLY_SQL(from, where))).recordset,
   );
 
@@ -437,7 +448,108 @@ export async function listEvents(
      ORDER BY ${order}
      OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY`,
   );
-  return { rows: res.recordset.map(foldProvenance), total, page: q.page, pageSize: q.pageSize, generations };
+  return { rows: res.recordset.map(foldProvenance), total, page: q.page, pageSize: q.pageSize, generations, dataIssues };
+}
+
+const tableFor = (type: EventType): EventTable =>
+  type === 'cone' ? 'cone_event' : type === 'sack' ? 'sack_event' : 'reject_event';
+
+/**
+ * A SECOND defect, found mid-pass (23 Sep 2026) in a different function of
+ * this same file: `foldGenerationTally` used a bare `Number(r.n)` and
+ * `countEvents` a bare `Number(res.recordset[0]?.n ?? 0)`. A tally/count row
+ * that comes back with its `n` column ABSENT — not SQL NULL, the key itself
+ * missing, the malformed/truncated-driver-row shape `production.ts` (WS-P,
+ * `71757a3`, the same day) already found and fixed elsewhere — turned
+ * `Number(undefined)` into `NaN`, which `JSON.stringify` then serialises as
+ * `null` (`register.presence.test.ts` asserts this directly). The client
+ * (`Sacks.tsx`'s history block: `rows.data?.data.total ?? 0`, then
+ * `total === 0 ? <Empty>`) reads that `null` as a real empty period —
+ * hiding real rows the LISTING half of the same response still holds.
+ *
+ * Mirrors `production.ts`'s own `readNum`/`dataIssues` idiom rather than
+ * inventing a second one; not imported, because `production.ts` does not
+ * export it and this file gains no new dependency for it.
+ */
+interface ReadResult {
+  value: number;
+  /** false when the source value was not a finite number — key absent, or malformed. */
+  ok: boolean;
+}
+function readNum(v: unknown): ReadResult {
+  return typeof v === 'number' && Number.isFinite(v) ? { value: v, ok: true } : { value: 0, ok: false };
+}
+
+/**
+ * One entry per numeric field this file could not read as a number from its
+ * source row. Always an array, empty on every healthy response — mirrors
+ * `production.ts`'s `ProductionDataIssue` exactly (see readNum's own doc for
+ * why this shape and not a new one): the affected field still reads as `0`,
+ * so the response's SUCCESS SHAPE is unchanged, but a consumer that checks
+ * this list can tell a real empty period apart from a malformed row.
+ */
+export interface RegisterDataIssue {
+  /** 'total' — foldGenerationTally's pooled COUNT(*), read by listEvents/exportEventsCsv. 'count' — countEvents' own scoped COUNT(*). */
+  field: 'total' | 'count';
+  /** The generation key (GenerationTally.key) the malformed row belonged to; null for countEvents, which reads exactly one row. */
+  generation: string | null;
+  reason: string;
+}
+
+export interface EventCount {
+  /** Rows matching the filters, within the ONE generation resolveGenerationScope chose for (lineId, from, to). Never a pooled figure. */
+  count: number;
+  /** Which generation `count` describes, and what (if anything) was excluded — same shape every other scoped report already returns. */
+  note: GenerationNote;
+  /** See RegisterDataIssue. Empty on every healthy response. */
+  dataIssues: RegisterDataIssue[];
+}
+
+/**
+ * WHY THIS EXISTS BESIDE listEvents (23 Sep 2026, RT-002/RT-029 follow-up).
+ *
+ * `listEvents`' `total` is deliberately pooled — see "WHY THE REGISTER LABELS
+ * AND DOES NOT FILTER" above — because a LISTING must never silently drop a
+ * generation's rows. A bare FIGURE has the opposite obligation: `total` read
+ * on its own, the way `reports/sack.ts` and `reports/summary.ts` both did
+ * until this pass, is exactly the kind of pooled count `sms summary` stopped
+ * printing in 0a0f030 (RT-002: 411 pooled vs 14 real on the register's own
+ * scale-rejected count, a ~29x inflation). `reports/daily.ts` hit the same
+ * defect and, not owning this file, worked around it with a private COUNT
+ * query of its own (23 Sep 2026) — this is the fix that query should have
+ * been able to call instead.
+ *
+ * THE DESIGN CHOICE. Rather than give `listEvents` an optional scope
+ * parameter, a caller after the LISTING could pass it by accident (a copy-
+ * pasted call site, a refactor that hoists a scope up a call chain) and
+ * silently start dropping rows from the one screen that must never do that.
+ * A count that needs scoping instead gets its OWN function, with its OWN
+ * query — nothing named `total` or `count` is reachable through `listEvents`
+ * without also getting every row back, so a caller who only wants a figure
+ * has no path that both pools and looks correct.
+ *
+ * Resolves its OWN scope via `resolveGenerationScope`, keyed on
+ * `(lineId, from, to)` the same way every other report-owned scope call is —
+ * so it agrees with whatever else on the same screen scoped the same window,
+ * with no scope threaded in from the caller and no shared signature touched.
+ */
+export async function countEvents(
+  pool: ConnectionPool,
+  lineId: number,
+  type: EventType,
+  f: RegisterFilters,
+): Promise<EventCount> {
+  const table = tableFor(type);
+  const scope = await resolveGenerationScope(pool, lineId, { from: f.from, to: f.to }, [table]);
+  const req = pool.request();
+  const where0 = bindFilters(req, lineId, type, f, ALIAS);
+  const where = andEpoch(where0, req, scope, table);
+  const res = await req.query<{ n: number }>(`SELECT COUNT(*) n FROM ${fromFor(type)} WHERE ${where}`);
+  const n = readNum(res.recordset[0]?.n);
+  const dataIssues: RegisterDataIssue[] = n.ok
+    ? []
+    : [{ field: 'count', generation: scope.generation?.key ?? null, reason: 'countEvents aggregate row is missing its count (n)' }];
+  return { count: n.value, note: noteOf(scope), dataIssues };
 }
 
 interface TallyRow {
@@ -478,19 +590,25 @@ export function foldGenerationTally(rows: readonly TallyRow[]): {
   generations: GenerationTally[];
   /** epoch_id → generation key, so a row can be attributed without a second query. */
   keyOfEpoch: Map<number, string>;
+  /** See RegisterDataIssue. Empty on every healthy tally. */
+  dataIssues: RegisterDataIssue[];
 } {
   const by = new Map<string, GenerationTally>();
   const keyOfEpoch = new Map<number, string>();
+  const dataIssues: RegisterDataIssue[] = [];
   let total = 0;
   for (const r of rows) {
-    const n = Number(r.n);
-    total += n;
     const ordinal = r.generation_ordinal == null ? null : Number(r.generation_ordinal);
     const key = ordinal == null ? `epoch:${r.epoch_id ?? 'none'}` : `${r.source_db ?? ''}#${ordinal}`;
     if (r.epoch_id != null) keyOfEpoch.set(Number(r.epoch_id), key);
+    // WS-R (23 Sep 2026): `n` read defensively — see readNum's own doc for
+    // why a missing column must not become a silent, wire-serialisable NaN.
+    const n = readNum(r.n);
+    if (!n.ok) dataIssues.push({ field: 'total', generation: key, reason: 'tally row is missing its count (n)' });
+    total += n.value;
     const cur = by.get(key);
     if (cur) {
-      cur.rows += n;
+      cur.rows += n.value;
       continue;
     }
     by.set(key, {
@@ -502,7 +620,7 @@ export function foldGenerationTally(rows: readonly TallyRow[]): {
       // says so. Provenance alone is not trusted — epochs 13-16 are the
       // simulator's tables recorded as IFL's own and are left standing.
       simulator: r.provenance === 'simulator' || /_SIM$/i.test(r.source_db ?? ''),
-      rows: n,
+      rows: n.value,
     });
   }
   // Newest generation first; unordinalled entries last, so the figure a reader
@@ -510,7 +628,7 @@ export function foldGenerationTally(rows: readonly TallyRow[]): {
   const generations = [...by.values()].sort(
     (a, b) => (b.ordinal ?? -1) - (a.ordinal ?? -1) || b.rows - a.rows,
   );
-  return { total, generations, keyOfEpoch };
+  return { total, generations, keyOfEpoch, dataIssues };
 }
 
 export async function getEventDetail(

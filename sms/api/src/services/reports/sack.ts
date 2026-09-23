@@ -24,7 +24,8 @@
 import type { ConnectionPool } from 'mssql';
 import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { loadProductCatalogue } from '../productLimits.js';
-import { listEvents } from '../register.js';
+import { countEvents } from '../register.js';
+import type { GenerationNote } from '../generation.js';
 import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js';
 import { getConfiguredBasis, getWeights, type WeightStats } from '../weights.js';
 import { pct, type ReportFilters } from './common.js';
@@ -46,6 +47,8 @@ export interface SackReportData {
   /** Null under a shift filter: weights.ts takes none, and a whole-period distribution under a shift heading would mislead. */
   distribution: Pick<WeightStats, 'count' | 'implausible' | 'avg' | 'min' | 'max' | 'stdev' | 'bucketSize' | 'histogram'> | null;
   caveats: { time: string; machine: string; conesPerSack: string };
+  /** RT-002/RT-029 follow-up (23 Sep 2026): the scope `rejectedByScale`'s own count was resolved and bound to — see register.ts's countEvents. */
+  generationNote: GenerationNote;
 }
 
 export async function getSackReport(
@@ -61,7 +64,7 @@ export async function getSackReport(
     getProduction(pool, lineId, { from, to, shift, groupBy: 'shift' }),
     getProduction(pool, lineId, { from, to, shift, groupBy: 'day' }),
     getProduction(pool, lineId, { from, to, shift, groupBy: 'product' }),
-    listEvents(pool, lineId, 'sack', { from, to, shift, inRange: false, page: 1, pageSize: 1, sort: 'time', dir: 'desc' }),
+    countEvents(pool, lineId, 'sack', { from, to, shift, inRange: false }),
     loadProductCatalogue(pool),
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
     // resolves that to the basis Setup has on file.
@@ -78,8 +81,8 @@ export async function getSackReport(
     filters,
     weightBasis: weights?.basis ?? shiftBasis ?? 'as_recorded',
     totals,
-    rejectedByScale: rejected.total,
-    inRangePct: totals.sacks > 0 ? pct(totals.sacks - rejected.total, totals.sacks) : null,
+    rejectedByScale: rejected.count,
+    inRangePct: totals.sacks > 0 ? pct(totals.sacks - rejected.count, totals.sacks) : null,
     conesPerSack: totals.conesPerSack,
     byShift: byShift.rows.map(toReportLine).sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group)),
     byDay: byDay.rows.map(toReportLine),
@@ -107,6 +110,7 @@ export async function getSackReport(
       machine: 'No sack is attributed to a machine: the plant’s sack records carry no machine at any layer, and none is inferred.',
       conesPerSack: 'Cones per sack is cones weighed divided by sacks weighed over the period — an approximation, not a packing list.',
     },
+    generationNote: rejected.note,
   };
 }
 
