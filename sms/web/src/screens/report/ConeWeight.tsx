@@ -82,7 +82,7 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
       </Block>
 
       <Block label={W.reports.histogram(d.bucketSizeG)}>
-        <Histogram buckets={d.histogram} unit="" label={W.reports.histogram(d.bucketSizeG)} />
+        <Histogram buckets={d.histogram} bucketSize={d.bucketSizeG} unit="" label={W.reports.histogram(d.bucketSizeG)} />
       </Block>
 
       <Block label={W.reports.byStation} note={W.reports.lineMean(fmtG1(d.lineMeanG))}>

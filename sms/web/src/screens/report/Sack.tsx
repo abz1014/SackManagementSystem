@@ -84,7 +84,7 @@ export function SackSection({ d, products }: { d: SackReportData; products: Prod
 
           {d.distribution && (
             <Block label={W.reports.histogramKg(d.distribution.bucketSize)} note={`${fmtInt(d.distribution.implausible)} implausible excluded`}>
-              <Histogram buckets={d.distribution.histogram} unit="" label={W.reports.histogramKg(d.distribution.bucketSize)} />
+              <Histogram buckets={d.distribution.histogram} bucketSize={d.distribution.bucketSize} unit="" label={W.reports.histogramKg(d.distribution.bucketSize)} />
             </Block>
           )}
         </>

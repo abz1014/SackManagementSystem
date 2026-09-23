@@ -1945,6 +1945,23 @@ export const W = {
     states: 'By state',
     histogram: (g: number) => `Distribution, ${g} g buckets`,
     histogramKg: (kg: number) => `Distribution, ${kg} kg buckets`,
+    /**
+     * The x axis is linear in value, so a handful of far strays would leave
+     * the body of the distribution a 55px spike on a 760px plot. The axis is
+     * clipped to the body and those readings are NAMED here — never dropped,
+     * and never left to a chevron on its own. They remain inside every
+     * figure the report prints; only the axis is shorter.
+     */
+    histogramClipped: (
+      nBelow: string | null, lowest: string | null,
+      nAbove: string | null, highest: string | null,
+      lo: string, hi: string,
+    ) => {
+      const parts: string[] = [];
+      if (nBelow && lowest) parts.push(`${nBelow} below ${lo} (lowest bucket ${lowest})`);
+      if (nAbove && highest) parts.push(`${nAbove} above ${hi} (highest bucket ${highest})`);
+      return `Axis clipped to the body of the distribution: ${parts.join(' and ')}. Those readings are still counted in every figure on this report — only the axis is shorter.`;
+    },
     byStation: 'By station',
     medianFromReport: 'The median is computed by the report over the same readings as the mean.',
     /* Sack report. */

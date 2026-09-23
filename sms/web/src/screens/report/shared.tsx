@@ -205,8 +205,164 @@ export function DayBars({ rows, label = W.report.conesPerDay }: { rows: ReportLi
   );
 }
 
-/** A histogram as plain bars: bucket start on the x axis, count as height. */
-export function Histogram({ buckets, unit, label }: { buckets: { bucket: number; count: number }[]; unit: string; label: string }) {
+/* ----------------------------------------------------------- histogram */
+
+export interface HistBucket {
+  /** The bucket's START value, in `unit`. Buckets are `bucketSize` apart. */
+  bucket: number;
+  count: number;
+}
+
+/**
+ * How many EMPTY buckets may sit between two occupied ones before the far
+ * side stops counting as part of the same body.
+ *
+ * Eight, and that is not a taste: `weights.ts` bins every histogram this
+ * screen draws at 32 bins across +/-4 sd, so one standard deviation is
+ * four buckets wide whatever the unit and whatever the generation. Eight
+ * empty buckets is therefore two sd of nothing at all — a distance no
+ * shoulder of a real distribution crosses, and the distance the isolated
+ * readings on this data actually sit at.
+ */
+const CORE_GAP_BUCKETS = 8;
+
+/**
+ * Above this share of readings outside the core, DO NOT clip. A tail
+ * carrying more than one reading in fifty is not a stray, it is a second
+ * population, and putting it behind an edge marker would hide a bimodal
+ * distribution — the exact failure this chart exists to make visible.
+ */
+const MAX_OVERFLOW_SHARE = 0.02;
+
+/**
+ * And below this saving, do not clip either: if the core still spans 80 %
+ * of the full range, an edge marker costs the reader a sentence and buys
+ * them almost no resolution.
+ */
+const MIN_CLIP_SAVING = 0.2;
+
+/** Readings pushed outside the drawn axis at one end. Never dropped — named. */
+export interface HistOverflow {
+  count: number;
+  /** The START of the furthest occupied bucket on this side. */
+  extremeBucket: number;
+}
+
+export interface HistogramView {
+  /** Domain actually drawn: [lo, hi) in the chart's own unit. */
+  lo: number;
+  hi: number;
+  drawn: HistBucket[];
+  below: HistOverflow | null;
+  above: HistOverflow | null;
+}
+
+/**
+ * THE X AXIS IS LINEAR IN VALUE, and this function is what makes that
+ * survivable.
+ *
+ * Until 23 Sep 2026 `Histogram` laid its bars out BY INDEX: every occupied
+ * bucket got an equal slot, so an empty bucket occupied no width at all and
+ * distance along the axis measured nothing. That was invisible while the
+ * server's bucket was wider than the spread it was drawing (one bar, or
+ * three). `b91f7d5` fixed the bucketing — 47 bars on gen-1 sacks, 75 on
+ * gen-1 cones, 21 on gen-3 sacks — and at 21 bars the index layout became a
+ * measurable misrepresentation: gen-3 sacks hold strays at 45.12 and 55.48
+ * kg with nothing between them, and the chart drew 55.45 immediately beside
+ * 49.15, the same 36 px it gave the 0.05 kg step from 45.10 to 45.15. A 126:1
+ * distortion at the worst adjacency, measured in the browser before the fix.
+ *
+ * A linear axis over the FULL range fixes the lie and creates a second
+ * problem: gen-3 sacks then span 208 buckets, of which the entire body
+ * (46.95-47.65 kg, 3,113 of 3,122 readings) occupies 14 — 51 px of the
+ * 760 px plot measured at 1366 px. So the axis is clipped to the body, and
+ * the nine readings outside it are
+ * COUNTED AND NAMED under the chart rather than dropped. An axis that
+ * quietly omits a real reading asserts that the reading does not exist;
+ * this one says how many there are and where the furthest sits.
+ *
+ * The body is grown outward from the modal bucket across gaps of at most
+ * `CORE_GAP_BUCKETS`, and the result is discarded entirely — full range,
+ * no marker — if it would hide more than `MAX_OVERFLOW_SHARE` of the
+ * readings or if it saves less than `MIN_CLIP_SAVING` of the width.
+ */
+export function histogramView(buckets: HistBucket[], bucketSize: number): HistogramView {
+  const all = [...buckets].sort((a, b) => a.bucket - b.bucket);
+  const size = bucketSize > 0 ? bucketSize : 1;
+  const full: HistogramView = {
+    lo: all[0]!.bucket,
+    hi: all[all.length - 1]!.bucket + size,
+    drawn: all,
+    below: null,
+    above: null,
+  };
+  if (all.length < 3) return full;
+
+  // Empty buckets strictly between two occupied ones.
+  const gap = (a: HistBucket, b: HistBucket) => Math.round((b.bucket - a.bucket) / size) - 1;
+
+  let peak = 0;
+  for (let i = 1; i < all.length; i++) if (all[i]!.count > all[peak]!.count) peak = i;
+  let lo = peak;
+  let hi = peak;
+  while (lo > 0 && gap(all[lo - 1]!, all[lo]!) <= CORE_GAP_BUCKETS) lo--;
+  while (hi < all.length - 1 && gap(all[hi]!, all[hi + 1]!) <= CORE_GAP_BUCKETS) hi++;
+  if (lo === 0 && hi === all.length - 1) return full;
+
+  const sum = (from: number, to: number) => all.slice(from, to).reduce((t, b) => t + b.count, 0);
+  const total = sum(0, all.length);
+  const hidden = sum(0, lo) + sum(hi + 1, all.length);
+  if (total <= 0 || hidden / total > MAX_OVERFLOW_SHARE) return full;
+
+  const fullSpan = Math.round((full.hi - full.lo) / size);
+  const coreSpan = Math.round((all[hi]!.bucket + size - all[lo]!.bucket) / size);
+  if (coreSpan / fullSpan > 1 - MIN_CLIP_SAVING) return full;
+
+  return {
+    lo: all[lo]!.bucket,
+    hi: all[hi]!.bucket + size,
+    drawn: all.slice(lo, hi + 1),
+    below: lo > 0 ? { count: sum(0, lo), extremeBucket: all[0]!.bucket } : null,
+    above: hi < all.length - 1 ? { count: sum(hi + 1, all.length), extremeBucket: all[all.length - 1]!.bucket } : null,
+  };
+}
+
+/** Decimals a bucket label needs at this width: 0.05 -> 2, 2 -> 0. */
+function bucketDecimals(size: number): number {
+  return size > 0 ? Math.max(0, -Math.floor(Math.log10(size))) : 0;
+}
+
+/**
+ * Evenly spaced tick VALUES across [lo, hi), each a whole multiple of the
+ * bucket width so every label is a real bucket boundary and stays as round
+ * as the server made it. The step is the smallest multiple of `bucketSize`
+ * at least `minPx` wide, so labels thin themselves rather than overprint —
+ * the same rule `fittingTicks` applies to the other charts, expressed in
+ * value rather than in index because this axis is now value-positioned.
+ */
+function bucketTicks(lo: number, hi: number, size: number, plotW: number, minPx = 70): number[] {
+  const span = hi - lo;
+  if (!(span > 0) || !(size > 0) || !(plotW > 0)) return [lo];
+  const perBucket = plotW / (span / size);
+  const step = Math.max(1, Math.ceil(minPx / perBucket)) * size;
+  const dp = bucketDecimals(size);
+  const round = (v: number) => Number(v.toFixed(dp + 3));
+  const out: number[] = [];
+  for (let v = Math.ceil(round(lo / step)) * step; round(v) < round(hi); v += step) out.push(round(v));
+  if (out.length === 0) out.push(round(lo));
+  return out;
+}
+
+/**
+ * A histogram as plain bars: bucket start on a LINEAR x axis, count as
+ * height. `bucketSize` is required rather than inferred from the gaps
+ * between the buckets, because the wire payload is SPARSE (weights.ts:55,
+ * "empty buckets are omitted") and a one-bar or two-bar distribution has no
+ * gap to infer it from — and guessing the unit of the axis is exactly the
+ * kind of unsupported assertion this app does not make. Both callers
+ * already hold it: they print it in the block label beside the chart.
+ */
+export function Histogram({ buckets, bucketSize, unit, label }: { buckets: HistBucket[]; bucketSize: number; unit: string; label: string }) {
   const [box, width] = useChartWidth();
   const H = 180;
   const L = 48;
@@ -214,27 +370,55 @@ export function Histogram({ buckets, unit, label }: { buckets: { bucket: number;
   const T = 12;
   const B = 28;
   if (buckets.length === 0) return <Empty message={W.nothingHere} />;
-  const max = Math.max(...buckets.map((b) => b.count), 1);
-  const slot = (width - L - R) / buckets.length;
-  const bw = Math.max(2, slot * 0.8);
+  const view = histogramView(buckets, bucketSize);
+  const size = bucketSize > 0 ? bucketSize : 1;
+  const dp = bucketDecimals(size);
+  const plotW = Math.max(1, width - L - R);
+  const max = Math.max(...view.drawn.map((b) => b.count), 1);
+  const x = linear([view.lo, view.hi], [L, width - R]);
+  // The natural width of one bucket on this axis. Floored at 2px, because a
+  // bar that renders as nothing is its own defect; when the floor bites, the
+  // bar is re-centred on its own interval so it still sits where its value is.
+  const slot = plotW / Math.max(1, (view.hi - view.lo) / size);
+  const bw = Math.max(2, slot * 0.9);
   const y = (v: number) => T + ((max - v) / max) * (H - T - B);
-  const step = Math.max(1, Math.ceil(buckets.length / Math.max(2, Math.floor((width - L - R) / 70))));
+  const ticks = bucketTicks(view.lo, view.hi, size, plotW);
+  const fmtB = (v: number) => v.toFixed(dp);
+  const clipped = view.below ?? view.above;
   return (
     <div ref={box}>
       <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={label}>
-        {buckets.map((b, i) => (
-          <rect key={b.bucket} x={L + slot * i + (slot - bw) / 2} y={y(b.count)} width={bw} height={Math.max(0, H - B - y(b.count))} fill="var(--graphite)" />
+        {view.drawn.map((b) => (
+          <rect key={b.bucket} x={x(b.bucket + size / 2) - bw / 2} y={y(b.count)} width={bw} height={Math.max(0, H - B - y(b.count))} fill="var(--graphite)" />
         ))}
-        {buckets.map((b, i) =>
-          i % step === 0 || i === buckets.length - 1 ? (
-            <text key={`t${b.bucket}`} x={L + slot * i + slot / 2} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, buckets.length)}>
-              {b.bucket}{unit}
-            </text>
-          ) : null,
+        {ticks.map((v, i) => (
+          <text key={`t${v}`} x={x(v)} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, ticks.length)}>
+            {fmtB(v)}{unit}
+          </text>
+        ))}
+        {/* The axis is cut here, and the sentence under the chart says by how
+            much. A mark alone would be decoration; the count is the fact. */}
+        {view.below && (
+          <text x={L - 2} y={H - B - 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end" aria-hidden="true">‹‹</text>
+        )}
+        {view.above && (
+          <text x={width - R + 2} y={H - B - 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="start" aria-hidden="true">››</text>
         )}
         <text x={L - 8} y={T + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{fmtInt(max)}</text>
         <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
       </svg>
+      {clipped && (
+        <p className="mut sm" style={{ marginTop: 6 }}>
+          {W.reports.histogramClipped(
+            view.below ? fmtInt(view.below.count) : null,
+            view.below ? `${fmtB(view.below.extremeBucket)}${unit}` : null,
+            view.above ? fmtInt(view.above.count) : null,
+            view.above ? `${fmtB(view.above.extremeBucket)}${unit}` : null,
+            `${fmtB(view.lo)}${unit}`,
+            `${fmtB(view.hi)}${unit}`,
+          )}
+        </p>
+      )}
     </div>
   );
 }
