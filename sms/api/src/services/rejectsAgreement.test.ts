@@ -167,6 +167,13 @@ function evaluate(sql: string, p: Map<string, unknown>): Record<string, unknown>
   if (sql.includes('AS day')) {
     return groupBy((r) => r.shift_date, (day, rs) => ({ day, n: rs.length }));
   }
+  // rejects.ts getUnmatchedRejects, grouped by day (getRejectsByDayCode's own
+  // denominator query) — `AS grp`, not `AS day`, because getUnmatchedRejects
+  // is shared across every grouping dimension production.ts uses, not day
+  // alone.
+  if (sql.includes('AS grp') && sql.includes('shift_date, 120)')) {
+    return groupBy((r) => r.shift_date, (day, rs) => ({ grp: day, n: rs.length }));
+  }
   // one aggregate row (production.ts groupBy 'none', the unattributed counts)
   return [{
     grp: 'total',

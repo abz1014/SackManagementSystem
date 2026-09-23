@@ -219,6 +219,16 @@ function datasetPool(withCodeFilter: boolean) {
         input: (name: string, _type: unknown, value: unknown) => { inputs.set(name, value); return req; },
         query: async (sql: string) => {
           statements.push({ sql, inputs: new Map(inputs) });
+          // Checked BEFORE the plain cone_event branch: getUnmatchedRejects's
+          // NOT EXISTS subquery references sms.cone_event too, so a bare
+          // `.includes('FROM sms.cone_event')` would misroute it there.
+          if (sql.includes('FROM sms.reject_event') && sql.includes('NOT EXISTS')) {
+            // Every reject of the day, whatever its code, with none matching
+            // a cone_event row — the fixture's `datasetPool` never modelled
+            // cone/reject identity, so every reject here is "unmatched",
+            // reproducing the same totals the pre-23-Sep-2026 formula used.
+            return { recordset: [{ grp: '2026-09-06', n: 100 }, { grp: '2026-09-07', n: 20 }] };
+          }
           if (sql.includes('FROM sms.cone_event')) {
             return { recordset: [{ day: '2026-09-06', n: 900 }, { day: '2026-09-07', n: 400 }] };
           }
@@ -230,8 +240,7 @@ function datasetPool(withCodeFilter: boolean) {
             ];
             return { recordset: withCodeFilter ? rows.filter((r) => r.reject_type === 'quality') : rows };
           }
-          // every reject of the day, whatever its code
-          return { recordset: [{ day: '2026-09-06', n: 100 }, { day: '2026-09-07', n: 20 }] };
+          throw new Error(`unexpected query: ${sql}`);
         },
       };
       return req;
@@ -279,7 +288,10 @@ describe('getRejectsByDayCode — rate uses that day\'s own population', () => {
     // The grouped query carries the code predicate; the two denominator queries do not.
     const grouped = statements.find((s) => s.sql.includes('rc.reject_code_id'))!;
     const all = statements.find((s) => !s.sql.includes('rc.reject_code_id') && s.sql.includes('FROM sms.reject_event'))!;
-    const cones = statements.find((s) => s.sql.includes('FROM sms.cone_event'))!;
+    // Excludes getUnmatchedRejects's own query: its NOT EXISTS subquery also
+    // references sms.cone_event, so a bare substring match would pick it up
+    // instead of the real cone count.
+    const cones = statements.find((s) => s.sql.includes('FROM sms.cone_event') && !s.sql.includes('reject_event'))!;
     expect(grouped.sql).toContain('@codeTube');
     expect(all.sql).not.toContain('@codeTube');
     expect(cones.sql).not.toContain('@codeTube');

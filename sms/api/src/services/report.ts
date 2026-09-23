@@ -163,7 +163,16 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 export function toReportLine(r: ProductionRow): ReportLine {
   const cones = r.cones ?? 0;
   const rejected = r.rejectedCones ?? 0;
-  const weighed = cones + rejected;
+  // Corrected 23 Sep 2026 (finding H1's own follow-up defect, see
+  // rejectSpc.ts's file header): `weighed` used to be `cones + rejected`,
+  // double-counting the 98%+ of rejects that are the SAME physical cone as
+  // an existing production.ts cone row, weighed then separately rejected.
+  // `unmatchedRejects` (production.ts) is only the rejects with no matching
+  // cone_event row — falling back to `rejected` only when a caller supplies
+  // a bare ProductionRow with no `unmatchedRejects` at all (some fixtures in
+  // tests do; real production.ts rows always carry the real figure).
+  const unmatchedRejects = r.unmatchedRejects ?? rejected;
+  const weighed = cones + unmatchedRejects;
   const sacks = r.sacks ?? 0;
   const kg = r.sackWeightKg ?? 0;
   return {

@@ -128,6 +128,60 @@ export function bindConeFilters(req: SqlRequest, lineId: number, f: RejectFilter
 }
 
 /**
+ * cone_event's own merge key (transform.ts `coneKey`): production instant +
+ * hanger. A reject_event row matching an existing cone_event row on this key
+ * is the SAME physical cone, weighed then separately rejected — not a second
+ * unit. Shared here so every "was this reject already counted as a cone"
+ * check in the app (rejectSpc.ts's p-chart, this file's day/code breakdown,
+ * production.ts's report denominator) uses the identical predicate. See
+ * rejectSpc.ts's file header (23 Sep 2026) for the measurement this rests
+ * on: matching rejectQCS1_TP1U2/rejectWeight1_TP1U2 to pack1_TP1U2 on
+ * (ProductionDate, HangerNum) finds a match for 98%+ of quality rejects and
+ * 41/41 (Sept) / 244/246 (July) weight rejects.
+ */
+export function coneMatchPredicate(rejectAlias: string, coneAlias: string): string {
+  return `${coneAlias}.line_id = ${rejectAlias}.line_id
+      AND ${coneAlias}.production_ts_utc_ms = ${rejectAlias}.production_ts_utc_ms
+      AND ISNULL(${coneAlias}.hanger_num, -1) = ISNULL(${rejectAlias}.hanger_num, -1)`;
+}
+
+/**
+ * Rejects with NO matching cone_event row — the ONLY rejects that belong in
+ * a reject-rate denominator alongside cones (see `coneMatchPredicate`). A
+ * rejected cone is still an inspected unit, but 98%+ of rejects are already
+ * counted once in `produced`/`cones` because the reject_event row and the
+ * cone_event row are the same physical cone logged twice; adding every
+ * reject to the denominator double-counts those. Every reject-rate
+ * calculation in the app must call this (or rejectSpc.ts's own bucketed
+ * version of the same query) rather than adding cones + every reject.
+ *
+ * `group` is a SQL expression evaluated against the `re` alias (the same
+ * shape production.ts's own `groupExpr` uses, re-aliased), or omitted for a
+ * single ungrouped total keyed `'total'`.
+ */
+export async function getUnmatchedRejects(
+  pool: ConnectionPool,
+  lineId: number,
+  f: RejectFilters,
+  group?: string,
+): Promise<Map<string, number>> {
+  const req = pool.request();
+  const where = bindRejectFilters(req, lineId, { ...f, code: undefined }, 're.', false);
+  const groupClause = group ? `GROUP BY ${group}` : '';
+  const selectGroup = group ?? `'total'`;
+  const r = await req.query<{ grp: string; n: number }>(`
+    SELECT ${selectGroup} AS grp, COUNT(*) AS n
+      FROM sms.reject_event re
+     WHERE ${where}
+       AND NOT EXISTS (
+         SELECT 1 FROM sms.cone_event ce WHERE ${coneMatchPredicate('re', 'ce')}
+       )
+     ${groupClause}
+  `);
+  return new Map(r.recordset.map((x) => [String(x.grp), Number(x.n)]));
+}
+
+/**
  * The reject_code lookup join, per line since migration 028. ISNULL on both
  * sides: a weight reject's pair is NULL/NULL on the event AND on its code row.
  */
@@ -263,9 +317,11 @@ export interface RejectDayCodeRow {
   /** Cones weighed that day, under the same shift/station/product/tsTo filters. */
   cones: number;
   /**
-   * Cones + rejects of EVERY code that day — the rate's denominator, the one
-   * rule the whole application uses (a rejected cone was still an inspected
-   * unit; rejectSpc.ts header). Never divide `count` by `cones` alone.
+   * Cones + that day's rejects with no matching cone_event row — the rate's
+   * denominator (corrected 23 Sep 2026: most rejects already ARE a
+   * cone_event row, weighed then separately rejected; see
+   * `coneMatchPredicate` / rejectSpc.ts's file header). Never divide `count`
+   * by `cones` alone.
    */
   inspected: number;
   ratePct: number | null;
@@ -273,6 +329,13 @@ export interface RejectDayCodeRow {
 
 export interface RejectDayCodeResult {
   dayBasis: typeof REJECT_DAY_BASIS;
+  /**
+   * The label is unchanged (`cones_plus_rejects`) but the meaning was
+   * corrected 23 Sep 2026: "rejects" here means only the day's rejects with
+   * no matching cone_event row, not every reject of the day — see
+   * `getUnmatchedRejects`. Renaming the literal would ripple into the web
+   * client's own copy of this type for no behavioural gain, so it stays.
+   */
   denominator: 'cones_plus_rejects';
   /** Distinct production days with at least one reject (or cone) in range. */
   days: number;
@@ -282,11 +345,11 @@ export interface RejectDayCodeResult {
 
 /**
  * Rejects grouped by (production day, code), each with that day's own cone
- * count so the row can carry a rate. Three grouped queries and a merge in JS,
- * the same shape production.ts uses; the denominator population is the day's
- * cones plus ALL of the day's rejects under the non-code filters, so a code
- * that is 3% of a day's rejects reads as 3% × (rejects ÷ inspected), not as
- * 3% of the cones.
+ * count so the row can carry a rate. The denominator population is the day's
+ * cones plus only the day's rejects with no matching cone_event row
+ * (corrected 23 Sep 2026 — see `getUnmatchedRejects`), so a code that is 3%
+ * of a day's rejects reads as 3% × (rejects ÷ inspected), not as 3% of the
+ * cones.
  */
 export async function getRejectsByDayCode(
   pool: ConnectionPool,
@@ -308,15 +371,13 @@ export async function getRejectsByDayCode(
              rc.reject_code_id, rc.label, rc.is_pass
   `);
 
-  // Every reject of the day, whatever its code, for the denominator — the
-  // same query as above without the code predicate and the code grouping.
-  const allReq = pool.request();
-  const allWhere = bindRejectFilters(allReq, lineId, f, 're.', false);
-  const allRejects = await allReq.query<{ day: string; n: number }>(
-    `SELECT CONVERT(varchar(10), re.shift_date, 120) AS day, COUNT(*) AS n
-       FROM sms.reject_event re WHERE ${allWhere}
-      GROUP BY CONVERT(varchar(10), re.shift_date, 120)`,
-  );
+  // The denominator addend (corrected 23 Sep 2026, this file's own copy of
+  // the finding H1 follow-up defect — see rejectSpc.ts's file header): NOT
+  // every reject of the day, only those with no matching cone_event row.
+  // Most rejects (98%+) are the same physical cone as an existing cone_event
+  // row and are already counted once in `cones` below; adding all of them
+  // again double-counted every day's inspection reject rate.
+  const unmatchedOf = await getUnmatchedRejects(pool, lineId, f, "CONVERT(varchar(10), re.shift_date, 120)");
 
   const coneReq = pool.request();
   const coneWhere = bindConeFilters(coneReq, lineId, f, 'ce.');
@@ -328,13 +389,12 @@ export async function getRejectsByDayCode(
 
   const dayKey = (d: unknown) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
   const conesOf = new Map(cones.recordset.map((x) => [dayKey(x.day), Number(x.n)]));
-  const rejectsOf = new Map(allRejects.recordset.map((x) => [dayKey(x.day), Number(x.n)]));
 
   const rows: RejectDayCodeRow[] = byCode.recordset.map((x) => {
     const day = dayKey(x.day);
     const n = Number(x.n);
     const dayCones = conesOf.get(day) ?? 0;
-    const inspected = dayCones + (rejectsOf.get(day) ?? 0);
+    const inspected = dayCones + (unmatchedOf.get(day) ?? 0);
     const base = {
       rejectType: x.reject_type,
       tubeCode: x.tube_inspect_code == null ? null : Number(x.tube_inspect_code),

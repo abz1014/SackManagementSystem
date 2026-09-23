@@ -9,6 +9,7 @@ import {
   bindStateCase, foldStateCounts, loadStateContext, plausibleWhere,
   type StateContext, type StateCounts,
 } from './coneState.js';
+import { getUnmatchedRejects, type RejectFilters } from './rejects.js';
 
 /**
  * 'product' since roadmap Phase 8 (15 Sep 2026): the product report. The key
@@ -54,6 +55,18 @@ export interface ProductionRow {
   group: string;
   cones: number;
   rejectedCones: number;
+  /**
+   * `rejectedCones` with no matching cone_event row (corrected 23 Sep 2026 —
+   * see rejects.ts `getUnmatchedRejects`) — the reject-rate DENOMINATOR
+   * addend. Most rejects ARE an existing cone_event row, weighed then
+   * separately rejected, and are already counted once in `cones`; adding
+   * every reject again double-counts those. report.ts's `toReportLine` is
+   * the one place this becomes a rate; every report built on `getProduction`
+   * (daily, product, sack, the management summary) goes through it, so they
+   * cannot diverge from each other or from rejectSpc.ts's own p-chart, which
+   * computes the identical population directly.
+   */
+  unmatchedRejects?: number;
   sacks: number | null;
   sackWeightKg: number | null;
   conesInRangePct: number | null;
@@ -72,6 +85,26 @@ function groupExpr(g: GroupBy, stationCol = 'source_station'): string {
       return `ISNULL(CAST(material_id AS varchar(12)), '${NO_PRODUCT_GROUP}')`;
     case 'none':
       return "'total'";
+  }
+}
+
+/**
+ * Same grouping key, qualified for `getUnmatchedRejects`'s `re.` alias
+ * (its NOT EXISTS join needs both tables aliased). `undefined` for 'none' —
+ * that function treats an omitted group as a single ungrouped total.
+ */
+function unmatchedGroupExpr(g: GroupBy): string | undefined {
+  switch (g) {
+    case 'day':
+      return "CONVERT(varchar(10), re.shift_date, 120)";
+    case 'shift':
+      return 're.shift_code';
+    case 'station':
+      return 'CAST(re.source_station AS varchar(12))';
+    case 'product':
+      return `ISNULL(CAST(re.material_id AS varchar(12)), '${NO_PRODUCT_GROUP}')`;
+    case 'none':
+      return undefined;
   }
 }
 
@@ -236,6 +269,15 @@ export async function getProduction(
     `SELECT ${g} AS grp, COUNT(*) n FROM sms.reject_event WHERE ${rejWhere} ${groupClause}`,
   );
 
+  // The reject-rate denominator addend — rejects with no matching cone_event
+  // row, same shape/filters as `rejects` above (see ProductionRow.
+  // unmatchedRejects and rejects.ts `getUnmatchedRejects`).
+  const unmatchedFilters: RejectFilters = {
+    from: p.from, to: p.to, shift: p.shift as RejectFilters['shift'], tsTo: p.tsTo,
+    station: p.station, product: p.product,
+  };
+  const unmatchedOf = await getUnmatchedRejects(pool, lineId, unmatchedFilters, unmatchedGroupExpr(p.groupBy));
+
   // sacks — no station dimension; skip when grouping by station
   let sacks: { grp: string; n: number; kg: number }[] = [];
   if (!byStation) {
@@ -259,7 +301,7 @@ export async function getProduction(
   const map = new Map<string, ProductionRow>();
   const row = (grp: string): ProductionRow =>
     map.get(grp) ??
-    map.set(grp, { group: grp, cones: 0, rejectedCones: 0, sacks: byStation ? null : 0, sackWeightKg: byStation ? null : 0, conesInRangePct: null }).get(grp)!;
+    map.set(grp, { group: grp, cones: 0, rejectedCones: 0, unmatchedRejects: 0, sacks: byStation ? null : 0, sackWeightKg: byStation ? null : 0, conesInRangePct: null }).get(grp)!;
 
   for (const c of cones.recordset) {
     const r = row(c.grp);
@@ -267,6 +309,11 @@ export async function getProduction(
     r.conesInRangePct = c.n > 0 ? Math.round((1000 * c.inr) / c.n) / 10 : null;
   }
   for (const rj of rejects.recordset) row(rj.grp).rejectedCones = rj.n;
+  // `unmatchedOf` may hold a group ('total', a day, a station...) that never
+  // appeared in `rejects.recordset` only if COUNT(*) itself is 0 there,
+  // which cannot happen — a NOT EXISTS subset can never be non-empty when
+  // its superset is. row() still creates the group safely either way.
+  for (const [grp, n] of unmatchedOf) row(grp).unmatchedRejects = n;
   for (const s of sacks) {
     const r = row(s.grp);
     r.sacks = s.n;

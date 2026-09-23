@@ -18,6 +18,52 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### Rejects screen and the management summary printed different reject rates for the same period — closed (23 Sep 2026)
+
+`api/src/services/report.ts`'s `toReportLine` (`weighed = cones + rejected`) had the same
+double-counting defect `rejectSpc.ts` was corrected for earlier the same day (see
+`KPI-DEFINITIONS.md` row 5's history) — a separate code path with the identical bug, flagged
+but explicitly left unfixed by that earlier pass. A THIRD copy was found in `rejects.ts`'s
+`getRejectsByDayCode` (the per-day-per-code breakdown behind the Reject report). Both are
+fixed the same way, sharing rather than re-deriving the rule: `production.ts` now computes
+`ProductionRow.unmatchedRejects` — rejects with no matching `cone_event` row on
+`(production_ts_utc_ms, hanger_num)` — via a new shared `rejects.ts` function,
+`getUnmatchedRejects` (built on `coneMatchPredicate`, the same merge-key check
+`rejectSpc.ts` already used). `toReportLine` and `getRejectsByDayCode` both divide by
+`cones + unmatchedRejects`, matching `rejectSpc.ts`'s p̄ for the same period. This closes the
+divergence behind daily/product/sack reports and the management summary KPI, all of which are
+built on `toReportLine`.
+
+Re-verified against BOTH real generations via `sqlcmd -E` (read-only) before changing
+anything, independent of the numbers `rejectSpc.ts`'s own header already carried: July —
+2,886/2,900 quality and 244/246 weight rejects match an existing `pack1_TP1U2` row; September
+— 5,933/6,049 quality and 41/41 weight. The +7 s/+31 s offset controls returned zero matches
+on both generations, confirming the match is exact. `SCHEMA.md`'s `rejectWeight1_TP1U2`
+section, which claimed the reject and accept streams are disjoint, is corrected in place
+(dated, old claim kept, not deleted) — that claim is false by this same measurement.
+
+**A fourth copy was found and left unfixed, on purpose, to keep this pass's blast radius to
+the two screens named in the brief:** `api/src/services/weightStations.ts`'s
+`rejectRatesByStation` — the Weight screen's own per-station and line-wide reject rate, and
+`reports/station.ts`'s fallback — still computes `rejects / (cones + rejects)`. This is a
+real, measured disagreement (Weight screen vs. Rejects screen / management summary) waiting
+to surface the same way this one did; `KPI-DEFINITIONS.md` row 5's note names it explicitly
+so it is not lost.
+
+A new test, `api/src/services/reportRejectRateAgreement.test.ts`, drives both `toReportLine`
+and `rejectSpc.ts` against one dataset with both matched and unmatched rejects (a dataset
+where every reject is unmatched, as the existing `rejectsAgreement.test.ts` uses, cannot tell
+the old and new formulas apart) and fails if the two ever diverge again. Verified it actually
+catches the regression by temporarily reverting the fix and confirming the test fails, then
+restoring it.
+
+`npx vitest run`: every test file this pass touched passes (151 tests across the rejects/
+production/report/reportRejectRateAgreement/weightStations/reports suites); a full-repo run
+was not taken because other workers were concurrently editing screens this pass does not own
+(`Sacks.tsx`, `Line.tsx`, `app.css`, `spc.ts`) and one of those files was mid-edit with an
+unrelated `ReferenceError` at the time — not touched, not this pass's to fix. `npm run
+typecheck` (all five workspaces) clean.
+
 **Resuming after a break? Start with [`HANDOVER-2026-09-15.md`](HANDOVER-2026-09-15.md)** — repo state, the dirty working tree, phase board, IFL's 15 Sep answers, and what to do next, verified against the running repo.
 
 ### `AddTubeType`'s parameter signature confirmed; the tube-type picker restriction lifted (21 Sep 2026)
