@@ -315,19 +315,41 @@ confirm they are moot rather than assuming it.
 - And one open design point from the 15 September meeting itself: **does the machine take the
   running product from PDAS's active flag, or from the operator's HMI?** It decides whether a
   product change made in software reaches the machine or only the records.
-- **New, from today's build — the 18 August incident, now confirmed and asking a different
-  question than before.** An earlier version of our project notes said your engineer hit a
-  "duplicate product" refusal four times in six minutes on 18 August, sourced from ten SSMS
-  screenshots that in fact show no error — so an earlier pass of this document marked the story
-  unverified. It no longer is. Your system's own event log records it directly (re-verified
-  today, read-only, against `PDAS_TP1U2_SEP07.dbo.nhs_events`): four "Material already exist"
-  refusals at **10:35, 10:39, 10:40 and 10:41** on 18 August, bracketed by your own software
-  deactivating and then reactivating MaterialId 1022 at 10:39:01 and 10:43:17. We are not
-  asking you to confirm this happened — we can see it happened. What we would like to know is
-  **why**: what was the engineer trying to achieve in that four-minute window? Our software can
-  already do a retire-and-recreate through this screen, so knowing the actual goal — a setpoint
-  correction, a new variant, something else — lets us offer it as one supported action instead
-  of leaving an engineer to find the same workaround in SSMS.
+- **New, from today's build — the 18 August incident is now explained, not just confirmed, and
+  we are telling you something rather than asking why.** An earlier version of our project
+  notes said your engineer hit a "duplicate product" refusal four times in six minutes on
+  18 August, sourced from ten SSMS screenshots that in fact show no error — so an earlier pass
+  of this document marked the story unverified. It no longer is. Your system's own event log
+  records it directly (re-verified today, read-only, against `PDAS_TP1U2_SEP07.dbo.nhs_events`):
+  four "Material already exist" refusals at **10:35, 10:39, 10:40 and 10:41** on 18 August,
+  bracketed by your own software deactivating and then reactivating MaterialId 1022 at 10:39:01
+  and 10:43:17 — your engineer retiring the product and immediately trying to recreate it.
+  Today, with your permission, we ran that exact sequence against our local copy of your data
+  (never the live database) to find out why it fails. **It cannot succeed, for any blend/count/
+  tube combination, no matter how it is retried:** the vendor's own "create product" procedure
+  checks only whether that blend/count/tube already exists, and that check does not look at
+  whether the existing row is active or retired. Retiring first makes no difference. Your
+  engineer's 18 August attempt was never going to work — this is not a bug in our software, and
+  it is not something a future version of our software can route around, because the refusal
+  happens inside the vendor's own procedure before our software is even involved.
+
+  The supported way to change a running product's setpoint is to **edit the existing material
+  in place**, which our software already offers as a single guarded update that writes to your
+  own event log exactly as your other procedures do — this is the changeover screen Hassan sb
+  described as the key requirement on 15 September, and it does not require retiring or
+  recreating anything. **The one part only you can answer:** is editing in place acceptable to
+  you as the standard way to handle a changed product, or is there a reason you need a brand new
+  material id when a product changes — traceability, your own reporting, something in your QCS
+  workflow we cannot see from the data alone? If the latter, tell us what depends on a new id
+  and we will look for a way to give you one without hitting this refusal.
+- **One more thing worth flagging while we're in this area, not a question.** The same
+  procedure that refused your engineer also writes its own confirmation log line wrong: when it
+  successfully creates a product, the log entry that is meant to record the new product's id
+  instead records the blend's id — a copy-paste mistake in the vendor's code, reconfirmed today
+  on two separate test rows. It has nothing to do with the 18 August incident and causes no
+  wrong data in your tables, but if anyone at IFL ever reads that log column expecting it to
+  name the product that was created, it has been quietly wrong since the procedure was written.
+  Worth knowing; not something we need an answer to.
 
 ---
 

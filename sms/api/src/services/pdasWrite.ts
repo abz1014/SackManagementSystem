@@ -80,10 +80,22 @@
  *     matter for the plant's own `sms_readonly`, which is a separate
  *     question). The result was an exact match, in name and parameter order,
  *     to `PROC_PARAMS.AddTubeType` below — `typeTypeId` is confirmed, not
- *     presumed. This verifies the procedure's SIGNATURE only: its runtime
- *     behaviour (the -5001/-5002/-5003 codes above) is still read from the
- *     proc body text, not observed, and no PDAS procedure has ever been
- *     executed against any database. Do not read this as more than that.
+ *     presumed. That 21 Sep verification was signature-only, from
+ *     sys.parameters — it did not run the procedure and said so.
+ *     **UPDATE, 23 Sep 2026 (PDAS-EXECUTION-2026-09-23.md, WS-PDAS1/WS-PDAS2,
+ *     owner-authorised):** AddTubeType and CreateMaterial were then actually
+ *     executed — the first PDAS procedure executions in this project's
+ *     history — against the local `PDAS_TP1U2_SEP07` copy ONLY, never the
+ *     plant, via `sqlcmd -E` under the current Windows identity (not this
+ *     app's own connection path). A proven-restorable backup was taken
+ *     first and the copy was restored to its exact pre-execution state
+ *     afterwards. `PDAS_WRITE_ENABLED` was not touched and stays `false`;
+ *     `/api/changeover/execute` was never called; no `sms_pdas_writer`
+ *     login exists, so this module's own code path remains unexercised.
+ *     The -5001/-5002/-5003 codes above were observed firing exactly as the
+ *     proc body predicts (AddTubeType's uniqueness check is (TubeType,
+ *     TubeForm) together). See PDAS-EXECUTION-2026-09-23.md for the
+ *     verbatim inputs/outputs.
  *   - CreatePallet: INSERT keyed on (MaterialId, PackSchemaId, Lot), -8001
  *     "Pallet already exist" regardless of PalletActive, -8004 when material,
  *     schema or lot is empty, -8002 bad active bit; @labelType defaults to 1
@@ -157,12 +169,18 @@ export type VendorProc =
  *     OUTPUT, @tubeType nvarchar(255), @tubeForm int, @tubeWeight float`, in
  *     that parameter_id order — an exact match to the binding below. The
  *     OUTPUT id name 'typeTypeId' is now CONFIRMED as the vendor's own typo,
- *     not merely presumed. This confirms the procedure's SIGNATURE; it does
- *     not confirm runtime behaviour (the -5001/-5002/-5003 codes are still
- *     read from the proc body, not observed) and no PDAS procedure has ever
- *     been executed against any database. See the file header for the fuller
- *     account and CLAUDE.md's dated section of the same date for the
- *     reproducible query.
+ *     not merely presumed. That confirmed the procedure's SIGNATURE only;
+ *     runtime behaviour was still just read from the proc body as of 21 Sep.
+ *     **UPDATE, 23 Sep 2026:** AddTubeType has since been executed —
+ *     against the local `PDAS_TP1U2_SEP07` copy only, never the plant, never
+ *     through this app's own connection path (no `sms_pdas_writer` login
+ *     exists), under explicit owner authorisation, with a proven-restorable
+ *     backup taken first and the copy restored afterwards.
+ *     `PDAS_WRITE_ENABLED` remains `false`. The binding below (parameter
+ *     names, order and OUTPUT flags) is now confirmed both by signature and
+ *     by a successful call plus a refused duplicate, matching exactly. See
+ *     PDAS-EXECUTION-2026-09-23.md (repo root) for the verbatim inputs and
+ *     outputs and CLAUDE.md's dated section for the summary.
  *
  * has_default_value could not be read for any procedure (same permission gap)
  * — CreateMaterial is called with all five @materialDesc parameters bound
@@ -180,7 +198,7 @@ export const PROC_PARAMS: Record<VendorProc, readonly string[]> = {
   SetMaterialStatusActive: ['error', 'errorMsg', 'materialId', 'materialActive'],
   AddBlend: ['error', 'errorMsg', 'blendId', 'blend'],
   AddCount: ['error', 'errorMsg', 'countId', 'count'],
-  // Unverified — see the provenance note above.
+  // Signature confirmed 21 Sep 2026, executed (local copy only) 23 Sep 2026 — see the provenance note above.
   AddTubeType: ['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight'],
   CreatePallet: [
     'error', 'errorMsg', 'palletId',
