@@ -112,6 +112,53 @@ export interface ProductionRow {
   sacksPassedScalePct?: number | null;
 }
 
+/**
+ * Which numeric field a data issue is about. Per-row fields carry the row's
+ * `group` key alongside; the three whole-response fields (`unattributed.*`,
+ * `implausible`) carry `group: null`.
+ */
+export type ProductionField =
+  | 'cones' | 'conesInRangePct' | 'rejectedCones'
+  | 'sacks' | 'sackWeightKg' | 'sacksPassedScalePct'
+  | 'unattributed.cones' | 'unattributed.rejects'
+  | 'implausible';
+
+/**
+ * WS-P (remediation programme, 23 Sep 2026 red-team audit): a SQL recordset
+ * row that comes back with an expected COLUMN ABSENT — not SQL NULL, the key
+ * itself missing, the shape a malformed/truncated driver row takes — used to
+ * be read with a bare `?? 0` or a bare property access and silently become a
+ * real-looking `0`, indistinguishable from "the line genuinely produced
+ * nothing this period". `production.presence.test.ts` proves this against a
+ * fake pool with the key deleted (not nulled).
+ *
+ * One entry per (field, group) that could not be read as a number from its
+ * source row. Always present, empty on every healthy response — a CONSUMER
+ * checks this list, not the numeric value, to tell "no data" (a real zero,
+ * from a well-formed row — SQL COUNT/SUM without GROUP BY always returns
+ * exactly one row, even over zero matching source rows, so this path is
+ * never reached for a genuinely idle period) apart from "a field absent from
+ * a row that was present" (this list). The affected numeric field itself
+ * still reads as `0` (or `null` where `null` already means "not
+ * applicable") so the response's SUCCESS SHAPE is unchanged — no field
+ * silently vanishes from the JSON body the way an unset `undefined` would.
+ */
+export interface ProductionDataIssue {
+  field: ProductionField;
+  group: string | null;
+  reason: string;
+}
+
+/** A row's numeric field, read defensively. */
+interface ReadResult {
+  value: number;
+  /** false when the source value was not a finite number — key absent, or malformed. */
+  ok: boolean;
+}
+function readNum(v: unknown): ReadResult {
+  return typeof v === 'number' && Number.isFinite(v) ? { value: v, ok: true } : { value: 0, ok: false };
+}
+
 /** SQL expression that yields the grouping key per dimension. */
 function groupExpr(g: GroupBy, stationCol = 'source_station'): string {
   switch (g) {
@@ -284,6 +331,13 @@ export interface ProductionResult {
    * and no limits version has ever touched them.
    */
   limitProvenance?: LimitProvenance;
+  /**
+   * See `ProductionDataIssue`. Always an array, empty when nothing was
+   * affected — never omit this checking a "degraded" flag some other way,
+   * because the whole point is to say WHICH field/group, not just that
+   * something somewhere was off.
+   */
+  dataIssues: ProductionDataIssue[];
 }
 
 export async function getProduction(
@@ -303,6 +357,9 @@ export async function getProduction(
   // across them is a ratio of one population and not of two.
   const scope = await resolveGenerationScope(pool, lineId, { from: p.from, to: p.to });
 
+  // Collected across every query below; returned verbatim as `dataIssues`.
+  const issues: ProductionDataIssue[] = [];
+
   // The unattributed count, when a product filter is on: the same range and
   // station/shift filters, minus the product, so `of` is the population the
   // caller believes the period covers.
@@ -316,7 +373,16 @@ export async function getProduction(
          FROM ${table} WHERE ${uWhere}`,
       );
       const u0 = u.recordset[0];
-      return { rows: Number(u0?.no_attr ?? 0), of: Number(u0?.n ?? 0) };
+      const noAttr = readNum(u0?.no_attr);
+      const total = readNum(u0?.n);
+      const field: ProductionField = table === 'sms.cone_event' ? 'unattributed.cones' : 'unattributed.rejects';
+      // One issue for the pair, not two: `rows`/`of` are always read and
+      // reported together (see UnattributedCount), so a consumer never sees
+      // one half flagged without the other.
+      if (!noAttr.ok || !total.ok) {
+        issues.push({ field, group: null, reason: `${table} unattributed-count row is missing a column (no_attr/n)` });
+      }
+      return { rows: noAttr.value, of: total.value };
     };
     unattributed = {
       cones: await countUnattributed('sms.cone_event'),
@@ -347,9 +413,18 @@ export async function getProduction(
        FROM sms.cone_event WHERE ${stWhere}
        GROUP BY ${stateCase}`,
     );
+    let implausibleIssue = false;
+    const implausibleTotal = st.recordset.reduce((acc, r) => {
+      const n = readNum(r.implausible);
+      if (!n.ok) implausibleIssue = true;
+      return acc + n.value;
+    }, 0);
+    if (implausibleIssue) {
+      issues.push({ field: 'implausible', group: null, reason: 'a cone-state aggregate row is missing its implausible count' });
+    }
     classification = {
       states: foldStateCounts(st.recordset),
-      implausible: st.recordset.reduce((acc, r) => acc + Number(r.implausible ?? 0), 0),
+      implausible: implausibleTotal,
       provenance: limitProvenance(ctx),
     };
   }
@@ -393,8 +468,24 @@ export async function getProduction(
   const wr = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tare: number }>(
     `SELECT TOP 1 basis, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
   );
-  const basis = wr.recordset[0]?.basis ?? 'as_recorded';
-  const tare = Number(wr.recordset[0]?.tare ?? 0);
+  const wrRow = wr.recordset[0];
+  // JUSTIFIED `?? 'as_recorded'`: an EMPTY recordset here is not a malformed
+  // row, it is a real, legitimate state — no weight_rule row has ever been
+  // configured for this line — and 'as_recorded' is the documented default
+  // basis (Q4/Q5 unresolved). Not the defect class this file is being
+  // audited for: there is no row to have a hole in.
+  const basis = wrRow?.basis ?? 'as_recorded';
+  // `tare` DOES get the same presence check as everything below, but only
+  // when a row is actually present: a present-but-holed row (tare deleted)
+  // is exactly the malformed shape, unlike the empty-recordset case above.
+  let tare = 0;
+  if (wrRow) {
+    const tareRead = readNum(wrRow.tare);
+    if (!tareRead.ok) {
+      issues.push({ field: 'sackWeightKg', group: null, reason: 'weight_rule row is missing its tare (sack_tare_kg)' });
+    }
+    tare = tareRead.value;
+  }
 
   // merge by group key
   const map = new Map<string, ProductionRow>();
@@ -404,25 +495,72 @@ export async function getProduction(
 
   for (const c of cones.recordset) {
     const r = row(c.grp);
-    r.cones = c.n;
-    r.conesInRangePct = c.n > 0 ? Math.round((1000 * c.inr) / c.n) / 10 : null;
+    const n = readNum(c.n);
+    r.cones = n.value;
+    if (!n.ok) {
+      // The denominator itself is unreadable, so the % is unknowable too —
+      // flagged separately (a consumer reading only conesInRangePct must not
+      // have to cross-reference the 'cones' entry to learn its 0/null is
+      // not a real one).
+      issues.push({ field: 'cones', group: c.grp, reason: 'cone_event aggregate row is missing its count (n)' });
+      issues.push({ field: 'conesInRangePct', group: c.grp, reason: 'cone_event aggregate row is missing its count (n); in-range % unknowable' });
+      r.conesInRangePct = null;
+      continue;
+    }
+    if (n.value === 0) {
+      r.conesInRangePct = null; // a REAL zero: no cones this group, nothing to rate
+      continue;
+    }
+    const inr = readNum(c.inr);
+    if (!inr.ok) {
+      issues.push({ field: 'conesInRangePct', group: c.grp, reason: 'cone_event aggregate row is missing its in-range sum (inr)' });
+      r.conesInRangePct = null;
+      continue;
+    }
+    r.conesInRangePct = Math.round((1000 * inr.value) / n.value) / 10;
   }
-  for (const rj of rejects.recordset) row(rj.grp).rejectedCones = rj.n;
+  for (const rj of rejects.recordset) {
+    const r = row(rj.grp);
+    const n = readNum(rj.n);
+    r.rejectedCones = n.value;
+    if (!n.ok) {
+      issues.push({ field: 'rejectedCones', group: rj.grp, reason: 'reject_event aggregate row is missing its count (n)' });
+    }
+  }
   // `unmatchedOf` may hold a group ('total', a day, a station...) that never
   // appeared in `rejects.recordset` only if COUNT(*) itself is 0 there,
   // which cannot happen — a NOT EXISTS subset can never be non-empty when
   // its superset is. row() still creates the group safely either way.
+  // `unmatchedOf`'s values are already Number()'d inside
+  // rejects.ts::getUnmatchedRejects (that file's own concern, not this
+  // one's) — no second presence check here.
   for (const [grp, n] of unmatchedOf) row(grp).unmatchedRejects = n;
   for (const s of sacks) {
     const r = row(s.grp);
-    r.sacks = s.n;
-    let kg = Number(s.kg);
-    if (basis === 'net') kg -= tare * s.n;
+    const n = readNum(s.n);
+    r.sacks = n.value;
+    if (!n.ok) {
+      issues.push({ field: 'sacks', group: s.grp, reason: 'sack_event aggregate row is missing its count (n)' });
+    }
+
+    const kgSum = readNum(s.kg);
+    if (!kgSum.ok) {
+      issues.push({ field: 'sackWeightKg', group: s.grp, reason: 'sack_event aggregate row is missing its weight sum (kg)' });
+    }
+    let kg = kgSum.value;
+    if (basis === 'net') kg -= tare * n.value;
     r.sackWeightKg = Math.round(kg * 10) / 10;
-    const judged = Number(s.judged ?? 0);
-    // Null, not 0: no sack carrying a verdict is "not stated", and rendering
-    // it as 0 % would say the scale failed every sack in the group.
-    r.sacksPassedScalePct = judged > 0 ? Math.round((1000 * Number(s.passed ?? 0)) / judged) / 10 : null;
+
+    const judged = readNum(s.judged);
+    const passed = readNum(s.passed);
+    if (!judged.ok || !passed.ok) {
+      issues.push({ field: 'sacksPassedScalePct', group: s.grp, reason: 'sack_event aggregate row is missing its scale-verdict counts (judged/passed)' });
+      r.sacksPassedScalePct = null;
+    } else {
+      // Null, not 0: no sack carrying a verdict is "not stated", and rendering
+      // it as 0 % would say the scale failed every sack in the group.
+      r.sacksPassedScalePct = judged.value > 0 ? Math.round((1000 * passed.value) / judged.value) / 10 : null;
+    }
   }
 
   // 'station' and 'product' groups are numeric strings (varchar-cast for the
@@ -438,8 +576,13 @@ export async function getProduction(
   return {
     groupBy: p.groupBy, rows, unattributed,
     states: classification?.states ?? null,
+    // JUSTIFIED `?? null`: this reads `classification`, an already-validated
+    // in-memory object built above (implausibleTotal is a readNum() output,
+    // never a raw SQL value) — `?? null` here only distinguishes
+    // "withStates wasn't asked for" from a real 0, not a hole in a row.
     implausible: classification?.implausible ?? null,
     ...(classification ? { limitProvenance: classification.provenance } : {}),
     generationNote: noteOf(scope),
+    dataIssues: issues,
   };
 }

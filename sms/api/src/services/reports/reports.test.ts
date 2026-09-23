@@ -163,7 +163,11 @@ beforeEach(() => {
       : q.groupBy === 'day' ? [line('2026-09-01', 500), line('2026-09-02', 500)]
       : q.groupBy === 'station' ? [line('3', 480, 9), line('7', 520, 11)]
       : [line('21', 700, 14, 28, 1316), line('none', 300, 6, 12, 564)];
-    return { groupBy: q.groupBy, rows, unattributed: null, states: q.withStates ? STATES : null, implausible: q.withStates ? 4 : null };
+    // `dataIssues: []` — WS-P (23 Sep 2026): ProductionResult now always
+    // carries this field (see production.ts). This mock's rows are all
+    // hand-built and well-formed, so an empty array is correct here, not a
+    // placeholder.
+    return { groupBy: q.groupBy, rows, unattributed: null, states: q.withStates ? STATES : null, implausible: q.withStates ? 4 : null, dataIssues: [] };
   });
   // `as never`: Phase 9 is adding fields to these two shapes in the same wave; the report reads only what it names.
   vi.mocked(getWeights).mockResolvedValue(fakeWeights() as never);
