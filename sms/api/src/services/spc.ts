@@ -43,6 +43,7 @@ import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { PlausibilityRule } from './admin.js';
 import { plausibleWhere } from './coneState.js';
+import { epochFragment, resolveGenerationScope, type EventTable } from './generation.js';
 import { nelsonViolations, type NelsonRuleId } from './nelson.js';
 import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
 import { resolvePeriodTarget } from './reports/common.js';
@@ -491,102 +492,60 @@ export async function getWeightSpc(
   // not bound, or it would be a SQL error rather than an empty chart.
   const stationFilter = type === 'cone' && station != null;
 
-  // Base filter BEFORE the generation predicate — used only to resolve which
-  // generation(s) are actually present in the requested window (below).
+  // Base filter BEFORE the generation predicate.
   const base0 =
     `line_id=@line AND shift_date BETWEEN @from AND @to AND ${col} IS NOT NULL` +
     (shift ? ' AND shift_code=@shift' : '') +
     (stationFilter ? ' AND source_station=@station' : '');
 
-  // GENERATION PREDICATE (DEFECTS.md D-10 follow-up, 23 Sep 2026). Until this
-  // pass, getWeightSpc carried no generation filter at all — unlike
-  // rejectSpc.ts, which has refused to pool p̄ across the 5 Aug rebuild since
-  // roadmap Phase 5 for exactly the right reason. On this dev copy that meant
-  // silently pooling real epoch-9 cones (5 Aug-7 Sep) with plant-simulator
-  // epoch-13 cones into ONE control chart the moment a query's date range
-  // spanned both — a chart drawn from two physically different populations
-  // with no boundary marked on it.
-  //
-  // Resolution: find every source_epoch present in the base-filtered window,
-  // map each to its sms.source_epoch.generation_ordinal, provenance AND
-  // source_db, and keep only ONE generation:
-  //  - prefer a REAL generation over a SIMULATOR one when both are present
-  //    in the window. This is not merely "newest": CLAUDE.md's live-
-  //    rehearsal warning and this pass's own measurement (see DEFECTS.md
-  //    D-10) both establish that the simulator does NOT reproduce the
-  //    plant's between-subgroup wander (ratio 1.38x on simulator-dominated
-  //    late-Sep data vs 2.81-3.62x on real data) — silently drawing this
-  //    chart over simulator rows, even alone, would corrupt the very MR̄
-  //    this fix depends on with a variance shape that isn't the plant's.
-  //
-  //    "Simulator" is determined from `source_db`, NOT `se.provenance` —
-  //    verified live against this dev copy (23 Sep 2026): epoch 13
-  //    (pack1_TP1U2, `DATA_TP1U2_SIM`, 212,873 rows spanning 21 Aug-22 Sep)
-  //    is registered with `provenance='ifl_copy'`, not 'simulator' — almost
-  //    certainly a bootstrap/registration slip, but it makes `provenance`
-  //    alone unsafe to trust here. `scripts/simulate-plant.mjs` enforces
-  //    `/_SIM$/i` on its target database name as a hard refusal (its own
-  //    line 96-98) — that is the one invariant actually guaranteed to hold,
-  //    so a generation is treated as simulator when EITHER its provenance
-  //    says so OR its source_db ends in `_SIM`.
-  //  - among generations of the preferred kind, take the NEWEST ordinal
-  //    (ties cannot occur — UX_source_epoch_open allows at most one open
-  //    epoch per line/table, and ordinals are assigned in time order).
-  //  - with no real generation in the window at all, fall back to the
-  //    newest simulator one — still a single generation, still counted
-  //    honestly, and the caller can see `generation.provenance` says so.
-  // Rows from any other generation — including rows with a NULL
-  // source_epoch, i.e. "ingested before epoch tracking existed" — are
-  // excluded and counted, never silently pooled in. With zero or one
-  // generation present (the common case once a plant is live) this is a
-  // no-op: `otherGenerationExcluded` is 0 and no predicate is added.
-  const genReq = pool
-    .request()
-    .input('line', mssql.Int, lineId)
-    .input('from', mssql.Date, from)
-    .input('to', mssql.Date, to);
-  if (shift) genReq.input('shift', mssql.VarChar(10), shift);
-  if (stationFilter) genReq.input('station', mssql.Int, station);
-  const genWhere =
-    `e.line_id=@line AND e.shift_date BETWEEN @from AND @to AND e.${col} IS NOT NULL` +
-    (shift ? ' AND e.shift_code=@shift' : '') +
-    (stationFilter ? ' AND e.source_station=@station' : '');
-  const genRes = await genReq.query<{
-    epoch_id: number | null;
-    gen: number | null;
-    label: string | null;
-    provenance: string | null;
-    source_db: string | null;
-    n: number;
-  }>(
-    `SELECT e.source_epoch AS epoch_id, se.generation_ordinal AS gen, se.label AS label,
-            se.provenance AS provenance, se.source_db AS source_db, COUNT(*) AS n
-     FROM ${table} e LEFT JOIN sms.source_epoch se ON se.epoch_id = e.source_epoch
-     WHERE ${genWhere}
-     GROUP BY e.source_epoch, se.generation_ordinal, se.label, se.provenance, se.source_db`,
-  );
-  const genRows = genRes.recordset;
-  const isSimulator = (r: { provenance: string | null; source_db: string | null }) =>
-    r.provenance === 'simulator' || /_SIM$/i.test(r.source_db ?? '');
-  const totalGenRows = genRows.reduce((s, r) => s + Number(r.n), 0);
-  let genEpochId: number | null = null;
-  let generation: SpcData['generation'] = null;
-  let otherGenerationExcluded = 0;
-  const withOrdinal = genRows.filter((r) => r.gen != null && r.epoch_id != null);
-  const realGenerations = withOrdinal.filter((r) => !isSimulator(r));
-  const candidates = realGenerations.length > 0 ? realGenerations : withOrdinal;
-  if (candidates.length > 0) {
-    const chosen = candidates.reduce((a, b) => (Number(b.gen) > Number(a.gen) ? b : a));
-    genEpochId = Number(chosen.epoch_id);
-    generation = { epochId: genEpochId, ordinal: Number(chosen.gen), label: chosen.label, provenance: chosen.provenance };
-    const inChosen = genRows.filter((r) => r.epoch_id === chosen.epoch_id).reduce((s, r) => s + Number(r.n), 0);
-    otherGenerationExcluded = totalGenRows - inChosen;
-  }
-  const spansGenerations = otherGenerationExcluded > 0;
+  // GENERATION SCOPE (DEFECTS.md D-10 follow-up, 23 Sep 2026; import fixed
+  // WS-SP, 23 Sep 2026). Until this pass, getWeightSpc carried its OWN
+  // hand-rolled copy of the "prefer a real generation over a simulator one,
+  // then newest ordinal" rule — the same rule `resolveGenerationScope`
+  // (generation.ts) already centralises for 18 other call sites, and the
+  // same rule `rejectSpc.ts` also carried its own copy of until a genuine
+  // three-way disagreement was found and fixed the same day (see that
+  // file's header). A THIRD independent copy is exactly the shape that
+  // produced that bug: it agreed with the canonical rule today only because
+  // nobody had yet made it diverge. There is no reason for this file to have
+  // its own copy — unlike rejectSpc.ts, which needs an ordinal-keyed `perGen`
+  // shape the canonical (source_db, ordinal)-keyed `GenerationScope` doesn't
+  // provide, getWeightSpc only ever needs ONE scope applied to ONE table
+  // (`cone_event` or `sack_event`), which is exactly what
+  // `resolveGenerationScope` + `epochFragment` already return. Importing it
+  // also drops the `shift`/`station`/`${col} IS NOT NULL` filters this file
+  // used to fold into its OWN generation-detection query — deliberately not
+  // done by any of the 18 canonical call sites (see generation.ts's own
+  // docstring: scope is resolved on LINE AND DATE RANGE ONLY, never on a
+  // caller's secondary filters), so this also removes a policy divergence
+  // that predated the code-duplication one.
+  const eventTable: EventTable = type === 'cone' ? 'cone_event' : 'sack_event';
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, [eventTable]);
+  const generation: SpcData['generation'] = scope.generation
+    ? {
+        epochId: scope.epochIds(eventTable)[0] ?? -1,
+        ordinal: scope.generation.ordinal,
+        label: scope.generation.label,
+        provenance: scope.generation.provenance,
+      }
+    : null;
+  const otherGenerationExcluded = scope.otherGenerationExcluded;
+  const spansGenerations = scope.spansGenerations;
+
+  // `epochFragment`, not `epochWhere`: this predicate is folded into ONE
+  // WHERE string (`base`) and then reused across several SEPARATE requests
+  // below (sumReq, medReq, each subgroup/station request) — exactly the
+  // multi-request shape `epochFragment`'s own doc comment calls out
+  // (weights.ts does the same). `bindGen` re-binds the same params onto each
+  // request in turn.
+  const genFrag = epochFragment(scope, eventTable);
+  const bindGen = (r: SqlRequest) => {
+    for (const p of genFrag.params) r.input(p.name, mssql.Int, p.id);
+  };
 
   // Everything but the plausibility predicate, which plausibleWhere binds per
   // request below (its parameters must be on the request that runs).
-  const base = base0 + (genEpochId != null ? ' AND source_epoch=@genEpoch' : '');
+  const base = base0 + (genFrag.sql ? ` AND ${genFrag.sql}` : '');
   const whereOn = (r: SqlRequest) => `${base} AND ${plausibleWhere(r, col, plaus)}`;
 
   // 1. Overall summary — one pass, no row transfer. Drives the bucket sizing.
@@ -599,7 +558,7 @@ export async function getWeightSpc(
     .input('to', mssql.Date, to);
   if (shift) sumReq.input('shift', mssql.VarChar(10), shift);
   if (stationFilter) sumReq.input('station', mssql.Int, station);
-  if (genEpochId != null) sumReq.input('genEpoch', mssql.Int, genEpochId);
+  bindGen(sumReq);
   const sumWhere = whereOn(sumReq);
   const sumRes = await sumReq
     .query<{
@@ -630,7 +589,7 @@ export async function getWeightSpc(
     .input('to', mssql.Date, to);
   if (shift) medReq.input('shift', mssql.VarChar(10), shift);
   if (stationFilter) medReq.input('station', mssql.Int, station);
-  if (genEpochId != null) medReq.input('genEpoch', mssql.Int, genEpochId);
+  bindGen(medReq);
   const medWhere = whereOn(medReq);
   const medRes = await medReq.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(${col} AS float)) OVER () med
@@ -673,7 +632,7 @@ export async function getWeightSpc(
       .input('bucketMin', mssql.Int, bucketMinutes);
     if (shift) r.input('shift', mssql.VarChar(10), shift);
     if (stationFilter) r.input('station', mssql.Int, station);
-    if (genEpochId != null) r.input('genEpoch', mssql.Int, genEpochId);
+    bindGen(r);
     whereOn(r);
     extra?.(r);
     return r;
