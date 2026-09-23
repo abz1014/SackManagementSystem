@@ -110,8 +110,16 @@ export async function getMachinesRunning(
   const anchorReq = bindCone(pool.request().input('line', mssql.Int, lineId));
   if (opts.asOfMs != null) anchorReq.input('asOf', mssql.BigInt, opts.asOfMs);
   const anchor = await anchorReq.query<{ ms: string | number | null }>(
+    // RT-021 (23 Sep 2026 red-team audit): a vendor clock-fault row
+    // (production_ts_utc_ms = 0, the 1969-12-31 sentinel — CLAUDE.md's
+    // "Known constraints") sits in the currently-live generation and used
+    // to win this MAX() whenever asOfMs landed before the generation's real
+    // data starts. `> 0` is a literal, not a bound parameter, so this stays
+    // the query's own floor rather than a period bound (never `@start`) —
+    // the anchor is still "the newest reading in the WHOLE table", now
+    // minus the one row that is not a real reading at all.
     `SELECT MAX(production_ts_utc_ms) AS ms FROM sms.cone_event
-      WHERE line_id = @line ${opts.asOfMs != null ? 'AND production_ts_utc_ms <= @asOf' : ''}${andCone}`,
+      WHERE line_id = @line AND production_ts_utc_ms > 0 ${opts.asOfMs != null ? 'AND production_ts_utc_ms <= @asOf' : ''}${andCone}`,
   );
   const asOfMs = anchor.recordset[0]?.ms == null ? null : Number(anchor.recordset[0]!.ms);
 

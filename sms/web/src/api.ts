@@ -1090,7 +1090,7 @@ export interface LiveGenerationNote {
 }
 
 export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
-export type LiveHealthKind = "ok" | "stale" | "late" | "no_data";
+export type LiveHealthKind = "ok" | "stale" | "late" | "lag_unknown" | "no_data";
 export interface LiveHealth {
   kind: LiveHealthKind;
   /** Seconds since the OLDEST source table last synced — not the newest. */

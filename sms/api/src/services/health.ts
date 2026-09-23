@@ -246,11 +246,19 @@ export async function acquisitionHealth(pool: ConnectionPool, lineId: number): P
 
   const [sync, tip, lag, halted] = await Promise.all([
     getSyncHealth(pool, lineId),
+    // RT-021 (23 Sep 2026 red-team audit): the same unfloored MAX() defect
+    // as live.ts and machinesRunning.ts — a vendor clock-fault row
+    // (production_ts_utc_ms = 0) could win this query. This site carries no
+    // @now/@asOf cap today, so the sentinel is never actually the largest
+    // candidate against real data — but the floor is added here too, as a
+    // literal, so the query's shape matches the other two sites and a
+    // future caller that adds a cap (the live read-only login, Q65-70)
+    // inherits the same protection instead of reintroducing RT-021 here.
     bindF(pool.request().input('line', mssql.Int, lineId), coneF, rejF).query<{ tip: number | null }>(
       `SELECT MAX(tip) AS tip FROM (
-           SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event WHERE line_id = @line${andF(coneF)}
+           SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event WHERE line_id = @line AND production_ts_utc_ms > 0${andF(coneF)}
            UNION ALL
-           SELECT MAX(production_ts_utc_ms) FROM sms.reject_event WHERE line_id = @line${andF(rejF)}
+           SELECT MAX(production_ts_utc_ms) FROM sms.reject_event WHERE line_id = @line AND production_ts_utc_ms > 0${andF(rejF)}
          ) t`,
     ),
     bindF(

@@ -33,6 +33,15 @@ export type Health =
   | { kind: 'stale'; readingUtc: string | null; syncAgeSeconds: number | null }
   /** Readings are arriving far too late to judge the line by. */
   | { kind: 'late'; readingUtc: string; lagSeconds: number }
+  /**
+   * RT-006 (23 Sep 2026 red-team audit): a reading exists but the
+   * acquisition lag has not been measured yet — a zero-row lag sample,
+   * exactly the state `sms epoch:accept` produces the instant it opens a
+   * new generation. Until a lag sample exists, running/stopped cannot be
+   * judged (the arithmetic would compare the reading to the wall clock with
+   * no lag correction), so this is deliberately NOT folded into 'ok'.
+   */
+  | { kind: 'lag_unknown'; readingUtc: string }
   /** Nothing has ever arrived. */
   | { kind: 'none' };
 
@@ -48,6 +57,8 @@ export function assessHealth(line: LiveLine | null): Health {
       return { kind: 'stale', readingUtc: line.dataAsOfUtc, syncAgeSeconds: line.health.ageSeconds };
     case 'late':
       return { kind: 'late', readingUtc: line.dataAsOfUtc, lagSeconds: line.ingestLagSeconds ?? 0 };
+    case 'lag_unknown':
+      return { kind: 'lag_unknown', readingUtc: line.dataAsOfUtc };
     case 'no_data':
       return { kind: 'none' };
     default:

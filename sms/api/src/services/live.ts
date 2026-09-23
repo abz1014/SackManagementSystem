@@ -376,8 +376,20 @@ export type LineStatus = 'running' | 'stopped' | 'idle' | 'no_data';
  * the line-state arithmetic reports "Stopped 3 min" about a line running flat
  * out. An amber dot in the corner does not undo a wrong headline, so when this
  * is anything but 'ok' no screen may assert running or stopped.
+ *
+ * 'lag_unknown' (RT-006, 23 Sep 2026 red-team audit): the acquisition-lag
+ * sample came back with zero rows — nothing to measure yet — which is
+ * exactly the state `sms epoch:accept` produces the moment it opens a new
+ * generation, literally IFL's installation day. classifyHealth used to fall
+ * through the null-lag case to 'ok' and the line-state arithmetic then
+ * defaulted the lag to 0, so a healthy line's newest reading was judged
+ * against the WALL CLOCK with no lag correction and printed "⟨line⟩ has been
+ * stopped for N min" in alarm styling about a pipeline that simply had not
+ * yet measured its own delay. This kind says the honest thing: not stale,
+ * not late, not no-data — just not yet measurable, so no screen may assert
+ * running or stopped until a lag sample exists.
  */
-export type LiveHealthKind = 'ok' | 'stale' | 'late' | 'no_data';
+export type LiveHealthKind = 'ok' | 'stale' | 'late' | 'lag_unknown' | 'no_data';
 
 export interface SyncHealth {
   /**
@@ -471,7 +483,12 @@ export function classifyHealth(
   if (replay) return dataAsOfMs == null ? 'no_data' : 'ok';
   if (dataAsOfMs == null) return 'no_data';
   if (sync.ageSeconds == null || sync.ageSeconds > sync.staleAfterSeconds) return 'stale';
-  if (ingestLagSeconds != null && ingestLagSeconds > MAX_CREDIBLE_LAG_SECONDS) return 'late';
+  // RT-006: an unmeasured lag must never fall through to 'ok' — see the
+  // 'lag_unknown' doc comment on LiveHealthKind above. Checked before the
+  // MAX_CREDIBLE_LAG_SECONDS test below, which only makes sense once a lag
+  // has actually been measured.
+  if (ingestLagSeconds == null) return 'lag_unknown';
+  if (ingestLagSeconds > MAX_CREDIBLE_LAG_SECONDS) return 'late';
   return 'ok';
 }
 
@@ -731,12 +748,19 @@ export async function getLive(
     rejF,
   );
   const tipRes = await tipReq.query<{ tip: number | null }>(
+    // RT-021 (23 Sep 2026 red-team audit): a vendor clock-fault row
+    // (production_ts_utc_ms = 0) sits in the currently-live generation and
+    // used to win this MAX() whenever `@now`/`asOf` landed before the
+    // generation's real data starts — measured live: dataAsOfUtc
+    // "1970-01-01T00:00:00.000Z", behindSeconds 1,783,244,983 (56.5 years).
+    // `> 0` is a literal floor, not a bound parameter — this is still "the
+    // newest reading on record", minus the one row that is not one.
     `SELECT MAX(tip) AS tip FROM (
          SELECT MAX(production_ts_utc_ms) AS tip FROM sms.cone_event
-          WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(coneF)}
+          WHERE line_id = @line AND production_ts_utc_ms > 0 AND production_ts_utc_ms <= @now${andF(coneF)}
          UNION ALL
          SELECT MAX(production_ts_utc_ms) FROM sms.reject_event
-          WHERE line_id = @line AND production_ts_utc_ms <= @now${andF(rejF)}
+          WHERE line_id = @line AND production_ts_utc_ms > 0 AND production_ts_utc_ms <= @now${andF(rejF)}
        ) t`,
   );
   const dataAsOfMs = tipRes.recordset[0]?.tip != null ? Number(tipRes.recordset[0].tip) : null;

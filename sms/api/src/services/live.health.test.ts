@@ -65,8 +65,13 @@ describe('classifyHealth — pure state table', () => {
       dataAsOfMs: 1_000, sync: { ...VALID_SYNC, ageSeconds: 181, staleAfterSeconds: 180 }, lag: null, replay: false, expected: 'stale',
     },
     {
+      // This case is about the STALENESS boundary only (ageSeconds ===
+      // staleAfterSeconds is inclusive of ok), not about the lag. It used to
+      // carry lag: null and still expect 'ok', which depended on the null-lag
+      // fallthrough the RT-006 case above removes. A plausible, measured lag
+      // keeps the boundary assertion honest without weakening it.
       name: 'ageSeconds exactly AT staleAfterSeconds → NOT stale (boundary is inclusive of ok)',
-      dataAsOfMs: 1_000, sync: { ...VALID_SYNC, ageSeconds: 180, staleAfterSeconds: 180 }, lag: null, replay: false, expected: 'ok',
+      dataAsOfMs: 1_000, sync: { ...VALID_SYNC, ageSeconds: 180, staleAfterSeconds: 180 }, lag: 1_100, replay: false, expected: 'ok',
     },
     {
       name: 'ingestLagSeconds past MAX_CREDIBLE_LAG_SECONDS → late',
@@ -77,8 +82,16 @@ describe('classifyHealth — pure state table', () => {
       dataAsOfMs: 1_000, sync: VALID_SYNC, lag: MAX_CREDIBLE_LAG_SECONDS, replay: false, expected: 'ok',
     },
     {
-      name: 'ingestLagSeconds = null (not yet measured) → ok, not held against it',
-      dataAsOfMs: 1_000, sync: VALID_SYNC, lag: null, replay: false, expected: 'ok',
+      // RT-006 (23 Sep 2026 red-team audit): this case used to expect 'ok'.
+      // A zero-row lag sample — the state produced by `sms epoch:accept`
+      // opening a new generation, literally IFL's installation day — made
+      // ingestLagSeconds null, classifyHealth fell through to 'ok', and the
+      // line then printed "stopped" in alarm styling while the pipeline
+      // simply did not yet know the lag. 'ok' must never be reachable with
+      // an unmeasured lag; see the 'lag null → lag_unknown' case for the
+      // replacement pin.
+      name: 'ingestLagSeconds = null (not yet measured) → NOT ok (RT-006)',
+      dataAsOfMs: 1_000, sync: VALID_SYNC, lag: null, replay: false, expected: 'lag_unknown',
     },
     {
       name: 'fresh data, healthy sync, plausible lag, no replay → ok',
