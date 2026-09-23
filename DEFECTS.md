@@ -267,6 +267,146 @@ New test: `web/src/screens/Weight.test.tsx`, describe block `Weight — X̄ viol
 
 ---
 
+## D-11 — Almost no query constrained which SOURCE GENERATION it was reading (23 Sep 2026)
+
+**Severity: HIGH. Partly fixed; the remainder is inventoried below by `file:line`, not summarised.**
+
+IFL dropped and recreated their four weighing tables on **2026-08-05**, restarting every
+identity at 1 (`SEPT-2026-EPOCH-DECISION.md`). `sms.source_epoch` exists to keep those
+generations apart. An inventory on 23 Sep 2026 of every query reading `sms.cone_event`,
+`sms.sack_event` or `sms.reject_event` found:
+
+| | |
+|---|---|
+| **Constrained** | 2 — `spc.ts getWeightSpc` (fixed the same day, `6052b69`) and `dq.ts loadPriorSackNums` |
+| **Correct by partitioning** | 1 — `rejectSpc.ts getRejectSpc`, which groups by `source_epoch` and has never pooled p̄ across the boundary |
+| **Unconstrained** | everything else |
+
+This is a defect about **IFL's own rebuild**, not about this laptop. It is *visible* here
+because the plant simulator's generation (`DATA_TP1U2_SIM`, epoch 13, 21 Aug – 22 Sep)
+**overlaps** IFL's real September generation (`DATA_TP1U2_SEP07`, epoch 9, 5 Aug – 7 Sep) in
+time. Measured on the sidecar, 21 Aug – 7 Sep, plausible cones:
+
+| | cones | mean |
+|---|---|---|
+| pooled — what the app showed | 190,284 | 1951.79 g |
+| IFL's own (epoch 9) | **55,058 (29 %)** | 1952.94 g |
+
+The means agree to about 1 g because the simulator's distributions were measured from the
+real data, which is exactly why three weeks of pooled counts read as normal to everyone.
+Sacks over the same window: 8,509 pooled against 2,310 real — so cones-per-sack was a ratio
+across two physically different tables.
+
+**The case that exists at the plant has no simulator in it at all.** Over 1 Jul – 20 Aug on
+this same sidecar, `sms.cone_event` holds 75,178 cones of IFL's July generation and 77,493
+of their September one, pooled into one figure by every unconstrained query. The fix is
+built for that, not for the simulator.
+
+### The worst instance: `downtime.ts` ERASED real events
+
+Every figure there comes from `LAG(production_ts_utc)` over an ordered cone stream. Two
+generations interleaved in time make **one** stream, and each fills the other's gaps, so a
+genuine stop with another generation's cones inside it yields no gap at all. Measured for
+`shift_date` 2026-09-01, where epoch 9 (3,089 cones) and epoch 13 (7,470) overlap hour for
+hour:
+
+| | stoppages ≥120 s | downtime | availability |
+|---|---|---|---|
+| pooled | 12 | 3,301 s | 96.2 % |
+| epoch 9 only | **65** | **48,032 s** | **44.1 %** |
+
+53 real stoppages and 12.4 hours of real downtime erased — a line down more than half the
+day reported as running 96 % of it. The predicate is now bound **inside** the CTE, where the
+window function reads its rows; applied to the CTE's output it would compile, run, and still
+be wrong.
+
+### The rule adopted, and the alternatives rejected
+
+`api/src/services/generation.ts` holds it: **restrict to the newest generation present in
+the window, preferring a real generation over a simulator one, and then SAY SO.** Every
+touched service returns `generationNote` — `{ generation, spansGenerations,
+otherGenerationExcluded }` — deliberately the same shape `spc.ts` adopted in `6052b69`, so
+the application has one generation vocabulary rather than two.
+
+- **Pooling** (the old behaviour) is wrong for a mean, a rate and a LAG sequence alike.
+- **"The generation with the most rows"** was rejected as unstable: the same period's answer
+  would flip generation as data accrues, and every figure would jump with it for no reason
+  the reader can see.
+- **Partition and report both** (the `rejectSpc.ts` shape) is right for a chart whose x-axis
+  can carry two series, wrong for a single figure, and would change every payload shape in
+  the application. Kept where it already is; not generalised.
+
+Excluding data is the correct answer. Excluding it **silently** is the NO OVER-CLAIMING rule
+read backwards — the screen would imply the period is fully represented when it is not.
+
+A generation is keyed on **(source_db, generation_ordinal)**, not on one `epoch_id`: one
+generation spans one `sms.source_epoch` row *per source table* (cone gen 3 is epoch 9, sack
+gen 3 is epoch 10, reject gen 3 is epochs 11 **and** 12). Getting that wrong would make
+cones-per-sack a ratio across two generations, i.e. the defect itself.
+
+"Simulator" is read from `source_db` (`/_SIM$/i`), **not** from `provenance`:
+`cli/src/commands/epoch.ts` defaulted `--provenance` to `ifl_copy`, so epochs 13-16 claim
+IFL provenance while sitting on the simulator. That default is removed (`6b76ae3`) and those
+rows are **deliberately left standing**, so `provenance` alone is not safe to key off. The
+`_SIM` test is a safety net; the mechanism is "newest generation, one at a time".
+
+### Fixed (commits `8673ffd` — see below — and `ca34a23`)
+
+`production.ts bindFilters`, `weights.ts dateWhere`, `sacks.ts bindFilters`,
+`rejects.ts bindRejectFilters`, `downtime.ts`, `calibration.ts`, `shiftCheck.ts`,
+`reconcile.ts`. 23 new tests across `services/generation.test.ts`,
+`services/downtime.generations.test.ts` and `sacks.test.ts`, including a period that
+genuinely spans the 5 Aug boundary with no simulator in it.
+
+Two further defects found while wiring it, both fixed: `rejects.ts bindConeFilters` would
+have bound **`reject_event`'s** epoch to a `cone_event` query; and `getUnmatchedRejects`'s
+`NOT EXISTS` now constrains the **cone** side too — without it a reject from one generation
+could be "matched" by a cone from another sharing (production instant, hanger), and a reject
+wrongly counted as matched drops straight out of the reject-rate denominator, silently.
+
+> **Note on `8673ffd`.** That commit's *message* describes unrelated UI work. A parallel
+> worker's bare commit swept this pass's staged files into it. The code is correct and
+> intact; its reasoning lives in `generation.ts`'s own file header and in `ca34a23`.
+
+### STILL UNCONSTRAINED — the list, by name
+
+Held by another worker on 23 Sep 2026:
+
+| Site | Note |
+|---|---|
+| `services/reports/coneWeight.ts:110`, `reports/product.ts:109,119`, `reports/station.ts:72`, `report.ts:231`, `routes/reports.ts:104` | every report. A `generation` parameter on `/api/reports` belongs with them |
+| `services/weightStations.ts:634,698,704,730,732` | per-station targets |
+
+Deferred with a reason, not forgotten:
+
+| Site | Why it was not done |
+|---|---|
+| `services/live.ts:548-651` (11 queries), `services/health.ts:225,227`, `services/machinesRunning.ts:73,128`, `app.ts:209,341,561`, `envelope.ts:34` | **Needs an owner decision, not a guess.** Two defensible rules conflict. *Newest real generation* (this pass's default) would make the live screens show IFL's 7 Sep data as "now", breaking the plant-simulator rehearsal `CLAUDE.md` documents as a working tool. *The generation owning the newest reading* keeps the simulator working and is correct at IFL — whose generations do **not** overlap in time, so an unconstrained `MAX()` already lands on the newest — but it would disagree with every other screen on this dev copy, which is worse than either rule alone. The exposure at IFL is genuinely low for exactly the reason that makes the choice hard |
+| `services/register.ts:315` | Already JOINs `sms.source_epoch` for the generation **label** on every row; it does not filter. Listing two generations of rows, each labelled, is defensible for a register in a way it is not for a mean. Left as it is, on purpose |
+| `services/sackStock.ts:387,406,538` | Its `priorWeighed` opening-balance query reaches back before `@from` with no lower bound at all, so scoping it needs a decision about what an opening balance *means* across a rebuild. Not a one-line change |
+| `services/productAt.ts:502` | limits-vs-scale agreement count — not attempted this pass |
+| `services/machineProducts.ts:174,195` | per-machine product grid — not attempted this pass |
+
+**A correction to the brief that prompted this work.** `services/operations.ts:473-492`
+`resolveDqDestination` was listed as a hazard because `raw_id` is "not unique across
+generations". **Measured 23 Sep 2026: it is unique** — 0 duplicate `raw_id` in
+`cone_event`, `sack_event` or `reject_event` — because `raw_id` is the **sidecar** raw
+table's identity, app-owned and monotonic across generations, not the source's. The column
+that genuinely collides is `source_row_id`: **132,552 duplicates in `cone_event` alone**. So
+`resolveDqDestination` is sound as written; anything keyed on `source_row_id` is not.
+
+`cli rebuild` scoped by `source_system` and never by `source_epoch`, so it deleted and
+re-transformed every generation. Reported out of this pass and fixed separately (`fb44b11`).
+
+**Verified against the local `_SEP07` development sidecar only, never real plant data.** Every
+measurement above came from read-only `SELECT`s against the app-owned `sms` database
+(`sqlcmd -E`). No `epoch:accept` was run, no login was created, and `sms.source_epoch` was
+**not** hand-repaired — epoch 13's mislabelled row still stands, so the registration bug it
+proves stays visible.
+
+
+---
+
 ## Part 3 — Suite result observed for this pass
 
 `npx vitest run` from `sms/`, run once at the end of this pass, 22 Sep 2026: **120 test files (1 skipped), 1253 tests passed / 4 skipped.** No red files. This number is consistent with the 1253/4 the two commits above already carried (this pass added no test files, since it touches no source), and it was captured with the working tree in the state described in Part 2 above (uncommitted CSS and Weight.tsx changes from a parallel worker present, `IFL-DEMO-WALKTHROUGH.md` untracked). Carries the same open caveat as every other "green" claim in this project: the D-7 flake is roughly 1-in-74 and this was one run.
@@ -304,3 +444,4 @@ New test: `web/src/screens/Weight.test.tsx`, describe block `Weight — X̄ viol
 | D-7 | HIGH | Weight.tsx headline flips to the wrong sentence when `getWeightStations` resolves after `coneLine`'s first error, changing its poll key and wiping a real error (`usePolling` key-change semantics) | **fixed**, `441f3f9` — `headline()` now checks `coneLine.loading` instead of touching `usePolling`'s shared key-change semantics; deterministic regression test added |
 | D-8 | MEDIUM | `sms.source_epoch.last_seen_utc` has no writer | **fixed**, `b31d574` |
 | D-10 | **HIGH** | X̄ control limits (`grandMean ± 3σ_within/√n`) do not fit the process — ~16% of subgroups "violate" at month scale post-D-1 vs an expected ~0.3% | **model replaced** (`6052b69`, I-MR on the subgroup means) and **rule-1 rendering restored** 23 Sep 2026, gated on `xLimits.valid`; rule-1 rate now 5.6–13.1% on real generations. **Rules 2-8 stay suppressed** — measured 37.6–54.8% flag rate on the same windows. Band not validated against a known-good reference process. |
+| D-11 | **HIGH** | Almost no query constrained which SOURCE GENERATION it read; `downtime.ts` ERASED 53 real stoppages on one measured day | **partly fixed** (`8673ffd`, `ca34a23`) — four shared filter builders plus downtime/calibration/shiftCheck/reconcile now read ONE generation and say what they excluded; reports, weightStations, live/health/machinesRunning, register, sackStock, productAt and machineProducts remain unconstrained, each listed by `file:line` in D-11 above |
