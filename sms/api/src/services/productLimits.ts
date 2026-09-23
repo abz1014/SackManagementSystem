@@ -45,8 +45,14 @@ import { distinctProductLabels, type ProductNameParts } from './productNames.js'
  *   mirror is MERGE-overwritten by the PDAS sync every pass and would erase
  *   it — so this table is the only place an sms_local change is recorded, and
  *   it is judged by limitsAt() exactly like every other source.
+ * 'pdas_created' — PDAS's own `dbo.Materials.Timestamp`, the instant that
+ *   material's row was inserted and therefore the instant its limits came
+ *   into existence (migration 040, 23 Sep 2026). NOT a lower bound: a reading
+ *   carrying that MaterialId cannot predate the row it points at. This is the
+ *   only source whose effective_from is evidence from IFL's own record rather
+ *   than an instant this application chose.
  */
-export type LimitSource = 'pdas_observed' | 'sms_write' | 'sms_local';
+export type LimitSource = 'pdas_observed' | 'pdas_created' | 'sms_write' | 'sms_local';
 
 /**
  * Which source wins when two versions share the exact same effective_from
@@ -67,8 +73,16 @@ export type LimitSource = 'pdas_observed' | 'sms_write' | 'sms_local';
  * (they are different features, and only one — sms_local — can be in use
  * while IFL's PDAS authorisation is outstanding), so the ordering between them
  * is a tie-break of convenience, not a load-bearing decision.
+ *
+ * 'pdas_created' sits at the BOTTOM, below 'pdas_observed'. That is not a
+ * judgement on its evidence — its date is the best this system has — but on
+ * what a tie would mean: 'pdas_created' is the instant a material came into
+ * existence, so anything else stamped at that same millisecond is later news
+ * about the same row, and later news wins. In practice the two cannot
+ * collide, since a creation instant is PDAS's clock months ago and every
+ * other source stamps its own "now".
  */
-const SOURCE_PRIORITY: Record<LimitSource, number> = { sms_local: 3, sms_write: 2, pdas_observed: 1 };
+const SOURCE_PRIORITY: Record<LimitSource, number> = { sms_local: 4, sms_write: 3, pdas_observed: 2, pdas_created: 1 };
 
 export interface LimitVersion {
   productId: number;

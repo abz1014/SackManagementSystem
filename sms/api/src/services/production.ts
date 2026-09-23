@@ -6,8 +6,8 @@
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import {
-  bindStateCase, foldStateCounts, loadStateContext, plausibleWhere,
-  type StateContext, type StateCounts,
+  bindStateCase, foldStateCounts, limitProvenance, loadStateContext, plausibleWhere,
+  type LimitProvenance, type StateContext, type StateCounts,
 } from './coneState.js';
 import { getUnmatchedRejects, type RejectFilters } from './rejects.js';
 import {
@@ -241,6 +241,20 @@ export interface Unattributed {
 export interface ProductionStates {
   states: StateCounts;
   implausible: number;
+  /**
+   * Whether the product-tolerance half of those states — 'within', 'low' and
+   * 'high' — was decided against limits whose start date is known. Computed
+   * from the SAME StateContext the CASE above was built from, never from a
+   * second lookup, so the disclosure can never describe different windows
+   * from the ones that produced the counts.
+   *
+   * DECLARED OPTIONAL for the same reason `sacksPassedScalePct?` and
+   * `generationNote?` above are: `getProduction` always sets it, but a
+   * required field would break the hand-built fakes in report and summary
+   * test files other workers hold open mid-flight. A CONSUMER must read a
+   * missing value as "not stated" — never as "the start dates are known".
+   */
+  provenance?: LimitProvenance;
 }
 
 export interface ProductionResult {
@@ -260,6 +274,16 @@ export interface ProductionResult {
    * period look fully represented when it is not.
    */
   generationNote?: GenerationNote;
+  /**
+   * Whether `states` rests on limits whose start date this system knows, and
+   * the sentence to print once if it does not (coneState.ts limitProvenance).
+   *
+   * Present only alongside `states`, because it describes those five counts
+   * and nothing else on this payload: `rows`' cone and sack counts, the
+   * kilograms and the scale's own pass figures are measured at the machine
+   * and no limits version has ever touched them.
+   */
+  limitProvenance?: LimitProvenance;
 }
 
 export async function getProduction(
@@ -326,6 +350,7 @@ export async function getProduction(
     classification = {
       states: foldStateCounts(st.recordset),
       implausible: st.recordset.reduce((acc, r) => acc + Number(r.implausible ?? 0), 0),
+      provenance: limitProvenance(ctx),
     };
   }
 
@@ -414,6 +439,7 @@ export async function getProduction(
     groupBy: p.groupBy, rows, unattributed,
     states: classification?.states ?? null,
     implausible: classification?.implausible ?? null,
+    ...(classification ? { limitProvenance: classification.provenance } : {}),
     generationNote: noteOf(scope),
   };
 }

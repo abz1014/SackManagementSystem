@@ -13,7 +13,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { seedReference } from './seedReference.js';
-import { seedProducts } from './seedProducts.js';
+import { pdasCreatedAsUtc, seedProducts } from './seedProducts.js';
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
 
@@ -110,6 +110,9 @@ describe('seedProducts', () => {
   const material = {
     MaterialId: 21, BlendId: 1, CountId: 2, TubeTypeId: 3, MaterialSetpointWeight: 1960, MaterialActive: true,
     MaterialDesc1: '205-IL0-SD', MaterialDesc2: 'PARROT', MaterialWeightOffsetMinus: 50, MaterialWeightOffsetPlus: 50,
+    // dbo.Materials.Timestamp — DEFAULT (getdate()), so every real row has
+    // one. This is MaterialId 21's actual value on IFL's September copy.
+    Timestamp: new Date('2026-07-30T11:31:50.623Z'),
   };
   const mats = { needle: 'FROM [PDAS_TP1U2].dbo.Materials', rows: [material] };
   // migration 036: pack_schema has no vendor-seed id filter (both real rows
@@ -215,26 +218,52 @@ describe('seedProducts', () => {
     expect(read.sql).toMatch(/WHERE PalletId > 10/);
   });
 
-  it('appends a "first seen" limits version when the product has no history', async () => {
-    const app = fakePool([{ needle: 'FROM sms.product_limit_version WHERE product_id = @id', rows: [] }]);
+  it("dates a product's FIRST limits version from PDAS's own record of when the material was created", async () => {
+    // Migration 040. Before this the first version was stamped
+    // SYSUTCDATETIME() and flagged a lower bound, which on real plant data
+    // meant a date AFTER every reading it was then used to judge — 275,063
+    // of 275,063 cones. dbo.Materials.Timestamp is when that row, and so
+    // those limits, came into existence, and a cone cannot carry a
+    // MaterialId whose row does not yet exist.
+    const app = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     const ins = app.statements.find((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))!;
     expect(ins).toBeDefined();
     expect(ins.inputs.get('id')).toBe(21);
     expect([ins.inputs.get('sp'), ins.inputs.get('om'), ins.inputs.get('op')]).toEqual([1960, 50, 50]);
-    expect(ins.inputs.get('reason')).toBe('First seen by the mirror.');
-    // A lower bound, observed by the mirror, never claimed as the instant of change.
+    expect(ins.inputs.get('reason')).toBe(
+      'In force since this material was created in PDAS (dbo.Materials.Timestamp).',
+    );
+    // NOT a lower bound, and NOT stamped "now": a measured date, bound as a
+    // parameter rather than written by the server clock.
+    expect(ins.sql).toMatch(/@eff,\s*0, 'pdas_created'/);
+    expect(ins.sql).not.toMatch(/SYSUTCDATETIME\(\)/);
+    expect(ins.inputs.get('eff')).toEqual(pdasCreatedAsUtc(material.Timestamp));
+  });
+
+  it('falls back to an honest lower bound when PDAS records no creation instant', async () => {
+    // Not reachable on IFL's data (the column has DEFAULT getdate() and is
+    // populated on every row), but the branch must not invent a date if it
+    // ever is: it says what it knows, which is only when the mirror looked.
+    const noTs = fakePool([blends, counts, tubes,
+      { needle: mats.needle, rows: [{ ...material, Timestamp: null }] }, packSchemas, pallets]);
+    const app = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+    await seedProducts(app, noTs, 'PDAS_TP1U2');
+    const ins = app.statements.find((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))!;
+    expect(ins.inputs.get('reason')).toBe(
+      'First seen by the mirror; PDAS records no creation instant for this material.',
+    );
     expect(ins.sql).toMatch(/SYSUTCDATETIME\(\), 1, 'pdas_observed'/);
   });
 
   it('appends nothing when the newest version already equals the mirrored values', async () => {
-    const app = fakePool([{ needle: 'FROM sms.product_limit_version WHERE product_id = @id', rows: [{ sp: '1960.00', om: '50.00', op: '50.00' }] }]);
+    const app = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [{ sp: '1960.00', om: '50.00', op: '50.00' }] }]);
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     expect(app.statements.some((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))).toBe(false);
   });
 
   it('appends an "observed differing" version when PDAS changed underneath the mirror', async () => {
-    const app = fakePool([{ needle: 'FROM sms.product_limit_version WHERE product_id = @id', rows: [{ sp: 1950, om: 50, op: 50 }] }]);
+    const app = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [{ sp: 1950, om: 50, op: 50 }] }]);
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     const ins = app.statements.find((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))!;
     expect(ins.inputs.get('sp')).toBe(1960);
@@ -243,7 +272,7 @@ describe('seedProducts', () => {
 
   it('a null setpoint is recorded as null, not as zero', async () => {
     ifl = fakePool([blends, counts, tubes, { needle: mats.needle, rows: [{ ...material, MaterialSetpointWeight: null }] }]);
-    const app = fakePool([{ needle: 'FROM sms.product_limit_version WHERE product_id = @id', rows: [] }]);
+    const app = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     const ins = app.statements.find((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))!;
     expect(ins.inputs.get('sp')).toBeNull();
@@ -286,8 +315,14 @@ function versionTablePool(
           if (sql.includes('SELECT TOP 1') && sql.includes('FROM sms.product_limit_version')) {
             // The behaviour under test: whether the query text scopes the
             // comparison to the mirror's own prior observations.
-            const scoped = sql.includes("AND source = 'pdas_observed'");
-            const candidates = scoped ? rows.filter((r) => r.source === 'pdas_observed') : rows;
+            // Both mirror sources: 'pdas_created' (the material's creation
+            // instant, migration 040) and 'pdas_observed' (a later change the
+            // mirror noticed) are the two ways this seeder records what PDAS
+            // itself holds. 'sms_local' and 'sms_write' are not, and must
+            // stay out of the comparison — that IS the regression.
+            const scoped = sql.includes("source IN ('pdas_observed', 'pdas_created')");
+            const MIRROR = ['pdas_observed', 'pdas_created'];
+            const candidates = scoped ? rows.filter((r) => MIRROR.includes(r.source)) : rows;
             const newest = [...candidates].sort(
               (a, b) =>
                 new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime() ||

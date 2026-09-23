@@ -47,6 +47,76 @@ export interface StateContext {
   windows: LimitWindow[];
 }
 
+/**
+ * Whether the product-tolerance states in a payload rest on a limits start
+ * date this system knows, and the one sentence that says so when they do not.
+ *
+ * WHY THIS IS AN AGGREGATE AND NOT A PER-ROW FLAG. Before migration 040 the
+ * answer was "no" for 275,063 of 275,063 cones — 100 % of real plant data.
+ * An asterisk on every row of a register carries no information; it is
+ * decoration that a reader learns to stop seeing in about four seconds. The
+ * fact is a property of the WHOLE figure, so it is stated once, over the
+ * figure, in words that name what is and is not known.
+ *
+ * WHY IT IS A SERVER SENTENCE. The same reason resolvePeriodTarget's is
+ * (719fbee): the service is the only thing that knows WHICH versions were
+ * consulted and why they were doubted, and a screen that composed its own
+ * wording would be free to drift from what was actually computed.
+ *
+ * IT IS BUILT TO GO AWAY. `ok` is true — and `note` null — as soon as no
+ * window in force is resting on an assumed start, which is exactly what a
+ * 'pdas_created' version (migration 040) or an engineer's confirmed
+ * 'sms_local' version produces. Nothing has to be edited for the disclosure
+ * to disappear; it stops being true and so it stops being printed.
+ *
+ * THIS SAYS NOTHING ABOUT THE SCALE'S OWN VERDICT. ONE STATUS VOCABULARY
+ * (CLAUDE.md rule 1): "Passed" / "Rejected by the scale" is the scale's
+ * in-range bit, a separate and differently-named fact that no limits version
+ * has ever touched. bindStateCase resolves `in_range = 0` to 'rejected'
+ * BEFORE it consults a single window, so a reading the scale rejected is
+ * reported as such whether or not any limits are known. This disclosure is
+ * about the product tolerance and must never be worded as though it put the
+ * scale's answer in doubt.
+ */
+export interface LimitProvenance {
+  /** True when every window in force owns its start date. */
+  ok: boolean;
+  /** Windows whose start is assumed, and the total, so a caller can be specific. */
+  assumedWindows: number;
+  totalWindows: number;
+  /** The sentence to print, once, beside the affected figures. Null when `ok`. */
+  note: string | null;
+}
+
+/**
+ * The disclosure for a loaded context. Pure — takes the windows, returns the
+ * finding — so the wording is testable without a database.
+ */
+export function limitProvenance(ctx: StateContext): LimitProvenance {
+  const total = ctx.windows.length;
+  const assumed = ctx.windows.filter((w) => w.assumedStart).length;
+  if (assumed === 0) {
+    return { ok: true, assumedWindows: 0, totalWindows: total, note: null };
+  }
+  const all = assumed === total;
+  // "Every set … was" against "2 of 36 sets … were". Worth the two lines:
+  // this sentence is printed on a report an engineer may hand to a manager,
+  // and a plural error on it invites the reader to discount the rest of it.
+  const subject = all
+    ? 'Every set of limits in force here was'
+    : `${assumed} of the ${total} sets of limits in force here ${assumed === 1 ? 'was' : 'were'}`;
+  return {
+    ok: false,
+    assumedWindows: assumed,
+    totalWindows: total,
+    note:
+      `Product-tolerance figures below are judged against limits whose start date this system does not know. ` +
+      `${subject} first recorded after the readings they are being applied to, ` +
+      `so "within" and "outside the product's limits" state what today's limits would have said, not what was in force at the time. ` +
+      `The scale's own verdict — passed, or rejected by the scale — is a separate reading taken at the machine and is not affected.`,
+  };
+}
+
 /** Everything the CASE needs, loaded once per request. */
 export async function loadStateContext(pool: ConnectionPool, lineId: number): Promise<StateContext> {
   const [plaus, timeline, catalogue] = await Promise.all([

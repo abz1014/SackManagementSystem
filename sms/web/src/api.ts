@@ -1556,11 +1556,34 @@ export interface SpcData {
   implausible: number;
 }
 export type StateCounts = Record<ConeState, number>;
+/**
+ * Whether the product-tolerance half of `states` — 'within', 'low', 'high' —
+ * was judged against limits whose START DATE this system knows, and the one
+ * sentence to print if it was not (api coneState.ts `limitProvenance`).
+ *
+ * The sentence is composed SERVER-SIDE and printed verbatim, the same way
+ * `resolvePeriodTarget`'s refusal reason is: only the service knows which
+ * limits versions were actually consulted, and a screen wording its own
+ * version of this would be free to drift from what was computed. That is
+ * also why there is no entry for it in words.ts.
+ */
+export interface LimitProvenance {
+  ok: boolean;
+  assumedWindows: number;
+  totalWindows: number;
+  note: string | null;
+}
 export interface ProductionData {
   /** Cones per state over the same filters as `rows`; null unless the route computed it. */
   states: StateCounts | null;
   /** Readings the population rule excluded as implausible. */
   implausible: number | null;
+  /**
+   * Present whenever `states` is. OPTIONAL on the wire, so an older API or a
+   * test fake that omits it does not break a screen — a missing value means
+   * "not stated", never "the start dates are known".
+   */
+  limitProvenance?: LimitProvenance;
 }
 export interface ProductAtData {
   /** The plausibility window the state was judged with (roadmap Phase 4). */

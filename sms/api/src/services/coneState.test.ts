@@ -123,7 +123,7 @@ function contextFor(limits: ConeLimits | null): StateContext {
   return {
     plausibility: fixture.plausibility,
     windows: limits
-      ? [{ materialId: 14, fromMs: null, toMs: null, loG: limits.setpointG - Math.abs(limits.minusG), hiG: limits.setpointG + Math.abs(limits.plusG) }]
+      ? [{ materialId: 14, fromMs: null, toMs: null, loG: limits.setpointG - Math.abs(limits.minusG), hiG: limits.setpointG + Math.abs(limits.plusG), assumedStart: false }]
       : [],
   };
 }

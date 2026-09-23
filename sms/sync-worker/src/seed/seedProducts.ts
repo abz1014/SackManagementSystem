@@ -8,6 +8,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { plantOffsetMinutes } from '@sms/shared';
 
 /**
  * A database NAME is an object identifier, and T-SQL cannot bind identifiers as
@@ -43,8 +44,14 @@ export async function seedProducts(
       // MaterialDesc2 added for finding M10 (Sep 2026 audit): real color data
       // (e.g. 'PARROT', 'Khaki-2' on this line) was silently dropped before —
       // MaterialDesc1 alone was selected and never MaterialDesc2.
+      // `Timestamp` added 23 Sep 2026 (migration 040). DEFAULT (getdate()) on
+      // PDAS, never listed by CreateMaterial's INSERT and never written by
+      // either trigger, so it is the instant that material's row — and
+      // therefore its limits — came into existence. See migration 040 for the
+      // five checks that establish this, and the limits-history block below
+      // for what it is used for.
       `SELECT MaterialId, BlendId, CountId, TubeTypeId, MaterialSetpointWeight, MaterialActive, MaterialDesc1, MaterialDesc2,
-              MaterialWeightOffsetMinus, MaterialWeightOffsetPlus
+              MaterialWeightOffsetMinus, MaterialWeightOffsetPlus, Timestamp
        FROM ${db}.dbo.Materials WHERE MaterialId > 10`,
     )
   ).recordset;
@@ -103,9 +110,9 @@ export async function seedProducts(
     await up(
       `MERGE sms.product t USING (SELECT @id id) s ON t.product_id=s.id
        WHEN MATCHED THEN UPDATE SET blend_id=@b, count_id=@c, tube_type_id=@tt, setpoint_weight_g=@sp, active_flag=@a, description=@d,
-                                     weight_offset_minus_g=@om, weight_offset_plus_g=@op, color=@col
-       WHEN NOT MATCHED THEN INSERT (product_id, blend_id, count_id, tube_type_id, setpoint_weight_g, active_flag, description, weight_offset_minus_g, weight_offset_plus_g, color)
-         VALUES (@id, @b, @c, @tt, @sp, @a, @d, @om, @op, @col);`,
+                                     weight_offset_minus_g=@om, weight_offset_plus_g=@op, color=@col, pdas_created_at=@ts
+       WHEN NOT MATCHED THEN INSERT (product_id, blend_id, count_id, tube_type_id, setpoint_weight_g, active_flag, description, weight_offset_minus_g, weight_offset_plus_g, color, pdas_created_at)
+         VALUES (@id, @b, @c, @tt, @sp, @a, @d, @om, @op, @col, @ts);`,
       (r) => {
         r.input('id', mssql.Int, m.MaterialId);
         r.input('b', mssql.Int, m.BlendId);
@@ -117,6 +124,12 @@ export async function seedProducts(
         r.input('om', mssql.Decimal(10, 2), m.MaterialWeightOffsetMinus);
         r.input('op', mssql.Decimal(10, 2), m.MaterialWeightOffsetPlus);
         r.input('col', mssql.NVarChar(255), m.MaterialDesc2 || null);
+        // pdas_created_at = Materials.Timestamp: PDAS's own getdate(), i.e.
+        // the plant wall clock — NOT app UTC (the two-clocks rule). Stored
+        // as-is, exactly as sms.pallet.pdas_created_at is; the conversion to
+        // a genuine UTC instant happens once, below, where it is compared
+        // against app-written time.
+        r.input('ts', mssql.DateTime2(3), m.Timestamp ?? null);
       },
     );
   }
@@ -213,6 +226,33 @@ export async function seedProducts(
   // already judged under the sms_local version: that version's effective_from
   // is untouched and still governs every reading between it and the new
   // pdas_observed row (roadmap rule 12).
+  //
+  // THE FIRST VERSION IS NO LONGER A GUESS (23 Sep 2026, migration 040).
+  // Until now a product's first recorded version was stamped
+  // SYSUTCDATETIME() — the instant the mirror happened to look — and flagged
+  // as a lower bound, because nothing better was known. Something better IS
+  // known: PDAS's own `Materials.Timestamp` is the instant that row was
+  // inserted, and the row's limits have existed since exactly then. Migration
+  // 040 sets out the five checks behind that. So when the material carries a
+  // creation instant, the first version is written with THAT as its
+  // effective_from, source 'pdas_created', and `effective_is_lower_bound = 0`
+  // — a measured date from IFL's own record, not an observation of our own.
+  //
+  // A reading cannot predate it: `MaterialId` is an IDENTITY and a cone can
+  // only carry an id whose row already exists. Verified on source generation
+  // 9 (the September copy, real IFL data): all seven products appearing on a
+  // cone were created in PDAS before their own first reading.
+  //
+  // A SUBSEQUENT change is still only a lower bound and still 'pdas_observed'
+  // — Materials.Timestamp is NOT touched by an update, so if the values move
+  // underneath us the only thing we can honestly say is when we noticed.
+  // Hence two sources, not one, and the "has PDAS changed?" comparison below
+  // reads BOTH: they are the two ways this mirror records what PDAS itself
+  // holds, as against 'sms_local' (an engineer's deliberate local override,
+  // which must never feed this comparison — see the long note above) and
+  // 'sms_write' (a change we made to PDAS). Leaving 'pdas_created' out of
+  // that IN-list would make every pass find no prior mirror row and append a
+  // fresh duplicate every 60 seconds.
   for (const m of mats) {
     const sp = m.MaterialSetpointWeight == null ? null : Number(m.MaterialSetpointWeight);
     const om = m.MaterialWeightOffsetMinus == null ? null : Number(m.MaterialWeightOffsetMinus);
@@ -222,7 +262,8 @@ export async function seedProducts(
       .input('id', mssql.Int, m.MaterialId)
       .query<{ sp: number | null; om: number | null; op: number | null }>(
         `SELECT TOP 1 setpoint_g sp, offset_minus_g om, offset_plus_g op
-           FROM sms.product_limit_version WHERE product_id = @id AND source = 'pdas_observed'
+           FROM sms.product_limit_version
+          WHERE product_id = @id AND source IN ('pdas_observed', 'pdas_created')
           ORDER BY effective_from DESC, version_id DESC`,
       );
     const l = latest.recordset[0];
@@ -232,14 +273,32 @@ export async function seedProducts(
       (l.om == null ? null : Number(l.om)) === om &&
       (l.op == null ? null : Number(l.op)) === op;
     if (same) continue;
-    await appPool
+
+    const createdAtUtc = l == null ? pdasCreatedAsUtc(m.Timestamp) : null;
+    const req = appPool
       .request()
       .input('id', mssql.Int, m.MaterialId)
       .input('sp', mssql.Decimal(10, 2), sp)
       .input('om', mssql.Decimal(10, 2), om)
-      .input('op', mssql.Decimal(10, 2), op)
+      .input('op', mssql.Decimal(10, 2), op);
+
+    if (createdAtUtc) {
+      await req
+        .input('eff', mssql.DateTime2(3), createdAtUtc)
+        .input('reason', mssql.NVarChar(255),
+          'In force since this material was created in PDAS (dbo.Materials.Timestamp).')
+        .query(
+          `INSERT INTO sms.product_limit_version
+             (product_id, setpoint_g, offset_minus_g, offset_plus_g, effective_from,
+              effective_is_lower_bound, source, reason)
+           VALUES (@id, @sp, @om, @op, @eff, 0, 'pdas_created', @reason)`,
+        );
+      continue;
+    }
+
+    await req
       .input('reason', mssql.NVarChar(255), l == null
-        ? 'First seen by the mirror.'
+        ? 'First seen by the mirror; PDAS records no creation instant for this material.'
         : 'Mirror observed PDAS values differing from the newest recorded version.')
       .query(
         `INSERT INTO sms.product_limit_version
@@ -248,4 +307,26 @@ export async function seedProducts(
          VALUES (@id, @sp, @om, @op, SYSUTCDATETIME(), 1, 'pdas_observed', @reason)`,
       );
   }
+}
+
+/**
+ * `Materials.Timestamp` as a genuine UTC instant, for storing in
+ * product_limit_version.effective_from.
+ *
+ * THE TWO CLOCKS. Timestamp is PDAS's own `getdate()` — the plant's wall
+ * clock — while effective_from is defined as a genuine UTC instant, which
+ * productLimits.ts converts back through toPlantMs() before comparing it
+ * against a reading. So the plant offset must come OFF here, or the version
+ * would take effect five hours late on this plant and a changeover's readings
+ * would be judged against the previous material's limits.
+ *
+ * Exported for the test beside this file: this conversion is the one piece of
+ * arithmetic in the limits-provenance path that a wrong sign would make
+ * silently, plausibly wrong rather than loudly broken.
+ */
+export function pdasCreatedAsUtc(timestamp: Date | string | null | undefined): Date | null {
+  if (timestamp == null) return null;
+  const plantMs = timestamp instanceof Date ? timestamp.getTime() : new Date(timestamp).getTime();
+  if (!Number.isFinite(plantMs)) return null;
+  return new Date(plantMs - plantOffsetMinutes(new Date(plantMs)) * 60_000);
 }

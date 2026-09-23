@@ -109,7 +109,7 @@ function fakeReport(over: Partial<ReportData> = {}): ReportData {
   };
 }
 
-const CTX = { plausibility: { loG: 1500, hiG: 2100 }, windows: [{ materialId: 21, fromMs: null, toMs: null, loG: 1930, hiG: 1990 }] };
+const CTX = { plausibility: { loG: 1500, hiG: 2100 }, windows: [{ materialId: 21, fromMs: null, toMs: null, loG: 1930, hiG: 1990, assumedStart: false }] };
 
 const stationRow = (station: number, flagged = false) => ({
   station, n: 500, meanG: 1958.2, vsLineG: 1.1, vsTargetG: -1.8, targetBasis: 'line_product' as const, daysHeld: 3, flagged, rejectRatePct: 2.1, lastAdjustedUtc: null,

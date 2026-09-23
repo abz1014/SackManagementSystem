@@ -161,6 +161,18 @@ export function LineScreen({
         ) : totals.data ? (
           <>
             <Figures items={periodFigures(totals.data.data.rows[0] ?? null, totals.data.data.states, onNavigate)} />
+            {/* ONE disclosure for the whole block, not one per reading.
+                "Outside the product's limits" above is the 'low' + 'high'
+                states; when the limits behind them have a start date this
+                system does not know, that is a property of the figure, so it
+                is said once, here, under it. It prints the SERVER's sentence
+                (api coneState.ts limitProvenance) and disappears on its own
+                as versions gain a real start date — it is not a permanent
+                disclaimer. The cone, sack and rejected figures beside it are
+                measured at the machine and are not covered by it. */}
+            {totals.data.data.limitProvenance?.note && (
+              <p className="mut sm" style={{ marginTop: 8 }}>{totals.data.data.limitProvenance.note}</p>
+            )}
             {kpiNote && <p className="mut sm" style={{ marginTop: 8 }}>{kpiNote}</p>}
           </>
         ) : (

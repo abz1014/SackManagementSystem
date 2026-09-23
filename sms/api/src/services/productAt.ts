@@ -304,6 +304,30 @@ export interface LimitWindow {
   toMs: number | null;
   loG: number;
   hiG: number;
+  /**
+   * TRUE when this window judges readings from BEFORE its own version's
+   * recorded start, using a start date the system does not actually know
+   * (23 Sep 2026).
+   *
+   * The oldest version of a product is deliberately extended backwards —
+   * `fromMs: null` below, the SQL mirror of ProductCatalogue.versionAt's
+   * fallback to the oldest version. That is the right behaviour: the limits
+   * are the best evidence available and refusing to judge at all would be
+   * worse. But when that oldest version is itself flagged
+   * `effective_is_lower_bound` — first SEEN at that instant, not known to
+   * have STARTED there — the extension is resting on a date this application
+   * chose, and every state computed through it inherits that.
+   *
+   * Before migration 040 this was the ONLY path on real plant data: all 14
+   * versions were migration-027 bootstraps stamped after the last reading
+   * existed, so 275,063 of 275,063 cones were judged this way and nothing
+   * downstream of limitsAt() knew. The flag exists so that a screen can say
+   * so ONCE, over the figures it affects, instead of an asterisk on every row
+   * that carries no information — and so that it goes quiet by itself as
+   * 'pdas_created' versions replace the bootstraps, which is what makes it a
+   * disclosure rather than a permanent disclaimer.
+   */
+  assumedStart: boolean;
 }
 
 /**
@@ -333,6 +357,10 @@ export function limitWindowsFor(timeline: ProductTimeline, catalogue: ProductCat
         toMs: versions[i + 1]?.effectiveFromMs ?? null,
         loG: lim.loG,
         hiG: lim.hiG,
+        // Only the backwards-extended oldest version can be judging readings
+        // from before its own start, and only then does the lower-bound flag
+        // matter: every later version governs from a date it really does own.
+        assumedStart: i === 0 && v.effectiveIsLowerBound,
       });
     }
   }
@@ -341,12 +369,20 @@ export function limitWindowsFor(timeline: ProductTimeline, catalogue: ProductCat
     const seg = asc[i]!;
     const lim = catalogue.limitsAt(seg.productId, seg.effectiveFromMs) ?? limitsOf(seg);
     if (!lim) continue;
+    // The SEGMENT's own start is an engineer's entry and is never in doubt.
+    // What can be in doubt is the LIMITS it is carrying: if the version that
+    // supplied them is one whose start this system does not know, then this
+    // window is judging July readings against limits of unknown vintage just
+    // as surely as the MaterialId windows above. `limitsAt` already resolved
+    // which version that was, so ask it the same question.
+    const v = catalogue.versionAt(seg.productId, seg.effectiveFromMs);
     out.push({
       materialId: null,
       fromMs: seg.effectiveFromMs,
       toMs: asc[i + 1]?.effectiveFromMs ?? null,
       loG: lim.loG,
       hiG: lim.hiG,
+      assumedStart: Boolean(v?.effectiveIsLowerBound),
     });
   }
   return out;
@@ -460,7 +496,13 @@ export async function productDisagreement(
           const lim = limitsOf(seg);
           // Legacy path (no catalogue): every row in the segment, whatever its material_id.
           return lim
-            ? [{ materialId: null, fromMs: seg.effectiveFromMs, toMs: asc[i + 1]?.effectiveFromMs ?? null, loG: lim.loG, hiG: lim.hiG, anyMaterial: true }]
+            // assumedStart is unconditionally true on this branch: with no
+            // catalogue there is no version history at all, so these limits
+            // are the MIRROR'S CURRENT VALUES — today's tolerance applied to
+            // whenever the segment ran, which is exactly the thing REDESIGN
+            // rule 1 exists to name. Every caller should pass a catalogue;
+            // while one does not, the window says what it is.
+            ? [{ materialId: null, fromMs: seg.effectiveFromMs, toMs: asc[i + 1]?.effectiveFromMs ?? null, loG: lim.loG, hiG: lim.hiG, assumedStart: true, anyMaterial: true }]
             : [];
         });
 

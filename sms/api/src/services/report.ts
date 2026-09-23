@@ -276,7 +276,17 @@ export async function getReport(
           thresholdSeconds: REPORT_STOP_THRESHOLD_SECONDS,
         }
       : null,
-    readings: totalRes.states == null ? null : { states: totalRes.states, implausible: totalRes.implausible ?? 0 },
+    readings:
+      totalRes.states == null
+        ? null
+        : {
+            states: totalRes.states,
+            implausible: totalRes.implausible ?? 0,
+            // Carried onto the REPORT deliberately: a report is the artefact
+            // that gets printed and passed on, so it is the last place a
+            // product-tolerance figure should travel without its provenance.
+            ...(totalRes.limitProvenance ? { provenance: totalRes.limitProvenance } : {}),
+          },
     shiftCheck:
       shiftCheck.cones - shiftCheck.noLegacyShift > 0
         ? {

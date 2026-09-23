@@ -45,7 +45,7 @@ function fakePool(answer: (sql: string, params: Map<string, unknown>) => Record<
 
 const CTX: StateContext = {
   plausibility: { loG: 1500, hiG: 2100 },
-  windows: [{ materialId: 14, fromMs: null, toMs: null, loG: 1930, hiG: 1990 }],
+  windows: [{ materialId: 14, fromMs: null, toMs: null, loG: 1930, hiG: 1990, assumedStart: false }],
 };
 
 describe('getProduction — classification', () => {
