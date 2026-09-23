@@ -246,8 +246,32 @@ describe('every report payload `target` field carries its own instant, never a b
  * two F6 cases in `api/src/services/reports/reports.test.ts` (the whole
  * report, end to end). This check stops the WIRING from being removed again;
  * those stop the BEHAVIOUR from changing.
+ *
+ * WIDENED 23 Sep 2026, after this check demonstrably could not have caught
+ * two of the four instances of the defect it names. `listReportFiles()` reads
+ * `api/src/services/reports/` and nothing else, so the scan's population was
+ * the nine report modules. Both `api/src/services/weightStations.ts` and
+ * `api/src/services/spc.ts` call `versionAt(` and publish a limits-derived
+ * instant (`targetEffectiveFromUtc`, `limitsEffectiveFromUtc`) from OUTSIDE
+ * that directory — the station table judged 5-20 Aug against limits first
+ * recorded 11 Sep, and the weight chart drew a USL/LSL band and a Cpk from
+ * the same refused version — and the guard was green throughout. A check
+ * that reads as "every file that resolves a limits version" while scanning
+ * one directory is worse than no check, because it is cited as coverage.
+ *
+ * The scan is now every non-test file under `api/src/services/**`, and the
+ * "publishes an instant" test is case-insensitive over the three names the
+ * codebase actually uses (`inForceAtUtc`, `limitsEffectiveFromUtc`,
+ * `targetEffectiveFromUtc`) plus the catalogue's own `effectiveFromUtc` —
+ * the earlier `/inForceAtUtc/` literal would have missed both files even
+ * once the directory was widened.
  */
 const RESOLVES_A_VERSION_RE = /\bversionAt\s*\(/;
+/** Any of the names a limits instant is published under, case-insensitively —
+ *  `inForceAtUtc`, `limitsEffectiveFromUtc`, `targetEffectiveFromUtc`,
+ *  `effectiveFromUtc`. Deliberately broad: under-matching here is exactly how
+ *  the two 23 Sep instances stayed invisible. */
+const PUBLISHES_AN_INSTANT_RE = /\b(?:inForceAtUtc|[a-z]*effectiveFromUtc)\b/i;
 /**
  * A CALL to the shared resolver — the one sanctioned way to handle it.
  * Deliberately a call, not a mention: an earlier draft of this check accepted
@@ -257,35 +281,77 @@ const RESOLVES_A_VERSION_RE = /\bversionAt\s*\(/;
  */
 const HANDLES_LOWER_BOUND_RE = /\bresolvePeriodTarget\s*\(/;
 
-describe('a report that resolves its own limits version may not drop the lower-bound qualifier', () => {
-  const files = listReportFiles();
+/**
+ * WRITTEN EXCEPTIONS to check 3, in `reliability.guard.test.ts`'s idiom:
+ * each names the evidence it was checked against, not the failure it
+ * silences. Keyed by path relative to `sms/`.
+ */
+const VERSION_RESOLVER_ALLOW_LIST: Record<string, string> = {
+  'api/src/services/productLimits.ts':
+    'DEFINES versionAt and the LimitVersion.effectiveFromUtc field this check greps for. It is the honest source of ' +
+    'the effectiveIsLowerBound flag every other file is judged on dropping; it resolves no PERIOD and publishes no ' +
+    'report payload. Routing it through resolvePeriodTarget would be circular — that resolver takes a LimitVersion.',
+  'api/src/services/productAt.ts':
+    'Resolves at the READING\'S OWN instant (`versionAt(productId, tsMs)` where tsMs is the cone\'s production ' +
+    'timestamp), which is §8 applied directly, not a period target. resolvePeriodTarget takes a period END and asks ' +
+    'whether a version postdates it; there is no period here to compare against, so it does not apply. The file ' +
+    'carries the qualifier on every verdict it returns (`limitsAreLowerBound`, ProductVerdict). NOT a claim that the ' +
+    'per-reading path is beyond doubt: versionAt still falls back to the oldest version for a reading that predates ' +
+    'all of them, so a June cone can be judged against a bootstrap version stamped 2026-09-11 with the flag set. ' +
+    'That is a REPORTED open item (23 Sep 2026), owned by whoever next takes ONE STATUS VOCABULARY — its blast ' +
+    'radius is every per-reading state in the app, not one chart — and it is recorded here rather than left silent.',
+};
 
-  it('sanity: at least one report file really does resolve a version itself (canary on the scan)', () => {
+describe('a service that resolves its own limits version may not drop the lower-bound qualifier', () => {
+  // WIDENED 23 Sep 2026 from `listReportFiles()` (nine files in reports/) to
+  // every non-test service. See the block comment above: the two instances
+  // found that day both lived outside reports/ and this check was green.
+  const files = listSourceFiles(`${API_SRC}services`).filter((f) => !/\.test\.tsx?$/.test(f));
+
+  it('sanity: the widened scan reaches the two files that were outside it (canary on the scan)', () => {
+    const rels = files.map(relPath);
+    expect(rels).toContain('api/src/services/spc.ts');
+    expect(rels).toContain('api/src/services/weightStations.ts');
+    expect(rels).toContain('api/src/services/reports/coneWeight.ts');
     const resolvers = files.filter((f) => RESOLVES_A_VERSION_RE.test(readFileSync(f, 'utf8')));
     expect(
       resolvers.length,
-      'no report file calls versionAt( any more — if the resolution moved, move this check with it',
+      'no service calls versionAt( any more — if the resolution moved, move this check with it',
     ).toBeGreaterThan(0);
   });
 
   it('every such file also names the lower-bound case', () => {
     const violations: string[] = [];
     for (const file of files) {
+      const rel = relPath(file);
+      if (VERSION_RESOLVER_ALLOW_LIST[rel]) continue;
       const src = readFileSync(file, 'utf8');
       if (!RESOLVES_A_VERSION_RE.test(src)) continue;
-      if (!src.includes('inForceAtUtc')) continue; // resolves a version but publishes no instant
-      if (!HANDLES_LOWER_BOUND_RE.test(src)) violations.push(relPath(file));
+      if (!PUBLISHES_AN_INSTANT_RE.test(src)) continue; // resolves a version but publishes no instant
+      if (!HANDLES_LOWER_BOUND_RE.test(src)) violations.push(rel);
     }
     expect(
       violations,
       violations.length === 0
         ? ''
-        : `these report files resolve a limits version with versionAt() and publish an inForceAtUtc without calling ` +
+        : `these services resolve a limits version with versionAt() and publish a limits instant without calling ` +
             `resolvePeriodTarget(): ${violations.join(', ')}. That is the F6 ` +
             `defect exactly — ProductCatalogue.versionAt returns the NEAREST version marked effectiveIsLowerBound when ` +
-            `none was in force at the instant asked for, and dropping that flag publishes a date the report does not ` +
+            `none was in force at the instant asked for, and dropping that flag publishes a date the service does not ` +
             `have. Route the resolution through reports/common.ts's resolvePeriodTarget (which refuses a version that ` +
-            `begins after the period ends, and flags a lower bound as one), as coneWeight.ts and product.ts do.`,
+            `begins after the period ends, and flags a lower bound as one), as coneWeight.ts, product.ts, ` +
+            `weightStations.ts and spc.ts do. If the file genuinely does not resolve a PERIOD target, add a written ` +
+            `VERSION_RESOLVER_ALLOW_LIST entry naming the evidence — never to silence a red run.`,
     ).toEqual([]);
+  });
+
+  it('the allow-list names only files that still exist and still resolve a version', () => {
+    const stale: string[] = [];
+    for (const rel of Object.keys(VERSION_RESOLVER_ALLOW_LIST)) {
+      const file = files.find((f) => relPath(f) === rel);
+      if (!file) { stale.push(`${rel} (file not found)`); continue; }
+      if (!RESOLVES_A_VERSION_RE.test(readFileSync(file, 'utf8'))) stale.push(`${rel} (no longer calls versionAt)`);
+    }
+    expect(stale, `stale VERSION_RESOLVER_ALLOW_LIST entries (remove them): ${stale.join(', ')}`).toEqual([]);
   });
 });

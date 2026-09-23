@@ -39,6 +39,37 @@ function pool(versions = 2) {
   } as unknown as ConnectionPool;
 }
 
+/**
+ * The shape actually on the dev copy (F6, 23 Sep 2026): ONE version per
+ * product, a migration-027 bootstrap stamped 2026-09-11T10:03:15.957Z with
+ * `effective_is_lower_bound = 1` and the reason "true start unknown". The
+ * mirror's current row is answered too, on purpose: a refusal must not fall
+ * through to it and restore the very band it withheld.
+ */
+function bootstrapPool() {
+  const rows = [{
+    product_id: 12, setpoint_g: '1960.00', offset_minus_g: '40.00', offset_plus_g: '40.00',
+    effective_from: new Date('2026-09-11T10:03:15.957Z'), effective_is_lower_bound: true, source: 'pdas_observed',
+  }];
+  return {
+    request() {
+      return {
+        input() { return this; },
+        async query(sql: string) {
+          if (sql.includes('FROM sms.product_limit_version')) return { recordset: rows, rowsAffected: [1] };
+          if (sql.includes('FROM sms.product p')) {
+            return { recordset: [{ product_id: 12, description: '201-IH0-SD', lot_code: null, active_flag: true }], rowsAffected: [1] };
+          }
+          if (sql.includes('FROM sms.product WHERE product_id=@id')) {
+            return { recordset: [{ sp: 1960, om: 40, op: 40, d: 'mirror-now', l: null }], rowsAffected: [1] };
+          }
+          return { recordset: [], rowsAffected: [0] };
+        },
+      };
+    },
+  } as unknown as ConnectionPool;
+}
+
 describe('getSpec — limits in force at the END of the period', () => {
   it('a period after the change draws the new limits and reports no change inside it', async () => {
     const s = await getSpec(pool(), 21, null, null, 'cone', { from: '2026-09-06', to: '2026-09-07' });
@@ -62,10 +93,57 @@ describe('getSpec — limits in force at the END of the period', () => {
     expect(s.limitsChangedInPeriod).toBe(1);
   });
 
-  it('a period before any version falls back to the oldest, flagged as a lower bound', async () => {
+  /**
+   * F6, the chart (23 Sep 2026). This case USED to assert the opposite —
+   * "falls back to the oldest, flagged as a lower bound", nominal 1950 — and
+   * that is precisely the defect: the oldest version here begins 2026-08-01,
+   * three weeks AFTER this period ended on 2026-07-10, so those limits
+   * demonstrably did not exist while the readings were taken. Flagging the
+   * fallback was not enough, because the flag has no render site and the
+   * band, the Cp/Cpk and the scale-against-product figure were all drawn from
+   * it anyway. The chart now states no limits and says why, the same verdict
+   * `71ac170` gave the report tile and `4b514b2` gave the station table.
+   */
+  it('a period that ENDS before the earliest version on record gets no limits, and a reason', async () => {
     const s = await getSpec(pool(), 21, null, null, 'cone', { from: '2026-07-01', to: '2026-07-10' });
-    expect(s.nominal).toBe(1950);
+    expect(s).toMatchObject({ usl: null, lsl: null, nominal: null, source: 'none' });
+    // The reason is the SHARED resolver's sentence, not one composed here.
+    expect(s.limitsOmittedReason).toContain('2026-08-01');
+    expect(s.limitsOmittedReason).toContain('2026-07-10');
+    // The product that ran is still named — that is not a claim about limits.
+    expect(s.productLabel).toBe('205-IL0-SD');
+    // No instant, no lower-bound flag, no change count travels with a refusal.
+    expect(s.limitsEffectiveFromUtc).toBeUndefined();
+    expect(s.limitsAreLowerBound).toBeUndefined();
+    expect(s.limitsChangedInPeriod).toBeUndefined();
+  });
+
+  /**
+   * The case actually on the dev copy, and the reason this matters at all:
+   * every one of the fourteen `sms.product_limit_version` rows is a
+   * migration-027 bootstrap stamped 2026-09-11T10:03:15.957Z with
+   * `effective_is_lower_bound = 1` and the reason "true start unknown".
+   * Before this fix, Weight over 2026-08-05..08-20 (epoch 9, real IFL data)
+   * drew USL 2000 / LSL 1920 and reported Cp 1.564, Cpk 1.209 against limits
+   * first recorded 22 days after the last reading on the chart.
+   */
+  it('the migration-027 bootstrap shape: a single lower-bound version after the period', async () => {
+    const s = await getSpec(bootstrapPool(), 12, null, null, 'cone', { from: '2026-08-05', to: '2026-08-20' });
+    expect(s).toMatchObject({ usl: null, lsl: null, nominal: null, source: 'none' });
+    expect(s.productLabel).toBe('201-IH0-SD');
+    expect(s.limitsOmittedReason).toContain('2026-08-20');
+  });
+
+  it('the SAME bootstrap version is USABLE for a period that ends after it — only its start is unproven', async () => {
+    // The other half of the split `resolvePeriodTarget` makes, on the same
+    // fixture: these limits DID apply during a late-September period, so the
+    // band stays and `limitsAreLowerBound` qualifies it. Withholding here
+    // would blank a chart over a fact that is imprecise, not absent — and
+    // the pair of cases is what proves the refusal is dated, not blanket.
+    const s = await getSpec(bootstrapPool(), 12, null, null, 'cone', { from: '2026-09-20', to: '2026-09-22' });
+    expect(s).toMatchObject({ usl: 2000, lsl: 1920, nominal: 1960, source: 'product' });
     expect(s.limitsAreLowerBound).toBe(true);
+    expect(s.limitsOmittedReason).toBeUndefined();
   });
 
   it('manual limits win, and sacks never get a cone setpoint', async () => {

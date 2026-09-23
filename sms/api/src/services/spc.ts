@@ -45,6 +45,7 @@ import type { PlausibilityRule } from './admin.js';
 import { plausibleWhere } from './coneState.js';
 import { nelsonViolations, type NelsonRuleId } from './nelson.js';
 import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
+import { resolvePeriodTarget } from './reports/common.js';
 
 export type SpcType = 'cone' | 'sack';
 
@@ -98,6 +99,15 @@ export interface SpecLimits {
   limitsEffectiveFromUtc?: string;
   limitsAreLowerBound?: boolean;
   limitsChangedInPeriod?: number;
+  /**
+   * Why no limits are stated, when a product WAS running but this system
+   * holds no record of what its tolerance was during the period (friction
+   * audit F6, 23 Sep 2026 — see getSpec below). Present only with
+   * `source: 'none'`, and only for the refused case: a period that simply
+   * had no product carries `source: 'none'` and no reason, because there is
+   * nothing to explain beyond the absence of a product.
+   */
+  limitsOmittedReason?: string;
 }
 
 /**
@@ -267,6 +277,27 @@ export function pickBucketMinutes(occupiedMinutes: number, count: number): { min
   return chosen;
 }
 
+/**
+ * The chart's own half of the withheld-limits sentence, appended to the
+ * shared resolver's reason so the whole statement travels as ONE string.
+ *
+ * Composed HERE, in the service, rather than as two keys in
+ * `web/src/lib/words.ts` — the same route `weightStations.ts`'s
+ * `targetOmittedReason` already takes, and Weight.tsx already prints that
+ * one verbatim. Both halves are needed and neither may be dropped: a blank
+ * band with only the first sentence leaves a reader wondering whether the
+ * chart itself is trustworthy, and a chart that says nothing at all reads as
+ * "the process is fine". The second sentence exists to make sure it reads as
+ * neither. (An Urdu pass will have to reach the server-composed sentences —
+ * this one, `targetOmittedReason` and `resolvePeriodTarget`'s own — as a
+ * set; noted rather than quietly worked around.)
+ */
+const CHART_LIMITS_WITHHELD =
+  'No tolerance band, Cp/Cpk or scale-against-product comparison is shown for this period, for that reason. ' +
+  'Everything else on this chart is measured from the readings themselves and needs no product limits: the ' +
+  'control band, the mean and spread, the group series and the station comparison are unaffected. This is a gap ' +
+  'in what the system knows about the product, not a judgement about the line.';
+
 export async function getSpec(
   pool: ConnectionPool,
   productId: number | null,
@@ -300,6 +331,54 @@ export async function getSpec(
     const endMs = new Date(`${range.to}T23:59:59Z`).getTime();
     const v = catalogue.versionAt(productId, endMs);
     const lim = limitsFromVersion(v);
+    /**
+     * FRICTION AUDIT F6, the fourth and last surface (23 Sep 2026).
+     *
+     * `versionAt` falls back to the OLDEST known version for a period that
+     * predates all of them, marking it `effectiveIsLowerBound`. This branch
+     * carried that flag out honestly as `limitsAreLowerBound` — and then drew
+     * the band anyway. On the dev copy every one of the fourteen
+     * `sms.product_limit_version` rows is a migration-027 bootstrap stamped
+     * 2026-09-11 ("true start unknown"), so a chart of 5-20 Aug was drawn with
+     * USL 2000 / LSL 1920 and Cpk 1.209 against limits first recorded 22 days
+     * after the last reading on it. The report tile and the station table had
+     * already stopped stating that target (`71ac170`, `4b514b2`); the chart
+     * beside them had not.
+     *
+     * WITHHOLD, NOT FLAG — `4b514b2`'s precedent, and the count that decides
+     * it here is even more one-sided. Every product-derived thing on this
+     * chart is already null-guarded, because a period with no product at all
+     * reaches exactly this state and epoch 1 (22 Jun - 10 Jul, real IFL data,
+     * productId null) exercises it every day: `capability` returns four nulls
+     * when `spec.usl`/`spec.lsl` are null, `specAgreement` returns null when
+     * `spec.source` is 'none', and Weight.tsx's `limitLine` renders nothing
+     * for a null bound. Withholding costs zero edits in any consumer.
+     *
+     * What is NOT withheld, deliberately: the chart's own statistical
+     * content. The X̄ I-MR band, σ within/overall, the subgroup series, the
+     * station comparison and the histogram are all measured from the readings
+     * themselves and need no product limits, so they stay and remain true.
+     * What goes is only what was derived from limits that did not exist:
+     * the USL/LSL lines, Cp/Cpk/Pp/Ppk, and the scale-against-product
+     * agreement. `limitsOmittedReason` carries the sentence — composed once
+     * by the shared resolver, never restated here — so the absence reads as a
+     * stated fact rather than as a quiet blank.
+     */
+    const periodTarget = resolvePeriodTarget(v, endMs, range.to);
+    if (v && lim && !periodTarget.usable) {
+      return {
+        usl: null,
+        lsl: null,
+        nominal: null,
+        source: 'none',
+        // The product that ran is still a fact about the period, and stating
+        // it is not a claim about any tolerance. The caption keeps its name.
+        productLabel: catalogue.distinctLabel(productId),
+        limitsOmittedReason: periodTarget.omittedReason
+          ? `${periodTarget.omittedReason} ${CHART_LIMITS_WITHHELD}`
+          : undefined,
+      };
+    }
     if (v && lim) {
       const changed = catalogue
         .versionsAscending(productId)

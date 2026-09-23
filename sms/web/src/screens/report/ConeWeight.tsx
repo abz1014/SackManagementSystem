@@ -5,6 +5,15 @@ import { fmtAppInstant, fmtInt } from '../../lib/fmt';
 import { stationLabel, type ConeWeightReportData, type StationRow } from '../../api';
 import { fmtG1, fmtSignedG, Histogram, statesLine } from './shared';
 
+/** See the note at the render site: on the wire since `71ac170`, not yet on api.ts's own type. */
+type TargetExtras = { omittedReason?: string | null; inForceIsLowerBound?: boolean };
+const targetOmittedReason = (t: ConeWeightReportData['target']): string | null => {
+  const r = (t as TargetExtras).omittedReason;
+  return typeof r === 'string' && r.length > 0 ? r : null;
+};
+const targetIsLowerBound = (t: ConeWeightReportData['target']): boolean =>
+  (t as TargetExtras).inForceIsLowerBound === true;
+
 export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names: StationRow[] }) {
   if (d.cones === 0) {
     return (
@@ -20,12 +29,38 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
         <div className="figs">
           <div>
             <b className="fig-val">{d.meanG == null ? '—' : Math.round(d.meanG).toLocaleString('en-US')}<span className="fig-unit">g {W.reports.meanLabel}</span></b>
+            {/* F6 (23 Sep 2026), two corrections in one tile.
+                (1) `targetNone` — "No product was in force at the end of this
+                period" — was printed for BOTH reasons a target can be absent.
+                On epoch 9 (5-20 Aug) a product WAS in force (id 12,
+                201-IH0-SD); what is missing is any record of its tolerance
+                then. coneWeight.ts has published the true reason as
+                `target.omittedReason` since `71ac170` and nothing rendered it,
+                so the one case the fix was written for printed a sentence
+                that is false. The resolver's sentence wins when there is one;
+                `targetNone` survives for the genuine no-product case.
+                (2) `targetSince` asserts a start date. Every limits version
+                on this system is a migration-027 bootstrap marked
+                `effective_is_lower_bound`, so the instant is a lower bound,
+                and Weight.tsx:279 already says "no later than" for the
+                identical fact. This tile said "in force since". */}
+            {/* Both fields are read LOOSELY off the wire object rather than
+                through api.ts's ConeWeightReportData: api.ts carries another
+                worker's in-flight change today, so declaring them there would
+                have swept their unfinished hunks into this commit. Both have
+                been on the wire since `71ac170` (coneWeight.ts's `target`).
+                Reported: they belong on that interface once the tree settles. */}
             {d.target.source === 'none' ? (
-              <span className="fig-note">{W.reports.targetNone}</span>
+              <span className="fig-note">{targetOmittedReason(d.target) ?? W.reports.targetNone}</span>
             ) : (
               <span className="fig-note">
                 {W.reports.target(fmtG1(d.target.setpointG), d.target.label ?? W.reports.wholeLine)}
-                {d.target.inForceAtUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.target.inForceAtUtc))}`}
+                {d.target.inForceAtUtc &&
+                  ` · ${
+                    targetIsLowerBound(d.target)
+                      ? W.reports.targetNoLaterThan(fmtAppInstant(d.target.inForceAtUtc))
+                      : W.reports.targetSince(fmtAppInstant(d.target.inForceAtUtc))
+                  }`}
               </span>
             )}
           </div>

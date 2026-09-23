@@ -45,6 +45,20 @@ import {
 /** Roadmap Phase 2b (16 Sep 2026): the chart toggle, in the URL as `wm`. */
 export type WeightMode = 'time' | 'dist';
 
+/**
+ * F6 (23 Sep 2026). `spc.ts` withholds the USL/LSL band, Cp/Cpk and the
+ * scale-against-product agreement when the only limits version on record
+ * begins AFTER the period ended, and sends the reason as
+ * `SpecLimits.limitsOmittedReason`. Read loosely rather than through api.ts's
+ * `SpecLimits`: api.ts is being edited by another worker today and a field
+ * added there would have travelled into this commit. The field belongs on
+ * that interface as soon as the tree settles — reported, not forgotten.
+ */
+function specOmittedReason(spec: SpcData['spec']): string | null {
+  const r = (spec as { limitsOmittedReason?: string }).limitsOmittedReason;
+  return typeof r === 'string' && r.length > 0 ? r : null;
+}
+
 export function WeightScreen({
   period,
   mode,
@@ -401,6 +415,33 @@ export function WeightScreen({
           <p className="mut sm" style={{ marginTop: 10 }}>
             {W.weight.limitsChanged(s.spec.limitsChangedInPeriod!)}
           </p>
+        )}
+        {/* F6 (23 Sep 2026): the chart used to draw a USL/LSL band, a Cp/Cpk
+            and a scale-against-product agreement from a limits version that
+            began AFTER the period ended — on the dev copy, 5-20 Aug was
+            judged against limits first recorded on 11 Sep, while the report
+            tile and the station table two screens over already refused that
+            same target. spc.ts now routes through resolvePeriodTarget and
+            withholds all three. This is the only render site that change
+            needs, because every product-derived figure on this chart was
+            already null-guarded for the no-product case — but a silent blank
+            is the reliability defect Phase 7 spent itself eliminating, so the
+            service's own sentence is printed here, verbatim, followed by what
+            this screen specifically does and does not still stand behind. */}
+        {/* Read LOOSELY, off the wire object rather than through `SpecLimits`
+            in api.ts, and deliberately so: api.ts carries another worker's
+            in-flight change today, and adding a field there would have put
+            their unfinished hunks into this commit. The sentence is composed
+            server-side (spc.ts's CHART_LIMITS_WITHHELD) and printed verbatim,
+            the same route weightStations.ts's targetOmittedReason already
+            takes — words.ts became another worker's file mid-task, and the
+            brief's own instruction for that case is to report the string
+            rather than edit the file. Same loose-read idiom as
+            coneWeight.ts's `(w.cone as { median?: number|null }).median`.
+            Reported for a one-line follow-up: `limitsOmittedReason?: string`
+            belongs on api.ts's own SpecLimits once that file settles. */}
+        {s && specOmittedReason(s.spec) && (
+          <p className="mut sm" style={{ marginTop: 10 }}>{specOmittedReason(s.spec)}</p>
         )}
         {/* UX Phase 5 Brief 3 unit U6: a sack weight is kilograms and the
             product setpoint is a cone weight in grams, so spc.ts refuses to

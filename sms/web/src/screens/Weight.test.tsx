@@ -651,3 +651,97 @@ describe('Weight — the period’s target', () => {
     expect(body).not.toContain('no later than');
   });
 });
+
+/**
+ * FRICTION AUDIT F6, the CHART (23 Sep 2026) — the fourth and last surface.
+ *
+ * The block above pins the target TILE. Two lines below it on the same
+ * screen, the control chart was still drawing a USL/LSL band, a Cp/Cpk and a
+ * scale-against-product agreement from the same refused limits version:
+ * measured on epoch 9 (2026-08-05 → 08-20, real IFL data, product 12) the
+ * chart reported `usl 2000, lsl 1920, nominal 1960` and `Cp 1.564,
+ * Cpk 1.209` against limits first recorded on 2026-09-11 — 22 days after the
+ * last reading on it — while the tile beside it refused to state any target.
+ *
+ * `spc.ts` now routes through `resolvePeriodTarget` and withholds all three,
+ * sending the reason as `SpecLimits.limitsOmittedReason`. These cases pin
+ * BOTH halves of what the screen must then say: the reason (so the blank is
+ * not silent), AND that the chart's own statistical content is unaffected
+ * (so the blank does not read as "something is broken"). Neither may read as
+ * "the process is fine".
+ */
+describe('Weight — the chart’s own limits, withheld with a reason', () => {
+  // The whole sentence as `spc.ts` composes it: the shared resolver's reason
+  // followed by CHART_LIMITS_WITHHELD. Sent as ONE string and printed verbatim,
+  // the same route weightStations.ts's `targetOmittedReason` already takes.
+  const REASON =
+    'No target is stated: the earliest limits this system holds for that product were first recorded on ' +
+    '2026-09-11, after this period ended on 2026-08-20. ' +
+    'No tolerance band, Cp/Cpk or scale-against-product comparison is shown for this period, for that reason. ' +
+    'Everything else on this chart is measured from the readings themselves and needs no product limits: the ' +
+    'control band, the mean and spread, the group series and the station comparison are unaffected. This is a gap ' +
+    'in what the system knows about the product, not a judgement about the line.';
+
+  async function renderChart(mutate: (d: SpcData) => void) {
+    const f: Envelope<SpcData> = JSON.parse(JSON.stringify(spcFixture(500, 1948)));
+    mutate(f.data);
+    installFakeFetch({
+      '/api/weight-stations': WEIGHT_STATIONS_OK,
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': f,
+    });
+    const r = render(<WeightScreen {...baseProps()} />);
+    await r.findByRole('heading', { level: 1 });
+    return r;
+  }
+
+  it('prints the service’s reason AND what is still measured, when the limits are withheld', async () => {
+    const { container } = await renderChart((d) => {
+      (d.spec as unknown as Record<string, unknown>).limitsOmittedReason = REASON;
+      d.spec.source = 'none';
+      d.spec.usl = null;
+      d.spec.lsl = null;
+      d.spec.nominal = null;
+      d.capability = { cp: null, cpk: null, pp: null, ppk: null };
+      d.specAgreement = null;
+    });
+    const body = container.textContent ?? '';
+    expect(body).toContain(REASON);
+    expect(body).toContain('No tolerance band, Cp/Cpk or scale-against-product comparison is shown');
+    // The second half is what stops this reading as a breakage.
+    expect(body).toContain('not a judgement about the line');
+    // And no capability FIGURE survives the withdrawal. Matched as
+    // "Cpk <number>", not the bare word: `limitsWithheld` itself names
+    // Cp/Cpk as one of the things it is withholding, so a bare-substring
+    // assertion would fail on the very sentence that proves the fix.
+    expect(body).not.toMatch(/Cpk\s+[\d.]/);
+    expect(body).not.toMatch(/\bCp\s+[\d.]/);
+  });
+
+  it('the chart’s OWN statistics are untouched by the withdrawal', async () => {
+    const { container } = await renderChart((d) => {
+      (d.spec as unknown as Record<string, unknown>).limitsOmittedReason = REASON;
+      d.spec.source = 'none';
+      d.capability = { cp: null, cpk: null, pp: null, ppk: null };
+      d.specAgreement = null;
+    });
+    const body = container.textContent ?? '';
+    // Mean, spread and the I-MR band verdict all come from the readings
+    // themselves and need no product limits — they must still be stated.
+    expect(body).toContain('standard deviation');
+    expect(body).toContain(fmtInt(500));
+    expect(body).not.toContain(W.weight.bandInvalid);
+  });
+
+  it('a period with NO product at all stays silent — the reason is for the refused case only', async () => {
+    // Epoch 1 (2026-06-22 → 07-10) is this case on real data: productId is
+    // null, `getSpec` answers source 'none' with no reason, and there is
+    // nothing to explain beyond the absence of a product. Printing the F6
+    // sentence here would assert a limits record that was never sought.
+    const { container } = await renderChart(() => {});
+    const body = container.textContent ?? '';
+    expect(body).not.toContain('No tolerance band, Cp/Cpk or scale-against-product comparison is shown');
+    expect(body).not.toContain('the earliest limits this system holds');
+  });
+});
