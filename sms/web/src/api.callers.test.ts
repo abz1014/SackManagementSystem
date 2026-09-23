@@ -73,6 +73,26 @@ function listSourceFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * WS-AC (23 Sep 2026 red-team remediation). The caller scan below used to
+ * run its `\bname\b` regex over each file's raw text, so a wrapper's name
+ * merely WRITTEN INSIDE A COMMENT — e.g. explaining what a query does,
+ * never actually calling it — counted as a real caller. `Rejects.tsx`'s own
+ * JSDoc for WS-B1 says "the unmatched query `getRejectSpc` runs is never
+ * narrowed by `rejectType`" while describing the SERVER-side query behind
+ * `getRejectSpcFiltered`; the client wrapper `getRejectSpc` is never once
+ * called (`getRejectSpc(` has exactly one match in web/src — its own
+ * definition in api.ts). That false positive flipped the "ALLOW_LIST is not
+ * stale" check red for an entry that is not stale. Strip comments first so
+ * the scan matches what this test claims to check: real callers, not prose
+ * that happens to name the function.
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments, incl. /** JSDoc */
+    .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments (leaves http:// etc. alone)
+}
+
 /** Every `export function` / `export const foo = (` in api.ts, by name. */
 function exportedWrapperNames(apiSource: string): string[] {
   const names = new Set<string>();
@@ -96,7 +116,7 @@ const wrapperNames = exportedWrapperNames(apiSource);
 const callerFiles = listSourceFiles(SRC_DIR).filter(
   (f) => !f.endsWith(`/${API_FILE}`) && !/\.test\.tsx?$/.test(f) && !f.includes('/testkit/'),
 );
-const callerSource = callerFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
+const callerSource = callerFiles.map((f) => stripComments(readFileSync(f, 'utf8'))).join('\n');
 
 describe('api.ts wrappers are reachable from the app', () => {
   it('scanned a realistic number of exported wrappers (sanity check on the scan itself)', () => {
