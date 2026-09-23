@@ -59,6 +59,30 @@ export type SackUnit = 'sacks' | 'kg';
 const periodLabel = (p: Period): string =>
   p.from === p.to ? fmtDayLong(p.from) : `${fmtDayLong(p.from)} to ${fmtDayLong(p.to)}`;
 
+/**
+ * UX Phase WS-B2 (23 Sep 2026) — THE UNDIAGNOSED FAILURE MODE, established.
+ *
+ * `fmtInt`/`fmtKg` (`lib/fmt.ts`) guard `n == null`, which correctly catches
+ * both `null` and a field simply absent from the wire (`undefined`) — a
+ * bare stripped field already renders the honest "—" those helpers were
+ * built for, with no fix needed here.
+ *
+ * The actual hole is ARITHMETIC done on a possibly-missing field BEFORE
+ * formatting: `Math.round(t.kg)` and `t.sacks - t.noFlag` both produce
+ * `NaN` when the operand is `undefined` (a field an RT-005-shaped response
+ * — a present envelope with keys deleted, see `testkit/fixtures.ts`'s
+ * `stripFields` — did not send), and `NaN == null` is `false`, so `fmtInt`
+ * does NOT catch it. Reproduced live (`Sacks.summaryFigures.test.tsx`): the
+ * headline printed "96 sacks weighed, NaN kg, 94.1% within the scale's
+ * range." and the in-range note printed "90 of NaN the scale passed" — a
+ * plausible-looking three-letter word standing in for a number, on a
+ * report a manager may read or print, neither a throw nor a fabricated
+ * zero. `finiteOrNull` is the one guard that treats "the arithmetic could
+ * not be done" the same honest way `fmtInt`/`fmtKg` already treat "the
+ * field itself was missing" — never inventing a 0.
+ */
+const finiteOrNull = (n: number): number | null => (Number.isFinite(n) ? n : null);
+
 export function SacksScreen({
   period,
   unit,
@@ -116,7 +140,7 @@ export function SacksScreen({
     ? null
     : s.totals.sacks === 0
       ? W.sacks.headlineNone(periodLabel(period))
-      : W.sacks.headline(periodLabel(period), fmtInt(s.totals.sacks), fmtInt(Math.round(s.totals.kg)), s.totals.inRangePct == null ? null : fmtPct1(s.totals.inRangePct));
+      : W.sacks.headline(periodLabel(period), fmtInt(s.totals.sacks), fmtInt(finiteOrNull(Math.round(s.totals.kg))), s.totals.inRangePct == null ? null : fmtPct1(s.totals.inRangePct));
 
   return (
     <>
@@ -271,7 +295,7 @@ function SackWeighedChart({ days }: { days: LedgerDay[] }) {
     key: d.day,
     label: fmtDayShort(d.day),
     value: d.weighed.sacks,
-    detail: `${fmtDayLong(d.day)} · ${fmtInt(d.weighed.sacks)} ${W.sacks.figSacks} · ${fmtInt(Math.round(d.weighed.kg))} ${W.sacks.figKg}`,
+    detail: `${fmtDayLong(d.day)} · ${fmtInt(d.weighed.sacks)} ${W.sacks.figSacks} · ${fmtInt(finiteOrNull(Math.round(d.weighed.kg)))} ${W.sacks.figKg}`,
   }));
   const total = days.reduce((sum, d) => sum + d.weighed.sacks, 0);
   const busiest = days.reduce((best, d) => (d.weighed.sacks > best.weighed.sacks ? d : best), days[0]!);
@@ -405,7 +429,7 @@ function SummaryFigures({ s }: { s: SackSummaryData }) {
       items={[
         { value: fmtInt(t.sacks), unit: W.sacks.figSacks },
         {
-          value: fmtInt(Math.round(t.kg)),
+          value: fmtInt(finiteOrNull(Math.round(t.kg))),
           unit: W.sacks.figKg,
           note: t.avgKg == null ? null : (
             <>
@@ -419,7 +443,7 @@ function SummaryFigures({ s }: { s: SackSummaryData }) {
           unit: W.sacks.figInRange,
           note: (
             <>
-              {W.sacks.inRangeNote(fmtInt(t.inRange), fmtInt(t.sacks - t.noFlag))}
+              {W.sacks.inRangeNote(fmtInt(t.inRange), fmtInt(finiteOrNull(t.sacks - t.noFlag)))}
               {t.noFlag > 0 && <> · {W.sacks.noFlagNote(fmtInt(t.noFlag))}</>}
             </>
           ),
@@ -462,7 +486,7 @@ function GroupTable({
           <tr key={r.key}>
             <td>{r.label}</td>
             <td className="n">{fmtInt(r.sacks)}</td>
-            <td className="n">{fmtInt(Math.round(r.kg))}</td>
+            <td className="n">{fmtInt(finiteOrNull(Math.round(r.kg)))}</td>
             <td className="n">{r.avgKg == null ? '—' : fmtKg(r.avgKg)}</td>
             <td className="n">{r.inRangePct == null ? '—' : fmtPct1(r.inRangePct)}</td>
           </tr>

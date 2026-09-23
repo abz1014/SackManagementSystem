@@ -188,25 +188,56 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
   const ids = [...new Set([...names.map((s) => s.stationId), ...line.stations.map((s) => s.station)])]
     .sort((a, b) => a - b);
 
+  const quietSeconds = (lastTs: string) =>
+    Math.max(0, (new Date(anchor).getTime() - new Date(lastTs).getTime()) / 1000);
+
+  /**
+   * `absent` covers TWO shapes that both mean the same thing to a reader
+   * four metres away — "the server did not tell us what this station did" —
+   * and neither is a genuine zero:
+   *  - the id has no row at all in `line.stations` (only the roster names
+   *    it), the ordinary shape until 23 Sep 2026 and still the common one;
+   *  - the row IS present but has lost a field the wire type promises: a
+   *    non-finite `cones` or an `lastTs` that does not parse — the RT-005
+   *    shape (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), a 200 OK with keys
+   *    deleted from an otherwise real row.
+   * `quiet` is the opposite: a complete, trustworthy row whose OWN
+   * timestamp says it has genuinely been idle. The two must never share a
+   * mark — see the file header, "KEEPING THE FIGURES IS NOT THE SAME AS
+   * KEEPING THE VERDICT".
+   */
+  type StationStatus = 'ok' | 'quiet' | 'absent';
+  const statusOf = (id: number): StationStatus => {
+    const row = byId.get(id);
+    if (!row || !Number.isFinite(row.cones) || Number.isNaN(new Date(row.lastTs).getTime())) return 'absent';
+    return quietSeconds(row.lastTs) > QUIET_AFTER_SECONDS ? 'quiet' : 'ok';
+  };
+
   // The row scales to its own maximum, so the board reads every shift rather
   // than sitting at a tenth of a fixed ceiling. It is a picture of THIS shift,
   // not a comparison against another day's photograph of the wall.
-  const rowMax = Math.max(1, ...ids.map((id) => byId.get(id)?.cones ?? 0));
+  //
+  // Built from stations we actually heard a real, finite count from — an
+  // absent/malformed row (see `statusOf`) no longer feeds a `?? 0` into this
+  // computation. Before 23 Sep 2026 a malformed row silently entered the max
+  // AND the median as a genuine zero, which for the median in particular
+  // drags the "typical" reference line down and makes every healthy station
+  // read as "above typical" for a reason that has nothing to do with the
+  // line.
+  const knownCones = ids
+    .map((id) => byId.get(id))
+    .filter((row): row is { station: number; cones: number; lastTs: string } => row != null && Number.isFinite(row.cones))
+    .map((row) => row.cones);
+  const rowMax = Math.max(1, ...knownCones);
   // UX Phase 11 (22 Sep 2026): max-normalised bars alone draw the eye to
   // absolute height, nearly identical across stations on a healthy line,
   // rather than to deviation — the actual question a glance from the
   // doorway needs answered. A dashed line at the median count, on the same
   // 0..rowMax basis as every bar, is what makes "above/below typical" the
   // thing that's readable, not just "all fourteen are tall".
-  const rowMedianRatio = Math.min(1, medianOf(ids.map((id) => byId.get(id)?.cones ?? 0)) / rowMax);
+  const rowMedianRatio = Math.min(1, medianOf(knownCones) / rowMax);
 
-  const quietSeconds = (lastTs: string) =>
-    Math.max(0, (new Date(anchor).getTime() - new Date(lastTs).getTime()) / 1000);
-
-  const quietCount = ids.filter((id) => {
-    const row = byId.get(id);
-    return !row || quietSeconds(row.lastTs) > QUIET_AFTER_SECONDS;
-  }).length;
+  const quietCount = ids.filter((id) => statusOf(id) === 'quiet').length;
 
   return (
     <div className="wall" onDoubleClick={onExit}>
@@ -257,14 +288,17 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
         </div>
         <div className="w-st" style={{ ['--st-count' as string]: String(ids.length) }}>
           {ids.map((id) => {
-            const row = byId.get(id);
-            const cones = row?.cones ?? 0;
-            const quiet = !row || quietSeconds(row.lastTs) > QUIET_AFTER_SECONDS;
+            const status = statusOf(id);
+            const row = status === 'absent' ? undefined : byId.get(id);
+            const cones = row?.cones ?? null;
             const flag = flagged.has(id);
             // Zero is the only genuine gap; anything produced gets a bar.
-            const r = cones === 0 ? 0 : Math.max(BAR_MIN_RATIO, cones / rowMax);
+            // Absent draws no bar at all — there is no measurement to size
+            // it from, and a zero-height bar reads as "produced nothing",
+            // which is a claim this row cannot support.
+            const r = status === 'absent' || cones === 0 ? 0 : Math.max(BAR_MIN_RATIO, (cones as number) / rowMax);
             return (
-              <div key={id} className={flag ? 'flag' : quiet ? 'quiet' : undefined}>
+              <div key={id} className={flag ? 'flag' : status !== 'ok' ? status : undefined}>
                 <span className="bar-track">
                   <span className="bar" style={{ height: `calc(var(--bar-max) * ${r.toFixed(4)})` }} />
                   {/* [PHASE 11 R3] Same fraction on every station's cell, so the
@@ -278,7 +312,12 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
                   <span className="bar-median" style={{ bottom: `calc(var(--bar-max) * ${rowMedianRatio.toFixed(4)})` }} />
                 </span>
                 <span className="cap">
-                  <b>{cones === 0 ? '—' : fmtInt(cones)}</b>
+                  {/* "?" is a THIRD glyph, deliberately not "—" (a genuine
+                      zero, still used below) and not a number (a real
+                      count). A reader four metres away who has learned
+                      "dash means nothing happened" must not read "?" the
+                      same way — it means "we don't know", not "nothing". */}
+                  <b>{status === 'absent' ? '?' : cones === 0 ? '—' : fmtInt(cones as number)}</b>
                   <i>{names.find((n) => n.stationId === id)?.name?.trim() || id}</i>
                 </span>
               </div>
@@ -332,6 +371,20 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
   );
 }
 
+/**
+ * Local only — not a `words.ts` string (owned by a parallel worker for this
+ * whole programme). Report to that owner: `W.state.stopped` has no variant
+ * for "stopped, duration unknown" — it takes a span and always prints one.
+ * `behindSeconds ?? 0` used to hand it a fabricated "0 s" whenever the
+ * server genuinely did not know how long the line had been down (the field
+ * is typed `number | null` in `LiveLine.state`), which prints "stopped for
+ * 0 s" — a real-looking, false claim — for a line that has in fact been
+ * down for an unknown, possibly long, time. A biggest-thing-on-the-board
+ * sentence stating a duration it does not have is exactly the over-claim
+ * this pass exists to remove.
+ */
+const STOPPED_DURATION_UNKNOWN_LOCAL = 'has stopped; how long is not known';
+
 /** The biggest thing on the board, and the only one read from outside the room. */
 function stateSentence(line: LiveLine, knowable: boolean, anchor: string): string {
   if (!knowable) return W.state.unknown;
@@ -340,7 +393,9 @@ function stateSentence(line: LiveLine, knowable: boolean, anchor: string): strin
     case 'running':
       return `${name} ${W.state.running}`;
     case 'stopped':
-      return `${name} ${W.state.stopped(fmtSpan(line.state.behindSeconds ?? 0))}`;
+      return line.state.behindSeconds != null
+        ? `${name} ${W.state.stopped(fmtSpan(line.state.behindSeconds))}`
+        : `${name} ${STOPPED_DURATION_UNKNOWN_LOCAL}`;
     default:
       return `${name} ${W.state.idle(fmtClock(anchor))}`;
   }

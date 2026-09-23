@@ -1003,6 +1003,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .w-st .quiet b, .w-st .quiet i { color: var(--grid); }
 .w-st .flag .bar { background: var(--acc-pale); border-top-color: var(--acc); }
 .w-st .flag b { color: var(--acc); }
+/* UX Phase WS-B2 (23 Sep 2026): `.absent` is a THIRD state, not a colour
+   variant of `.quiet` — "we heard nothing from the server about this
+   station" must not share a look with "the server told us it is idle". No
+   bar is drawn at all (JS sends a 0 ratio for `absent`, same as a genuine
+   zero, but the dashed cap border below is what tells the two apart even
+   at that shared height), and the caption's own rule turns dashed so the
+   whole cell reads as an outline rather than a filled fact, from across a
+   room, without a new colour token. */
+.w-st .absent .cap { border-top-style: dashed; border-top-color: var(--rule-2); }
+.w-st .absent b, .w-st .absent i { color: var(--muted); font-style: italic; }
 
 .w-foot {
   padding: 1.5vh 3.6vw; background: var(--paper-3);

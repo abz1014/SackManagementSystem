@@ -719,31 +719,76 @@ export function RejectTrendChart({
 
   const wByTs = new Map((weight ?? []).map((b) => [b.bucketTs, b]));
   const pct = (r: number | null) => (r == null ? null : r * 100);
+  // UX Phase WS-B2 (23 Sep 2026): `q`/`w` are `number | null`, never `?? 0`.
+  // `b.rate` is already nullable in the wire type ("no valid rate this
+  // bucket"), and `wb` itself can be entirely absent ("no matching
+  // weight-reject bucket for this day at all") — both used to collapse
+  // through `pct(...) ?? 0` into a literal 0%, indistinguishable on the
+  // chart from a genuinely perfect day. `wn` mirrors that: `wb?.rejects`
+  // stays null rather than a fabricated zero reject count.
   const series = days.map((b) => {
     const wb = wByTs.get(b.bucketTs) ?? null;
     return {
       ts: b.bucketTs,
-      q: pct(b.rate) ?? 0,
-      w: pct(wb?.rate ?? null) ?? 0,
+      q: pct(b.rate),
+      w: pct(wb?.rate ?? null),
       qUcl: pct(b.ucl),
+      // `qLcl ?? 0` below (bandPath) is a defensive fallback only, never
+      // observed to fire: rejectSpc.ts sets ucl and lcl together in the same
+      // branch (api/src/services/rejectSpc.ts:374-396), so any index this
+      // component treats as "has a valid ucl" also has a valid lcl. Kept as
+      // `?? 0` rather than a non-null assertion so a future change to that
+      // invariant fails soft (a 0% floor) instead of throwing on this chart.
       qLcl: pct(b.lcl),
       wUcl: pct(wb?.ucl ?? null),
       qOut: b.outOfControl,
       wOut: wb?.outOfControl ?? false,
       produced: b.produced,
       qn: b.rejects,
-      wn: wb?.rejects ?? 0,
+      wn: wb?.rejects ?? null,
     };
   });
   // The y-range covers the band too, or a ceiling above every point would
-  // be clipped off the top of the plot.
-  const max = Math.max(...series.map((s) => Math.max(s.q, s.w, s.qUcl ?? 0, s.wUcl ?? 0)), 1);
+  // be clipped off the top of the plot. Built from only the values a bucket
+  // actually reported — a missing rate/limit must not silently cap the
+  // scale by pretending it was a zero (the same `?? 0` collapse this pass
+  // removes from the plotted points themselves).
+  const numericExtents = series.flatMap((s) => [s.q, s.w, s.qUcl, s.wUcl].filter((v): v is number => v != null));
+  const max = Math.max(...numericExtents, 1);
   const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
   const y = (v: number) => T + ((max - v) / max) * (H - T - B);
 
   const inPeriod = (ts: string) => periodFrom != null && periodTo != null && ts.slice(0, 10) >= periodFrom && ts.slice(0, 10) <= periodTo;
   const firstIn = series.findIndex((s) => inPeriod(s.ts));
   const lastIn = series.map((s) => inPeriod(s.ts)).lastIndexOf(true);
+
+  /** Indices grouped into consecutive runs where `pred(i)` holds — the same
+   *  device the band below already used for "a day too thin for a valid
+   *  limit breaks the band rather than being bridged"; from this pass, also
+   *  used for the quality/weight LINES themselves so a missing bucket draws
+   *  a gap rather than a point bridged through a fabricated 0. */
+  const runsWhere = (pred: (i: number) => boolean): number[][] => {
+    const runs: number[][] = [];
+    for (let i = 0; i < series.length; i++) {
+      if (!pred(i)) continue;
+      const run = runs[runs.length - 1];
+      if (run && run[run.length - 1] === i - 1) run.push(i);
+      else runs.push([i]);
+    }
+    return runs;
+  };
+  const qRuns = runsWhere((i) => series[i]!.q != null);
+  const wRuns = weight ? runsWhere((i) => series[i]!.w != null) : [];
+  let lastQIdx: number | null = null;
+  for (let i = series.length - 1; i >= 0; i--) if (series[i]!.q != null) { lastQIdx = i; break; }
+  let lastWIdx: number | null = null;
+  for (let i = series.length - 1; i >= 0; i--) if (series[i]!.w != null) { lastWIdx = i; break; }
+  /** Local only — not a `words.ts` string (owned by a parallel worker for
+   *  this whole programme). Report to that owner: a proper string belongs
+   *  beside `W.rejectsMore.aboveUsual` for "this bucket has no valid rate",
+   *  used only in the hover readout when the hovered day is a gap. */
+  const NO_READING_LOCAL = 'no reading this day';
+  const fmtRateOrGap = (v: number | null): string => (v == null ? NO_READING_LOCAL : `${v.toFixed(1)}%`);
 
   // The band: UCL over LCL, per bucket (a p-chart for varying sample size
   // gives every day its own limits). Drawn only across runs of days that
@@ -777,8 +822,8 @@ export function RejectTrendChart({
         hovered={
           h
             ? weight
-              ? `${labelFmt(h.ts)} · ${W.rejects.quality} ${h.q.toFixed(1)}% · ${W.rejects.weightKind} ${h.w.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
-              : `${labelFmt(h.ts)} · ${qName} ${h.q.toFixed(1)}% · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+              ? `${labelFmt(h.ts)} · ${W.rejects.quality} ${fmtRateOrGap(h.q)} · ${W.rejects.weightKind} ${fmtRateOrGap(h.w)} · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+              : `${labelFmt(h.ts)} · ${qName} ${fmtRateOrGap(h.q)} · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
             : null
         }
         resting={periodFrom != null ? `${series.length} days · the shaded band is the selected period` : `${series.length} days`}
@@ -809,20 +854,56 @@ export function RejectTrendChart({
           />
         )}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
-        <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.q) })))} fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round" />
-        {weight && (
-          <path d={linePath(series.map((s, i) => ({ x: x(i), y: y(s.w) })))} fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round" />
+        {/* UX Phase WS-B2 (23 Sep 2026): one <path> per RUN of consecutive
+            days that actually have a value, not one path spanning the whole
+            series — a bucket with no valid rate (or, for weight, no
+            matching bucket at all) breaks the line instead of being bridged
+            through a fabricated 0%. A run of exactly one day still needs a
+            mark: a single moveto with no lineto paints nothing, so an
+            isolated real reading gets its own dot rather than vanishing. */}
+        {qRuns.map((run) =>
+          run.length === 1 ? (
+            <circle key={`ql${run[0]}`} cx={x(run[0]!)} cy={y(series[run[0]!]!.q!)} r={2.5} fill="var(--ink)" />
+          ) : (
+            <path
+              key={`ql${run[0]}`}
+              d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.q!) })))}
+              fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round"
+            />
+          ),
         )}
-        {/* Out-of-control days, in the mark Weight's control chart uses. */}
-        {series.map((s, i) => (s.qOut ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
-        {weight && series.map((s, i) => (s.wOut ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
-        {/* Labelled on the mark, so the chart needs no legend. */}
-        <text x={width - R + 10} y={y(series[series.length - 1]!.q) + 4} fontSize="var(--fs-small)" fill="var(--ink)">
-          {qName} {series[series.length - 1]!.q.toFixed(1)}%
-        </text>
-        {weight && (
-          <text x={width - R + 10} y={y(series[series.length - 1]!.w) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
-            {W.rejects.weightKind} {series[series.length - 1]!.w.toFixed(1)}%
+        {weight &&
+          wRuns.map((run) =>
+            run.length === 1 ? (
+              <circle key={`wl${run[0]}`} cx={x(run[0]!)} cy={y(series[run[0]!]!.w!)} r={2} fill="var(--graphite)" />
+            ) : (
+              <path
+                key={`wl${run[0]}`}
+                d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.w!) })))}
+                fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round"
+              />
+            ),
+          )}
+        {/* Out-of-control days, in the mark Weight's control chart uses.
+            `s.qOut`/`s.wOut` can only be true where the bucket had a valid
+            rate (rejectSpc.ts sets `outOfControl` inside the same branch
+            that sets `rate`), but `s.q != null` is kept as an explicit guard
+            here rather than a non-null assertion, matching this pass's rule
+            of never asserting past a value this component cannot itself
+            verify. */}
+        {series.map((s, i) => (s.qOut && s.q != null ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
+        {weight && series.map((s, i) => (s.wOut && s.w != null ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
+        {/* Labelled on the mark, so the chart needs no legend — on the LAST
+            day that actually has a value, not the last index: the newest
+            bucket in the window may itself be the gap. */}
+        {lastQIdx != null && (
+          <text x={width - R + 10} y={y(series[lastQIdx]!.q!) + 4} fontSize="var(--fs-small)" fill="var(--ink)">
+            {qName} {series[lastQIdx]!.q!.toFixed(1)}%
+          </text>
+        )}
+        {weight && lastWIdx != null && (
+          <text x={width - R + 10} y={y(series[lastWIdx]!.w!) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
+            {W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%
           </text>
         )}
         {series.map((_, i) => (
