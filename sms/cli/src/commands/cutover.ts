@@ -172,7 +172,12 @@ export async function cutover(argv: string[]): Promise<number> {
       );
 
     console.log(`\ndone. The generation registry is empty and migration 025's seed will not re-run.`);
-    console.log(`Next:  sms epoch:accept --all --confirm --provenance <ifl_live|ifl_copy|simulator> --label "..."`);
+    // Equals signs, not spaces: parseArgs only understands --key=value, and a
+    // bare `--provenance ifl_live` parses as a flag plus a stray word (the
+    // same trap epoch.ts already warns about for --label). Since 23 Sep 2026
+    // that shape is refused rather than silently defaulted, so this line
+    // printed a command the next step would reject.
+    console.log(`Next:  sms epoch:accept --all --confirm --provenance=<ifl_live|ifl_copy|simulator> --label="..."`);
     console.log(`       sms sync        (backfills the generation just registered)`);
     console.log(`       sms verify      (a STOP after the backfill has settled is a STOP condition)`);
     return 0;

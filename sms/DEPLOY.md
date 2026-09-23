@@ -443,6 +443,29 @@ ALTER ROLE db_backupoperator ADD MEMBER sms_backup;
   `EXEC master.dbo.xp_instance_regread N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'BackupDirectory';`
 - **Monthly:** test a restore into a scratch DB — an untested backup is not a backup.
 - **Before any canonical rebuild:** the `sms rebuild` command **requires** a point-in-time snapshot id and refuses without it (`ARCHITECTURE §18`). This is separate from and more precise than the nightly backup.
+- **A rebuild must name the source generation it means** (23 Sep 2026). The
+  full form is
+  `sms rebuild --table=<t> --snapshot-id=<id> (--epoch=N[,M] | --all-generations) --confirm`.
+  There is no default scope. **Until 23 Sep 2026 there was none at all**: the
+  command scoped by `source_system` only, so one `--table=cone_event` deleted
+  and re-derived *every* generation's cone rows together — on the development
+  sidecar that is 487,936 rows across IFL's July copy, IFL's September copy
+  and the simulator. Run it without a scope and it now prints every
+  generation of the table with its row count and exits 2; run it with one and
+  it prints exactly what it will delete, what it will re-derive it from, and
+  what it will leave alone, then refuses without `--confirm`.
+  `sms epoch:list` names the generations.
+- **What a rebuild does and does not restore.** Canonical rows are re-derived
+  from `sms_raw.*`, which the command never touches, so the rows come back.
+  Two things do not: the transform applies the shift rule, plausibility rule
+  and station roster **on file now**, so a re-derived row is stamped under
+  today's rules rather than the ones in force when it was first transformed;
+  and `sms.dq_finding` carries no generation, so a targeted rebuild clears
+  none of it (stale findings may sit beside the new ones) while
+  `--all-generations` clears the table's **non-critical** findings only. A
+  CRITICAL finding is never deleted by a rebuild — `transform_zero_write` is
+  the alarm saying rows were *not* written, and losing it is how a real loss
+  becomes invisible.
 - **Rebuild and the sync-worker service are now mutually exclusive** (Sep 2026
   audit fix, C1): `sms rebuild` and the service's own 60s transform pass take
   the same `sp_getapplock`, so running `sms rebuild` with the service still
@@ -514,6 +537,26 @@ the backup file is good.
 - **`node cli/dist/index.js verify`** — full reconciliation + DQ findings.
 - **`node cli/dist/index.js summary --date=YYYY-MM-DD`** — spot-check totals from the shell.
 - **Logs** — structured JSON lines in `logs\sync.log` / `logs\api.log`.
+
+### Which CLI commands know about source generations (23 Sep 2026)
+
+`sms.source_epoch` is the only thing keeping IFL's two data generations apart
+(they dropped and recreated all four weighing tables on 2026-08-05, restarting
+every identity at 1). A command that ignores it either reports a pooled number
+as if it were one generation's, or operates across generations the operator did
+not mean. Audited command by command; re-audit this table whenever a command is
+added.
+
+| Command | Generation-aware | What a wrong answer costs |
+|---|---|---|
+| `sync` | **yes** — the worker resolves the generation before every read and halts on an unknown one | it halts rather than guessing; this is the gate everything else rests on |
+| `verify` | **yes** — per-generation identity, `COUNT/MIN/MAX/SUM(id)` against the open generation only, closed ones reported as archived, `raw ⇄ canonical` by key per epoch, and `--weights` likewise | read-only; a wrong answer here is a missed or false alarm, not a deletion |
+| `epoch:list` / `epoch:accept` / `epoch:purge` / `epoch:drop` | **yes** — generations are their subject | `epoch:purge` deletes raw **and** canonical for the named epochs; its gates (`--backup=<path.bak>`, `--confirm`, no pass in flight, transform lock) are the model the rebuild gates now follow |
+| `rebuild` | **yes, since 23 Sep 2026** — `--epoch=` or `--all-generations`, required, no default. **Before that: no.** It scoped by `source_system` alone and rebuilt every generation of the table together | the one command that deletes canonical rows. They are re-derivable from `sms_raw.*` (untouched), so the rows come back; the stamping and the DQ history do not — see *Backup & restore* above |
+| `cutover` | n/a by design — it clears raw **and** canonical for **everything**, which is what a cutover is. Gated by `--backup`, `--confirm` and the in-flight check | total loss of the sidecar's archive if run with a bad or missing backup; the gates are the whole defence |
+| `retention` | n/a — prunes `sync_run`, non-critical `dq_finding` and expired sessions only, and never a reading of either layer | prints what it will never touch on every run |
+| `summary` | **NO** — `sms.cone_event` / `sack_event` / `reject_event` are aggregated by `shift_date` with no epoch predicate | read-only, but it will silently add two generations' rows together wherever their production days overlap. On this dev sidecar the simulator's generation overlaps IFL's September one, so `summary` over 21 Aug – 7 Sep reports roughly three times the real cone count. **Do not quote `sms summary` to IFL while more than one generation covers the same days.** Not fixed here: the same omission runs through most API read services and is one decision, not a per-command patch |
+| `user:create` / `user:password` | n/a — accounts, not readings | — |
 
 ### Health
 
@@ -664,7 +707,7 @@ There is no `SESSION_SECRET`: sessions are server-side random UUIDs (`sms.sessio
 
 No redeploy needed — an **admin sets it once in the UI** (`ARCHITECTURE §4`):
 - **Q4/Q5 weights (gross/net):** Admin → Interpretation rules → Weight basis. Applies immediately.
-- **Q7 shift (fix/reproduce):** Admin → Shift basis, then `sms rebuild --table=cone_event --snapshot-id=<id>` to apply to stored data.
+- **Q7 shift (fix/reproduce):** Admin → Shift basis, then `sms rebuild --table=cone_event --snapshot-id=<id> --epoch=<the generation you mean> --confirm` to apply to stored data. Name the generation: restamping every generation under the new rule is `--all-generations`, and it is a decision, not a side effect. `sms epoch:list` first.
 - **Q10 reject codes:** Rejects view → type labels (manager+).
 - **Q11 station names:** Admin → Station labels.
 - **Q1 current product:** Dashboard → Current Product selector (supervisor+).

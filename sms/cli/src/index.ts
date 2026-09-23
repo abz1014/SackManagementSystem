@@ -17,7 +17,14 @@ function help(): void {
   sms verify [--weights]            reconcile source ⇄ raw ⇄ canonical; list DQ findings
                                     (--weights: also COUNT/SUM/AVG/MIN/MAX of every weight column)
   sms summary [--date=YYYY-MM-DD]   print totals (cones/rejects/sacks/weight) [--shift=]
-  sms rebuild --table=<t> --snapshot-id=<id>   rebuild canonical from raw (snapshot-gated)
+  sms rebuild --table=<t> --snapshot-id=<id> (--epoch=N[,M] | --all-generations) --confirm
+                                    delete a canonical table's rows for the NAMED source
+                                    generation(s) and re-derive them from sms_raw.* (which is
+                                    not touched). The generation scope is REQUIRED and has no
+                                    default: until 23 Sep 2026 this command scoped by
+                                    source_system alone and rebuilt every generation at once.
+                                    Prints what it will delete and re-derive, per generation,
+                                    and refuses without --confirm.
   sms cutover --confirm --backup=<path.bak>
                                     clear raw/canonical + gate baselines, keep users, products,
                                     labels, rules and audit; refuses without an existing backup
