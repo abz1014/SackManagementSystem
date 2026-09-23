@@ -374,6 +374,7 @@ const summaryData: any = {
   period: { from: '2026-09-01', to: '2026-09-03' },
   prior: { from: '2026-08-29', to: '2026-08-31' },
   coverage: { current: coverage, prior: coverage },
+  attribution: { current: 1, prior: 0.98 },
   kpis: [
     { key: 'cones', label: 'Cones', unit: 'count', current: 300, prior: 280, delta: { abs: 20, pct: 7.1 }, betterWhen: 'higher', approval: 'awaiting', comparable: true, incomparableReason: null },
   ],

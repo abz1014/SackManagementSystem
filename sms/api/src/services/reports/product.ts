@@ -25,7 +25,7 @@ import { bindStateCase, foldStateCounts, loadStateContext, plausibleWhere, type 
 import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { loadProductCatalogue, limitsFromVersion } from '../productLimits.js';
 import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js';
-import { round, type ReportFilters } from './common.js';
+import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
 export interface ProductReportRow extends ReportLine {
@@ -44,9 +44,24 @@ export interface ProductReportRow extends ReportLine {
    * judge it against) and for a product whose version carries no usable
    * limits.
    */
-  target: { setpointG: number; loG: number; hiG: number; inForceAtUtc: string; limitsChangedInPeriod: number } | null;
+  target: {
+    setpointG: number;
+    loG: number;
+    hiG: number;
+    inForceAtUtc: string;
+    /**
+     * F6 (23 Sep 2026): the limits were first SEEN at `inForceAtUtc`, not
+     * known to have STARTED then — read the instant as "no later than".
+     * Carried through from productLimits.ts's `effectiveIsLowerBound` instead
+     * of being dropped on the way out, as it was here and in coneWeight.ts.
+     */
+    inForceIsLowerBound: boolean;
+    limitsChangedInPeriod: number;
+  } | null;
   /** Signed grams of this row's own mean weight against its own target; null when `target` is null or the mean is unknown. */
   vsTargetG: number | null;
+  /** F6: why `target` is null although the product has recorded limits; null otherwise. */
+  targetOmittedReason: string | null;
 }
 
 export interface ProductReportData {
@@ -124,20 +139,34 @@ export async function getProductReport(
     const productId = r.group === NO_PRODUCT_GROUP ? null : Number(r.group);
     const avgG = round(w?.avg);
     let target: ProductReportRow['target'] = null;
+    let targetOmittedReason: string | null = null;
     if (productId != null) {
       const v = catalogue.versionAt(productId, endMs);
       const lim = limitsFromVersion(v);
-      if (v && lim) {
+      // F6: a version that begins AFTER this period ended did not exist while
+      // these readings were taken, and `vsTargetG` computed against it would
+      // be a difference from limits that were never applied. No target, and
+      // the row says why.
+      const pt = resolvePeriodTarget(v, endMs, to);
+      targetOmittedReason = pt.omittedReason;
+      if (v && lim && pt.usable) {
         const changed = catalogue
           .versionsAscending(productId)
           .filter((x) => x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
-        target = { setpointG: lim.targetG, loG: lim.loG, hiG: lim.hiG, inForceAtUtc: v.effectiveFromUtc, limitsChangedInPeriod: changed };
+        target = {
+          setpointG: lim.targetG, loG: lim.loG, hiG: lim.hiG,
+          inForceAtUtc: v.effectiveFromUtc, inForceIsLowerBound: pt.isLowerBound, limitsChangedInPeriod: changed,
+        };
       }
     }
     return {
       ...line,
       productId,
-      productLabel: productId == null ? 'No product on the reading' : (catalogue.product(productId)?.label ?? `Product ${productId}`),
+      // F7 (23 Sep 2026): the DISTINCT label, not the bare description. Six
+      // PDAS materials on this line are all called "205-IL0-SD"; this row's
+      // name has to survive being exported to a spreadsheet, where there is
+      // no row to click and nothing but the name and the numbers.
+      productLabel: productId == null ? 'No product on the reading' : catalogue.distinctLabel(productId),
       weight: {
         n: Number(w?.n ?? 0),
         avgG,
@@ -149,6 +178,7 @@ export async function getProductReport(
       implausible: Number(w?.excluded ?? 0),
       target,
       vsTargetG: target == null || avgG == null ? null : round(avgG - target.setpointG),
+      targetOmittedReason,
     };
   });
 
@@ -177,6 +207,9 @@ export const PRODUCT_CSV_HEADERS = [
   'sacks', 'sack_weight_kg', 'weight_n', 'weight_avg_g', 'weight_sd_g', 'weight_min_g', 'weight_max_g',
   'within', 'low', 'high', 'rejected', 'unknown', 'implausible_excluded',
   'target_g', 'vs_target_g', 'limits_changed_in_period',
+  // F6 (23 Sep 2026): a target may never travel without the instant it was in
+  // force at, and "no later than" is a different claim from "since".
+  'target_in_force_at_utc', 'target_in_force_is_lower_bound', 'target_omitted_reason',
 ] as const;
 
 export function productCsv(d: ProductReportData): CsvTable {
@@ -185,6 +218,7 @@ export function productCsv(d: ProductReportData): CsvTable {
     r.sacks, r.sackWeightKg, r.weight.n, r.weight.avgG, r.weight.sdG, r.weight.minG, r.weight.maxG,
     r.states.within, r.states.low, r.states.high, r.states.rejected, r.states.unknown, r.implausible,
     r.target?.setpointG ?? null, r.vsTargetG, r.target?.limitsChangedInPeriod ?? null,
+    r.target?.inForceAtUtc ?? null, r.target?.inForceIsLowerBound ?? null, r.targetOmittedReason,
   ]);
   return { headers: PRODUCT_CSV_HEADERS, rows };
 }

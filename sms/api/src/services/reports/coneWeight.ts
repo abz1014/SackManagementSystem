@@ -28,7 +28,8 @@ import { getProduction } from '../production.js';
 import type { ResolvedPeriod } from '../report.js';
 import { getWeights, type Basis, type Bucket } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
-import { round, type ReportFilters } from './common.js';
+import { loadProductCatalogue } from '../productLimits.js';
+import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
 export interface ConeWeightReportData {
@@ -67,9 +68,23 @@ export interface ConeWeightReportData {
     label: string | null;
     /** When this target began applying — the version qualifier, same instant convention as spc.ts's limitsEffectiveFromUtc. */
     inForceAtUtc: string | null;
+    /**
+     * F6 (23 Sep 2026): "first SEEN at that instant, not known to have STARTED
+     * then" — productLimits.ts's `effectiveIsLowerBound`, carried through at
+     * last instead of being dropped between layers. When true, `inForceAtUtc`
+     * means NO LATER THAN that instant, which is a weaker claim and must be
+     * printed as one.
+     */
+    inForceIsLowerBound: boolean;
     /** How many times this target's OWN limits changed inside the period (a version that BEGAN inside it, not merely in force at its end). */
     limitsChangedInPeriod: number;
     source: 'in_force_at_period_end' | 'none';
+    /**
+     * Why `source` is 'none' although the line had a product, in words fit to
+     * print. Null when a target is stated, and null for the ordinary "no
+     * product was in force" case, which needs no explanation beyond itself.
+     */
+    omittedReason: string | null;
   };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
   lineMeanG: number | null;
@@ -105,7 +120,7 @@ export async function getConeWeightReport(
   _filters: ReportFilters,
 ): Promise<ConeWeightReportData> {
   const { from, to } = resolved;
-  const [w, prod, stations, plausibility] = await Promise.all([
+  const [w, prod, stations, plausibility, catalogue] = await Promise.all([
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
     // resolves that to the basis Setup has on file (weights.ts's loadWeightRule),
     // the same row every other basis-aware figure in the app reads.
@@ -113,8 +128,27 @@ export async function getConeWeightReport(
     getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true }),
     getWeightStations(pool, lineId, from, to),
     getPlausibilityRule(pool, lineId),
+    // F6 (23 Sep 2026): the versioned limits history, read HERE rather than
+    // taken on trust from getWeightStations, which resolves the same version
+    // and then drops its `effectiveIsLowerBound` flag
+    // (weightStations.ts:196 — a different owner's file; reported, not
+    // edited). This report states the target on its own front page, so it
+    // resolves the qualifier itself rather than inheriting a claim it cannot
+    // check.
+    loadProductCatalogue(pool),
   ]);
   const window = { loG: plausibility.coneLoG, hiG: plausibility.coneHiG };
+  // The same instant convention weightStations.ts and product.ts use for
+  // "the limits in force at the period's end".
+  const periodEndMs = new Date(`${to}T23:59:59Z`).getTime();
+  const targetVersion = stations.productId != null ? catalogue.versionAt(stations.productId, periodEndMs) : null;
+  const resolvedTarget = resolvePeriodTarget(targetVersion, periodEndMs, to);
+  // Suppress ONLY the demonstrated F6 case — a version that began after the
+  // period ended. A product with no recorded version at all keeps the old
+  // behaviour (a target with a null instant, which claims no date and so
+  // states nothing untrue); narrowing it that far is deliberate, so this fix
+  // cannot quietly blank a target it was not written to doubt.
+  const stateTarget = stations.targetG != null && !(targetVersion != null && !resolvedTarget.usable);
   // Phase 9's median (`cone.median`, landed in this same wave), when the
   // service reports one; this report's own query over the same population
   // otherwise. Read loosely on purpose, so a weights.ts built before Phase 9
@@ -138,12 +172,14 @@ export async function getConeWeightReport(
     bucketSizeG: w.cone.bucketSize,
     histogram: w.cone.histogram,
     target: {
-      setpointG: stations.targetG,
+      setpointG: stateTarget ? stations.targetG : null,
       productId: stations.productId,
-      label: stations.productLabel,
-      inForceAtUtc: stations.targetEffectiveFromUtc,
-      limitsChangedInPeriod: stations.limitsChangedInWindow ?? 0,
-      source: stations.targetG != null ? 'in_force_at_period_end' : 'none',
+      label: stateTarget ? stations.productLabel : null,
+      inForceAtUtc: stateTarget ? (resolvedTarget.inForceAtUtc ?? stations.targetEffectiveFromUtc) : null,
+      inForceIsLowerBound: stateTarget && resolvedTarget.isLowerBound,
+      limitsChangedInPeriod: stateTarget ? (stations.limitsChangedInWindow ?? 0) : 0,
+      source: stateTarget ? 'in_force_at_period_end' : 'none',
+      omittedReason: stateTarget ? null : resolvedTarget.omittedReason,
     },
     byStation: stations.stations.map((s) => ({
       station: s.station, n: s.n, meanG: s.meanG, vsLineG: s.vsLineG, vsTargetG: s.vsTargetG, flagged: s.flagged,
@@ -158,7 +194,11 @@ export async function getConeWeightReport(
           : `Weights as the scale recorded them (the weight basis is not yet confirmed by IFL). `) +
       'Every statistic is over readings inside the plausibility window; the excluded count is stated. The target is the ' +
       'line-wide product in force at the END of this period, from the same versioned limits the station table below uses ' +
-      '— never today\'s product applied backwards over the whole period, and never an invented number when none was in force.',
+      '— never today\'s product applied backwards over the whole period, and never an invented number when none was in force.' +
+      (resolvedTarget.omittedReason ? ` ${resolvedTarget.omittedReason}` : '') +
+      (stateTarget && resolvedTarget.isLowerBound
+        ? ' Those limits were first SEEN at the instant stated, not known to have started then, so read it as "no later than".'
+        : ''),
   };
 }
 
@@ -179,6 +219,9 @@ export function coneWeightCsv(d: ConeWeightReportData): CsvTable {
     kv('max_g', d.maxG),
     kv('target_g', d.target.setpointG),
     kv('target_source', d.target.source),
+    kv('target_in_force_at_utc', d.target.inForceAtUtc),
+    kv('target_in_force_is_lower_bound', d.target.inForceIsLowerBound),
+    kv('target_omitted_reason', d.target.omittedReason),
     kv('plausible_lo_g', d.plausibility.loG),
     kv('plausible_hi_g', d.plausibility.hiG),
   ];

@@ -32,6 +32,7 @@ import mssql from 'mssql';
 import { toPlantMs, toPlantIso } from './plantClock.js';
 import type { ProductLimits } from './productAt.js';
 import { auditedWrite, type Db } from './audit.js';
+import { distinctProductLabels, type ProductNameParts } from './productNames.js';
 
 /**
  * 'pdas_observed' — the sync worker noticed the PDAS mirror changed underneath
@@ -81,8 +82,9 @@ export interface LimitVersion {
   source: LimitSource;
 }
 
-export interface CatalogueProduct {
+export interface CatalogueProduct extends ProductNameParts {
   productId: number;
+  /** The PLAIN name — `description || lot_code || "Product N"`. Six materials on this line share one. */
   label: string;
   /** PDAS MaterialActive as last mirrored — informational, never enforced. */
   activeFlag: boolean | null;
@@ -119,9 +121,20 @@ export class ProductCatalogue {
   private readonly products = new Map<number, CatalogueProduct>();
   /** Newest first, per product. */
   private readonly versions = new Map<number, LimitVersion[]>();
+  /**
+   * productId → a name unique across the whole catalogue (friction audit F7).
+   * Computed once here so every consumer — report payload, CSV, XLSX, PDF —
+   * gets the same answer, rather than each screen patching around a collision
+   * in the browser and each export shipping the collision.
+   */
+  private readonly distinct: Map<number, string>;
 
   constructor(products: CatalogueProduct[], versions: LimitVersion[]) {
     for (const p of products) this.products.set(p.productId, p);
+    // `label` IS the plain name (`description || lot_code || "Product N"`),
+    // so it is what the collision test must run on — a catalogue built by
+    // hand in a test carries no separate description field.
+    this.distinct = distinctProductLabels(products.map((p) => ({ ...p, description: p.label })));
     for (const v of versions) {
       const list = this.versions.get(v.productId) ?? [];
       list.push(v);
@@ -135,6 +148,17 @@ export class ProductCatalogue {
 
   product(productId: number): CatalogueProduct | null {
     return this.products.get(productId) ?? null;
+  }
+
+  /**
+   * The name to PRINT for a product: the plain description when nothing else
+   * in the catalogue shares it, otherwise the description plus whichever of
+   * colour / blend / count / tube type actually tells it apart (see
+   * productNames.ts). Falls back to `Product N` for an id the mirror has never
+   * heard of — the same fallback every caller used before this existed.
+   */
+  distinctLabel(productId: number): string {
+    return this.distinct.get(productId) ?? `Product ${productId}`;
   }
 
   /**
@@ -176,12 +200,28 @@ export class ProductCatalogue {
 }
 
 export async function loadProductCatalogue(pool: ConnectionPool): Promise<ProductCatalogue> {
+  // The join is to the three reference tables the PDAS sync already mirrors
+  // (sms.blend / sms.yarn_count / sms.tube_type, migration 006) and `color`
+  // (migration 020). They are a handful of rows each and carry the only
+  // things that tell two same-named materials apart — see productNames.ts.
+  // LEFT JOIN throughout: a product with a null blend_id must still be listed.
   const prod = await pool.request().query<{
     product_id: number;
     description: string | null;
     lot_code: string | null;
     active_flag: boolean | null;
-  }>(`SELECT product_id, description, lot_code, active_flag FROM sms.product`);
+    color: string | null;
+    blend: string | null;
+    count_text: string | null;
+    tube_type: string | null;
+  }>(
+    `SELECT p.product_id, p.description, p.lot_code, p.active_flag, p.color,
+            b.blend, c.count_text, t.tube_type
+       FROM sms.product p
+       LEFT JOIN sms.blend b ON b.blend_id = p.blend_id
+       LEFT JOIN sms.yarn_count c ON c.count_id = p.count_id
+       LEFT JOIN sms.tube_type t ON t.tube_type_id = p.tube_type_id`,
+  );
 
   const ver = await pool.request().query<{
     product_id: number;
@@ -203,6 +243,12 @@ export async function loadProductCatalogue(pool: ConnectionPool): Promise<Produc
       productId: p.product_id,
       label: p.description || p.lot_code || `Product ${p.product_id}`,
       activeFlag: p.active_flag == null ? null : Boolean(p.active_flag),
+      description: p.description ?? null,
+      lotCode: p.lot_code ?? null,
+      color: p.color ?? null,
+      blend: p.blend ?? null,
+      countText: p.count_text ?? null,
+      tubeType: p.tube_type ?? null,
     })),
     ver.recordset.map((v) => {
       const ms = toPlantMs(v.effective_from);

@@ -46,7 +46,7 @@ import { getProduction } from '../production.js';
 import { getWeights } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { loadProductCatalogue } from '../productLimits.js';
-import { getManagementSummary } from './summary.js';
+import { getManagementSummary, summaryCsv } from './summary.js';
 
 /** A 34-day September window — the September generation's own length — so the
  *  prior period (also 34 days, ending the day before) lands entirely inside
@@ -93,7 +93,7 @@ beforeEach(() => {
   vi.mocked(getProduction).mockReset().mockResolvedValue({ groupBy: 'product', rows: [], unattributed: null, states: null, implausible: null } as never);
   vi.mocked(getWeights).mockReset().mockResolvedValue(fakeWeights() as never);
   vi.mocked(getWeightStations).mockReset().mockResolvedValue(fakeStations() as never);
-  vi.mocked(loadProductCatalogue).mockReset().mockResolvedValue({ product: () => null } as never);
+  vi.mocked(loadProductCatalogue).mockReset().mockResolvedValue({ product: () => null, distinctLabel: (id: number) => `Product ${id}` } as never);
 });
 
 describe('management summary — a comparison may not be an artefact of coverage (U5)', () => {
@@ -166,5 +166,125 @@ describe('management summary — a comparison may not be an artefact of coverage
     );
     const underLine = await getManagementSummary({} as unknown as ConnectionPool, 1, CURRENT, {});
     expect(underLine.kpis.find((k) => k.key === 'cones_weighed')!.comparable).toBe(true);
+  });
+});
+
+/**
+ * F12 (23 Sep 2026) — the management summary reported
+ *
+ *     Within product limits · higher is better · 99.8 % · 4.5 % · +95.3 (+2,117.8 %)
+ *
+ * for 2026-08-05 → 2026-09-07 against its own chosen prior, 2026-07-02 →
+ * 2026-08-04. The prior period's own "Products run" table on the same page
+ * reads `No product on the reading — 67,044` and one cone of STR-RED: before
+ * IFL's 2026-08-05 source rebuild no reading carried a `MaterialId` at all,
+ * so nothing could be judged against product limits and 4.5 % is the absence
+ * of a column, not a quality level. A twenty-one-fold improvement in product
+ * conformance that did not happen, on the page a GM signs.
+ *
+ * The coverage guard above could not catch it: it is keyed on `shape`, and
+ * 'Within product limits' is a RATE — coverage-independent by construction,
+ * which is correct for 'Average sack (kg)' and wrong here. The distinction is
+ * not total-versus-rate; it is whether the two periods are comparable at all.
+ *
+ * Measured against the sidecar for that exact period, 23 Sep 2026:
+ * attribution is 100.0 % current, 0.0 % prior (1 attributed cone in 67,045).
+ */
+describe('management summary — an attribution discontinuity is not a trend (F12)', () => {
+  /** getProduction's product-grouped shape: the only rows summary.ts reads from it. */
+  const mix = (rows: { group: string; cones: number }[]) => ({
+    groupBy: 'product',
+    rows: rows.map((r) => ({ ...r, rejectedCones: 0, rejectRatePct: 0, conesInRangePct: 99, sacks: 0, sackWeightKg: 0, avgSackKg: null, conesPerSack: null })),
+    unattributed: null, states: null, implausible: null,
+  });
+
+  /** Coverage equal on both sides, so ONLY the attribution test can fire. */
+  const equalCoverage = () =>
+    vi.mocked(getReport).mockImplementation(async (_p, _l, resolved) =>
+      resolved.from === CURRENT.from ? fakeReport(34, 34, 8000) : fakeReport(34, 34, 7900),
+    );
+
+  it('suppresses the Within product limits comparison across the 2026-08-05 rebuild, and says why', async () => {
+    equalCoverage();
+    vi.mocked(getProduction).mockImplementation(async (_p, _l, opts) =>
+      (opts.from === CURRENT.from
+        ? mix([{ group: '21', cones: 190_000 }, { group: 'none', cones: 0 }])
+        : mix([{ group: '17', cones: 1 }, { group: 'none', cones: 67_044 }])) as never,
+    );
+    const d = await getManagementSummary({} as unknown as ConnectionPool, 1, CURRENT, {});
+
+    expect(d.attribution.current).toBe(1);
+    expect(d.attribution.prior).toBeLessThan(0.001);
+
+    const within = d.kpis.find((k) => k.key === 'cones_within_limits_pct')!;
+    expect(within.comparable).toBe(false);
+    expect(within.incomparableReason).toMatch(/product attribution covers 0% of the prior period/);
+    expect(within.incomparableReason).toMatch(/against 100% for this one/);
+    expect(within.incomparableReason).toMatch(/not a change in conformance/);
+    // The delta is still COMPUTED — the screen decides not to present it —
+    // so the underlying arithmetic is never quietly altered.
+    expect(within.delta).not.toBeNull();
+
+    // Nothing else is suppressed: the guard is targeted, not a blanket.
+    for (const key of ['cones_in_range_pct', 'mean_cone_weight_g', 'avg_sack_kg', 'cones_weighed']) {
+      expect(d.kpis.find((k) => k.key === key)!.comparable, key).toBe(true);
+    }
+    // And the CSV carries the evidence, so the exported sheet can be checked
+    // without the app.
+    const t = summaryCsv(d);
+    const row = t.rows.find((r) => r[0] === 'cones_within_limits_pct')!;
+    expect(row[11]).toBe(false); // comparable
+    expect(String(row[12])).toMatch(/product attribution/);
+    expect(row[13]).toBe(100); // current attribution %
+    expect(row[14]).toBe(0); // prior attribution %
+  });
+
+  it('two periods that BOTH record a product compare normally', async () => {
+    equalCoverage();
+    vi.mocked(getProduction).mockImplementation(async (_p, _l, opts) =>
+      (opts.from === CURRENT.from
+        ? mix([{ group: '21', cones: 190_000 }, { group: 'none', cones: 100 }])
+        : mix([{ group: '21', cones: 180_000 }, { group: 'none', cones: 900 }])) as never,
+    );
+    const d = await getManagementSummary({} as unknown as ConnectionPool, 1, CURRENT, {});
+    const within = d.kpis.find((k) => k.key === 'cones_within_limits_pct')!;
+    expect(within.comparable).toBe(true);
+    expect(within.incomparableReason).toBeNull();
+  });
+
+  it('a period with no readings at all is not treated as an attribution break', async () => {
+    // The prior has nothing to be a share of, so `attributedShare` is null
+    // and the attribution test cannot fire. figuresFor has already nulled the
+    // prior's figures, so there is no delta to present either way — the
+    // coverage guard is what speaks here, as it always did.
+    vi.mocked(getReport).mockImplementation(async (_p, _l, resolved) =>
+      resolved.from === CURRENT.from ? fakeReport(34, 34, 8000) : fakeReport(0, 34, 0),
+    );
+    vi.mocked(getProduction).mockImplementation(async (_p, _l, opts) =>
+      (opts.from === CURRENT.from ? mix([{ group: '21', cones: 190_000 }]) : mix([])) as never,
+    );
+    const d = await getManagementSummary({} as unknown as ConnectionPool, 1, CURRENT, {});
+    expect(d.attribution.prior).toBeNull();
+    const within = d.kpis.find((k) => k.key === 'cones_within_limits_pct')!;
+    expect(within.comparable).toBe(true);
+    expect(within.prior).toBeNull();
+    expect(within.delta).toBeNull();
+  });
+
+  it('a KPI blocked by BOTH tests states both reasons, not one silently chosen', async () => {
+    vi.mocked(getReport).mockImplementation(async (_p, _l, resolved) =>
+      resolved.from === CURRENT.from ? fakeReport(34, 34, 8000) : fakeReport(9, 34, 2000),
+    );
+    vi.mocked(getProduction).mockImplementation(async (_p, _l, opts) =>
+      (opts.from === CURRENT.from
+        ? mix([{ group: '21', cones: 190_000 }])
+        : mix([{ group: 'none', cones: 67_044 }])) as never,
+    );
+    const d = await getManagementSummary({} as unknown as ConnectionPool, 1, CURRENT, {});
+    // cones_within_limits_pct is a rate, so coverage alone would not block it;
+    // it is blocked by attribution only.
+    expect(d.kpis.find((k) => k.key === 'cones_within_limits_pct')!.incomparableReason).toMatch(/product attribution/);
+    // cones_weighed is a total blocked by coverage only.
+    expect(d.kpis.find((k) => k.key === 'cones_weighed')!.incomparableReason).toMatch(/coverage gap/);
   });
 });

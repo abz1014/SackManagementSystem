@@ -57,6 +57,23 @@ export interface KpiDefinition {
   unit: KpiUnit;
   /** See KpiShape. Drives comparability, independent of `unit`. */
   shape: KpiShape;
+  /**
+   * SECOND comparability axis, independent of `shape` (friction audit F12,
+   * 23 Sep 2026). A KPI whose denominator is "readings that could be judged
+   * against a product" cannot be compared across IFL's 2026-08-05 source
+   * rebuild: before that date no reading carried a `MaterialId` at all, so
+   * nothing could be judged, and the figure collapses toward zero for a
+   * reason that has nothing to do with the plant. The summary reported
+   * "Within product limits · 99.8 % against 4.5 % · +2,117.8 %" from exactly
+   * this — a twenty-one-fold improvement in product conformance that did not
+   * happen, on the page a GM signs.
+   *
+   * `shape` does NOT catch it: 'Within product limits' is a rate, and rates
+   * are coverage-independent by construction, which is correct for 'Average
+   * sack (kg)' and wrong here. The distinction is not total-versus-rate; it
+   * is whether the two periods are comparable at all.
+   */
+  attributionSensitive?: boolean;
   betterWhen: BetterWhen;
   /** One sentence; the SQL-level formula is in KPI-DEFINITIONS.md under the same key. */
   definition: string;
@@ -73,7 +90,7 @@ export const KPI_DEFINITIONS: readonly KpiDefinition[] = [
   // rejected them.
   { key: 'rejects_at_inspection', label: 'Rejected at inspection', unit: 'cones', shape: 'total', betterWhen: 'lower', definition: 'Cones the inspection stations rejected.' },
   { key: 'inspection_reject_rate_pct', label: 'Inspection reject rate', unit: '%', shape: 'rate', betterWhen: 'lower', definition: 'Inspection rejects over cones plus inspection rejects.' },
-  { key: 'cones_within_limits_pct', label: 'Within product limits', unit: '%', shape: 'rate', betterWhen: 'higher', definition: 'Cones classified within the limits in force at their own time, over cones that could be judged.' },
+  { key: 'cones_within_limits_pct', label: 'Within product limits', unit: '%', shape: 'rate', attributionSensitive: true, betterWhen: 'higher', definition: 'Cones classified within the limits in force at their own time, over cones that could be judged.' },
   { key: 'mean_cone_weight_g', label: 'Mean cone weight', unit: 'g', shape: 'rate', betterWhen: 'neither', definition: 'Average recorded cone weight over the plausible population.' },
   { key: 'cone_weight_sd_g', label: 'Cone weight spread', unit: 'g', shape: 'rate', betterWhen: 'lower', definition: 'Standard deviation of recorded cone weight over the plausible population.' },
   { key: 'implausible_readings', label: 'Implausible readings excluded', unit: 'readings', shape: 'total', betterWhen: 'lower', definition: 'Cone readings outside the plausibility window, excluded from every weight figure.' },
@@ -125,6 +142,13 @@ export interface ManagementSummaryData {
   period: ResolvedPeriod;
   prior: DayRange;
   coverage: { current: ReportData['coverage']; prior: ReportData['coverage'] };
+  /**
+   * F12: the share of each period's cone readings that carry a product at
+   * all, 0..1. Published so a reader can see for themselves why an
+   * attribution-sensitive KPI's comparison was withheld, rather than being
+   * asked to take the sentence on trust.
+   */
+  attribution: { current: number | null; prior: number | null };
   kpis: KpiRow[];
   /**
    * Which products each period actually ran (UX Phase 5 Brief 1, unit U5),
@@ -145,6 +169,8 @@ interface PeriodFigures {
   totals: ReportData['totals'];
   /** Raw product-id + cones, labelled later (once) by the caller. */
   productMix: { productId: number | null; cones: number }[];
+  /** F12: share of this period's cone readings carrying a product, 0..1; null when the period holds none. */
+  attributedShare: number | null;
 }
 
 /**
@@ -172,6 +198,25 @@ const COVERAGE_MATERIAL_THRESHOLD = 0.2;
 function coverageDiffers(cur: ReportData['coverage'], prior: ReportData['coverage']): boolean {
   const denom = Math.max(cur.daysInPeriod, prior.daysInPeriod, 1);
   return Math.abs(cur.daysWithData - prior.daysWithData) / denom > COVERAGE_MATERIAL_THRESHOLD;
+}
+
+/**
+ * F12 — the SECOND comparability test, on the same 20% line and for the same
+ * reason: below it the difference is ordinary noise, above it the KPI is
+ * measuring the availability of product attribution rather than the plant.
+ *
+ * The case that produced it is not marginal — 99.9% attributed against 0.0%,
+ * a gap of essentially 1.0, five times this threshold — so the line's exact
+ * placement is not load-bearing; what matters is that the test exists at all.
+ * A period with no readings gives a null share and no comparison to guard:
+ * `figuresFor` has already nulled every value for an empty period, so the
+ * delta is null and nothing is presented either way.
+ */
+const ATTRIBUTION_MATERIAL_THRESHOLD = 0.2;
+
+function attributionDiffers(cur: number | null, prior: number | null): boolean {
+  if (cur == null || prior == null) return false;
+  return Math.abs(cur - prior) > ATTRIBUTION_MATERIAL_THRESHOLD;
 }
 
 async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange): Promise<PeriodFigures> {
@@ -218,7 +263,16 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange)
     productId: r.group === NO_PRODUCT_GROUP ? null : Number(r.group),
     cones: r.cones,
   }));
-  return { coverage: report.coverage, values, totals: t, productMix };
+  // F12: the share of this period's cone readings that carry a product at
+  // all. Measured from the same grouped query the product mix comes from,
+  // not asserted from a date: the discontinuity is IFL's 2026-08-05 rebuild,
+  // but the thing that actually decides comparability is whether the readings
+  // could be judged, and that is this number. Null when the period has no
+  // readings — there is nothing to be a share of.
+  const mixCones = productMix.reduce((a, m) => a + m.cones, 0);
+  const attributedCones = productMix.reduce((a, m) => a + (m.productId == null ? 0 : m.cones), 0);
+  const attributedShare = mixCones > 0 ? attributedCones / mixCones : null;
+  return { coverage: report.coverage, values, totals: t, productMix, attributedShare };
 }
 
 export async function getManagementSummary(
@@ -242,17 +296,36 @@ export async function getManagementSummary(
     `Prior period covers ${prev.coverage.daysWithData} of ${prev.coverage.daysInPeriod} days with readings, versus ` +
     `${cur.coverage.daysWithData} of ${cur.coverage.daysInPeriod} for the current period — comparing the totals would ` +
     'measure that coverage gap, not a change in production.';
+  // F12 (23 Sep 2026): an attribution-sensitive KPI compared across the
+  // 2026-08-05 rebuild is not a trend. Before that date no reading carried a
+  // MaterialId, so nothing could be judged against product limits and the
+  // figure is the absence of a column, not a quality level.
+  const attrDiffers = attributionDiffers(cur.attributedShare, prev.attributedShare);
+  const share = (s: number | null) => (s == null ? 'none' : `${Math.round(s * 1000) / 10}%`);
+  const attributionReason =
+    `Not comparable: product attribution covers ${share(prev.attributedShare)} of the prior period's cone readings ` +
+    `against ${share(cur.attributedShare)} for this one. A reading with no product on it cannot be judged against ` +
+    'product limits at all, so the difference measures when the plant started recording a product on the reading ' +
+    '(its source tables were rebuilt on 5 August 2026), not a change in conformance.';
   const kpis: KpiRow[] = KPI_DEFINITIONS.map((k) => {
     const current = round(cur.values[k.key] ?? null);
     const before = round(prev.values[k.key] ?? null);
-    const comparable = k.shape !== 'total' || !covDiffers;
+    const coverageBlocks = k.shape === 'total' && covDiffers;
+    const attributionBlocks = k.attributionSensitive === true && attrDiffers;
+    const comparable = !coverageBlocks && !attributionBlocks;
     return {
       ...k, current, prior: before, delta: delta(current, before),
-      comparable, incomparableReason: comparable ? null : incomparableReason,
+      comparable,
+      incomparableReason: comparable
+        ? null
+        : [attributionBlocks ? attributionReason : null, coverageBlocks ? incomparableReason : null]
+            .filter(Boolean)
+            .join(' '),
       approval: 'awaiting',
     };
   });
-  const labelFor = (pid: number | null) => (pid == null ? 'No product on the reading' : (catalogue.product(pid)?.label ?? `Product ${pid}`));
+  // F7 (23 Sep 2026): the DISTINCT label — see productNames.ts.
+  const labelFor = (pid: number | null) => (pid == null ? 'No product on the reading' : catalogue.distinctLabel(pid));
   const productMix = {
     current: cur.productMix.map((m) => ({ ...m, label: labelFor(m.productId) })),
     prior: prev.productMix.map((m) => ({ ...m, label: labelFor(m.productId) })),
@@ -261,27 +334,36 @@ export async function getManagementSummary(
     period: resolved,
     prior,
     coverage: { current: cur.coverage, prior: prev.coverage },
+    attribution: { current: cur.attributedShare, prior: prev.attributedShare },
     kpis,
     productMix,
     verdict: { cones: cur.totals.cones, sacks: cur.totals.sacks, sackWeightKg: cur.totals.sackWeightKg },
     approval: 'awaiting',
     note:
-      'Each figure is shown beside the same figure for the period of equal length immediately before it. The KPI set and ' +
-      'its definitions (KPI-DEFINITIONS.md) are the developer’s proposal and await IFL’s approval.',
+      'Each figure is shown beside the same figure for the period of equal length immediately before it. A comparison is ' +
+      'withheld — shown as “not comparable”, with the reason — when the two periods differ too much in how many days held ' +
+      'readings, or in how many of those readings carried a product at all; either difference would be reported as a ' +
+      'change in the plant when it is not one. The KPI set and its definitions (KPI-DEFINITIONS.md) are the developer’s ' +
+      'proposal and await IFL’s approval.',
   };
 }
 
 export const SUMMARY_CSV_HEADERS = [
   'kpi', 'label', 'unit', 'current', 'prior', 'delta', 'delta_pct', 'better_when', 'period', 'prior_period', 'ifl_approval',
   'comparable', 'incomparable_reason',
+  // F12 (23 Sep 2026): the evidence behind an attribution-based withholding
+  // travels with the file, so the exported sheet can be checked without the app.
+  'product_attribution_current_pct', 'product_attribution_prior_pct',
 ] as const;
 
 export function summaryCsv(d: ManagementSummaryData): CsvTable {
   const period = `${d.period.from} to ${d.period.to}`;
   const priorPeriodLabel = `${d.prior.from} to ${d.prior.to}`;
+  const sharePct = (s: number | null) => (s == null ? null : Math.round(s * 1000) / 10);
   const rows: CsvRow[] = d.kpis.map((k) => [
     k.key, k.label, k.unit, k.current, k.prior, k.delta?.abs ?? null, k.delta?.pct ?? null, k.betterWhen, period, priorPeriodLabel, k.approval,
     k.comparable, k.incomparableReason,
+    sharePct(d.attribution.current), sharePct(d.attribution.prior),
   ]);
   return { headers: SUMMARY_CSV_HEADERS, rows };
 }

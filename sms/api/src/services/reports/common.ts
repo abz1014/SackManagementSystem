@@ -201,3 +201,69 @@ export function round(n: number | null | undefined, dp = 2): number | null {
 export function pct(part: number, of: number): number | null {
   return of > 0 ? Math.round((1000 * part) / of) / 10 : null;
 }
+
+/* ------------------------------------------------ the period's own target */
+
+/**
+ * THE §8 RULE, ENFORCED AT THE ONE PLACE A REPORT STATES A TARGET (friction
+ * audit F6, 23 Sep 2026): "a reading is judged by the limits in force at its
+ * own time, never by today's mirror."
+ *
+ * `ProductCatalogue.versionAt` is already honest — when NO version began at
+ * or before the asked-for instant it returns the nearest one and marks it
+ * `effectiveIsLowerBound: true`. That flag was then dropped by every caller
+ * on the way to a report payload, so Report › Cone weight published
+ * `inForceAtUtc: 2026-09-11` under `source: 'in_force_at_period_end'` for a
+ * period ending 2026-09-07 — a target dated four days AFTER the readings it
+ * was judging them against, printed under a caption promising the opposite.
+ *
+ * Two DIFFERENT things wear the same flag and this function separates them:
+ *
+ *  - a version the app merely OBSERVED already in place (migration 027's
+ *    bootstrap rows, every `pdas_observed` row) that began at or before the
+ *    period end. The limits did apply; we only cannot prove they started
+ *    exactly then. Usable, qualified as "no later than" — `isLowerBound`.
+ *  - a version whose effective instant is AFTER the period end. Those limits
+ *    demonstrably did not exist while the readings were taken. NOT usable:
+ *    the report states no target at all and says why, rather than picking the
+ *    nearest version and calling it "in force".
+ */
+export interface PeriodTarget {
+  /** True when a target may be stated for this period at all. */
+  usable: boolean;
+  /** The version's instant; null when there is no version. */
+  inForceAtUtc: string | null;
+  /** `inForceAtUtc` means NO LATER THAN, not exactly then. Only meaningful when `usable`. */
+  isLowerBound: boolean;
+  /** Printable reason the target was withheld; null when one is stated, or when there was simply no product. */
+  omittedReason: string | null;
+}
+
+/** The date part of an ISO instant, for a sentence a manager reads. */
+const instantDay = (iso: string) => iso.slice(0, 10);
+
+export function resolvePeriodTarget(
+  version: { effectiveFromMs: number; effectiveFromUtc: string; effectiveIsLowerBound: boolean } | null,
+  periodEndMs: number,
+  periodTo: string,
+): PeriodTarget {
+  if (!version) return { usable: false, inForceAtUtc: null, isLowerBound: false, omittedReason: null };
+  if (version.effectiveFromMs > periodEndMs) {
+    return {
+      usable: false,
+      inForceAtUtc: version.effectiveFromUtc,
+      isLowerBound: false,
+      omittedReason:
+        `No target is stated: the earliest limits this system holds for that product were first recorded on ` +
+        `${instantDay(version.effectiveFromUtc)}, after this period ended on ${periodTo}. What was actually in force ` +
+        'during the period is not recorded anywhere, and a reading is judged by the limits in force at its own time — ' +
+        'never by a later record applied backwards.',
+    };
+  }
+  return {
+    usable: true,
+    inForceAtUtc: version.effectiveFromUtc,
+    isLowerBound: version.effectiveIsLowerBound,
+    omittedReason: null,
+  };
+}

@@ -110,7 +110,10 @@ class FakeDb {
         effective_from: new Date('2026-08-01T00:00:00Z'), effective_is_lower_bound: false, source: 'pdas_observed',
       });
     }
-    if (sql.includes('SELECT product_id, description, lot_code, active_flag FROM sms.product')) {
+    // loadProductCatalogue's product query — matched on the FROM clause, not
+    // the select list: F7 (23 Sep 2026) widened it to LEFT JOIN blend, count
+    // and tube type so the catalogue can tell same-named materials apart.
+    if (sql.includes('FROM sms.product p')) {
       return row({ product_id: 21, description: '205-IL0-SD', lot_code: null, active_flag: true });
     }
     if (sql.includes('MAX(production_ts_utc_ms)')) return row({ ms: Date.UTC(2026, 8, 7, 12, 0, 0) });

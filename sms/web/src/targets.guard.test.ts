@@ -214,3 +214,78 @@ describe('every report payload `target` field carries its own instant, never a b
     ).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------ check 3 */
+
+/**
+ * WHY THIS CHECK EXISTS, AND WHY CHECK 2 DID NOT CATCH THE DEFECT IT GUARDS
+ * (friction audit F6, 23 Sep 2026).
+ *
+ * Check 2 asks only that a report payload declaring a `target` MENTIONS
+ * `inForceAtUtc` somewhere in the file. Report › Cone weight did — and then
+ * published `inForceAtUtc: '2026-09-11T15:03:15.957Z'` with
+ * `source: 'in_force_at_period_end'` for a period ending 2026-09-07, under a
+ * caption promising the target was the one in force at the END of the period.
+ * The instant was PRESENT and WRONG, which is precisely the case a
+ * presence-only check cannot see, so check 2 passed on the defect. The audit
+ * says so in as many words: "The Phase 5 guard requires a `target` to state
+ * an `inForceAtUtc`; it does not check that the instant precedes the period,
+ * so the guard passes."
+ *
+ * `ProductCatalogue.versionAt` (api/src/services/productLimits.ts) is honest
+ * about it: when no version began at or before the asked-for instant it
+ * returns the nearest version and marks it `effectiveIsLowerBound: true`.
+ * Every instance of the defect is that flag being DROPPED on the way to a
+ * payload. So the mechanical form of the defect is: a report file that
+ * resolves a version itself (`versionAt(`) and publishes an `inForceAtUtc`,
+ * without ever naming the lower-bound case.
+ *
+ * The VALUE-level assertion — that a published instant never postdates the
+ * period — lives where it can be executed rather than grepped:
+ * `api/src/services/reports/periodTarget.test.ts` (the pure resolver) and the
+ * two F6 cases in `api/src/services/reports/reports.test.ts` (the whole
+ * report, end to end). This check stops the WIRING from being removed again;
+ * those stop the BEHAVIOUR from changing.
+ */
+const RESOLVES_A_VERSION_RE = /\bversionAt\s*\(/;
+/**
+ * A CALL to the shared resolver — the one sanctioned way to handle it.
+ * Deliberately a call, not a mention: an earlier draft of this check accepted
+ * the identifier `effectiveIsLowerBound` appearing anywhere in the file, and
+ * passed on a deliberately broken product.ts because the name survived in a
+ * DOC COMMENT. A guard that a comment can satisfy is not a guard.
+ */
+const HANDLES_LOWER_BOUND_RE = /\bresolvePeriodTarget\s*\(/;
+
+describe('a report that resolves its own limits version may not drop the lower-bound qualifier', () => {
+  const files = listReportFiles();
+
+  it('sanity: at least one report file really does resolve a version itself (canary on the scan)', () => {
+    const resolvers = files.filter((f) => RESOLVES_A_VERSION_RE.test(readFileSync(f, 'utf8')));
+    expect(
+      resolvers.length,
+      'no report file calls versionAt( any more — if the resolution moved, move this check with it',
+    ).toBeGreaterThan(0);
+  });
+
+  it('every such file also names the lower-bound case', () => {
+    const violations: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(file, 'utf8');
+      if (!RESOLVES_A_VERSION_RE.test(src)) continue;
+      if (!src.includes('inForceAtUtc')) continue; // resolves a version but publishes no instant
+      if (!HANDLES_LOWER_BOUND_RE.test(src)) violations.push(relPath(file));
+    }
+    expect(
+      violations,
+      violations.length === 0
+        ? ''
+        : `these report files resolve a limits version with versionAt() and publish an inForceAtUtc without calling ` +
+            `resolvePeriodTarget(): ${violations.join(', ')}. That is the F6 ` +
+            `defect exactly — ProductCatalogue.versionAt returns the NEAREST version marked effectiveIsLowerBound when ` +
+            `none was in force at the instant asked for, and dropping that flag publishes a date the report does not ` +
+            `have. Route the resolution through reports/common.ts's resolvePeriodTarget (which refuses a version that ` +
+            `begins after the period ends, and flags a lower bound as one), as coneWeight.ts and product.ts do.`,
+    ).toEqual([]);
+  });
+});

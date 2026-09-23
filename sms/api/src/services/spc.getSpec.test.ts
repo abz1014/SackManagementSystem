@@ -25,7 +25,7 @@ function pool(versions = 2) {
         input(n: string, _t: unknown, v: unknown) { inputs.set(n, v); return this; },
         async query(sql: string) {
           if (sql.includes('FROM sms.product_limit_version')) return { recordset: rows, rowsAffected: [rows.length] };
-          if (sql.includes('active_flag FROM sms.product')) {
+          if (sql.includes('FROM sms.product p')) {
             return { recordset: [{ product_id: 21, description: '205-IL0-SD', lot_code: null, active_flag: true }], rowsAffected: [1] };
           }
           // The legacy fallback row, only reached without a catalogue hit.

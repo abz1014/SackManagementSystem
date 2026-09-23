@@ -88,7 +88,10 @@ export async function getSackReport(
       .filter((r) => r.sacks > 0)
       .map((r) => ({
         productId: r.group === NO_PRODUCT_GROUP ? null : Number(r.group),
-        productLabel: r.group === NO_PRODUCT_GROUP ? 'No product on the reading' : (catalogue.product(Number(r.group))?.label ?? `Product ${r.group}`),
+        // F7 (23 Sep 2026): the DISTINCT label — see productNames.ts. The
+        // sack CSV writes this string into its `group` column and carries no
+        // product id at all, so a collided name is unrecoverable there.
+        productLabel: r.group === NO_PRODUCT_GROUP ? 'No product on the reading' : catalogue.distinctLabel(Number(r.group)),
         sacks: r.sacks,
         sackWeightKg: r.sackWeightKg,
         avgSackKg: r.avgSackKg,
@@ -110,18 +113,23 @@ export async function getSackReport(
 export const SACK_CSV_HEADERS = [
   'section', 'group', 'sacks', 'sack_weight_kg', 'avg_sack_kg', 'cones', 'cones_per_sack', 'rejected_by_scale', 'in_range_pct',
   'bucket_kg', 'count',
+  // F7 (23 Sep 2026): the `group` column carries the product NAME, and a
+  // name that is unique on this dataset is not guaranteed unique in general.
+  // `material_id` is — it is PDAS's own key — so the one identifier that
+  // cannot collide travels with the file. Populated on 'product' rows only.
+  'material_id',
 ] as const;
 
 export function sackCsv(d: SackReportData): CsvTable {
-  const line = (section: string, r: ReportLine): CsvRow => [section, r.group, r.sacks, r.sackWeightKg, r.avgSackKg, r.cones, r.conesPerSack, null, null, null, null];
+  const line = (section: string, r: ReportLine): CsvRow => [section, r.group, r.sacks, r.sackWeightKg, r.avgSackKg, r.cones, r.conesPerSack, null, null, null, null, null];
   const rows: CsvRow[] = [
-    ['total', 'total', d.totals.sacks, d.totals.sackWeightKg, d.totals.avgSackKg, d.totals.cones, d.conesPerSack, d.rejectedByScale, d.inRangePct, null, null],
+    ['total', 'total', d.totals.sacks, d.totals.sackWeightKg, d.totals.avgSackKg, d.totals.cones, d.conesPerSack, d.rejectedByScale, d.inRangePct, null, null, null],
     ...d.byShift.map((r) => line('shift', r)),
     ...d.byDay.map((r) => line('day', r)),
-    ...d.byProduct.map((p): CsvRow => ['product', p.productLabel, p.sacks, p.sackWeightKg, p.avgSackKg, null, null, null, null, null, null]),
+    ...d.byProduct.map((p): CsvRow => ['product', p.productLabel, p.sacks, p.sackWeightKg, p.avgSackKg, null, null, null, null, null, null, p.productId]),
   ];
   if (d.distribution) {
-    for (const b of d.distribution.histogram) rows.push(['histogram', null, null, null, null, null, null, null, null, b.bucket, b.count]);
+    for (const b of d.distribution.histogram) rows.push(['histogram', null, null, null, null, null, null, null, null, b.bucket, b.count, null]);
   }
   return { headers: SACK_CSV_HEADERS, rows };
 }
