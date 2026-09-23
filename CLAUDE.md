@@ -209,8 +209,11 @@ programme and it must not flatter what was actually verified:**
 - **No viewer has ever signed in.** `rank.matrix.test.tsx` (Phase 8) proves
   rank 1 renders correctly; nobody has authenticated as one on a live
   instance. Still needs Q65-70 and an IFL-created account.
-- **`sms.source_epoch.last_seen_utc` still has no writer anywhere in the
-  repo.**
+- **`sms.source_epoch.last_seen_utc` had no writer anywhere in the repo** when
+  this phase was written. **Corrected 23 Sep 2026:** it has had one since
+  commit `b31d574` (22 Sep) — `sync-worker/src/epoch.ts:176-180` stamps it
+  once per table per pass, tested at `sync-worker/src/epoch.test.ts:112`. The
+  column is still NULL on every row only because no sync pass has run since.
 - **Flagged, not fixed, in this phase's own scope:** `Readings.tsx:253`
   prints while rows are still loading or failed, unlike `Report.tsx:138` —
   a real behaviour gap, deliberately left for whoever next touches that
@@ -298,8 +301,10 @@ authority for the nine PDAS write rights (`AddTubeType`'s parameter
 Phase 9 entry — which does not itself grant authority to call it), weight
 basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings (Q10), sack
 stock per machine, the 10 Jul – 5 Aug data, and the live read-only login/host
-(Q65-70). `sms.source_epoch.last_seen_utc` still has no writer anywhere in the
-repo. Verified against the local `_SEP07` dev copy only, never real plant
+(Q65-70). `sms.source_epoch.last_seen_utc` had no writer anywhere in the repo
+when this was written; **corrected 23 Sep 2026 — `sync-worker/src/epoch.ts`
+writes it since `b31d574`, and it reads NULL only because no pass has run
+since.** Verified against the local `_SEP07` dev copy only, never real plant
 data. The branch remains unpushed, now roughly 90 commits ahead of
 `origin/main`.
 
@@ -345,11 +350,22 @@ does not have — not new analytics.
    live exception currently claimed); and the ONE AUDIENCE rule is now
    mechanical client-side — the exact set of `rank >=` read-tier gates in
    `App.tsx` cannot grow without a reviewed change to this file.
-6. **A finding, not a fix**: `sms.source_epoch.last_seen_utc` has **no writer
-   anywhere in the repository** — verified by grep (only the column
-   definition in `025_source_epoch.sql` and a read in `systemHistory.ts`).
-   `web/src/lib/words.ts` now says so on screen instead of showing bare
-   dashes unexplained. This remains an open item, not resolved.
+6. **A finding, not a fix**: `sms.source_epoch.last_seen_utc` had **no writer
+   anywhere in the repository** — verified by grep at the time (only the
+   column definition in `025_source_epoch.sql` and a read in
+   `systemHistory.ts`). `web/src/lib/words.ts` says so on screen instead of
+   showing bare dashes unexplained. **RESOLVED 22 Sep 2026, commit `b31d574`
+   (recorded here 23 Sep):** `sync-worker/src/epoch.ts:176-180` stamps
+   `last_seen_utc = SYSUTCDATETIME()` on the resolved epoch once per table per
+   pass — the one place that has already proven the source IS that generation
+   — with a regression test at `sync-worker/src/epoch.test.ts:112`. Both
+   re-read on 23 Sep 2026 rather than taken from the commit message. The
+   column is nevertheless still NULL on all rows of the dev database, because
+   no sync pass has run since the fix; the two UI strings that tell a viewer
+   so are therefore still correct and were deliberately left alone
+   (`web/src/lib/words.ts:1195`, `screens/health/SystemHistoryBlock.tsx:57`).
+   Revisit that copy once a worker has run against a database — tracked as
+   D-14 in `DEFECTS.md`.
 
 Suite: **1169 → 1194 passed / 4 skipped**, `npx vitest run` from `sms/`,
 observed 21 Sep 2026.
@@ -638,6 +654,18 @@ undo any of these without reading why they exist:
 admin; a *Product limits* rule in Setup; the per-day-per-code reason sheet;
 the line-level sack ledger once IFL answers. **The five questions in
 `REDESIGN.md` §11 have not been sent.**
+
+> **Update, 23 Sep 2026 — three of those four are done; do not read the list
+> above as current.** Roles are `1 viewer · 2 engineer · 3 manager · 4 admin`
+> (read back from `sms.role` on the dev database, 23 Sep 2026; renamed by
+> `db/migrations/035_roles_and_answers.sql` on IFL's 15 Sep answer that the
+> process engineer owns these writes). Product limits are settable in SMS
+> without touching PDAS (`POST /api/products/limits/local`, rank 2,
+> `api/src/routes/cone.ts:70`). The per-day-per-code reason sheet shipped with
+> roadmap Phase 5. The line-level sack ledger exists (migration 033) and IFL's
+> Q28 answer moved it behind the production view. **Still unsent:** the
+> `REDESIGN.md` §11 questions — now folded into
+> [`IFL-OPEN-QUESTIONS.md`](IFL-OPEN-QUESTIONS.md), the one list to send.
 
 > **Update, Sep 2026 audit fix (finding H3):** the app-owned product-details
 > overlay (dropped from the list above — it is done, not pending) is now built

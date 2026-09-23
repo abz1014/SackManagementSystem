@@ -405,6 +405,76 @@ measurement above came from read-only `SELECT`s against the app-owned `sms` data
 proves stays visible.
 
 
+### D-12 — The PDAS write authority is recorded only in a commit message, and two records contradict each other — **MEDIUM (process/documentation), open, owner's call** (23 Sep 2026)
+
+Found while bringing the IFL-facing documents current. Four facts, each checked on 23 Sep 2026:
+
+1. `handover/IFL-ANSWERS-2026-09-15.md:7` records that as of the 15 Sep meeting the PDAS write
+   authority was **still verbal** (Q18), and instructs that `PDAS_WRITE_ENABLED` stay `false`.
+2. Commit **`af420a4`** (22 Sep 2026) states in its message: *"IFL granted permission for SMS
+   to write product data to PDAS. The owner instructed that the path be enabled."*
+3. **No document anywhere in the repository records that grant** — not its date, not who at IFL
+   gave it, not which of the nine rights it covers (`grep -rn "IFL granted\|granted permission"
+   --include=*.md` returns nothing).
+4. `sms/.env` reads `PDAS_WRITE_ENABLED=false` today, so the flag the commit says was enabled
+   is off again.
+
+**Why this is a defect and not a note.** The register's own HIGH definition covers "a gap
+between what a governing document claims is true and what the code actually does"; this is the
+same shape one level up — a grant that governs nine write rights against a client's production
+database exists in exactly one place, a commit message, which no IFL-facing document can cite
+and no auditor would accept. It is rated MEDIUM rather than HIGH only because the flag is off
+and **no PDAS procedure has ever executed against any database, local or plant** (the commit
+itself says so and `PDAS_WRITE_ENABLED=false` holds it).
+
+**What it blocks in practice, today:** `IFL-OPEN-QUESTIONS.md` ask 3 cannot be sent. Asking a
+client to re-give permission they already gave reads as badly as switching a write path on
+against a permission nobody can produce.
+
+**Fix (owner only, not a code change):** state which of 1 and 2 is true, and put it in a
+document with a date and a name. If the grant is real, record which of the nine rights it
+covers; if it is not, `af420a4`'s message should be corrected in the record.
+
+### D-13 — One `basis` setting answers two different questions; IFL was asked only one of them — **LOW, open (no wrong number today)** (23 Sep 2026)
+
+`sms.weight_rule` has a single `basis` column (`as_recorded | gross | net`) governing **both**
+cone and sack weights, plus one `cone_tube_weight_g` and one `sack_tare_kg` (read from the
+running dev database, 23 Sep 2026). IFL's 15 Sep answer to Q24 was about **sacks** — "the total
+weight of the sack" — and was applied to that shared setting the same day (row 9, `basis =
+'gross'`, reason "IFL answer Q24, 15 Sep 2026"). Cone weights are therefore computed on a basis
+IFL was never asked about.
+
+**Why LOW and not HIGH, stated precisely so this is not read as worse than it is:** at `gross`
+the conversion is the **identity** — the tube weight is subtracted only under `net`
+(`api/src/services/weights.ts:239`, `coneAdj = basis === 'net' ? tube : 0`) — and the service
+still emits an explicit "Weight basis is unconfirmed (Q4/Q5)" reason naming the exact
+consequence, including that Gross and As-recorded are identical until IFL confirms
+(`weights.ts:370-375`, `:417`). **No number on any screen is currently wrong.** The defect is
+structural: one control answers two questions, and a future `net` selection would silently
+apply a **developer placeholder** — `cone_tube_weight_g = 70.00`, `sack_tare_kg = 0.500`,
+values IFL has never seen — to every cone figure in the application.
+
+**Fix:** either split the basis per measurement kind, or refuse `net` until IFL has supplied
+the real tube and tare weights. Tracked on the IFL side as ask 6 in `IFL-OPEN-QUESTIONS.md`
+and N-5 in `IFL-QUESTIONS-STATUS.md`.
+
+### D-14 — `CLAUDE.md` asserted a finding in three places that had been fixed the day before — **LOW (documentation), FIXED this pass** (23 Sep 2026)
+
+`CLAUDE.md:212`, `:301` and `:348` each stated that `sms.source_epoch.last_seen_utc` "has no
+writer anywhere in the repository". It has had one since commit `b31d574` (22 Sep 2026):
+`sync-worker/src/epoch.ts:176-180` stamps `last_seen_utc = SYSUTCDATETIME()` on the resolved
+epoch once per table per pass, with a regression test at `sync-worker/src/epoch.test.ts:112`
+asserting the UPDATE and its bound `epoch_id` — both re-read, not taken from the commit
+message. The column is still NULL on every row only because no sync pass has run since.
+
+All three sentences corrected in this pass, each rewritten to say what is true *and* why the
+column still reads empty, rather than being deleted. **Two UI strings deliberately not
+touched** (`web/src/lib/words.ts:1195`, `web/src/screens/health/SystemHistoryBlock.tsx:57`):
+they tell a viewer the column has never been populated, which remains true of the live database
+until a pass runs, and they belong to another worker's files. They should be revisited once the
+worker has run against a database for a while — carried here so that follow-up is not lost.
+
+
 ---
 
 ## Part 3 — Suite result observed for this pass
@@ -445,3 +515,6 @@ proves stays visible.
 | D-8 | MEDIUM | `sms.source_epoch.last_seen_utc` has no writer | **fixed**, `b31d574` |
 | D-10 | **HIGH** | X̄ control limits (`grandMean ± 3σ_within/√n`) do not fit the process — ~16% of subgroups "violate" at month scale post-D-1 vs an expected ~0.3% | **model replaced** (`6052b69`, I-MR on the subgroup means) and **rule-1 rendering restored** 23 Sep 2026, gated on `xLimits.valid`; rule-1 rate now 5.6–13.1% on real generations. **Rules 2-8 stay suppressed** — measured 37.6–54.8% flag rate on the same windows. Band not validated against a known-good reference process. |
 | D-11 | **HIGH** | Almost no query constrained which SOURCE GENERATION it read; `downtime.ts` ERASED 53 real stoppages on one measured day | **partly fixed** (`8673ffd`, `ca34a23`) — four shared filter builders plus downtime/calibration/shiftCheck/reconcile now read ONE generation and say what they excluded; reports, weightStations, live/health/machinesRunning, register, sackStock, productAt and machineProducts remain unconstrained, each listed by `file:line` in D-11 above |
+| D-12 | MEDIUM | PDAS write authority exists only in commit `af420a4`'s message; `handover/IFL-ANSWERS-2026-09-15.md` says it was still verbal and no document records a grant | open — **owner's call**, blocks sending `IFL-OPEN-QUESTIONS.md` ask 3 |
+| D-13 | LOW | One `sms.weight_rule.basis` governs cones and sacks; IFL's 15 Sep answer covered sacks only, and `net` would apply placeholder tube/tare values | open — no wrong number today (`gross` is the identity conversion, `weights.ts:239`) |
+| D-14 | LOW | `CLAUDE.md` asserted in three places that `last_seen_utc` has no writer; it has had one since `b31d574` | **fixed** this pass (23 Sep 2026) |
