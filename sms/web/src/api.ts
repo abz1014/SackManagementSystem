@@ -1749,6 +1749,16 @@ export interface WeightStationRow {
   targetBasis: 'station_material' | 'mixed' | 'line_product';
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
+  /**
+   * F6 (23 Sep 2026), optional for the same reason as the data-level flags
+   * above: absent reads as "not flagged". `targetIsLowerBound` means this
+   * row's target came from a version the app merely OBSERVED in place, so its
+   * instant is a lower bound; `targetAfterWindowEnd` means the version begins
+   * AFTER the window ended, in which case the server has already set
+   * `vsTargetG` to null and this flag is the REASON the cell is blank.
+   */
+  targetIsLowerBound?: boolean;
+  targetAfterWindowEnd?: boolean;
 }
 
 export interface WeightStationsData {
@@ -1756,6 +1766,31 @@ export interface WeightStationsData {
   rules: NelsonRuleInfo[];
   /** When the line-wide target (above) was last recorded (genuine UTC — fmtAppInstant). */
   targetEffectiveFromUtc: string | null;
+  /**
+   * THE FOUR FIELDS BELOW ARE OPTIONAL ON PURPOSE (F6, 23 Sep 2026). The
+   * server always sends them; they are declared optional so a screen reads
+   * them defensively and so the existing typed fixtures — several of them in
+   * files this change does not own — keep compiling without being rewritten
+   * to restate facts they are not testing. Absent is read as "not flagged",
+   * which is the same thing an older payload meant.
+   *
+   * `targetEffectiveFromUtc` is a LOWER BOUND when this is true: the limits
+   * were in place NO LATER THAN that instant. Print it as "no later than …",
+   * never as a start date. Product › Catalogue already renders this case.
+   */
+  targetEffectiveIsLowerBound?: boolean;
+  /**
+   * The resolved version BEGINS AFTER the period ended — limits that
+   * demonstrably did not exist while these readings were taken. When this is
+   * true the server has ALREADY withheld `targetG` and every row's
+   * `vsTargetG`; `targetOmittedReason` below is the sentence to print in
+   * their place, so a screen never has to decide this for itself.
+   */
+  targetEffectiveAfterWindowEnd?: boolean;
+  /** Why no target is stated, in words, from the server's one resolver. Null/absent when a target IS stated, or when there was simply no product. */
+  targetOmittedReason?: string | null;
+  /** How many station rows had their `vsTargetG` withheld for that reason. */
+  stationsWithTargetWithheld?: number;
   /** How many times the line-wide product's own limits changed inside the window (a version that BEGAN inside it). Null when there is no line-wide product at all. */
   limitsChangedInWindow: number | null;
   /** How many times the line-wide Current Product itself changed inside the window (a new product_timeline entry, not just a limits revision). */

@@ -309,7 +309,16 @@ export async function getSpec(
         lsl: lim.loG,
         nominal: lim.targetG,
         source: 'product',
-        productLabel: catalogue.product(productId)?.label ?? `Product ${productId}`,
+        // F7 (23 Sep 2026): `distinctLabel`, not the plain `.label`. PDAS
+        // holds six materials all described "205-IL0-SD" (ids 20, 21,
+        // 1021-1024) whose blend is PVSD8020 on every one of them, so the
+        // plain description names one of six ambiguously — and this label
+        // travels onto the weight chart's own caption, beside a set of
+        // control limits that belong to exactly one of the six. Every other
+        // surface disambiguates them through the same catalogue helper
+        // (productNames.ts, ported from web/src/lib/productLabel.ts); this
+        // was the one caller left on the plain name.
+        productLabel: catalogue.distinctLabel(productId),
         limitsEffectiveFromUtc: v.effectiveFromUtc,
         limitsAreLowerBound: v.effectiveIsLowerBound,
         // The version in force at the end is not itself "a change inside the

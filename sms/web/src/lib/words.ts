@@ -1859,6 +1859,15 @@ export const W = {
        force. */
     targetNone: 'No product was in force at the end of this period.',
     targetSince: (instant: string) => `in force since ${instant}`,
+    /* F6 (23 Sep 2026): the WEAKER claim, for a limits version the app merely
+       observed already in place (`effectiveIsLowerBound`). The limits did
+       apply; only their start is unproven, so the instant is a lower bound
+       and must be printed as one. `targetSince` above states a start date and
+       may only be used for a version that genuinely carries one. Product ›
+       Catalogue already says "no later than" for the identical fact
+       (`product.noLaterThan`); this is the same words in the sentence form
+       the report/Weight captions need. */
+    targetNoLaterThan: (instant: string) => `in force no later than ${instant}`,
     limitsChangedInPeriod: (n: number) =>
       n === 1
         ? 'The target’s limits changed once inside this period; this is the version in force at its end.'

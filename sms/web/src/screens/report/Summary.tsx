@@ -41,10 +41,31 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
     );
   }
   const priorEmpty = d.coverage.prior.daysWithData === 0;
-  // U5: every incomparable row this call carries the same reason (it is
-  // derived from the two periods' coverage, not the individual KPI), so one
-  // note beneath the table explains all of them rather than repeating it.
-  const incomparableReason = d.kpis.find((k) => !k.comparable)?.incomparableReason ?? null;
+  /*
+   * U5 assumed every incomparable row carried the SAME reason, because the
+   * only reason that existed was derived from the two periods' coverage
+   * rather than from the individual KPI — so it took the FIRST such row's
+   * reason and printed it as a note for all of them.
+   *
+   * That assumption stopped being true on 23 Sep 2026 (`71ac170`), which
+   * added a second, independent comparability test: `attributionSensitive`
+   * KPIs are withheld when product attribution covers materially different
+   * shares of the two periods. A KPI can now be blocked by coverage, by
+   * attribution, or by both (summary.ts joins them), and the three read
+   * differently. With both kinds present, `find` returned whichever row came
+   * first in the KPI list — the coverage reason, since `shape: 'total'` rows
+   * are declared ahead of `cones_within_limits_pct` — and the attribution
+   * reason survived only in a tooltip on a different row, where a printed
+   * page cannot show it at all.
+   *
+   * The per-row data was always exact; only the "one reason fits all"
+   * summarisation was wrong. So collect the DISTINCT reasons in the order
+   * they first appear and print every one. In the common case there is still
+   * exactly one and the note reads as it always did.
+   */
+  const incomparableReasons = [
+    ...new Set(d.kpis.filter((k) => !k.comparable && k.incomparableReason).map((k) => k.incomparableReason!)),
+  ];
   return (
     <>
       <Block first>
@@ -95,8 +116,22 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
             </tbody>
           </table>
         </div>
-        {incomparableReason && (
-          <p className="mut sm" style={{ marginTop: 10 }}>{W.reports.incomparableNote} {incomparableReason}</p>
+        {/* One reason renders exactly as it did before (a single sentence
+            after the heading); two or more are listed, so neither can hide
+            behind the other. Printed, not a tooltip — this page goes to
+            paper and a hover has no meaning there. */}
+        {incomparableReasons.length === 1 && (
+          <p className="mut sm" style={{ marginTop: 10 }}>{W.reports.incomparableNote} {incomparableReasons[0]}</p>
+        )}
+        {incomparableReasons.length > 1 && (
+          <div className="mut sm" style={{ marginTop: 10 }}>
+            <p>{W.reports.incomparableNote}</p>
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              {incomparableReasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </div>
         )}
       </Block>
 

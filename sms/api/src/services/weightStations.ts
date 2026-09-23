@@ -58,6 +58,14 @@ import { getPlausibilityRule, type PlausibilityRule } from './admin.js';
 import { loadProductTimeline, limitsOf } from './productAt.js';
 import { loadProductCatalogue } from './productLimits.js';
 import { plausibleWhere } from './coneState.js';
+// The §8 rule's ONE resolver (friction audit F6, 23 Sep 2026). It lives under
+// `reports/` because reports were the first consumer, not because it is
+// report-specific: it is a pure decision about whether a limits version may
+// be used to judge a period at all, and this service is where that question
+// is asked FIRST — the reports below compose their station rows from here.
+// The import direction is safe: reports/common.ts imports no service, only
+// `@sms/shared` types and its own arithmetic, so there is no cycle.
+import { resolvePeriodTarget } from './reports/common.js';
 import { driftThresholdG, MIN_DAYS_HELD } from './attention.js';
 import { consecutiveProductionDays } from './plantClock.js';
 import { getUnmatchedRejects } from './rejects.js';
@@ -104,9 +112,42 @@ export interface WeightStationRow {
   vsLineG: number;
   /**
    * Signed grams against this row's own target (see `targetBasis`) — null
-   * when no target could be resolved, or when the station ran more than one
+   * when no target could be resolved, when the station ran more than one
    * material in the window and there is therefore no single target to be
-   * signed against.
+   * signed against, or when the only limits version on record for that
+   * material BEGINS AFTER the window ended (`targetAfterWindowEnd`).
+   *
+   * THE THIRD CASE, AND WHY IT WITHHOLDS RATHER THAN FLAGS (F6, 23 Sep 2026).
+   * `29f4e70` added `targetAfterWindowEnd` and left the number in place,
+   * leaving the decision to each consumer. `71ac170` had already made the
+   * opposite choice for the reports, through `resolvePeriodTarget`. On real
+   * data (epoch 9, 5-20 Aug) those two choices collided ON ONE PAGE: Report ›
+   * Cone weight printed "No target is stated: the earliest limits this system
+   * holds for that product were first recorded on 2026-09-11, after this
+   * period ended on 2026-08-20" at the top, and seven stations' `vs target`
+   * numbers (-14.2 g, -12.52 g, -12.4 g, -11.66 g …) in the table beneath it,
+   * judged against those very limits. A reader comparing the two halves
+   * concludes either that the caption is boilerplate or that the numbers are
+   * authoritative. Both conclusions are wrong.
+   *
+   * Withholding wins on three counts, not one:
+   *  - THE READER. The refusal is a sentence a manager can act on; a column
+   *    of numbers under it is a contradiction they cannot resolve.
+   *  - THIS FILE'S OWN PRECEDENT. `targetBasis: 'mixed'` already returns null
+   *    here, for the weaker reason that the target is AMBIGUOUS between two
+   *    products. A target that did not yet exist is a stronger reason to
+   *    withhold than one that is merely ambiguous.
+   *  - THE COST OF THE ALTERNATIVE, counted. Five render sites consume
+   *    `vsTargetG` (report/Calibration.tsx:101, report/ConeWeight.tsx:76,
+   *    report/Station.tsx:86, StationSheet.tsx:227, Weight.tsx:1026) plus
+   *    three CSV writers. Every one of them ALREADY handles null — the
+   *    'mixed' path proves it, and epoch 1 exercises it on real data. NONE of
+   *    them handles the flags. Flagging is eight edits in three owners'
+   *    files, any one of which restates F6 by omission; withholding is zero.
+   *
+   * What is NOT lost: `targetIsLowerBound` and `targetAfterWindowEnd` stay on
+   * the row, and `WeightStationsData.targetOmittedReason` states the reason
+   * in words, so the column is blank WITH an explanation rather than blank.
    *
    * Same population as `meanG` and `vsLineG` (F4): `meanG - targetG`. The
    * Weight screen's `lineOffsetSentence` already assumed exactly this — it
@@ -162,9 +203,13 @@ export interface WeightStationRow {
   /**
    * F6: this row's target version's effective instant falls AFTER the
    * window's end — limits that demonstrably did not exist while these
-   * readings were taken. `vsTargetG` is still computed (narrowly, so this
-   * cannot quietly blank a column it was not written to doubt) but a consumer
-   * that prints the target MUST print this qualifier or withhold the number.
+   * readings were taken.
+   *
+   * REVISED 23 Sep 2026: `vsTargetG` is now NULL whenever this is true — the
+   * service withholds the number itself rather than leaving each consumer to
+   * remember. See `vsTargetG` for the evidence behind that choice. This flag
+   * remains, and is no longer gated on the number's presence, because it is
+   * the REASON the column is blank and a consumer needs to be able to say so.
    */
   targetAfterWindowEnd: boolean;
   /** Consecutive most-recent production days on the same side of the line. */
@@ -193,8 +238,32 @@ export interface WeightStationsData {
   /** Production days actually holding data in the window. */
   days: number;
   lineMeanG: number | null;
+  /**
+   * The line-wide target for THIS PERIOD, or null when none may be stated.
+   *
+   * Null in two cases now: no product was in force at the window's end (as
+   * before), and — F6, 23 Sep 2026 — the product's only limits version begins
+   * after the window ended, in which case `targetOmittedReason` says so in
+   * words. Every consumer of this field already had a written "no target
+   * recorded" branch (`W.reports.noTarget`, `W.weight.headlineNoTarget`,
+   * `W.weight.sortNoteNoTarget`), and epoch 1 exercises that branch on real
+   * data, so the second case reuses a path that was already live rather than
+   * introducing one.
+   */
   targetG: number | null;
-  /** The product's limits in force at the window's end, the edges the projection extends to. */
+  /**
+   * The product's limits as RECORDED — the edges the projection extends to
+   * and the width `driftThresholdG` scales itself from.
+   *
+   * DELIBERATELY NOT WITHHELD alongside `targetG` (F6, 23 Sep 2026), because
+   * the two answer different questions. `targetG` answers "what should these
+   * readings have weighed?", which is a claim ABOUT THE PERIOD and cannot be
+   * made from limits recorded after it. `limits` answers "where are the edges
+   * this station's current drift is heading for?", which is a claim about the
+   * FUTURE, and for that the limits now on record are the right ones. Keeping
+   * it also means `thresholdG`, `flagged`, the attention list and every guard
+   * built on them are untouched by the withholding above.
+   */
   limits: { loG: number; hiG: number } | null;
   productId: number | null;
   productLabel: string | null;
@@ -229,15 +298,25 @@ export interface WeightStationsData {
    * 2026-08-05 → 2026-09-07, whose only version for product 12 begins
    * 2026-09-11 — four days after the period ended.
    *
-   * `targetG` is still reported when this is true; withholding it is the
-   * CONSUMER's call (reports/coneWeight.ts already does exactly that through
-   * reports/common.ts's `resolvePeriodTarget`), because this service is also
-   * read by the Weight screen, which states the target as the product's own
-   * recorded figure rather than as a claim about the period. What this
-   * service must never do again is hand out the instant with no way to tell
-   * the two cases apart.
+   * REVISED 23 Sep 2026: withholding is NO LONGER the consumer's call. It was
+   * made here, once, because leaving it to the consumer produced exactly the
+   * disagreement it was meant to avoid — see `WeightStationRow.vsTargetG`.
+   * When this is true, `targetG` and every row's `vsTargetG` are null and
+   * `targetOmittedReason` carries the sentence to print instead.
    */
   targetEffectiveAfterWindowEnd: boolean;
+  /**
+   * WHY no target is stated, in words fit to print, from the one resolver
+   * (`reports/common.ts`'s `resolvePeriodTarget`) — so every surface that
+   * blanks a target for this reason gives the SAME reason, and none of them
+   * has to compose the sentence itself.
+   *
+   * Null when a target IS stated, and null for the ordinary "no product was
+   * in force" case, which needs no explanation beyond itself.
+   */
+  targetOmittedReason: string | null;
+  /** How many station rows had their `vsTargetG` withheld for that reason — so a caption can say how much of the column is blank and why. */
+  stationsWithTargetWithheld: number;
   /**
    * How many times the line-wide product's OWN limits changed inside the
    * window — a version that BEGAN inside `[from, to]`, mirroring spc.ts's
@@ -306,17 +385,30 @@ export async function getWeightStations(
   const limitsChangedInWindow = product
     ? catalogue.versionsAscending(product.productId).filter((v) => v.effectiveFromMs > startMs && v.effectiveFromMs <= endMs).length
     : null;
-  // F6 (23 Sep 2026): read the VERSION, not just its instant, so the two
-  // qualifiers travel with the date. See WeightStationsData's fields.
-  const versionProvenance = (productId: number | null) => {
+  // F6 (23 Sep 2026), completed 23 Sep 2026: read the VERSION, not just its
+  // instant, and put the USABILITY decision through the one shared resolver
+  // rather than re-deciding it here. `resolvePeriodTarget` owns exactly one
+  // rule — a version that BEGINS after the period ended may not be used to
+  // judge that period — and it is the only place that rule is written.
+  //
+  // The two booleans below describe the VERSION and are deliberately NOT
+  // taken from the resolver's own collapsed output: a refused version is
+  // still a lower-bound record, and a consumer is entitled to know that.
+  // `afterWindowEnd` is nonetheless DERIVED from the resolver's verdict
+  // (`v != null && !usable`) rather than re-testing `effectiveFromMs > endMs`
+  // a second time, so the comparison lives in one file only.
+  const resolveTarget = (productId: number | null) => {
     const v = productId == null ? null : catalogue.versionAt(productId, endMs);
+    const t = resolvePeriodTarget(v, endMs, to);
     return {
-      effectiveFromUtc: v?.effectiveFromUtc ?? null,
+      usable: t.usable,
+      effectiveFromUtc: t.inForceAtUtc,
       isLowerBound: v?.effectiveIsLowerBound === true,
-      afterWindowEnd: v != null && v.effectiveFromMs > endMs,
+      afterWindowEnd: v != null && !t.usable,
+      omittedReason: t.omittedReason,
     };
   };
-  const lineTargetProvenance = versionProvenance(product?.productId ?? null);
+  const lineTargetProvenance = resolveTarget(product?.productId ?? null);
   const targetEffectiveFromUtc = lineTargetProvenance.effectiveFromUtc;
   // How many times the line-wide Current Product itself changed (a new
   // product_timeline entry), not merely a limits revision on the same product.
@@ -414,24 +506,29 @@ export async function getWeightStations(
     let targetBasis: WeightStationRow['targetBasis'] = 'line_product';
     let materialsInWindow: number | undefined;
     let stationLimits: { loG: number; hiG: number; targetG: number } | null = limits;
+    // F6 (23 Sep 2026): `vsTargetG` is a JUDGEMENT OF THESE READINGS against a
+    // target, so it is withheld outright — not merely flagged — when the only
+    // limits version on record begins after the window ended. See the
+    // `vsTargetG` doc comment for why withholding beat flagging here.
     // F4: signed against `st.grandMean`, the same population `meanG` prints —
     // NEVER `runMean`. See WeightStationRow.vsTargetG.
-    let rowVsTargetG: number | null = limits == null ? null : round(st.grandMean - limits.targetG);
     // F6: the line-wide fallback's provenance is the line target's own.
     let rowTargetProvenance = lineTargetProvenance;
+    let rowVsTargetG: number | null =
+      limits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - limits.targetG);
     if (distinctMaterials.length === 1) {
       targetBasis = 'station_material';
       const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
       stationLimits = mLimits;
-      rowVsTargetG = mLimits == null ? null : round(st.grandMean - mLimits.targetG);
-      rowTargetProvenance = versionProvenance(distinctMaterials[0]!);
+      rowTargetProvenance = resolveTarget(distinctMaterials[0]!);
+      rowVsTargetG = mLimits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - mLimits.targetG);
     } else if (distinctMaterials.length > 1) {
       targetBasis = 'mixed';
       materialsInWindow = distinctMaterials.length;
       stationLimits = null; // no single target to project toward either
       rowVsTargetG = null; // NO NUMBER — there is no single target, so printing one would be over-claiming.
       // No single target means no single target provenance either.
-      rowTargetProvenance = { effectiveFromUtc: null, isLowerBound: false, afterWindowEnd: false };
+      rowTargetProvenance = { usable: false, effectiveFromUtc: null, isLowerBound: false, afterWindowEnd: false, omittedReason: null };
     }
 
     const r = rejects.get(st.station);
@@ -449,8 +546,14 @@ export async function getWeightStations(
       runVsLineG: runMeanIsRun && lineMeanG != null ? round(runMean - lineMeanG) : null,
       targetBasis,
       ...(materialsInWindow != null ? { materialsInWindow } : {}),
-      targetIsLowerBound: rowVsTargetG == null ? false : rowTargetProvenance.isLowerBound,
-      targetAfterWindowEnd: rowVsTargetG == null ? false : rowTargetProvenance.afterWindowEnd,
+      // F6: these describe the VERSION this row resolved, and they are no
+      // longer gated on `vsTargetG != null` — under the withholding rule
+      // above, `targetAfterWindowEnd` is precisely the reason the number is
+      // absent, so gating it on the number's presence would erase the
+      // explanation exactly when it is needed. A row with no version at all
+      // (no product, or 'mixed') resolves to false on both, as before.
+      targetIsLowerBound: rowTargetProvenance.isLowerBound,
+      targetAfterWindowEnd: rowTargetProvenance.afterWindowEnd,
       daysHeld,
       flagged,
       rejectRatePct: r == null ? null : round(r, 2),
@@ -488,13 +591,18 @@ export async function getWeightStations(
     to,
     days: drift.days,
     lineMeanG: lineMeanG == null ? null : round(lineMeanG),
-    targetG: limits?.targetG ?? null,
+    // F6: withheld, not flagged, when the version is refused — see
+    // `targetOmittedReason`. `limits` below is deliberately NOT withheld with
+    // it: see its own doc comment.
+    targetG: lineTargetProvenance.usable ? (limits?.targetG ?? null) : null,
     limits: limits ? { loG: limits.loG, hiG: limits.hiG } : null,
     productId: product?.productId ?? null,
     productLabel: product?.label ?? null,
     targetEffectiveFromUtc,
     targetEffectiveIsLowerBound: lineTargetProvenance.isLowerBound,
     targetEffectiveAfterWindowEnd: lineTargetProvenance.afterWindowEnd,
+    targetOmittedReason: lineTargetProvenance.omittedReason,
+    stationsWithTargetWithheld: stations.filter((s) => s.targetAfterWindowEnd && s.vsTargetG == null).length,
     limitsChangedInWindow,
     productChangesInWindow,
     thresholdG,

@@ -252,12 +252,37 @@ export function WeightScreen({
                     UX Phase 7 Brief 5: `d` is now nullable — st.error with no
                     data must read as "unknown", never fall into the same
                     branch as the honest "no target recorded" case below. */}
+                {/* F6 (23 Sep 2026): three states, not two. The middle one is
+                    new and is the whole point of this pass — the server has
+                    WITHHELD the target because the only limits version on
+                    record begins after this period ended, and it supplies the
+                    reason in words (`targetOmittedReason`). Printing that
+                    reason here is what makes this tile agree with the station
+                    table below it, whose `vs target` column the server blanked
+                    for the same reason and in the same breath. Before this,
+                    `d.targetG` was a bare 1,960 g and `targetSince` printed
+                    "in force since 11/09/2026" beneath a period ending
+                    20/08/2026 — a start date four weeks AFTER the readings it
+                    was judging.
+                    The lower-bound case keeps its number and is qualified
+                    rather than withheld: those limits did apply, only their
+                    start is unproven. That is resolvePeriodTarget's own split
+                    and this tile follows it rather than inventing a third. */}
                 {d == null ? (
                   W.weight.targetUnknown
                 ) : d.targetG != null ? (
                   <>
                     {W.reports.target(fmtG(d.targetG), d.productLabel ?? W.reports.wholeLine)}
-                    {d.targetEffectiveFromUtc && ` · ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}`}
+                    {d.targetEffectiveFromUtc &&
+                      ` · ${
+                        d.targetEffectiveIsLowerBound
+                          ? W.reports.targetNoLaterThan(fmtAppInstant(d.targetEffectiveFromUtc))
+                          : W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))
+                      }`}
+                  </>
+                ) : d.targetOmittedReason ? (
+                  <>
+                    {W.weight.noTarget} · {d.targetOmittedReason}
                   </>
                 ) : (
                   W.weight.noTarget
@@ -656,10 +681,20 @@ function lineOffsetSentence(d: WeightStationsData): string | null {
 /** "1,960 g (201-IH0-SD), in force since 16/09/2026, 09:00:00" — the target
  *  with its product and the instant its limits took effect, so the headline
  *  and the figure note never state a bare number the station table below
- *  cannot be checked against. */
+ *  cannot be checked against.
+ *
+ *  F6 (23 Sep 2026): the SECOND place on this screen that states the period's
+ *  target, and it was missed on the first pass of this fix — the figure note
+ *  had already been taught to say "no later than" while this sentence, four
+ *  lines above it in the same viewport, still said "in force since" about the
+ *  same instant. A component test caught it, which is the only reason it is
+ *  not in the commit. The rule the whole pass exists for applies here too: a
+ *  version the app merely OBSERVED in place has no start date to state. */
 function targetPhrase(d: WeightStationsData): string {
   const base = `${fmtG(d.targetG)} (${d.productLabel ?? W.reports.wholeLine})`;
-  return d.targetEffectiveFromUtc ? `${base}, ${W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))}` : base;
+  if (!d.targetEffectiveFromUtc) return base;
+  const instant = fmtAppInstant(d.targetEffectiveFromUtc);
+  return `${base}, ${d.targetEffectiveIsLowerBound ? W.reports.targetNoLaterThan(instant) : W.reports.targetSince(instant)}`;
 }
 
 /** The complement of the in-range share, to one decimal. */

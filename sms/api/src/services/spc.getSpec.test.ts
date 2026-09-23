@@ -85,3 +85,77 @@ describe('getSpec — limits in force at the END of the period', () => {
     expect(s.limitsEffectiveFromUtc).toBeUndefined();
   });
 });
+
+/**
+ * FRICTION AUDIT F7 (23 Sep 2026), the one caller `71ac170` did not reach.
+ *
+ * PDAS holds SIX materials all described "205-IL0-SD" — ids 20, 21, 1021,
+ * 1022, 1023, 1024 — and `blend` is PVSD8020 on every one of them, so the
+ * blend discriminates nothing. `materialId` is the only guaranteed-unique
+ * field; colour separates four of the six (1021 and 1023 are both ORANGE)
+ * and the count ("30" against "20 Slub") separates the last pair.
+ *
+ * `71ac170` fixed the product, sack and management-summary exports by giving
+ * `ProductCatalogue` a `distinctLabel`. `getSpec` was still on the plain
+ * `.label`, and its `productLabel` travels onto the weight CHART's caption —
+ * printed beside a set of control limits that belong to exactly one of the
+ * six. Naming that one ambiguously on the surface whose entire job is to say
+ * which tolerance these readings were judged against is the same defect on a
+ * worse page than the ones already fixed.
+ */
+function sixWayPool() {
+  const SAME = '205-IL0-SD';
+  const products = [
+    { product_id: 20, description: SAME, lot_code: null, active_flag: true, color: 'Star Green', blend: 'PVSD8020', count_text: '18', tube_type: 'T1' },
+    { product_id: 21, description: SAME, lot_code: null, active_flag: true, color: 'Blue', blend: 'PVSD8020', count_text: '36', tube_type: 'T1' },
+    { product_id: 1021, description: SAME, lot_code: null, active_flag: true, color: 'ORANGE', blend: 'PVSD8020', count_text: '30', tube_type: 'T1' },
+    { product_id: 1022, description: SAME, lot_code: null, active_flag: true, color: null, blend: 'PVSD8020', count_text: '50', tube_type: 'T1' },
+    { product_id: 1023, description: SAME, lot_code: null, active_flag: true, color: 'ORANGE', blend: 'PVSD8020', count_text: '20 Slub', tube_type: 'T1' },
+    { product_id: 1024, description: SAME, lot_code: null, active_flag: true, color: 'YELLOW', blend: 'PVSD8020', count_text: '36 Slub', tube_type: 'T1' },
+  ];
+  const versions = products.map((p) => ({
+    product_id: p.product_id, setpoint_g: '1960.00', offset_minus_g: '50.00', offset_plus_g: '50.00',
+    effective_from: new Date('2026-08-01T00:00:00Z'), effective_is_lower_bound: false, source: 'pdas_observed',
+  }));
+  return {
+    request() {
+      return {
+        input() { return this; },
+        async query(sql: string) {
+          if (sql.includes('FROM sms.product_limit_version')) return { recordset: versions, rowsAffected: [versions.length] };
+          if (sql.includes('FROM sms.product p')) return { recordset: products, rowsAffected: [products.length] };
+          return { recordset: [], rowsAffected: [0] };
+        },
+      };
+    },
+  } as unknown as ConnectionPool;
+}
+
+describe('getSpec — the chart names ONE product, not one of six', () => {
+  const RANGE = { from: '2026-08-10', to: '2026-08-20' };
+
+  it('every one of the six same-named materials gets a distinct chart label', async () => {
+    const labels = await Promise.all(
+      [20, 21, 1021, 1022, 1023, 1024].map(async (id) => (await getSpec(sixWayPool(), id, null, null, 'cone', RANGE)).productLabel),
+    );
+    expect(new Set(labels).size).toBe(6);
+    // Not merely distinct — distinguished by what actually differs. The
+    // plain description alone would have produced six identical strings.
+    expect(labels.every((l) => l?.startsWith('205-IL0-SD'))).toBe(true);
+    expect(labels).not.toEqual(Array(6).fill('205-IL0-SD'));
+  });
+
+  it('the pair colour cannot separate (both ORANGE) falls through to the count', async () => {
+    const a = (await getSpec(sixWayPool(), 1021, null, null, 'cone', RANGE)).productLabel!;
+    const b = (await getSpec(sixWayPool(), 1023, null, null, 'cone', RANGE)).productLabel!;
+    expect(a).not.toBe(b);
+    // Blend is PVSD8020 on all six and may never be the thing that separates them.
+    expect(a.replace('PVSD8020', '')).not.toBe(b.replace('PVSD8020', ''));
+  });
+
+  it('a product whose name is already unique keeps it unchanged', async () => {
+    // The original single-product fixture: nothing collides, nothing is added.
+    const s = await getSpec(pool(), 21, null, null, 'cone', RANGE);
+    expect(s.productLabel).toBe('205-IL0-SD');
+  });
+});

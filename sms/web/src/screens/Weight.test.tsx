@@ -574,3 +574,80 @@ describe('Weight — X̄ rule 1 restored, patterns still withheld (DEFECTS.md D-
     expect(container.textContent ?? '').not.toContain('one generation of the source tables');
   });
 });
+
+/**
+ * FRICTION AUDIT F6 (23 Sep 2026) — THE FIGURE TILE AND THE STATION TABLE
+ * MUST STATE ONE THING ABOUT THE PERIOD'S TARGET.
+ *
+ * Measured before the fix, on epoch 9 (2026-08-05 → 08-20, real IFL data):
+ * this tile printed "target 1,960 g (201-IH0-SD) · in force since
+ * 11/09/2026" for a period that ended on 20 August — a start date three
+ * weeks AFTER the readings it was judging — while Report › Cone weight, over
+ * the same service and the same window, refused to state a target at all.
+ * Every limits version in `sms.product_limit_version` is a migration-027
+ * bootstrap stamped 2026-09-11 with "true start unknown", so for August SMS
+ * genuinely does not know what applied.
+ *
+ * The server now withholds `targetG` and supplies `targetOmittedReason`.
+ * These cases pin that the tile prints the reason rather than falling back
+ * to a bare "No product target" — a blank with no explanation is how the
+ * contradiction went unnoticed — and that the three states stay distinct:
+ * withheld, lower-bound-but-usable, and plainly dated.
+ */
+describe('Weight — the period’s target', () => {
+  const OMITTED =
+    'No target is stated: the earliest limits this system holds for that product were first recorded on ' +
+    '2026-09-11, after this period ended on 2026-08-20.';
+
+  async function renderStations(mutate: (d: WeightStationsData) => void) {
+    const f: Envelope<WeightStationsData> = JSON.parse(JSON.stringify(WEIGHT_STATIONS_OK));
+    mutate(f.data);
+    installFakeFetch({
+      '/api/weight-stations': f,
+      '/api/stations': STATIONS_OK,
+      '/api/production': PRODUCTION_OK,
+      '/api/spc': spcFixture(500, 1948),
+    });
+    const r = render(<WeightScreen {...baseProps()} />);
+    await r.findByRole('heading', { level: 1 });
+    return r;
+  }
+
+  it('a withheld target prints the server’s reason, not a bare number and not a bare dash', async () => {
+    const { container } = await renderStations((d) => {
+      d.targetG = null;
+      d.targetEffectiveFromUtc = '2026-09-11T15:03:15.957Z';
+      d.targetEffectiveIsLowerBound = true;
+      d.targetEffectiveAfterWindowEnd = true;
+      d.targetOmittedReason = OMITTED;
+      d.stations[0]!.vsTargetG = null;
+      d.stations[0]!.targetAfterWindowEnd = true;
+    });
+    const body = container.textContent ?? '';
+    expect(body).toContain(OMITTED);
+    // The defect in its exact original form: a target stated with a start
+    // date that postdates the period.
+    expect(body).not.toContain(W.reports.target(fmtG(1950), '201-IH0-SD'));
+    expect(body).not.toContain(W.reports.targetSince('11/09/2026, 15:03:15'));
+  });
+
+  it('a lower-bound but usable version KEEPS its number and says “no later than”, never “since”', async () => {
+    const { container } = await renderStations((d) => {
+      d.targetEffectiveIsLowerBound = true;
+      d.targetEffectiveAfterWindowEnd = false;
+      d.targetOmittedReason = null;
+    });
+    const body = container.textContent ?? '';
+    expect(body).toContain(W.reports.target(fmtG(1950), '201-IH0-SD'));
+    expect(body).toContain('in force no later than');
+    expect(body).not.toContain('in force since');
+  });
+
+  it('a plainly dated version carries no qualifier at all (the untouched case)', async () => {
+    const { container } = await renderStations(() => {});
+    const body = container.textContent ?? '';
+    expect(body).toContain(W.reports.target(fmtG(1950), '201-IH0-SD'));
+    expect(body).toContain('in force since');
+    expect(body).not.toContain('no later than');
+  });
+});

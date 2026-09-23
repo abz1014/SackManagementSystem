@@ -221,9 +221,20 @@ describe('F6 — the limits version’s qualifier is carried, not dropped', () =
     const d = await getWeightStations(pool(), 1, FROM, TO);
     const s3 = d.stations.find((s) => s.station === 3)!;
     // Material 23's only version begins 2026-09-11, after this window ends on
-    // 2026-08-14. The number is still computed; what may never happen again is
-    // it travelling with no way to tell that the limits post-date the readings.
+    // 2026-08-14.
+    //
+    // REVISED 23 Sep 2026: when this case was first pinned the number was
+    // still computed and the flags merely travelled with it, leaving each
+    // consumer to decide. That produced Report › Cone weight refusing to
+    // state a target at the top of the page while seven stations' `vs target`
+    // numbers sat in the table beneath it, judged against the very limits the
+    // caption had just refused. The number is now WITHHELD at the service —
+    // see WeightStationRow.vsTargetG for the three reasons — and the flags
+    // remain, no longer gated on the number, because they are the REASON the
+    // column is blank. The assertion below pins both halves of that: absent
+    // number, present explanation.
     expect(s3.targetBasis).toBe('station_material');
+    expect(s3.vsTargetG).toBeNull();
     expect(s3.targetIsLowerBound).toBe(true);
     expect(s3.targetAfterWindowEnd).toBe(true);
     // Stations 1 and 2 used a version genuinely in force during the window.
