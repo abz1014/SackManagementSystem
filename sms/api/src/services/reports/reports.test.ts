@@ -70,6 +70,24 @@ import { buildReport, reportCsv } from './index.js';
 
 interface Captured { sql: string; params: Map<string, unknown> }
 
+/**
+ * `resolveGenerationScope`'s own two queries (`generation.ts`) — a UNION ALL
+ * present-rows count keyed `GROUP BY source_epoch`, then a `sms.source_epoch`
+ * registry read — are answered transparently here and excluded from `calls`,
+ * the same idiom `testkit/generations.ts`'s `fakePositionalPool` uses and for
+ * the same reason: the present-rows query's UNION parts each contain
+ * `FROM sms.<table>` (cone_event included), so a `calls` list that counted it
+ * would silently turn the product report's own `toHaveLength(2)` assertion
+ * into a false "3". Answering both with an empty recordset resolves every
+ * fixture below to `UNSCOPED` (no epoch predicate bound) — the same
+ * single-generation-agnostic behaviour these fixtures had before any owned
+ * report gained its own scope call. Cross-generation behaviour is exercised
+ * separately, in `generations.test.ts`.
+ */
+function isGenerationScopeQuery(sql: string): boolean {
+  return sql.includes('GROUP BY source_epoch') || sql.includes('FROM sms.source_epoch');
+}
+
 function fakePool(answer: (sql: string, params: Map<string, unknown>) => Record<string, unknown>[] = () => []): { pool: ConnectionPool; calls: Captured[] } {
   const calls: Captured[] = [];
   const pool = {
@@ -77,7 +95,11 @@ function fakePool(answer: (sql: string, params: Map<string, unknown>) => Record<
       const params = new Map<string, unknown>();
       const req = {
         input: (name: string, _t: unknown, v: unknown) => { params.set(name, v); return req; },
-        query: async (sql: string) => { calls.push({ sql, params }); return { recordset: answer(sql, params), rowsAffected: [0] }; },
+        query: async (sql: string) => {
+          if (isGenerationScopeQuery(sql)) return { recordset: [], rowsAffected: [0] };
+          calls.push({ sql, params });
+          return { recordset: answer(sql, params), rowsAffected: [0] };
+        },
       };
       return req;
     },
@@ -313,10 +335,18 @@ describe('the header', () => {
 /* ------------------------------------------------------------ the reports */
 
 describe('daily report', () => {
-  it('delegates to getReport with the shift and names the two reject populations from the register', async () => {
-    const d = await getDailyReport(fakePool().pool, 1, PERIOD, { shift: 'night' });
+  it('delegates to getReport with the shift and names the two reject populations from its OWN scoped scale-rejected count (RT-002/RT-029, 23 Sep 2026: no longer the register)', async () => {
+    const { pool, calls } = fakePool((sql) => (sql.includes('in_range = 0') ? [{ n: 17 }] : []));
+    const d = await getDailyReport(pool, 1, PERIOD, { shift: 'night' });
     expect(getReport).toHaveBeenCalledWith(expect.anything(), 1, PERIOD, 'night');
-    expect(listEvents).toHaveBeenCalledWith(expect.anything(), 1, 'cone', expect.objectContaining({ from: PERIOD.from, to: PERIOD.to, shift: 'night', inRange: false, pageSize: 1 }));
+    // The register's listEvents is no longer this report's source — see the
+    // file header for why (register.ts carries no epoch predicate and is not
+    // this pass's file to fix). The count now comes from this report's own
+    // query, shift-filtered the same way listEvents was.
+    expect(listEvents).not.toHaveBeenCalled();
+    const scaleQuery = calls.find((c) => c.sql.includes('in_range = 0'))!;
+    expect(scaleQuery.sql).toContain('FROM sms.cone_event');
+    expect(scaleQuery.params.get('shift')).toBe('night');
     expect(d.rejectPopulations.byScale).toBe(17);
     expect(d.rejectPopulations.byScalePct).toBe(1.7);
     expect(d.rejectPopulations.atInspection).toBe(20);
@@ -324,7 +354,7 @@ describe('daily report', () => {
     expect(d.downtime).toBeNull(); // a shift filter drops time lost rather than printing the whole day's
   });
   it('CSV: column order, one row per scope, the scale figure only on the total', () => {
-    const t = dailyCsv({ ...fakeReport(), rejectPopulations: { byScale: 17, byScalePct: 1.7, atInspection: 20, atInspectionPct: 1.96, note: '' } });
+    const t = dailyCsv({ ...fakeReport(), rejectPopulations: { byScale: 17, byScalePct: 1.7, atInspection: 20, atInspectionPct: 1.96, note: '' }, generationNote: { generation: null, spansGenerations: false, otherGenerationExcluded: 0 } });
     expect(t.headers).toEqual(DAILY_CSV_HEADERS);
     expect(t.rows[0]).toEqual(['total', 'total', 1000, 99.5, 40, 1880, 47, 25, 20, 1.96, 17]);
     expect(t.rows[1]![0]).toBe('shift');

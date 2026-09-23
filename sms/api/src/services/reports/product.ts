@@ -22,6 +22,7 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { bindStateCase, foldStateCounts, loadStateContext, plausibleWhere, type StateCounts } from '../coneState.js';
+import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
 import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { loadProductCatalogue, limitsFromVersion } from '../productLimits.js';
 import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js';
@@ -71,6 +72,17 @@ export interface ProductReportData {
   /** Readings in the period with no product at all, out of every reading in it. */
   unattributed: { cones: number; rejects: number; sacks: number; ofCones: number; ofRejects: number; ofSacks: number };
   note: string;
+  /**
+   * RT-002/RT-029 (23 Sep 2026 red-team audit): this report's own weight and
+   * state queries below carried no epoch predicate and pooled the plant's
+   * real generation with the local dev simulator's overlapping one, while
+   * `prod` (production.ts's `getProduction`, above) was already
+   * generation-scoped — one field scoped, the adjacent ones not. Both
+   * queries now resolve their own scope over the same (lineId, from, to) key
+   * `getProduction` uses, so they land on the same generation without a
+   * scope threaded through either signature.
+   */
+  generationNote: GenerationNote;
 }
 
 export async function getProductReport(
@@ -80,10 +92,14 @@ export async function getProductReport(
   filters: ReportFilters,
 ): Promise<ProductReportData> {
   const { from, to } = resolved;
-  const [ctx, catalogue, prod] = await Promise.all([
+  const [ctx, catalogue, prod, scope] = await Promise.all([
     loadStateContext(pool, lineId),
     loadProductCatalogue(pool),
     getProduction(pool, lineId, { from, to, shift: filters.shift, station: filters.station, groupBy: 'product' }),
+    // RT-002/RT-029: this service's own scope, over the same (lineId, from,
+    // to) key getProduction resolves internally — guaranteed to agree with
+    // `prod` without threading a scope through either signature.
+    resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
   ]);
 
   const bind = (req: mssql.Request) => {
@@ -91,7 +107,7 @@ export async function getProductReport(
     const w = ['line_id = @line', 'shift_date BETWEEN @from AND @to'];
     if (filters.shift) { w.push('shift_code = @shift'); req.input('shift', mssql.VarChar(10), filters.shift); }
     if (filters.station != null) { w.push('source_station = @station'); req.input('station', mssql.Int, filters.station); }
-    return w.join(' AND ');
+    return andEpoch(w.join(' AND '), req, scope, 'cone_event');
   };
   const grp = `ISNULL(CAST(material_id AS varchar(12)), '${NO_PRODUCT_GROUP}')`;
 
@@ -199,6 +215,7 @@ export async function getProductReport(
     note:
       'Each reading is grouped by the product recorded on it by the plant. Readings from before the source recorded a product ' +
       'are listed as "No product on the reading" and are never assigned one after the fact.',
+    generationNote: noteOf(scope),
   };
 }
 

@@ -16,6 +16,7 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { bindStateCase, foldStateCounts, loadStateContext, type StateCounts } from '../coneState.js';
+import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
 import { getProduction } from '../production.js';
 import type { ResolvedPeriod } from '../report.js';
 import { getWeightStations, type WeightStationsData } from '../weightStations.js';
@@ -50,6 +51,19 @@ export interface StationReportData {
   lineRejectRatePct: number | null;
   rows: StationReportRow[];
   note: string;
+  /**
+   * RT-002/RT-029 (23 Sep 2026 red-team audit): the raw per-station state
+   * count below is this report's OWN query, unlike `cones` (production.ts,
+   * already generation-scoped) and `rows[].mean/vsLine/...` (weightStations.ts,
+   * NOT YET scoped — a held file, reported not edited). Without its own
+   * epoch predicate this query pooled the plant's real September generation
+   * with the local dev simulator's overlapping one, so a station's own
+   * `states` (within+low+high+rejected+unknown) could exceed its own
+   * `cones` — an arithmetically impossible row, visible on screen. Scoped
+   * to the newest generation in the period, same rule as every other caller
+   * of `resolveGenerationScope`.
+   */
+  generationNote: GenerationNote;
 }
 
 export async function getStationReport(
@@ -59,18 +73,28 @@ export async function getStationReport(
   _filters: ReportFilters,
 ): Promise<StationReportData> {
   const { from, to } = resolved;
-  const [ws, prod, ctx] = await Promise.all([
+  // RT-002/RT-029: resolved by THIS service, over the SAME (lineId, from, to)
+  // key every other caller of resolveGenerationScope uses — guaranteed to
+  // land on the same generation as production.ts's own scoping of `prod`
+  // below, without threading a scope through either signature. One extra
+  // round trip, accepted per the remediation brief.
+  const [ws, prod, ctx, scope] = await Promise.all([
     getWeightStations(pool, lineId, from, to),
     getProduction(pool, lineId, { from, to, groupBy: 'station' }),
     loadStateContext(pool, lineId),
+    resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
   ]);
 
   const sReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const stateCase = bindStateCase(sReq, ctx, '', 'cs');
+  const statesWhere = andEpoch(
+    'line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL',
+    sReq, scope, 'cone_event',
+  );
   const states = await sReq.query<{ st: number; state: string; n: number }>(
     `SELECT source_station AS st, ${stateCase} AS state, COUNT(*) n
        FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL
+      WHERE ${statesWhere}
       GROUP BY source_station, ${stateCase}`,
   );
   const statesOf = new Map<number, { state: string; n: number }[]>();
@@ -123,6 +147,7 @@ export async function getStationReport(
     note:
       'The mean and the bias are over readings inside the plausibility window; the cone count is every reading. ' +
       'The target is the product in force at the end of the period, line-wide. Weighing data cannot tell a heavy scale from heavy cones.',
+    generationNote: noteOf(scope),
   };
 }
 

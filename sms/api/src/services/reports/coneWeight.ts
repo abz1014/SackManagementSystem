@@ -27,6 +27,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { getPlausibilityRule } from '../admin.js';
 import { plausibleWhere, type StateCounts } from '../coneState.js';
+import { andEpoch, noteOf, resolveGenerationScope, UNSCOPED, type GenerationNote, type GenerationScope } from '../generation.js';
 import { getProduction } from '../production.js';
 import type { ResolvedPeriod } from '../report.js';
 import { getWeights, type Basis, type Bucket } from '../weights.js';
@@ -93,11 +94,23 @@ export interface ConeWeightReportData {
   lineMeanG: number | null;
   plausibility: { loG: number; hiG: number };
   note: string;
+  /**
+   * RT-002/RT-029 (23 Sep 2026 red-team audit): `medianConeWeight`'s own
+   * query carried no epoch predicate while `w.cone.*` (weights.ts) and
+   * `prod`/`prod.states` (production.ts) — the report's other figures over
+   * the same plausible population — were already generation-scoped. Null
+   * when the median came from the weights service instead (no query of our
+   * own ran) rather than from a scope that was never resolved.
+   */
+  generationNote: GenerationNote | null;
 }
 
 /**
  * The interpolated median over the plausible population, one query. Exported
- * so the test can pin the predicate it binds.
+ * so the test can pin the predicate it binds. `scope` defaults to
+ * `UNSCOPED` (no epoch predicate) so a direct caller — this file's own test
+ * calls it with four arguments — keeps its old, single-generation-agnostic
+ * behaviour; `getConeWeightReport` below resolves and passes its own.
  */
 export async function medianConeWeight(
   pool: ConnectionPool,
@@ -105,13 +118,15 @@ export async function medianConeWeight(
   from: string,
   to: string,
   window: { loG: number; hiG: number },
+  scope: GenerationScope = UNSCOPED,
 ): Promise<number | null> {
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const plaus = plausibleWhere(req, 'weight_g', window);
+  const where = andEpoch(`line_id = @line AND shift_date BETWEEN @from AND @to AND ${plaus}`, req, scope, 'cone_event');
   const r = await req.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(weight_g AS float)) OVER () AS med
        FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to AND ${plaus}`,
+      WHERE ${where}`,
   );
   return round(r.recordset[0]?.med ?? null);
 }
@@ -157,7 +172,11 @@ export async function getConeWeightReport(
   // otherwise. Read loosely on purpose, so a weights.ts built before Phase 9
   // still gets a median here rather than a type error.
   const serviceMedian = (w.cone as { median?: number | null }).median;
-  const medianG = serviceMedian != null ? serviceMedian : await medianConeWeight(pool, lineId, from, to, window);
+  // RT-002/RT-029: only resolved when this report is about to run its own
+  // query — a scope round trip nobody will bind a predicate with is a cost
+  // with no corresponding claim.
+  const medianScope = serviceMedian != null ? null : await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
+  const medianG = serviceMedian != null ? serviceMedian : await medianConeWeight(pool, lineId, from, to, window, medianScope ?? UNSCOPED);
 
   return {
     period: resolved,
@@ -202,6 +221,7 @@ export async function getConeWeightReport(
       (stateTarget && resolvedTarget.isLowerBound
         ? ' Those limits were first SEEN at the instant stated, not known to have started then, so read it as "no later than".'
         : ''),
+    generationNote: medianScope != null ? noteOf(medianScope) : null,
   };
 }
 

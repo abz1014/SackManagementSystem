@@ -318,8 +318,6 @@ export async function getRejectSpc(
   }
   const sortedCells = [...cells.values()].sort((a, b) => a.t - b.t || a.generation - b.generation);
 
-  const totalProduced = [...producedMap.values()].reduce((s, v) => s + v, 0);
-  const totalRejects = [...rejectsMap.values()].reduce((s, v) => s + v, 0);
   // p̄ = rejects / (cones + unmatched rejects) — see the file header (23 Sep
   // 2026 correction of finding H1). A rejected cone IS still an inspected
   // unit, but 98%+ of rejects are already counted in `produced` because the
@@ -362,6 +360,20 @@ export async function getRejectSpc(
   // boundary it is the newest generation's — ordinals advance in time order.
   const newestGen = perGen.size ? Math.max(...perGen.keys()) : null;
   const pBar = newestGen == null ? null : (pBarOf.get(newestGen) ?? null);
+  // RT-002/RT-029 (23 Sep 2026 red-team audit): `totalProduced`/
+  // `totalRejects` used to be summed over EVERY generation's rows
+  // (`producedMap`/`rejectsMap` pooled), while `pBar` right above was
+  // already correctly scoped to `newestGen` alone — the same generation's
+  // own `pBar` figure and `totalRejects/totalProduced` disagreeing on what
+  // range they cover. `attention.ts` divides `totalRejects` by
+  // `totalInspected` in the SAME sentence as `pBar` (its own file header),
+  // so a pooled numerator beside a single-generation p̄ silently mismatched.
+  // Now the same figure `pBar` itself is: the newest generation's alone.
+  // `generations[]` (below) still carries every generation's own totals
+  // un-pooled, for a caller that wants the full breakdown.
+  const newestGenTotals = newestGen == null ? null : perGen.get(newestGen);
+  const totalProduced = newestGenTotals?.produced ?? 0;
+  const totalRejects = newestGenTotals?.rejects ?? 0;
 
   const buckets: RejectBucket[] = sortedCells.map(({ generation, t }) => {
     const k = key(generation, t);

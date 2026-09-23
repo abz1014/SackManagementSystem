@@ -11,14 +11,28 @@
  * comparing the two screens had no way to see that they were not the same
  * thing. Both are printed here, each named as what it is.
  *
- * The scale-rejected count comes from the REGISTER (listEvents with
- * `inRange: false`, total only), so it is by construction the number the
- * Readings screen's "Rejected cones" listing shows — not a third query that
- * could drift from it.
+ * The scale-rejected count USED to come from the REGISTER (listEvents with
+ * `inRange: false`, total only) so it was by construction the number the
+ * Readings screen's "Rejected cones" listing shows. RT-002/RT-029 (23 Sep
+ * 2026 red-team audit) found that count inflated ~29x (411 pooled vs 14
+ * real) on a window that overlaps the local dev simulator's generation,
+ * because `register.ts`'s `listEvents` carries no epoch predicate at all —
+ * a file this pass does not own (`register.ts` is not one of the three
+ * files this remediation wave assigned to a parallel worker either; it is a
+ * genuine gap, reported, not silently absorbed). Rather than print a pooled
+ * count beside `report.totals`, which IS already generation-scoped
+ * (`report.ts`'s `getReport`, a held file this pass reads but does not
+ * edit), this report now runs its OWN scoped count directly against
+ * `sms.cone_event`, mirroring `listEvents`' own `in_range = 0` /
+ * `shift_code` predicate shape closely enough to still be "the same number
+ * Readings would show for a single-generation window" — the drift risk this
+ * file's old comment warned against is accepted here as the lesser fault
+ * until `register.ts` itself is scoped.
  */
 import type { ConnectionPool } from 'mssql';
+import mssql from 'mssql';
+import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
 import { getReport, type ReportData, type ReportLine, type ResolvedPeriod } from '../report.js';
-import { listEvents } from '../register.js';
 import { pct, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
@@ -35,6 +49,8 @@ export interface RejectPopulations {
 
 export interface DailyReportData extends ReportData {
   rejectPopulations: RejectPopulations;
+  /** RT-002/RT-029: the scope `byScale`'s own query below was resolved and bound to. */
+  generationNote: GenerationNote;
 }
 
 export async function getDailyReport(
@@ -44,26 +60,30 @@ export async function getDailyReport(
   filters: ReportFilters,
 ): Promise<DailyReportData> {
   const shift = filters.shift ?? null;
-  const [report, scaleRejected] = await Promise.all([
+  const { from, to } = resolved;
+  const [report, scope] = await Promise.all([
     getReport(pool, lineId, resolved, shift),
-    listEvents(pool, lineId, 'cone', {
-      from: resolved.from,
-      to: resolved.to,
-      shift: shift ?? undefined,
-      inRange: false,
-      page: 1,
-      pageSize: 1,
-      sort: 'time',
-      dir: 'desc',
-    }),
+    // RT-002/RT-029: resolved over the same (lineId, from, to) key
+    // `report.ts`'s own getReport uses internally, so `byScale` below and
+    // `report.totals.cones` agree on which generation they describe.
+    resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
   ]);
+  const scaleReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
+  const scaleWhere0 = ['line_id = @line', 'shift_date BETWEEN @from AND @to', 'in_range = 0'];
+  if (shift) { scaleWhere0.push('shift_code = @shift'); scaleReq.input('shift', mssql.VarChar(10), shift); }
+  const scaleWhere = andEpoch(scaleWhere0.join(' AND '), scaleReq, scope, 'cone_event');
+  const scaleRejectedRes = await scaleReq.query<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM sms.cone_event WHERE ${scaleWhere}`,
+  );
+  const byScale = Number(scaleRejectedRes.recordset[0]?.n ?? 0);
   const cones = report.totals.cones;
   const atInspection = report.totals.rejectedCones;
   return {
     ...report,
+    generationNote: noteOf(scope),
     rejectPopulations: {
-      byScale: scaleRejected.total,
-      byScalePct: pct(scaleRejected.total, cones),
+      byScale,
+      byScalePct: pct(byScale, cones),
       atInspection,
       atInspectionPct: report.totals.rejectRatePct,
       // "before they were weighed as cones" corrected 23 Sep 2026 — see

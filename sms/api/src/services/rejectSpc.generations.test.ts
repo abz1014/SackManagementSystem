@@ -83,6 +83,21 @@ describe('getRejectSpc across a generation boundary', () => {
     expect(d.episodes.every((e) => e.bucketCount === 1)).toBe(true);
   });
 
+  it('totalProduced/totalRejects match the SAME generation pBar describes, not the whole pooled range (RT-002/RT-029, 23 Sep 2026)', async () => {
+    const d = await getRejectSpc(fakePool(REGISTRY, produced, rejects, rejects, rejects), 1, '2026-07-01', '2026-08-31', 'day', 'quality');
+    // Before this fix: totalProduced/totalRejects were summed over BOTH
+    // generations (28,000 / 1,080) while pBar, two lines above in
+    // rejectSpc.ts, was already the NEWEST generation's alone (540/14,540) —
+    // the numerator and denominator `attention.ts` prints beside pBar in one
+    // sentence disagreed with pBar about which range they covered.
+    expect(d.totalProduced).toBe(d.generations[1]!.totalProduced);
+    expect(d.totalRejects).toBe(d.generations[1]!.totalRejects);
+    expect(d.totalProduced).toBe(14000); // generation 3 (August) alone: 7,000 + 7,000
+    expect(d.totalRejects).toBe(540); // generation 3 alone: 400 + 140
+    expect(d.totalProduced).not.toBe(28000); // the old, pooled-across-both-generations total
+    expect(d.totalRejects).not.toBe(1080);
+  });
+
   it('is unchanged for a range inside one generation', async () => {
     const one = (rows: Row[], ...ids: number[]) => rows.filter((r) => ids.includes(r.source_epoch));
     const d = await getRejectSpc(
