@@ -20,6 +20,26 @@
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { Db } from './audit.js';
+import {
+  andEpoch, epochWhere, noteOf, resolveGenerationScope, UNSCOPED,
+  type GenerationNote, type GenerationScope,
+} from './generation.js';
+
+/**
+ * Resolve the source generation for a filter bag and return the bag with it
+ * attached. Every public entry point in this file starts with this, so all of
+ * its own queries — and everything it calls, `getUnmatchedRejects` included —
+ * read ONE generation (generation.ts, 23 Sep 2026).
+ */
+async function scoped(
+  pool: ConnectionPool,
+  lineId: number,
+  f: RejectFilters,
+): Promise<{ f: RejectFilters; note: GenerationNote }> {
+  if (f.scope) return { f, note: noteOf(f.scope) };
+  const scope = await resolveGenerationScope(pool, lineId, { from: f.from, to: f.to });
+  return { f: { ...f, scope }, note: noteOf(scope) };
+}
 
 /**
  * One reject code, as a filter. `quality` codes are a (tube, material) pair
@@ -60,6 +80,20 @@ export interface RejectFilters {
   /** material_id. NULL on every row from before the 2026-08-05 rebuild — see `unattributed`. */
   product?: number;
   code?: RejectCodeFilter;
+  /**
+   * The SOURCE GENERATION these filters are confined to (generation.ts,
+   * 23 Sep 2026). Carried ON THE FILTER BAG rather than as a parameter so it
+   * propagates through every `{ ...f }` spread in this file and through
+   * `getUnmatchedRejects` without a signature change — three workers hold
+   * files that call `bindRejectFilters`, and a required parameter would have
+   * broken them mid-flight.
+   *
+   * Omitted (undefined) means UNCONSTRAINED, which is what every caller did
+   * before this pass. That is deliberately a no-op rather than a hard error:
+   * see the report accompanying this commit for the call sites that are still
+   * unconstrained and why each one is.
+   */
+  scope?: GenerationScope;
 }
 
 /**
@@ -80,6 +114,7 @@ export function bindRejectFilters(
   withCode = true,
 ): string {
   const c = (name: string) => `${alias}${name}`;
+  const scope = f.scope ?? UNSCOPED;
   const w: string[] = [`${c('line_id')} = @line`];
   req.input('line', mssql.Int, lineId);
   if (f.from) { w.push(`${c('shift_date')} >= @from`); req.input('from', mssql.Date, f.from); }
@@ -98,7 +133,7 @@ export function bindRejectFilters(
       req.input('codeMaterial', mssql.Int, f.code.material ?? -999);
     }
   }
-  return w.join(' AND ');
+  return andEpoch(w.join(' AND '), req, scope, 'reject_event', { alias });
 }
 
 /**
@@ -124,7 +159,12 @@ export function bindRejectFilters(
  * discrepancy in the same pass as the denominator fix above.
  */
 export function bindConeFilters(req: SqlRequest, lineId: number, f: RejectFilters, alias = ''): string {
-  return bindRejectFilters(req, lineId, { ...f, code: undefined }, alias, false);
+  // The generation predicate must name CONE_EVENT's epoch, not reject_event's
+  // — one generation spans several `sms.source_epoch` rows, one per source
+  // table, so the ids differ per table. Strip the scope from the delegated
+  // call and re-apply it against the right table here.
+  const where = bindRejectFilters(req, lineId, { ...f, code: undefined, scope: undefined }, alias, false);
+  return andEpoch(where, req, f.scope ?? UNSCOPED, 'cone_event', { alias });
 }
 
 /**
@@ -167,6 +207,14 @@ export async function getUnmatchedRejects(
 ): Promise<Map<string, number>> {
   const req = pool.request();
   const where = bindRejectFilters(req, lineId, { ...f, code: undefined }, 're.', false);
+  // The cone side of the match is generation-constrained TOO. Without it a
+  // reject from one generation can be "matched" by a cone from another that
+  // happens to share (production instant, hanger) — which on this dev copy is
+  // not hypothetical, because the simulator replays the real plant's own
+  // timing distributions. A reject wrongly counted as matched drops straight
+  // out of the reject-rate DENOMINATOR, so the error is silent in both
+  // directions.
+  const coneEpoch = epochWhere(req, f.scope ?? UNSCOPED, 'cone_event', { alias: 'ce.', prefix: 'um' });
   const groupClause = group ? `GROUP BY ${group}` : '';
   const selectGroup = group ?? `'total'`;
   const r = await req.query<{ grp: string; n: number }>(`
@@ -174,7 +222,7 @@ export async function getUnmatchedRejects(
       FROM sms.reject_event re
      WHERE ${where}
        AND NOT EXISTS (
-         SELECT 1 FROM sms.cone_event ce WHERE ${coneMatchPredicate('re', 'ce')}
+         SELECT 1 FROM sms.cone_event ce WHERE ${coneMatchPredicate('re', 'ce')}${coneEpoch ? ` AND ${coneEpoch}` : ''}
        )
      ${groupClause}
   `);
@@ -222,6 +270,8 @@ export interface RejectParetoResult {
   total: number;
   reasons: RejectReason[];
   unattributed: UnattributedRejects | null;
+  /** Which source generation these counts came from, and what was left out. */
+  generationNote?: GenerationNote;
 }
 
 function displayFor(r: { rejectType: string; tubeCode: number | null; materialCode: number | null; label: string | null }): string {
@@ -245,8 +295,9 @@ async function countUnattributed(pool: ConnectionPool, lineId: number, f: Reject
 export async function getRejectPareto(
   pool: ConnectionPool,
   lineId: number,
-  f: RejectFilters = {},
+  f0: RejectFilters = {},
 ): Promise<RejectParetoResult> {
+  const { f, note } = await scoped(pool, lineId, f0);
   const req = pool.request();
   const where = bindRejectFilters(req, lineId, f, 're.');
 
@@ -288,7 +339,7 @@ export async function getRejectPareto(
     };
   });
   const unattributed = await countUnattributed(pool, lineId, f);
-  return { total, reasons, unattributed };
+  return { total, reasons, unattributed, generationNote: note };
 }
 
 /* ------------------------------------------------------- per day, per code */
@@ -341,6 +392,8 @@ export interface RejectDayCodeResult {
   days: number;
   total: number;
   rows: RejectDayCodeRow[];
+  /** Which source generation these counts came from, and what was left out. */
+  generationNote?: GenerationNote;
 }
 
 /**
@@ -354,8 +407,9 @@ export interface RejectDayCodeResult {
 export async function getRejectsByDayCode(
   pool: ConnectionPool,
   lineId: number,
-  f: RejectFilters = {},
+  f0: RejectFilters = {},
 ): Promise<RejectDayCodeResult> {
+  const { f, note } = await scoped(pool, lineId, f0);
   const codeReq = pool.request();
   const codeWhere = bindRejectFilters(codeReq, lineId, f, 're.');
   const byCode = await codeReq.query<{
@@ -422,6 +476,7 @@ export async function getRejectsByDayCode(
     days,
     total: rows.reduce((s, r) => s + r.count, 0),
     rows,
+    generationNote: note,
   };
 }
 
@@ -454,6 +509,8 @@ export interface RejectReasonResult {
   page: number;
   pageSize: number;
   rows: RejectReasonRow[];
+  /** Which source generation these rows came from, and what was left out. */
+  generationNote?: GenerationNote;
 }
 
 /**
@@ -468,7 +525,9 @@ export async function listRejectsOfDayCode(
   lineId: number,
   q: { day: string; code: RejectCodeFilter; station?: number; product?: number; shift?: RejectFilters['shift']; page: number; pageSize: number },
 ): Promise<RejectReasonResult> {
-  const f: RejectFilters = { from: q.day, to: q.day, code: q.code, station: q.station, product: q.product, shift: q.shift };
+  const { f, note } = await scoped(pool, lineId, {
+    from: q.day, to: q.day, code: q.code, station: q.station, product: q.product, shift: q.shift,
+  });
 
   const codeRow = await pool
     .request()
@@ -537,6 +596,7 @@ export async function listRejectsOfDayCode(
       epochLabel: x.epoch_label ?? null,
       attributionMethod: x.attribution_method ?? null,
     })),
+    generationNote: note,
   };
 }
 

@@ -8,6 +8,10 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { getPlausibilityRule } from './admin.js';
 import { plausibleWhere } from './coneState.js';
+import {
+  epochFragment, noteOf, resolveGenerationScope,
+  type GenerationNote,
+} from './generation.js';
 
 export type Basis = 'as_recorded' | 'gross' | 'net';
 
@@ -60,6 +64,15 @@ export interface WeightsData {
   };
   sack: WeightStats;
   note: string;
+  /**
+   * Which SOURCE GENERATION these distributions were computed from, and how
+   * many readings in the same period belong to another one and were therefore
+   * NOT included (generation.ts, 23 Sep 2026). Before this the mean cone
+   * weight over a range spanning IFL's 2026-08-05 rebuild — or, on this dev
+   * copy, spanning the plant simulator — was a mean of two physically
+   * different populations presented as one.
+   */
+  generationNote?: GenerationNote;
 }
 
 /**
@@ -141,10 +154,20 @@ export async function getWeights(
   const coneAdj = basis === 'net' ? tube : 0;
   const sackAdj = basis === 'net' ? tare : 0;
 
-  const dateWhere = (col = 'shift_date') => {
+  // ONE generation for both tables and every query below, resolved once —
+  // see generation.ts. The fragment is built here and the parameters bound in
+  // `bind()` because the SAME where-string is run on a dozen separate
+  // requests in this function.
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event', 'sack_event']);
+  const coneEpoch = epochFragment(scope, 'cone_event');
+  const sackEpoch = epochFragment(scope, 'sack_event');
+
+  const dateWhere = (table: 'cone' | 'sack', col = 'shift_date') => {
     const w: string[] = ['line_id=@line'];
     if (from) w.push(`${col} >= @from`);
     if (to) w.push(`${col} <= @to`);
+    const e = table === 'cone' ? coneEpoch.sql : sackEpoch.sql;
+    if (e) w.push(e);
     return w.join(' AND ');
   };
   // --- cones (grams) / sacks (kg): the population is the ONE plausibility
@@ -175,6 +198,7 @@ export async function getWeights(
     r.input('sackAdj', mssql.Float, sackAdj);
     r.input('coneBucket', mssql.Int, CONE_BUCKET);
     r.input('sackBucket', mssql.Int, SACK_BUCKET);
+    for (const pr of [...coneEpoch.params, ...sackEpoch.params]) r.input(pr.name, mssql.Int, pr.id);
     return r;
   };
   /** A request with the cone population predicate bound; returns [request, predicate]. */
@@ -191,51 +215,51 @@ export async function getWeights(
   const coneStat = await csReq.query<{ n: number; avg: number; mn: number; mx: number; sd: number; excluded: number }>(
     `SELECT COUNT(*) n, AVG(weight_g - @coneAdj) avg, MIN(weight_g - @coneAdj) mn,
             MAX(weight_g - @coneAdj) mx, STDEV(weight_g - @coneAdj) sd,
-            (SELECT COUNT(*) FROM sms.cone_event WHERE ${dateWhere()} AND weight_g IS NOT NULL AND NOT (${csPlaus})) excluded
-     FROM sms.cone_event WHERE ${dateWhere()} AND ${csPlaus}`,
+            (SELECT COUNT(*) FROM sms.cone_event WHERE ${dateWhere('cone')} AND weight_g IS NOT NULL AND NOT (${csPlaus})) excluded
+     FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${csPlaus}`,
   );
   // The median, from the SAME population predicate as the statistics above.
   // PERCENTILE_CONT is a window function; TOP 1 keeps one row of the constant.
   const [cmReq, cmPlaus] = coneReq();
   const coneMed = await cmReq.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight_g - @coneAdj) OVER () med
-     FROM sms.cone_event WHERE ${dateWhere()} AND ${cmPlaus}`,
+     FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${cmPlaus}`,
   );
   const [chReq, chPlaus] = coneReq();
   const coneHist = await chReq.query<{ bucket: number; count: number }>(
     `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket bucket, COUNT(*) count
-     FROM sms.cone_event WHERE ${dateWhere()} AND ${chPlaus}
+     FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${chPlaus}
      GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket)*@coneBucket ORDER BY bucket`,
   );
   // The excluded readings themselves, lightest first — shown, on purpose.
   const [coReq, coAll] = coneReq({ includeImplausible: true });
   const coneOut = await coReq.query<{ w: number; d: string; id: number }>(
     `SELECT TOP 20 weight_g - @coneAdj w, CONVERT(varchar(10), shift_date, 120) d, cone_event_id id
-     FROM sms.cone_event WHERE ${dateWhere()} AND ${coAll} AND NOT (weight_g BETWEEN @plausLo AND @plausHi) ORDER BY weight_g`,
+     FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${coAll} AND NOT (weight_g BETWEEN @plausLo AND @plausHi) ORDER BY weight_g`,
   );
 
   const [ssReq, ssPlaus] = sackReq();
   const sackStat = await ssReq.query<{ n: number; avg: number; mn: number; mx: number; sd: number; excluded: number }>(
     `SELECT COUNT(*) n, AVG(weight_kg - @sackAdj) avg, MIN(weight_kg - @sackAdj) mn,
             MAX(weight_kg - @sackAdj) mx, STDEV(weight_kg - @sackAdj) sd,
-            (SELECT COUNT(*) FROM sms.sack_event WHERE ${dateWhere()} AND weight_kg IS NOT NULL AND NOT (${ssPlaus})) excluded
-     FROM sms.sack_event WHERE ${dateWhere()} AND ${ssPlaus}`,
+            (SELECT COUNT(*) FROM sms.sack_event WHERE ${dateWhere('sack')} AND weight_kg IS NOT NULL AND NOT (${ssPlaus})) excluded
+     FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${ssPlaus}`,
   );
   const [smReq, smPlaus] = sackReq();
   const sackMed = await smReq.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight_kg - @sackAdj) OVER () med
-     FROM sms.sack_event WHERE ${dateWhere()} AND ${smPlaus}`,
+     FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${smPlaus}`,
   );
   const [shReq, shPlaus] = sackReq();
   const sackHist = await shReq.query<{ bucket: number; count: number }>(
     `SELECT FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket bucket, COUNT(*) count
-     FROM sms.sack_event WHERE ${dateWhere()} AND ${shPlaus}
+     FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${shPlaus}
      GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket)*@sackBucket ORDER BY bucket`,
   );
   const [soReq, soAll] = sackReq({ includeImplausible: true });
   const sackOut = await soReq.query<{ w: number; d: string; id: number }>(
     `SELECT TOP 20 weight_kg - @sackAdj w, CONVERT(varchar(10), shift_date, 120) d, sack_event_id id
-     FROM sms.sack_event WHERE ${dateWhere()} AND ${soAll} AND NOT (weight_kg BETWEEN @plausLo AND @plausHi) ORDER BY weight_kg`,
+     FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${soAll} AND NOT (weight_kg BETWEEN @plausLo AND @plausHi) ORDER BY weight_kg`,
   );
 
   // Nominal comes from the product actually selected for this line, when one is.
@@ -311,5 +335,6 @@ export async function getWeights(
         : basis === 'gross'
           ? `Gross basis: readings as the PLC recorded them. Identical to As-recorded until IFL confirms the basis (Q4/Q5).`
           : `Weights as the PLC recorded them.`,
+    generationNote: noteOf(scope),
   };
 }

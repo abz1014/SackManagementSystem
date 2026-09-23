@@ -32,6 +32,10 @@ import mssql from 'mssql';
 import { getPlausibilityRule } from './admin.js';
 import { plausibleWhere } from './coneState.js';
 import { MACHINE_LEVEL_REASON } from './sackStock.js';
+import {
+  andEpoch, noteOf, resolveGenerationScope,
+  type EventTable, type GenerationNote, type GenerationScope,
+} from './generation.js';
 
 export interface SackSummaryQuery {
   from: string;
@@ -78,6 +82,8 @@ export interface SackSummary {
   sackTimeIsInsertTime: true;
   conesPerSackApproximate: true;
   machineLevel: { enabled: false; reason: string };
+  /** Which source generation these sacks came from, and what was left out. */
+  generationNote?: GenerationNote;
 }
 
 interface GroupRow {
@@ -92,8 +98,24 @@ interface GroupRow {
   product_name?: string | null;
 }
 
-/** The shared WHERE for every sack query here — the same columns and parameters production.ts binds. */
-function bindFilters(req: SqlRequest, lineId: number, q: SackSummaryQuery, alias: string, withProduct: boolean): string {
+/**
+ * The shared WHERE for every sack query here — the same columns and parameters
+ * production.ts binds, plus the SOURCE-GENERATION predicate (generation.ts,
+ * 23 Sep 2026). `table` matters: one generation spans one `sms.source_epoch`
+ * row PER SOURCE TABLE, so the sack aggregate and the cone count that divides
+ * it must each name their own table's epoch — getting that wrong would make
+ * cones-per-sack a ratio across two generations, which is precisely the
+ * defect being closed.
+ */
+function bindFilters(
+  req: SqlRequest,
+  lineId: number,
+  q: SackSummaryQuery,
+  alias: string,
+  withProduct: boolean,
+  scope: GenerationScope,
+  table: EventTable,
+): string {
   const c = (n: string) => `${alias}${n}`;
   const w = [`${c('line_id')} = @line`, `${c('shift_date')} >= @from`, `${c('shift_date')} <= @to`];
   req.input('line', mssql.Int, lineId).input('from', mssql.Date, q.from).input('to', mssql.Date, q.to);
@@ -109,12 +131,15 @@ function bindFilters(req: SqlRequest, lineId: number, q: SackSummaryQuery, alias
     w.push(`${c('material_id')} = @product`);
     req.input('product', mssql.Int, q.product);
   }
-  return w.join(' AND ');
+  return andEpoch(w.join(' AND '), req, scope, table, { alias });
 }
 
 const SHIFT_ORDER = ['morning', 'evening', 'night'];
 
 export async function getSackSummary(pool: ConnectionPool, lineId: number, q: SackSummaryQuery): Promise<SackSummary> {
+  // One generation for the sack aggregates AND the cone count they are
+  // divided by, resolved once (generation.ts).
+  const scope = await resolveGenerationScope(pool, lineId, { from: q.from, to: q.to }, ['cone_event', 'sack_event']);
   const [plaus, wr] = await Promise.all([
     getPlausibilityRule(pool, lineId),
     pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tare: number }>(
@@ -127,7 +152,7 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
 
   const aggregate = async (groupExpr: string | null, join = ''): Promise<GroupRow[]> => {
     const req = pool.request();
-    const where = bindFilters(req, lineId, q, 'e.', true);
+    const where = bindFilters(req, lineId, q, 'e.', true, scope, 'sack_event');
     const plausible = plausibleWhere(req, 'e.weight_kg', window, { prefix: 'sp' });
     const grp = groupExpr ?? `'total'`;
     const nameCol = join ? `, COALESCE(p.description, p.lot_code) AS product_name` : '';
@@ -176,14 +201,14 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
 
   // Cones in the same period and filters, for the approximate cones-per-sack.
   const coneReq = pool.request();
-  const coneWhere = bindFilters(coneReq, lineId, q, '', true);
+  const coneWhere = bindFilters(coneReq, lineId, q, '', true, scope, 'cone_event');
   const cones = await coneReq.query<{ n: number }>(`SELECT COUNT(*) n FROM sms.cone_event WHERE ${coneWhere}`);
   const coneN = Number(cones.recordset[0]?.n ?? 0);
 
   // Sacks with no product on the reading, of every sack in the period — the
   // product filter deliberately left off, as production.ts does for cones.
   const uReq = pool.request();
-  const uWhere = bindFilters(uReq, lineId, q, '', false);
+  const uWhere = bindFilters(uReq, lineId, q, '', false, scope, 'sack_event');
   const u = await uReq.query<{ n: number; no_attr: number }>(
     `SELECT COUNT(*) n, SUM(CASE WHEN material_id IS NULL THEN 1 ELSE 0 END) no_attr FROM sms.sack_event WHERE ${uWhere}`,
   );
@@ -216,5 +241,6 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
     sackTimeIsInsertTime: true,
     conesPerSackApproximate: true,
     machineLevel: { enabled: false, reason: MACHINE_LEVEL_REASON },
+    generationNote: noteOf(scope),
   };
 }

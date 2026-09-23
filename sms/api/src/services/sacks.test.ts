@@ -20,6 +20,16 @@ function datasetPool(basis: 'as_recorded' | 'net') {
       const req = {
         input: (name: string, _t: unknown, v: unknown) => { inputs.set(name, v); return req; },
         query: async (sql: string) => {
+          // The source-generation probe (generation.ts `resolveGenerationScope`,
+          // 23 Sep 2026) runs before every other query in this service. It is
+          // answered here as "no epoch-tagged rows", which resolves to the
+          // UNSCOPED no-op, so the cases below keep testing exactly what they
+          // were written to test. It is intercepted BEFORE `statements` is
+          // appended to, so it does not shift the positional assertions those
+          // cases make about which query came first. The predicate itself is
+          // covered by generation.test.ts and by the epoch cases at the end of
+          // this file.
+          if (sql.includes('AS tbl, source_epoch AS epoch_id')) return { recordset: [] };
           statements.push({ sql, inputs: new Map(inputs) });
           if (sql.includes('sms.plausibility_rule')) return { recordset: [{ cl: 1500, ch: 2100, sl: 40, sh: 60 }] };
           if (sql.includes('sms.weight_rule')) return { recordset: [{ basis, tare: 0.5 }] };
@@ -102,5 +112,88 @@ describe('getSackSummary', () => {
     expect(unattributed.sql).toMatch(/shift_code = @shift/);
     expect(unattributed.inputs.get('shift')).toBe('night');
     expect(unattributed.inputs.get('tsTo')).toBe(new Date('2026-09-07T20:00:00.000Z').getTime());
+  });
+});
+
+/**
+ * SOURCE GENERATIONS (generation.ts, 23 Sep 2026). `getSackSummary` divides a
+ * sack aggregate by a cone count. Before this pass both sides pooled every
+ * generation, so over 21 Aug - 7 Sep on the development sidecar the screen
+ * read 8,509 sacks and 190,306 cones when IFL's own September generation held
+ * 2,310 and 55,058 — and cones-per-sack was a ratio across two physically
+ * different tables.
+ *
+ * The two tables' epochs DIFFER inside one generation (sack1_TP1U2 gen 3 is
+ * epoch 10, pack1_TP1U2 gen 3 is epoch 9), which is the thing most easily got
+ * wrong, so it is asserted directly.
+ */
+function epochAwarePool() {
+  const statements: Stmt[] = [];
+  const pool = {
+    request: () => {
+      const inputs = new Map<string, unknown>();
+      const req = {
+        input: (name: string, _t: unknown, v: unknown) => { inputs.set(name, v); return req; },
+        query: async (sql: string) => {
+          statements.push({ sql, inputs: new Map(inputs) });
+          if (sql.includes('AS tbl, source_epoch AS epoch_id')) {
+            return { recordset: [
+              { tbl: 'cone_event', epoch_id: 9, n: 55058 },
+              { tbl: 'cone_event', epoch_id: 13, n: 135248 },
+              { tbl: 'sack_event', epoch_id: 10, n: 2310 },
+              { tbl: 'sack_event', epoch_id: 14, n: 6199 },
+            ] };
+          }
+          if (sql.includes('FROM sms.source_epoch')) {
+            return { recordset: [
+              { epoch_id: 9, source_db: 'DATA_TP1U2_SEP07', generation_ordinal: 3, provenance: 'ifl_copy', label: 'September copy - cones' },
+              { epoch_id: 10, source_db: 'DATA_TP1U2_SEP07', generation_ordinal: 3, provenance: 'ifl_copy', label: 'September copy - sacks' },
+              { epoch_id: 13, source_db: 'DATA_TP1U2_SIM', generation_ordinal: 4, provenance: 'ifl_copy', label: 'pack1_TP1U2 gen 4' },
+              { epoch_id: 14, source_db: 'DATA_TP1U2_SIM', generation_ordinal: 4, provenance: 'ifl_copy', label: 'sack1_TP1U2 gen 4' },
+            ] };
+          }
+          if (sql.includes('sms.plausibility_rule')) return { recordset: [{ cl: 1500, ch: 2100, sl: 40, sh: 60 }] };
+          if (sql.includes('sms.weight_rule')) return { recordset: [{ basis: 'as_recorded', tare: 0 }] };
+          if (sql.includes('FROM sms.cone_event')) return { recordset: [{ n: 55058 }] };
+          if (sql.includes('no_attr')) return { recordset: [{ n: 2310, no_attr: 0 }] };
+          return { recordset: [{ grp: 'total', n: 2310, kg: 0, inr: 0, noflag: 0, implausible: 0, plaus_kg: 0, plaus_n: 0 }] };
+        },
+      };
+      return req;
+    },
+  };
+  return { pool: pool as unknown as ConnectionPool, statements };
+}
+
+describe('getSackSummary — source generations', () => {
+  it('binds the SACK epoch to sack queries and the CONE epoch to the cone count', async () => {
+    const { pool, statements } = epochAwarePool();
+    await getSackSummary(pool, 1, { from: '2026-08-21', to: '2026-09-07' });
+
+    const sackQueries = statements.filter(
+      (s) => s.sql.includes('FROM sms.sack_event') && !s.sql.includes('AS tbl'),
+    );
+    expect(sackQueries.length).toBeGreaterThan(0);
+    for (const s of sackQueries) {
+      expect(s.sql).toMatch(/source_epoch = @ges0/);
+      expect(s.inputs.get('ges0')).toBe(10);
+    }
+
+    const coneQuery = statements.find(
+      (s) => s.sql.includes('FROM sms.cone_event') && !s.sql.includes('AS tbl'),
+    )!;
+    expect(coneQuery.sql).toMatch(/source_epoch = @gec0/);
+    // 9, not 10: one generation, different epoch row per source table.
+    expect(coneQuery.inputs.get('gec0')).toBe(9);
+  });
+
+  it('states which generation it used and how many rows it left out', async () => {
+    const { pool } = epochAwarePool();
+    const s = await getSackSummary(pool, 1, { from: '2026-08-21', to: '2026-09-07' });
+    expect(s.generationNote?.generation?.sourceDb).toBe('DATA_TP1U2_SEP07');
+    expect(s.generationNote?.generation?.simulator).toBe(false);
+    expect(s.generationNote?.spansGenerations).toBe(true);
+    // 135,248 simulator cones + 6,199 simulator sacks, none of them counted.
+    expect(s.generationNote?.otherGenerationExcluded).toBe(141447);
   });
 });

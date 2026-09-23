@@ -10,6 +10,10 @@ import {
   type StateContext, type StateCounts,
 } from './coneState.js';
 import { getUnmatchedRejects, type RejectFilters } from './rejects.js';
+import {
+  andEpoch, noteOf, resolveGenerationScope,
+  type EventTable, type GenerationNote, type GenerationScope,
+} from './generation.js';
 
 /**
  * 'product' since roadmap Phase 8 (15 Sep 2026): the product report. The key
@@ -108,12 +112,25 @@ function unmatchedGroupExpr(g: GroupBy): string | undefined {
   }
 }
 
-/** Common WHERE + parameter binding for a table. `hasStation` gates station filters. */
+/**
+ * Common WHERE + parameter binding for a table. `hasStation` gates station
+ * filters.
+ *
+ * `scope`/`table` add the SOURCE-GENERATION predicate (generation.ts, 23 Sep
+ * 2026). Until then every query in this file pooled IFL's pre- and
+ * post-2026-08-05 generations the moment a range spanned the rebuild — and on
+ * this dev copy pooled the plant simulator's cones with IFL's real ones, 29 %
+ * of the rows being real over 21 Aug - 7 Sep. The caller resolves the scope
+ * ONCE and passes the same one to every table, so the cone, sack and reject
+ * figures on one response are all drawn from the same physical generation.
+ */
 function bindFilters(
   req: SqlRequest,
   p: ProductionParams,
   lineId: number,
   hasStation: boolean,
+  scope: GenerationScope,
+  table: EventTable,
 ): string {
   const w: string[] = ['line_id = @line'];
   req.input('line', mssql.Int, lineId);
@@ -146,7 +163,7 @@ function bindFilters(
     w.push('material_id = @product');
     req.input('product', mssql.Int, p.product);
   }
-  return w.join(' AND ');
+  return andEpoch(w.join(' AND '), req, scope, table);
 }
 
 /**
@@ -199,6 +216,14 @@ export interface ProductionResult {
   states: StateCounts | null;
   /** Readings the population rule excluded as implausible; with `states`. */
   implausible: number | null;
+  /**
+   * Which SOURCE GENERATION these figures were drawn from, and how many rows
+   * in the same period belong to another one and were therefore NOT counted
+   * (generation.ts, 23 Sep 2026). Never omit this from a screen that spans
+   * generations: excluding data is correct, excluding it silently makes the
+   * period look fully represented when it is not.
+   */
+  generationNote?: GenerationNote;
 }
 
 export async function getProduction(
@@ -212,6 +237,12 @@ export async function getProduction(
   // (SQL Server rejects GROUP BY on a constant).
   const groupClause = p.groupBy === 'none' ? '' : `GROUP BY ${g}`;
 
+  // ONE resolution for the whole response. Every query below — cones, states,
+  // rejects, unmatched rejects, sacks, and the unattributed counts — is bound
+  // to the SAME generation, so a cones-per-sack or a reject rate computed
+  // across them is a ratio of one population and not of two.
+  const scope = await resolveGenerationScope(pool, lineId, { from: p.from, to: p.to });
+
   // The unattributed count, when a product filter is on: the same range and
   // station/shift filters, minus the product, so `of` is the population the
   // caller believes the period covers.
@@ -219,7 +250,7 @@ export async function getProduction(
   if (p.product != null) {
     const countUnattributed = async (table: 'sms.cone_event' | 'sms.reject_event'): Promise<UnattributedCount> => {
       const uReq = pool.request();
-      const uWhere = bindFilters(uReq, { ...p, product: undefined }, lineId, true);
+      const uWhere = bindFilters(uReq, { ...p, product: undefined }, lineId, true, scope, table === 'sms.cone_event' ? 'cone_event' : 'reject_event');
       const u = await uReq.query<{ n: number; no_attr: number }>(
         `SELECT COUNT(*) n, SUM(CASE WHEN material_id IS NULL THEN 1 ELSE 0 END) no_attr
          FROM ${table} WHERE ${uWhere}`,
@@ -235,7 +266,7 @@ export async function getProduction(
 
   // cones (with in-range %)
   const coneReq = pool.request();
-  const coneWhere = bindFilters(coneReq, p, lineId, true);
+  const coneWhere = bindFilters(coneReq, p, lineId, true, scope, 'cone_event');
   const cones = await coneReq.query<{ grp: string; n: number; inr: number }>(
     `SELECT ${g} AS grp, COUNT(*) n, SUM(CASE WHEN in_range=1 THEN 1 ELSE 0 END) inr
      FROM sms.cone_event WHERE ${coneWhere} ${groupClause}`,
@@ -247,7 +278,7 @@ export async function getProduction(
   if (p.withStates) {
     const ctx = p.stateContext ?? (await loadStateContext(pool, lineId));
     const stReq = pool.request();
-    const stWhere = bindFilters(stReq, p, lineId, true);
+    const stWhere = bindFilters(stReq, p, lineId, true, scope, 'cone_event');
     const stateCase = bindStateCase(stReq, ctx, '', 'cs');
     const plausible = plausibleWhere(stReq, 'weight_g', ctx.plausibility);
     const st = await stReq.query<{ state: string; n: number; implausible: number }>(
@@ -264,7 +295,7 @@ export async function getProduction(
 
   // rejected cones
   const rejReq = pool.request();
-  const rejWhere = bindFilters(rejReq, p, lineId, true);
+  const rejWhere = bindFilters(rejReq, p, lineId, true, scope, 'reject_event');
   const rejects = await rejReq.query<{ grp: string; n: number }>(
     `SELECT ${g} AS grp, COUNT(*) n FROM sms.reject_event WHERE ${rejWhere} ${groupClause}`,
   );
@@ -282,7 +313,7 @@ export async function getProduction(
   let sacks: { grp: string; n: number; kg: number }[] = [];
   if (!byStation) {
     const sackReq = pool.request();
-    const sackWhere = bindFilters(sackReq, p, lineId, false);
+    const sackWhere = bindFilters(sackReq, p, lineId, false, scope, 'sack_event');
     const res = await sackReq.query<{ grp: string; n: number; kg: number }>(
       `SELECT ${g} AS grp, COUNT(*) n, ISNULL(SUM(weight_kg),0) kg
        FROM sms.sack_event WHERE ${sackWhere} ${groupClause}`,
@@ -336,5 +367,6 @@ export async function getProduction(
     groupBy: p.groupBy, rows, unattributed,
     states: classification?.states ?? null,
     implausible: classification?.implausible ?? null,
+    generationNote: noteOf(scope),
   };
 }

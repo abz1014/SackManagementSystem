@@ -33,6 +33,16 @@ function recordingPool(responses: unknown[][] = []): { pool: ConnectionPool; sta
           return req;
         },
         query: async (sql: string) => {
+          // The source-generation probe (generation.ts `resolveGenerationScope`,
+          // 23 Sep 2026) runs before every other query in this service. It is
+          // answered here as "no epoch-tagged rows", which resolves to the
+          // UNSCOPED no-op, so the cases below keep testing exactly what they
+          // were written to test. It is intercepted BEFORE `statements` is
+          // appended to, so it does not shift the positional assertions those
+          // cases make about which query came first. The predicate itself is
+          // covered by generation.test.ts and by the epoch cases at the end of
+          // this file.
+          if (sql.includes('AS tbl, source_epoch AS epoch_id')) return { recordset: [] };
           statements.push({ sql, inputs: new Map(inputs) });
           return { recordset: responses[i++] ?? [], rowsAffected: [0] };
         },
@@ -218,6 +228,16 @@ function datasetPool(withCodeFilter: boolean) {
       const req = {
         input: (name: string, _type: unknown, value: unknown) => { inputs.set(name, value); return req; },
         query: async (sql: string) => {
+          // The source-generation probe (generation.ts `resolveGenerationScope`,
+          // 23 Sep 2026) runs before every other query in this service. It is
+          // answered here as "no epoch-tagged rows", which resolves to the
+          // UNSCOPED no-op, so the cases below keep testing exactly what they
+          // were written to test. It is intercepted BEFORE `statements` is
+          // appended to, so it does not shift the positional assertions those
+          // cases make about which query came first. The predicate itself is
+          // covered by generation.test.ts and by the epoch cases at the end of
+          // this file.
+          if (sql.includes('AS tbl, source_epoch AS epoch_id')) return { recordset: [] };
           statements.push({ sql, inputs: new Map(inputs) });
           // Checked BEFORE the plain cone_event branch: getUnmatchedRejects's
           // NOT EXISTS subquery references sms.cone_event too, so a bare
