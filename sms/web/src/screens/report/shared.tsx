@@ -256,19 +256,33 @@ export function RankBars({
   rows,
   ariaLabel,
   valueFmt = fmtInt,
+  labelWidth = 168,
+  rowHeight = 28,
 }: {
   rows: RankRow[];
   ariaLabel: string;
   valueFmt?: (v: number) => string;
+  /**
+   * The label gutter. 168px fits a station name; it does NOT fit a PDAS
+   * product whose plain description collides with five others and is
+   * therefore printed with the parts that distinguish it appended
+   * ("205-IL0-SD · Star Green · PVSD8020 · 18" — see productLabel.ts).
+   * Callers drawing products pass a wider gutter rather than letting the
+   * label run under its own bar. Default unchanged, so every existing
+   * caller renders exactly as before.
+   */
+  labelWidth?: number;
+  rowHeight?: number;
 }) {
   const [box, width] = useChartWidth();
   if (rows.length < MIN_MULTIROW) return null;
 
-  const L = 168; // label gutter
+  const L = labelWidth; // label gutter
   const R = 60; // value gutter
   const T = 6;
-  const rowH = 28;
-  const barH = 14;
+  const rowH = rowHeight;
+  // 14px at the default 28px row, thicker (to 18) on a taller one.
+  const barH = Math.max(12, Math.min(18, rowHeight - 14));
   const H = T + rows.length * rowH + 6;
 
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
@@ -328,9 +342,24 @@ export function DeviationBars({
   thresholdLabel,
   zeroLabel,
   valueFmt = fmtSignedG,
+  height = 220,
+  minHalfSpan,
 }: {
   rows: DeviationRow[];
   ariaLabel: string;
+  height?: number;
+  /**
+   * The smallest half-domain the y axis may use, in the rows' own unit.
+   *
+   * Without it the axis always fits the data, so a set of readings that
+   * barely move — every production day's mean sack weight within 0.1 kg of
+   * the period's own mean — is magnified until the bars look like a problem.
+   * A caller that knows what size of difference would MATTER passes it here,
+   * and a flat week then draws flat, which is the true answer. Never a
+   * tolerance: this app has no sack tolerance from IFL (CLAUDE.md), and this
+   * is a drawing bound, not a limit, so it is not labelled as one.
+   */
+  minHalfSpan?: number;
   /** A symmetric flag distance either side of zero, in the same unit as `value`. */
   threshold?: number;
   thresholdLabel?: string;
@@ -341,7 +370,7 @@ export function DeviationBars({
   const [box, width] = useChartWidth();
   if (rows.length < MIN_MULTIROW) return null;
 
-  const H = 220;
+  const H = height;
   const L = 48;
   const R = 8;
   const T = 18;
@@ -349,15 +378,23 @@ export function DeviationBars({
 
   const values = rows.map((r) => r.value);
   const withThreshold = threshold != null ? [threshold, -threshold] : [];
+  const floor = minHalfSpan != null ? [minHalfSpan, -minHalfSpan] : [];
   // `0` is always in the values handed to `niceDomain` so the zero axis is
   // never padded away, whichever side of it every row happens to sit.
-  const [lo, hi] = niceDomain([...values, 0, ...withThreshold], { pad: 0.15 });
+  const [lo, hi] = niceDomain([...values, 0, ...withThreshold, ...floor], { pad: 0.15 });
   const y = linear([lo, hi], [H - B, T]);
   const slot = (width - L - R) / rows.length;
   const bw = Math.max(4, slot * 0.55);
   const cx = (i: number) => L + slot * i + slot / 2;
   const zeroY = y(0);
-  const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / 60))));
+  // Thin the x labels by how wide the WIDEST label actually is, not by a
+  // fixed 60px slot. With 23 day labels ("23 Sept") across a full-width
+  // chart the fixed figure kept every one of them and the last two
+  // overprinted each other (seen on Sacks, 23 Sep 2026). Station labels are
+  // shorter than the old 60px assumption in the common case, so no existing
+  // caller loses a tick it was drawing before.
+  const labelPx = Math.max(...rows.map((r) => r.label.length)) * 7 + 16;
+  const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / labelPx))));
 
   return (
     <div ref={box}>

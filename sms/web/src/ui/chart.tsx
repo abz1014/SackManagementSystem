@@ -224,6 +224,124 @@ export function RefLine({
   );
 }
 
+/* --------------------------------------------------------- category bars */
+
+export interface BarDatum {
+  key: string;
+  /** The x-axis tick, already short. */
+  label: string;
+  value: number;
+  /** The whole readout line for this bar, when hovered. */
+  detail?: ReactNode;
+}
+
+/**
+ * Vertical bars over categories — days, shifts, products — with a zero
+ * baseline, at most three gridlines, ticks that thin themselves to fit, and
+ * the house readout above.
+ *
+ * BARS, NEVER A LINE, and that is a rule rather than a preference on this
+ * data. The plant dropped and recreated its weighing tables on 2026-08-05,
+ * and the sidecar additionally holds simulator rows overlapping the real
+ * ones, so a period can span two source generations with a hole between
+ * them. A line drawn across that gap asserts one continuous process; a bar
+ * says nothing whatever about the day beside it. Every caller on Line and
+ * Sacks draws days this way for that reason.
+ *
+ * The caller passes the resting summary: a chart on a wall display that says
+ * nothing until someone points at it is mute to the room it hangs in.
+ */
+export function CategoryBars({
+  data,
+  height = 280,
+  ariaLabel,
+  resting,
+  valueFmt = (v: number) => String(v),
+  leftGutter = 56,
+}: {
+  data: BarDatum[];
+  height?: number;
+  ariaLabel: string;
+  resting: ReactNode;
+  valueFmt?: (v: number) => string;
+  leftGutter?: number;
+}) {
+  const [box, width] = useChartWidth();
+  const [hover, setHover] = useHoverIndex(data.length);
+  const H = height;
+  const L = leftGutter;
+  const R = 10;
+  const T = 16;
+  const B = 30;
+
+  if (data.length === 0) return <NoChartData message="Nothing to draw for this period." />;
+
+  const [lo, hi] = niceDomain(data.map((d) => d.value), { zero: true, pad: 0.06 });
+  const y = linear([lo, hi], [H - B, T]);
+  const slot = (width - L - R) / data.length;
+  // Capped, or a two-day period draws two 400px-wide slabs across a
+  // full-width chart (seen on Line with "This week" on a Wednesday). A bar's
+  // job is to be compared by height; past about 64px of width it stops
+  // reading as a bar at all.
+  const bw = Math.min(64, Math.max(3, slot * 0.62));
+  const cx = (i: number) => L + slot * i + slot / 2;
+  const widest = Math.max(...data.map((d) => d.label.length));
+  const ticks = new Set(tickIndices(data.length, fittingTicks(width - L - R, widest, 12, data.length, 12)));
+  const zeroY = y(0);
+
+  const h = hover != null ? data[hover] : null;
+
+  return (
+    <div ref={box}>
+      <Readout hovered={h ? (h.detail ?? `${h.label} · ${valueFmt(h.value)}`) : null} resting={resting} />
+      <svg
+        className="chart"
+        viewBox={`0 0 ${width} ${H}`}
+        height={H}
+        role="img"
+        aria-label={ariaLabel}
+        onMouseLeave={() => setHover(null)}
+      >
+        {gridValues([lo, hi]).map((v) => (
+          <g key={v}>
+            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
+            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">
+              {valueFmt(v)}
+            </text>
+          </g>
+        ))}
+        {data.map((d, i) => (
+          <rect
+            key={d.key}
+            x={cx(i) - bw / 2}
+            y={Math.min(zeroY, y(d.value))}
+            width={bw}
+            height={Math.max(0, Math.abs(y(d.value) - zeroY))}
+            fill={hover === i ? 'var(--ink)' : 'var(--graphite)'}
+          />
+        ))}
+        <HoverBands count={data.length} x={cx} top={T} height={H - B - T} onHover={setHover} />
+        {hover != null && <Crosshair x={cx(hover)} top={T} bottom={H - B} />}
+        {data.map((d, i) =>
+          ticks.has(i) ? (
+            <text
+              key={`t${d.key}`}
+              x={cx(i)}
+              y={H - 8}
+              fontSize="var(--fs-tick)"
+              fill="var(--muted)"
+              textAnchor={edgeAnchor(i, data.length)}
+            >
+              {d.label}
+            </text>
+          ) : null,
+        )}
+        <line x1={L} x2={width - R} y1={zeroY} y2={zeroY} stroke="var(--rule-2)" />
+      </svg>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ empty state */
 
 export function NoChartData({ message }: { message: string }) {

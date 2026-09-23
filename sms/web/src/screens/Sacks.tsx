@@ -31,14 +31,27 @@ import type { Period } from '../lib/period';
 import { Block, Details, Empty, Failed, Figures, SkelChart, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
-import { Readout, edgeAnchor, useChartWidth } from '../ui/chart';
-import { fmtDayShort } from './report/shared';
-import { Pager, PAGE_SIZE, ReadingTable } from './Readings';
+import { CategoryBars, type BarDatum } from '../ui/chart';
+import { distinctProductLabels } from '../lib/productLabel';
+import { DeviationBars, RankBars, fmtDayShort, type DeviationRow, type RankRow } from './report/shared';
+import { Pager, ReadingTable } from './Readings';
 import {
-  getEvents, getProducts, getSackStock, getSackSummary, recordSackMovement, MOVEMENT_TYPES,
+  getEvents, getProducts, getReportOf, getSackStock, getSackSummary, recordSackMovement, MOVEMENT_TYPES,
   type LedgerDay, type LedgerFlow, type MovementType, type ProductOption, type RegisterType, type SackSummaryData,
-  type StockLedgerData,
+  type SackReportData, type StockLedgerData,
 } from '../api';
+
+/**
+ * This screen's own register page, deliberately NOT Readings' 100.
+ *
+ * At 100 rows the sack history was about 3,600px of a 7,900px page — the
+ * single largest thing on the screen was a table of a hundred rows, on a
+ * screen whose own question is answered by the blocks above it. Readings IS
+ * the register and keeps its hundred; this is the same rows in a second
+ * place (see the file header), and twenty-five of them with the pager intact
+ * is a listing rather than a wall.
+ */
+const HISTORY_PAGE_SIZE = 25;
 
 /** Roadmap Phase 2b (16 Sep 2026): the ledger's unit, in the URL as `su`. */
 export type SackUnit = 'sacks' | 'kg';
@@ -76,8 +89,29 @@ export function SacksScreen({
     `sacks:summary:${key}`,
   );
   const ledger = usePolling(() => getSackStock({ from: period.from, to: period.to, tsTo: period.tsTo }), slow, `sacks:stock:${key}`);
+  // The per-day average sack weight, which no other endpoint on this screen
+  // carries: /api/sacks/summary gives one average for the whole period and
+  // the ledger gives none. The sack REPORT already computes it per day, at
+  // rank 1 (REPORT_RANK.sack = 1, services/reports/common.ts), and is cached
+  // server-side — this is an existing endpoint read from a second screen, not
+  // a new payload.
+  const report = usePolling(
+    () => getReportOf('sack', { from: period.from, to: period.to, shift: period.shift }),
+    slow,
+    `sacks:report:${key}`,
+  );
+  // PDAS holds six materials all described "205-IL0-SD" on this line, so the
+  // by-product table printed six identical row headings with figures ranging
+  // 27.8% to 100% — indistinguishable to the reader, and a duplicate React
+  // key on top of it. The parts that tell them apart (colour, blend, count,
+  // tube) live in the product master, and the one disambiguator every other
+  // screen already uses turns them into distinct names.
+  const productMaster = usePolling(() => getProducts(), 10 * 60_000, 'products');
 
   const s = summary.data?.data ?? null;
+  const labels = distinctProductLabels(productMaster.data?.products ?? []);
+  const productName = (materialId: number | null, plain: string | null): string =>
+    materialId == null ? W.sacks.noProduct : (labels.get(materialId) ?? plain ?? `Product ${materialId}`);
   const headline = !s
     ? null
     : s.totals.sacks === 0
@@ -101,17 +135,18 @@ export function SacksScreen({
         )}
       </Block>
 
-      {/* UX chart-primitives pass (23 Sep 2026): this screen measured at 0%
-          chart pixel area against 7,400+ px of page — the worst offender the
-          brief that added this chart found. Placed second on the page (above
-          the fold) and given a real height, unlike the 14 x 85x56px marks
-          that Line's own station strip used to carry. Drawn from the SAME
-          `ledger` fetch the Stock ledger table below already reads — no new
-          request, no new statistic (`weighed.sacks`/`weighed.kg` per day are
-          the ledger's own figures, already printed in that table's
-          "Receipts" column via `weighed`). */}
+      {/* UX charts pass 2 (23 Sep 2026). The first pass put ONE 816x240px bar
+          chart on an 8,890px page — 1.8% of it — and the owner's complaint
+          ("majority of texts, no proper graphs") was not answered by that.
+          Four marks now carry this screen's own question, in the order a
+          packing question is actually asked: how many, how heavy, which
+          product, which shift. Every one of them is drawn from a figure an
+          endpoint already returns; none is a new statistic, and none is a
+          line, because a period may span the 5 Aug source-generation
+          boundary (see CategoryBars' own header). */}
       {s && s.totals.sacks > 0 && (
-        <Block label={W.sacks.weighedPerDay}>
+        <Block chartWide>
+          <p className="h2"><span>{W.sacks.weighedPerDay}</span></p>
           {ledger.error && !ledger.data ? (
             <Failed error={ledger.error} onRetry={ledger.refresh} />
           ) : !ledger.data ? (
@@ -123,19 +158,59 @@ export function SacksScreen({
       )}
 
       {s && s.totals.sacks > 0 && (
-        <Block>
-          <div className="two-col">
-            <div>
-              <p className="h2"><span>{W.sacks.byShift}</span></p>
-              <div className="tw"><GroupTable head={W.sacks.colShift} rows={s.byShift.map((r) => ({ label: W.shiftName[r.shift as 'morning'] ?? r.shift, ...r }))} /></div>
-            </div>
-            <div>
-              <p className="h2"><span>{W.sacks.byProduct}</span></p>
-              <div className="tw"><GroupTable head={W.sacks.colProduct} rows={s.byProduct.map((r) => ({ label: r.productName ?? (r.materialId == null ? W.sacks.noProduct : `Product ${r.materialId}`), ...r }))} /></div>
-              {s.unattributed.rows > 0 && (
-                <p className="mut sm" style={{ marginTop: 8 }}>{W.sacks.unattributed(fmtInt(s.unattributed.rows), fmtInt(s.unattributed.of))}</p>
-              )}
-            </div>
+        <Block chartWide>
+          <p className="h2">
+            <span>{W.sacks.avgPerDay}</span>
+          </p>
+          {report.error && !report.data ? (
+            // Named, not blanket: everything else on this screen is still on
+            // screen and still true; it is this one chart that has no data.
+            <p className="state">{W.sacks.avgPerDayUnavailable}</p>
+          ) : !report.data ? (
+            <SkelChart />
+          ) : (
+            <AvgWeightPerDay report={report.data.data.report} />
+          )}
+        </Block>
+      )}
+
+      {s && s.totals.sacks > 0 && (
+        <Block chartWide>
+          <p className="h2"><span>{W.sacks.byProduct}</span></p>
+          {productMaster.error && !productMaster.data && (
+            <p className="mut sm" style={{ marginBottom: 10 }}>{W.sacks.namesNotDistinct}</p>
+          )}
+          <ByProduct rows={s.byProduct} nameOf={productName} />
+          {s.unattributed.rows > 0 && (
+            <p className="mut sm" style={{ marginTop: 8 }}>{W.sacks.unattributed(fmtInt(s.unattributed.rows), fmtInt(s.unattributed.of))}</p>
+          )}
+          <div className="tw" style={{ marginTop: 18 }}>
+            <GroupTable
+              head={W.sacks.colProduct}
+              rows={s.byProduct.map((r) => ({ ...r, key: String(r.materialId ?? 'none'), label: productName(r.materialId, r.productName) }))}
+            />
+          </div>
+        </Block>
+      )}
+
+      {s && s.totals.sacks > 0 && s.byShift.length > 0 && (
+        <Block chartWide>
+          <p className="h2"><span>{W.sacks.byShift}</span></p>
+          <RankBars
+            rows={s.byShift.map((r) => ({
+              key: r.shift,
+              label: W.shiftName[r.shift as 'morning'] ?? r.shift,
+              value: r.sacks,
+            }))}
+            ariaLabel={W.sacks.byShiftAria}
+            labelWidth={140}
+            rowHeight={36}
+          />
+          <div className="tw" style={{ marginTop: 14 }}>
+            <GroupTable
+              head={W.sacks.colShift}
+              rows={s.byShift.map((r) => ({ ...r, key: r.shift, label: W.shiftName[r.shift as 'morning'] ?? r.shift }))}
+            />
           </div>
         </Block>
       )}
@@ -178,69 +253,132 @@ export function SacksScreen({
  * internals from for a shape that does not fit it.
  */
 function SackWeighedChart({ days }: { days: LedgerDay[] }) {
-  const [box, width] = useChartWidth();
-  const [hover, setHover] = useState<number | null>(null);
-  const H = 240;
-  const L = 48;
-  const R = 8;
-  const T = 18;
-  const B = 30;
-
   if (days.length === 0) return <Empty message={W.nothingHere} />;
-
-  const max = Math.max(...days.map((d) => d.weighed.sacks), 1);
-  const slot = (width - L - R) / days.length;
-  const bw = Math.max(4, slot * 0.62);
-  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
-  const cx = (i: number) => L + slot * i + slot / 2;
-  const step = Math.max(1, Math.ceil(days.length / Math.max(2, Math.floor((width - L - R) / 70))));
-  const grid = [0.25, 0.5, 0.75].map((f) => Math.round(max * f)).filter((v, i, a) => v > 0 && a.indexOf(v) === i);
-
-  const h = hover != null ? days[hover] : null;
-  const totalSacks = days.reduce((sum, d) => sum + d.weighed.sacks, 0);
-
+  const data: BarDatum[] = days.map((d) => ({
+    key: d.day,
+    label: fmtDayShort(d.day),
+    value: d.weighed.sacks,
+    detail: `${fmtDayLong(d.day)} · ${fmtInt(d.weighed.sacks)} ${W.sacks.figSacks} · ${fmtInt(Math.round(d.weighed.kg))} ${W.sacks.figKg}`,
+  }));
+  const total = days.reduce((sum, d) => sum + d.weighed.sacks, 0);
+  const busiest = days.reduce((best, d) => (d.weighed.sacks > best.weighed.sacks ? d : best), days[0]!);
   return (
-    <div ref={box}>
-      <Readout
-        hovered={h ? `${fmtDayLong(h.day)} · ${fmtInt(h.weighed.sacks)} sacks · ${fmtInt(Math.round(h.weighed.kg))} kg` : null}
-        resting={`${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(totalSacks)} sacks weighed`}
+    <CategoryBars
+      data={data}
+      height={300}
+      ariaLabel={W.sacks.weighedPerDayAria}
+      valueFmt={fmtInt}
+      resting={W.sacks.weighedResting(
+        days.length,
+        fmtInt(total),
+        fmtInt(busiest.weighed.sacks),
+        fmtDayLong(busiest.day),
+      )}
+    />
+  );
+}
+
+/**
+ * Each production day's MEAN sack weight against the period's own mean.
+ *
+ * Deviation bars rather than absolute weights: every sack on this line is
+ * packed to about 47 kg, so an absolute axis prints twenty-three bars of
+ * identical height and answers nothing. What a packing question actually
+ * asks is whether any day drifted, and by how much.
+ *
+ * TWO THINGS THIS CHART MUST NOT DO, both of which would be over-claiming:
+ *  - it draws NO target or tolerance band. IFL's data carries no sack
+ *    tolerance of any kind (CLAUDE.md), so there is nothing to draw and
+ *    nothing to judge a day against beyond the period's own middle;
+ *  - it does not let the axis magnify nothing into something. `minHalfSpan`
+ *    fixes the axis at ±0.5 kg — about 1% of a sack — so a period whose days
+ *    all sit within 0.1 kg of each other DRAWS flat, which is the true and
+ *    useful answer. Without it niceDomain would scale ±0.07 kg to the full
+ *    height of the block and invent a drift story.
+ */
+function AvgWeightPerDay({ report }: { report: SackReportData }) {
+  const days = report.byDay.filter((r) => r.group !== 'total' && r.avgSackKg != null);
+  if (days.length < 2 || report.totals.avgSackKg == null) return <Empty message={W.sacks.avgPerDayTooShort} />;
+  const mean = report.totals.avgSackKg;
+  const rows: DeviationRow[] = days.map((r) => ({
+    key: r.group,
+    label: fmtDayShort(r.group),
+    value: Number(((r.avgSackKg as number) - mean).toFixed(3)),
+  }));
+  const worst = rows.reduce((a, b) => (Math.abs(b.value) > Math.abs(a.value) ? b : a), rows[0]!);
+  return (
+    <>
+      <p className="readout"><span className="dim">{W.sacks.avgPerDayResting(fmtKg(mean), fmtKg(Math.abs(worst.value)))}</span></p>
+      <DeviationBars
+        rows={rows}
+        ariaLabel={W.sacks.avgPerDayAria}
+        zeroLabel={W.sacks.avgPerDayZero(fmtKg(mean))}
+        valueFmt={(v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtKg(Math.abs(v))}`}
+        height={260}
+        /* 0.1 kg either side — about 0.2% of a 47 kg sack, and set by
+           measurement rather than taste. At ±0.5 kg (the first value tried)
+           the real day-to-day movement drew as an invisible hairline, which
+           reads as a broken chart rather than as a steady one. It is not
+           magnifying noise either: with roughly 300 sacks behind each day's
+           mean and a 0.12 kg spread, the standard error of a day's mean is
+           about 0.007 kg, so a 0.05 kg difference between days is a real
+           difference. A genuine drift beyond 0.1 kg still scales the axis
+           out, because this is a floor, not a fixed domain. */
+        minHalfSpan={0.1}
       />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={W.sacks.weighedPerDayAria}>
-        {grid.map((v) => (
-          <g key={v}>
-            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
-            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{fmtInt(v)}</text>
-          </g>
-        ))}
-        {days.map((d, i) => (
-          <rect
-            key={d.day}
-            x={cx(i) - bw / 2}
-            y={d.weighed.sacks > 0 ? y(d.weighed.sacks) : y(0)}
-            width={bw}
-            height={Math.max(0, H - B - y(d.weighed.sacks))}
-            fill={hover === i ? 'var(--ink)' : 'var(--graphite)'}
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover(null)}
+    </>
+  );
+}
+
+/**
+ * Two ranked comparisons of the products that actually carry a product id:
+ * how many sacks each packed, and what share of them the scale passed.
+ *
+ * The unattributed rows are NOT in either chart — on the September
+ * generation they are 88% of every sack, and one bar that long leaves the
+ * real products as hairlines. Their count is printed in full beneath the
+ * charts (the same sentence this block already carried), never dropped.
+ *
+ * Nothing here is flagged in the accent: IFL has confirmed no sack
+ * tolerance and no in-range target, so this app has no standing to mark one
+ * product's share as a fault. The bars state what was measured and stop.
+ */
+function ByProduct({
+  rows,
+  nameOf,
+}: {
+  rows: (SackSummaryData['byProduct'][number])[];
+  nameOf: (materialId: number | null, plain: string | null) => string;
+}) {
+  const attributed = rows.filter((r) => r.materialId != null);
+  if (attributed.length < 2) return null;
+  const sacks: RankRow[] = [...attributed]
+    .sort((a, b) => b.sacks - a.sacks)
+    .map((r) => ({ key: String(r.materialId), label: nameOf(r.materialId, r.productName), value: r.sacks }));
+  const inRange: RankRow[] = [...attributed]
+    .filter((r) => r.inRangePct != null)
+    .sort((a, b) => (a.inRangePct as number) - (b.inRangePct as number))
+    .map((r) => ({
+      key: String(r.materialId),
+      label: `${nameOf(r.materialId, r.productName)} · ${fmtInt(r.sacks)} ${W.sacks.figSacks}`,
+      value: r.inRangePct as number,
+    }));
+  return (
+    <>
+      <RankBars rows={sacks} ariaLabel={W.sacks.byProductAria} labelWidth={330} rowHeight={34} />
+      {inRange.length >= 2 && (
+        <>
+          <p className="h2" style={{ marginTop: 22 }}><span>{W.sacks.inRangeByProduct}</span></p>
+          <RankBars
+            rows={inRange}
+            ariaLabel={W.sacks.inRangeByProductAria}
+            valueFmt={(v) => fmtPct1(v)}
+            labelWidth={420}
+            rowHeight={34}
           />
-        ))}
-        {days.map((d, i) =>
-          i % step === 0 || i === days.length - 1 ? (
-            <text
-              key={`t${d.day}`}
-              x={cx(i)}
-              y={H - 8}
-              fontSize="var(--fs-tick)"
-              fill="var(--muted)"
-              textAnchor={edgeAnchor(i, days.length)}
-            >
-              {fmtDayShort(d.day)}
-            </text>
-          ) : null,
-        )}
-        <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
-      </svg>
-    </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -284,7 +422,15 @@ function GroupTable({
   rows,
 }: {
   head: string;
-  rows: { label: string; sacks: number; kg: number; avgKg: number | null; inRangePct: number | null }[];
+  /**
+   * `key` is the row's own identity, not its label. Six PDAS materials share
+   * the description "205-IL0-SD" on this line, so `key={r.label}` gave React
+   * six duplicate keys (55 warnings in the console, counted 23 Sep 2026) —
+   * and, more to the point, printed six identical headings against figures
+   * running from 27.8% to 100%. The label is now disambiguated by the
+   * caller; the key is the material id.
+   */
+  rows: { key: string; label: string; sacks: number; kg: number; avgKg: number | null; inRangePct: number | null }[];
 }) {
   if (rows.length === 0) return <Empty message={W.nothingHere} />;
   return (
@@ -300,7 +446,7 @@ function GroupTable({
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.label}>
+          <tr key={r.key}>
             <td>{r.label}</td>
             <td className="n">{fmtInt(r.sacks)}</td>
             <td className="n">{fmtInt(Math.round(r.kg))}</td>
@@ -567,7 +713,7 @@ function History({
   const rows = usePolling(
     () => getEvents({
       type: 'sack', from: period.from, to: period.to, shift: period.shift, tsFrom: period.tsFrom, tsTo: period.tsTo,
-      page, pageSize: PAGE_SIZE, sort: 'time', dir: 'desc',
+      page, pageSize: HISTORY_PAGE_SIZE, sort: 'time', dir: 'desc',
     }),
     period.live ? LIST_POLL_MS : 5 * 60_000,
     `sacks:history:${period.from}:${period.to}:${period.shift ?? 'all'}:${page}`,
@@ -599,8 +745,8 @@ function History({
               {stale ? lagText : period.live ? W.readings.liveNote : null}
             </span>
             <span>
-              {W.readings.perPage(PAGE_SIZE, fmtInt(total))}
-              <Pager page={page} total={total} onPage={onPageChange} />
+              {W.readings.perPage(HISTORY_PAGE_SIZE, fmtInt(total))}
+              <Pager page={page} total={total} onPage={onPageChange} size={HISTORY_PAGE_SIZE} />
             </span>
           </p>
         </>

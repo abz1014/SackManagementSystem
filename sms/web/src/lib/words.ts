@@ -109,6 +109,13 @@ export const W = {
     intoShift: (span: string, shift: string, from: string, to: string) =>
       `${span} into the ${shift}, ${from}${nbsp}to${nbsp}${to}`,
     shiftOf: (shift: string, from: string, to: string) => `${shift}, ${from} to ${to}`,
+    /* UX charts pass 2 (23 Sep 2026). The home screen's headline used to name
+       the SHIFT IN PROGRESS whatever the period control said, so "This month"
+       printed "Morning shift, 6:00 AM to 2:00 PM" above a month of counts.
+       The state clause is about now and says so; this one names what the
+       figures below actually cover. */
+    rightNow: 'right now',
+    figuresCover: (period: string) => `Figures below cover ${period}.`,
   } as const,
   shift: { morning: 'morning shift', evening: 'evening shift', night: 'night shift' } as const,
   shiftName: { morning: 'Morning', evening: 'Evening', night: 'Night' } as const,
@@ -355,6 +362,24 @@ export const W = {
      phrase would suggest the two charts measure the same thing. */
   stationsCompareAria: 'Cones this period, each station against the row’s own median',
   stationsCompareZero: 'row median',
+  /* UX charts pass 2 (23 Sep 2026): the period's own shape, on the home
+     screen, under the figures it belongs to. */
+  conesPerDay: 'Cones weighed per production day',
+  conesPerShift: 'Cones weighed per shift',
+  conesPerDayAria: 'Cones weighed per production day',
+  conesPerShiftAria: 'Cones weighed per shift',
+  conesResting: (n: number, spread: 'day' | 'shift', total: string, most: string, mostLabel: string) =>
+    `${n} ${spread === 'day' ? (n === 1 ? 'production day' : 'production days') : (n === 1 ? 'shift' : 'shifts')} · ${total} cones · busiest ${most} on ${mostLabel}`,
+  conesPerDayUnavailable:
+    'The per-day counts could not be read, so this chart is not drawn. The figures above come from a separate call and are unaffected.',
+  /* Two points are the minimum a comparison can be made from, and WHICH kind
+     of point is missing decides the sentence: on "Today" the grouping is by
+     shift, and telling a reader who has already picked Today to "pick Today"
+     was the first draft's own bug. */
+  onePointNoShape: (spread: 'day' | 'shift') =>
+    spread === 'day'
+      ? 'Fewer than two production days in this period hold readings, so there is no shape to compare yet.'
+      : 'Only one shift in this period holds readings, so there is no shape to compare yet — pick This week or This month.',
   /* The wall has no period control: its per-station counts are measured
      from the start of the shift (live.ts), so it must not borrow Line's
      "this period" wording. */
@@ -1631,6 +1656,26 @@ export const W = {
        the ledger table beside it already does. */
     weighedPerDay: 'Sacks weighed per day',
     weighedPerDayAria: 'Sacks weighed per day',
+    weighedResting: (days: number, total: string, most: string, mostDay: string) =>
+      `${days} ${days === 1 ? 'day' : 'days'} · ${total} sacks weighed · busiest ${most} on ${mostDay}`,
+    /* UX charts pass 2 (23 Sep 2026). Three more marks, so this screen's own
+       question is answerable without reading a table. Each is drawn from a
+       figure an endpoint already returns. */
+    avgPerDay: 'Average sack weight, each day against the period',
+    avgPerDayAria: 'Average sack weight per day, as a difference from the period average',
+    avgPerDayZero: (mean: string) => `period average ${mean}`,
+    avgPerDayResting: (mean: string, worst: string) =>
+      `Period average ${mean}. No day’s own average sits more than ${worst} from it. The axis is held at ±0.1 kg or wider, so a steady period draws flat.`,
+    avgPerDayTooShort: 'Two production days or more are needed before a day can be compared to the period.',
+    /* Named, not blanket (CLAUDE.md, "name which part failed"): every other
+       figure on this screen comes from a different endpoint and is unaffected. */
+    avgPerDayUnavailable: 'The per-day averages could not be read, so this chart is not drawn. Every other figure on this screen is unaffected.',
+    byProductAria: 'Sacks weighed, by product',
+    inRangeByProduct: 'Within the scale’s range, by product',
+    inRangeByProductAria: 'Share of sacks the scale passed, by product, worst first',
+    byShiftAria: 'Sacks weighed, by shift',
+    namesNotDistinct:
+      'The product master could not be read, so products that share a description are shown under the same name.',
     /* The ledger. */
     ledger: 'Stock ledger',
     ledgerNote: 'line stock, not per machine',

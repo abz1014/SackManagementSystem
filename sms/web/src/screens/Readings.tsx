@@ -458,8 +458,17 @@ function StateChips({ value, onChange }: { value: ConeState[]; onChange: (v: Con
   );
 }
 
-export function Pager({ page, total, onPage }: { page: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+export function Pager({
+  page,
+  total,
+  onPage,
+  /** The caller's own page size. Sacks' history listing is 25, not the
+   *  register's 100 (see Sacks.tsx's HISTORY_PAGE_SIZE); without this the
+   *  page count here would be computed from a size that listing never asked
+   *  for, and the pager would stop four pages early. */
+  size = PAGE_SIZE,
+}: { page: number; total: number; onPage: (p: number) => void; size?: number }) {
+  const pages = Math.max(1, Math.ceil(total / size));
   if (pages <= 1) return null;
   return (
     <span className="no-print">

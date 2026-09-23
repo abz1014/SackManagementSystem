@@ -30,10 +30,11 @@ import { W } from '../lib/words';
 import type { Period } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
-  SkelFigures, SkelLines, SkelStations, type FigureProps,
+  SkelChart, SkelFigures, SkelLines, SkelStations, type FigureProps,
 } from '../ui/bits';
-import { fmtClock, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
-import { DeviationBars, type DeviationRow } from './report/shared';
+import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
+import { CategoryBars, type BarDatum } from '../ui/chart';
+import { DeviationBars, fmtDayShort, type DeviationRow } from './report/shared';
 import {
   getAttention, getProduction, getProductAt, getProducts, getStations, stationLabel, getMachinesRunning,
   type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
@@ -99,6 +100,17 @@ export function LineScreen({
     period.live ? REFRESH_MS : 5 * 60_000,
     `line-stations:${periodKey}`,
   );
+  // UX charts pass 2 (23 Sep 2026): the shape of the period, as a mark.
+  // Until now this screen stated its output as four numerals and drew
+  // nothing about time at all — a month and a shift looked identical. Same
+  // endpoint, same period, same instant cap as the totals above it; only the
+  // grouping differs, so no new payload and nothing new computed.
+  const spread: 'day' | 'shift' = period.days >= 2 ? 'day' : 'shift';
+  const perSpread = usePolling(
+    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: spread }),
+    period.live ? REFRESH_MS : 5 * 60_000,
+    `line-spread:${spread}:${periodKey}`,
+  );
   // Same leak, same fix: with no argument this asked for the product running
   // NOW, so a July replay showed today's product beside July's readings.
   const product = usePolling(() => getProductAt(period.tsTo), REFRESH_MS, `product-at:${period.tsTo}`);
@@ -136,7 +148,7 @@ export function LineScreen({
       <div className="page">
         <p className="q">{W.question.line}</p>
         <h1 className="wide">
-          <Headline line={line} knowable={stateIsKnowable(health)} />
+          <Headline line={line} knowable={stateIsKnowable(health)} period={period} />
         </h1>
       </div>
 
@@ -153,6 +165,24 @@ export function LineScreen({
           </>
         ) : (
           <SkelFigures n={4} />
+        )}
+      </Block>
+
+      {/* The period's own shape, immediately under its figures: at 1366x768
+          this is the first mark a reader meets, and it is the answer to the
+          screen's second question ("what has it made this period") drawn
+          rather than spelled. Bars, never a line — a picked range can span
+          the 5 Aug source-generation boundary, and this sidecar additionally
+          holds simulator rows overlapping the real ones, so nothing here may
+          imply one continuous process across a gap. */}
+      <Block chartWide>
+        <p className="h2"><span>{spread === 'day' ? W.conesPerDay : W.conesPerShift}</span></p>
+        {perSpread.error && !perSpread.data ? (
+          <p className="state">{W.conesPerDayUnavailable}</p>
+        ) : !perSpread.data ? (
+          <SkelChart />
+        ) : (
+          <OutputSpread rows={perSpread.data.data.rows} spread={spread} />
         )}
       </Block>
 
@@ -183,10 +213,16 @@ export function LineScreen({
       {/* Stations moves above "What is being made" (OVERVIEW-SPEC.md §3):
           the attention list above names stations, and this grid is the
           surface a reader scans to find the one it named. */}
-      <Block
-        label={`${W.stations} — ${W.stationsNote}`}
-        note={stationsNote(line, stations.data?.stations ?? [], perStation.data?.data.rows ?? null, health.kind === 'ok')}
-      >
+      {/* chartWide: the comparative station chart and the fourteen-box grid
+          both read better across the page than inside the 816px content
+          column, so this block takes the wider page and carries its own
+          heading and note inside it (Block's `chartWide` doc). */}
+      <Block chartWide>
+        <p className="h2"><span>{`${W.stations} — ${W.stationsNote}`}</span></p>
+        {(() => {
+          const n = stationsNote(line, stations.data?.stations ?? [], perStation.data?.data.rows ?? null, health.kind === 'ok');
+          return n ? <p className="mut sm" style={{ marginBottom: 10 }}>{n}</p> : null;
+        })()}
         {/* perStation counted too: without it a failed counts fetch left
             every station cell in its permanent loading state — the
             endless-skeleton half of H14, in the same block as the fixed half. */}
@@ -275,17 +311,36 @@ export function LineScreen({
 
 /* ---------------------------------------------------------------- headline */
 
-function Headline({ line, knowable }: { line: LiveLine; knowable: boolean }) {
+function Headline({ line, knowable, period }: { line: LiveLine; knowable: boolean; period: Period }) {
   const shiftName = W.shift[line.shift.code];
   const from = fmtClock(line.shift.startUtc);
   const to = fmtClock(line.shift.endUtc);
 
-  // When the pipeline is in doubt the state is not asserted at all. The shift
-  // is still true, so it is still said.
+  /**
+   * THE SECOND CLAUSE NAMES THE PERIOD THE FIGURES BELOW ACTUALLY COVER.
+   *
+   * It used to name the shift in progress, always — so with the period
+   * control on "This month" the home screen read "Morning shift, 6:00 AM to
+   * 2:00 PM" directly above a month's counts (reconfirmed live, 23 Sep
+   * 2026). A heading that names a period different from its own rows is
+   * exactly the defect class the owner has been pointing at, and it is worse
+   * here than anywhere: this is the landing screen.
+   *
+   * The FIRST clause is deliberately untouched. The line's state is a fact
+   * about now — it comes from /api/live and is judged against the newest
+   * reading, never the period — so it stays, and on a non-shift period it
+   * says "right now" so the two clauses cannot be read as one.
+   */
+  const scope = period.key === 'shift'
+    ? `${W.state.shiftOf(cap(shiftName), from, to)}.`
+    : W.state.figuresCover(periodLabel(period));
+
+  // When the pipeline is in doubt the state is not asserted at all. The
+  // period is still true, so it is still said.
   if (!knowable) {
     return (
       <>
-        <span className="acc">{W.state.unknown}</span>. {W.state.shiftOf(cap(shiftName), from, to)}.
+        <span className="acc">{W.state.unknown}</span>. {scope}
       </>
     );
   }
@@ -293,10 +348,14 @@ function Headline({ line, knowable }: { line: LiveLine; knowable: boolean }) {
   const elapsed = fmtSpan(line.shift.elapsedSeconds);
   switch (line.state.status) {
     case 'running':
-      return (
+      return period.key === 'shift' ? (
         <>
           {lineTitle(line)} {W.state.running} —{' '}
           {W.state.intoShift(elapsed, shiftName, from, to)}.
+        </>
+      ) : (
+        <>
+          {lineTitle(line)} {W.state.running} {W.state.rightNow}. {scope}
         </>
       );
     case 'stopped':
@@ -305,17 +364,28 @@ function Headline({ line, knowable }: { line: LiveLine; knowable: boolean }) {
           <span className="acc">
             {lineTitle(line)} {W.state.stopped(fmtSpan(line.state.behindSeconds ?? 0))}
           </span>
-          . {W.state.shiftOf(cap(shiftName), from, to)}.
+          . {scope}
         </>
       );
     default:
       return (
         <>
-          {W.state.idle(line.dataAsOfUtc ? fmtClock(line.dataAsOfUtc) : '—')}.{' '}
-          {W.state.shiftOf(cap(shiftName), from, to)}.
+          {W.state.idle(line.dataAsOfUtc ? fmtClock(line.dataAsOfUtc) : '—')}. {scope}
         </>
       );
   }
+}
+
+/**
+ * The selected period, short.
+ *
+ * `fmtDayLong` on both ends ("Tuesday, 1 September 2026 to Wednesday, 23
+ * September 2026") pushed this screen's headline to three lines and shoved
+ * the first chart another 44px down a 768px-tall screen. The day names earn
+ * nothing in a range; the dates do.
+ */
+function periodLabel(p: Period): string {
+  return p.from === p.to ? fmtDayLong(p.from) : `${fmtDayShort(p.from)} to ${fmtDayShort(p.to)} ${p.to.slice(0, 4)}`;
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -421,6 +491,50 @@ function kpiBlockNote(r: ProductionRow | null, line: LiveLine, period: Period, h
     return W.fig.notCaughtUp(fmtSpan(line.ingestLagSeconds));
   }
   return W.nothingHere;
+}
+
+/* ------------------------------------------------------------ the period */
+
+/**
+ * Cones weighed per production day (or per shift when the period is a single
+ * day), with the day's rejects and sacks in the hover readout.
+ *
+ * ONE BAR IS NOT A CHART. On a single-shift period the grouping collapses to
+ * one row, and this says so in words instead of drawing a lone rectangle
+ * that looks like a measurement of something.
+ *
+ * The rejects are NOT drawn as a second series. `rejectedCones` and `cones`
+ * come from two different tables with two different populations (see
+ * OVERVIEW-SPEC.md §3.3 and the reject-rate denominator fix in 4f68945);
+ * stacking them would assert a whole/part relationship this screen has no
+ * standing to assert. They are stated, per day, in the readout.
+ */
+function OutputSpread({ rows, spread }: { rows: ProductionRow[]; spread: 'day' | 'shift' }) {
+  const real = rows.filter((r) => r.group !== 'total');
+  if (real.length < 2) return <p className="state">{W.onePointNoShape(spread)}</p>;
+  const data: BarDatum[] = real.map((r) => ({
+    key: r.group,
+    label: spread === 'day' ? fmtDayShort(r.group) : (W.shiftName[r.group as 'morning'] ?? r.group),
+    value: r.cones,
+    detail: `${spread === 'day' ? fmtDayLong(r.group) : (W.shiftName[r.group as 'morning'] ?? r.group)} · ${fmtInt(r.cones)} ${W.fig.cones} · ${fmtInt(r.rejectedCones)} ${W.fig.rejected} · ${fmtInt(r.sacks ?? 0)} ${W.fig.sacks}`,
+  }));
+  const total = real.reduce((n, r) => n + r.cones, 0);
+  const best = real.reduce((a, b) => (b.cones > a.cones ? b : a), real[0]!);
+  return (
+    <CategoryBars
+      data={data}
+      height={300}
+      ariaLabel={spread === 'day' ? W.conesPerDayAria : W.conesPerShiftAria}
+      valueFmt={fmtInt}
+      resting={W.conesResting(
+        real.length,
+        spread,
+        fmtInt(total),
+        fmtInt(best.cones),
+        spread === 'day' ? fmtDayLong(best.group) : (W.shiftName[best.group as 'morning'] ?? best.group),
+      )}
+    />
+  );
 }
 
 /* --------------------------------------------------------------- attention */
@@ -777,6 +891,7 @@ function StationCompare({ ids, counts, stations }: { ids: number[]; counts: Prod
       ariaLabel={W.stationsCompareAria}
       zeroLabel={W.stationsCompareZero}
       valueFmt={fmtSignedCount}
+      height={260}
     />
   );
 }

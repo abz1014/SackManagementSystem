@@ -460,6 +460,16 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
 
 .page { width: 100%; max-width: 1100px; margin: 0 auto; padding: 34px 32px 64px; }
 
+/* UX charts pass 2 (23 Sep 2026). The 1100px cap is a measure for TEXT — a
+   line longer than about 90 characters is harder to read, which is why it
+   exists and why it is not touched here. A chart is not text: its legibility
+   grows with width, and at 1100px minus the 180px label gutter every chart in
+   this app was drawn 816px wide on a 1366px screen and 816px wide on a
+   1920px one, which is why the first charts pass still measured under 6% of
+   the page. A block that carries a chart opts into this wider page instead;
+   it stays centred on the same axis, so the page keeps one spine. */
+.page.chart-wide { max-width: 1480px; }
+
 /* [SPEC 4] NEW. A full-bleed band carrying the rule.
    The old page drew every block's hairline at 1100px, so on the office's
    2560px monitor the page was a narrow strip of lines floating in white and

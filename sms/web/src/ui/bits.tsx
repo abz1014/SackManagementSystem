@@ -26,6 +26,7 @@ export function Block({
   first,
   tight,
   plain,
+  chartWide,
   children,
 }: {
   label?: ReactNode;
@@ -34,6 +35,16 @@ export function Block({
   first?: boolean;
   tight?: boolean;
   plain?: boolean;
+  /**
+   * This block holds a CHART, so it takes the wider page (app.css
+   * `.page.chart-wide`) — 1100px is a measure for text, and a chart squeezed
+   * into 816px was half the reason the first charts pass measured under 6%
+   * of the page. Pass no `label` with it: a labelled block spends 220px of
+   * that width on the label gutter, and a chart block states its own heading
+   * inside the content column instead (`<p className="h2">`, the idiom the
+   * two-column blocks already use).
+   */
+  chartWide?: boolean;
   children: ReactNode;
 }) {
   // A block that is not the screen's first sits inside a BAND, and the band
@@ -63,7 +74,7 @@ export function Block({
     </section>
   );
 
-  const page = <div className="page">{inner}</div>;
+  const page = <div className={chartWide ? 'page chart-wide' : 'page'}>{inner}</div>;
   return banded ? <div className="band">{page}</div> : page;
 }
 
