@@ -267,10 +267,27 @@ export function RejectsScreen({
       : figuresFailed
         ? { kind: 'failed' }
         : { kind: 'pending' };
-  const produced = q && w ? q.totalProduced : null;
+  /**
+   * WS-B1 (23 Sep 2026 red-team remediation, defect 1). This used to divide
+   * by `q.totalProduced + rejectCount.n` — cones plus EVERY reject of
+   * either type — which double-counts the ~98% of rejects that are the SAME
+   * physical cone as an existing cone_event row, weighed then separately
+   * rejected. `rejectSpc.ts` (this screen's own service) already computes
+   * the correction per generation as `totalInspected` (cones + only the
+   * UNMATCHED rejects), exposed per generation in `generations[]`, and
+   * `q`/`w` share one denominator by construction — the unmatched query
+   * `getRejectSpc` runs is never narrowed by `rejectType`, so it counts both
+   * series' unmatched rejects once regardless of which type the call asked
+   * for. Summing `q`'s own generations (equivalently `w`'s — same base
+   * filters, same population) is therefore the one population this
+   * combined quality+weight headline may divide by, and it is the same
+   * population `rejectRateThreeWayAgreement.test.ts` pins report.ts,
+   * weightStations.ts and rejectSpc.ts's own p-chart to on the server side.
+   */
+  const inspected = q && w ? q.generations.reduce((sum, g) => sum + g.totalInspected, 0) : null;
   const ratePct =
-    rejectCount.kind === 'ok' && produced != null && produced + rejectCount.n > 0
-      ? (100 * rejectCount.n) / (produced + rejectCount.n)
+    rejectCount.kind === 'ok' && inspected != null && inspected > 0
+      ? (100 * rejectCount.n) / inspected
       : null;
 
   // The verdict follows what the trend shows: the chosen reason when one is

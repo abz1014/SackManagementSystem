@@ -38,8 +38,8 @@ import { CategoryBars, type BarDatum } from '../ui/chart';
 import { DeviationBars, fmtDayShort, type DeviationRow } from './report/shared';
 import {
   getAttention, getProduction, getProductAt, getProducts, getStations, stationLabel, getMachinesRunning,
-  type AttentionFinding, type LiveLine, type ProductionRow, type StationRow, type MachinesRunningData,
-  type StateCounts, type ProductOption,
+  type AttentionFinding, type LiveLine, type ProductionRow, type ProductionDataIssue, type StationRow,
+  type MachinesRunningData, type StateCounts, type ProductOption,
 } from '../api';
 import type { Screen, ReadingsFilter } from '../ui/Bar';
 import { projectionSentence } from './StationSheet';
@@ -141,7 +141,9 @@ export function LineScreen({
   // strip and headline already carry that doubt (rule 8), a second warning
   // here would be the density failure IFL named. Only computed once totals
   // has data; skeleton and Failed carry their own states.
-  const kpiNote = totals.data ? kpiBlockNote(totals.data.data.rows[0] ?? null, line, period, health.kind === 'ok') : null;
+  const kpiNote = totals.data
+    ? kpiBlockNote(totals.data.data.rows[0] ?? null, line, period, health.kind === 'ok', totals.data.data.dataIssues)
+    : null;
   const implausible = totals.data?.data.implausible ?? null;
 
   return (
@@ -187,7 +189,14 @@ export function LineScreen({
           <Failed error={totals.error} onRetry={totals.refresh} />
         ) : totals.data ? (
           <>
-            <Figures items={periodFigures(totals.data.data.rows[0] ?? null, totals.data.data.states, onNavigate)} />
+            <Figures
+              items={periodFigures(
+                totals.data.data.rows[0] ?? null,
+                totals.data.data.states,
+                totals.data.data.dataIssues,
+                onNavigate,
+              )}
+            />
             {/* ONE disclosure for the whole block, not one per reading.
                 "Outside the product's limits" above is the 'low' + 'high'
                 states; when the limits behind them have a start date this
@@ -465,17 +474,51 @@ function lineTitle(line: LiveLine): string {
  * onClick handlers — no new API, no new URL key, no new handler shape.
  * `onNav` is `onNavigate`, already wired at App.tsx to merge the period.
  */
+/** True when `dataIssues` names `field` for this row's own `group`. */
+function issueFor(dataIssues: ProductionDataIssue[] | undefined, field: ProductionDataIssue['field'], group: string | null): boolean {
+  return !!dataIssues?.some((i) => i.field === field && i.group === group);
+}
+
 function periodFigures(
   r: ProductionRow | null,
   states: StateCounts | null,
+  dataIssues: ProductionDataIssue[] | undefined,
   onNav: (s: Screen, filter?: ReadingsFilter) => void,
 ): FigureProps[] {
+  const group = r?.group ?? null;
+  // WS-B1 (23 Sep 2026 red-team remediation, RED 2 / "absence renders as
+  // zero"): production.ts's `dataIssues[]` (WS-P, 71757a3) names a field
+  // that came back ABSENT from a row that was otherwise present — the row
+  // still carries a numeric 0 for it (the response shape never changes),
+  // so a bare `?? 0` here cannot tell that 0 from a genuine empty period.
+  // Each figure checks its own field(s) and shows a dash with a caveat
+  // instead of asserting the server's placeholder as a measurement.
+  const conesUnreadable = issueFor(dataIssues, 'cones', group);
+  const sacksUnreadable = issueFor(dataIssues, 'sacks', group) || issueFor(dataIssues, 'sackWeightKg', group);
+  const rejectedUnreadable = issueFor(dataIssues, 'rejectedCones', group);
+
   const cones = r?.cones ?? 0;
   const rejected = r?.rejectedCones ?? 0;
   const sacks = r?.sacks ?? 0;
   const kg = r?.sackWeightKg ?? 0;
-  const rejectRate =
-    cones + rejected > 0 ? `${Math.round((1000 * rejected) / (cones + rejected)) / 10}%` : '0%';
+  // WS-B1 (23 Sep 2026 red-team remediation, defect 1): this used to divide
+  // by `cones + rejected`, double-counting the ~98% of rejects that are the
+  // SAME physical cone as an existing `cones` row, weighed then separately
+  // rejected — Line printed 4.4% against the corrected 4.59% the server,
+  // Rejects and the reports all agree on. `unmatchedRejects` (added to the
+  // client's own ProductionRow above) is the denominator addend the server
+  // actually uses; this is the IDENTICAL formula `toReportLine`
+  // (api/src/services/report.ts) applies, reproduced rather than reinvented
+  // so Line and Report can never print two different rates for one period
+  // again — see `rejectRateThreeWayAgreement.test.ts` on the server side
+  // and `Line.render.test.tsx`'s RED 1 here.
+  const unmatchedRejects = r?.unmatchedRejects ?? rejected;
+  const weighed = cones + unmatchedRejects;
+  const rejectRatePct = weighed > 0 ? Math.round((10000 * rejected) / weighed) / 100 : null;
+  const rejectRateText = weighed > 0 ? fmtPct1(rejectRatePct) : '0%';
+  // A rate needs BOTH halves read correctly; a cones data issue poisons the
+  // denominator even when rejectedCones itself is fine.
+  const rateUnreadable = conesUnreadable || rejectedUnreadable;
   // states is computed once for the whole range at rank 1 on every
   // /api/production call (app.ts withStates: true) — served today and
   // discarded by the client until now. low/high = passed the scale, outside
@@ -485,9 +528,11 @@ function periodFigures(
   const couldNotBeJudged = states ? states.unknown : 0;
   return [
     {
-      value: fmtInt(cones),
+      value: conesUnreadable ? '—' : fmtInt(cones),
       unit: W.fig.cones,
-      note: r?.conesInRangePct != null ? W.withinLimits(fmtPct1(r.conesInRangePct)) : null,
+      note: conesUnreadable
+        ? W.fig.couldNotRead
+        : r?.conesInRangePct != null ? W.withinLimits(fmtPct1(r.conesInRangePct)) : null,
       // Readings, unfiltered: the filter is explicitly cleared by go()'s
       // merge (App.tsx: filter ?? null), not left over from a previous hop.
       onClick: () => onNav('readings'),
@@ -496,15 +541,15 @@ function periodFigures(
     // the reader is being asked to care about, and nobody weighs a shift's
     // output to the gram.
     {
-      value: fmtInt(sacks),
+      value: sacksUnreadable ? '—' : fmtInt(sacks),
       unit: W.fig.sacks,
-      note: `${fmtInt(Math.round(kg))} ${W.fig.kg}`,
+      note: sacksUnreadable ? W.fig.couldNotRead : `${fmtInt(Math.round(kg))} ${W.fig.kg}`,
       onClick: () => onNav('sacks'),
     },
     {
-      value: fmtInt(rejected),
+      value: rejectedUnreadable ? '—' : fmtInt(rejected),
       unit: W.fig.rejected,
-      note: W.ofEverything(rejectRate),
+      note: rateUnreadable ? W.fig.couldNotRead : W.ofEverything(rejectRateText),
       onClick: () => onNav('rejects'),
     },
     {
@@ -524,8 +569,26 @@ function periodFigures(
  * the strip and headline already carry that doubt, and a second warning here
  * is the density failure IFL named.
  */
-function kpiBlockNote(r: ProductionRow | null, line: LiveLine, period: Period, healthOk: boolean): string | null {
+function kpiBlockNote(
+  r: ProductionRow | null,
+  line: LiveLine,
+  period: Period,
+  healthOk: boolean,
+  dataIssues: ProductionDataIssue[] | undefined,
+): string | null {
   if (!healthOk) return null;
+  // WS-B1 (23 Sep 2026 red-team remediation, RED 2): checked BEFORE the
+  // real-empty-period case below, because a data issue forces the row's own
+  // cones/sacks/rejectedCones to a placeholder 0 — the exact same shape a
+  // genuinely quiet period has. Proven live: a field-stripped row printed
+  // "0 cones / 99.9% within the scale's limits / 0 sacks / 0 kg / 0
+  // rejected" directly above a chart still reading 77,492 cones for the
+  // same period; this note is what must stop that reading as "nothing was
+  // made" when the true answer is "the server could not read part of it".
+  const group = r?.group ?? null;
+  const anyUnreadable = (['cones', 'sacks', 'rejectedCones'] as const)
+    .some((f) => issueFor(dataIssues, f, group));
+  if (anyUnreadable) return W.dataIssueThisPeriod;
   const cones = r?.cones ?? 0;
   const sacks = r?.sacks ?? 0;
   const rejected = r?.rejectedCones ?? 0;

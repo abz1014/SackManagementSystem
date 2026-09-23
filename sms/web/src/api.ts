@@ -1625,6 +1625,61 @@ export interface ProductionData {
    */
   limitProvenance?: LimitProvenance;
 }
+
+/**
+ * WS-P (23 Sep 2026 red-team remediation) — both fields have been on the
+ * wire since `production.ts`'s WS-P commit (71757a3); this merge only
+ * teaches the client TYPE about them, the same idiom `states`/`implausible`
+ * above used for Phase 4. No new request, no new route.
+ */
+export interface ProductionRow {
+  /**
+   * `rejectedCones` with no matching cone_event row — the reject-rate
+   * DENOMINATOR addend (api/src/services/production.ts's field of the same
+   * name). Most rejects ARE an existing cone_event row and are already
+   * counted once in `cones`; adding every reject again double-counts those.
+   * A consumer computing a rate must use `cones + unmatchedRejects`, never
+   * `cones + rejectedCones` — see `toReportLine` (services/report.ts) and
+   * Line.tsx's `periodFigures`, which now mirrors it so Line and Report can
+   * never print two different rates for the same period. Optional: falls
+   * back to `rejectedCones` where absent, exactly as the server's own
+   * `toReportLine` does.
+   */
+  unmatchedRejects?: number;
+}
+/** Which numeric field a data issue is about — mirrors production.ts's own `ProductionField`. */
+export type ProductionField =
+  | 'cones' | 'conesInRangePct' | 'rejectedCones'
+  | 'sacks' | 'sackWeightKg' | 'sacksPassedScalePct'
+  | 'unattributed.cones' | 'unattributed.rejects'
+  | 'implausible';
+/**
+ * One (field, group) that could not be read as a number from its source row
+ * — a SQL row that came back with a COLUMN ABSENT, not SQL NULL and not a
+ * real zero (production.ts's own header, WS-P). The affected field still
+ * reads as its placeholder (0, or null where null already means "not
+ * applicable") so the response shape is unchanged; THIS is what tells a
+ * consumer the difference between a genuine zero and one that was never
+ * read.
+ */
+export interface ProductionDataIssue {
+  field: ProductionField;
+  group: string | null;
+  reason: string;
+}
+export interface ProductionData {
+  /**
+   * Always an array on the wire, empty when nothing was affected. See
+   * `ProductionDataIssue`. Declared OPTIONAL here for the same reason
+   * `limitProvenance?` above is — a required field would break every
+   * hand-built `ProductionData` fake across the test suite that predates
+   * this merge. A CONSUMER must read a missing array as "not stated", never
+   * as "nothing was affected" — Line.tsx's own read defaults it to `[]`,
+   * which is the correct fallback only because an absent array here means
+   * an older fixture, never a real response (the route always sets it).
+   */
+  dataIssues?: ProductionDataIssue[];
+}
 export interface ProductAtData {
   /** The plausibility window the state was judged with (roadmap Phase 4). */
   plausibility?: { loG: number; hiG: number };

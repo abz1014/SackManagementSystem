@@ -137,6 +137,14 @@ export const W = {
        acquisition lag, and a zero here can mean that rather than a stopped
        line. Never a literal "about 18 minutes" — the lag is measured. */
     notCaughtUp: (lag: string) => `Cones weighed in the last ${lag} have not reached this system yet.`,
+    /* WS-B1 (23 Sep 2026 red-team remediation, RED 2): the server names a
+       field absent from a row that was otherwise present (production.ts
+       `dataIssues[]`, WS-P) rather than silently returning 0 for it. A
+       figure this covers shows a dash, never the server's placeholder 0,
+       with this note beside it — never the ordinary note that field would
+       otherwise carry, which would assert something about a number that
+       was not actually read. */
+    couldNotRead: 'could not be read this period',
   } as const,
   /* ONE status vocabulary, and it names its basis every time it appears.
      Two verdicts exist on every cone — the scale's own in-range bit and the
@@ -1175,6 +1183,13 @@ export const W = {
   stationNotFound: 'This station has no readings in the window this sheet looks at, or the number in the link no longer matches a station.',
   retry: 'Try again',
   nothingHere: 'Nothing recorded in this period.',
+  /* WS-B1 (23 Sep 2026 red-team remediation): the KPI block's OWN empty-
+     state note (`kpiBlockNote`, Line.tsx) used to be reachable from a data
+     issue too — a malformed row's forced-0 cones/sacks/rejects summed to
+     zero and printed `nothingHere` above, a false "the line made nothing"
+     over a row the server itself flagged as unreadable. Checked first,
+     ahead of the real-empty-period case, so it can never be shadowed by it. */
+  dataIssueThisPeriod: "Part of this period's figures could not be read from the source. See Health for which.",
   replay: 'REPLAY — showing the plant as it was at',
   replayNote: 'This is not live.',
   offline: 'Could not reach the server — showing the last numbers received.',
