@@ -371,20 +371,6 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
   );
 }
 
-/**
- * Local only — not a `words.ts` string (owned by a parallel worker for this
- * whole programme). Report to that owner: `W.state.stopped` has no variant
- * for "stopped, duration unknown" — it takes a span and always prints one.
- * `behindSeconds ?? 0` used to hand it a fabricated "0 s" whenever the
- * server genuinely did not know how long the line had been down (the field
- * is typed `number | null` in `LiveLine.state`), which prints "stopped for
- * 0 s" — a real-looking, false claim — for a line that has in fact been
- * down for an unknown, possibly long, time. A biggest-thing-on-the-board
- * sentence stating a duration it does not have is exactly the over-claim
- * this pass exists to remove.
- */
-const STOPPED_DURATION_UNKNOWN_LOCAL = 'has stopped; how long is not known';
-
 /** The biggest thing on the board, and the only one read from outside the room. */
 function stateSentence(line: LiveLine, knowable: boolean, anchor: string): string {
   if (!knowable) return W.state.unknown;
@@ -393,9 +379,16 @@ function stateSentence(line: LiveLine, knowable: boolean, anchor: string): strin
     case 'running':
       return `${name} ${W.state.running}`;
     case 'stopped':
+      // `behindSeconds ?? 0` used to hand `W.state.stopped` a fabricated
+      // "0 s" whenever the server genuinely did not know how long the line
+      // had been down (the field is typed `number | null` in
+      // `LiveLine.state`), which printed "stopped for 0 s" — a real-looking,
+      // false claim — for a line that has in fact been down for an unknown,
+      // possibly long, time. `W.state.stoppedUnknownDuration` (added 7055be1)
+      // names that state honestly instead of fabricating a span.
       return line.state.behindSeconds != null
         ? `${name} ${W.state.stopped(fmtSpan(line.state.behindSeconds))}`
-        : `${name} ${STOPPED_DURATION_UNKNOWN_LOCAL}`;
+        : `${name} ${W.state.stoppedUnknownDuration}`;
     default:
       return `${name} ${W.state.idle(fmtClock(anchor))}`;
   }

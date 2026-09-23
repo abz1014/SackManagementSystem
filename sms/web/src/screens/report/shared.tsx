@@ -783,12 +783,10 @@ export function RejectTrendChart({
   for (let i = series.length - 1; i >= 0; i--) if (series[i]!.q != null) { lastQIdx = i; break; }
   let lastWIdx: number | null = null;
   for (let i = series.length - 1; i >= 0; i--) if (series[i]!.w != null) { lastWIdx = i; break; }
-  /** Local only — not a `words.ts` string (owned by a parallel worker for
-   *  this whole programme). Report to that owner: a proper string belongs
-   *  beside `W.rejectsMore.aboveUsual` for "this bucket has no valid rate",
-   *  used only in the hover readout when the hovered day is a gap. */
-  const NO_READING_LOCAL = 'no reading this day';
-  const fmtRateOrGap = (v: number | null): string => (v == null ? NO_READING_LOCAL : `${v.toFixed(1)}%`);
+  // Used only in the hover readout when the hovered day is a gap. Was a
+  // local-only string awaiting a `words.ts` home; `W.rejectsMore.noReadingThisDay`
+  // (added 7055be1) is that home.
+  const fmtRateOrGap = (v: number | null): string => (v == null ? W.rejectsMore.noReadingThisDay : `${v.toFixed(1)}%`);
 
   // The band: UCL over LCL, per bucket (a p-chart for varying sample size
   // gives every day its own limits). Drawn only across runs of days that
