@@ -325,7 +325,10 @@ function TubePicker({
 }: {
   value: TubeRefOrNew;
   onChange: (v: TubeRefOrNew) => void;
-  options: { id: number; name: string; tubeWeightG: number | null }[];
+  // tubeForm added (migration 041): AddTubeType's own duplicate check is
+  // name AND form together, so the picker shows which form each existing
+  // tube type already is — null = the reference mirror has not yet recorded it.
+  options: { id: number; name: string; tubeWeightG: number | null; tubeForm: number | null }[];
 }) {
   return (
     <label className="field">
@@ -338,7 +341,10 @@ function TubePicker({
           >
             <option value="">—</option>
             {options.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}{o.tubeWeightG != null ? ` (${fmtG(o.tubeWeightG)})` : ''}</option>
+              <option key={o.id} value={o.id}>
+                {o.name}{o.tubeWeightG != null ? ` (${fmtG(o.tubeWeightG)})` : ''}
+                {o.tubeForm != null ? ` · form ${o.tubeForm}` : ` · ${W.product.changeover.tubeFormUnknown}`}
+              </option>
             ))}
           </select>
           <button type="button" className="linkish sm" onClick={() => onChange({ ...emptyTubeRefOrNew(), mode: 'new' })}>

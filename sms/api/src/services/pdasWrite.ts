@@ -1177,10 +1177,16 @@ export class PdasWriter {
         .input('id', mssql.Int, r.id)
         .input('v', mssql.NVarChar(255), observed?.tubeType ?? name)
         .input('w', mssql.Decimal(10, 2), observed?.tubeWeightG ?? p.tubeWeightG)
+        // migration 041: mirror the form too — observed.tubeForm when the
+        // echo-back read succeeded, else the form this call itself requested
+        // (never left NULL here: this call KNOWS the form it asked PDAS for,
+        // unlike seedProducts's periodic full read which only learns it from
+        // whatever PDAS currently reports).
+        .input('form', mssql.Int, observed?.tubeForm ?? tubeForm)
         .query(
           `MERGE sms.tube_type t USING (SELECT @id id) s ON t.tube_type_id=s.id
-           WHEN MATCHED THEN UPDATE SET tube_type=@v, tube_weight_g=@w
-           WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g) VALUES (@id, @v, @w);`,
+           WHEN MATCHED THEN UPDATE SET tube_type=@v, tube_weight_g=@w, tube_form=@form
+           WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g, tube_form) VALUES (@id, @v, @w, @form);`,
         );
       await this.recordChange({
         ...base, observedAfter: observed == null ? null : { tubeTypeId: r.id, ...observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,

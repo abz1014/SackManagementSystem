@@ -32,6 +32,9 @@ class FakeRequest {
 /** The sidecar mirror readMirror() reads, and the sink recordDisabledAttempt() writes to. */
 class FakeDb {
   statements: Stmt[] = [];
+  // Default: one tube type, form 2 (known) — the common case. Tests for the
+  // tube-form defect (migration 041 / resolveTube) override this per case.
+  tubeTypeRows: Record<string, unknown>[] = [{ id: 3, name: 'PP Tube', w: 12, form: 2 }];
   request(): FakeRequest {
     return new FakeRequest(this);
   }
@@ -42,7 +45,7 @@ class FakeDb {
 
     if (sql.includes('FROM sms.blend')) return rows([{ id: 1, name: 'PolyBlend' }]);
     if (sql.includes('FROM sms.yarn_count')) return rows([{ id: 2, name: '30s' }]);
-    if (sql.includes('FROM sms.tube_type')) return rows([{ id: 3, name: 'PP Tube', w: 12 }]);
+    if (sql.includes('FROM sms.tube_type')) return rows(this.tubeTypeRows);
     if (sql.includes('FROM sms.product')) {
       return rows([
         { product_id: 100, blend_id: 1, count_id: 2, tube_type_id: 3, active_flag: true, description: '205-IL0-SD', lot_code: null },
@@ -179,9 +182,63 @@ describe('planChangeover', () => {
   });
 
   it('B4: applies the same LIKE-collision block to a new tube type name', async () => {
-    // mirror has one tube type, "PP Tube" (id 3)
+    // mirror has one tube type, "PP Tube" (id 3), form 2 by default
     const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP T_be', tubeWeightG: 12 } }));
     expect(plan.blockers.some((b) => b.includes('PP T_be') && b.includes('tube type 3') && b.includes('PP Tube'))).toBe(true);
+  });
+
+  // The defect reported against commit a9b85b5's B4 fix: AddTubeType's own
+  // duplicate check is `TubeType LIKE @tubeType AND TubeForm = @tubeForm`
+  // (compound), not name alone — see resolveTube's header comment and
+  // migration 041.
+  describe('tube form (migration 041 / resolveTube)', () => {
+    it('reuses an exact name match whose mirrored form equals the requested form', async () => {
+      db.tubeTypeRows = [{ id: 3, name: 'PP Tube', w: 12, form: 2 }];
+      const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP Tube', tubeWeightG: 12, tubeForm: 2 } }));
+      const tube = plan.steps.find((s) => s.step === 'tube_type')!;
+      expect(tube.action).toBe('reuse');
+      expect(tube.id).toBe(3);
+    });
+
+    it('the serious half of the defect: an exact name match in a DIFFERENT known form is NOT silently reused — it is planned as a new, different tube type', async () => {
+      // Mirror's "PP Tube" is form 1; the request asks for form 2 under the
+      // same name. AddTubeType's own (name AND form) check would accept this
+      // as a genuinely new row, so the plan must not reuse tube type 3.
+      db.tubeTypeRows = [{ id: 3, name: 'PP Tube', w: 12, form: 1 }];
+      const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP Tube', tubeWeightG: 12, tubeForm: 2 } }));
+      const tube = plan.steps.find((s) => s.step === 'tube_type')!;
+      expect(tube.action).toBe('add');
+      expect(tube.proc).toBe('AddTubeType');
+      expect(tube.id).toBeNull();
+      // and it must not have been silently attached to product 100 (blend 1,
+      // count 2, tube 3) — no false "already exists as product 100" blocker
+      // from a wrongly-reused tube id.
+      expect(plan.blockers.some((b) => b.includes('already exists as product 100'))).toBe(false);
+    });
+
+    it('an exact name match whose mirrored form is unknown (NULL — not yet refreshed) blocks rather than silently reusing or adding', async () => {
+      db.tubeTypeRows = [{ id: 3, name: 'PP Tube', w: 12, form: null }];
+      const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP Tube', tubeWeightG: 12, tubeForm: 2 } }));
+      const tube = plan.steps.find((s) => s.step === 'tube_type')!;
+      expect(tube.action).not.toBe('reuse');
+      expect(plan.blockers.some((b) => b.includes('PP Tube') && b.includes('tube type 3') && b.includes('tube form') && b.includes('has not yet'))).toBe(true);
+    });
+
+    it('a LIKE-pattern collision against a row in a DIFFERENT known form does not block — AddTubeType\'s own check would not refuse it', async () => {
+      // "PP Tube" is form 1; the request's pattern "PP T_be" would match it,
+      // but only form 2 is requested — not a real collision.
+      db.tubeTypeRows = [{ id: 3, name: 'PP Tube', w: 12, form: 1 }];
+      const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP T_be', tubeWeightG: 12, tubeForm: 2 } }));
+      const tube = plan.steps.find((s) => s.step === 'tube_type')!;
+      expect(tube.action).toBe('add');
+      expect(plan.blockers.some((b) => b.includes('PP T_be'))).toBe(false);
+    });
+
+    it('a LIKE-pattern collision against a row whose form is unknown still blocks (cannot be ruled out)', async () => {
+      db.tubeTypeRows = [{ id: 3, name: 'PP Tube', w: 12, form: null }];
+      const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP T_be', tubeWeightG: 12, tubeForm: 2 } }));
+      expect(plan.blockers.some((b) => b.includes('PP T_be') && b.includes('tube type 3') && b.includes('has not yet recorded'))).toBe(true);
+    });
   });
 
   it('blocks a (blend, count, tube) triple that already exists as a product, active or not', async () => {

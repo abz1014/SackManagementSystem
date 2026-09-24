@@ -78,8 +78,9 @@ class FakeDb {
     if (sql.includes('DELETE FROM sms.session')) return none();
 
     // ---- the changeover mirror (services/changeover.ts's readMirror, and routes/changeover.ts's own /refs queries) ----
-    if (sql.includes('tubeWeightG FROM sms.tube_type')) return rows([{ id: 3, name: 'PP Tube', tubeWeightG: 12 }]); // /refs
-    if (sql.includes('FROM sms.tube_type')) return rows([{ id: 3, name: 'PP Tube', w: 12 }]); // readMirror
+    // migration 041: both queries now also carry tube_form/tubeForm.
+    if (sql.includes('tubeWeightG, tube_form tubeForm FROM sms.tube_type')) return rows([{ id: 3, name: 'PP Tube', tubeWeightG: 12, tubeForm: 2 }]); // /refs
+    if (sql.includes('FROM sms.tube_type')) return rows([{ id: 3, name: 'PP Tube', w: 12, form: 2 }]); // readMirror
     if (sql.includes('FROM sms.blend')) return rows([{ id: 1, name: 'PolyBlend' }]);
     if (sql.includes('FROM sms.yarn_count')) return rows([{ id: 2, name: '30s' }]);
     if (sql.includes('FROM sms.pack_schema')) return rows([{ pack_schema_id: 1, description: 'Sack 3x4', cones_per_layer: 20, pack_type_id: 2 }]);
@@ -210,7 +211,7 @@ describe('GET /api/changeover/refs', () => {
     expect(r.status).toBe(200);
     expect(r.json.blends).toEqual([{ id: 1, name: 'PolyBlend' }]);
     expect(r.json.counts).toEqual([{ id: 2, name: '30s' }]);
-    expect(r.json.tubeTypes).toEqual([{ id: 3, name: 'PP Tube', tubeWeightG: 12 }]);
+    expect(r.json.tubeTypes).toEqual([{ id: 3, name: 'PP Tube', tubeWeightG: 12, tubeForm: 2 }]);
     expect(r.json.packSchemas).toEqual([{ packSchemaId: 1, description: 'Sack 3x4', conesPerLayer: 20, packTypeId: 2 }]);
     // Only the active pallet (50) — the inactive one (51) is not selectable and is filtered out.
     expect(r.json.pallets).toHaveLength(1);

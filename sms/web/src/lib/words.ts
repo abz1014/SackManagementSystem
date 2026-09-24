@@ -340,6 +340,13 @@ export const W = {
          entry needs, the same role RefPicker's blend/count pickers fill
          with no note at all because they need nothing extra. */
       tubeNewNote: 'A new tube type also needs its weight and form (1 or 2) — AddTubeType requires both.',
+      /* Added with migration 041 (tube-form mirror fix): the picker now shows
+         each existing tube type's form beside it, since AddTubeType's own
+         duplicate check is name AND form together — a name match in a
+         different form is a different tube type, not the same one. This
+         string covers a mirror row whose form has not been recorded yet
+         (an old row, before the next reference mirror refresh). */
+      tubeFormUnknown: 'form unknown until the reference mirror refreshes',
     } as const,
 
     /* ---- History tab (Brief 3 builds the screen; strings fixed here so

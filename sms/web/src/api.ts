@@ -2638,7 +2638,10 @@ export function getReportHeader(q: { from?: string; to?: string; at?: string | n
 export interface ChangeoverRefs {
   blends: { id: number; name: string }[];
   counts: { id: number; name: string }[];
-  tubeTypes: { id: number; name: string; tubeWeightG: number | null }[];
+  // tubeForm added (migration 041): AddTubeType's own duplicate check is name
+  // AND form together, so the picker shows form beside each tube type; null
+  // = the reference mirror has not yet recorded this row's form.
+  tubeTypes: { id: number; name: string; tubeWeightG: number | null; tubeForm: number | null }[];
   packSchemas: { packSchemaId: number; description: string | null; conesPerLayer: number | null; packTypeId: number | null }[];
   /** Already filtered to active pallets by the server (routes/changeover.ts). */
   pallets: {

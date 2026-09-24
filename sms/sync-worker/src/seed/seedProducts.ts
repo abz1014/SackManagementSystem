@@ -145,7 +145,11 @@ export async function seedProducts(
   // read PDAS reference (read-only login)
   const blends = (await iflPool.request().query(`SELECT BlendId, Blend FROM ${db}.dbo.Blends`)).recordset;
   const counts = (await iflPool.request().query(`SELECT CountId, Count FROM ${db}.dbo.Counts`)).recordset;
-  const tubes = (await iflPool.request().query(`SELECT TubeTypeId, TubeType, TubeWeight FROM ${db}.dbo.TubeTypes`)).recordset;
+  // TubeForm added (migration 041): AddTubeType's own duplicate check is
+  // `TubeType LIKE @tubeType AND TubeForm = @tubeForm` — a compound key, so
+  // the mirror needs form too, not just name, for resolveTube (changeover.ts)
+  // to match PDAS's real check.
+  const tubes = (await iflPool.request().query(`SELECT TubeTypeId, TubeType, TubeWeight, TubeForm FROM ${db}.dbo.TubeTypes`)).recordset;
   const mats = (
     await iflPool.request().query(
       // MaterialDesc2 added for finding M10 (Sep 2026 audit): real color data
@@ -208,9 +212,14 @@ export async function seedProducts(
   for (const t of tubes) {
     await up(
       `MERGE sms.tube_type t USING (SELECT @id id) s ON t.tube_type_id=s.id
-       WHEN MATCHED THEN UPDATE SET tube_type=@v, tube_weight_g=@w
-       WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g) VALUES (@id, @v, @w);`,
-      (r) => { r.input('id', mssql.Int, t.TubeTypeId); r.input('v', mssql.NVarChar(255), t.TubeType); r.input('w', mssql.Decimal(10, 2), t.TubeWeight); },
+       WHEN MATCHED THEN UPDATE SET tube_type=@v, tube_weight_g=@w, tube_form=@form
+       WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g, tube_form) VALUES (@id, @v, @w, @form);`,
+      (r) => {
+        r.input('id', mssql.Int, t.TubeTypeId);
+        r.input('v', mssql.NVarChar(255), t.TubeType);
+        r.input('w', mssql.Decimal(10, 2), t.TubeWeight);
+        r.input('form', mssql.Int, t.TubeForm == null ? null : Number(t.TubeForm));
+      },
     );
   }
   for (const m of mats) {

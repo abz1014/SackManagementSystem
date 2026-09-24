@@ -116,7 +116,10 @@ describe('seedReference', () => {
 describe('seedProducts', () => {
   const blends = { needle: 'FROM [PDAS_TP1U2].dbo.Blends', rows: [{ BlendId: 1, Blend: 'PV 65/35' }] };
   const counts = { needle: 'FROM [PDAS_TP1U2].dbo.Counts', rows: [{ CountId: 2, Count: '30' }, { CountId: 3, Count: '2/30' }] };
-  const tubes = { needle: 'FROM [PDAS_TP1U2].dbo.TubeTypes', rows: [{ TubeTypeId: 3, TubeType: 'Paper', TubeWeight: 62.5 }] };
+  // TubeForm added (migration 041): AddTubeType's own duplicate check is
+  // name-pattern AND form together, so the mirror must carry form too — see
+  // that migration's header and changeover.ts's resolveTube.
+  const tubes = { needle: 'FROM [PDAS_TP1U2].dbo.TubeTypes', rows: [{ TubeTypeId: 3, TubeType: 'Paper', TubeWeight: 62.5, TubeForm: 2 }] };
   const material = {
     MaterialId: 21, BlendId: 1, CountId: 2, TubeTypeId: 3, MaterialSetpointWeight: 1960, MaterialActive: true,
     MaterialDesc1: '205-IL0-SD', MaterialDesc2: 'PARROT', MaterialWeightOffsetMinus: 50, MaterialWeightOffsetPlus: 50,
@@ -177,7 +180,7 @@ describe('seedProducts', () => {
     expect(merges.map((m) => m.sql.match(/MERGE (sms\.\w+)/)![1])).toEqual([
       'sms.blend', 'sms.yarn_count', 'sms.yarn_count', 'sms.tube_type', 'sms.product', 'sms.pack_schema', 'sms.pallet',
     ]);
-    const [, c30, c230, , prod] = merges;
+    const [, c30, c230, tube, prod] = merges;
     expect(c30!.inputs.get('iv')).toBe(30);
     // '2/30' is a real IFL count that parseInt reads as 2 — kept as text beside it.
     expect(c230!.inputs.get('iv')).toBe(2);
@@ -185,6 +188,12 @@ describe('seedProducts', () => {
     expect(prod!.inputs.get('sp')).toBe(1960);
     expect(prod!.inputs.get('col')).toBe('PARROT');
     expect(prod!.inputs.get('d')).toBe('205-IL0-SD');
+    // migration 041: TubeForm mirrored onto sms.tube_type.tube_form.
+    expect(tube!.inputs.get('form')).toBe(2);
+    expect(tube!.sql).toMatch(/tube_form=@form/);
+    expect(tube!.sql).toMatch(
+      /INSERT \(tube_type_id, tube_type, tube_weight_g, tube_form\) VALUES \(@id, @v, @w, @form\)/,
+    );
   });
 
   it('mirrors pack_schema with a bound-parameter MERGE (migration 036)', async () => {

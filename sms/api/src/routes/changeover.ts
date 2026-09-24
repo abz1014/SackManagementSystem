@@ -133,8 +133,12 @@ export function mountChangeoverRoutes(ctx: RouteContext): void {
         pool.request().query<{ id: number; name: string }>(`SELECT count_id id, count_text name FROM sms.yarn_count ORDER BY count_val, count_text`),
         pool
           .request()
-          .query<{ id: number; name: string; tubeWeightG: number | null }>(
-            `SELECT tube_type_id id, tube_type name, tube_weight_g tubeWeightG FROM sms.tube_type ORDER BY tube_type`,
+          // tubeForm added (migration 041) so the picker can show it —
+          // AddTubeType's own duplicate check is name AND form together
+          // (resolveTube's header), so an engineer choosing a tube type by
+          // name benefits from seeing which form each one already is.
+          .query<{ id: number; name: string; tubeWeightG: number | null; tubeForm: number | null }>(
+            `SELECT tube_type_id id, tube_type name, tube_weight_g tubeWeightG, tube_form tubeForm FROM sms.tube_type ORDER BY tube_type`,
           ),
         listPackSchemas(pool),
         listPallets(pool),

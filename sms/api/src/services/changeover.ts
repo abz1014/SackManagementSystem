@@ -179,7 +179,12 @@ function findLikeCollision<T extends { name: string }>(rows: T[], requestedName:
 interface Mirror {
   blends: { id: number; name: string }[];
   counts: { id: number; name: string }[];
-  tubeTypes: { id: number; name: string; tubeWeightG: number | null }[];
+  // tubeForm added (migration 041): AddTubeType's own duplicate check is
+  // name-pattern AND form together, not name alone — see resolveTube below
+  // and the migration's header. null = the mirror has not yet recorded this
+  // row's form (an old row, not yet touched by a full seedProducts read or a
+  // post-AddTubeType echo-back MERGE).
+  tubeTypes: { id: number; name: string; tubeWeightG: number | null; tubeForm: number | null }[];
   products: { id: number; blendId: number | null; countId: number | null; tubeTypeId: number | null; active: boolean | null; label: string }[];
   pallets: Awaited<ReturnType<typeof listPallets>>;
 }
@@ -188,7 +193,9 @@ async function readMirror(pool: ConnectionPool): Promise<Mirror> {
   const [b, c, t, p, pallets] = await Promise.all([
     pool.request().query<{ id: number; name: string }>(`SELECT blend_id id, blend name FROM sms.blend`),
     pool.request().query<{ id: number; name: string }>(`SELECT count_id id, count_text name FROM sms.yarn_count`),
-    pool.request().query<{ id: number; name: string; w: number | null }>(`SELECT tube_type_id id, tube_type name, tube_weight_g w FROM sms.tube_type`),
+    pool.request().query<{ id: number; name: string; w: number | null; form: number | null }>(
+      `SELECT tube_type_id id, tube_type name, tube_weight_g w, tube_form form FROM sms.tube_type`,
+    ),
     pool.request().query<{ product_id: number; blend_id: number | null; count_id: number | null; tube_type_id: number | null; active_flag: boolean | null; description: string | null; lot_code: string | null }>(
       `SELECT product_id, blend_id, count_id, tube_type_id, active_flag, description, lot_code FROM sms.product`,
     ),
@@ -197,7 +204,12 @@ async function readMirror(pool: ConnectionPool): Promise<Mirror> {
   return {
     blends: b.recordset.map((x) => ({ id: Number(x.id), name: String(x.name) })),
     counts: c.recordset.map((x) => ({ id: Number(x.id), name: String(x.name) })),
-    tubeTypes: t.recordset.map((x) => ({ id: Number(x.id), name: String(x.name), tubeWeightG: x.w == null ? null : Number(x.w) })),
+    tubeTypes: t.recordset.map((x) => ({
+      id: Number(x.id),
+      name: String(x.name),
+      tubeWeightG: x.w == null ? null : Number(x.w),
+      tubeForm: x.form == null ? null : Number(x.form),
+    })),
     products: p.recordset.map((x) => ({
       id: Number(x.product_id),
       blendId: x.blend_id == null ? null : Number(x.blend_id),
@@ -256,6 +268,27 @@ function resolveRef(
   return { step: { step: what, action: 'add', proc, label: name, id: null, detail: { name, ...(likeCollision ? { likeCollisionWith: likeCollision.id } : {}) } }, id: null };
 }
 
+/**
+ * Defect fixed here (reported against commit a9b85b5's B4 fix): AddTubeType's
+ * own duplicate check is `TubeType LIKE @tubeType AND TubeForm = @tubeForm` —
+ * a COMPOUND key, name pattern AND exact form together (verified against the
+ * proc body, likePattern.ts's header). The B4 fix compared on name alone,
+ * because `sms.tube_type` carried no form column at the time, and that had
+ * two consequences:
+ *   (a) an EXACT name match was reused even when the requested form
+ *       differed from the existing row's — silently attaching a changeover
+ *       to the wrong tube type, since AddTubeType's own check would have
+ *       accepted the request as a genuinely different, new tube type;
+ *   (b) a LIKE-pattern collision against a row in a different form was
+ *       over-blocked, refusing something PDAS's own check would allow.
+ * Migration 041 mirrors TubeForm onto `sms.tube_type.tube_form` (nullable —
+ * an existing row reads NULL until the next full seedProducts read or a
+ * post-AddTubeType echo-back MERGE populates it). This function now matches
+ * PDAS's real check: name AND form together when the row's form is known,
+ * and a mirror row whose form is NULL is never silently reused or ruled out
+ * — it blocks instead, naming the reason, exactly as the task that reported
+ * this defect required.
+ */
 function resolveTube(choice: TubeChoice, rows: Mirror['tubeTypes'], blockers: string[], warnings: string[]): { step: PlanStep; id: number | null } {
   if ('id' in choice) {
     const row = rows.find((r) => r.id === choice.id);
@@ -263,34 +296,62 @@ function resolveTube(choice: TubeChoice, rows: Mirror['tubeTypes'], blockers: st
       blockers.push(`No tube type with number ${choice.id} is known to the mirror.`);
       return { step: { step: 'tube_type', action: 'reuse', proc: null, label: `tube type ${choice.id}`, id: choice.id, detail: {} }, id: choice.id };
     }
-    return { step: { step: 'tube_type', action: 'reuse', proc: null, label: row.name, id: row.id, detail: { name: row.name, tubeWeightG: row.tubeWeightG } }, id: row.id };
+    return { step: { step: 'tube_type', action: 'reuse', proc: null, label: row.name, id: row.id, detail: { name: row.name, tubeWeightG: row.tubeWeightG, tubeForm: row.tubeForm } }, id: row.id };
   }
   const name = choice.name.trim();
   if (name.length === 0) blockers.push('The new tube type has no name.');
   if (!(Number.isFinite(choice.tubeWeightG) && choice.tubeWeightG > 0)) blockers.push('The new tube type needs a tube weight above zero.');
   const form: TubeForm = choice.tubeForm ?? 2;
-  const existing = rows.find((r) => norm(r.name) === norm(name));
-  if (existing) {
-    warnings.push(`"${name}" already exists as tube type ${existing.id} ("${existing.name}") and will be used as it is.`);
-    return { step: { step: 'tube_type', action: 'reuse', proc: null, label: existing.name, id: existing.id, detail: { name: existing.name, tubeWeightG: existing.tubeWeightG, matchedByName: true } }, id: existing.id };
+
+  const exact = rows.find((r) => norm(r.name) === norm(name));
+  if (exact) {
+    if (exact.tubeForm == null) {
+      // Never silently reuse a name match whose form is unknown: AddTubeType's
+      // own check is name AND form together, so whether this is the SAME
+      // tube type (reuse) or a genuinely DIFFERENT one in a different form
+      // (add) cannot be decided until the mirror knows the existing row's
+      // form. Block rather than guess either way.
+      blockers.push(
+        `"${name}" matches existing tube type ${exact.id} ("${exact.name}") by name, but the reference mirror has not yet ` +
+          `recorded that row's tube form — AddTubeType's own duplicate check is name AND form together, so whether this is ` +
+          `the same tube type or a different one cannot be decided yet. Wait for the next reference mirror refresh, or if ` +
+          `you already know it is the right tube type, select tube type ${exact.id} by number instead.`,
+      );
+      return {
+        step: { step: 'tube_type', action: 'add', proc: 'AddTubeType', label: name, id: null, detail: { name, tubeWeightG: choice.tubeWeightG, tubeForm: form, formUnknownFor: exact.id } },
+        id: null,
+      };
+    }
+    if (exact.tubeForm === form) {
+      warnings.push(`"${name}" already exists as tube type ${exact.id} ("${exact.name}") in form ${form} and will be used as it is.`);
+      return {
+        step: { step: 'tube_type', action: 'reuse', proc: null, label: exact.name, id: exact.id, detail: { name: exact.name, tubeWeightG: exact.tubeWeightG, tubeForm: exact.tubeForm, matchedByName: true } },
+        id: exact.id,
+      };
+    }
+    // Same name, different KNOWN form: AddTubeType's own (name AND form)
+    // check would not refuse this — it is a genuinely different tube type,
+    // not the same row under another label. Fall through and plan it as
+    // 'add', still subject to the LIKE-and-form check below.
   }
-  // B4: AddTubeType guards its INSERT with
-  // `TubeType LIKE @tubeType AND TubeForm = @tubeForm` (verified against the
-  // proc body, likePattern.ts's header) — a compound key, name pattern AND
-  // exact form. `sms.tube_type` (the sidecar mirror, db/migrations/006_
-  // reference.sql) carries no tube_form column, so this check cannot include
-  // form and is deliberately conservative: it blocks on a name-pattern
-  // collision alone, regardless of the existing row's form. That can only
-  // over-block (flag a pattern collision PDAS might actually accept because
-  // the forms differ) — the safe direction, never the silent-refusal defect
-  // this fix exists to close. Narrowing it needs tube_form added to the
-  // mirror and its sync, which is a schema change, not this fix's scope.
-  const likeCollision = findLikeCollision(rows, name);
+
+  // B4, restated for form: a LIKE-pattern collision only refuses AddTubeType's
+  // INSERT when the existing row's form ALSO equals the requested form. A
+  // same-name-pattern row in a different KNOWN form is not a collision at
+  // all. A row whose form the mirror has not yet recorded cannot be ruled
+  // out either way, so — same rule as the exact-match branch above — it is
+  // treated as a possible collision, never silently passed over.
+  const candidateRows = rows.filter((r) => r.tubeForm === form || r.tubeForm == null);
+  const likeCollision = findLikeCollision(candidateRows, name);
   if (likeCollision) {
+    const formNote =
+      likeCollision.tubeForm == null
+        ? ' — the mirror has not yet recorded that row\'s tube form, so this cannot be ruled out'
+        : '';
     blockers.push(
       `"${name}" would be refused by PDAS: as a wildcard pattern it matches the existing tube type ${likeCollision.id} ` +
-        `("${likeCollision.name}"), the same LIKE check AddTubeType runs before it inserts. Use a different, non-matching name, ` +
-        `or reuse tube type ${likeCollision.id} instead.`,
+        `("${likeCollision.name}") in the same form${formNote}, the same LIKE-and-form check AddTubeType runs before it inserts. ` +
+        `Use a different, non-matching name, or reuse tube type ${likeCollision.id} instead.`,
     );
   }
   return {
