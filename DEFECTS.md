@@ -676,7 +676,7 @@ worker has run against a database for a while — carried here so that follow-up
 | D-15…D-23 | mixed | Defects found DURING the RT- fix wave, not present in the audit itself | see Part 4 |
 | D-24 | MEDIUM | `pdasWrite.ts`'s post-commit echo-back check reads, run inside the same `try` as the write itself (Add*/CreatePallet/SetPalletActive), or entirely unguarded (`updateProductLimits`), misreported a committed write as failed when the check read itself failed | **fixed 24 Sep 2026**, `bdbb0eb` (B1/B2) |
 | D-25 | MEDIUM | `planChangeover` compared a requested new blend/count/tube name to existing rows by exact equality only, so a name that is a `LIKE`-pattern match for an existing row (T-SQL wildcard collision, e.g. `"R_D"` vs `"RED"`) planned clean and only failed mid-sequence against PDAS's own duplicate check | **fixed 24 Sep 2026**, `a9b85b5` (B4), new `api/src/services/likePattern.ts`; proven by F3b, `PDAS-EXECUTION-2026-09-24.md` | 
-| D-26 | MEDIUM, open (fix in progress by another worker) | `changeover.ts`'s `resolveTube` compared candidate tube types by name only; `sms.tube_type` carried no `tube_form` column, so it could either silently reuse a wrong-form tube type PDAS would have accepted as new, or over-block a same-form name that only collided by `LIKE` pattern against a different form | **open at the time of this entry** — migration `041_tube_type_form.sql` (adds `sms.tube_type.tube_form`, nullable) plus companion changes to `changeover.ts`/`changeover.test.ts`/`pdasWrite.ts`'s `addTubeType` mirror-write/`sync-worker/src/seed/seedProducts.ts`/`seed.test.ts` were uncommitted and in progress by a concurrent worker as of 24 Sep 2026; not this pass's to finish or claim closed |
+| D-26 | MEDIUM | `changeover.ts`'s `resolveTube` compared candidate tube types by name only; `sms.tube_type` carried no `tube_form` column, so it could either silently reuse a wrong-form tube type PDAS would have accepted as new, or over-block a same-form name that only collided by `LIKE` pattern against a different form | **fixed 24 Sep 2026**, `d6a58d4` (migration `041_tube_type_form.sql` + `changeover.ts`/`pdasWrite.ts`'s `addTubeType` MERGE/`seedProducts.ts`); **proven live 24 Sep 2026** — the final re-run section of `PDAS-EXECUTION-2026-09-24.md`: `AddTubeType` writes `tube_form` into the mirror (TubeTypeId 28, `tube_form=2`, matches PDAS's own `TubeForm`), and a plan-only `resolveTube` check confirms same-name/same-form plans `reuse` while same-name/different-form plans `add` |
 
 ---
 
@@ -827,7 +827,7 @@ blocks a colliding name at plan time, before any write. **Proven by this pass**:
 (`PDAS-EXECUTION-2026-09-24.md`) requested tube name `"R_D"` against an existing `"RED"` row and
 was blocked at plan time with a message naming the collision, zero writes reaching PDAS.
 
-### D-26 — `resolveTube` had no way to distinguish two tube types by form, only by name — MEDIUM, open, fix in progress (not this pass's to close) (24 Sep 2026)
+### D-26 — `resolveTube` had no way to distinguish two tube types by form, only by name — MEDIUM, **fixed** (24 Sep 2026, `d6a58d4`; proven live later the same day)
 
 Found while reading `changeover.ts` for this pass's own run (not exercised directly by this
 pass's harness, which reused existing tube types rather than triggering this path). PDAS's own
@@ -838,16 +838,32 @@ column at all, since migration 006. Two failure shapes follow: (a) an exact name
 reused even when the requested form differs from the existing row's — silently attaching a
 changeover to the wrong tube type, when PDAS's own `AddTubeType` would have accepted the request
 as a genuinely new, different tube type; (b) a `LIKE`-pattern collision against a row in a
-**different** form over-blocks a request PDAS's own check would have let through. **This is a
-real, currently-open gap** — not fixed by D-25's `LIKE`-collision fix, which does not carry
-form information either. **Status at the time this entry is written**: another worker has
-migration `041_tube_type_form.sql` (adds `sms.tube_type.tube_form`, nullable — existing rows
-read `NULL` until the mirror learns the real value from a `seedProducts` full read or an
-`AddTubeType` echo-back write) and companion changes to `changeover.ts`, `changeover.test.ts`,
-`pdasWrite.ts`'s `addTubeType` mirror-write, and `sync-worker/src/seed/seedProducts.ts`/
-`seed.test.ts` **uncommitted and in progress**, per `git status` at the time this pass ran. This
-pass deliberately left all of those files untouched (a live editing conflict) and does not claim
-this gap closed. Whoever finishes it should update this entry to FIXED with the commit hash.
+**different** form over-blocks a request PDAS's own check would have let through. **This was a
+real gap** — not fixed by D-25's `LIKE`-collision fix, which does not carry form information
+either.
+
+**Fixed by commit `d6a58d4`** ("Match changeover tube types on name and form, as AddTubeType
+does"), found uncommitted and in progress by a concurrent worker at the time this entry was
+first written, now landed: migration `041_tube_type_form.sql` adds `sms.tube_type.tube_form`
+(nullable — an existing row reads `NULL` until the mirror learns the real value from a
+`seedProducts` full read or an `AddTubeType` echo-back MERGE), and `resolveTube` in
+`changeover.ts` now matches PDAS's own compound key — name AND form together when the row's
+form is known, and a mirror row whose form is still `NULL` blocks rather than guesses either
+way (see the function's own header comment, `changeover.ts:271-291`).
+
+**Proven live, not just read from the diff, by the "Final re-run on `d6a58d4`+" section of
+`PDAS-EXECUTION-2026-09-24.md` (24 Sep 2026, HEAD `58a705c`):** the committed harness's `R1`
+case ran `AddTubeType` for a new tube (`E2E-TUBE`, `tubeForm=2`, resulting TubeTypeId 28), and a
+direct, read-only comparison afterward showed `sms.tube_type` row 28's `tube_form=2` matching
+`PDAS_TP1U2_SEP07.dbo.TubeTypes` row 28's own `TubeForm=2` exactly — the MERGE now writes the
+column instead of leaving it `NULL`. A second, plan-only script (no `execute`, `planChangeover`
+only) then drove `resolveTube` directly: requesting `E2E-TUBE` with `tubeForm=2` (the row's own,
+now-known form) planned `action='reuse'`, `id=28`; requesting the same name with `tubeForm=1` (a
+different, known form) planned `action='add'`, `id=null`, `proc='AddTubeType'`. Both were
+plan-only, zero writes reached PDAS for either check. Both databases were restored from a
+proven-restorable backup afterward and recounted to match the pre-run snapshot exactly,
+including the E2E-TUBE/E2E-BLEND/E2E-COUNT/E2E-material/E2E-pallet rows this same re-run's `R1`
+had created.
 
 ### The local end-to-end proof itself — all nine rights, through the app's own code
 

@@ -391,3 +391,126 @@ No login was created against the plant. No `DELETE`/`DROP`/`TRUNCATE`/`ALTER` (s
 statement was ever issued against any real database this pass. Both `PDAS_TP1U2_SEP07` and
 `sms` have been restored to their exact pre-run state, independently re-verified against a
 separately-recorded baseline.
+
+## Final re-run on `d6a58d4`+ (24 Sep 2026, later the same day)
+
+A second, independent re-run against the tree as it stood after commit `d6a58d4` ("Match
+changeover tube types on name and form, as AddTubeType does") — the commit that closed D-26,
+the tube-form gap this same file's original pass explicitly left open and uncommitted. HEAD at
+run time was `58a705c`. Same protocol, same boundary as every pass before it: only
+`PDAS_TP1U2_SEP07` on `.\SQLEXPRESS` and the local `sms` sidecar, never the plant, never
+`sms/.env`, `PDAS_WRITE_ENABLED` never flipped from `false`, no login created, no `DELETE`.
+
+### Pre-flight
+
+`npm run build` (all five workspaces) — clean. `npx vitest run` from `sms/` — **181 files
+passed / 1 skipped, 1820 tests passed / 4 skipped**, no red files, one run. `npm run typecheck`
+(`tsc -b shared sync-worker cli api web`) — clean, no output. These are the counts this pass
+observed directly, not carried over from an earlier entry.
+
+### Backups and restore proof (P2/S2)
+
+Fresh `COPY_ONLY, CHECKSUM, INIT` backups were taken of both databases
+(`PDAS_TP1U2_SEP07-20260924-165928-P2.bak`, `sms-20260924-165928-S2.bak`,
+`D:\sms-backups\`), each passed `RESTORE VERIFYONLY ... WITH CHECKSUM`, and each was restored
+into a scratch database (`pdas_restore_e2e`, `sms_restore_e2e`, `WITH MOVE` to new physical
+file names) before any write. Counts matched the live copies exactly:
+
+- PDAS six tables (`Materials`/`Blends`/`Counts`/`TubeTypes`/`Pallets`/`nhs_events`) —
+  count and `MAX(id)` identical live vs. restored: 24/1024, 10/10, 14/14, 27/27, 25/1022,
+  3631/23445.
+- Every `sms`/`sms_raw` table via `sys.partitions` row counts — all 41 tables MATCH, live vs.
+  restored (`app_config` through `yarn_count`/`sms_raw.*`), including `cone_event` 487,936 and
+  `sack_event` 20,612.
+- Exact `COUNT`/`MAX(pk)` for `product_change` (3/3), `product` (14/1024), `blend` (10/10),
+  `yarn_count` (14/14), `tube_type` (27/27), `pallet` (15/1022), `product_limit_version`
+  (14/29), `dq_finding` (22/114), `audit_log` (45/50) — all MATCH, live vs. restored.
+
+Both scratch databases were then dropped (`ALTER DATABASE ... SET SINGLE_USER WITH ROLLBACK
+IMMEDIATE; DROP DATABASE ...`), confirmed gone via `sys.databases`.
+
+### Harness run and results
+
+**The committed harness, `sms/scripts/pdas-e2e-local.mjs` (341 lines, as it stands on
+`58a705c`), covers four cases, not the eleven (R1–R3, F1–F6) this same file's first pass
+describes.** Reading the script confirms it directly: it exercises `R1` (one
+`planChangeover`/`executeChangeover` call covering `AddBlend`, `AddCount`, `AddTubeType`,
+`CreateMaterial`, `CreatePallet` — the `retire` arrays are passed empty, so no
+`SetMaterialStatusActive`/`SetPalletStatusActive` retire step runs), `R2`
+(`updateProductLimits`, a fresh single call), `F4` (optimistic concurrency — two
+`updateProductLimits` calls sharing one stale `before`), and `F5` (`createProduct` through a
+write-disabled `PdasWriter`). There is no `R3` (`setProductActive` reactivate), `F1` (plan-time
+duplicate-triple blocker), `F2` (direct duplicate `createProduct` refusal), `F3` (`AddTubeType`
+duplicate / `LIKE`-collision refusal), or `F6` (retire-then-recreate blocker) case anywhere in
+the committed script — those eleven labels belong to the original pass's own ad hoc
+`S\pdas-e2e.mjs`/`S\pdas-f4-only.mjs`, which were never committed; only the four-case version
+was folded into `sms/scripts/pdas-e2e-local.mjs`. This entry reports what the committed harness
+actually proved this pass, not what an earlier, different script proved on an earlier day.
+Whoever next touches this harness should decide, explicitly, whether to widen it back to eleven
+cases or to correct the file header's own claim of proving "all nine rights" (R1's five write
+steps plus R2's guarded `UPDATE`, F5/F4 exercise the remaining shapes but not
+`SetMaterialStatusActive`/`SetPalletStatusActive` directly).
+
+Run with `PDAS_E2E_PORT=14330` (the harness's own port default resolves to `1433` unless
+overridden — `.env`'s `PDAS_WRITE_PORT=1433` is the plant-shaped placeholder, not this local
+instance's actual `14330`; this is an invocation detail, not a code defect) and
+`PDAS_E2E_OUT_FILE` pointed at the scratchpad. Result: **exit 0, all four verdicts PASS**:
+
+| Case | What it proved | Verdict |
+|---|---|---|
+| R1-plan | `planChangeover` returns `writesEnabled=true`, zero blockers for a fresh blend/count/tube/material/pallet request | **PASS** |
+| R1-execute | All five steps land: `AddBlend`→BlendId 11, `AddCount`→CountId 15, `AddTubeType`→TubeTypeId 28 (`tubeForm=2`), `CreateMaterial`→MaterialId 1025, `CreatePallet`→PalletId 1023; `nhs_events` rows written for each, `product_change` rows recorded | **PASS** (read back, not just trusted) |
+| R2 | `updateProductLimits` on MaterialId 1025: setpoint 1960→1965 g, `ok=true`, PDAS row confirms | **PASS** |
+| F4 | Two `updateProductLimits` calls sharing one `before`: first commits (1965→1970), second returns `code=CONFLICT`, PDAS ends at 1970 (only one write landed) | **PASS** |
+| F5 | `createProduct` via a `PDAS_WRITE_ENABLED=false` writer returns `code=DISABLED`, `sms.product_change` records `outcome='disabled'`, PDAS counts unchanged before/after | **PASS** |
+
+### `tube_form` evidence — the specific fix this re-run exists to prove
+
+R1's `AddTubeType` call created TubeTypeId 28 (`E2E-TUBE`, `tubeForm=2`). Read back directly,
+read-only, after the run:
+
+- `sms.tube_type` row 28: `tube_type='E2E-TUBE'`, `tube_weight_g=70.00`, **`tube_form=2`**.
+- `PDAS_TP1U2_SEP07.dbo.TubeTypes` row 28: `TubeType='E2E-TUBE'`, `TubeWeight=70.0`,
+  **`TubeForm=2`**.
+
+The mirror's `tube_form` matches PDAS's own `TubeForm` exactly — the MERGE `pdasWrite.ts`'s
+`addTubeType` now performs (per `d6a58d4`) is writing the column, not leaving it `NULL` as D-26
+described.
+
+A second, plan-only script (`plan-only-tubeform-check.mjs`, no `execute`, read-only against
+both databases plus one `planChangeover` call each) then drove `resolveTube` directly through
+the real `api/dist` code:
+
+- Requesting tube name `E2E-TUBE` with `tubeForm=2` (the row's own, now-known form) against the
+  post-R1 mirror → `action='reuse'`, `id=28`, `warnings=["\"E2E-TUBE\" already exists as tube
+  type 28 (\"E2E-TUBE\") in form 2 and will be used as it is."]`. **PASS.**
+- Requesting the same name `E2E-TUBE` with `tubeForm=1` (a different, known form) → `action=
+  'add'`, `proc='AddTubeType'`, `id=null`, no reuse. **PASS.**
+
+This is exactly the behaviour D-26 named as missing: before the fix, `resolveTube` could not
+tell these two requests apart because `sms.tube_type.tube_form` did not exist; now a same-name
+request in a genuinely different, known form is correctly planned as a new tube type instead of
+being silently attached to the wrong one, and a same-name-same-form request is correctly
+reused. Neither plan-only call issued a write — no `execute` was called, confirmed by reading
+the script and by the unchanged PDAS/`sms` counts after it ran.
+
+### Restore proof (post-run)
+
+Both databases were restored from the P2/S2 backups (`ALTER DATABASE ... SET SINGLE_USER WITH
+ROLLBACK IMMEDIATE`, `RESTORE DATABASE ... WITH REPLACE, CHECKSUM`, `ALTER DATABASE ... SET
+MULTI_USER`) and recounted. Every count — the PDAS six tables, all 41 `sms`/`sms_raw` tables via
+`sys.partitions`, and the nine exact-PK counts (`product_change` through `audit_log`) — matched
+the pre-run P2/S2 snapshot exactly: no row created by R1/R2/F4/F5 (BlendId 11, CountId 15,
+TubeTypeId 28, MaterialId 1025, PalletId 1023, the `nhs_events`/`product_change` rows they
+generated) remains in either database. `sms_pdas_writer` was then confirmed to still log in
+post-restore: a small probe script connected as `sms_pdas_writer` and printed only
+`SUSER_NAME()`, which returned `sms_pdas_writer` — no password or connection string printed.
+
+### Verdict
+
+D-26 is closed, proven live on the committed code, not just read from the diff: `tube_form` is
+written to the mirror by `AddTubeType`'s MERGE and correctly distinguishes a same-name request
+in a different form (planned as `add`) from one in the same form (planned as `reuse`). The
+committed harness's own coverage gap (four cases, not the eleven the first pass ran ad hoc) is
+recorded above as a separate, honest finding — it does not bear on D-26's fix, which this pass
+verified by a dedicated plan-only script rather than by assuming the harness covered it.
