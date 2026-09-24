@@ -3,6 +3,26 @@
 Repo root: `C:\Users\ABDULLAH SAJID\Desktop\sag database`, branch `floor-first-rework`,
 commit `238e7a9`. Suite 1792 passed / 4 skipped / 0 failed (not re-run this pass).
 
+> **Correction, 24 Sep 2026 (kept in place, not deleted, per this repo's convention).**
+> This file's commit (`238e7a9`) and suite figure (1792/4/0) describe the state at the
+> START of the QA session that then produced `ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`
+> (RT24-01…13) and the fix wave that followed it (commits `3e0d349` … `8f5c80c`) — read
+> those two documents and `DEFECTS.md` Part 6 for what that session actually found and
+> fixed; do not treat this file's own counts as current. Two of this file's standing
+> instructions are also now stale: **(1)** "Layout specs are blocked on
+> `SMS_TEST_USERNAME`/`SMS_TEST_PASSWORD`" is still true for *signed-in* cases, but a
+> real Playwright harness now exists and runs unattended for what it can
+> (`sms/playwright.config.ts`, `layout-tests/`, commit `b866754`; 24 Sep 2026 run: 3
+> passed / 13 skipped / 0 failed — the 13 skips are exactly the credential-gated cases).
+> **(2)** the hard rule below, "Never set `PDAS_WRITE_ENABLED=true`", was correct for
+> THIS session's own scope and remains correct for the plant — but the separate PDAS
+> session it points to (`HANDOVER-PDAS.md`) has since set it `true` locally, pointed at
+> `PDAS_TP1U2_SEP07` only (`PDAS-EXECUTION-2026-09-24.md`); the plant is untouched. Suite,
+> re-captured 24 Sep 2026 at HEAD `8f5c80c`: 196 files passed / 1 skipped, 2030 tests
+> passed / 4 skipped, **2 tests failed** (`sync-worker/src/transform/isolatedDay.test.ts`,
+> not investigated this pass — concurrent uncommitted edits were present in the tree at
+> the time).
+
 ## Goal of this session
 
 The owner tests and tries to break the software — hands-on plus agent-assisted QA
@@ -56,6 +76,17 @@ decision pending, see `DEFECTS.md` D-10), RT-020 (no confidence interval on the
 days-to-limit projection). See `DEFECTS.md` and `CLAUDE.md` for the fuller open list.
 Below-rank RBAC is untested live — no rank-1/2 accounts exist yet. Layout specs are
 blocked on `SMS_TEST_USERNAME`/`SMS_TEST_PASSWORD` env vars not being set.
+
+**Added 24 Sep 2026, from this session's own audit (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`,
+`DEFECTS.md` Part 6) — don't re-report these either:** RT24-05 (PDAS write-path echo-back
+verification cannot detect a real mismatch under an EXECUTE-only role, self-disables to
+WARNING — in progress, hash pending), RT24-07 (Line's reject rate reverts to the double-count
+formula if `unmatchedRejects` is missing — in progress, hash pending), RT24-08 (no
+stale-vs-dead distinction per machine — in progress, hash pending), RT24-09 (a mis-generation
+row can sit inside the documented data gap, unflagged), RT24-10 (dead `/api/report` ignores
+dates), RT24-11 (`X-Powered-By` header present), RT24-12 (`degradedReason` sometimes null
+while degraded), RT24-13 (missing-field fuzz coverage absent on ~13 screens). RT24-01/02/03/04/06
+were found and fixed the same session — see `DEFECTS.md` Part 6 for which.
 
 ## Test tools
 
