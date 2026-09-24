@@ -109,6 +109,7 @@ import {
   resolvePlausibilityAt,
 } from './ruleHistory.js';
 import { checkShiftRuleDrift } from './shiftRuleDrift.js';
+import { checkIsolatedProductionDay } from './isolatedDay.js';
 
 type Raw = Record<string, unknown>;
 
@@ -592,6 +593,11 @@ export async function runTransform(
   // only one shift_rule version on file.
   const driftFindings = await checkShiftRuleDrift(appPool, cfg.lineId, shiftHistory);
   await persistFindings(appPool, runId, driftFindings);
+
+  // RT24-09 (24 Sep 2026): read-only, line-wide, same reason as the drift
+  // check above — one GROUP BY over sms.cone_event per pass, not per stream.
+  const isolatedDayFindings = await checkIsolatedProductionDay(appPool, cfg.lineId);
+  await persistFindings(appPool, runId, isolatedDayFindings);
 
   return out;
 }

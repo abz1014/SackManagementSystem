@@ -31,6 +31,11 @@
  *                                     row's OWN production time — a rebuild spanning a rule edit restamped
  *                                     old rows under a rule they never ran under; see shiftRuleDrift.ts.
  *                                     No-op (not raised) when the line has only one shift_rule version on file.
+ *   isolated_production_day WARNING   RT24-09 (24 Sep 2026): a cone_event shift_date with fewer than 5 rows
+ *                                     whose ±3-day neighbourhood (same source generation) has no data at all,
+ *                                     or that falls outside the generation's own coverage range — e.g. a
+ *                                     well-formed but misdated row sitting inside a documented "no data" gap.
+ *                                     Nothing deleted, no API change; see isolatedDay.ts.
  *
  * `subject_ref` (roadmap Phase 3 item 3, 14 Sep 2026): a finding about ROWS
  * names the raw_id of the first offending one, so an operator can go from
@@ -61,6 +66,7 @@ export const CHECK_NAMES = [
   'sack_num_reset',
   'sack_blackout',
   'shift_rule_drift',
+  'isolated_production_day',
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];
 
