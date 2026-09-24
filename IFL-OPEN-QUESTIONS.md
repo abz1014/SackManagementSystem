@@ -79,9 +79,32 @@ and instance. A script IFL's DBA can run unchanged is ready at
 exists at that path, alongside two related bootstrap templates for PDAS procedure metadata
 and the PDAS writer login).
 
+**One specific permission inside that same login, added 24 September 2026 and not obvious
+from "`db_datareader`" alone: the login must be able to read schema/catalogue metadata, not
+just table rows.** Every pass, the sync worker asks the server what shape its own tables are
+in — this is how it notices IFL renaming or adding a column, the way `Source` became
+`MachineNo` and `MaterialId` was added on 5 August 2026 — by querying four system views:
+**`sys.tables`, `sys.columns`, `sys.types`, and `INFORMATION_SCHEMA.COLUMNS`.** Measuring
+this (`PERFORMANCE-SOURCE-LOAD-2026-09-24.md`) needed Windows authentication locally, because
+this project's own current `IFL_DB_USER` — which holds `db_datareader` on
+`PDAS_TP1U2_SEP07` — was not enough for a *different*, narrower catalogue read a 16 September
+task needed (`sys.procedures`/`sys.parameters`, to confirm a stored procedure's own
+parameters). `db_datareader` ordinarily includes `SELECT` on these four views as part of the
+database, so the four above should already be covered by item 1's ask as written — but that
+has not been confirmed against IFL's actual grant, because that login does not exist yet. **If
+it turns out not to be included, this is the specific, narrower ask: `SELECT` on `sys.tables`,
+`sys.columns`, `sys.types` and `INFORMATION_SCHEMA.COLUMNS` on both `DATA_TP1U2` and
+`PDAS_TP1U2`, in addition to ordinary table `SELECT`.**
+
 **Blocked without it:** everything that makes this a live system rather than a demo. The
 cutover rehearsal, reconciliation against IFL's own data, the scheduled backup, and the
-Windows service install all wait on this.
+Windows service install all wait on this. Specifically for the catalogue-read permission
+above: without it, schema-drift detection and source-generation ("epoch") identification —
+the mechanism that caught the 5 August rebuild and stopped the sync worker from silently
+reporting "success" while reading nothing — cannot run at all on installation day. This is
+not a hypothetical: this project already knows a plant login can be narrower than
+`db_datareader` implies (`ibrahim`, seen during the PDAS introspection work, is
+EXECUTE-only, with no `db_datareader` and no `VIEW DEFINITION` on any procedure).
 
 **Cost of staying blocked:** total. The product cannot be installed. Every number anyone has
 ever seen from it describes a copy of IFL's data that stops on 7 September 2026.
