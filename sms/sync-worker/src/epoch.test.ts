@@ -19,6 +19,10 @@ const source = {
   createdKey: '2026-08-05T19:03:16.353Z' as string | null,
   fingerprint: 'bf17df27200feeb21ac65c2e5dfc39e7',
   columns: ['id int', 'Date datetime', 'MaterialId int'] as string[],
+  /** WS-PERF3, Job 1: counts every real columnList() round trip the mocked
+   *  adapter answers, so a test can prove the catalogue is not queried twice
+   *  per table per pass. */
+  columnListCalls: 0,
 };
 // The registry (createAdapter) hands out this class for 'ifl_sql'.
 vi.mock('./reader/IflSqlAdapter.js', () => ({
@@ -31,12 +35,14 @@ vi.mock('./reader/IflSqlAdapter.js', () => ({
       return source.fingerprint;
     }
     async columnList() {
+      source.columnListCalls++;
       return source.columns;
     }
   },
 }));
 
 const { resolveEpoch, checkColumnDrift, readSourceIdentity } = await import('./epoch.js');
+const { createAdapter } = await import('./reader/SourceAdapter.js');
 
 const OPEN = {
   epoch_id: 9,
@@ -67,11 +73,15 @@ beforeEach(() => {
   openRows = [OPEN];
   source.createdKey = OPEN.source_created_key;
   source.fingerprint = OPEN.schema_fingerprint;
+  source.columnListCalls = 0;
 });
 
 describe('resolveEpoch', () => {
-  it('returns the open epoch when server, database, create_date and fingerprint all match', async () => {
-    await expect(resolveEpoch(appPool, iflPool, def, 1, iflDb)).resolves.toMatchObject({ epoch_id: 9 });
+  it('returns the open epoch, plus the live column list it already read, when server, database, create_date and fingerprint all match', async () => {
+    await expect(resolveEpoch(appPool, iflPool, def, 1, iflDb)).resolves.toMatchObject({
+      epoch: { epoch_id: 9 },
+      columnList: ['id int', 'Date datetime', 'MaterialId int'],
+    });
   });
 
   it('halts when no generation is open, and names the command that fixes it', async () => {
@@ -176,17 +186,14 @@ describe('checkColumnDrift', () => {
     };
     return p as unknown as ConnectionPool & { statements: Stmt[] };
   }
-  const adapter = {
-    systemCode: 'ifl_sql',
-    def: { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] },
-    async columnList() {
-      return source.columns;
-    },
-  } as never;
+  // WS-PERF3, Job 1: checkColumnDrift no longer calls adapter.columnList()
+  // itself — it takes the live list its caller already read via resolveEpoch.
+  const def = { key: 'cone', sourceTable: 'pack1_TP1U2', rawTable: 'sms_raw.cone_raw', systemCode: 'ifl_sql', columns: [] };
+  const live = source.columns;
 
   it('first sight: stores the list on the epoch row (guarded IS NULL) and raises nothing', async () => {
     const p = pool(null);
-    expect(await checkColumnDrift(p, adapter, OPEN as never)).toBeNull();
+    expect(await checkColumnDrift(p, live, OPEN as never, def)).toBeNull();
     const upd = p.statements.find((s) => /UPDATE sms\.source_epoch SET column_list = @json/.test(s.sql))!;
     expect(upd).toBeDefined();
     expect(upd.sql).toMatch(/WHERE epoch_id = @id AND column_list IS NULL/);
@@ -196,18 +203,38 @@ describe('checkColumnDrift', () => {
 
   it('same list afterwards: nothing stored, nothing raised', async () => {
     const p = pool(JSON.stringify(['id int', 'Date datetime', 'MaterialId int']));
-    expect(await checkColumnDrift(p, adapter, OPEN as never)).toBeNull();
+    expect(await checkColumnDrift(p, live, OPEN as never, def)).toBeNull();
     expect(p.statements.some((s) => /UPDATE/.test(s.sql))).toBe(false);
   });
 
   it('a different list: one WARNING naming what was added and removed, on the raw table, and the row is NOT overwritten', async () => {
     const p = pool(JSON.stringify(['id int', 'Date datetime', 'Source int']));
-    const f = await checkColumnDrift(p, adapter, OPEN as never);
+    const f = await checkColumnDrift(p, live, OPEN as never, def);
     expect(f).toMatchObject({ check_name: 'source_columns_changed', severity: 'WARNING', subject_table: 'cone_raw', count: 2 });
     expect(f!.detail).toBe(
       'columns added: [MaterialId int]; removed: [Source int] on pack1_TP1U2 (generation 9) — the fingerprint of ' +
         'the columns SMS reads is unchanged, so ingestion continues; review whether SMS should read the new columns',
     );
     expect(p.statements.some((s) => /UPDATE/.test(s.sql))).toBe(false);
+  });
+});
+
+/**
+ * WS-PERF3, Job 1 (24 Sep 2026). PERFORMANCE-SOURCE-LOAD-2026-09-24.md §1
+ * found `columnList()` issued twice per table per pass, identical query,
+ * identical parameters: once inside `resolveEpoch` (via `readSourceIdentity`),
+ * once again in the immediately-following `checkColumnDrift` call — the exact
+ * sequence `runner.ts` runs for every table, every 60 seconds. This drives
+ * that real sequence (create the adapter once, resolve the epoch, then run
+ * the drift check) against the mocked adapter's own call counter, so it fails
+ * if the redundancy comes back.
+ */
+describe('resolveEpoch + checkColumnDrift together (Job 1: no duplicate catalogue read)', () => {
+  it('reads the live column list only once per table per pass', async () => {
+    const adapter = createAdapter(def.systemCode, iflPool, def as never);
+    const { epoch, columnList } = await resolveEpoch(appPool, iflPool, def, 1, iflDb);
+    await checkColumnDrift(appPool, columnList, epoch, def);
+    expect(source.columnListCalls).toBe(1);
+    void adapter; // constructed the same way runner.ts constructs it, unused beyond that
   });
 });

@@ -30,7 +30,7 @@ import mssql from 'mssql';
 import { createLogger, type Logger } from '@sms/shared';
 import type { DbConfig } from './config.js';
 import { rawShortName, type IflTableDef } from './reader/iflTables.js';
-import { createAdapter, type SourceAdapter } from './reader/SourceAdapter.js';
+import { createAdapter } from './reader/SourceAdapter.js';
 import type { Finding } from './transform/dq.js';
 
 const log: Logger = createLogger('sync-worker');
@@ -115,6 +115,16 @@ export async function openEpoch(
  *
  * This replaces BOTH the old `app_config` gates: the schema fingerprint is a
  * property of a generation, not of a table name, so it lives on the epoch row.
+ *
+ * Returns the live FULL column list alongside the epoch (WS-PERF3, Job 1,
+ * 24 Sep 2026): `readSourceIdentity` already reads it via `adapter.columnList()`
+ * to build the fingerprint/identity picture, and `checkColumnDrift` used to
+ * read it AGAIN with the same statement and the same parameters — a genuine,
+ * undocumented redundancy (PERFORMANCE-SOURCE-LOAD-2026-09-24.md §1), not a
+ * deliberate re-read: nothing between the two calls can change the source's
+ * schema, so re-reading it is pure waste, not a freshness guarantee. The
+ * caller (`runner.ts`) now threads this same list into `checkColumnDrift`
+ * instead of letting it fetch its own.
  */
 export async function resolveEpoch(
   appPool: ConnectionPool,
@@ -122,7 +132,7 @@ export async function resolveEpoch(
   def: IflTableDef,
   lineId: number,
   iflDb: DbConfig,
-): Promise<EpochRow> {
+): Promise<{ epoch: EpochRow; columnList: string[] }> {
   const now = await readSourceIdentity(iflPool, def, iflDb);
   const open = await openEpoch(appPool, lineId, def.sourceTable);
 
@@ -179,7 +189,7 @@ export async function resolveEpoch(
     .input('id', mssql.Int, open.epoch_id)
     .query(`UPDATE sms.source_epoch SET last_seen_utc = SYSUTCDATETIME() WHERE epoch_id = @id`);
 
-  return open;
+  return { epoch: open, columnList: now.columnList };
 }
 
 /**
@@ -297,13 +307,22 @@ export const SOURCE_COLUMNS_CHANGED = 'source_columns_changed';
  * because the fingerprint of the depended-on columns is unchanged — the rows
  * we read are still the rows we think — and the honest message is "there is
  * something new here you may want", not "stop".
+ *
+ * Takes the live column list as a parameter (WS-PERF3, Job 1, 24 Sep 2026)
+ * rather than an adapter to call `columnList()` on itself: `resolveEpoch`,
+ * called immediately before this on every path (`runner.ts`), already read
+ * the identical statement with identical parameters to resolve the
+ * generation. Re-reading it here bought no freshness — nothing runs between
+ * the two calls that could change the source's schema — so the caller now
+ * passes the one list it already has. `def` is only `{ rawTable }` this
+ * needs, for the finding's `subject_table`.
  */
 export async function checkColumnDrift(
   appPool: ConnectionPool,
-  adapter: SourceAdapter,
+  live: string[],
   epoch: EpochRow,
+  def: Pick<IflTableDef, 'rawTable' | 'sourceTable'>,
 ): Promise<Finding | null> {
-  const live = await adapter.columnList();
   const stored = await appPool
     .request()
     .input('id', mssql.Int, epoch.epoch_id)
@@ -335,10 +354,10 @@ export async function checkColumnDrift(
   return {
     check_name: SOURCE_COLUMNS_CHANGED,
     severity: 'WARNING',
-    subject_table: rawShortName(adapter.def.rawTable),
+    subject_table: rawShortName(def.rawTable),
     count: added.length + removed.length,
     detail:
-      `columns added: [${added.join(', ')}]; removed: [${removed.join(', ')}] on ${adapter.def.sourceTable} ` +
+      `columns added: [${added.join(', ')}]; removed: [${removed.join(', ')}] on ${def.sourceTable} ` +
       `(generation ${epoch.epoch_id}) — the fingerprint of the columns SMS reads is unchanged, so ingestion ` +
       `continues; review whether SMS should read the new columns`,
   };

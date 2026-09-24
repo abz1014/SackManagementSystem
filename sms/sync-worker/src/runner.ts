@@ -144,14 +144,20 @@ export async function runOnce(
       //
       // Order matters: the watermark is meaningless until the generation is known,
       // since `id` restarts with each one.
-      epoch = await resolveEpoch(appPool, iflPool, def, cfg.lineId, cfg.iflData);
+      const resolved = await resolveEpoch(appPool, iflPool, def, cfg.lineId, cfg.iflData);
+      epoch = resolved.epoch;
 
       // ---- column-list drift (non-fatal) ---------------------------------------
       // The fingerprint above sees only the columns we READ. This compares the
       // FULL list to the one recorded for the generation and raises a WARNING
       // finding on a difference — a column IFL added that SMS might want, the
       // way MaterialId arrived. Stored on first sight; never a halt.
-      const drift = await checkColumnDrift(appPool, adapter, epoch);
+      //
+      // `resolved.columnList` is the SAME live read resolveEpoch already made
+      // (WS-PERF3, Job 1, 24 Sep 2026) — this used to call `adapter.columnList()`
+      // a second time, identical statement, identical parameters, every table,
+      // every pass. See epoch.ts's checkColumnDrift doc comment.
+      const drift = await checkColumnDrift(appPool, resolved.columnList, epoch, def);
       if (drift) {
         await persistFindings(appPool, runId, [drift]);
         passLog.warn('source column list changed', { table: def.sourceTable, epoch: epoch.epoch_id, detail: drift.detail });

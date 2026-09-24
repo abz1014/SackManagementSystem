@@ -67,9 +67,15 @@ const EPOCH = {
 interface Def { sourceTable: string; systemCode: string }
 interface Drift { check_name: string; severity: string; subject_table: string; count: number; detail: string }
 
-/** What the fake source/epoch layer reports; each test rewrites what it needs. */
+/** What the fake source/epoch layer reports; each test rewrites what it needs.
+ *  WS-PERF3, Job 1: resolveEpoch's real return shape is now
+ *  `{ epoch, columnList }` (columnList threaded into checkColumnDrift instead
+ *  of it re-reading the catalogue) — the fake mirrors that shape so runner.ts's
+ *  destructuring is exercised the same way production code hits it. */
 const world = {
-  resolve: (async (_def: Def) => EPOCH) as (def: Def) => Promise<typeof EPOCH>,
+  resolve: (async (_def: Def) => ({ epoch: EPOCH, columnList: [] as string[] })) as (
+    def: Def,
+  ) => Promise<{ epoch: typeof EPOCH; columnList: string[] }>,
   maxId: 999_999 as number | null,
   rows: [{ src_id: 1 }] as { src_id: number }[],
   drift: null as Drift | null,
@@ -147,7 +153,7 @@ const pool = {} as ConnectionPool;
 const cfg = { lineId: 1, overlapRows: 500, iflData: { server: 'localhost', database: 'DATA_TP1U2_SEP07' } } as never;
 
 beforeEach(() => {
-  world.resolve = async () => EPOCH;
+  world.resolve = async () => ({ epoch: EPOCH, columnList: [] });
   world.maxId = 999_999;
   world.rows = [{ src_id: 1 }];
   world.drift = null;
@@ -168,7 +174,7 @@ const halts = () => recordHaltedRun.mock.calls.map((c) => c[1]);
 const coneResolveFails = (message: string) => {
   world.resolve = async (def) => {
     if (def.sourceTable === 'pack1_TP1U2') throw new Error(message);
-    return EPOCH;
+    return { epoch: EPOCH, columnList: [] };
   };
 };
 
@@ -347,7 +353,7 @@ describe('runOnce — every halt leaves a row for its table', () => {
     const adapterMax = [5_000, 10];
     world.resolve = async () => {
       world.maxId = adapterMax[calls++] ?? 5_000;
-      return EPOCH;
+      return { epoch: EPOCH, columnList: [] };
     };
     await expect(runOnce(pool, pool, cfg)).rejects.toThrow(/gone backwards/);
     expect(halts().map((x) => x.targetTable)).toEqual(['sack_raw']);
@@ -434,7 +440,7 @@ describe('runOnce — classified failures', () => {
       if (def.sourceTable === 'pack1_TP1U2') {
         throw Object.assign(new Error("Invalid object name 'pack1_TP1U2'"), { code: 'EREQUEST', number: 208 });
       }
-      return EPOCH;
+      return { epoch: EPOCH, columnList: [] };
     };
     await runOnce(pool, pool, cfg).catch(() => {});
     expect(halts()[0]!.error).toBe("[schema] Invalid object name 'pack1_TP1U2'");
