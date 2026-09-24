@@ -6,9 +6,11 @@
  * WHY IT EXISTS. IFL's process engineers currently create and edit products by
  * hand-writing EXECs of the vendor's stored procedures in SSMS; the client
  * confirmed on 2026-09-11 that replacing that with a button in this software
- * is a required deliverable. It is OFF BY DEFAULT (PDAS_WRITE_ENABLED) and stays
- * off until IFL confirms in writing that SMS may write to
- * PDAS_TP1U2.dbo.Materials — §6.2 lists what they must answer first.
+ * is a required deliverable. It is OFF BY DEFAULT (PDAS_WRITE_ENABLED=false) and
+ * stays off until the local end-to-end proof passes — §6.2 lists what that
+ * needs. IFL's written grant to write to PDAS_TP1U2.dbo.Materials was given
+ * 19 Sep 2026 (DEFECTS.md D-12, handover/PDAS-WRITE-GRANT-2026-09-19.md); the
+ * flag staying false is a build-readiness gate now, not a wait on IFL.
  *
  * WHAT THE VENDOR API CAN AND CANNOT DO — all verified from the proc bodies:
  *   - CreateMaterial: INSERT, keyed on (BlendId, CountId, TubeTypeId). Refuses
@@ -809,13 +811,32 @@ export class PdasWriter {
 
     // Echo-back: what PDAS holds now, read outside the transaction. Any
     // difference from what was requested is a CRITICAL finding, not a log line.
-    const observed = (await PdasWriter.readFields(pool.request(), p.productId)) ?? p.after;
-    const echoOk = PdasWriter.sameFields(observed, p.after);
-    if (!echoOk) {
-      await this.raiseEchoMismatch(
+    // B2 fix: this check read used to be unguarded — a failure here (e.g. no
+    // SELECT on dbo.Materials for an EXECUTE-only role) threw out of the
+    // route entirely (500, no sms.product_change row) for an UPDATE that had
+    // already committed. It is now the app's own follow-up, caught on its
+    // own, never conflated with the write itself failing.
+    let observed: ProductFields;
+    let checkReadFailed = false;
+    let checkErrMessage = '';
+    let echoOk = true;
+    try {
+      observed = (await PdasWriter.readFields(pool.request(), p.productId)) ?? p.after;
+      echoOk = PdasWriter.sameFields(observed, p.after);
+      if (!echoOk) {
+        await this.raiseEchoMismatch(
+          'product',
+          `Product ${p.productId}: PDAS holds ${JSON.stringify(observed)} after a change that requested ` +
+            `${JSON.stringify(p.after)}. The write committed but the row does not read back as written.`,
+        );
+      }
+    } catch (checkErr) {
+      checkReadFailed = true;
+      checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+      observed = p.after;
+      await this.raiseReadbackFailed(
         'product',
-        `Product ${p.productId}: PDAS holds ${JSON.stringify(observed)} after a change that requested ` +
-          `${JSON.stringify(p.after)}. The write committed but the row does not read back as written.`,
+        `Product ${p.productId}: updateProductLimits committed but the follow-up check read failed: ${checkErrMessage}`,
       );
     }
 
@@ -833,7 +854,10 @@ export class PdasWriter {
     });
     await this.recordChange({
       ...base, observedAfter: observed, outcome: 'ok', pdasErrorCode: null,
-      message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: committedAt,
+      message: checkReadFailed
+        ? `updateProductLimits committed but the follow-up check read failed: ${checkErrMessage}`
+        : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
+      effectiveFrom: committedAt,
     });
     await recordAudit(
       this.appPool, p.actor.userId, 'product.limits', 'product', p.productId,
@@ -870,15 +894,22 @@ export class PdasWriter {
    */
 
   /**
-   * A CRITICAL finding when the row PDAS holds after a committed write is not
-   * what was requested. Deduped on the detail text, like every other finding.
+   * One row in sms.dq_finding, deduped on the detail text. check_name is
+   * VARCHAR(64) free text (no CHECK constraint — verified against
+   * 009_dq_finding.sql before adding a second name here), so a second
+   * check_name alongside 'pdas_write_echo_mismatch' needs no migration.
    */
-  private async raiseEchoMismatch(subjectTable: 'product' | 'pallet' | 'blend' | 'yarn_count' | 'tube_type', detail: string): Promise<void> {
+  private async raiseDqFinding(
+    checkName: string,
+    severity: 'WARNING' | 'CRITICAL',
+    subjectTable: 'product' | 'pallet' | 'blend' | 'yarn_count' | 'tube_type',
+    detail: string,
+  ): Promise<void> {
     await this.appPool
       .request()
       .input('run', mssql.UniqueIdentifier, randomUUID())
-      .input('check', mssql.VarChar(64), 'pdas_write_echo_mismatch')
-      .input('sev', mssql.VarChar(10), 'CRITICAL')
+      .input('check', mssql.VarChar(64), checkName)
+      .input('sev', mssql.VarChar(10), severity)
       .input('tbl', mssql.VarChar(40), subjectTable)
       .input('detail', mssql.NVarChar(500), detail.slice(0, 500))
       .query(
@@ -886,6 +917,26 @@ export class PdasWriter {
          SELECT @run, @check, @sev, @tbl, @detail
           WHERE NOT EXISTS (SELECT 1 FROM sms.dq_finding WHERE check_name = @check AND detail = @detail)`,
       );
+  }
+
+  /**
+   * A CRITICAL finding when the row PDAS holds after a committed write is not
+   * what was requested.
+   */
+  private async raiseEchoMismatch(subjectTable: 'product' | 'pallet' | 'blend' | 'yarn_count' | 'tube_type', detail: string): Promise<void> {
+    await this.raiseDqFinding('pdas_write_echo_mismatch', 'CRITICAL', subjectTable, detail);
+  }
+
+  /**
+   * B1/B2 fix: a WARNING finding when the vendor proc committed the write but
+   * the app's own follow-up check-read (echo-back SELECT) then failed — e.g.
+   * the plant's EXECUTE-only role has no SELECT on the PDAS table. This is
+   * NOT a mismatch (we never learned what PDAS holds), so it is a different,
+   * lower-severity check_name than raiseEchoMismatch's, and it must never be
+   * conflated with a proc-level failure: the row really was written.
+   */
+  private async raiseReadbackFailed(subjectTable: 'product' | 'pallet' | 'blend' | 'yarn_count' | 'tube_type', detail: string): Promise<void> {
+    await this.raiseDqFinding('pdas_write_readback_failed', 'WARNING', subjectTable, detail);
   }
 
   /**
@@ -939,11 +990,26 @@ export class PdasWriter {
       }
       const now = new Date();
       const pool = await this.pool();
-      const echo = await pool.request().input('id', mssql.Int, r.id).query<{ Blend: string }>(`SELECT Blend FROM dbo.Blends WHERE BlendId = @id`);
-      const observed = echo.recordset[0]?.Blend ?? null;
-      const echoOk = observed != null && observed.trim() === blend;
-      if (!echoOk) {
-        await this.raiseEchoMismatch('blend', `Blend ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddBlend requested ${JSON.stringify(blend)}.`);
+      // B1 fix: AddBlend has already committed (r.id is real). This
+      // check-read is the app's own follow-up, not the write itself — a
+      // permission-denied (or any) failure here must not be reported as
+      // though the write failed, or a retry would hit AddBlend's own
+      // duplicate refusal (-4001) against a blend that already exists.
+      let observed: string | null = null;
+      let checkReadFailed = false;
+      let checkErrMessage = '';
+      let echoOk = false;
+      try {
+        const echo = await pool.request().input('id', mssql.Int, r.id).query<{ Blend: string }>(`SELECT Blend FROM dbo.Blends WHERE BlendId = @id`);
+        observed = echo.recordset[0]?.Blend ?? null;
+        echoOk = observed != null && observed.trim() === blend;
+        if (!echoOk) {
+          await this.raiseEchoMismatch('blend', `Blend ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddBlend requested ${JSON.stringify(blend)}.`);
+        }
+      } catch (checkErr) {
+        checkReadFailed = true;
+        checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        await this.raiseReadbackFailed('blend', `Blend ${r.id}: AddBlend committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       await this.appPool
         .request()
@@ -955,8 +1021,11 @@ export class PdasWriter {
            WHEN NOT MATCHED THEN INSERT (blend_id, blend) VALUES (@id, @v);`,
         );
       await this.recordChange({
-        ...base, observedAfter: { blendId: r.id, blend: observed }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
-        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+        ...base, observedAfter: { blendId: r.id, blend: observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: checkReadFailed
+          ? `AddBlend committed (blend ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
+        effectiveFrom: now,
       });
       await recordAudit(this.appPool, p.actor.userId, 'product.add_blend', 'blend', r.id, `Added blend ${r.id} "${blend}" — ${p.reason}`);
       return { ok: true, blendId: r.id };
@@ -990,11 +1059,23 @@ export class PdasWriter {
       }
       const now = new Date();
       const pool = await this.pool();
-      const echo = await pool.request().input('id', mssql.Int, r.id).query<{ Count: string }>(`SELECT [Count] FROM dbo.Counts WHERE CountId = @id`);
-      const observed = echo.recordset[0]?.Count == null ? null : String(echo.recordset[0].Count);
-      const echoOk = observed != null && observed.trim() === count;
-      if (!echoOk) {
-        await this.raiseEchoMismatch('yarn_count', `Count ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddCount requested ${JSON.stringify(count)}.`);
+      // B1 fix: same rationale as addBlend — AddCount has already committed;
+      // a failure in this follow-up check-read must not read as a failed write.
+      let observed: string | null = null;
+      let checkReadFailed = false;
+      let checkErrMessage = '';
+      let echoOk = false;
+      try {
+        const echo = await pool.request().input('id', mssql.Int, r.id).query<{ Count: string }>(`SELECT [Count] FROM dbo.Counts WHERE CountId = @id`);
+        observed = echo.recordset[0]?.Count == null ? null : String(echo.recordset[0].Count);
+        echoOk = observed != null && observed.trim() === count;
+        if (!echoOk) {
+          await this.raiseEchoMismatch('yarn_count', `Count ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddCount requested ${JSON.stringify(count)}.`);
+        }
+      } catch (checkErr) {
+        checkReadFailed = true;
+        checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        await this.raiseReadbackFailed('yarn_count', `Count ${r.id}: AddCount committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       // Same cast rule as the sync's seed: the int where the text is one, the text always.
       const text = observed ?? count;
@@ -1010,8 +1091,11 @@ export class PdasWriter {
            WHEN NOT MATCHED THEN INSERT (count_id, count_val, count_text) VALUES (@id, @iv, @v);`,
         );
       await this.recordChange({
-        ...base, observedAfter: { countId: r.id, count: observed }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
-        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+        ...base, observedAfter: { countId: r.id, count: observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: checkReadFailed
+          ? `AddCount committed (count ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
+        effectiveFrom: now,
       });
       await recordAudit(this.appPool, p.actor.userId, 'product.add_count', 'yarn_count', r.id, `Added count ${r.id} "${count}" — ${p.reason}`);
       return { ok: true, countId: r.id };
@@ -1065,15 +1149,28 @@ export class PdasWriter {
       }
       const now = new Date();
       const pool = await this.pool();
-      const echo = await pool
-        .request()
-        .input('id', mssql.Int, r.id)
-        .query<{ TubeType: string; TubeWeight: number; TubeForm: number | null }>(`SELECT TubeType, TubeWeight, TubeForm FROM dbo.TubeTypes WHERE TubeTypeId = @id`);
-      const row = echo.recordset[0];
-      const observed = row ? { tubeType: row.TubeType, tubeWeightG: Number(row.TubeWeight), tubeForm: row.TubeForm == null ? null : Number(row.TubeForm) } : null;
-      const echoOk = observed != null && observed.tubeType.trim() === name && observed.tubeWeightG === p.tubeWeightG && observed.tubeForm === tubeForm;
-      if (!echoOk) {
-        await this.raiseEchoMismatch('tube_type', `Tube type ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddTubeType requested ${JSON.stringify(after)}.`);
+      // B1 fix: same rationale as addBlend/addCount — AddTubeType has already
+      // committed; a failure in this follow-up check-read must not read as a
+      // failed write.
+      let observed: { tubeType: string; tubeWeightG: number; tubeForm: number | null } | null = null;
+      let checkReadFailed = false;
+      let checkErrMessage = '';
+      let echoOk = false;
+      try {
+        const echo = await pool
+          .request()
+          .input('id', mssql.Int, r.id)
+          .query<{ TubeType: string; TubeWeight: number; TubeForm: number | null }>(`SELECT TubeType, TubeWeight, TubeForm FROM dbo.TubeTypes WHERE TubeTypeId = @id`);
+        const row = echo.recordset[0];
+        observed = row ? { tubeType: row.TubeType, tubeWeightG: Number(row.TubeWeight), tubeForm: row.TubeForm == null ? null : Number(row.TubeForm) } : null;
+        echoOk = observed != null && observed.tubeType.trim() === name && observed.tubeWeightG === p.tubeWeightG && observed.tubeForm === tubeForm;
+        if (!echoOk) {
+          await this.raiseEchoMismatch('tube_type', `Tube type ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddTubeType requested ${JSON.stringify(after)}.`);
+        }
+      } catch (checkErr) {
+        checkReadFailed = true;
+        checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        await this.raiseReadbackFailed('tube_type', `Tube type ${r.id}: AddTubeType committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       await this.appPool
         .request()
@@ -1086,8 +1183,11 @@ export class PdasWriter {
            WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g) VALUES (@id, @v, @w);`,
         );
       await this.recordChange({
-        ...base, observedAfter: observed == null ? null : { tubeTypeId: r.id, ...observed }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
-        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+        ...base, observedAfter: observed == null ? null : { tubeTypeId: r.id, ...observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: checkReadFailed
+          ? `AddTubeType committed (tube type ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
+        effectiveFrom: now,
       });
       await recordAudit(this.appPool, p.actor.userId, 'product.add_tube_type', 'tube_type', r.id, `Added tube type ${r.id} "${name}" ${p.tubeWeightG} g form ${tubeForm} — ${p.reason}`);
       return { ok: true, tubeTypeId: r.id };
@@ -1226,15 +1326,31 @@ export class PdasWriter {
       }
       const now = new Date();
       const pool = await this.pool();
-      const observed = await PdasWriter.readPallet(pool.request(), r.id);
-      const echoOk = observed != null && PdasWriter.samePallet(observed, f);
-      if (!echoOk) {
-        await this.raiseEchoMismatch('pallet', `Pallet ${r.id}: PDAS holds ${JSON.stringify(observed)} after CreatePallet requested ${JSON.stringify(f)}.`);
+      // B1 fix: same rationale as addBlend/addCount/addTubeType — CreatePallet
+      // has already committed; a failure in this follow-up check-read must
+      // not read as a failed write.
+      let observed: Awaited<ReturnType<typeof PdasWriter.readPallet>> = null;
+      let checkReadFailed = false;
+      let checkErrMessage = '';
+      let echoOk = false;
+      try {
+        observed = await PdasWriter.readPallet(pool.request(), r.id);
+        echoOk = observed != null && PdasWriter.samePallet(observed, f);
+        if (!echoOk) {
+          await this.raiseEchoMismatch('pallet', `Pallet ${r.id}: PDAS holds ${JSON.stringify(observed)} after CreatePallet requested ${JSON.stringify(f)}.`);
+        }
+      } catch (checkErr) {
+        checkReadFailed = true;
+        checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        await this.raiseReadbackFailed('pallet', `Pallet ${r.id}: CreatePallet committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       await this.mirrorPallet(observed ?? { ...f, palletId: r.id, pdasCreatedAt: null });
       await this.recordChange({
-        ...base, palletId: r.id, observedAfter: observed, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
-        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+        ...base, palletId: r.id, observedAfter: observed, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: checkReadFailed
+          ? `CreatePallet committed (pallet ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
+        effectiveFrom: now,
       });
       await recordAudit(
         this.appPool, p.actor.userId, 'pallet.create', 'pallet', r.id,
@@ -1279,10 +1395,23 @@ export class PdasWriter {
       }
       const now = new Date();
       const pool = await this.pool();
-      const observed = await PdasWriter.readPallet(pool.request(), p.palletId);
-      const echoOk = observed != null && observed.active === p.active;
-      if (!echoOk) {
-        await this.raiseEchoMismatch('pallet', `Pallet ${p.palletId}: PDAS holds active=${observed?.active ?? 'missing'} after SetPalletStatusActive requested ${p.active}.`);
+      // B1 fix: same rationale as the other four operations — SetPalletStatusActive
+      // has already committed; a failure in this follow-up check-read must not
+      // read as a failed write.
+      let observed: Awaited<ReturnType<typeof PdasWriter.readPallet>> = null;
+      let checkReadFailed = false;
+      let checkErrMessage = '';
+      let echoOk = false;
+      try {
+        observed = await PdasWriter.readPallet(pool.request(), p.palletId);
+        echoOk = observed != null && observed.active === p.active;
+        if (!echoOk) {
+          await this.raiseEchoMismatch('pallet', `Pallet ${p.palletId}: PDAS holds active=${observed?.active ?? 'missing'} after SetPalletStatusActive requested ${p.active}.`);
+        }
+      } catch (checkErr) {
+        checkReadFailed = true;
+        checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        await this.raiseReadbackFailed('pallet', `Pallet ${p.palletId}: SetPalletStatusActive committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       if (observed) {
         await this.mirrorPallet(observed);
@@ -1290,8 +1419,11 @@ export class PdasWriter {
         await this.appPool.request().input('id', mssql.Int, p.palletId).input('a', mssql.Bit, p.active).query(`UPDATE sms.pallet SET active_flag = @a WHERE pallet_id = @id`);
       }
       await this.recordChange({
-        ...base, observedAfter: observed == null ? null : { active: observed.active }, outcome: echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
-        message: echoOk ? null : 'echo-back differs from request — CRITICAL finding raised', effectiveFrom: now,
+        ...base, observedAfter: observed == null ? null : { active: observed.active }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        message: checkReadFailed
+          ? `SetPalletStatusActive committed (pallet ${p.palletId}) but the follow-up check read failed: ${checkErrMessage}`
+          : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
+        effectiveFrom: now,
       });
       await recordAudit(
         this.appPool, p.actor.userId, p.active ? 'pallet.activate' : 'pallet.retire', 'pallet', p.palletId,

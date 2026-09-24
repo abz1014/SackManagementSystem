@@ -8,9 +8,57 @@
  * `sms_pdas_writer` login IFL has not yet provisioned, so they are exercised
  * only when that exists — and the flag stays false until then (§6.2).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { PdasWriter, PROC_PARAMS, type ProductFields, type VendorProc } from './pdasWrite.js';
+
+/**
+ * updateProductLimits is the only method that uses `new mssql.Transaction(...)`
+ * / `new mssql.Request(...)` directly rather than `pool.request()` off a
+ * duck-typed ConnectionPool, so it is the only place this file needs to
+ * replace those two real mssql classes to drive it offline. Everything else
+ * mssql exports (Int, Float, NVarChar, Decimal, ...) stays real — those are
+ * only ever used as inert type-marker values/factories the fake `.input()`/
+ * `.output()` below ignore. FakeRequest just forwards to whatever `.request()`
+ * the underlying fake pool already provides (the same fake pool shape every
+ * other test in this file uses), and FakeTransaction is a no-op wrapper
+ * around that pool — this test does not need real transactional semantics,
+ * only the code path through `updateProductLimits`.
+ */
+vi.mock('mssql', async (importOriginal) => {
+  const actual = (await importOriginal()) as any;
+  class FakeRequest {
+    private req: any;
+    constructor(poolOrTx: any) {
+      const pool = poolOrTx && poolOrTx.__fakePool ? poolOrTx.__fakePool : poolOrTx;
+      this.req = pool.request();
+    }
+    input(...args: any[]) {
+      this.req.input(...args);
+      return this;
+    }
+    output(...args: any[]) {
+      this.req.output?.(...args);
+      return this;
+    }
+    query(...args: any[]) {
+      return this.req.query(...args);
+    }
+    execute(...args: any[]) {
+      return this.req.execute(...args);
+    }
+  }
+  class FakeTransaction {
+    __fakePool: any;
+    constructor(pool: any) {
+      this.__fakePool = pool;
+    }
+    async begin() {}
+    async commit() {}
+    async rollback() {}
+  }
+  return { ...actual, default: { ...actual.default, Transaction: FakeTransaction, Request: FakeRequest } };
+});
 
 interface Captured { sql: string; params: Record<string, unknown> }
 
@@ -272,5 +320,227 @@ describe('PdasWriter — createProduct bookkeeping failure after a successful PD
     expect(rows).toHaveLength(1);
     expect(rows[0]?.params.outcome).toBe('ok');
     expect(String(rows[0]?.params.msg)).toMatch(/PDAS write succeeded.*bookkeeping failed.*deadlocked/);
+  });
+});
+
+/**
+ * B1/B2 — read code by pdasWrite.ts:942/993/1068/1229/1282 (addBlend, addCount,
+ * addTubeType, createPallet, setPalletActive) and ~812 (updateProductLimits):
+ * each runs a check SELECT to read back the row PDAS now holds AFTER its
+ * vendor proc (or, for updateProductLimits, its own guarded UPDATE) has
+ * already committed. Before this fix that read sat inside the same try as
+ * the write (or, for updateProductLimits, outside any try at all), so a
+ * permission-denied error on it — the real shape of the plant's EXECUTE-only
+ * role, which has no SELECT on PDAS tables — was recorded (or thrown) as
+ * though the WRITE had failed. It had not: retrying would hit the vendor's
+ * own duplicate refusal (-4001/-6001/-5001/-8001) against a row that already
+ * exists, and for updateProductLimits the route returned 500 with no
+ * sms.product_change row at all for an UPDATE that had committed.
+ *
+ * Per the decision recorded in CLAUDE.md's current-phase section: a confirmed
+ * write whose follow-up check read fails is recorded with the EXISTING
+ * outcome 'ok' (no CHECK-constraint migration needed — sms.dq_finding's
+ * check_name is free VARCHAR(64), verified against 009_dq_finding.sql), the
+ * message names that the check read failed and why, the sidecar mirror is
+ * still written with the requested values (plus the id the proc returned),
+ * and a dq finding is raised under the new check_name
+ * 'pdas_write_readback_failed' (a WARNING, distinct from the existing
+ * CRITICAL 'pdas_write_echo_mismatch', because a failed read is not a proven
+ * mismatch). A genuine proc-level failure (non-zero @error, or a thrown EXEC)
+ * must still be reported as an error exactly as before this fix — that is
+ * not what these tests exercise.
+ */
+
+/** A writer pool whose vendor-proc EXECUTE always succeeds, but whose every
+ * follow-up `.query()` (the echo-back SELECT) throws a permission-denied
+ * error in the exact shape SQL Server raises one (message text + `.number`
+ * 229), simulating the plant's EXECUTE-only role reading back a table it
+ * has no SELECT grant on. */
+function fakeWriterPoolFailingQuery(calls: Array<{ proc: string; params: string[] }>): () => Promise<ConnectionPool> {
+  const permissionDenied = () => {
+    const e = new Error(
+      "The SELECT permission was denied on the object 'Blends', database 'PDAS_TP1U2_SEP07', schema 'dbo'.",
+    ) as Error & { number: number };
+    e.number = 229;
+    return e;
+  };
+  const pool = {
+    request: () => {
+      const names: string[] = [];
+      const outputs: Record<string, unknown> = {};
+      const req: {
+        input: (name: string, ...rest: unknown[]) => typeof req;
+        output: (name: string, ...rest: unknown[]) => typeof req;
+        query: (sql: string) => Promise<{ recordset: unknown[]; rowsAffected: number[] }>;
+        execute: (proc: string) => Promise<{ output: Record<string, unknown>; returnValue: number; recordset: unknown[] }>;
+      } = {
+        input: (name) => {
+          names.push(name);
+          return req;
+        },
+        output: (name) => {
+          names.push(name);
+          outputs[name] = name === 'error' ? 0 : name === 'errorMsg' ? null : 1;
+          return req;
+        },
+        query: async () => {
+          throw permissionDenied();
+        },
+        execute: async (proc) => {
+          calls.push({ proc: proc.replace(/^dbo\./, ''), params: [...names] });
+          return { output: outputs, returnValue: outputs.error === 0 ? 1 : 0, recordset: [] };
+        },
+      };
+      return req;
+    },
+  };
+  return async () => pool as unknown as ConnectionPool;
+}
+
+describe('PdasWriter — B1: a permission-denied follow-up check read must not undo a committed write', () => {
+  const targets: Array<{
+    name: string;
+    run: (w: PdasWriter) => Promise<{ ok: boolean } & Record<string, unknown>>;
+    idField: string;
+    mirrorTable: RegExp;
+    verbPast: string;
+  }> = [
+    {
+      name: 'addBlend',
+      run: (w) => w.addBlend({ blend: 'Cotton 30/1', reason: REASON, actor: ACTOR }),
+      idField: 'blendId',
+      mirrorTable: /MERGE sms\.blend\b/,
+      verbPast: 'AddBlend committed',
+    },
+    {
+      name: 'addCount',
+      run: (w) => w.addCount({ count: '30', reason: REASON, actor: ACTOR }),
+      idField: 'countId',
+      mirrorTable: /MERGE sms\.yarn_count\b/,
+      verbPast: 'AddCount committed',
+    },
+    {
+      name: 'addTubeType',
+      run: (w) => w.addTubeType({ tubeType: 'PP-2', tubeWeightG: 12, reason: REASON, actor: ACTOR }),
+      idField: 'tubeTypeId',
+      mirrorTable: /MERGE sms\.tube_type\b/,
+      verbPast: 'AddTubeType committed',
+    },
+    {
+      name: 'createPallet',
+      run: (w) =>
+        w.createPallet({
+          fields: { productId: 20, packSchemaId: 1, lot: 'L-1', active: true, desc1: 'Blue' },
+          reason: REASON,
+          actor: ACTOR,
+        }),
+      idField: 'palletId',
+      mirrorTable: /MERGE sms\.pallet\b/,
+      verbPast: 'CreatePallet committed',
+    },
+    {
+      name: 'setPalletActive',
+      run: (w) => w.setPalletActive({ palletId: 5, active: true, reason: REASON, actor: ACTOR }),
+      idField: 'palletId',
+      mirrorTable: /(MERGE sms\.pallet\b|UPDATE sms\.pallet\b)/,
+      verbPast: 'SetPalletStatusActive committed',
+    },
+  ];
+
+  for (const t of targets) {
+    it(`${t.name}: proc succeeds, follow-up check read throws permission-denied — still ok:true with the id, product_change 'ok', mirror written, dq finding raised`, async () => {
+      const calls: Array<{ proc: string; params: string[] }> = [];
+      const log: Captured[] = [];
+      const w = new PdasWriter(fakeAppPool(log), enabledCfg, 1, { writerPool: fakeWriterPoolFailingQuery(calls) });
+
+      const r = await t.run(w);
+
+      expect(r.ok).toBe(true);
+      expect((r as Record<string, unknown>)[t.idField]).toBeGreaterThan(0);
+
+      // The write itself must be reported as having happened.
+      const rows = changeRows(log);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.params.outcome).toBe('ok');
+      expect(String(rows[0]?.params.msg)).toMatch(/follow-up check read failed/);
+      expect(String(rows[0]?.params.msg)).toContain(t.verbPast);
+
+      // The sidecar mirror must still be written, with the requested values.
+      expect(log.some((e) => t.mirrorTable.test(e.sql))).toBe(true);
+
+      // A dq finding under the new, non-CRITICAL check_name — not the
+      // existing 'pdas_write_echo_mismatch', which asserts a PROVEN mismatch.
+      const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql));
+      expect(dqRows).toHaveLength(1);
+      expect(dqRows[0]?.params.check).toBe('pdas_write_readback_failed');
+      expect(dqRows[0]?.params.sev).toBe('WARNING');
+    });
+  }
+});
+
+/** A writer pool for updateProductLimits: the in-transaction optimistic-
+ * concurrency read (before the UPDATE) succeeds and matches `before`; the
+ * UPDATE and the nhs_events insert both succeed; the SECOND read of the same
+ * SELECT — the post-commit echo-back this fix targets — throws permission-
+ * denied, simulating a role that can read the row once but not again (or any
+ * other transient cause): the point under test is only that this second
+ * failure must not surface as though the UPDATE itself failed. */
+function fakeUpdateLimitsPool(before: ProductFields): () => Promise<ConnectionPool> {
+  let selectCount = 0;
+  const pool = {
+    request: () => {
+      const req: {
+        input: (name: string, ...rest: unknown[]) => typeof req;
+        query: (sql: string) => Promise<{ recordset: unknown[]; rowsAffected: number[] }>;
+      } = {
+        input: () => req,
+        query: async (sql: string) => {
+          if (/SELECT MaterialSetpointWeight/.test(sql)) {
+            selectCount += 1;
+            if (selectCount === 1) {
+              return {
+                recordset: [
+                  { sp: before.setpointG, om: before.offsetMinusG, op: before.offsetPlusG, d1: before.desc1, d2: before.desc2, a: before.active },
+                ],
+                rowsAffected: [1],
+              };
+            }
+            const e = new Error(
+              "The SELECT permission was denied on the object 'Materials', database 'PDAS_TP1U2_SEP07', schema 'dbo'.",
+            ) as Error & { number: number };
+            e.number = 229;
+            throw e;
+          }
+          // SET XACT_ABORT ON / UPDATE dbo.Materials / INSERT INTO dbo.nhs_events
+          return { recordset: [], rowsAffected: [1] };
+        },
+      };
+      return req;
+    },
+  };
+  return async () => pool as unknown as ConnectionPool;
+}
+
+describe('PdasWriter — B2: updateProductLimits post-commit check read must not throw out of the route', () => {
+  it('post-commit check read throws — ok:true, product_change row written, no throw', async () => {
+    const log: Captured[] = [];
+    const before = FIELDS;
+    const after: ProductFields = { ...FIELDS, setpointG: 1965 };
+    const w = new PdasWriter(fakeAppPool(log), enabledCfg, 1, { writerPool: fakeUpdateLimitsPool(before) });
+
+    const r = await w.updateProductLimits({ productId: 20, before, after, bounds: BOUNDS, reason: REASON, actor: ACTOR });
+
+    expect(r).toMatchObject({ ok: true, productId: 20 });
+
+    const rows = changeRows(log);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.params.outcome).toBe('ok');
+    expect(String(rows[0]?.params.msg)).toMatch(/follow-up check read failed/);
+    expect(String(rows[0]?.params.msg)).toContain('updateProductLimits committed');
+
+    const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql));
+    expect(dqRows).toHaveLength(1);
+    expect(dqRows[0]?.params.check).toBe('pdas_write_readback_failed');
+    expect(dqRows[0]?.params.sev).toBe('WARNING');
   });
 });
