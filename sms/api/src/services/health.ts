@@ -409,6 +409,49 @@ export function foldStatus(
   return 'ok';
 }
 
+/**
+ * RT24-12 (24 Sep 2026 red-team audit): `foldStatus` above degrades on five
+ * signals, but `degradedReason` (below getHealth) only ever reported
+ * `markDegraded()`'s own reason — every OTHER route into 'degraded' (a full
+ * data file, stale/late/halted acquisition, a blocking DQ finding, a stale
+ * backup) left the field `null` while `status` read `"degraded"` right
+ * beside it. Pure and exported so it can be pinned without a fake pool: one
+ * plain-English sentence per signal that is actually true, in the same
+ * priority order `foldStatus` itself checks (pool error first — it is the
+ * most specific and most actionable), joined with '; ' when more than one
+ * fires at once, so an operator sees every reason, not just the first.
+ */
+export function degradedReasons(
+  db: DbProbe,
+  acq: AcquisitionFacts | null,
+  markedReason: string | null,
+  dqBlockingCount: number,
+  backupWarning: boolean,
+  backupWarningText: string | null,
+): string | null {
+  if (markedReason != null) return markedReason;
+  const reasons: string[] = [];
+  if (db.sizeMb != null && (db.sizeMb / EXPRESS_CAP_MB) * 100 >= SIZE_WARN_PCT) {
+    const pct = Math.round((db.sizeMb / EXPRESS_CAP_MB) * 1000) / 10;
+    reasons.push(`database at ${pct}% of its size cap`);
+  }
+  if (acq) {
+    if (acq.kind === 'stale' || acq.kind === 'late') {
+      reasons.push(`acquisition ${acq.kind} (age ${acq.ageSeconds ?? 'unknown'} s)`);
+    }
+    if (acq.halted.length > 0) {
+      reasons.push(`acquisition halted on ${acq.halted.join(', ')}`);
+    }
+  }
+  if (dqBlockingCount > 0) {
+    reasons.push(`${dqBlockingCount} blocking data-quality finding${dqBlockingCount === 1 ? '' : 's'}`);
+  }
+  if (backupWarning) {
+    reasons.push(backupWarningText != null ? `backup: ${backupWarningText}` : 'backup is missing or stale');
+  }
+  return reasons.length > 0 ? reasons.join('; ') : null;
+}
+
 export interface HealthDeps {
   probeDatabase: typeof probeDatabase;
   acquisitionHealth: typeof acquisitionHealth;
@@ -469,8 +512,16 @@ export async function getHealth(
     }
   }
   const backup = deps.backupHealth(opts.backupDir);
-  const reason = degradedReason();
-  const status = foldStatus(db, acq, reason != null, dqBlocking, backup.warning);
+  const markedReason = degradedReason();
+  const status = foldStatus(db, acq, markedReason != null, dqBlocking, backup.warning);
+  // RT24-12: degradedReason must name every signal that actually degraded
+  // `status`, not just a pool error — see degradedReasons' own doc above.
+  const backupWarningText = backup.warning
+    ? backup.newestFile == null
+      ? 'no backup found'
+      : `newest backup is ${backup.ageDays ?? '?'} day(s) old`
+    : null;
+  const reason = degradedReasons(db, acq, markedReason, dqBlocking, backup.warning, backupWarningText);
   const pct = db.sizeMb == null ? null : Math.round((db.sizeMb / EXPRESS_CAP_MB) * 1000) / 10;
   const a = opts.authenticated;
 

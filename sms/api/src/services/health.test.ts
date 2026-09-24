@@ -8,6 +8,7 @@ import type { ConnectionPool } from 'mssql';
 import {
   backupHealth,
   clearDegraded,
+  degradedReasons,
   foldStatus,
   getHealth,
   markDegraded,
@@ -120,6 +121,54 @@ describe('backupHealth — newest .bak by mtime, read-only', () => {
   });
 });
 
+/**
+ * RT24-12 (24 Sep 2026 red-team audit): `/api/health` used to answer
+ * `status: "degraded"` with `degradedReason: null` even though
+ * `acquisition.kind: "stale"` or `backup.warning` were true in the very
+ * same payload — every degrading signal except a pool error (markDegraded)
+ * left the field unpopulated. degradedReasons is the pure fold this pins.
+ */
+describe('degradedReasons — RT24-12', () => {
+  it('a marked pool error wins outright, verbatim, over every other signal', () => {
+    expect(degradedReasons(okDb, okAcq, 'pool error: x', 5, true, 'no backup found')).toBe('pool error: x');
+  });
+
+  it('null when nothing degraded', () => {
+    expect(degradedReasons(okDb, okAcq, null, 0, false, null)).toBeNull();
+  });
+
+  it('names a stale/late acquisition with its age', () => {
+    expect(degradedReasons(okDb, { ...okAcq, kind: 'stale', ageSeconds: 900 }, null, 0, false, null))
+      .toBe('acquisition stale (age 900 s)');
+    expect(degradedReasons(okDb, { ...okAcq, kind: 'late', ageSeconds: 400 }, null, 0, false, null))
+      .toBe('acquisition late (age 400 s)');
+  });
+
+  it('names a halted table', () => {
+    expect(degradedReasons(okDb, { ...okAcq, halted: ['cone_raw'] }, null, 0, false, null))
+      .toBe('acquisition halted on cone_raw');
+  });
+
+  it('names blocking DQ findings, singular and plural', () => {
+    expect(degradedReasons(okDb, okAcq, null, 1, false, null)).toBe('1 blocking data-quality finding');
+    expect(degradedReasons(okDb, okAcq, null, 3, false, null)).toBe('3 blocking data-quality findings');
+  });
+
+  it('names a backup warning using the caller-supplied plain-English text', () => {
+    expect(degradedReasons(okDb, okAcq, null, 0, true, 'no backup found')).toBe('backup: no backup found');
+  });
+
+  it('names the database size cap when over threshold', () => {
+    expect(degradedReasons({ ...okDb, sizeMb: 8192 }, okAcq, null, 0, false, null))
+      .toBe('database at 80% of its size cap');
+  });
+
+  it('joins more than one true signal with "; "', () => {
+    expect(degradedReasons(okDb, { ...okAcq, kind: 'stale', ageSeconds: 900 }, null, 2, true, 'no backup found'))
+      .toBe('acquisition stale (age 900 s); 2 blocking data-quality findings; backup: no backup found');
+  });
+});
+
 describe('serviceHealth', () => {
   it('carries the package version and a non-negative uptime', () => {
     const s = serviceHealth();
@@ -218,6 +267,25 @@ describe('getHealth — redaction and the degraded marker', () => {
     }));
     expect(h.status).toBe('ok');
     expect(h.acquisition.kind).toBeNull();
+  });
+
+  /* RT24-12, at the getHealth level: before this fix, degradedReason stayed
+     null here even though status read 'degraded' from the stale acquisition
+     alone — the exact contradiction the finding names. */
+  it('stale acquisition, authenticated: degraded with a non-null, descriptive reason', async () => {
+    const h = await getHealth(pool, { lineId: 1, backupDir: 'C:\\b', authenticated: true }, deps({
+      acquisitionHealth: async () => ({ ...okAcq, kind: 'stale', ageSeconds: 1234 }),
+    }));
+    expect(h.status).toBe('degraded');
+    expect(h.degradedReason).toBe('acquisition stale (age 1234 s)');
+  });
+
+  it('stale acquisition, unauthenticated: status still degraded but degradedReason stays null', async () => {
+    const h = await getHealth(pool, { lineId: 1, backupDir: 'C:\\b', authenticated: false }, deps({
+      acquisitionHealth: async () => ({ ...okAcq, kind: 'stale', ageSeconds: 1234 }),
+    }));
+    expect(h.status).toBe('degraded');
+    expect(h.degradedReason).toBeNull();
   });
 
   /* RT24-05: no `pdas` dep supplied at all (the shape every pre-existing
