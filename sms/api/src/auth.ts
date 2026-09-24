@@ -294,6 +294,17 @@ async function renewSession(pool: ConnectionPool, id: string, res: Response, req
   setSessionCookie(res, id, expires, req);
 }
 
+/**
+ * RT24-01 (CRITICAL): `sms.session.session_id` is a SQL `UNIQUEIDENTIFIER`,
+ * so `userFromSession` binds the cookie value into an
+ * `mssql.UniqueIdentifier` parameter. A cookie that is not GUID-shaped (a
+ * stale/tampered/hand-typed value — `Cookie: sms_session=not-a-guid`) makes
+ * `mssql` throw `EPARAM` while building the request, before any query runs.
+ * Rejecting the shape here means a malformed cookie costs zero database
+ * round trips and never reaches `userFromSession` at all.
+ */
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function readCookie(req: Request, name: string): string | null {
   const raw = req.headers.cookie;
   if (!raw) return null;
@@ -360,7 +371,22 @@ export function authMiddleware(pool: ConnectionPool) {
       return;
     }
     const id = readCookie(req, SESSION_COOKIE);
-    const found = id ? await userFromSession(pool, id) : null;
+    // RT24-01: a non-GUID cookie is rejected by shape before any query, and
+    // a genuine lookup failure (DB error, timeout, …) is caught rather than
+    // left to reject this handler's promise — Express 4 does not forward an
+    // async middleware's rejection, so an uncaught one here used to be an
+    // unhandled rejection that could crash the whole process over a single
+    // bad cookie. Either way the request proceeds as anonymous; protected
+    // routes still 401/403 via requireRole.
+    let found: { user: AuthUser; expiresAtUtc: Date | null } | null = null;
+    if (id && GUID_RE.test(id)) {
+      try {
+        found = await userFromSession(pool, id);
+      } catch (e) {
+        requestLog(req).error('auth: session lookup failed', { err: e });
+        found = null;
+      }
+    }
     (req as AuthedRequest).user = found?.user ?? null;
     if (id && found?.expiresAtUtc && found.expiresAtUtc.getTime() - Date.now() < RENEW_BELOW_MS) {
       // Best-effort: a failed renewal must never fail the request it rode on.

@@ -7,6 +7,7 @@ import { loadApiConfig, apiPoolOptions } from './config.js';
 import { createApp } from './app.js';
 import { markDegraded, SERVICE_VERSION } from './services/health.js';
 import { log } from './log.js';
+import { installProcessGuards } from './processGuards.js';
 
 /**
  * Cross-checks PLANT_UTC_OFFSET_MINUTES (if set) against this process's own
@@ -86,6 +87,14 @@ function installShutdown(server: { close(cb: (err?: Error) => void): unknown }, 
 
 async function main(): Promise<void> {
   loadDotEnv();
+  // RT24-01 (CRITICAL): installed before anything can start handling
+  // requests. Previously an unhandled promise rejection anywhere in the
+  // process (e.g. authMiddleware's EPARAM on a malformed session cookie)
+  // was fatal — Node's default for an unhandled rejection with no listener
+  // is to exit. Now it is logged, marks the service degraded (visible on
+  // /api/health), and the process keeps serving; only a genuine synchronous
+  // uncaughtException still exits (NSSM restarts it, DEPLOY.md).
+  installProcessGuards(log, markDegraded);
   const cfg = loadApiConfig();
   checkPlantOffsetOnStartup(cfg.plantUtcOffsetMinutes);
   // 16 Sep 2026 fix: without an explicit override, createPool falls back to
