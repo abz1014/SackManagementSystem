@@ -514,3 +514,93 @@ in a different form (planned as `add`) from one in the same form (planned as `re
 committed harness's own coverage gap (four cases, not the eleven the first pass ran ad hoc) is
 recorded above as a separate, honest finding — it does not bear on D-26's fix, which this pass
 verified by a dedicated plan-only script rather than by assuming the harness covered it.
+
+---
+
+## Complete re-run after the RT24 fix wave (23 Sep 2026 evening / 24 Sep 2026)
+
+Authorised, targeting only `PDAS_TP1U2_SEP07` and the `sms` sidecar on `.\SQLEXPRESS`
+(`tcp:localhost,14330`), never the plant, never `.env`, `PDAS_WRITE_ENABLED` unchanged
+(`false` in the shipped `.env`; only overridden in-process by the harness). This pass closes
+the coverage gap the previous section of this file named honestly: the committed harness
+(`sms/scripts/pdas-e2e-local.mjs`) covered R1/R2/F4/F5 only, four of the eleven-plus cases
+earlier ad hoc scripts had exercised. It now covers all thirteen — R1, R2, R3, F1, F2, F3a,
+F3b, F4, F5, F5b, F6, T1 — merged from the scratchpad's `pdas-e2e.mjs` and
+`plan-only-tubeform-check.mjs` into the one owned, committed file, with an explicit PASS/FAIL
+verdict per case and a non-zero exit code if any case fails.
+
+**Build first.** `npm run build` from `sms/` (five workspaces) — clean, no errors. This
+picked up every commit since the previous pass, including `edae627` (RT24-09 DQ check),
+`4e8513c` (Line's reject-rate fallback + per-machine quiet grading), `25b02bc` (the
+UNVERIFIED/CRITICAL escalation this pass's R1 now asserts against), `8f5c80c` (time-versioned
+rule tables read as-of), and `b077815` (RT24-03 route gap).
+
+### Case table
+
+| Case | What it proves | Verdict |
+|---|---|---|
+| R1 | Full changeover: blend/count/tube/material/pallet created, an existing material+pallet retired, all 7 steps in the expected order, PDAS counts move by exactly +1 per table, retired rows go inactive, **no `UNVERIFIED` product_change message and no `pdas_write_unverified` finding** (the writer's read-back succeeds cleanly post-RT24) | **PASS** |
+| R2 | `updateProductLimits` on the material R1 just created, fresh `before` read from PDAS immediately before the call | **PASS** |
+| R3 | `SetMaterialStatusActive` reactivates the material R1 retired | **PASS** |
+| F1 | Blocker: a plan that reuses the retired material's own blend+count+tube triple is blocked at plan time; execute refuses; zero PDAS change | **PASS** |
+| F2 | Direct `createProduct` with an existing triple → PDAS `-7001`, no row inserted | **PASS** |
+| F3a | Direct `addTubeType('RED', ..., form=2)` against an existing name+form → PDAS `-5001`, no row inserted | **PASS** |
+| F3b | Plan with tube name `'R_D'` (a `LIKE` pattern matching the existing `'RED'` in the same form) is blocked before any PDAS call, citing the collision by name | **PASS** |
+| F4 | Optimistic concurrency: one fresh `before` snapshot reused for two successive `updateProductLimits` calls — first succeeds, second returns `CONFLICT`; PDAS shows exactly one committed update | **PASS** |
+| F5 | `writerDisabled.createProduct` → `DISABLED`, one `outcome='disabled'` row in `sms.product_change`, PDAS counts unchanged | **PASS** |
+| F5b | `executeChangeover` through the same disabled writer short-circuits with `refused` before any PDAS call | **PASS** |
+| F6 | A single plan that both retires a material and recreates its own triple is blocked — retire-and-recreate can never work, by design, whether attempted as two calls (18 Aug 2026 incident, the first PDAS-execution pass) or as one plan (this case) | **PASS** |
+| T1 | `resolveTube` via plan-only calls: same tube name + same form → `action:'reuse'` against the existing `tube_type_id`; same name + different form → `action:'add'` (re-confirms D-26's fix, now inside the owned committed harness rather than only the ad hoc script) | **PASS** |
+
+All thirteen verdicts: **PASS**. `node scripts/pdas-e2e-local.mjs` exited **0**. Full run log
+and results Markdown are in the scratchpad (`run-p3.log`, `run-p3.md`) — not committed, per the
+scratchpad's own purpose.
+
+### Backups, restorability proof, and restore (this pass)
+
+Two fresh `COPY_ONLY, CHECKSUM, INIT` backups were taken immediately before the run —
+`D:\sms-backups\PDAS_TP1U2_SEP07-20260924-174939-P3.bak` and
+`D:\sms-backups\sms-20260924-174939-S3.bak` — both passed `RESTORE VERIFYONLY ... WITH
+CHECKSUM`, then were each restored into a scratch database (`PDAS_SCRATCH_P3`,
+`SMS_SCRATCH_S3`) with `MOVE` to distinct physical files, alongside the live copies. Every
+count matched the live copies exactly before the scratch databases were dropped:
+
+- PDAS six tables — Materials 24/max 1024, Blends 10/max 10, Counts 14/max 14, TubeTypes
+  27/max 27, Pallets 25/max 1022, nhs_events 3631/max 23445 — identical in both
+  `PDAS_TP1U2_SEP07` and `PDAS_SCRATCH_P3`.
+- All 37 `sms`/`sms_raw` tables (queried via `sys.tables`/`sys.schemas`, not a hand-picked
+  subset) — every one of `sms` and `SMS_SCRATCH_S3`'s counts matched exactly, including
+  `cone_event`/`cone_raw` at 487,936, `sack_event`/`sack_raw` at 20,612, `product_change` at 3,
+  `dq_finding` at 22.
+
+Both scratch databases were dropped (`SET SINGLE_USER WITH ROLLBACK IMMEDIATE` then `DROP
+DATABASE`) before the harness ran, so the run started from the same state the backups
+recorded.
+
+**Post-run restore.** Both databases were restored from the same P3/S3 backups
+(`SET SINGLE_USER WITH ROLLBACK IMMEDIATE`, `RESTORE DATABASE ... WITH REPLACE, CHECKSUM`,
+`SET MULTI_USER`) and recounted. Every count matched the pre-run snapshot exactly — PDAS six
+tables at 24/1024, 10, 14, 27/1022, 25, 3631/23445; `sms.product_change`=3, `sms.dq_finding`=22,
+`sms.cone_event`=487936 — meaning none of R1/R2/R3/F1–F6/T1's writes (the new blend, count,
+tube type, material, pallet; the retire/reactivate cycle on the existing material and pallet;
+the F4 setpoint change) remain in either database. `sms_pdas_writer` was confirmed to still log
+in afterward: a probe connected as that login and printed only `SUSER_NAME()`, which returned
+`sms_pdas_writer` — no password or connection string printed, consistent with every prior pass
+in this file and `PDAS-EXECUTION-2026-09-23.md`.
+
+The main API on port 4000 was left running throughout (per this pass's brief, its connections
+were expected to drop briefly at each restore and did; it answered `401` on
+`GET /api/live` immediately afterward, confirming it was still serving).
+
+### What this pass changed and did not
+
+**Changed:** `sms/scripts/pdas-e2e-local.mjs` now owns all thirteen cases (previously four),
+each with a machine-checked PASS/FAIL condition and a process exit code — a genuine CI gate
+for this write path, not just a demonstration script. The two scratchpad scripts
+(`pdas-e2e.mjs`, `plan-only-tubeform-check.mjs`) that this pass's case bodies were ported from
+stay in the scratchpad; they are not part of the repo.
+
+**Did not change:** no application code was touched — this was a harness and documentation
+pass, as instructed. `PDAS_WRITE_ENABLED` remains `false` in `sms/.env`; nothing here grants
+any new authority. Written authority for all nine PDAS write rights still awaits IFL, unchanged
+by this pass.
