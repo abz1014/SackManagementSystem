@@ -674,6 +674,9 @@ worker has run against a database for a while — carried here so that follow-up
 | D-14 | LOW | `CLAUDE.md` asserted in three places that `last_seen_utc` has no writer; it has had one since `b31d574` | **fixed** this pass (23 Sep 2026) |
 | RT-001…036 | mixed | Today's red-team audit findings — see Part 4 below for the full table | mixed, see Part 4 |
 | D-15…D-23 | mixed | Defects found DURING the RT- fix wave, not present in the audit itself | see Part 4 |
+| D-24 | MEDIUM | `pdasWrite.ts`'s post-commit echo-back check reads, run inside the same `try` as the write itself (Add*/CreatePallet/SetPalletActive), or entirely unguarded (`updateProductLimits`), misreported a committed write as failed when the check read itself failed | **fixed 24 Sep 2026**, `bdbb0eb` (B1/B2) |
+| D-25 | MEDIUM | `planChangeover` compared a requested new blend/count/tube name to existing rows by exact equality only, so a name that is a `LIKE`-pattern match for an existing row (T-SQL wildcard collision, e.g. `"R_D"` vs `"RED"`) planned clean and only failed mid-sequence against PDAS's own duplicate check | **fixed 24 Sep 2026**, `a9b85b5` (B4), new `api/src/services/likePattern.ts`; proven by F3b, `PDAS-EXECUTION-2026-09-24.md` | 
+| D-26 | MEDIUM, open (fix in progress by another worker) | `changeover.ts`'s `resolveTube` compared candidate tube types by name only; `sms.tube_type` carried no `tube_form` column, so it could either silently reuse a wrong-form tube type PDAS would have accepted as new, or over-block a same-form name that only collided by `LIKE` pattern against a different form | **open at the time of this entry** — migration `041_tube_type_form.sql` (adds `sms.tube_type.tube_form`, nullable) plus companion changes to `changeover.ts`/`changeover.test.ts`/`pdasWrite.ts`'s `addTubeType` mirror-write/`sync-worker/src/seed/seedProducts.ts`/`seed.test.ts` were uncommitted and in progress by a concurrent worker as of 24 Sep 2026; not this pass's to finish or claim closed |
 
 ---
 
@@ -777,3 +780,98 @@ A 200 response with `count` itself deleted (the RT-005 shape, applied to a diffe
 - **RT-014, RT-016, RT-017, RT-018, RT-020, RT-025, RT-026, RT-027, RT-028, RT-031, RT-034** are unaddressed by any of the fifteen commits — confirmed by reading each, not assumed from the absence of a matching commit message. Carried into `COMMISSIONING-GAPS.md` §2 and this table above.
 - **RT-023** (stale running process) is an operational fact this worker cannot check from source alone — marked cannot-determine, not fixed and not disproven.
 - No independent re-verification of RT-008's "five live sites" resolution was done this pass beyond reading `generation.ts` and its call sites; the live numbers in Part 3's D-11 above are from the pass that produced them, not re-measured here.
+
+---
+
+## Part 5 — 24 Sep 2026: PDAS write-path bugs found and fixed before, and the first local end-to-end proof through the app's own code
+
+Written by the worker who ran `PDAS-EXECUTION-2026-09-24.md`. Where the two 23 Sep 2026 passes
+(`PDAS-EXECUTION-2026-09-23.md`) called the vendor's stored procedures by hand via `sqlcmd -E`,
+this pass exercised **all nine PDAS write rights through `PdasWriter` and
+`planChangeover`/`executeChangeover` themselves**, under the dedicated `sms_pdas_writer` login,
+against the local `PDAS_TP1U2_SEP07` copy and the local `sms` sidecar only. Full detail, every
+per-run verdict, and the backup/restore proof: `PDAS-EXECUTION-2026-09-24.md`.
+
+### D-24 — a follow-up check-read failure was reported as the write itself failing — MEDIUM, fixed, `bdbb0eb` (23 Sep 2026)
+
+`addBlend`/`addCount`/`addTubeType`/`createPallet`/`setPalletActive` each run a post-commit
+echo-back `SELECT` (to confirm PDAS now holds what was written) inside the **same `try`** as the
+vendor proc call itself. Against a role with EXECUTE-only rights and no `SELECT` on the PDAS
+tables — the shape the plant's real login may end up as — a permission-denied error on that
+check read was caught by the same `catch` that handles a genuine write failure, and recorded as
+`outcome: 'error'` for a write that had, in fact, already committed. A caller retrying "the
+failed create" would then hit the vendor's own duplicate refusal against a row that already
+exists — a confusing, wrong-diagnosis failure mode. `updateProductLimits` had the sharper form
+of the same defect: its check read sat outside any `try` at all, so the exception propagated out
+of the route as an uncaught 500 with **no** `sms.product_change` row written for an `UPDATE`
+that had committed — the worst case, since even the audit trail was silent about a real write.
+**Fixed**: the check read is now its own, separately-caught step, never conflated with the write
+succeeding or failing. **Re-verified by this pass's own run**: R1's seven-step execute and R2's
+limits update both recorded `outcome: 'ok'` on every row that actually committed, checked
+against direct PDAS/sidecar reads, not against the app's own claim.
+
+### D-25 — a `LIKE`-pattern name collision was not caught until PDAS itself refused it, mid-plan — MEDIUM, fixed, `a9b85b5` (24 Sep 2026)
+
+`AddBlend`, `AddCount` and `AddTubeType` each guard their `INSERT` with
+`IF NOT EXISTS (SELECT * FROM <table> WHERE <col> LIKE @newName [AND TubeForm = @tubeForm])` —
+read from the proc bodies on `PDAS_TP1U2_SEP07` via read-only `sqlcmd`, 24 Sep 2026.
+`planChangeover` compared a requested new name against existing rows by exact
+(case-insensitive, trimmed) equality only, so a name that is merely a `LIKE` **pattern** match
+for an existing row (T-SQL: `_` is any-one-character, `%` is any-run) — e.g. `"R_D"` against an
+existing `"RED"` — planned as a clean `add` step and was only discovered to collide once PDAS's
+own check refused it, potentially after earlier steps in the same plan had already written.
+**Fixed**: a new, independently tested module, `api/src/services/likePattern.ts`, compiles a
+T-SQL `LIKE` pattern to an equivalent case-insensitive JS `RegExp` (handling `_`, `%`, `[...]`,
+`[^...]`, and escaping the literal parts' own regex metacharacters), and `planChangeover` now
+blocks a colliding name at plan time, before any write. **Proven by this pass**: case F3b
+(`PDAS-EXECUTION-2026-09-24.md`) requested tube name `"R_D"` against an existing `"RED"` row and
+was blocked at plan time with a message naming the collision, zero writes reaching PDAS.
+
+### D-26 — `resolveTube` had no way to distinguish two tube types by form, only by name — MEDIUM, open, fix in progress (not this pass's to close) (24 Sep 2026)
+
+Found while reading `changeover.ts` for this pass's own run (not exercised directly by this
+pass's harness, which reused existing tube types rather than triggering this path). PDAS's own
+`AddTubeType` duplicate check is a **compound** key — `TubeType LIKE @tubeType AND TubeForm =
+@tubeForm` together — but `sms.tube_type` (the local mirror `changeover.ts`'s `resolveTube` reads
+to decide whether to reuse an existing tube type or plan a new one) carried no `tube_form`
+column at all, since migration 006. Two failure shapes follow: (a) an exact name match gets
+reused even when the requested form differs from the existing row's — silently attaching a
+changeover to the wrong tube type, when PDAS's own `AddTubeType` would have accepted the request
+as a genuinely new, different tube type; (b) a `LIKE`-pattern collision against a row in a
+**different** form over-blocks a request PDAS's own check would have let through. **This is a
+real, currently-open gap** — not fixed by D-25's `LIKE`-collision fix, which does not carry
+form information either. **Status at the time this entry is written**: another worker has
+migration `041_tube_type_form.sql` (adds `sms.tube_type.tube_form`, nullable — existing rows
+read `NULL` until the mirror learns the real value from a `seedProducts` full read or an
+`AddTubeType` echo-back write) and companion changes to `changeover.ts`, `changeover.test.ts`,
+`pdasWrite.ts`'s `addTubeType` mirror-write, and `sync-worker/src/seed/seedProducts.ts`/
+`seed.test.ts` **uncommitted and in progress**, per `git status` at the time this pass ran. This
+pass deliberately left all of those files untouched (a live editing conflict) and does not claim
+this gap closed. Whoever finishes it should update this entry to FIXED with the commit hash.
+
+### The local end-to-end proof itself — all nine rights, through the app's own code
+
+Beyond the two fixes above, this pass ran a Node harness (now `sms/scripts/pdas-e2e-local.mjs`,
+copied from the scratchpad original with a hard local-only guard added) that drove
+`PdasWriter`/`planChangeover`/`executeChangeover` — loaded from the built `api/dist`, not
+re-implemented — against `PDAS_TP1U2_SEP07` + the local `sms` sidecar, under the newly-created
+`sms_pdas_writer` login. Eleven cases (R1–R3, F1–F6) all PASS; one harness bug was found (F4's
+first attempt reused a stale `before` snapshot from an earlier step, making both of its calls
+return `CONFLICT` and never exercise the intended "one commits, one conflicts" case) — recorded
+as FAIL in the raw results rather than hidden, then immediately rerun with a freshly-read
+`before` and PASS, the same fix folded into the committed harness. Full per-case evidence,
+backup/restore proof (two backup pairs, both proven restorable, the post-run restore
+independently re-verified against a separately-recorded baseline with zero deviation), and what
+this pass explicitly did NOT prove (the live HTTP route/session layer and the Changeover screen
+in a browser — no agent has an app session to sign in with; plant concurrency/load; whether the
+plant's live PDAS has drifted since the 7 Sep 2026 export) are all in
+`PDAS-EXECUTION-2026-09-24.md`.
+
+### Suite, observed this pass
+
+`npx vitest run api/src/app.rbac.test.ts api/src/routes` (the RBAC/route slice relevant to the
+changeover write path, not a full-repo run — other workers were concurrently editing
+`changeover.ts`/`changeover.test.ts`/migrations/sync-worker mirror code/`Changeover.tsx` at the
+time): **8 files passed, 176 tests passed, 0 failed.** A full-repo `npx vitest run` was not
+taken this pass, for the same reason `reportRejectRateAgreement.test.ts`'s 23 Sep entry above
+gives: a parallel worker's file was mid-edit at the time.

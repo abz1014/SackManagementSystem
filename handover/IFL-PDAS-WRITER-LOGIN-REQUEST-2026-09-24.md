@@ -27,8 +27,14 @@ Nine rights in total, all on the PDAS database, nothing else:
 
 Alongside these nine, the login would also need plain read access (SELECT) to the five
 tables it writes to or reads reference data from: Materials, Blends, Counts, TubeTypes,
-Pallets. This is so the software can check, after every write, that PDAS actually holds
-what it expects, rather than assuming the write went through.
+Pallets. This read access serves three purposes, not one: it lets the software check, after
+every write, that PDAS actually holds what it expects, rather than assuming the write went
+through; it lets the software check, before changing a product's setpoint, that nobody else
+changed that same product since the screen was opened; and — for the setpoint-change UPDATE
+specifically — it is a plain requirement of SQL Server itself, which will not run an UPDATE
+whose WHERE clause names a column (here, the product's id) without SELECT permission on that
+column, regardless of the UPDATE permission already granted. Without this SELECT grant, the
+setpoint-change right above would not work at all, not merely lose its double-check.
 
 Nothing beyond this. No other tables, no DELETE, no schema changes of any kind.
 
