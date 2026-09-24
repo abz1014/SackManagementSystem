@@ -35,8 +35,8 @@ import { getSackSummary } from '../services/sacks.js';
 import {
   getStockLedger, insertMovement, listMovements, productExists, validateMovement,
 } from '../services/sackStock.js';
+import { isoDate } from '../dates.js';
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 /** Same cap as app.ts's validateRange and routes/rejects.ts (MAX_RANGE_DAYS, config.ts): 366 days, 400 otherwise. */
@@ -48,8 +48,8 @@ function rangeError(from: string, to: string): string | null {
 }
 
 const periodQuery = z.object({
-  from: z.string().regex(DATE, 'expected YYYY-MM-DD'),
-  to: z.string().regex(DATE, 'expected YYYY-MM-DD'),
+  from: isoDate,
+  to: isoDate,
   product: z.coerce.number().int().positive().optional(),
   tsTo: z.string().regex(ISO_TS, 'expected ISO timestamp').optional(),
 });

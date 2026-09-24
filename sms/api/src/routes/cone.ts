@@ -21,8 +21,9 @@ import { getPlausibilityRule } from '../services/admin.js';
 import { getReconciliation } from '../services/reconcile.js';
 import { getMachinesRunning } from '../services/machinesRunning.js';
 import { getShiftCheck } from '../services/shiftCheck.js';
+import { isoDate } from '../dates.js';
 
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+const dateStr = isoDate;
 const isoTs = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')

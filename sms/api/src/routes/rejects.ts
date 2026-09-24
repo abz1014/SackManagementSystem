@@ -21,8 +21,8 @@ import type { RouteContext } from './context.js';
 import { envelope } from '../envelope.js';
 import { MAX_RANGE_DAYS } from '../config.js';
 import { getRejectsByDayCode, listRejectsOfDayCode, parseCodeParam, type RejectFilters } from '../services/rejects.js';
+import { isoDate } from '../dates.js';
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 /**
@@ -47,13 +47,13 @@ const filterSchema = {
 };
 
 const byDayCodeQuery = z.object({
-  from: z.string().regex(DATE, 'expected YYYY-MM-DD'),
-  to: z.string().regex(DATE, 'expected YYYY-MM-DD'),
+  from: isoDate,
+  to: isoDate,
   ...filterSchema,
 });
 
 const reasonQuery = z.object({
-  day: z.string().regex(DATE, 'expected YYYY-MM-DD'),
+  day: isoDate,
   code: z.string().max(24),
   shift: filterSchema.shift,
   station: filterSchema.station,

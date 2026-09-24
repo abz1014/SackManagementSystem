@@ -67,11 +67,9 @@ import { mountReportsRoutes } from './routes/reports.js';
 import { mountCalibrationRoutes } from './routes/calibration.js';
 import { mountSacksRoutes } from './routes/sacks.js';
 import { mountChangeoverRoutes } from './routes/changeover.js';
+import { isoDate } from './dates.js';
 
-const dateStr = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
-  .optional();
+const dateStr = isoDate.optional();
 
 // Analytics endpoints (SPC/reject-SPC/OEE) do full-population computation by
 // design — correct at the current 18-day scale, but unbounded once years
@@ -984,7 +982,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     try {
       const q = z
         .object({
-          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          date: isoDate,
           thresholdSeconds: z.coerce.number().int().min(30).max(3600).default(120),
         })
         .safeParse(req.query);
@@ -1005,8 +1003,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const q = z
         .object({
           type: z.enum(['cone', 'sack']).default('cone'),
-          from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          from: isoDate,
+          to: isoDate,
           productId: z.coerce.number().int().positive().optional(),
           usl: z.coerce.number().optional(),
           lsl: z.coerce.number().optional(),
@@ -1053,8 +1051,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     try {
       const q = z
         .object({
-          from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-          to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          from: isoDate,
+          to: isoDate,
           bucket: z.enum(['hour', 'day']).optional(),
           rejectType: z.enum(['all', 'quality', 'weight']).default('all'),
           // Roadmap Phase 5 (14 Sep 2026): shift + tsTo so the Rejects headline
