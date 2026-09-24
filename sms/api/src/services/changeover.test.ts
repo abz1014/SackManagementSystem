@@ -131,6 +131,59 @@ describe('planChangeover', () => {
     expect(blend.id).toBeNull();
   });
 
+  // Defect B4: AddBlend/AddCount/AddTubeType guard their INSERT with
+  // `IF NOT EXISTS (... WHERE <col> LIKE @newName [AND TubeForm = @form])`
+  // (verified against the proc bodies on PDAS_TP1U2_SEP07, 24 Sep 2026,
+  // likePattern.ts's own header). A name that is not textually equal to an
+  // existing one can still be refused by PDAS if it matches as a WILDCARD
+  // PATTERN (`_` any one char, `%` any run, `[...]` a class). The mirror
+  // only has one blend, "PolyBlend" (id 1).
+  it('B4: blocks a new blend name that would collide with an existing one as a LIKE pattern ("_" wildcard), rather than planning to add it', async () => {
+    const plan = await planChangeover(deps, baseRequest({ blend: { name: 'PolyBl_nd' } }));
+    const blend = plan.steps.find((s) => s.step === 'blend')!;
+    expect(blend.action).not.toBe('reuse'); // must not silently reuse a different row
+    expect(plan.blockers.some((b) => b.includes('PolyBl_nd') && b.includes('blend 1') && b.includes('PolyBlend'))).toBe(true);
+  });
+
+  it('B4: blocks a new blend name that would collide via "%"', () => {
+    return planChangeover(deps, baseRequest({ blend: { name: 'Poly%' } })).then((plan) => {
+      expect(plan.blockers.some((b) => b.includes('Poly%'))).toBe(true);
+    });
+  });
+
+  it('B4: an exact match (case-insensitive) still reuses, unaffected by the LIKE check', async () => {
+    const plan = await planChangeover(deps, baseRequest({ blend: { name: 'polyblend' } }));
+    const blend = plan.steps.find((s) => s.step === 'blend')!;
+    expect(blend.action).toBe('reuse');
+    expect(blend.id).toBe(1);
+  });
+
+  it('B4: an exact match with trailing whitespace still reuses (the request name is trimmed before any check)', async () => {
+    const plan = await planChangeover(deps, baseRequest({ blend: { name: 'PolyBlend   ' } }));
+    const blend = plan.steps.find((s) => s.step === 'blend')!;
+    expect(blend.action).toBe('reuse');
+    expect(blend.id).toBe(1);
+  });
+
+  it('B4: a name with no relation to any existing row is still planned to add', async () => {
+    const plan = await planChangeover(deps, baseRequest({ blend: { name: 'Cotton Mix' } }));
+    const blend = plan.steps.find((s) => s.step === 'blend')!;
+    expect(blend.action).toBe('add');
+    expect(plan.blockers).toHaveLength(0);
+  });
+
+  it('B4: applies the same LIKE-collision block to a new count name', async () => {
+    // mirror has one count, "30s" (id 2)
+    const plan = await planChangeover(deps, baseRequest({ count: { name: '3_s' } }));
+    expect(plan.blockers.some((b) => b.includes('3_s') && b.includes('count 2') && b.includes('30s'))).toBe(true);
+  });
+
+  it('B4: applies the same LIKE-collision block to a new tube type name', async () => {
+    // mirror has one tube type, "PP Tube" (id 3)
+    const plan = await planChangeover(deps, baseRequest({ tubeType: { name: 'PP T_be', tubeWeightG: 12 } }));
+    expect(plan.blockers.some((b) => b.includes('PP T_be') && b.includes('tube type 3') && b.includes('PP Tube'))).toBe(true);
+  });
+
   it('blocks a (blend, count, tube) triple that already exists as a product, active or not', async () => {
     const plan = await planChangeover(deps, baseRequest());
     expect(plan.blockers.some((b) => b.includes('already exists as product 100'))).toBe(true);

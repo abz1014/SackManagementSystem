@@ -49,6 +49,7 @@ import mssql from 'mssql';
 import type { Actor, PalletFields, PdasWriter, SetpointBounds, TubeForm, WriteFailure } from './pdasWrite.js';
 import { findPalletByKey, listPallets } from './pallets.js';
 import { recordAudit } from './audit.js';
+import { likeMatches } from './likePattern.js';
 
 /* ------------------------------------------------------------- the request */
 
@@ -161,6 +162,18 @@ const MIN_REASON_CHARS = 10;
 const fmtG = (n: number) => Math.round(n).toLocaleString('en-US');
 const norm = (s: string) => s.trim().toLowerCase();
 
+/**
+ * Defect B4: the first row (if any) whose stored name would be matched by
+ * `requestedName` if PDAS ran it as a `LIKE` pattern — the same guard
+ * `AddBlend`/`AddCount`/`AddTubeType` put around their own INSERT (see
+ * likePattern.ts's header for the verified proc text). Only called once an
+ * EXACT (case-insensitive, trimmed) match has already been ruled out, so a
+ * hit here means: not the same name, but PDAS would still refuse it.
+ */
+function findLikeCollision<T extends { name: string }>(rows: T[], requestedName: string): T | undefined {
+  return rows.find((r) => likeMatches(r.name, requestedName));
+}
+
 /* ------------------------------------------------------------ the mirror */
 
 interface Mirror {
@@ -226,7 +239,21 @@ function resolveRef(
     warnings.push(`"${name}" already exists as ${what} ${existing.id} ("${existing.name}") and will be used as it is.`);
     return { step: { step: what, action: 'reuse', proc: null, label: existing.name, id: existing.id, detail: { name: existing.name, matchedByName: true } }, id: existing.id };
   }
-  return { step: { step: what, action: 'add', proc, label: name, id: null, detail: { name } }, id: null };
+  // B4: not an exact duplicate, but `${proc}` guards its INSERT with
+  // `<col> LIKE @newName` — a name that is only a wildcard-pattern match for
+  // an existing row (e.g. "R_D" against "RED") is refused by PDAS exactly
+  // like a real duplicate, just later — mid-sequence, after earlier steps
+  // may already have written. Block it here instead of silently planning to
+  // add it, and name the row it collides with rather than reusing it.
+  const likeCollision = findLikeCollision(rows, name);
+  if (likeCollision) {
+    blockers.push(
+      `"${name}" would be refused by PDAS: as a wildcard pattern it matches the existing ${what} ${likeCollision.id} ` +
+        `("${likeCollision.name}"), the same LIKE check ${proc} runs before it inserts. Use a different, non-matching name, ` +
+        `or reuse ${what} ${likeCollision.id} instead.`,
+    );
+  }
+  return { step: { step: what, action: 'add', proc, label: name, id: null, detail: { name, ...(likeCollision ? { likeCollisionWith: likeCollision.id } : {}) } }, id: null };
 }
 
 function resolveTube(choice: TubeChoice, rows: Mirror['tubeTypes'], blockers: string[], warnings: string[]): { step: PlanStep; id: number | null } {
@@ -247,7 +274,36 @@ function resolveTube(choice: TubeChoice, rows: Mirror['tubeTypes'], blockers: st
     warnings.push(`"${name}" already exists as tube type ${existing.id} ("${existing.name}") and will be used as it is.`);
     return { step: { step: 'tube_type', action: 'reuse', proc: null, label: existing.name, id: existing.id, detail: { name: existing.name, tubeWeightG: existing.tubeWeightG, matchedByName: true } }, id: existing.id };
   }
-  return { step: { step: 'tube_type', action: 'add', proc: 'AddTubeType', label: name, id: null, detail: { name, tubeWeightG: choice.tubeWeightG, tubeForm: form } }, id: null };
+  // B4: AddTubeType guards its INSERT with
+  // `TubeType LIKE @tubeType AND TubeForm = @tubeForm` (verified against the
+  // proc body, likePattern.ts's header) — a compound key, name pattern AND
+  // exact form. `sms.tube_type` (the sidecar mirror, db/migrations/006_
+  // reference.sql) carries no tube_form column, so this check cannot include
+  // form and is deliberately conservative: it blocks on a name-pattern
+  // collision alone, regardless of the existing row's form. That can only
+  // over-block (flag a pattern collision PDAS might actually accept because
+  // the forms differ) — the safe direction, never the silent-refusal defect
+  // this fix exists to close. Narrowing it needs tube_form added to the
+  // mirror and its sync, which is a schema change, not this fix's scope.
+  const likeCollision = findLikeCollision(rows, name);
+  if (likeCollision) {
+    blockers.push(
+      `"${name}" would be refused by PDAS: as a wildcard pattern it matches the existing tube type ${likeCollision.id} ` +
+        `("${likeCollision.name}"), the same LIKE check AddTubeType runs before it inserts. Use a different, non-matching name, ` +
+        `or reuse tube type ${likeCollision.id} instead.`,
+    );
+  }
+  return {
+    step: {
+      step: 'tube_type',
+      action: 'add',
+      proc: 'AddTubeType',
+      label: name,
+      id: null,
+      detail: { name, tubeWeightG: choice.tubeWeightG, tubeForm: form, ...(likeCollision ? { likeCollisionWith: likeCollision.id } : {}) },
+    },
+    id: null,
+  };
 }
 
 /**
