@@ -107,9 +107,12 @@ describe('ShiftSection', () => {
     expect(tables.length).toBe(3);
   });
 
-  it('an empty period renders Nothing to show, no chart', () => {
+  it('an empty period (every known total genuinely 0, not just cones) renders Nothing to show, no chart', () => {
     const d = fixture();
-    d.shifts = d.shifts.map((s) => ({ ...s, totals: { ...s.totals, cones: 0 } }));
+    d.shifts = d.shifts.map((s) => ({
+      ...s,
+      totals: { ...s.totals, cones: 0, rejectedCones: 0, sacks: 0, sackWeightKg: 0 },
+    }));
     const { container } = render(<ShiftSection d={d} />);
     expect(container.querySelectorAll('svg.chart').length).toBe(0);
   });

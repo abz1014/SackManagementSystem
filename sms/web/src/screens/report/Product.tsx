@@ -8,7 +8,19 @@ import { distinctProductLabels } from '../../lib/productLabel';
 import { fmtG1, fmtSignedG, StateCells, StateHeads } from './shared';
 
 export function ProductSection({ d, products }: { d: ProductReportData; products: ProductOption[] }) {
-  const rows = d.rows.filter((r) => r.cones > 0 || r.rejectedCones > 0 || r.sacks > 0);
+  // A missing count (a stripped field on an otherwise-real row) is UNKNOWN,
+  // not zero: `undefined > 0` is false, so a row whose cones/rejectedCones/
+  // sacks all went missing while its weight readings (weight.n) are real
+  // used to vanish from the table with no caveat. Keep a row when any of
+  // its known counts is non-zero, when any of those counts is itself
+  // unreadable (missing), or when it carries real weight readings.
+  const rows = d.rows.filter((r) => {
+    const counts = [r.cones, r.rejectedCones, r.sacks];
+    const knownNonZero = counts.some((c) => c != null && c > 0);
+    const anyUnknown = counts.some((c) => c == null);
+    const hasWeightData = r.weight.n > 0;
+    return knownNonZero || anyUnknown || hasWeightData;
+  });
   // Six PDAS materials on this line share the description "205-IL0-SD";
   // the server's label is the plain description, so the parts that differ
   // are appended here from the product list, as the Rejects filter does.

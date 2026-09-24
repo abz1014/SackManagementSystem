@@ -2098,7 +2098,8 @@ export const W = {
     priorPeriod: 'Period before',
     change: 'Change',
     priorSpan: (from: string, to: string) => `compared with ${from} to ${to}`,
-    priorCoverage: (withData: number, of: number) => `${withData} of ${of} days there hold readings`,
+    priorCoverage: (withData: number | null | undefined, of: number | null | undefined) =>
+      withData == null || of == null ? 'how many days there hold readings could not be read' : `${withData} of ${of} days there hold readings`,
     priorNoData: 'The period before holds no readings, so there is nothing to compare with.',
     betterHigher: 'higher is better',
     betterLower: 'lower is better',

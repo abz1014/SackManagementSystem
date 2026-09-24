@@ -965,7 +965,11 @@ describe('MISSING-FIELD FUZZ — Report / Daily, ReportLine.cones (Totals gate, 
 
 const SHIFT_SECTION_FIXTURE = {
   shift: 'evening' as const, coverage: REPORT_COVERAGE, totals: REPORT_LINE_FIXTURE,
-  byDay: [REPORT_LINE_FIXTURE], readings: null,
+  // group must NOT be 'total' here — LineTable/DayBars both filter out
+  // 'total' rows (that value is only meaningful for REPORT_LINE_FIXTURE's
+  // other use as a totals row elsewhere in this file), and an all-filtered
+  // byDay would render its own, unrelated Empty state.
+  byDay: [{ ...REPORT_LINE_FIXTURE, group: '2026-09-07' }], readings: null,
 };
 const SHIFT_FIXTURE: ShiftReportData = {
   period: REPORT_PERIOD, shift: null, shifts: [SHIFT_SECTION_FIXTURE],
@@ -985,7 +989,7 @@ describe('MISSING-FIELD FUZZ — Report / Shift, ShiftSection.totals.cones (the 
   // a confident zero, it is a confident "nothing here" over data that is
   // actually present. File: web/src/screens/report/Shift.tsx (the
   // `d.shifts.some((s) => s.totals.cones > 0)` gate).
-  it.skip('DEFECT (Shift.tsx, the whole-report empty gate): totals.cones DELETED on the only shift, with real non-zero rejectedCones/sacks/sackWeightKg: the report wrongly renders Empty instead of the real shift data', () => {
+  it('DEFECT (Shift.tsx, the whole-report empty gate): totals.cones DELETED on the only shift, with real non-zero rejectedCones/sacks/sackWeightKg: the report wrongly renders Empty instead of the real shift data', () => {
     const holed: ShiftReportData = {
       ...SHIFT_FIXTURE,
       shifts: [{ ...SHIFT_SECTION_FIXTURE, totals: stripFields(SHIFT_SECTION_FIXTURE.totals, ['cones']) }],
@@ -1031,22 +1035,20 @@ describe('MISSING-FIELD FUZZ — Report / Product, ProductReportRow.cones (the p
     expect(container.textContent ?? '').toContain('Test Yarn');
   });
 
-  it('DEFECT, recorded not fixed (same file, same gate): cones/rejectedCones/sacks ALL DELETED on the only row while its weight data is real (weight.n=500): the row silently vanishes from the table with no caveat that a row was dropped, not because the product genuinely ran nothing', () => {
+  it('FIXED: cones/rejectedCones/sacks ALL DELETED on the only row while its weight data is real (weight.n=500): the row still renders, since real weight readings say this product was not, in fact, idle', () => {
     const holed: ProductReportData = {
       ...PRODUCT_FIXTURE,
       rows: [stripFields(PRODUCT_ROW_FIXTURE, ['cones', 'rejectedCones', 'sacks'])],
     };
     const { container } = render(<ProductSection d={holed} products={[]} />);
-    // Documents the current (defective) behaviour: the row disappears and
-    // the section falls back to Empty even though weight.n (real cone
-    // weight readings) says this product was not, in fact, idle.
-    expect(container.textContent ?? '').toContain(W.nothingHere);
+    expect(container.textContent ?? '').not.toContain(W.nothingHere);
+    expect(container.textContent ?? '').toContain('Test Yarn');
   });
 
-  it('two-sided partner: cones/rejectedCones/sacks PRESENT as real 0s (a product that genuinely ran nothing this period): Empty is correct', () => {
+  it('two-sided partner: cones/rejectedCones/sacks PRESENT as real 0s and weight.n also genuinely 0 (a product that genuinely ran nothing this period): Empty is correct', () => {
     const genuinelyIdle: ProductReportData = {
       ...PRODUCT_FIXTURE,
-      rows: [{ ...PRODUCT_ROW_FIXTURE, cones: 0, rejectedCones: 0, sacks: 0 }],
+      rows: [{ ...PRODUCT_ROW_FIXTURE, cones: 0, rejectedCones: 0, sacks: 0, weight: { ...PRODUCT_ROW_FIXTURE.weight, n: 0 } }],
     };
     const { container } = render(<ProductSection d={genuinelyIdle} products={[]} />);
     expect(container.textContent ?? '').toContain(W.nothingHere);
@@ -1163,7 +1165,7 @@ describe('MISSING-FIELD FUZZ — Report / Management summary, ManagementSummaryD
   // sibling file this pass does not own. File:
   // web/src/screens/report/Summary.tsx (the `priorCoverage(...)` call) and
   // web/src/lib/words.ts's `priorCoverage` definition.
-  it.skip('DEFECT (Summary.tsx priorCoverage call / words.ts priorCoverage): coverage.prior.daysWithData DELETED: prints the literal word "undefined", not a dash or a caveat', () => {
+  it('DEFECT (Summary.tsx priorCoverage call / words.ts priorCoverage): coverage.prior.daysWithData DELETED: prints the literal word "undefined", not a dash or a caveat', () => {
     const holed: ManagementSummaryData = {
       ...SUMMARY_FIXTURE,
       coverage: { ...SUMMARY_FIXTURE.coverage, prior: stripFields(SUMMARY_FIXTURE.coverage.prior, ['daysWithData']) },
@@ -1239,7 +1241,7 @@ describe('MISSING-FIELD FUZZ — Health / System history, SourceGeneration.rawRo
   // unlike every other case in this file, crashes the whole block. File:
   // web/src/screens/health/SystemHistoryBlock.tsx (the
   // `g.rawRowCount.toLocaleString('en-GB')` cell).
-  it.skip('DEFECT (SystemHistoryBlock.tsx, rawRowCount cell): rawRowCount DELETED on an otherwise-real generation row: throws instead of rendering a dash', async () => {
+  it('DEFECT (SystemHistoryBlock.tsx, rawRowCount cell): rawRowCount DELETED on an otherwise-real generation row: throws instead of rendering a dash', async () => {
     const holed = {
       data: { ...SYSTEM_HISTORY_FIXTURE, generations: [stripFields(SYSTEM_HISTORY_GENERATION_FIXTURE, ['rawRowCount'])] },
       metadata: META_FIXTURE,

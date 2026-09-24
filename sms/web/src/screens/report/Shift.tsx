@@ -5,8 +5,18 @@ import { fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
 import type { ShiftReportData, ShiftSection as ShiftSectionData } from '../../api';
 import { Fig, LineTable, DayBars } from './shared';
 
+// A missing total (a stripped field on an otherwise-real payload) is UNKNOWN,
+// not zero: `undefined > 0` is false, so treating a hole the same as a real
+// 0 makes a shift with real non-zero rejectedCones/sacks/sackWeightKg render
+// as Empty. A shift counts as having data when any of its KNOWN totals is
+// non-zero; a missing field never by itself proves a shift was empty.
+function shiftHasData(t: ShiftSectionData['totals']): boolean {
+  const known = [t.cones, t.rejectedCones, t.sacks, t.sackWeightKg].filter((v): v is number => v != null);
+  return known.some((v) => v > 0);
+}
+
 export function ShiftSection({ d }: { d: ShiftReportData }) {
-  const any = d.shifts.some((s) => s.totals.cones > 0);
+  const any = d.shifts.some((s) => shiftHasData(s.totals));
   if (!any) {
     return (
       <Block first>

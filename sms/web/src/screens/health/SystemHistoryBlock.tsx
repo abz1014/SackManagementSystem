@@ -117,7 +117,7 @@ export function SystemHistoryBlock() {
                     {g.closedUtc == null ? W.health.epochRegister.open : W.health.epochRegister.closed(fmtAppInstant(g.closedUtc))}
                   </td>
                   <td>{W.health.epochRegister.registeredBy(g.registeredBy)}</td>
-                  <td className="n">{g.rawRowCount.toLocaleString('en-GB')}</td>
+                  <td className="n">{g.rawRowCount == null ? '—' : g.rawRowCount.toLocaleString('en-GB')}</td>
                 </tr>
               ))}
             </tbody>
