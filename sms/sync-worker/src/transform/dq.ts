@@ -26,6 +26,11 @@
  *   sack_blackout           WARNING   no sack row for more than SACK_BLACKOUT_HOURS while cones were being
  *                                     weighed — the sack trigger's four-tag guard makes this a real failure
  *                                     mode (roadmap Phase 7); see sackBlackoutFindings
+ *   shift_rule_drift        WARNING   RT24-04 (24 Sep 2026): a sample of stored cone_event rows' shift_code/
+ *                                     shift_date does not match the sms.shift_rule version in force at each
+ *                                     row's OWN production time — a rebuild spanning a rule edit restamped
+ *                                     old rows under a rule they never ran under; see shiftRuleDrift.ts.
+ *                                     No-op (not raised) when the line has only one shift_rule version on file.
  *
  * `subject_ref` (roadmap Phase 3 item 3, 14 Sep 2026): a finding about ROWS
  * names the raw_id of the first offending one, so an operator can go from
@@ -55,6 +60,7 @@ export const CHECK_NAMES = [
   'transform_failed',
   'sack_num_reset',
   'sack_blackout',
+  'shift_rule_drift',
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];
 
@@ -133,9 +139,19 @@ export function computeFindings<T extends Weighted>(
    *  incremental batch is still caught against history, not just against
    *  rows that happen to share its batch. -Infinity = no history (backfill). */
   initialMaxMs = -Infinity,
-  /** The plausibility rule on file; the historical constants when not given. */
-  plausibility: PlausibilityBounds = DEFAULT_PLAUSIBILITY,
+  /**
+   * The plausibility window: either one bounds object applied to every row
+   * (the historical behaviour — still the default, and what every existing
+   * caller passes), or a resolver keyed on a row's OWN production_ts_utc_ms
+   * (RT24-04, 24 Sep 2026: ruleHistory.ts's resolvePlausibilityAt). A single
+   * bounds object is what a rule that has never changed collapses to; a
+   * resolver is what runTransform.ts now passes so a rebuild spanning a rule
+   * edit judges each reading by the window in force at ITS OWN time, not by
+   * whichever version happened to be newest when the pass ran.
+   */
+  plausibility: PlausibilityBounds | ((productionTsUtcMs: number) => PlausibilityBounds) = DEFAULT_PLAUSIBILITY,
 ): Finding[] {
+  const boundsAt = typeof plausibility === 'function' ? plausibility : () => plausibility;
   // production_ts_utc_ms is the PLANT'S WALL CLOCK labelled as UTC (see
   // wallClock.ts / format.ts) — comparing it against real UTC Date.now()
   // would flag EVERY live reading as "future" on a UTC+5 plant, an error
@@ -154,11 +170,17 @@ export function computeFindings<T extends Weighted>(
   let nonPositive = 0;
   let outlier = 0;
   let collision = 0;
-  // kg for sacks, g for cones; rejects carry a cone weight when they carry one
-  const window =
-    kind === 'sack'
-      ? { lo: plausibility.sackLoKg, hi: plausibility.sackHiKg }
-      : { lo: plausibility.coneLoG, hi: plausibility.coneHiG };
+  // kg for sacks, g for cones; rejects carry a cone weight when they carry one.
+  // Resolved PER ROW below (RT24-04) since a resolver may return a different
+  // window for different production times; windowOf(r) is also used for the
+  // finding's detail sentence, which reports the window of the LAST offending
+  // row seen (the newest one), naming the count as "of N sampled" only when
+  // the caller passed a resolver with more than one distinct window below.
+  const windowOf = (r: Weighted) => {
+    const b = boundsAt(r.production_ts_utc_ms);
+    return kind === 'sack' ? { lo: b.sackLoKg, hi: b.sackHiKg } : { lo: b.coneLoG, hi: b.coneHiG };
+  };
+  let lastOutlierWindow = windowOf(rows[0] ?? ({ production_ts_utc_ms: 0 } as Weighted));
   // The first offending row of each check, by raw_id — subject_ref (Phase 3).
   const first: Record<string, number | null> = {};
   const note = (check: string, r: Weighted) => {
@@ -194,9 +216,13 @@ export function computeFindings<T extends Weighted>(
       if (w <= 0) {
         nonPositive++;
         note('nonpositive_weight', r);
-      } else if (w < window.lo || w > window.hi) {
-        outlier++;
-        note('outlier_weight', r);
+      } else {
+        const window = windowOf(r);
+        if (w < window.lo || w > window.hi) {
+          outlier++;
+          lastOutlierWindow = window;
+          note('outlier_weight', r);
+        }
       }
     }
   }
@@ -228,7 +254,8 @@ export function computeFindings<T extends Weighted>(
     'outlier_weight',
     'WARNING',
     outlier,
-    `${outlier} rows outside the plausibility window ${window.lo}-${window.hi}${kind === 'sack' ? 'kg' : 'g'} (the rule on file, not yet confirmed by IFL)`,
+    `${outlier} rows outside the plausibility window ${lastOutlierWindow.lo}-${lastOutlierWindow.hi}${kind === 'sack' ? 'kg' : 'g'}` +
+      ` (window of the newest offending row; a resolver may apply a different window to earlier rows — the rule on file, not yet confirmed by IFL)`,
   );
   add(
     'no_station',

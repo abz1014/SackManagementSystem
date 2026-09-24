@@ -91,7 +91,6 @@ async function onlyFresh<T extends { raw_id: number }>(
 }
 import {
   computeFindings,
-  loadPlausibilityRule,
   persistFindings,
   stationRosterFindings,
   PER_SUBJECT_CHECKS,
@@ -103,6 +102,13 @@ import {
   type StationRoster,
 } from './dq.js';
 import { seedRejectCodes } from './seedRejectCodes.js';
+import {
+  loadShiftRuleHistory,
+  resolveShiftRuleAt,
+  loadPlausibilityRuleHistory,
+  resolvePlausibilityAt,
+} from './ruleHistory.js';
+import { checkShiftRuleDrift } from './shiftRuleDrift.js';
 
 type Raw = Record<string, unknown>;
 
@@ -395,22 +401,37 @@ export async function runTransform(
   const runId = randomUUID();
   const out: TransformOutcome[] = [];
 
-  // Configuration, resolved once per pass (roadmap Phase 1): the shift rule
-  // on file wins over the env default (finding H5), each kind's system code
-  // and source table name come from sms.source_table, and the station roster
-  // is what the line has rows for. All three are threaded through as
-  // arguments, since mapCone/mapSack/mapReject stay pure functions.
-  const shift = await resolveShiftRule(appPool, cfg.lineId, cfg.appConfig.shift);
+  // Configuration, resolved once per pass (roadmap Phase 1): each kind's
+  // system code and source table name come from sms.source_table, and the
+  // station roster is what the line has rows for.
   const streams = await loadSourceStreams(appPool, cfg.lineId);
   const roster = await loadStationRoster(appPool, cfg.lineId);
-  // The plausibility window for the outlier finding, from the same rule the
-  // API's statistics exclude by (roadmap Phase 4, 14 Sep 2026) — dq.ts used
-  // to hard-code 1500 g / 40 kg with no ceiling.
-  const plausibility = await loadPlausibilityRule(appPool, cfg.lineId);
-  const rulesFor = (kind: keyof typeof streams): TransformRules => ({
+  // RT24-04 (23 Sep 2026 red-team audit, transform side, fixed 24 Sep 2026):
+  // resolveShiftRule/loadPlausibilityRule (still below, kept for other
+  // callers) each read only the NEWEST version and applied it to every row in
+  // the pass regardless of that row's own production time — so a rebuild
+  // after an admin edits a rule in Setup bakes TODAY's rule into stored
+  // shift_code/shift_date/outlier_weight for readings from BEFORE the edit.
+  // ruleHistory.ts loads every version once per pass; each row below is
+  // stamped with the version in force at ITS OWN production time.
+  const shiftHistory = await loadShiftRuleHistory(appPool, cfg.lineId, cfg.appConfig.shift);
+  const plausibilityHistory = await loadPlausibilityRuleHistory(appPool, cfg.lineId);
+  const plausibilityAt = (productionMs: number) => resolvePlausibilityAt(plausibilityHistory, productionMs);
+  // Everything EXCEPT the shift rule — that is resolved per row, below,
+  // from each raw row's OWN event time (see eventMsOfRaw / rulesForRow).
+  const baseRulesFor = (kind: keyof typeof streams): Omit<TransformRules, 'shift'> => ({
     lineId: cfg.lineId,
-    shift,
     sourceSystem: streams[kind].systemCode,
+  });
+  /** The raw row's own event instant, on the plant wall-clock convention — the
+   *  same field mapCone/mapSack/mapReject themselves read for production_ts. */
+  const eventMsOfRaw = (raw: Raw, usesProductionDate: boolean): number => {
+    const dt = (usesProductionDate ? (raw.src_ProductionDate ?? raw.src_Date) : raw.src_Date) as Date;
+    return dt.getTime();
+  };
+  const rulesForRow = (base: Omit<TransformRules, 'shift'>, raw: Raw, usesProductionDate: boolean): TransformRules => ({
+    ...base,
+    shift: resolveShiftRuleAt(shiftHistory, eventMsOfRaw(raw, usesProductionDate)),
   });
 
   // cones ---------------------------------------------------------------------
@@ -420,15 +441,15 @@ export async function runTransform(
     if (raw.length === 0) {
       out.push({ table: 'cone_event', read: 0, written: 0, findings: [] });
     } else {
-      const rules = rulesFor('cone');
+      const rules = baseRulesFor('cone');
       const rows = await onlyFresh(
         appPool, 'sms.cone_event', rules.sourceSystem,
-        assignMergeKeys(raw.map((r) => mapCone(r, rules)), coneKey),
+        assignMergeKeys(raw.map((r) => mapCone(r, rulesForRow(rules, r, true))), coneKey),
       );
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
       const findings = [
-        ...computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs, plausibility),
+        ...computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs, plausibilityAt),
         ...stationRosterFindings(rows, roster, rawShortName(TABLE_SHAPES.cone.rawTable), streams.cone.sourceTable),
       ];
       const res = await persistCanonical(appPool, 'sms.cone_event', CONE_COLS, rows, {
@@ -458,10 +479,10 @@ export async function runTransform(
       await persistFindings(appPool, runId, findings);
       out.push({ table: 'sack_event', read: 0, written: 0, findings });
     } else {
-      const rules = rulesFor('sack');
+      const rules = baseRulesFor('sack');
       const rows = await onlyFresh(
         appPool, 'sms.sack_event', rules.sourceSystem,
-        assignMergeKeys(raw.map((r) => mapSack(r, rules)), sackKey),
+        assignMergeKeys(raw.map((r) => mapSack(r, rulesForRow(rules, r, false))), sackKey),
       );
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
@@ -471,7 +492,7 @@ export async function runTransform(
       // sack stream while cones were being weighed.
       const priorSackNums = await loadPriorSackNums(appPool, cfg.lineId, rows.map((r) => r.source_epoch));
       const findings = [
-        ...computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs, plausibility),
+        ...computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs, plausibilityAt),
         ...sackNumResetFindings(rows, priorSackNums),
         ...(await detectSackBlackouts(appPool, cfg.lineId, rows, priorSack, cfg.sackBlackoutHours)),
       ];
@@ -496,12 +517,12 @@ export async function runTransform(
       out.push({ table: 'reject_event', read: 0, written: 0, findings: [] });
     } else {
       // Two raw streams, two source tables: each keeps its own system code.
-      const qRules = rulesFor('reject_qcs');
-      const wRules = rulesFor('reject_weight');
+      const qRules = baseRulesFor('reject_qcs');
+      const wRules = baseRulesFor('reject_weight');
       const mapped = assignMergeKeys(
         [
-          ...qcs.map((r) => mapReject(r, 'quality', qRules)),
-          ...wt.map((r) => mapReject(r, 'weight', wRules)),
+          ...qcs.map((r) => mapReject(r, 'quality', rulesForRow(qRules, r, true))),
+          ...wt.map((r) => mapReject(r, 'weight', rulesForRow(wRules, r, true))),
         ],
         rejectKey,
       );
@@ -542,8 +563,8 @@ export async function runTransform(
       // assumes rows arrive in that order — interleaving two differently-
       // ordered streams would produce false positives, not a stricter check.
       const findings = mergeByCheck(
-        computeFindings(q, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs, plausibility),
-        computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs, plausibility),
+        computeFindings(q, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs, plausibilityAt),
+        computeFindings(w, 'reject', 'reject_event', (r) => r.weight_g, priorMaxMs, plausibilityAt),
         stationRosterFindings(q, roster, rawShortName(TABLE_SHAPES.reject_qcs.rawTable), streams.reject_qcs.sourceTable),
         stationRosterFindings(w, roster, rawShortName(TABLE_SHAPES.reject_weight.rawTable), streams.reject_weight.sourceTable),
       );
@@ -564,6 +585,13 @@ export async function runTransform(
   // keep the reject-code lookup populated with any new code pairs (labels
   // pending Q10) — for THIS line only, since migration 028 keyed codes per line.
   await seedRejectCodes(appPool, cfg.lineId);
+
+  // RT24-04's drift check: read-only, line-wide (not per stream), so it runs
+  // once at the end of the pass rather than inside any one of the three
+  // blocks above. No-op inside checkShiftRuleDrift itself when the line has
+  // only one shift_rule version on file.
+  const driftFindings = await checkShiftRuleDrift(appPool, cfg.lineId, shiftHistory);
+  await persistFindings(appPool, runId, driftFindings);
 
   return out;
 }

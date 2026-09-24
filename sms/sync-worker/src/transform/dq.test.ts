@@ -278,4 +278,25 @@ describe('outlier_weight reads the plausibility rule (roadmap Phase 4)', () => {
     expect(f!.count).toBe(2);
     expect(f!.detail).toMatch(/40-60kg/);
   });
+
+  // RT24-04: a rebuild used to read ONE plausibility window for the whole pass
+  // (whatever was newest when the pass ran) and apply it to every row
+  // regardless of the row's own production time. A row genuinely OUT of the
+  // window in force when it was produced could be masked by a later, wider
+  // rule, and vice versa. computeFindings must accept a resolver keyed on
+  // each row's own production_ts_utc_ms, not just a flat bounds object.
+  it('accepts a per-row resolver so each reading is judged by the window in force at ITS OWN time', () => {
+    const rows = [
+      cone('2026-06-22T11:00:00', 1600), // before the rule changed: narrow window (1900-2100) — 1600 is an outlier
+      cone('2026-09-14T11:00:00', 1600), // after the rule changed: wide window (1500-2100) — 1600 is fine
+    ];
+    const CHANGE_MS = ms('2026-08-01T00:00:00');
+    const resolver = (productionMs: number) =>
+      productionMs < CHANGE_MS
+        ? { coneLoG: 1900, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 }
+        : { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 };
+    const findings = computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, -Infinity, resolver);
+    const f = findings.find((x) => x.check_name === 'outlier_weight');
+    expect(f!.count).toBe(1); // only the pre-change row is genuinely out of ITS OWN window
+  });
 });
