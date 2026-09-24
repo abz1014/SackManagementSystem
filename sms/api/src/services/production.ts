@@ -441,7 +441,7 @@ export async function getProduction(
   // unmatchedRejects and rejects.ts `getUnmatchedRejects`).
   const unmatchedFilters: RejectFilters = {
     from: p.from, to: p.to, shift: p.shift as RejectFilters['shift'], tsTo: p.tsTo,
-    station: p.station, product: p.product,
+    station: p.station, product: p.product, scope,
   };
   const unmatchedOf = await getUnmatchedRejects(pool, lineId, unmatchedFilters, unmatchedGroupExpr(p.groupBy));
 
