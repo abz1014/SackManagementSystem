@@ -11,7 +11,7 @@ status document.
 - No read-only login/host for the live plant server — nothing can be installed until this arrives → IFL #1
 - PC-to-plant network reachability unconfirmed → IFL #2
 - Cutover has never been rehearsed against an unknown login shape → ours
-- PDAS write authority contradicts itself in our own records — `.env`'s comment says "ENABLED 22 Sep 2026 (IFL granted permission)", the flag itself still reads `false`, and no document names who at IFL granted it or which of the nine rights it covers (`DEFECTS.md` D-12) → IFL #3
+- PDAS: written grant recorded (19 Sep); `sms_pdas_writer` not provisioned; local end-to-end proof not run → ours + IFL #3
 - Windows service (NSSM) never installed or exercised on any machine → ours
 - Nightly backup scheduled only on paper, never run unattended → ours
 - ~114 commits ahead of `origin/floor-first-rework` (last pushed 16 Sep), ~179 ahead of `origin/main` — never seen by CI → ours

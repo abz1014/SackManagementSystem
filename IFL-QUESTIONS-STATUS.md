@@ -143,8 +143,9 @@ reading's own timestamp, never today's. *[Our design]*
 
 **18. Should our software be allowed to add/change/retire products in PDAS?**
 Wanted, yes — IFL's own engineers make exactly these changes by hand today (11 Sep 2026).
-**The written authority is the part that matters and its status is now contradictory — see
-open question O-1 below. Do not treat this as closed.**
+**Granted in writing (WhatsApp, Hassan sb) 19 Sep 2026, owner's statement; formal
+confirmation requested; plant switch-on gated on our own local end-to-end proof passing.**
+See open question O-1 below for the full history.
 
 **19. If SMS may write to PDAS, who is authorised to make those changes?**
 **RESOLVED 15 Sep 2026** — **the process engineer on the floor.** *[IFL said so — 15 Sep
@@ -404,7 +405,10 @@ change made through SMS actually reaches the machine or only the records.
 (b) what to do when the scale's own pass/fail flag disagrees with the product tolerance
 (today: state both facts separately, never one merged verdict).
 
-**O-1 — The PDAS write authority is recorded two ways and they contradict each other. UNVERIFIED.**
+**O-1 — The PDAS write authority is recorded two ways and they contradict each other.
+RESOLVED 24 Sep 2026 (owner's statement).**
+
+History, kept for the record:
 - `handover/IFL-ANSWERS-2026-09-15.md:7` records that on 15 Sep the authority was **still
   verbal**, and says to keep `PDAS_WRITE_ENABLED=false`.
 - Commit **`af420a4`** (22 Sep 2026) states in its message: *"IFL granted permission for SMS
@@ -416,10 +420,14 @@ change made through SMS actually reaches the machine or only the records.
 - Also still true, and stated in that same commit: **no PDAS procedure has ever been executed
   against any database, local or plant.**
 
-**Nobody should send IFL a request for authority they may already have given, and nobody
-should switch the path on against a grant that exists only in a commit message.** The owner
-must say which it is, and the answer must land in a document. Until then this file records it
-as unverified rather than resolving it in either direction.
+**Resolution (24 Sep 2026, owner's statement):** the owner states that Hassan sb, IFL, gave a
+written WhatsApp permission on 19 September 2026, covering both the local test copy and the
+plant, and reading as "complete autonomy and permission to enable and work on the PDAS
+changing the DB." The owner's reading is that this covers all nine of the rights listed in
+`IFL-OPEN-QUESTIONS.md` item 3. Process engineers will be the users of the resulting
+workflow. The code path has not yet been run end to end, and the plant will not be switched
+on until the local end-to-end test passes. See `DEFECTS.md` D-12 and
+`handover/PDAS-WRITE-GRANT-2026-09-19.md` for the full record.
 
 ---
 

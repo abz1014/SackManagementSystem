@@ -48,13 +48,24 @@ Plant SQL Server ──read-only──▶ sync-worker (Windows Service) ──�
   has no table read at all, and the product mirror this software depends on
   for every weight limit and product name fails without it.
 
-Nothing else is required from IFL's systems. No schema change, no new
-index, no new stored procedure, no trigger, and no write of any kind to
-`DATA_TP1U2` or `PDAS_TP1U2` — this is a hard constraint enforced by design:
-only `sync-worker` ever opens a connection to IFL's server, and that
-connection is opened with the read-only login above. There is no code path
-in this application, in any of its three processes, that issues `INSERT`,
-`UPDATE`, `DELETE`, `CREATE` or `ALTER` against either of IFL's databases.
+No schema change, no new index, no new stored procedure, no trigger, and no
+write of any kind to `DATA_TP1U2` — this is a hard constraint enforced by
+design: `sync-worker`'s connection to `DATA_TP1U2` is opened with the
+read-only login above, and no code path in this application issues
+`INSERT`, `UPDATE`, `DELETE`, `CREATE` or `ALTER` against it.
+
+`PDAS_TP1U2` is different, by IFL's own written request (the product
+changeover workflow), and only through a dedicated login, `sms_pdas_writer`,
+separate from the read-only one above. That login is limited to the nine
+rights IFL authorised in writing on 19 September 2026: the vendor's own
+Add / Retire / activate stored procedures for materials, blends, counts,
+tube types and pallets, one guarded single-row update to a product's
+weight limits (the vendor supplies no procedure for that), and one insert
+of an audit event row. No new database objects, no `DELETE`, and no table
+outside those covered by the nine rights. This write path stays switched
+off (`PDAS_WRITE_ENABLED=false`) until it has been proven to work end to
+end on a local copy of the data; it is not yet in use against the plant
+database.
 
 ## 3. What the sync process actually does
 
