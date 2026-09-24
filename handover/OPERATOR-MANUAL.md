@@ -333,11 +333,31 @@ product, station, or management-summary figures for a chosen period.
   (line, period, who generated it, SMS version) is written into the file
   as trailing rows after a blank line — not as a comment header, because a
   comment header renders as a mangled first row in Excel.
-- **There is no dedicated PDF export button.** To get a PDF, use your
+- **There is no PDF button on the Report screen itself** (verified against
+  `web/src/screens/Report.tsx`: only CSV and Excel links are rendered next
+  to Print). To get a PDF from the screen as it stands today, use your
   browser's own Print dialog and choose "Save as PDF" — SMS's print
   stylesheet (landscape for reports, portrait for the Readings register)
-  is built for exactly this. **[No real print/PDF driver has verified this
-  yet — see §8.]**
+  is built for exactly this.
+- **Separately, the server itself CAN generate a true PDF** —
+  `GET /api/reports/:type/export?format=pdf` (rank: manager and above,
+  audited as `export.pdf`) drives a headless copy of Microsoft Edge to
+  load and print the same report page SMS already renders, so the PDF is
+  never a second layout implementation (`api/src/services/reports/pdf.ts`).
+  **No button in the web app links to this endpoint** — reaching it today
+  means constructing the URL by hand (or scripting it), not clicking
+  anything in Report. Whoever next touches the Report screen should decide
+  whether to wire a button to it or remove it, rather than leave a working
+  server capability unreachable.
+- **Neither PDF path — browser Print-to-PDF, nor the server's own
+  `format=pdf` endpoint — has been verified end to end.** No real print
+  dialog and no real installation of Edge/`puppeteer-core` on a plant-like
+  host has ever produced and inspected an actual PDF file in this project;
+  the server endpoint's own automated tests deliberately mock the Edge
+  render rather than exercise it, precisely so the test suite does not need
+  Edge installed to pass. Treat both as unverified until someone opens a
+  produced PDF and checks it by eye. **[No real print/PDF driver has
+  verified this yet — see §8.]**
 
 ### 2.8 Health
 
@@ -491,16 +511,29 @@ admin session has been used so far.
 - **CSV and Excel exports exist and are built.** Attribution is written as
   trailing rows, never a header comment (Excel would show a mangled first
   row).
-- **There is no in-app PDF button.** PDF is produced by your browser's own
-  Print-to-PDF, using SMS's print stylesheet (reports print landscape;
-  the Readings register prints portrait — an explicit choice after both
-  orientations were compared side by side).
+- **There is no in-app PDF button on the Report screen** (Report offers CSV
+  and Excel only — verified against `web/src/screens/Report.tsx`). The
+  everyday path to a PDF is still your browser's own Print-to-PDF, using
+  SMS's print stylesheet (reports print landscape; the Readings register
+  prints portrait — an explicit choice after both orientations were
+  compared side by side).
+- **A true, server-rendered PDF export ALSO exists, but nothing in the UI
+  reaches it.** `GET /api/reports/:type/export?format=pdf`
+  (`api/src/services/reports/pdf.ts`) drives a headless copy of Microsoft
+  Edge to load and print SMS's own report page, so the PDF is never a
+  second, hand-built layout — but no button, link or screen calls this
+  endpoint today. This is a real gap between what the server can do and
+  what an operator can reach, not a missing feature of the server itself.
 - **No print pipeline has been verified against a real printer or PDF
-  driver.** Every print claim in this system's own build notes comes from
-  a simulated print layout in a test browser, cross-checked against the
-  page's own measured width — a close approximation, not a proof that a
-  real printer or a real "Print to PDF" dialog will render identically.
-  **[UNVERIFIED on plant data]**
+  driver, for EITHER path.** Every print claim in this system's own build
+  notes comes from a simulated print layout in a test browser, cross-checked
+  against the page's own measured width — a close approximation, not a
+  proof that a real printer or a real "Print to PDF" dialog will render
+  identically. The server-rendered PDF path is even less proven: its own
+  automated tests deliberately mock the Edge render, so passing tests do
+  not mean a real installation of Edge/`puppeteer-core` has ever produced
+  an actual PDF file that someone opened and checked. **[UNVERIFIED on
+  plant data]**
 - **"Too much data"** — see §6.
 
 ---

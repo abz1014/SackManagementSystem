@@ -674,7 +674,10 @@ worker has run against a database for a while — carried here so that follow-up
 | D-14 | LOW | `CLAUDE.md` asserted in three places that `last_seen_utc` has no writer; it has had one since `b31d574` | **fixed** this pass (23 Sep 2026) |
 | RT-001…036 | mixed | 23 Sep 2026 red-team audit findings — see Part 4 below for the full table | mixed, see Part 4 |
 | D-15…D-23 | mixed | Defects found DURING the RT- fix wave, not present in the audit itself | see Part 4 |
-| RT24-01…13 | mixed | 24 Sep 2026 red-team audit findings (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`) — see Part 6 below for the full table | mixed, see Part 6 |
+| RT24-01…13 | mixed | 24 Sep 2026 red-team audit findings (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`) — see Part 6 below for the full table | **all 13 now fixed or extended** — RT24-10/11/12/13 and RT-014 closed this pass, see Part 7 |
+| D-27 | HIGH | `shift_rule_drift` DQ check false-positived 20,000/20,000 rows — `mssql` returns BIGINT as a JS string, `new Date(<string ms>)` parses it as an invalid date string, not milliseconds | **fixed**, `32e9d0d` — see Part 7 |
+| D-28 | MEDIUM | `eventMsOfRaw` threw a bare `TypeError` (`.getTime()` on `undefined`) naming neither the row nor its table, on a raw row missing both production and insert time | **fixed**, `95b3aff` — see Part 7 |
+| D-29 | LOW | 2 `sms.cone_event` rows carry `production_ts_utc_ms` before year 2000 (min 0 — an epoch-zero phantom timestamp) | **open, not fixed this pass** — see Part 7 |
 | D-24 | MEDIUM | `pdasWrite.ts`'s post-commit echo-back check reads, run inside the same `try` as the write itself (Add*/CreatePallet/SetPalletActive), or entirely unguarded (`updateProductLimits`), misreported a committed write as failed when the check read itself failed | **fixed 24 Sep 2026**, `bdbb0eb` (B1/B2) |
 | D-25 | MEDIUM | `planChangeover` compared a requested new blend/count/tube name to existing rows by exact equality only, so a name that is a `LIKE`-pattern match for an existing row (T-SQL wildcard collision, e.g. `"R_D"` vs `"RED"`) planned clean and only failed mid-sequence against PDAS's own duplicate check | **fixed 24 Sep 2026**, `a9b85b5` (B4), new `api/src/services/likePattern.ts`; proven by F3b, `PDAS-EXECUTION-2026-09-24.md` | 
 | D-26 | MEDIUM | `changeover.ts`'s `resolveTube` compared candidate tube types by name only; `sms.tube_type` carried no `tube_form` column, so it could either silently reuse a wrong-form tube type PDAS would have accepted as new, or over-block a same-form name that only collided by `LIKE` pattern against a different form | **fixed 24 Sep 2026**, `d6a58d4` (migration `041_tube_type_form.sql` + `changeover.ts`/`pdasWrite.ts`'s `addTubeType` MERGE/`seedProducts.ts`); **proven live 24 Sep 2026** — the final re-run section of `PDAS-EXECUTION-2026-09-24.md`: `AddTubeType` writes `tube_form` into the mirror (TubeTypeId 28, `tube_form=2`, matches PDAS's own `TubeForm`), and a plan-only `resolveTube` check confirms same-name/same-form plans `reuse` while same-name/different-form plans `add` |
@@ -914,10 +917,10 @@ disposition only, using the audit's own numbering exactly.
 | RT24-07 | MEDIUM | `Line.tsx::periodFigures` (~line 534): `unmatchedRejects = r?.unmatchedRejects ?? rejected`, no unreadable flag — if `/api/production` ever returns a row missing just that key, the headline reject-rate tile silently reverts to the pre-fix double-count formula (reproduced in jsdom: 5.0% → 4.8%) with no caveat shown | **fixed**, `4e8513c` — the rate now routes through the existing `rateUnreadable`/`fieldMissing` idiom when `unmatchedRejects` is absent (the rejected COUNT stays readable, only the computed rate goes could-not-read); new case in `Line.render.test.tsx` (RED before / GREEN after). |
 | RT24-08 | MEDIUM | `machinesRunning.ts::getMachinesRunning` retains only `quiet:true\|false` on a hard 2-hour cliff, no last-seen time — a machine quiet 3 minutes renders identically to one dead for weeks, on the one screen meant to say which machines need attention | **fixed**, `4e8513c` — added `lastSeenUtc` (MAX(production_ts_utc_ms) per station, this generation, reusing the existing `IX_cone_line_station_shift` index — a full scan, not a new index; no schema change) and `state: 'running'|'quiet'|'stale'|'silent'`, graded off `lastSeenUtc` relative to the same `asOfMs` anchor the file already used, never `Date.now()`. Whole-line exception documented: when `asOfMs` itself is null, every machine reports `'quiet'`, not `'silent'`. New `machinesRunning.test.ts` covers four stations at 1h/5h/3d/10d, a never-seen station, and the whole-line exception. **Not yet measured:** the added query's cost under load — the commit message states the index reuse but no benchmark was run this pass. |
 | RT24-09 | MEDIUM | `generation.ts::resolveGenerationScope` keys on `shift_date` with no temporal-plausibility check — a mis-generation row (`DATA_TP1U2_SEP07.pack1_TP1U2` id=4130, `ProductionDate` 2026-07-12 but `source_epoch` 9) sits inside the documented 10 Jul→5 Aug "no data" gap and is returned as one in-range cone with `spansGenerations=false`, unflagged | **fixed**, `edae627` — new read-only DQ check `isolated_production_day`: for each `source_epoch`, a `cone_event` `shift_date` with fewer than 5 rows raises a WARNING (naming the first raw_id) when its ±3-day neighbourhood in the same generation has no data at all, or falls outside that generation's own coverage range. Known clock-fault sentinel dates excluded. Registered in `dq.ts`'s `CHECK_NAMES`, run once per pass at the end of `runTransform.ts`. Verified read-only against the local `sms` DB (`sqlcmd -E`): exactly one row flagged across all generations — `source_epoch` 9, `shift_date` 2026-07-12, n=1, raw_id 208207, whose `source_row_id` is 4130 — an exact match to the cited id. |
-| RT24-10 | LOW | Legacy `/api/report` silently ignores `from`/`to` unless `period=custom`; no UI caller (`getReport` unreferenced) — dead route, but a script hitting it directly is silently misled | **open**, per the audit's own numbering — not addressed by any commit this pass. Fix options stated in the audit (delete the route, or align its `period` default with `routes/reports.ts`) are unimplemented. |
-| RT24-11 | LOW | `X-Powered-By: Express` present — framework fingerprinting; every other security header is set deliberately | **open** — `app.disable('x-powered-by')` not applied by any commit this pass. |
-| RT24-12 | LOW | `/api/health` can return `status:"degraded"` with `degradedReason:null` even though `acquisition.kind:"stale"`/`backup.warning` are in the same payload — the field is not always populated from the signals that already set the status | **partly addressed** — `3e0d349`'s `markDegraded` change (landed for RT24-01) touches the same degraded-status code path, but no commit this pass specifically targets `degradedReason` population from `acquisition`/`backup` signals; re-check against current `health.ts` before calling this closed. Treated here as **still open** pending that re-check. |
-| RT24-13 | LOW | Missing-field fuzz coverage (`stripFields` harness) exists for Line/Weight/Rejects/Sacks and two report sections, but not for 6 of 8 report types, all 4 Product tabs, Health's two blocks, or the 4 sheets — RT24-07 was found in a *better*-covered screen, so a sibling defect could be hiding in an un-fuzzed one | **open** — no commit this pass extends `stripFields` coverage to the named gaps. |
+| RT24-10 | LOW | Legacy `/api/report` silently ignores `from`/`to` unless `period=custom`; no UI caller (`getReport` unreferenced) — dead route, but a script hitting it directly is silently misled | **fixed, 24 Sep 2026, `855045f`** (later same day) — `/api/report` deleted server-side; the web client's own dead `getReport` caller removed the same commit. See Part 7. |
+| RT24-11 | LOW | `X-Powered-By: Express` present — framework fingerprinting; every other security header is set deliberately | **fixed, 24 Sep 2026, `855045f`** (later same day) — `app.disable('x-powered-by')` added to `createApp` (`sms/api/src/app.ts:126`). See Part 7. |
+| RT24-12 | LOW | `/api/health` can return `status:"degraded"` with `degradedReason:null` even though `acquisition.kind:"stale"`/`backup.warning` are in the same payload — the field is not always populated from the signals that already set the status | **fixed, 24 Sep 2026, `45bdba8`** (later same day) — new pure `degradedReasons()` (`health.ts:424`) names every true degrading signal in `foldStatus`'s own priority order; re-verified directly against current `health.ts` this pass, not left pending. See Part 7. |
+| RT24-13 | LOW | Missing-field fuzz coverage (`stripFields` harness) exists for Line/Weight/Rejects/Sacks and two report sections, but not for 6 of 8 report types, all 4 Product tabs, Health's two blocks, or the 4 sheets — RT24-07 was found in a *better*-covered screen, so a sibling defect could be hiding in an un-fuzzed one | **extended, not closed to zero, 24 Sep 2026, `855045f`/`e8a1e39`** (later same day) — the 8 remaining report types and Health's `SystemHistoryBlock` are now fuzzed, finding and fixing four real defects (`61de930`). **Still un-fuzzed:** the 4 Product tabs (Running/Changeover/Catalogue/History) and Health's `SyncHealthBlock`. See Part 7. |
 
 **Read together with Part 4/Part 5:** RT24-02/03/04 are the same "generation/time scoping not
 threaded everywhere" root cause Part 4's RT-001…036 wave already fixed most instances of —
@@ -938,3 +941,185 @@ plausibly shift generation/day-isolation fixtures; this is a documentation pass 
 attribute or fix the failure. Do not read this as a fully green suite — it is 196/198 files
 green, 2 tests red, measured directly, not copied from a commit message. Re-run once the tree
 settles and record a clean number before claiming "green" again.
+
+---
+
+## Part 7 — 24 Sep 2026, later the same day: RT24-10/11/12/13 and RT-014 closed; two further defects found and fixed; one new defect found, not fixed
+
+This pass closes the four LOW findings Part 6 left open (RT24-10/11/12/13) and the one
+finding that had been blocking `PROJECT_STATUS.md` Phase 11 from COMPLETE since the 23 Sep
+audit (RT-014). It also records two defects fixed earlier the same day but not yet written up
+here (`32e9d0d`, `95b3aff`), and one new defect found this pass and left open.
+
+### RT24-10 — dead `/api/report` route, and its dead web caller — **fixed**, `855045f`
+
+The legacy `/api/report` route (silently ignoring `from`/`to` unless `period=custom`) is
+deleted server-side. `web/src/api.ts`'s `getReport` — already unreferenced by any screen,
+confirmed by the audit — is removed the same commit, along with its `api.callers.test.ts`
+allow-list entry. Closed from both ends: nothing in the tree can hit the dead contract by
+accident, from the server or the client.
+
+### RT24-11 — `X-Powered-By: Express` present — **fixed**, `855045f`
+
+`app.disable('x-powered-by')` added to `createApp` (`sms/api/src/app.ts:126`), verified
+present in the current tree by direct grep this pass.
+
+### RT24-12 — `degradedReason` sometimes null while `status:"degraded"` — **fixed**, `45bdba8`
+
+`foldStatus` (`sms/api/src/services/health.ts`) degrades `status` on five independent
+signals — pool error, database-size cap, stale/late/halted acquisition, blocking DQ findings,
+stale backup — but `degradedReason` only ever reported the first: every other route into
+`'degraded'` left the field `null` right beside a status reading `"degraded"`. A new pure
+function, `degradedReasons()` (`health.ts:424`), derives one plain-English sentence per true
+signal, joined `'; '`, in the same priority order `foldStatus` already checks; `getHealth`
+wires it in, still `null` for an unauthenticated caller. RED: a new `getHealth` case in
+`health.test.ts` (stale acquisition, authenticated) asserted `degradedReason` stayed `null`
+while `status` read `degraded`, matching the finding exactly — GREEN after the change.
+Re-verified directly against the current file this pass, not left as the "partly addressed,
+not specifically re-verified" state Part 6 recorded it in.
+
+### RT24-13 — missing-field fuzz coverage — **extended**, `855045f`/`e8a1e39`; **not closed to zero**
+
+`missingField.fuzz.test.tsx`'s `stripFields` harness now covers the 8 report types it did not
+before (daily/shift/product/station/reject/sack/management-summary/machine-product) and
+Health's `SystemHistoryBlock`, driving `stripFields` against each section component's plain
+data prop. **Still not fuzzed, named rather than left implied:** the 4 Product tabs
+(Running/Changeover/Catalogue/History) and Health's other block, `SyncHealthBlock`.
+
+Four real defects the extended fuzz found, each proven with an `it.skip` canary that failed
+before the fix and was restored after, all fixed the same day in `61de930`:
+
+- `screens/report/Shift.tsx` — the whole-report empty gate was `s.totals.cones > 0`, so a
+  stripped `cones` field on the only shift in a period read as empty even with real non-zero
+  `rejectedCones`/`sacks`/`sackWeightKg` behind it, hiding genuine data behind "Nothing
+  recorded in this period." Now counts as having data when any KNOWN total is non-zero,
+  treating a missing count as unreadable rather than a confident zero.
+- `screens/report/Summary.tsx` + `lib/words.ts`'s `priorCoverage` — a bare template
+  interpolation printed the literal word "undefined" onto the page when
+  `coverage.prior.daysWithData` was stripped. Now states the count could not be read.
+- `screens/health/SystemHistoryBlock.tsx` — `g.rawRowCount.toLocaleString(...)` had no null
+  guard and crashed the whole block on a missing field, unlike every other cell in the same
+  table. Now renders an em dash like its neighbours.
+- `screens/report/Product.tsx` (found in the same fuzz pass, not itself named in the audit's
+  own RT24-13 text) — the per-row filter dropped a row whenever `cones`/`rejectedCones`/
+  `sacks` were all missing, even when the row's own weight readings were real, silently
+  excluding it with no caveat. Now keeps a row when any known count is non-zero, any count is
+  unreadable, or `weight.n` is real.
+
+### RT-014 — no server-side response-size/row-count cap independent of SQL — **fixed**, `855045f`
+
+`sms/api/src/middleware/responseCap.ts`, mounted once, globally, in `createApp`, refuses
+outright — `413` — whenever a response would exceed either of two caps, checked independent
+of whatever the SQL layer already did:
+
+- **Row cap** (`MAX_RESPONSE_ROWS = 50_000`, `config.ts:75`): the largest array found at one
+  of this app's known envelope shapes (a bare top-level array, or `.rows`/`.data`/`.data.rows`)
+  — a deliberately small, explicit set of shapes, not a recursive walk that would also flag
+  small, harmless nested arrays.
+- **Byte cap** (`MAX_RESPONSE_BYTES = 20 * 1024 * 1024`, `config.ts:77`): an independent
+  backstop for a response the row check waves through — one huge non-array payload, or many
+  moderate rows with heavy per-row fields.
+
+Both refusals are logged with the request's correlation id before the `413` is sent.
+`/api/spc` additionally keeps its own tighter, separately-named span cap
+(`MAX_SPC_RANGE_DAYS = 186` days, `config.ts:87`, verified present) rather than relying on the
+row cap alone, because a wide-but-shallow SPC query can return few rows yet scan a large
+range. The register CSV export (`/api/events/export`) is **deliberately not** wrapped by this
+middleware — it already enforces its own `CSV_ROW_CAP` with an explicit `truncated`/
+`X-Export-Truncated` flag, a tighter, already-labelled contract this middleware would only
+duplicate; this is a documented exclusion, confirmed by reading `responseCap.ts`'s own header
+comment, not a gap. Web-side, `e8a1e39` has `usePolling` (`lib/live.tsx`) encode a thrown
+`ApiError`'s status as a `[<status>] ` prefix on the error string it hands to screens, and
+`Failed` (`ui/bits.tsx`) reads a `413` prefix and shows a plain-English "too much data"
+sentence (`words.ts` `errorDisplay.tooMuchData`) instead of the generic "the plant connection
+may be down" outage message — RED test first (`ui/bits.test.tsx`), GREEN after wiring both
+files.
+
+**Consequence for `PROJECT_STATUS.md`:** RT-014 was the one item stopping roadmap Phase 11
+(Security & operations) from returning to COMPLETE (see that file's phase board, row 40, and
+`handover/FAT-PROTOCOL.md`'s SEC8 row) — both corrected this pass.
+
+### RT24-05, restated for `handover/FAT-PROTOCOL.md` — not re-fixed this pass, its consequence corrected
+
+`25b02bc` (already recorded in Part 6) means a real read-back failure under an EXECUTE-only
+role now raises the standing CRITICAL `pdas_write_unverified` finding instead of silently
+downgrading to a WARNING. `handover/FAT-PROTOCOL.md`'s PW10 row used to describe this as
+"currently fails silently... must be fixed before this step can pass" — that text described
+the pre-`25b02bc` behaviour and is corrected in place this pass. **Not proven by a live
+structural-failure repro** — the local dev login still carries SELECT rights
+(`canReadBack: true` locally), so the new CRITICAL path is proven by code path and unit test
+only; do not read the FAT correction as a rehearsal that has actually happened.
+
+### D-27 — `shift_rule_drift` false-positived every sampled row (BIGINT returned as a string) — **fixed**, `32e9d0d`
+
+`mssql` returns `BIGINT` columns as JS strings, so `production_ts_utc_ms` arrived at this
+check as e.g. `"1790080162370"`. Passed straight into `new Date(...)`, that string parses as
+an invalid date (JS's `Date` constructor treats a bare numeric string as a date-time string,
+not milliseconds), so `wallClockOf`/`shiftCodeOf`/`shiftDateOf` all produced `NaN` and every
+sampled row mismatched — **20,000/20,000 flagged as drift on local data**, though a direct SQL
+recompute of the same rule shows **0 real mismatches**. `runTransform.ts` already does
+`Number(...)` at this same DB boundary (its own lines ~90, ~293, ~299); this check never did,
+and its unit test only ever exercised a numeric fixture, so it never caught the string case.
+Fix: `SampledRow.production_ts_utc_ms` now accepts `number | string`;
+`shiftRuleDriftFindingsFor` converts via `Number(...)` once per row. A non-finite result after
+conversion is counted separately as `check_name: shift_rule_drift_unreadable_time` and never
+folded into the drift count itself, so a genuinely unreadable time cannot masquerade as either
+"drift" or "no drift." **This was a false-positive in the DQ check itself, not a defect in the
+stored data** — verified this pass by an independent SQL-side recompute of the same rule
+against `sms.cone_event`, which the fix's own commit message also states; no rebuild was
+needed or run.
+
+### D-28 — `eventMsOfRaw` threw a bare `TypeError` on unusable event time — **fixed**, `95b3aff`
+
+A raw row missing both `src_ProductionDate` and `src_Date` (or missing `src_Date` alone, for
+sacks) left `eventMsOfRaw`'s `dt` `undefined`; calling `.getTime()` on it threw an unhandled
+`TypeError` naming neither the row nor its source table — the least informative failure mode
+available for a transform-time error. It now throws a plain `Error` naming the row's `raw_id`
+and source table, matching how this same file already reports other malformed rule data
+(`resolveShiftRule`/`loadShiftRuleHistory`). It still throws, deliberately, rather than
+silently skipping the row — a batch retries until the row is fixed or explicitly excluded,
+rather than a real production reading silently vanishing. New
+`runTransform.eventTime.test.ts`: RED-then-GREEN coverage for the TypeError-to-Error change,
+plus a regression pinning per-row shift-rule resolution (RT24-04) across a genuine 3-version
+shift_rule history.
+
+### D-29 — two `sms.cone_event` rows carry an epoch-zero phantom timestamp — **NEW, open, not fixed this pass**
+
+Read-only query against the local `sms` database this pass (`sqlcmd -E`, `SELECT` only):
+
+```
+SELECT COUNT(*) AS cnt, MIN(production_ts_utc_ms) AS minms
+FROM sms.cone_event
+WHERE production_ts_utc_ms < 946684800000;   -- year 2000
+```
+
+returns **`cnt = 2`, `minms = 0`** — two rows whose `production_ts_utc_ms` is exactly `0`
+(1970-01-01T00:00:00.000Z), not a plausible production timestamp on any generation this
+project has ever seen, and distinct from the already-known 1969-12-31/2026-06-21 clock-fault
+sentinel dates this file and `CLAUDE.md` already document and exclude from aggregates. Not
+triaged for root cause or user-facing impact this pass (which raw row(s) this traces to,
+whether it is a source data defect or a transform-time defect, and which screens it could
+skew are all open); recorded here as a defect found, not a defect closed, so it is not lost
+between passes.
+
+### Process note: two commits mixed files from concurrent workers
+
+`855045f` and an earlier commit pair (`25b02bc`/`8f5c80c`) each bundle changes from more than
+one concurrent worker on this branch into a single commit — confirmed by `git show --stat` on
+each, which lists files spanning unrelated fixes (e.g. `855045f` touches both the RT24-10/11/
+RT-014 web-side work and unrelated report-service files). Content is intact and each file's
+own diff is coherent; this is a process note about commit hygiene on a branch several workers
+share concurrently, not a code defect, and no file was found half-written or reverted by the
+mixing.
+
+### Suite and typecheck, measured this pass
+
+`npx vitest run` from `sms/` — **201 files passed / 1 skipped (202), 2088 tests passed / 4
+skipped (2092), 0 failed.** `npm run typecheck` (all five workspaces) — clean. Both run
+directly for this pass, HEAD at the time of the run included `61de930`.
+
+### What this pass did NOT get to
+
+RT24-13's two remaining named gaps (Product tabs, `SyncHealthBlock`) stay unfuzzed. D-29 (the
+epoch-zero cone_event rows) is found, not triaged or fixed. This is a documentation pass; no
+production code was changed by it.

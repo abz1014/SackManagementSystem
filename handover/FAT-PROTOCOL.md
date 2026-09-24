@@ -104,12 +104,19 @@ own work). This must be done by IFL or the human owner, ahead of the FAT session
   `PDAS_WRITE_ENABLED` in the real, on-disk `sms/.env` remains `false`; it must be
   turned on **only** once the plant login/role is confirmed and RT24-05 (below) is
   fixed.
-- **A defect blocks enabling this against the plant as-is**: RT24-05 — the write path's
-  own post-commit verification cannot detect a real mismatch under the plant's
-  anticipated EXECUTE-only role, and silently downgrades a would-be CRITICAL to a
-  WARNING (`COMMISSIONING-GAPS.md` §4, `DEFECTS.md` Part 6). **This must be fixed and
-  re-verified before FAT exercises any PDAS write against the plant.** Against the
-  local copy only, all nine write rights have been driven through the app's own code
+- **RT24-05 is fixed, `25b02bc` (24 Sep 2026, corrected here 24 Sep 2026 later the same
+  day — see `DEFECTS.md` Part 6/Part 7).** The write path's own post-commit verification
+  used to be able to silently downgrade a would-be CRITICAL to a WARNING when a
+  read-back failed; it now raises the standing CRITICAL `pdas_write_unverified` finding
+  on the first read-back failure per subject table, and `observed`/
+  `observed_after_json` go `NULL` rather than a false "it matched" claim, whenever the
+  writer role lacks SELECT on the PDAS tables. **What this row still cannot state as
+  verified:** the fix is proven by code path and unit test only — the local dev login
+  still carries SELECT rights (`canReadBack: true` locally), so the CRITICAL path has
+  never been observed firing against a real EXECUTE-only role. **Do not enable
+  `PDAS_WRITE_ENABLED` against the plant on the strength of this fix alone** — that
+  still additionally needs the plant login/role confirmed, per the point above. Against
+  the local copy only, all nine write rights have been driven through the app's own code
   and read back correctly (`PDAS-EXECUTION-2026-09-24.md`).
 
 ### 2.5 Backups
@@ -209,7 +216,7 @@ MachineProduct.
 | PW7 | Execute — `LIKE`-pattern near-duplicate | Plan a new blend/count/tube name that is a `LIKE` pattern match (not exact) for an existing name (e.g. `"R_D"` vs `"RED"`) | Plan blocks BEFORE any write reaches PDAS (fixed `a9b85b5`, 24 Sep 2026, tested at plan time via `likePattern.ts`) | | |
 | PW8 | Read back in PDAS | After PW2/PW4 succeed against the local copy, query `PDAS.Materials`/`Blends`/`Counts`/`TubeTypes` directly | New row(s) present with correct values; `sms.product_change` row recorded, not mislabeled (see the known `nhs_events` logging bug below) | | Note to FAT witnesses: `nhs_events`' own info-row text logs `@blendId`, not the real `MaterialId` — a vendor logging bug, confirmed independently twice (23 Sep 2026). Do not use `nhs_events` text alone to attribute a created row; use the real `MaterialId`/OUTPUT value. |
 | PW9 | Change limits (the only real "edit setpoint" path) | As engineer, edit an existing material's limits via the guarded single-row `UPDATE dbo.Materials` | Commits; `nhs_events` row written in the vendor's own event-log format; `sms.product_limit_version` versioned row created | | |
-| PW10 | Post-commit verification under EXECUTE-only role | Execute a write using a role with EXECUTE-only (no SELECT) permission on PDAS tables, simulating the plant's anticipated grant | **Currently fails silently** — RT24-05: the write path's own verification cannot detect a real mismatch under this role and downgrades a would-be CRITICAL to a WARNING | | **Known open defect — must be fixed before this step can pass; do not enable `PDAS_WRITE_ENABLED` against the plant until it is** |
+| PW10 | Post-commit verification under EXECUTE-only role | Execute a write using a role with EXECUTE-only (no SELECT) permission on PDAS tables, simulating the plant's anticipated grant | **Fixed, `25b02bc`** — RT24-05: a real read-back failure under this role now raises the standing CRITICAL `pdas_write_unverified` finding (`observed` goes `NULL`, not a false match), rather than downgrading to a WARNING | | **Fixed by code path and unit test, corrected here 24 Sep 2026 (later same day) — see `DEFECTS.md` Part 6/Part 7. Not yet observed firing under a live EXECUTE-only role (the local dev login still has SELECT); still confirm this row live at FAT before treating it as rehearsed.** |
 
 ### 3.6 Rules edit and history-as-of behaviour
 
@@ -237,7 +244,7 @@ MachineProduct.
 |---|---|---|---|---|---|
 | H1 | Kill the sync worker mid-session | Stop the sync worker process; reload Health, Line, Weight | Screens state which specific fetch failed, not a blanket error; no screen asserts the line is/isn't running while unhealthy | | |
 | H2 | Zero-lag edge case | Force a reading with zero acquisition lag | Reports `lag_unknown`, not a false "stopped" (RT-006, fixed) | | |
-| H3 | `/api/health` `degraded` with null reason | Trigger a degraded state | **Currently can report `degraded` with `degradedReason: null`** (RT24-12) | | **Open defect — must show a reason, or the screen must handle null gracefully; confirm before sign-off** |
+| H3 | `/api/health` `degraded` with null reason | Trigger a degraded state | **Fixed, `45bdba8`** (RT24-12) — `degradedReasons()` now names every true degrading signal (pool error, size cap, stale/late/halted acquisition, blocking DQ findings, stale backup) instead of leaving the field null | | **Fixed, corrected here 24 Sep 2026 (later same day) — see `DEFECTS.md` Part 6/Part 7** |
 | H4 | Stale vs dead machine | Compare a machine quiet 3 minutes vs quiet for weeks | **Currently render identically** (RT24-08, in progress) | | **Open defect** |
 | H5 | Calendar-invalid date | Submit `2026-13-45` as a report/period parameter | Must return `400`, not a silent-empty `200` or a crash (RT24-06 fixed for the endpoints checked 24 Sep; RT-016 notes a driver crash was found on other endpoints — re-check breadth at FAT) | | Re-verify breadth: RT-016 said 9/9 endpoints crashed before RT24-06; confirm the fix's scope matches |
 
@@ -252,7 +259,7 @@ MachineProduct.
 | SEC5 | Malformed session cookie | Send a request with a corrupted/malformed session cookie | `401`, not a server crash (RT24-01, fixed `3e0d349` — previously CRITICAL: killed the whole API process, unauthenticated) | | |
 | SEC6 | Viewer (rank 1) live session | Sign in as a real rank-1 account (once created per §2.3) | All 7 nav screens render; Setup absent; write controls absent one rank below their server gate | | **[UNVERIFIED live — no viewer has ever signed in on a live instance]**; rendering-only proven by `rank.matrix.test.tsx` against a faked `/api/auth/me` |
 | SEC7 | Audit integrity | Attempt to alter or delete an `audit_log` row via the app login | Refused — `sms_app`'s `db_ddladmin` grant (which could alter/drop the append-only trigger) was found and fixed before this pass (R-13) | | |
-| SEC8 | Response size cap | Request a report/endpoint designed to return an unusually large row count | **No server-side response-size/row-count cap independent of SQL exists today** (RT-014, unfixed) | | **Open defect — blocks Phase 11 (Security & operations) returning to COMPLETE per `PROJECT_STATUS.md`** |
+| SEC8 | Response size cap | Request a report/endpoint designed to return an unusually large row count | **Fixed, `855045f`** (RT-014) — `responseCap` middleware refuses `413` past `MAX_RESPONSE_ROWS` (50,000) or `MAX_RESPONSE_BYTES` (20 MB), independent of SQL; `/api/spc` additionally keeps its own `MAX_SPC_RANGE_DAYS` (186-day) cap; the register CSV export keeps its own separately-labelled `CSV_ROW_CAP` | | **Fixed, corrected here 24 Sep 2026 (later same day) — Phase 11 (Security & operations) returns to COMPLETE per `PROJECT_STATUS.md`; see `DEFECTS.md` Part 6/Part 7** |
 
 ---
 
@@ -271,10 +278,14 @@ MachineProduct.
 **Total: 73 test rows.**
 
 **Rows marked [UNVERIFIED] or naming a specific open defect that would fail the row
-as written: 16** (R7 known-limitation, R8, S2, S3, S6/RT-018, RP1, RP9, RP10, RP13,
-RP14, PL1, PW2, PW6, PW10/RT24-05, H3/RT24-12, H4/RT24-08, SEC6, SEC8/RT-014 — count
-includes rows citing an open defect as well as rows never yet exercised under the FAT
-condition; several rows carry more than one caveat, counted once each by row).
+as written: 14, corrected 24 Sep 2026 (later the same day) — PW10/RT24-05, H3/RT24-12
+and SEC8/RT-014 are fixed (see `DEFECTS.md` Part 6/Part 7) and no longer count as open
+defects, though PW10 remains unproven live and is kept [UNVERIFIED live] rather than
+dropped entirely** (R7 known-limitation, R8, S2, S3, S6/RT-018, RP1, RP9, RP10, RP13,
+RP14, PL1, PW2, PW6, PW10 [unverified live only, defect itself fixed], H4/RT24-08,
+SEC6 — count includes rows citing an open defect as well as rows never yet exercised
+under the FAT condition; several rows carry more than one caveat, counted once each by
+row).
 
 ---
 
@@ -296,7 +307,9 @@ already found and recorded:
    gap in the build. `cone_id`/`cone_id_source` columns exist, nullable, as a
    documented re-entry point only; no PLC library is in any manifest.
 4. **Open RT (red-team audit) items, unfixed as of this writing:**
-   - RT-014 — no server-side response-size/row-count cap independent of SQL
+   - ~~RT-014 — no server-side response-size/row-count cap independent of SQL~~ —
+     **fixed, `855045f`, corrected here 24 Sep 2026 (later the same day); see
+     `DEFECTS.md` Part 6/Part 7**
    - RT-016 — a calendar-invalid date crashes the DB driver on some endpoints (partially
      fixed as RT24-06; breadth not re-confirmed)
    - RT-017 — MachineProduct's on-screen column clipping (~82% of columns off-screen)
@@ -307,11 +320,18 @@ already found and recorded:
    - RT-019 — Nelson rules 2-8 flag 37.6–54.8% of station-groups on real data; kept
      deliberately suppressed pending an owner decision among four options (`DEFECTS.md`
      D-10) — not a bug, a pending call
-   - RT24-05 — PDAS write-back verification cannot detect a mismatch under an
-     EXECUTE-only role (see §2.4, §3.5 PW10) — **must be fixed before plant PDAS writes
-     are enabled**
-   - RT24-07, RT24-08, RT24-09, RT24-12 — in progress or open, see `COMMISSIONING-GAPS.md`
-     §2 for current text
+   - ~~RT24-05 — PDAS write-back verification cannot detect a mismatch under an
+     EXECUTE-only role~~ — **fixed, `25b02bc`, corrected here 24 Sep 2026 (later the
+     same day); see §2.4, §3.5 PW10, `DEFECTS.md` Part 6/Part 7. Fixed by code path and
+     unit test only — still not observed firing under a live EXECUTE-only role, so
+     confirming this live remains part of due diligence before plant PDAS writes are
+     enabled, even though the defect itself is closed.**
+   - RT24-07, RT24-08, RT24-09 — in progress or open, see `COMMISSIONING-GAPS.md`
+     §2 for current text. ~~RT24-12~~ — **fixed, `45bdba8`, corrected here 24 Sep 2026;
+     see §3.8 H3, `DEFECTS.md` Part 6/Part 7.**
+   - RT24-10, RT24-11, RT24-13 — **fixed or extended, `855045f`/`e8a1e39`/`61de930`, 24
+     Sep 2026 (later the same day this list was written); see `DEFECTS.md` Part 7.
+     RT24-13's two remaining gaps (Product tabs, `SyncHealthBlock`) stay unfuzzed.**
 5. **Nothing in this system has been observed by a real user on real plant data.**
    Every measurement cited anywhere in this protocol's source documents is against the
    local `_SEP07`/`_SIM` dev copy unless stated otherwise. This is the single largest

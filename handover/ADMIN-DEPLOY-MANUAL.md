@@ -349,11 +349,23 @@ convention, enforced by inspection, **not enforced by an automated test today.**
 ### 5.11 Response-size guardrails (in `api/src/config.ts`, not `.env`)
 `MAX_RESPONSE_ROWS = 50,000` and `MAX_RESPONSE_BYTES = 20 * 1024 * 1024` (20 MB) are
 constants in `sms/api/src/config.ts`, not environment variables — there is no `.env` key
-for either today. **Known gap (RT-014, still open):** there is no server-side
-response-size or row-count cap that is independent of the SQL query itself — a query
-that returns more than expected has no separate backstop at the HTTP layer. Do not
-assume `MAX_RESPONSE_ROWS`/`MAX_RESPONSE_BYTES` close that gap; confirm their actual
-enforcement point in `config.ts` before relying on them for capacity planning.
+for either today. **Fixed, 24 Sep 2026, `855045f` (RT-014, was "still open" as of this
+section's earlier wording — corrected here, later the same day the fix landed).** These
+two constants are now genuinely enforced, independent of whatever the SQL layer already
+did: `api/src/middleware/responseCap.ts` is mounted globally in `createApp` and refuses
+any response outright — HTTP `413` — whenever it exceeds either cap, before the response
+reaches the caller. The row cap looks at the largest array in this app's known envelope
+shapes (a bare top-level array, or `.rows`/`.data`/`.data.rows`); the byte cap is an
+independent backstop measured on the serialized JSON, catching a huge non-array payload or
+many moderately-sized rows with heavy per-row fields that the row check alone would miss.
+`/api/spc` additionally keeps its own tighter, separately-named span cap
+(`MAX_SPC_RANGE_DAYS = 186` days) rather than relying on the row cap alone. The register
+CSV export (`/api/events/export`) is deliberately **not** wrapped by this middleware — it
+already enforces its own `CSV_ROW_CAP` with an explicit `truncated`/`X-Export-Truncated`
+flag, a different, already-labelled contract this middleware would only duplicate; this is
+a documented exclusion, not a residual gap. `MAX_RESPONSE_ROWS`/`MAX_RESPONSE_BYTES` can now
+be relied on for capacity planning at the HTTP layer, on top of whatever the SQL query
+itself already bounds.
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
 

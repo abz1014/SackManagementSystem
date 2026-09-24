@@ -37,14 +37,81 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 | 8 — Dashboards & reports | **COMPLETE for TEN report types; Excel and PDF both built; KPI definitions await IFL approval** | One Report surface with **ten** types — Daily · Shift · Product · Machine/station · Rejects · Cone weight · Sacks · Calibration · Management summary, plus **Product by machine and shift**, the tenth, added on IFL's 15 Sep answer to Q28 (verified 23 Sep 2026: `REPORT_TYPES` in `api/src/services/reports/common.ts` and in `web/src/api.ts` both list ten, `machine-product` registered last). This row said "nine" until 23 Sep 2026. Excel and PDF are no longer "to build": `reports/xlsx.ts` ships real chart/drawing/dataBar parts (`f61eb35`) and `reports/pdf.ts` renders server-side (`47ac224`) — whether they meet IFL's "beautiful, with graphics" is a judgement only IFL can make by looking. Each type is each a composed `GET /api/reports/<type>` reusing the existing services, a CSV export (rank 3, audited) and a print header (line · period · filters · generated at plant time · by whom · SMS version); management summary with the prior period of equal length and deltas; `/api/report` gains `shift`; `groupBy=product` on production. `KPI-DEFINITIONS.md` (32 rows: definition, SQL-level formula, denominator, clock, exclusions — every row "IFL approval: awaiting") is the sheet for Phase 8's acceptance. Four defects closed: Weight passes `tsTo`, Wall never asks for an undefined day, Readings' print has the header, the three orphaned client wrappers are gone. All nine answer 200 on the sidecar (verified 15 Sep). |
 | 9 — Calibration analytics | **COMPLETE — validation method awaiting IFL** | Median beside the mean (same population rule) on Weight, the station table and the sheet; per-station SD rendered; Nelson rules named on hover and on the sheet, the centreline and I-MR sigma restart at a logged adjustment, rules that cannot fire on the series length are said so; the station sheet compares days on the plant clock (`web/src/lib/plantClock.ts`); the adjustment form takes the plant time, a note, before/after/reference readings and the product in force (migration 034); adjustments filter by period and station and include line-wide ones; a **projection** ("at N g/day this station reaches the action limit in about K days if it continues at that rate" — OLS over the flagged run, never called a prediction); `CALIBRATION-VALIDATION.md` with a real sweep over the 53 days: 12 flagged episodes, all beginning with a measurable step, 11 of them in July where no product limits existed (a floor on the fallback threshold is recommended, value for IFL). |
 | 10 — Optional AI/ML | **BLOCKED** | 53 production days held against a six-month minimum; one ledger row. Wave F, after go-live plus accrual. |
-| 11 — Security & operations | **PARTIAL — open code gaps, not COMPLETE.** 23 Sep red-team audit RT-014 (no server-side response-size/row-count cap independent of SQL) and RT-015 (malformed rows silently read as zero, server-side) both fell inside this phase's own "without silent data loss" acceptance criterion. RT-015 fixed the same day (`71757a3`, `410c179`); **RT-014 is still open — not addressed by any commit through 23 Sep.** **24 Sep red-team audit adds RT24-01 (CRITICAL — unauthenticated single-request DoS via a malformed session cookie crashing the API process) to this phase's own scope — fixed the same day, `3e0d349` (`DEFECTS.md` Part 6).** Do not mark this row COMPLETE again until RT-014 is fixed or the owner explicitly accepts it. Role mapping, retention policy and the live-host rehearsal still await IFL as before. | Password change (self) and reset (admin) with session revocation and a length policy; last-admin guard; login/logout/failed-login/export audited; limiter and cache bounded; `/api/health` (service · database size vs the 10 GB cap · acquisition · backups) and a Health screen every account can open; `pool.on('error')`, graceful SIGTERM/SIGINT, orphaned-run reconciliation at start, `persistent_sync_failure` CRITICAL after N consecutive halts (cleared by the next clean pass — loop or one-shot), hourly database-size check; `sms retention` (sync_run 90 d keeping the newest per table, non-CRITICAL findings 365 d, expired sessions; never audit/product_change/readings — IFL's decision); migration 030 makes `audit_log` append-only at the database (with the `db_ddladmin` caveat written down); `cutover`/`epoch:purge` take the lock, refuse a pass in flight and require `--backup=<existing .bak>`; scripts for DB maintenance, scheduled tasks (`-WhatIf` rehearsed) and configuration backup; DEPLOY.md gains Health, Scheduled tasks, Retention, Database maintenance, Configuration backup, Upgrading and rolling back; CHANGELOG 0.2.0. **Acceptance rehearsed 15 Sep 2026** (§2). |
+| 11 — Security & operations | **COMPLETE — corrected 24 Sep 2026, later the same day.** This row read PARTIAL below (RT-014, no server-side response-size/row-count cap independent of SQL, was the named blocker); RT-014 is now **fixed**, `855045f` — `api/src/middleware/responseCap.ts`, mounted globally, refuses `413` past `MAX_RESPONSE_ROWS`/`MAX_RESPONSE_BYTES`, independent of SQL — see §2's dated entry above. RT24-01 (CRITICAL, unauthenticated DoS via a malformed session cookie) was already fixed the same day it was found, `3e0d349`. Kept, not deleted: 23 Sep red-team audit RT-014 and RT-015 (malformed rows silently read as zero, server-side) both fell inside this phase's own "without silent data loss" acceptance criterion; RT-015 fixed same-day (`71757a3`, `410c179`). Role mapping, retention policy and the live-host rehearsal still await IFL as before — those remain outside this row's own acceptance criterion. | Password change (self) and reset (admin) with session revocation and a length policy; last-admin guard; login/logout/failed-login/export audited; limiter and cache bounded; `/api/health` (service · database size vs the 10 GB cap · acquisition · backups) and a Health screen every account can open; `pool.on('error')`, graceful SIGTERM/SIGINT, orphaned-run reconciliation at start, `persistent_sync_failure` CRITICAL after N consecutive halts (cleared by the next clean pass — loop or one-shot), hourly database-size check; `sms retention` (sync_run 90 d keeping the newest per table, non-CRITICAL findings 365 d, expired sessions; never audit/product_change/readings — IFL's decision); migration 030 makes `audit_log` append-only at the database (with the `db_ddladmin` caveat written down); `cutover`/`epoch:purge` take the lock, refuse a pass in flight and require `--backup=<existing .bak>`; scripts for DB maintenance, scheduled tasks (`-WhatIf` rehearsed) and configuration backup; DEPLOY.md gains Health, Scheduled tasks, Retention, Database maintenance, Configuration backup, Upgrading and rolling back; CHANGELOG 0.2.0. **Acceptance rehearsed 15 Sep 2026** (§2). |
 | 12 — Testing & release | **PARTIAL** | **1745 tests passed / 4 skipped, 177 test files passed / 1 skipped (23 Sep 2026, after the red-team audit's 15-commit fix wave, HEAD `cf1c363`; measured directly this pass — see §2). Was 1246/120 at Phase 9 close (21 Sep), 1240/118 at Phase 8, 1194/110 at Phase 7, 1169/109 at Phase 6, 324/34 at Phase 0 closure.** All against fakes, passing under UTC±0 and UTC+5; CI workflow added (Wave A); `verify:release` gate (not re-run this pass — `npx vitest run` and `npm run typecheck` were). The component harness (closed at Phase 8: `vitest.config.ts`'s `environmentMatchGlobs: [['**/*.test.tsx', 'jsdom']]`, the rank-1 UI matrix, six drilldown hops, the route/client rank crosscheck) is unchanged by Phase 9. Phase 9 adds `PrintHead.test.tsx` (two-sided: header present vs a failed fetch's degraded block) and `web/src/print.landscape.guard.test.ts` (a source-level guard proving app.css's print-landscape CSS selector and Report.tsx's rendered aria-label stay in agreement — proven to fail on a deliberately mismatched string and pass once restored). Of the 16 top-level files in `web/src/screens/`, 2 (Readings, Weight) have a direct component test; the other 14, including Setup, do not. Still absent: any browser/layout harness (jsdom computes no layout; Wall at 1920px and print CSS are verified only by viewport-resize simulation plus an injected stylesheet, never a real print dialog — see CLAUDE.md's Phase 9 section) and `@testing-library/user-event` (not installed, so Setup's form blocks and the Changeover confirm flow cannot be component-tested with realistic event sequences). The rank-1 matrix closes the *rendering* question only — nobody has signed in as a viewer on a live instance; that still needs Q65–70 and an IFL-created account. No performance, load, FAT or SAT material — this row stays PARTIAL for that reason. **One unexplained intermittent failure remains open** (roughly 1 run in 74 under `--sequence.shuffle`, never captured with a test name — see §6); a suite reported "green" carries that caveat. |
-| 13 — Documentation | **PARTIAL** | `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected — the font claim in its "Internet access is not required" section was itself wrong until this pass, see §6/CLAUDE.md), credentials statement, technical history, questions status. Data dictionary, operator manual, FAT/SAT protocols absent. |
+| 13 — Documentation | **PARTIAL — corrected 24 Sep 2026, later the same day: three manuals now exist that this row used to list as absent.** `handover/FAT-PROTOCOL.md` (`d772d4b`), `handover/OPERATOR-MANUAL.md` (`eb36ddb`) and `handover/ADMIN-DEPLOY-MANUAL.md` (`4513d40`) are all in the tree. Still absent, and the reason this row stays PARTIAL rather than COMPLETE: SAT protocol, a data dictionary in the form IFL would recognise (`DATA-DICTIONARY.md` exists but was never checked against IFL's own expectation), and none of the three manuals has been read or exercised by anyone at IFL. `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected — the font claim in its "Internet access is not required" section was itself wrong until this pass, see §6/CLAUDE.md), credentials statement, technical history, questions status. |
 | 14 — Site commissioning | out of scope until a host exists | — |
 
 ---
 
 ## 2. Completed
+
+### 24 September 2026 — RT24-10/11/12/13 and RT-014 closed (later the same day than the entry below)
+
+A further pass on top of the RT24-01…13 fix wave below closes the four LOW findings that
+wave left open, plus RT-014 (the one item blocking Phase 11 from COMPLETE since the 23 Sep
+audit). Every hash re-verified this pass with `git show --stat`, not copied from a prior
+entry.
+
+- **RT24-10 (dead `/api/report` ignoring `from`/`to`)** — fixed `855045f`: the legacy route
+  is deleted server-side, and the web client's own dead caller (`getReport`, unreferenced
+  since Phase 6) is removed the same commit, closing the finding from both ends.
+- **RT24-11 (`X-Powered-By: Express` present)** — fixed `855045f`: `app.disable('x-powered-by')`
+  is now called in `createApp` (`sms/api/src/app.ts:126`), verified present in the tree.
+- **RT24-12 (`degradedReason` sometimes null while `status:"degraded"`)** — fixed `45bdba8`:
+  a new pure `degradedReasons()` (`sms/api/src/services/health.ts:424`) names every true
+  signal — pool error, size cap, stale/late/halted acquisition, blocking DQ findings, stale
+  backup — joined `'; '`, in `foldStatus`'s own priority order; `getHealth` wires it in. New
+  test in `health.test.ts` (stale acquisition, authenticated) is the RED-then-GREEN case.
+  This supersedes PROJECT_STATUS's own earlier "partly addressed... not specifically
+  re-verified" note on this finding (line ~86 below) — re-checked directly against current
+  `health.ts` this pass, not assumed: it is now fixed, not partial.
+- **RT24-13 (missing-field fuzz coverage absent on ~13 screens)** — extended, not closed to
+  zero, by `855045f`/`e8a1e39`: `missingField.fuzz.test.tsx` now covers the 8 remaining
+  report types (daily/shift/product/station/reject/sack/management-summary/machine-product)
+  and Health's `SystemHistoryBlock`. **Still not fuzzed, named rather than left implied:**
+  the four Product tabs (Running/Changeover/Catalogue/History) and `SyncHealthBlock` (Health's
+  other block). Three real defects the extended fuzz found were fixed the same day, `61de930`
+  (Shift.tsx's `> 0` empty gate false-emptying a stripped `cones` field; Summary.tsx/words.ts
+  printing the literal word "undefined" on a stripped `priorCoverage.daysWithData`;
+  `SystemHistoryBlock.tsx` crashing outright on a missing `rawRowCount`; a fourth, found in the
+  same pass though not in the audit's own numbering, Product.tsx silently dropping a row with
+  real weight data whenever its count fields were all missing).
+- **RT-014 (no server-side response-size/row-count cap independent of SQL)** — fixed
+  `855045f`: `sms/api/src/middleware/responseCap.ts`, mounted globally in `createApp`, refuses
+  with `413` whenever a response exceeds `MAX_RESPONSE_ROWS` (50,000) or `MAX_RESPONSE_BYTES`
+  (20 MB) (`sms/api/src/config.ts:75-77`) — independent of whatever the SQL layer already did,
+  never a silent truncation. `/api/spc` keeps its own tighter, separately-named cap
+  (`MAX_SPC_RANGE_DAYS = 186` days, `config.ts:87`) rather than relying on the row cap alone.
+  The register CSV export (`/api/events/export`) is deliberately **not** wrapped by this
+  middleware — it already enforces its own `CSV_ROW_CAP` with an explicit `truncated`/
+  `X-Export-Truncated` flag, a different, already-labelled contract this middleware would only
+  duplicate; this is a documented exclusion, not a gap. Web-side, `e8a1e39` has `usePolling`
+  encode a thrown `ApiError`'s status as a `[<status>] ` prefix and `Failed` (`ui/bits.tsx`)
+  render a plain-English "too much data" sentence for a `413`, instead of the generic outage
+  message.
+- **RT24-05, restated for FAT-PROTOCOL.md's PW10, not re-fixed this pass:** the write-back
+  verification fix (`25b02bc`, already recorded below) means a real read-back failure under
+  an EXECUTE-only role now raises the standing CRITICAL `pdas_write_unverified` finding
+  instead of silently downgrading — `PW10`'s FAT row is corrected to say so. This remains
+  proven by code path and unit test, not by a live structural-failure repro (the local dev
+  login still has SELECT, so `canReadBack: true` locally) — do not read the FAT correction as
+  a live rehearsal.
+
+**Phase-board consequence:** Phase 11 (Security & operations) returns to COMPLETE with this
+pass — RT-014 was the row's own named blocker and is now fixed; row 40 below is corrected in
+place with this note rather than rewritten. Phase 13 (Documentation) gains three manuals since
+this row was last written (`FAT-PROTOCOL.md`, `d772d4b`; `OPERATOR-MANUAL.md`, `eb36ddb`;
+`ADMIN-DEPLOY-MANUAL.md`, `4513d40`) — row 42 corrected in place below.
+
+**Suite, measured this pass:** `npx vitest run` from `sms/` — **201 files passed / 1 skipped
+(202), 2088 tests passed / 4 skipped (2092), 0 failed.** `npm run typecheck` (all five
+workspaces) — clean. Both commands re-run directly for this pass, not copied from a commit
+message.
+
+**Not done by this pass:** RT24-13's two named remaining gaps (Product tabs, `SyncHealthBlock`)
+are still unfuzzed; this is a documentation pass and does not extend the harness further. The
+branch remains unpushed; nothing here has touched the plant.
 
 ### 24 September 2026 — second red-team audit (RT24-01…13) and its fix wave; local PDAS write path proven end to end
 
@@ -85,6 +152,14 @@ query cost under load not yet measured. RT24-09 (`edae627`) — new read-only DQ
 ignores dates), RT24-11 (`X-Powered-By` header present), RT24-12 (`degradedReason` sometimes
 null while degraded — partly touched by `3e0d349`'s `markDegraded` change, not specifically
 re-verified), RT24-13 (missing-field fuzz coverage absent on ~13 screens) — all open.
+
+**Superseded 24 Sep 2026, later the same day (see §2's own dated entry above):** all four are
+now fixed or extended — RT24-10 `855045f` (route and dead client caller both deleted),
+RT24-11 `855045f` (`x-powered-by` disabled), RT24-12 `45bdba8` (`degradedReasons()` names every
+signal, re-verified directly against current `health.ts`, not left as "not specifically
+re-verified"), RT24-13 `855045f`/`e8a1e39` (fuzz extended to 8 more report types and
+`SystemHistoryBlock`; Product tabs and `SyncHealthBlock` remain unfuzzed, named not implied).
+Do not read this paragraph's "all open" as current.
 
 **The same day, the local PDAS write path was proven end to end for the first time** — not
 through hand-written `sqlcmd`, but through the app's own code
@@ -168,7 +243,9 @@ hijacking three anchor queries (one more than the audit's own text named,
 longer call simulator figures real.
 
 **Confirmed still open, not softened by this wave (do not read as fixed
-without re-checking `DEFECTS.md` Part 4):** RT-014 (no response-size cap),
+without re-checking `DEFECTS.md` Part 4):** RT-014 (no response-size cap —
+**fixed 24 Sep 2026, `855045f`, see §2's dated entry above; do not read this
+line as current**),
 RT-016 (an invalid calendar date crashes the DB driver instead of being
 validated), RT-017 (MachineProduct's on-screen column clipping — distinct
 from CLAUDE.md's Phase 9, which only suppressed it in *print*), RT-018 (a
