@@ -22,7 +22,7 @@ import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { adjustmentRestarts, getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getLive, invalidateLiveConfigCache, resolveLiveScope } from './services/live.js';
-import { epochFragment } from './services/generation.js';
+import { epochFragment, createScopeCache } from './services/generation.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
@@ -753,14 +753,27 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         loadProductTimeline(pool, cfg.lineId),
         loadProductCatalogue(pool),
       ]);
+      // WS-PERF4 (24 Sep 2026): one per-request generation-scope cache,
+      // shared by getWeightStations (its own trailing drift window) and
+      // productDisagreement (the selected reporting period) — the two
+      // windows are usually different, so this ordinarily still resolves
+      // twice, but never a THIRD time as it did before (measured in
+      // PERFORMANCE-APP-2026-09-24.md: stationMaterialCounts and
+      // rejectRatesByStation, both inside getWeightStations, each resolved
+      // the SAME (from, to) independently — that pair is now resolved once
+      // inside getWeightStations itself). Created fresh for this request
+      // only; never stored anywhere it could outlive it — see
+      // generation.ts's createScopeCache for why that matters.
+      const resolveScope = createScopeCache(pool);
       const [stations, disagreement] = await Promise.all([
-        getWeightStations(pool, cfg.lineId, from, to),
+        getWeightStations(pool, cfg.lineId, from, to, resolveScope),
         productDisagreement(
           pool,
           cfg.lineId,
           timeline,
           { from: periodFrom, to: periodTo, shift: q.data.shift ?? null },
           catalogue,
+          resolveScope,
         ),
       ]);
       const env = await envelope(pool, cfg.lineId, { ...stations, disagreement });

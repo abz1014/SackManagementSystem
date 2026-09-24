@@ -75,12 +75,20 @@ import { getUnmatchedRejects } from './rejects.js';
 // generation predicate at all, so a window spanning IFL's 2026-08-05 table
 // rebuild (or, on this dev copy, the plant simulator's overlapping
 // DATA_TP1U2_SIM generation) pools two physical generations of a table whose
-// identities both start at 1. Each function resolves ITS OWN scope —
-// generation.ts's file header explains why that is safe: keyed on
-// (lineId, from, to) only, so two independent resolves over the same window
-// are guaranteed to agree — rather than threading one scope object through
-// this file's signatures.
-import { andEpoch, epochWhere, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
+// identities both start at 1.
+//
+// WS-PERF4 (24 Sep 2026): both functions used to resolve THEIR OWN scope,
+// independently, for the exact same `(lineId, from, to)` window that
+// `getWeightStations` calls them both with — safe (generation.ts's
+// guarantee: keyed on the tuple, so independent resolves over the same
+// window agree), but wasteful: two extra SQL round-trip pairs per request,
+// measured in `PERFORMANCE-APP-2026-09-24.md`. `getWeightStations` now
+// resolves ONE scope for that shared window (see its own comment) and
+// passes it in; these two functions take a `GenerationScope` parameter
+// instead of resolving one apiece. `rejectRatesByStation` is still exported
+// and still used standalone by the finding-H2 regression test, so it keeps
+// resolving its own scope when no caller supplies one — see its own header.
+import { andEpoch, epochWhere, noteOf, resolveGenerationScope, type GenerationNote, type GenerationScope, type ScopeResolver } from './generation.js';
 
 /**
  * Group key for unmatched rejects that carry no station id. A literal that
@@ -355,9 +363,9 @@ export interface WeightStationsData {
    * WS-A1 (23 Sep 2026): which source generation `lineRejectRatePct`, every
    * station's `rejectRatePct` and `targetBasis: 'station_material'` counts
    * were confined to, and what was left out — `rejectRatesByStation`'s own
-   * resolve. `stationMaterialCounts` resolves the SAME generation
-   * independently (generation.ts's guarantee: keyed on (lineId, from, to)
-   * only), so one note describes both.
+   * generation scope. WS-PERF4 (24 Sep 2026): `stationMaterialCounts` is
+   * now handed that SAME resolved scope by `getWeightStations`, rather than
+   * resolving it independently, so one note still describes both.
    */
   generationNote: GenerationNote;
 }
@@ -370,6 +378,20 @@ export async function getWeightStations(
   lineId: number,
   from: string,
   to: string,
+  /**
+   * WS-PERF4 (24 Sep 2026): optional. Defaults to calling
+   * `resolveGenerationScope` directly on `pool` — the pre-existing
+   * behaviour, for every caller that does not pass one (every test in this
+   * suite). `app.ts`'s `/api/weight-stations` route passes a per-request
+   * `createScopeCache(pool)` instead, so IF this call's `(lineId, from, to)`
+   * window happens to match another resolve made through the SAME cache in
+   * the same request (e.g. `productAt.ts`'s `productDisagreement`, run
+   * alongside this call in that route's own `Promise.all`), the two share
+   * one answer rather than asking the database twice. See
+   * `generation.ts`'s `createScopeCache` for why this is safe and why it is
+   * scoped to one request.
+   */
+  resolveScope: ScopeResolver = (lid, window, tables) => resolveGenerationScope(pool, lid, window, tables),
 ): Promise<WeightStationsData> {
   // T3 (15 Sep 2026): bound the ledger fetch to `{ to }`, never `from`. This
   // used to call listCalibrationAdjustments with no window filter at all, so
@@ -439,22 +461,41 @@ export async function getWeightStations(
   // well as its run (calibration.ts header, Phase 9).
   const restarts = adjustmentRestarts(adjustments);
 
+  // WS-PERF4 (24 Sep 2026): resolve the ONE generation scope that
+  // rejectRatesByStation and stationMaterialCounts both need for THIS
+  // window, once, here — instead of each of them resolving it
+  // independently (measured: 3 resolves, 6 extra SQL round trips, in
+  // PERFORMANCE-APP-2026-09-24.md; the third was productAt.ts's
+  // productDisagreement, resolved by app.ts's own route handler, not here).
+  // `tables` is the UNION of what the two actually read — cone_event alone
+  // for stationMaterialCounts, cone_event+reject_event for
+  // rejectRatesByStation — never sack_event, which neither reads and which
+  // the old unscoped defaults on both functions scanned regardless. A scope
+  // resolved for the union answers a narrower consumer's own `epochIds()`
+  // calls identically to a resolve scoped to just its own tables, because
+  // `epochIds()` is computed per table from the tables actually scanned —
+  // see `createScopeCache`'s own doc comment for the one case (a DIFFERENT
+  // table request) where reuse would NOT be safe, which this avoids by
+  // requesting the union up front rather than reusing across mismatched
+  // requests.
+  const scope = await resolveScope(lineId, { from, to }, ['cone_event', 'reject_event']);
+
   // stationMaterialCounts runs AFTER the pair above, not alongside them:
-  // rejectRatesByStation issues two queries on this same pool in a fixed
+  // rejectRatesByStation issues three queries on this same pool in a fixed
   // order that several existing tests pin positionally (fakePool(...
   // responses) helpers in weightStations.test.ts, .window.test.ts,
-  // .gap.test.ts, .phase9.test.ts), and running a third query concurrently
-  // would race with — and silently steal a response slot from — those two.
-  // Sequencing it after keeps their two-response fixtures correct unchanged;
-  // a fixture that supplies no third response simply gets an empty
+  // .gap.test.ts, .phase9.test.ts), and running a fourth query concurrently
+  // would race with — and silently steal a response slot from — those
+  // three. Sequencing it after keeps their fixtures correct unchanged; a
+  // fixture that supplies no fourth response simply gets an empty
   // recordset here, which resolves to every station falling back to
   // targetBasis 'line_product' — the same target those tests already expect.
   const [drift, rejectStats] = await Promise.all([
     getStationDrift(pool, lineId, from, to, plausibility, { restarts }),
-    rejectRatesByStation(pool, lineId, from, to),
+    rejectRatesByStation(pool, lineId, from, to, scope),
   ]);
   const rejects = rejectStats.rates;
-  const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility);
+  const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility, scope);
   const generationNote = rejectStats.generationNote;
 
   const active = drift.stations.filter((s) => s.n > 0);
@@ -649,11 +690,16 @@ async function stationMaterialCounts(
   from: string,
   to: string,
   plausibility: PlausibilityRule,
+  scope: GenerationScope,
 ): Promise<Map<number, { materialId: number | null; n: number }[]>> {
-  // WS-A1: this function's own scope, resolved independently of
-  // rejectRatesByStation's (see this file's import header) — the two are
-  // guaranteed to agree over the same (lineId, from, to) by construction.
-  const scope = await resolveGenerationScope(pool, lineId, { from, to });
+  // WS-PERF4 (24 Sep 2026): `scope` is now RESOLVED BY THE CALLER
+  // (`getWeightStations`, once, for the window it shares with
+  // `rejectRatesByStation`) and passed in, rather than resolved here a
+  // second time for the identical `(lineId, from, to)` tuple — see
+  // `getWeightStations`'s own comment and `PERFORMANCE-APP-2026-09-24.md`.
+  // This function only ever reads `cone_event`, so it never needed the
+  // three-table default the old unscoped call used; the caller resolves
+  // with the union its OTHER consumer (`rejectRatesByStation`) also needs.
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const plaus = plausibleWhere(req, 'weight_g', { loG: plausibility.coneLoG, hiG: plausibility.coneHiG });
   const where = andEpoch(
@@ -719,6 +765,21 @@ export async function rejectRatesByStation(
   lineId: number,
   from: string,
   to: string,
+  /**
+   * WS-PERF4 (24 Sep 2026): optional, so this function's own resolve stays
+   * available for the finding-H2 regression test and any other standalone
+   * caller. `getWeightStations` now resolves the shared `(lineId, from, to)`
+   * window ONCE and passes the answer in here (and to `stationMaterialCounts`)
+   * instead of each of the two resolving it independently — see
+   * `getWeightStations`'s own comment and `PERFORMANCE-APP-2026-09-24.md`.
+   * The `tables` list a standalone resolve asks for is `['cone_event',
+   * 'reject_event']` — the two tables this function actually reads, never
+   * `sack_event` — fixing the second finding in that same report: the old
+   * unconditional `resolveGenerationScope(pool, lineId, { from, to })` call
+   * defaulted to all three `EVENT_TABLES` for a function that never reads
+   * `sack_event`.
+   */
+  scope?: GenerationScope,
 ): Promise<{
   rates: Map<number, number>;
   totalCones: number;
@@ -727,17 +788,11 @@ export async function rejectRatesByStation(
   /** WS-A1, 23 Sep 2026: this function's own generation scope — see this file's import header. */
   generationNote: GenerationNote;
 }> {
-  // Resolved ONCE and reused for every query below (the per-station query,
-  // the totals query, and the getUnmatchedRejects call) so this function's
-  // own three queries cannot land on different generations of the same
-  // window — but NOT shared with stationMaterialCounts's own resolve (see
-  // that function), which is the point: each service/function resolves for
-  // itself rather than threading one object across the file's exports.
-  const scope = await resolveGenerationScope(pool, lineId, { from, to });
+  const resolvedScope = scope ?? (await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event', 'reject_event']));
 
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
-  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, scope, 'cone_event', { prefix: 'wsc' });
-  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, scope, 'reject_event', { prefix: 'wsr' });
+  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'cone_event', { prefix: 'wsc' });
+  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'reject_event', { prefix: 'wsr' });
   const r = await req.query<{ st: number; cones: number; rejects: number }>(`
       WITH c AS (
         SELECT source_station AS st, COUNT(*) AS n
@@ -767,8 +822,8 @@ export async function rejectRatesByStation(
    * real data, which is exactly why this had gone unnoticed.
    */
   const totalsReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
-  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, scope, 'cone_event', { prefix: 'wstc' });
-  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, scope, 'reject_event', { prefix: 'wstr' });
+  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'cone_event', { prefix: 'wstc' });
+  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'reject_event', { prefix: 'wstr' });
   const totals = await totalsReq.query<{ cones: number; rejects: number }>(`
       SELECT
         (SELECT COUNT(*) FROM sms.cone_event
@@ -798,7 +853,7 @@ export async function rejectRatesByStation(
   const unmatchedOf = await getUnmatchedRejects(
     pool,
     lineId,
-    { from, to, scope },
+    { from, to, scope: resolvedScope },
     `ISNULL(CAST(re.source_station AS varchar(12)), '${NO_STATION}')`,
   );
   let totalUnmatchedRejects = 0;
@@ -822,6 +877,6 @@ export async function rejectRatesByStation(
     totalCones: Number(t?.cones ?? 0),
     totalRejects: Number(t?.rejects ?? 0),
     totalUnmatchedRejects,
-    generationNote: noteOf(scope),
+    generationNote: noteOf(resolvedScope),
   };
 }

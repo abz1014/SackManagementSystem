@@ -33,7 +33,7 @@ import { classifyConeDetail, isPlausibleWeight, type ConeState } from '@sms/shar
 import { toPlantMs } from './plantClock.js';
 import { getPlausibilityRule } from './admin.js';
 import type { ProductCatalogue } from './productLimits.js';
-import { resolveGenerationScope, epochWhere, noteOf, type GenerationNote } from './generation.js';
+import { resolveGenerationScope, epochWhere, noteOf, type GenerationNote, type ScopeResolver } from './generation.js';
 
 export interface ProductInForce {
   productId: number;
@@ -486,6 +486,19 @@ export async function productDisagreement(
   timeline: ProductTimeline,
   range: DayRange,
   catalogue?: ProductCatalogue,
+  /**
+   * WS-PERF4 (24 Sep 2026): optional, defaults to calling
+   * `resolveGenerationScope` directly, exactly as before. `app.ts`'s
+   * `/api/weight-stations` route passes its per-request
+   * `createScopeCache(pool)` instead — this call's window (`range.from`/
+   * `range.to`, the REPORTING period) is usually different from
+   * `getWeightStations`'s own trailing drift window on that same route, so
+   * this ordinarily still resolves separately; the shared cache only saves
+   * a round trip on the rarer case where the two windows (and table lists)
+   * happen to coincide. `attention.ts`'s own call passes no resolver and is
+   * unaffected.
+   */
+  resolveScope: ScopeResolver = (lid, window, tables) => resolveGenerationScope(pool, lid, window, tables),
 ): Promise<ProductDisagreement> {
   type Win = LimitWindow & { anyMaterial?: boolean };
   const windows: Win[] = catalogue
@@ -512,7 +525,7 @@ export async function productDisagreement(
   const plausibility = await getPlausibilityRule(pool, lineId);
   // Resolved on line and day range only — never on `range.shift` — so the
   // shift breakdown and the period total land on the same generation.
-  const scope = await resolveGenerationScope(pool, lineId, { from: range.from, to: range.to }, ['cone_event']);
+  const scope = await resolveScope(lineId, { from: range.from, to: range.to }, ['cone_event']);
 
   const req = pool
     .request()

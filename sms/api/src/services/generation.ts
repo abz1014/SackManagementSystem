@@ -332,6 +332,79 @@ export function epochFragment(
   };
 }
 
+/**
+ * The shape `resolveGenerationScope` itself has, minus `pool` — what a
+ * caller threads through when it wants to resolve THROUGH a per-request
+ * cache instead of calling `resolveGenerationScope` directly. Every existing
+ * call site keeps working unchanged: passing no resolver at all still means
+ * "call `resolveGenerationScope` on this pool", exactly as before.
+ */
+export type ScopeResolver = (
+  lineId: number,
+  window: GenerationWindow,
+  tables?: readonly EventTable[],
+) => Promise<GenerationScope>;
+
+/**
+ * A PER-REQUEST memo over `resolveGenerationScope` (WS-PERF4, 24 Sep 2026).
+ *
+ * WHY THIS EXISTS. `PERFORMANCE-APP-2026-09-24.md` measured `/api/
+ * weight-stations` resolving the identical `(lineId, from, to)` window THREE
+ * separate times in one request — `weightStations.ts`'s `stationMaterialCounts`
+ * and `rejectRatesByStation`, plus `productAt.ts`'s `productDisagreement`,
+ * called from `app.ts`'s own `Promise.all` for that route — six extra SQL
+ * round trips (two queries per resolve) beyond the endpoint's real data
+ * queries. `resolveGenerationScope`'s own file header explains why each of
+ * those three call sites resolves independently BY DESIGN: keyed on
+ * `(lineId, from, to, tables)` only, so any two resolves over the same
+ * tuple are GUARANTEED to land on the same answer, which is what let six
+ * services be scoped by different workers, in parallel, over the same red-
+ * team pass, with no shared plumbing. That guarantee is what makes a memo
+ * SAFE here — caching "the same question always gets the same answer" never
+ * changes what a scoped query sees; it only stops asking the question twice.
+ *
+ * SCOPED TO ONE REQUEST, NEVER LONGER. Create one of these per HTTP request
+ * (in the route handler) and thread it through the services that need to
+ * resolve a generation for THAT request. Never hold it on the pool, the
+ * `Express` app, or any other object that outlives a single request — a
+ * scope resolved for one request's window answering a LATER request is
+ * exactly the cross-window pooling defect this generation-scoping work
+ * exists to prevent (the D-17/D-18 class: `rejectSpc.ts` and `spc.ts` each
+ * once carried their own hand-rolled, driftable copy of this rule).
+ *
+ * KEYED ON THE FULL TUPLE, INCLUDING `tables` — DELIBERATELY, not just
+ * `(lineId, from, to)`. Two calls for the same window but a DIFFERENT table
+ * list (e.g. `stationMaterialCounts`'s `['cone_event']` vs a caller that also
+ * needs `reject_event`) must not share one answer: `GenerationScope.epochIds`
+ * only carries epoch ids for the tables that were actually scanned, so
+ * reusing a narrower scope for a wider need would silently return `[]` —
+ * "no predicate" — for the table that was never asked about, which is
+ * unconstrained, not merely stale. Exact-tuple keying costs nothing here:
+ * the two real call sites that share this route's trailing `(from, to)`
+ * window (`stationMaterialCounts`, `rejectRatesByStation`) are made to ask
+ * for the SAME table list (see `weightStations.ts`), so they still collapse
+ * to one resolve; `productDisagreement`'s own, usually DIFFERENT, period
+ * window gets its own resolve, correctly, whether or not it happens to
+ * coincide with the trailing window.
+ *
+ * Safe under concurrent callers in the same request (several of these calls
+ * run inside a `Promise.all`): the promise is cached BEFORE it is awaited,
+ * so two concurrent calls for the same key share the one in-flight promise
+ * rather than racing to resolve twice.
+ */
+export function createScopeCache(pool: ConnectionPool): ScopeResolver {
+  const cache = new Map<string, Promise<GenerationScope>>();
+  return (lineId, window, tables = EVENT_TABLES) => {
+    const key = `${lineId}:${window.from ?? ''}:${window.to ?? ''}:${[...tables].slice().sort().join(',')}`;
+    let p = cache.get(key);
+    if (!p) {
+      p = resolveGenerationScope(pool, lineId, window, tables);
+      cache.set(key, p);
+    }
+    return p;
+  };
+}
+
 /** `epochWhere` folded into an existing WHERE fragment. */
 export function andEpoch(
   where: string,
