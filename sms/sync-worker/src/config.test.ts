@@ -32,6 +32,14 @@ describe('loadSyncConfig — numeric keys', () => {
     expect(c.lineId).toBe(1);
     expect(c.overlapRows).toBe(500);
     expect(c.intervalSeconds).toBe(60);
+    // WS-PERF3, Job 2: the PDAS mirror's full-read backstop, 10 minutes by default.
+    expect(c.pdasMirrorRefreshSeconds).toBe(600);
+  });
+
+  it('reads a configured PDAS_MIRROR_REFRESH_SECONDS and refuses a bad one', () => {
+    expect(loadSyncConfig({ ...BASE, PDAS_MIRROR_REFRESH_SECONDS: '120' }).pdasMirrorRefreshSeconds).toBe(120);
+    expect(() => loadSyncConfig({ ...BASE, PDAS_MIRROR_REFRESH_SECONDS: '2' })).toThrow(/at least 5/);
+    expect(() => loadSyncConfig({ ...BASE, PDAS_MIRROR_REFRESH_SECONDS: 'soon' })).toThrow(/PDAS_MIRROR_REFRESH_SECONDS must be a whole number/);
   });
 
   it('reads legitimate values, including a zero overlap', () => {

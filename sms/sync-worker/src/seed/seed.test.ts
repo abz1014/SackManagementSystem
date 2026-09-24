@@ -13,7 +13,17 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { seedReference } from './seedReference.js';
-import { pdasCreatedAsUtc, seedProducts } from './seedProducts.js';
+import { pdasCreatedAsUtc, seedProducts, __resetPdasMirrorFreshnessForTests } from './seedProducts.js';
+
+// WS-PERF3, Job 2 (24 Sep 2026): seedProducts now caches PDAS's MAX(id) per
+// table across calls, module-level, so it can skip a full re-read when
+// nothing changed (see seedProducts.ts). That cache must not leak between
+// otherwise-independent test cases sharing the 'PDAS_TP1U2' key below — every
+// test except the dedicated change-detection block wants the ordinary "first
+// sight, always read in full" behaviour.
+beforeEach(() => {
+  __resetPdasMirrorFreshnessForTests();
+});
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
 
@@ -143,15 +153,21 @@ describe('seedProducts', () => {
   it('reads PDAS with the vendor seed rows filtered out, and only ever SELECTs from it', async () => {
     const app = fakePool();
     await seedProducts(app, ifl, 'PDAS_TP1U2');
-    expect(ifl.statements).toHaveLength(6);
+    // WS-PERF3, Job 2: statement 0 is now the cheap MAX(id) change-detection
+    // probe (one round trip, UNION ALL across all six tables) that runs
+    // before the six full reads it gates — see the dedicated describe block
+    // below for that probe's own behaviour. The six full reads still follow
+    // it, unconditionally, on this — the first — call.
+    expect(ifl.statements).toHaveLength(7);
+    expect(ifl.statements[0]!.sql).toMatch(/UNION ALL SELECT/);
     for (const s of ifl.statements) expect(s.sql.trim()).toMatch(/^SELECT/);
-    expect(ifl.statements[3]!.sql).toMatch(/WHERE MaterialId > 10/);
-    expect(ifl.statements[3]!.sql).toMatch(/MaterialDesc2/);
+    expect(ifl.statements[4]!.sql).toMatch(/WHERE MaterialId > 10/);
+    expect(ifl.statements[4]!.sql).toMatch(/MaterialDesc2/);
     // PackSchemas carries no vendor-seed id noise (both real rows are ids 1-2) — unfiltered.
-    expect(ifl.statements[4]!.sql).toMatch(/FROM \[PDAS_TP1U2\]\.dbo\.PackSchemas/);
-    expect(ifl.statements[4]!.sql).not.toMatch(/WHERE/);
+    expect(ifl.statements[5]!.sql).toMatch(/FROM \[PDAS_TP1U2\]\.dbo\.PackSchemas/);
+    expect(ifl.statements[5]!.sql).not.toMatch(/WHERE/);
     // Pallets uses the same vendor-seed convention as Materials.
-    expect(ifl.statements[5]!.sql).toMatch(/FROM \[PDAS_TP1U2\]\.dbo\.Pallets WHERE PalletId > 10/);
+    expect(ifl.statements[6]!.sql).toMatch(/FROM \[PDAS_TP1U2\]\.dbo\.Pallets WHERE PalletId > 10/);
   });
 
   it('mirrors each reference row with a MERGE, casting Count to int and keeping the text', async () => {
@@ -276,6 +292,118 @@ describe('seedProducts', () => {
     await seedProducts(app, ifl, 'PDAS_TP1U2');
     const ins = app.statements.find((s) => s.sql.includes('INSERT INTO sms.product_limit_version'))!;
     expect(ins.inputs.get('sp')).toBeNull();
+  });
+
+  /**
+   * WS-PERF3, Job 2 (24 Sep 2026). PERFORMANCE-SOURCE-LOAD-2026-09-24.md §1/§2
+   * named seedProducts the one query class in the system with no watermark:
+   * six unfiltered, unconditional reads of PDAS's reference tables, every
+   * single pass, forever, regardless of whether anything changed. This drives
+   * seedProducts a SECOND time with nothing different at the source and
+   * proves it no longer repeats the full six-table read when nothing moved.
+   */
+  describe('change detection — does not re-read PDAS in full when nothing changed', () => {
+    it('a second call, same source state, reads only the cheap probe — not the six full tables', async () => {
+      const iflCall1 = fakePool([blends, counts, tubes, mats, packSchemas, pallets]);
+      const appCall1 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall1, iflCall1, 'PDAS_TP1U2');
+      // First call, nothing cached yet: the full read happens, as every other
+      // test in this file already pins.
+      expect(iflCall1.statements.some((s) => s.sql.includes('FROM [PDAS_TP1U2].dbo.Blends'))).toBe(true);
+
+      const iflCall2 = fakePool([blends, counts, tubes, mats, packSchemas, pallets]);
+      const appCall2 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall2, iflCall2, 'PDAS_TP1U2');
+
+      // THE regression this test exists to catch: against the old,
+      // unconditional code this second call issues the same six full-table
+      // SELECTs (and six more MERGEs) even though nothing at the source
+      // changed between the two calls.
+      expect(iflCall2.statements.some((s) => s.sql.includes('FROM [PDAS_TP1U2].dbo.Blends'))).toBe(false);
+      expect(appCall2.statements.some((s) => s.sql.includes('MERGE'))).toBe(false);
+    });
+
+    it('probeReferenceMaxIds itself reports the new MAX(id) once a row with a higher id exists', async () => {
+      const { probeReferenceMaxIds } = await import('./seedProducts.js');
+      const probeNeedle = "UNION ALL SELECT 'Pallets'";
+      const before = fakePool([
+        { needle: probeNeedle, rows: [
+          { tbl: 'Blends', hi: 1 }, { tbl: 'Counts', hi: 2 }, { tbl: 'TubeTypes', hi: 3 },
+          { tbl: 'Materials', hi: 21 }, { tbl: 'PackSchemas', hi: 1 }, { tbl: 'Pallets', hi: 21 },
+        ] },
+      ]);
+      const after = fakePool([
+        { needle: probeNeedle, rows: [
+          { tbl: 'Blends', hi: 1 }, { tbl: 'Counts', hi: 2 }, { tbl: 'TubeTypes', hi: 3 },
+          { tbl: 'Materials', hi: 22 }, { tbl: 'PackSchemas', hi: 1 }, { tbl: 'Pallets', hi: 21 },
+        ] },
+      ]);
+      const p1 = await probeReferenceMaxIds(before, '[PDAS_TP1U2]');
+      const p2 = await probeReferenceMaxIds(after, '[PDAS_TP1U2]');
+      expect(p1.Materials).toBe(21);
+      expect(p2.Materials).toBe(22);
+      expect(p1).not.toEqual(p2);
+      // one round trip, not six
+      expect(before.statements).toHaveLength(1);
+      expect(before.statements[0]!.sql).toMatch(/UNION ALL SELECT/);
+    });
+
+    it('the time-based backstop reads in full again after the refresh window, even with no id change — the gap a MAX(id) probe cannot see (an active-flag flip, a limits edit)', async () => {
+      let clock = 1_000_000;
+      const iflCall1 = fakePool([blends, counts, tubes, mats, packSchemas, pallets]);
+      const appCall1 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall1, iflCall1, 'PDAS_TP1U2', { now: () => clock, fullRefreshMs: 60_000 });
+
+      // Same source state, well within the backstop window: skipped, as the
+      // first test in this block already proves generally.
+      clock += 10_000;
+      const iflCall2 = fakePool([blends, counts, tubes, mats, packSchemas, pallets]);
+      const appCall2 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall2, iflCall2, 'PDAS_TP1U2', { now: () => clock, fullRefreshMs: 60_000 });
+      expect(iflCall2.statements.some((s) => s.sql.includes('FROM [PDAS_TP1U2].dbo.Blends'))).toBe(false);
+
+      // Past the backstop window, same source state: reads in full again —
+      // this is what bounds the staleness of an in-place PDAS edit (an
+      // active-flag flip, a limits UPDATE) that never changes any table's
+      // MAX(id) and so the probe alone would never notice.
+      clock += 60_000;
+      const iflCall3 = fakePool([blends, counts, tubes, mats, packSchemas, pallets]);
+      const appCall3 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall3, iflCall3, 'PDAS_TP1U2', { now: () => clock, fullRefreshMs: 60_000 });
+      expect(iflCall3.statements.some((s) => s.sql.includes('FROM [PDAS_TP1U2].dbo.Blends'))).toBe(true);
+    });
+
+    it('a changed probe result forces the full read even well inside the backstop window — seedProducts end to end', async () => {
+      const probeNeedle = "UNION ALL SELECT 'Pallets'";
+      const probeUnchanged = {
+        needle: probeNeedle,
+        rows: [
+          { tbl: 'Blends', hi: 1 }, { tbl: 'Counts', hi: 2 }, { tbl: 'TubeTypes', hi: 3 },
+          { tbl: 'Materials', hi: 21 }, { tbl: 'PackSchemas', hi: 1 }, { tbl: 'Pallets', hi: 21 },
+        ],
+      };
+      const probeChanged = {
+        needle: probeNeedle,
+        rows: [
+          { tbl: 'Blends', hi: 1 }, { tbl: 'Counts', hi: 2 }, { tbl: 'TubeTypes', hi: 3 },
+          // A new material was created at PDAS: MaterialId's own MAX moved.
+          { tbl: 'Materials', hi: 22 }, { tbl: 'PackSchemas', hi: 1 }, { tbl: 'Pallets', hi: 21 },
+        ],
+      };
+      let clock = 1_000_000;
+      const iflCall1 = fakePool([blends, counts, tubes, mats, packSchemas, pallets, probeUnchanged]);
+      const appCall1 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall1, iflCall1, 'PDAS_TP1U2', { now: () => clock, fullRefreshMs: 600_000 });
+
+      // Ten seconds later, deep inside the ten-minute backstop window, but
+      // the probe now reports a different Materials MAX: the full read must
+      // run anyway, not wait for the backstop.
+      clock += 10_000;
+      const iflCall2 = fakePool([blends, counts, tubes, mats, packSchemas, pallets, probeChanged]);
+      const appCall2 = fakePool([{ needle: 'FROM sms.product_limit_version', rows: [] }]);
+      await seedProducts(appCall2, iflCall2, 'PDAS_TP1U2', { now: () => clock, fullRefreshMs: 600_000 });
+      expect(iflCall2.statements.some((s) => s.sql.includes('FROM [PDAS_TP1U2].dbo.Materials'))).toBe(true);
+    });
   });
 });
 

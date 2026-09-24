@@ -74,6 +74,28 @@ export interface SyncConfig {
    * existing deployment. See @sms/shared's checkPlantOffset.
    */
   plantUtcOffsetMinutes?: number;
+  /**
+   * WS-PERF3, Job 2 (24 Sep 2026). `seedProducts.ts` mirrors six PDAS
+   * reference tables every pass with no watermark — PERFORMANCE-SOURCE-LOAD-
+   * 2026-09-24.md §1/§2 named this the one query class in the system whose
+   * cost does NOT shrink with scale. It now probes MAX(id) on all six (one
+   * cheap round trip, an index operation, not a scan) every pass and only
+   * does the full six-table read when a probed id has moved — which catches
+   * every genuine INSERT (a new blend/count/tube/material/pallet, i.e. IFL
+   * creating a product) within one pass. A MAX(id) probe cannot see an
+   * UPDATE to an EXISTING row (an active-flag flip, a limits edit) because
+   * none of these tables carries a last-modified column PDAS itself
+   * maintains and CLAUDE.md/Q21 forbid adding one — so this is also a
+   * backstop: however long the probe has reported no change, do a full read
+   * anyway once this many seconds have passed. PDAS_MIRROR_REFRESH_SECONDS,
+   * default 600 (10 minutes) — the staleness this introduces for an
+   * in-place edit that never changes a row's id. A genuine new product is
+   * never more than one pass (SYNC_INTERVAL_SECONDS, default 60s) behind,
+   * because the probe itself runs every pass. Floor 5, same as
+   * SYNC_INTERVAL_SECONDS's own floor; setting it below intervalSeconds
+   * buys nothing since the probe already runs every pass.
+   */
+  pdasMirrorRefreshSeconds: number;
   app: DbConfig;
   iflData: DbConfig;
   pdasDbName: string;
@@ -144,6 +166,7 @@ export function loadSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncConfig
     // unlike a bare Number()), and .optional() is what makes an unset
     // PLANT_UTC_OFFSET_MINUTES mean "skip the check" rather than "0".
     plantUtcOffsetMinutes: z.coerce.number().int().optional().parse(blankToUndefined(env.PLANT_UTC_OFFSET_MINUTES)),
+    pdasMirrorRefreshSeconds: intEnv(env, 'PDAS_MIRROR_REFRESH_SECONDS', 600, 5),
     app,
     iflData,
     pdasDbName: env.IFL_DB_NAME_PDAS ?? 'PDAS_TP1U2',

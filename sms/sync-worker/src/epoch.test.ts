@@ -42,7 +42,6 @@ vi.mock('./reader/IflSqlAdapter.js', () => ({
 }));
 
 const { resolveEpoch, checkColumnDrift, readSourceIdentity } = await import('./epoch.js');
-const { createAdapter } = await import('./reader/SourceAdapter.js');
 
 const OPEN = {
   epoch_id: 9,
@@ -231,10 +230,8 @@ describe('checkColumnDrift', () => {
  */
 describe('resolveEpoch + checkColumnDrift together (Job 1: no duplicate catalogue read)', () => {
   it('reads the live column list only once per table per pass', async () => {
-    const adapter = createAdapter(def.systemCode, iflPool, def as never);
     const { epoch, columnList } = await resolveEpoch(appPool, iflPool, def, 1, iflDb);
     await checkColumnDrift(appPool, columnList, epoch, def);
     expect(source.columnListCalls).toBe(1);
-    void adapter; // constructed the same way runner.ts constructs it, unused beyond that
   });
 });

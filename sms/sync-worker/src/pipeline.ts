@@ -118,7 +118,13 @@ export async function runFullSync(
   // and no foreign key ties them to sms.product.
   let productMirrorError: string | null = null;
   try {
-    await seedProducts(appPool, iflPool, cfg.pdasDbName);
+    // WS-PERF3, Job 2 (24 Sep 2026): seedProducts probes PDAS's reference
+    // tables cheaply every pass and only reads them in full when something
+    // moved or `pdasMirrorRefreshSeconds` has elapsed since the last full
+    // read (see seedProducts.ts and config.ts's doc comment on that field).
+    await seedProducts(appPool, iflPool, cfg.pdasDbName, {
+      fullRefreshMs: cfg.pdasMirrorRefreshSeconds * 1000,
+    });
     await clearFindings(appPool, PRODUCT_MIRROR_FAILED);
   } catch (err) {
     productMirrorError = err instanceof Error ? err.message : String(err);

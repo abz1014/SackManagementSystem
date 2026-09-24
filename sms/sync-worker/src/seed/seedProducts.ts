@@ -29,12 +29,119 @@ function safeDbName(name: string): string {
   return `[${name}]`;
 }
 
+/**
+ * WS-PERF3, Job 2 (24 Sep 2026): the six reference tables this mirror reads,
+ * each with the id column its own IDENTITY lives on. PERFORMANCE-SOURCE-
+ * LOAD-2026-09-24.md §1/§2 named this mirror the one query class in the
+ * system with no watermark — a full, unfiltered, unconditional read of all
+ * six every pass, forever, regardless of whether anything changed. Today
+ * that is 14 rows and free; it is also the only query shape here that does
+ * NOT get cheaper in relative terms as it repeats, and PDAS is exactly where
+ * IFL create products, so it grows with their product range.
+ */
+const REFERENCE_ID_COLUMNS = [
+  ['Blends', 'BlendId'],
+  ['Counts', 'CountId'],
+  ['TubeTypes', 'TubeTypeId'],
+  ['Materials', 'MaterialId'],
+  ['PackSchemas', 'PackSchemaId'],
+  ['Pallets', 'PalletId'],
+] as const;
+type ReferenceTable = (typeof REFERENCE_ID_COLUMNS)[number][0];
+export type ReferenceMaxIds = Record<ReferenceTable, number | null>;
+
+/**
+ * One round trip, six MAX(id) probes UNIONed together — each an index
+ * operation on the table's own clustered PK (the same MIN/MAX-on-an-indexed-
+ * column optimisation PERFORMANCE-SOURCE-LOAD-2026-09-24.md §2 confirmed for
+ * DATA_TP1U2's maxSourceId/observeArchivedFloor: 2-3 logical reads, not a
+ * scan of the table), never the full unbounded SELECT this mirror otherwise
+ * issues. It catches every INSERT — a new blend, count, tube type, material
+ * or pallet, which is what "IFL creates a product" actually is — within one
+ * pass, because PDAS's own IDENTITY columns only go up.
+ *
+ * What it CANNOT see: an UPDATE to an EXISTING row that leaves its id
+ * unchanged — SetMaterialStatusActive retiring/reactivating a material,
+ * SetPalletStatusActive on a pallet, or the guarded single-row
+ * UPDATE dbo.Materials this codebase's own (currently disabled) write path
+ * uses to change limits. None of these tables carries a last-modified column
+ * PDAS itself maintains — Materials.Timestamp is creation-only, never
+ * touched by an UPDATE (see the long comment on the limits-history block
+ * below) — and CLAUDE.md rule 3 / Q21 forbid adding one to IFL's schema. So
+ * this probe alone is not a complete change detector; seedProducts pairs it
+ * with a time-based backstop that bounds that gap in seconds — see there.
+ */
+export async function probeReferenceMaxIds(iflPool: ConnectionPool, db: string): Promise<ReferenceMaxIds> {
+  const sql = REFERENCE_ID_COLUMNS.map(
+    ([table, col], i) =>
+      `${i === 0 ? 'SELECT' : 'UNION ALL SELECT'} '${table}' AS tbl, MAX([${col}]) AS hi FROM ${db}.dbo.[${table}]`,
+  ).join('\n');
+  const r = await iflPool.request().query<{ tbl: string; hi: unknown }>(sql);
+  const out = {} as Record<string, number | null>;
+  for (const [table] of REFERENCE_ID_COLUMNS) out[table] = null;
+  for (const row of r.recordset) out[row.tbl] = row.hi == null ? null : Number(row.hi);
+  return out as ReferenceMaxIds;
+}
+
+function maxIdsEqual(a: ReferenceMaxIds | null, b: ReferenceMaxIds): boolean {
+  if (a === null) return false;
+  return REFERENCE_ID_COLUMNS.every(([table]) => a[table] === b[table]);
+}
+
+interface MirrorFreshnessState {
+  maxIds: ReferenceMaxIds | null;
+  /** Wall-clock ms of the last time the FULL six-table read actually ran —
+   *  not the last probe, or the backstop below would never fire. */
+  lastFullReadAtMs: number;
+}
+
+/**
+ * Module-level: one sync-worker process reads one PDAS database (in
+ * practice, one process = one line = one PDAS mirror), so a process-lifetime
+ * cache is the right scope — cheap, and a worker restart starts empty, which
+ * is the safe default (the next pass reads in full, exactly like day one;
+ * never a stale answer surviving past a restart).
+ */
+const freshnessByDb = new Map<string, MirrorFreshnessState>();
+
+/** Test-only: the module-level cache above must not leak state between
+ *  otherwise-independent test cases in the same file. */
+export function __resetPdasMirrorFreshnessForTests(): void {
+  freshnessByDb.clear();
+}
+
+/** PDAS_MIRROR_REFRESH_SECONDS's default, in ms — see config.ts's own doc
+ *  comment on `pdasMirrorRefreshSeconds` for the reasoning. Exported so a
+ *  caller that does not thread config.ts through (none does today; kept for
+ *  a future one) still gets the same default seedProducts itself would use. */
+export const DEFAULT_PDAS_MIRROR_REFRESH_MS = 600_000;
+
 export async function seedProducts(
   appPool: ConnectionPool,
   iflPool: ConnectionPool,
   pdasDb: string,
+  opts: { fullRefreshMs?: number; now?: () => number } = {},
 ): Promise<void> {
   const db = safeDbName(pdasDb);
+  const fullRefreshMs = opts.fullRefreshMs ?? DEFAULT_PDAS_MIRROR_REFRESH_MS;
+  const now = (opts.now ?? Date.now)();
+
+  // ---- change detection (WS-PERF3, Job 2) ------------------------------
+  // Probe first, always — it is the cheap query. Skip the full six-table
+  // read (and every MERGE it would otherwise issue) only when NEITHER an id
+  // has moved NOR the backstop interval has elapsed since the last full read.
+  const probed = await probeReferenceMaxIds(iflPool, db);
+  const prior = freshnessByDb.get(pdasDb) ?? null;
+  const unchanged = maxIdsEqual(prior?.maxIds ?? null, probed);
+  const dueForBackstop = prior === null || now - prior.lastFullReadAtMs >= fullRefreshMs;
+  if (unchanged && !dueForBackstop) {
+    // lastFullReadAtMs is carried forward UNCHANGED: it must keep counting
+    // from the last time a full read actually happened, or the backstop
+    // could never fire.
+    freshnessByDb.set(pdasDb, { maxIds: probed, lastFullReadAtMs: prior!.lastFullReadAtMs });
+    return;
+  }
+
   // read PDAS reference (read-only login)
   const blends = (await iflPool.request().query(`SELECT BlendId, Blend FROM ${db}.dbo.Blends`)).recordset;
   const counts = (await iflPool.request().query(`SELECT CountId, Count FROM ${db}.dbo.Counts`)).recordset;
@@ -307,6 +414,11 @@ export async function seedProducts(
          VALUES (@id, @sp, @om, @op, SYSUTCDATETIME(), 1, 'pdas_observed', @reason)`,
       );
   }
+
+  // The full read just completed: record it as the freshness baseline so the
+  // NEXT pass's probe has something to compare against, and so the backstop
+  // above starts counting from now, not from whenever it last fired.
+  freshnessByDb.set(pdasDb, { maxIds: probed, lastFullReadAtMs: now });
 }
 
 /**

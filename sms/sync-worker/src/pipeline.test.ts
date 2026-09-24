@@ -21,8 +21,8 @@ vi.mock('./reader/sourceTables.js', () => ({ loadSourceTables: () => loadSourceT
 const seedReference = vi.fn(async (): Promise<void> => undefined);
 vi.mock('./seed/seedReference.js', () => ({ seedReference: () => seedReference() }));
 
-const seedProducts = vi.fn(async (): Promise<void> => undefined);
-vi.mock('./seed/seedProducts.js', () => ({ seedProducts: () => seedProducts() }));
+const seedProducts = vi.fn(async (..._a: unknown[]): Promise<void> => undefined);
+vi.mock('./seed/seedProducts.js', () => ({ seedProducts: (...a: unknown[]) => seedProducts(...a) }));
 
 const runOnce = vi.fn(async () => [{ table: 'sms_raw.cone_raw', read: 3, written: 3, watermarkFrom: 0 }]);
 // The probe (Phase 2 item 5) runs before the reader; the fake answers ok
@@ -55,7 +55,7 @@ const { runFullSync, PRODUCT_MIRROR_FAILED, TRANSFORM_FAILED } = await import('.
 const { TableHaltsError } = await import('./runner.js');
 
 const pool = {} as ConnectionPool;
-const cfg = { lineId: 1, overlapRows: 500, pdasDbName: 'PDAS_TP1U2', app: {} } as never;
+const cfg = { lineId: 1, overlapRows: 500, pdasDbName: 'PDAS_TP1U2', pdasMirrorRefreshSeconds: 600, app: {} } as never;
 
 beforeEach(() => {
   for (const m of [seedReference, seedProducts, runOnce, runTransform, recordHaltedRun, persistFindings, clearFindings, loadSourceTables, probeSource]) m.mockClear();
@@ -91,6 +91,15 @@ describe('runFullSync — the product mirror is isolated from ingestion', () => 
     expect(r.productMirrorError).toBeNull();
     expect(clearFindings).toHaveBeenCalledWith(pool, PRODUCT_MIRROR_FAILED);
     expect(persistFindings.mock.calls.some((c) => c[2][0]!.check_name === PRODUCT_MIRROR_FAILED)).toBe(false);
+  });
+
+  // WS-PERF3, Job 2: cfg.pdasMirrorRefreshSeconds is the operator-facing
+  // knob (PDAS_MIRROR_REFRESH_SECONDS) for seedProducts's change-detection
+  // backstop; this pins that runFullSync actually threads it through rather
+  // than silently falling back to seedProducts's own default forever.
+  it('threads pdasMirrorRefreshSeconds through to seedProducts, converted to ms', async () => {
+    await runFullSync(pool, pool, cfg);
+    expect(seedProducts).toHaveBeenCalledWith(pool, pool, 'PDAS_TP1U2', { fullRefreshMs: 600_000 });
   });
 
   it('the finding detail is bounded to the column width', async () => {
