@@ -14,6 +14,8 @@ import {
   andEpoch, noteOf, resolveGenerationScope,
   type EventTable, type GenerationNote, type GenerationScope,
 } from './generation.js';
+import { getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
+import { plantNowMs } from '@sms/shared';
 
 /**
  * 'product' since roadmap Phase 8 (15 Sep 2026): the product report. The key
@@ -338,6 +340,22 @@ export interface ProductionResult {
    * something somewhere was off.
    */
   dataIssues: ProductionDataIssue[];
+  /**
+   * RT24-04, 24 Sep 2026: true when `sms.weight_rule` (basis/tare) changed
+   * at least once inside `[from, to]`. `basis`/`tare` themselves are always
+   * the single value in force AT THE PERIOD END — this is the disclosure
+   * that more than one rule applied somewhere in the range, not a second
+   * figure. Always present so a screen doesn't have to special-case an
+   * absent field as "no change" (which would be the wrong, silent default
+   * for a query with no `from`, where the flag is always false anyway).
+   *
+   * DECLARED OPTIONAL for the same reason `sacksPassedScalePct?` and
+   * `generationNote?` are (see ProductionRow above): `getProduction` always
+   * sets it, but a required field would break hand-built fakes in report/
+   * summary test files other workers hold open mid-flight. Read a missing
+   * value as "not stated", never as "no change".
+   */
+  weightRuleChangedInPeriod?: boolean;
 }
 
 export async function getProduction(
@@ -464,12 +482,19 @@ export async function getProduction(
     sacks = res.recordset;
   }
 
-  // weight basis (Q4/Q5)
-  const wr = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tare: number }>(
-    `SELECT TOP 1 basis, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
-  );
-  const wrRow = wr.recordset[0];
-  // JUSTIFIED `?? 'as_recorded'`: an EMPTY recordset here is not a malformed
+  // weight basis (Q4/Q5) — RT24-04: as of the PERIOD END, not "whatever is
+  // configured right now". A single value for the whole aggregate query
+  // (this is a SQL-aggregate report, not a per-row JS loop — do not rewrite
+  // it into one for this), same idiom as sacks.ts/sackStock.ts/weights.ts.
+  // `tsTo` (replay) wins over `to` when both are given, matching the same
+  // precedence the cone/reject/sack queries above already give it via
+  // bindFilters; an unbounded call (no `to`, no `tsTo`) is judged as of now.
+  const periodEndPlantMs = p.tsTo ? Date.parse(p.tsTo) : p.to ? plantDayEndMs(p.to) : plantNowMs();
+  const periodStartPlantMs = p.from ? plantDayStartMs(p.from) : undefined;
+  const wr = await getWeightRuleAsOf(pool, lineId, periodEndPlantMs, periodStartPlantMs);
+  const wrRow = wr.rule;
+  const ruleChangedInPeriod = wr.ruleChangedInPeriod;
+  // JUSTIFIED `?? 'as_recorded'`: an EMPTY history here is not a malformed
   // row, it is a real, legitimate state — no weight_rule row has ever been
   // configured for this line — and 'as_recorded' is the documented default
   // basis (Q4/Q5 unresolved). Not the defect class this file is being
@@ -477,10 +502,10 @@ export async function getProduction(
   const basis = wrRow?.basis ?? 'as_recorded';
   // `tare` DOES get the same presence check as everything below, but only
   // when a row is actually present: a present-but-holed row (tare deleted)
-  // is exactly the malformed shape, unlike the empty-recordset case above.
+  // is exactly the malformed shape, unlike the empty-history case above.
   let tare = 0;
   if (wrRow) {
-    const tareRead = readNum(wrRow.tare);
+    const tareRead = readNum(wrRow.sackTareKg);
     if (!tareRead.ok) {
       issues.push({ field: 'sackWeightKg', group: null, reason: 'weight_rule row is missing its tare (sack_tare_kg)' });
     }
@@ -584,5 +609,6 @@ export async function getProduction(
     ...(classification ? { limitProvenance: classification.provenance } : {}),
     generationNote: noteOf(scope),
     dataIssues: issues,
+    weightRuleChangedInPeriod: ruleChangedInPeriod,
   };
 }

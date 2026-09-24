@@ -49,8 +49,10 @@ export async function loadMeta(pool: ConnectionPool, lineId: number): Promise<Me
     sourceAgeSeconds: number | null;
   }>(`
     SELECT
-      (SELECT TOP 1 basis FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC) AS weightBasis,
-      (SELECT TOP 1 mode  FROM sms.shift_rule  WHERE line_id=@line ORDER BY effective_from DESC) AS shiftMode,
+      -- RT24-04: "in force right now" — bounded by effective_from <=
+      -- SYSUTCDATETIME() so a future-dated row cannot read as current early.
+      (SELECT TOP 1 basis FROM sms.weight_rule WHERE line_id=@line AND effective_from <= SYSUTCDATETIME() ORDER BY effective_from DESC) AS weightBasis,
+      (SELECT TOP 1 mode  FROM sms.shift_rule  WHERE line_id=@line AND effective_from <= SYSUTCDATETIME() ORDER BY effective_from DESC) AS shiftMode,
       (SELECT MAX(transform_version) FROM sms.cone_event WHERE line_id=@line${coneF.sql ? ` AND ${coneF.sql}` : ''}) AS transformVersion,
       (SELECT MAX(finished_at_utc) FROM sms.sync_run WHERE line_id=@line AND outcome='success') AS lastSyncUtc,
       DATEDIFF(SECOND,

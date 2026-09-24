@@ -84,6 +84,7 @@ import { plantNowMs } from '@sms/shared';
 import { auditedWrite } from './audit.js';
 import { shiftWindowAt, type LiveShiftRule } from './live.js';
 import { resolveGenerationScope, epochFragment, epochWhere, noteOf, type GenerationNote } from './generation.js';
+import { getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 
 export const MOVEMENT_TYPES = ['opening', 'receipt', 'issue', 'consumption', 'adjustment'] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
@@ -186,6 +187,8 @@ export interface StockLedger {
    * other workers' open files did not break. Missing is "not stated".
    */
   openingOtherGenerations?: number;
+  /** RT24-04, 24 Sep 2026: true when sms.weight_rule changed at least once inside [from, to]. */
+  weightRuleChangedInPeriod?: boolean;
 }
 
 export interface WeighedFact {
@@ -225,6 +228,8 @@ export interface LedgerFacts {
   /** Passed through to the response; the arithmetic never reads them. */
   generationNote?: GenerationNote;
   openingOtherGenerations?: number;
+  /** RT24-04: true when sms.weight_rule changed at least once inside [from, to]. */
+  weightRuleChangedInPeriod?: boolean;
 }
 
 const zero = (): LedgerFlow => ({ sacks: 0, kg: 0 });
@@ -400,6 +405,7 @@ export function buildLedger(f: LedgerFacts): StockLedger {
     kgMissing,
     generationNote: f.generationNote,
     openingOtherGenerations: f.openingOtherGenerations ?? 0,
+    weightRuleChangedInPeriod: f.weightRuleChangedInPeriod,
   };
 }
 
@@ -496,9 +502,13 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
       (tsToMs != null ? ' AND occurred_at_plant <= @tsToDt' : '') +
       ` GROUP BY production_day, material_id, movement_type`,
   );
-  // 5. The weight rule on file — the same read production.ts makes.
-  const wr = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tare: number }>(
-    `SELECT TOP 1 basis, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+  // 5. The weight rule on file — RT24-04, 24 Sep 2026: as of the PERIOD END
+  // (tsTo when a replay cap is given, else `to`), the same "as of", not
+  // "right now", switch production.ts/sacks.ts make for the same table.
+  const wr = await getWeightRuleAsOf(
+    pool, lineId,
+    tsToMs ?? plantDayEndMs(q.to),
+    plantDayStartMs(q.from),
   );
   // 6. Product names (a few dozen rows).
   const prod = await pool.request().query<{ product_id: number; name: string | null }>(
@@ -525,8 +535,9 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
     priorManual: priorManual.recordset.map(toManual),
     weighed: weighed.recordset.map(toWeighed),
     manual: manual.recordset.map(toManual),
-    weightBasis: wr.recordset[0]?.basis ?? 'as_recorded',
-    tareKg: Number(wr.recordset[0]?.tare ?? 0),
+    weightBasis: wr.rule?.basis ?? 'as_recorded',
+    tareKg: wr.rule?.sackTareKg ?? 0,
+    weightRuleChangedInPeriod: wr.ruleChangedInPeriod,
     products: new Map(prod.recordset.map((p) => [Number(p.product_id), p.name ?? `Product ${p.product_id}`])),
     generationNote: noteOf(scope),
     openingOtherGenerations,

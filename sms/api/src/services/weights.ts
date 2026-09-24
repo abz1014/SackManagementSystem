@@ -6,12 +6,13 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import { getPlausibilityRule } from './admin.js';
 import { plausibleWhere } from './coneState.js';
 import {
   epochFragment, noteOf, resolveGenerationScope,
   type GenerationNote,
 } from './generation.js';
+import { getPlausibilityRuleAsOf, getWeightRuleAsOf, plantDayEndMs, plantDayStartMs, type RuleAsOfResult, type WeightRule } from './ruleAsOf.js';
+import { plantNowMs } from '@sms/shared';
 
 export type Basis = 'as_recorded' | 'gross' | 'net';
 
@@ -167,6 +168,9 @@ export interface WeightsData {
    * different populations presented as one.
    */
   generationNote?: GenerationNote;
+  /** RT24-04: true when sms.weight_rule or sms.plausibility_rule changed inside [from, to]. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 /**
@@ -205,13 +209,28 @@ const FALLBACK_CONE_SETPOINT_G = 1950;
  * full distribution `getWeights` computes below, has one place to get it
  * from rather than a second copy of this query (H8, 15 Sep 2026).
  */
-async function loadWeightRule(pool: ConnectionPool, lineId: number): Promise<{ basis: Basis; tube: number; tare: number }> {
-  const wr = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tube: number; tare: number }>(
-    `SELECT TOP 1 basis, cone_tube_weight_g AS tube, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
-  );
-  const raw = wr.recordset[0]?.basis;
+/**
+ * RT24-04, 24 Sep 2026: reads the rule AS OF `atPlantMs` (the period end
+ * when one is known, else "now") rather than whatever is configured today —
+ * the same "as of", not "right now", switch production.ts/sacks.ts/
+ * sackStock.ts make for this table. `getConfiguredBasis` (below) still means
+ * "right now" — its own callers ask for exactly that, Setup's current value.
+ */
+async function loadWeightRule(
+  pool: ConnectionPool,
+  lineId: number,
+  atPlantMs: number,
+  fromPlantMs?: number,
+): Promise<{ basis: Basis; tube: number; tare: number; ruleChangedInPeriod: boolean }> {
+  const wr: RuleAsOfResult<WeightRule | null> = await getWeightRuleAsOf(pool, lineId, atPlantMs, fromPlantMs);
+  const raw = wr.rule?.basis;
   const basis: Basis = raw === 'gross' || raw === 'net' ? raw : 'as_recorded';
-  return { basis, tube: Number(wr.recordset[0]?.tube ?? 70), tare: Number(wr.recordset[0]?.tare ?? 0.5) };
+  return {
+    basis,
+    tube: wr.rule?.coneTubeWeightG ?? 70,
+    tare: wr.rule?.sackTareKg ?? 0.5,
+    ruleChangedInPeriod: wr.ruleChangedInPeriod,
+  };
 }
 
 /**
@@ -223,7 +242,7 @@ async function loadWeightRule(pool: ConnectionPool, lineId: number): Promise<{ b
  * branch, which skips `getWeights` itself on purpose).
  */
 export async function getConfiguredBasis(pool: ConnectionPool, lineId: number): Promise<Basis> {
-  return (await loadWeightRule(pool, lineId)).basis;
+  return (await loadWeightRule(pool, lineId, plantNowMs())).basis;
 }
 
 export async function getWeights(
@@ -240,7 +259,11 @@ export async function getWeights(
   from?: string,
   to?: string,
 ): Promise<WeightsData> {
-  const rule = await loadWeightRule(pool, lineId);
+  // RT24-04: as of the PERIOD END (`to`, else "now" for an unbounded call),
+  // not whatever is configured today.
+  const periodEndPlantMs = to ? plantDayEndMs(to) : plantNowMs();
+  const periodStartPlantMs = from ? plantDayStartMs(from) : undefined;
+  const rule = await loadWeightRule(pool, lineId, periodEndPlantMs, periodStartPlantMs);
   // Explicit override wins; otherwise fall back to the configured basis.
   basis = basis ?? rule.basis;
   const tube = rule.tube;
@@ -272,7 +295,8 @@ export async function getWeights(
   // everywhere a statistic is computed. The `outliers` sample is the one
   // deliberate exception: it LISTS the excluded readings, which is the point
   // of it, and says so with includeImplausible.
-  const plausibility = await getPlausibilityRule(pool, lineId);
+  const plausR = await getPlausibilityRuleAsOf(pool, lineId, periodEndPlantMs, periodStartPlantMs);
+  const plausibility = plausR.rule;
   const conePlaus = { loG: plausibility.coneLoG, hiG: plausibility.coneHiG };
   const sackPlaus = { loG: plausibility.sackLoKg, hiG: plausibility.sackHiKg };
 
@@ -453,5 +477,7 @@ export async function getWeights(
           ? `Gross basis: readings as the PLC recorded them. Identical to As-recorded until IFL confirms the basis (Q4/Q5).`
           : `Weights as the PLC recorded them.`,
     generationNote: noteOf(scope),
+    weightRuleChangedInPeriod: rule.ruleChangedInPeriod,
+    plausibilityRuleChangedInPeriod: plausR.ruleChangedInPeriod,
   };
 }

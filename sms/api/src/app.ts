@@ -43,6 +43,7 @@ import {
 import { recordAudit, recordAuditIn, auditedWrite, listAuditPage } from './services/audit.js';
 import { getHealth } from './services/health.js';
 import { LastAdminError, passwordPolicyProblem } from './services/admin.js';
+import { getPlausibilityRuleAsOf, plantDayEndMs, plantDayStartMs } from './services/ruleAsOf.js';
 import { shiftBoundariesFrom } from '@sms/shared';
 import {
   authMiddleware,
@@ -246,6 +247,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         lineId: cfg.lineId,
         backupDir: cfg.backupDir ?? 'C:\\sms-backups',
         authenticated: (req as AuthedRequest).user != null,
+        // RT24-05: Health's own PDAS-write-verification block reads this
+        // instance's in-memory readback record plus a live permission probe —
+        // both live on the one PdasWriter this process holds (see its
+        // construction above), never a second connection.
+        pdas: { enabled: pdas.enabled, readbackStatus: () => pdas.getReadbackStatus(), probePermissions: () => pdas.probePermissions() },
       });
       res.status(report.status === 'down' ? 503 : 200).json(report);
     } catch (err) {
@@ -668,7 +674,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // history at that instant rather than the mirror's current values.
       // This route used to hand-roll the first two steps itself and leave the
       // third to the browser.
-      const plaus = await getPlausibilityRule(pool, cfg.lineId);
+      // RT24-04: judged by the plausibility rule in force AT `atMs` — the
+      // reading's own instant — not by whatever is configured today.
+      const plaus = (await getPlausibilityRuleAsOf(pool, cfg.lineId, atMs)).rule;
       const v = timeline.verdict(atMs, q.data.weightG ?? null, {
         productId: q.data.productId ?? null,
         catalogue,
@@ -1036,7 +1044,12 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type, { from: q.data.from, to: q.data.to });
-      const plausibility = await getPlausibilityRule(pool, cfg.lineId);
+      // RT24-04: judged as of the PERIOD END, not "whatever is configured
+      // today" — getWeightSpc is a SQL-aggregate report over the whole
+      // range, so one rule for the range (not a per-row lookup) is correct.
+      const plausibility = (await getPlausibilityRuleAsOf(
+        pool, cfg.lineId, plantDayEndMs(q.data.to), plantDayStartMs(q.data.from),
+      )).rule;
       const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null, q.data.station ?? null);
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
@@ -1339,10 +1352,12 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // fix as weightStations.ts, see the comment there. Without it, an
       // adjustment logged after this route's own `to` would still come back
       // as the newest row and wrongly restart every station's run.
-      const [plausibility, adjustments] = await Promise.all([
-        getPlausibilityRule(pool, cfg.lineId),
+      // RT24-04: as of the period end, same reasoning as /api/spc above.
+      const [plausR, adjustments] = await Promise.all([
+        getPlausibilityRuleAsOf(pool, cfg.lineId, plantDayEndMs(q.data.to), plantDayStartMs(q.data.from)),
         listCalibrationAdjustments(pool, cfg.lineId, { to: q.data.to }),
       ]);
+      const plausibility = plausR.rule;
       const data = await getStationDrift(pool, cfg.lineId, q.data.from, q.data.to, plausibility, {
         restarts: adjustmentRestarts(adjustments),
       });

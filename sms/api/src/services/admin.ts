@@ -255,12 +255,19 @@ export interface Rules {
   plausibility: { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number } | null;
 }
 export async function getRules(pool: ConnectionPool, lineId: number): Promise<Rules> {
+  // RT24-04: "in force RIGHT NOW" — a bound `effective_from <= SYSUTCDATETIME()`
+  // so a future-dated row (entered ahead of a planned change) cannot read as
+  // current before its own effective date arrives. See ruleAsOf.ts's header
+  // for why this site uses the plain guard rather than ruleAsOf/history: Setup
+  // always wants "what applies today", never a specific reading's instant.
   const w = await pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tube: number; tare: number }>(
-    `SELECT TOP 1 basis, cone_tube_weight_g AS tube, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+    `SELECT TOP 1 basis, cone_tube_weight_g AS tube, sack_tare_kg AS tare FROM sms.weight_rule
+      WHERE line_id=@line AND effective_from <= SYSUTCDATETIME() ORDER BY effective_from DESC`,
   );
   const s = await pool.request().input('line', mssql.Int, lineId).query<{ ms: string; es: string; ns: string; mode: string; nb: string }>(
     `SELECT TOP 1 CONVERT(varchar(5),morning_start,108) ms, CONVERT(varchar(5),evening_start,108) es,
-            CONVERT(varchar(5),night_start,108) ns, mode, night_belongs_to nb FROM sms.shift_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+            CONVERT(varchar(5),night_start,108) ns, mode, night_belongs_to nb FROM sms.shift_rule
+      WHERE line_id=@line AND effective_from <= SYSUTCDATETIME() ORDER BY effective_from DESC`,
   );
   const p = await getPlausibilityRule(pool, lineId);
   return {
@@ -281,10 +288,23 @@ export async function getRules(pool: ConnectionPool, lineId: number): Promise<Ru
  */
 export interface PlausibilityRule { coneLoG: number; coneHiG: number; sackLoKg: number; sackHiKg: number }
 const PLAUSIBILITY_FALLBACK: PlausibilityRule = { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 };
+/**
+ * DEPRECATED (RT24-04, 24 Sep 2026): "in force right now" only — the same
+ * `effective_from <= SYSUTCDATETIME()` guard as getRules' own weight/shift
+ * reads, added so a future-dated row cannot read as current early, but this
+ * still judges EVERY reading by TODAY's rule regardless of when the reading
+ * was taken. That is exactly the defect class `sms.product_limit_version`
+ * was built to avoid (see productLimits.ts's header) — editing this rule
+ * retroactively re-judges historical reports read through this function.
+ *
+ * Kept only so callers not yet migrated still compile. Anything judging a
+ * reading, or a period, rather than "right now" — spc, weights, rejects,
+ * reports — must call `getPlausibilityRuleAsOf` (ruleAsOf.ts) instead.
+ */
 export async function getPlausibilityRule(pool: ConnectionPool, lineId: number): Promise<PlausibilityRule> {
   const r = await pool.request().input('line', mssql.Int, lineId).query<{ cl: number; ch: number; sl: number; sh: number }>(
     `SELECT TOP 1 cone_lo_g cl, cone_hi_g ch, sack_lo_kg sl, sack_hi_kg sh
-     FROM sms.plausibility_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+     FROM sms.plausibility_rule WHERE line_id=@line AND effective_from <= SYSUTCDATETIME() ORDER BY effective_from DESC`,
   );
   const row = r.recordset[0];
   if (!row) return PLAUSIBILITY_FALLBACK;

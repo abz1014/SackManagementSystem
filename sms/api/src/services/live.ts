@@ -346,9 +346,12 @@ export async function loadShiftRule(pool: ConnectionPool, lineId: number): Promi
     .request()
     .input('line', mssql.Int, lineId)
     .query<{ ms: string | null; es: string | null; ns: string | null; night_belongs_to: string | null }>(
+      // RT24-04: "in force right now" — bounded by effective_from <=
+      // SYSUTCDATETIME() so a future-dated row cannot be read as the current
+      // shift boundary before its own effective date arrives.
       `SELECT TOP 1 CONVERT(varchar(5), morning_start, 108) AS ms, CONVERT(varchar(5), evening_start, 108) AS es,
               CONVERT(varchar(5), night_start, 108) AS ns, night_belongs_to
-         FROM sms.shift_rule WHERE line_id = @line ORDER BY effective_from DESC`,
+         FROM sms.shift_rule WHERE line_id = @line AND effective_from <= SYSUTCDATETIME() ORDER BY effective_from DESC`,
     );
   const row = r.recordset[0];
   const ms = row?.ms == null ? null : parseShiftTime(row.ms);

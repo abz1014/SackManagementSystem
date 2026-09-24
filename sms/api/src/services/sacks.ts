@@ -29,13 +29,13 @@
  */
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
-import { getPlausibilityRule } from './admin.js';
 import { plausibleWhere } from './coneState.js';
 import { MACHINE_LEVEL_REASON } from './sackStock.js';
 import {
   andEpoch, noteOf, resolveGenerationScope,
   type EventTable, type GenerationNote, type GenerationScope,
 } from './generation.js';
+import { getPlausibilityRuleAsOf, getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 
 export interface SackSummaryQuery {
   from: string;
@@ -84,6 +84,9 @@ export interface SackSummary {
   machineLevel: { enabled: false; reason: string };
   /** Which source generation these sacks came from, and what was left out. */
   generationNote?: GenerationNote;
+  /** RT24-04: true when the named rule changed at least once inside [from, to]. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 interface GroupRow {
@@ -140,14 +143,20 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
   // One generation for the sack aggregates AND the cone count they are
   // divided by, resolved once (generation.ts).
   const scope = await resolveGenerationScope(pool, lineId, { from: q.from, to: q.to }, ['cone_event', 'sack_event']);
-  const [plaus, wr] = await Promise.all([
-    getPlausibilityRule(pool, lineId),
-    pool.request().input('line', mssql.Int, lineId).query<{ basis: string; tare: number }>(
-      `SELECT TOP 1 basis, sack_tare_kg AS tare FROM sms.weight_rule WHERE line_id=@line ORDER BY effective_from DESC`,
-    ),
+  // RT24-04: judged as of the PERIOD END (tsTo, the replay cap, wins over
+  // `to` exactly as bindFilters gives it precedence below), not "whatever is
+  // configured right now" — the same defect class product_limit_version was
+  // built to close. Both queries are single SQL aggregates over the whole
+  // period; per-row-in-JS is neither needed nor done anywhere in this file.
+  const periodEndPlantMs = q.tsTo ? new Date(q.tsTo).getTime() : plantDayEndMs(q.to);
+  const periodStartPlantMs = plantDayStartMs(q.from);
+  const [plausR, wrR] = await Promise.all([
+    getPlausibilityRuleAsOf(pool, lineId, periodEndPlantMs, periodStartPlantMs),
+    getWeightRuleAsOf(pool, lineId, periodEndPlantMs, periodStartPlantMs),
   ]);
-  const basis = wr.recordset[0]?.basis ?? 'as_recorded';
-  const tare = Number(wr.recordset[0]?.tare ?? 0);
+  const plaus = plausR.rule;
+  const basis = wrR.rule?.basis ?? 'as_recorded';
+  const tare = wrR.rule?.sackTareKg ?? 0;
   const window = { loG: plaus.sackLoKg, hiG: plaus.sackHiKg };
 
   const aggregate = async (groupExpr: string | null, join = ''): Promise<GroupRow[]> => {
@@ -242,5 +251,7 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
     conesPerSackApproximate: true,
     machineLevel: { enabled: false, reason: MACHINE_LEVEL_REASON },
     generationNote: noteOf(scope),
+    weightRuleChangedInPeriod: wrR.ruleChangedInPeriod,
+    plausibilityRuleChangedInPeriod: plausR.ruleChangedInPeriod,
   };
 }
