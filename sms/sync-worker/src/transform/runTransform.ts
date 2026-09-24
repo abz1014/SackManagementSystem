@@ -113,6 +113,42 @@ import { checkIsolatedProductionDay } from './isolatedDay.js';
 
 type Raw = Record<string, unknown>;
 
+/**
+ * The raw row's own event instant, on the plant wall-clock convention — the
+ * same field mapCone/mapSack/mapReject themselves read for production_ts.
+ * Used to resolve the shift rule in force for THIS row (see rulesForRow,
+ * below, in runTransform), independently of mapCone/mapSack/mapReject's own
+ * (separate) copy of the same null-coalesce in transform.ts.
+ *
+ * Before this fix: a raw row missing BOTH src_ProductionDate and src_Date
+ * (usesProductionDate=true) or missing src_Date (usesProductionDate=false)
+ * produced `dt === undefined`, and `.getTime()` on that threw an unhandled
+ * `TypeError: Cannot read properties of undefined (reading 'getTime')` —
+ * naming neither the row nor the table, indistinguishable from a real code
+ * bug. It now throws a plain Error naming the row's own raw_id and its
+ * source table, the same way this file already reports other malformed rule
+ * data (see resolveShiftRule / loadShiftRuleHistory's thrown Errors). It
+ * still throws rather than skipping the row: a cone/sack/reject with no
+ * usable time cannot be shift-resolved OR safely dropped silently — that
+ * would remove a real production reading from canonical with no record of
+ * why. The batch retries (nothing is watermarked or written yet at this
+ * point) until whoever owns the data fixes or excludes the row.
+ */
+export function eventMsOfRaw(raw: Raw, usesProductionDate: boolean, rawTable: string): number {
+  const dt = (usesProductionDate ? (raw.src_ProductionDate ?? raw.src_Date) : raw.src_Date) as
+    | Date
+    | null
+    | undefined;
+  if (dt == null) {
+    const missing = usesProductionDate ? 'src_ProductionDate and src_Date are both' : 'src_Date is';
+    throw new Error(
+      `Raw row raw_id=${String(raw.raw_id)} in ${rawTable} has no usable event time (${missing} null) — ` +
+        `cannot resolve the shift rule in force for it. Fix or exclude this row before transform can proceed.`,
+    );
+  }
+  return dt.getTime();
+}
+
 // ---- transform watermarks (sms.app_config) ---------------------------------
 
 const WM_KEYS = {
@@ -424,15 +460,14 @@ export async function runTransform(
     lineId: cfg.lineId,
     sourceSystem: streams[kind].systemCode,
   });
-  /** The raw row's own event instant, on the plant wall-clock convention — the
-   *  same field mapCone/mapSack/mapReject themselves read for production_ts. */
-  const eventMsOfRaw = (raw: Raw, usesProductionDate: boolean): number => {
-    const dt = (usesProductionDate ? (raw.src_ProductionDate ?? raw.src_Date) : raw.src_Date) as Date;
-    return dt.getTime();
-  };
-  const rulesForRow = (base: Omit<TransformRules, 'shift'>, raw: Raw, usesProductionDate: boolean): TransformRules => ({
+  const rulesForRow = (
+    base: Omit<TransformRules, 'shift'>,
+    raw: Raw,
+    usesProductionDate: boolean,
+    rawTable: string,
+  ): TransformRules => ({
     ...base,
-    shift: resolveShiftRuleAt(shiftHistory, eventMsOfRaw(raw, usesProductionDate)),
+    shift: resolveShiftRuleAt(shiftHistory, eventMsOfRaw(raw, usesProductionDate, rawTable)),
   });
 
   // cones ---------------------------------------------------------------------
@@ -445,7 +480,7 @@ export async function runTransform(
       const rules = baseRulesFor('cone');
       const rows = await onlyFresh(
         appPool, 'sms.cone_event', rules.sourceSystem,
-        assignMergeKeys(raw.map((r) => mapCone(r, rulesForRow(rules, r, true))), coneKey),
+        assignMergeKeys(raw.map((r) => mapCone(r, rulesForRow(rules, r, true, TABLE_SHAPES.cone.rawTable))), coneKey),
       );
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
@@ -483,7 +518,7 @@ export async function runTransform(
       const rules = baseRulesFor('sack');
       const rows = await onlyFresh(
         appPool, 'sms.sack_event', rules.sourceSystem,
-        assignMergeKeys(raw.map((r) => mapSack(r, rulesForRow(rules, r, false))), sackKey),
+        assignMergeKeys(raw.map((r) => mapSack(r, rulesForRow(rules, r, false, TABLE_SHAPES.sack.rawTable))), sackKey),
       );
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
       const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
@@ -522,8 +557,8 @@ export async function runTransform(
       const wRules = baseRulesFor('reject_weight');
       const mapped = assignMergeKeys(
         [
-          ...qcs.map((r) => mapReject(r, 'quality', rulesForRow(qRules, r, true))),
-          ...wt.map((r) => mapReject(r, 'weight', rulesForRow(wRules, r, true))),
+          ...qcs.map((r) => mapReject(r, 'quality', rulesForRow(qRules, r, true, TABLE_SHAPES.reject_qcs.rawTable))),
+          ...wt.map((r) => mapReject(r, 'weight', rulesForRow(wRules, r, true, TABLE_SHAPES.reject_weight.rawTable))),
         ],
         rejectKey,
       );
