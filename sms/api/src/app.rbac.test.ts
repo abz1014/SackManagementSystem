@@ -174,8 +174,9 @@ beforeAll(async () => {
     cacheTtlSeconds: 5,
     trustProxy: false,
     appDb: { server: 'unused', port: 1433, database: 'unused', user: 'unused', password: 'unused', encrypt: false, trustServerCertificate: true },
-    // Off, as in production until IFL confirms in writing (§6.2). The write
-    // routes must still exist and answer 503 with this reason, not 404.
+    // Off, as in production, until the local end-to-end test on the local
+    // database copy has passed (DEFECTS.md D-12). The write routes must
+    // still exist and answer 503 with this reason, not 404.
     pdasWrite: { enabled: false, db: null, disabledReason: 'PDAS_WRITE_ENABLED is not true.' },
   };
   const app = createApp(db as unknown as import('mssql').ConnectionPool, cfg);

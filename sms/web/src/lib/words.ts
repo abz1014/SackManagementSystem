@@ -308,12 +308,15 @@ export const W = {
     /* ---- Changeover tab (Brief 2 builds the screen; strings fixed here so
        Brief 2 never opens this file). Put machine N onto product X for this
        shift: a dry-run plan with blockers and warnings, and an execute step
-       that stays refused until IFL confirms PDAS writes in writing. */
+       that stays refused until the local end-to-end test on the local
+       database copy has passed (DEFECTS.md D-12; IFL's own written
+       permission was given 19 Sep 2026, see
+       handover/PDAS-WRITE-GRANT-2026-09-19.md). */
     changeover: {
       /* The one static line this brief's own instruction requires: it must
          not duplicate or contradict the server's own `disabledReason`,
          which Brief 2 prints verbatim beside it. */
-      executionDisabled: 'Executing a changeover here is switched off until IFL confirms in writing that this system may write to PDAS. The plan below can still be checked.',
+      executionDisabled: 'Executing a changeover here is switched off until a full test of this feature has been run and passed on this computer. The plan below can still be checked.',
       planTitle: 'What this changeover would do',
       step: 'Step',
       blockers: 'Blockers',
