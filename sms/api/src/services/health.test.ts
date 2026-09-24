@@ -219,4 +219,94 @@ describe('getHealth — redaction and the degraded marker', () => {
     expect(h.status).toBe('ok');
     expect(h.acquisition.kind).toBeNull();
   });
+
+  /* RT24-05: no `pdas` dep supplied at all (the shape every pre-existing
+     test above uses) must behave exactly as before this fix — pdasWrite null,
+     nothing else disturbed. */
+  it('no pdas dep supplied: pdasWrite is null and nothing else changes', async () => {
+    const h = await getHealth(pool, { lineId: 1, backupDir: 'C:\\b', authenticated: true }, deps());
+    expect(h.pdasWrite).toBeNull();
+    expect(h.status).toBe('ok');
+  });
+
+  it('anonymous caller: pdasWrite is redacted to null even when a pdas dep is supplied and enabled', async () => {
+    const h = await getHealth(
+      pool,
+      { lineId: 1, backupDir: 'C:\\b', authenticated: false, pdas: { enabled: true, readbackStatus: () => ({ unverifiedSinceStartup: ['blend'], lastVerifiedUtc: null }), probePermissions: async () => ({ canReadBack: false, missingSelect: ['Blends'], missingExecute: [], checkedAtUtc: '2026-09-24T00:00:00.000Z' }) } },
+      deps(),
+    );
+    expect(h.pdasWrite).toBeNull();
+  });
+
+  it('writes disabled: pdasWrite.enabled is false, the permission probe is never called, canReadBack null', async () => {
+    let probed = false;
+    const h = await getHealth(
+      pool,
+      {
+        lineId: 1,
+        backupDir: 'C:\\b',
+        authenticated: true,
+        pdas: {
+          enabled: false,
+          readbackStatus: () => ({ unverifiedSinceStartup: [], lastVerifiedUtc: null }),
+          probePermissions: async () => {
+            probed = true;
+            return null;
+          },
+        },
+      },
+      deps(),
+    );
+    expect(probed).toBe(false);
+    expect(h.pdasWrite).toEqual({ enabled: false, canReadBack: null, missingSelect: [], missingExecute: [], unverifiedSinceStartup: [], lastVerifiedUtc: null });
+  });
+
+  it('writes enabled, permission probe answers canReadBack:false with named tables — folded straight through', async () => {
+    const h = await getHealth(
+      pool,
+      {
+        lineId: 1,
+        backupDir: 'C:\\b',
+        authenticated: true,
+        pdas: {
+          enabled: true,
+          readbackStatus: () => ({ unverifiedSinceStartup: ['blend', 'pallet'], lastVerifiedUtc: '2026-09-24T01:02:03.000Z' }),
+          probePermissions: async () => ({ canReadBack: false, missingSelect: ['Blends', 'Pallets'], missingExecute: ['AddTubeType'], checkedAtUtc: '2026-09-24T00:00:00.000Z' }),
+        },
+      },
+      deps(),
+    );
+    expect(h.pdasWrite).toEqual({
+      enabled: true,
+      canReadBack: false,
+      missingSelect: ['Blends', 'Pallets'],
+      missingExecute: ['AddTubeType'],
+      unverifiedSinceStartup: ['blend', 'pallet'],
+      lastVerifiedUtc: '2026-09-24T01:02:03.000Z',
+    });
+  });
+
+  /* The permission probe is a live PDAS round trip — its own failure (e.g.
+     the writer pool could not connect) must not fail the whole /api/health
+     probe, same reasoning as acquisitionHealth/dqBlockingFindings above.
+     canReadBack surfaces as null ("could not be determined"), never as
+     false ("confirmed cannot read back") — those are different facts. */
+  it('the permission probe throwing does not fail the whole health probe; canReadBack is null, not false', async () => {
+    const h = await getHealth(
+      pool,
+      {
+        lineId: 1,
+        backupDir: 'C:\\b',
+        authenticated: true,
+        pdas: {
+          enabled: true,
+          readbackStatus: () => ({ unverifiedSinceStartup: [], lastVerifiedUtc: null }),
+          probePermissions: async () => { throw new Error('ELOGIN: Login failed for user'); },
+        },
+      },
+      deps(),
+    );
+    expect(h.status).toBe('ok');
+    expect(h.pdasWrite?.canReadBack).toBeNull();
+  });
 });

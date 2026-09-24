@@ -113,6 +113,7 @@ import mssql from 'mssql';
 import type { PdasWriteConfig } from '../config.js';
 import { appendLimitVersion } from './productLimits.js';
 import { recordAudit } from './audit.js';
+import { probePdasPermissions, type PdasPermissionStatus } from './pdasPermissions.js';
 
 /**
  * The only seven vendor procedures this module ever calls, and the only
@@ -344,6 +345,38 @@ function checkName(what: string, value: string): string | null {
 
 export class PdasWriter {
   private writer: Promise<ConnectionPool> | null = null;
+
+  // RT24-05 fix: per-subject-table read-back health, tracked for the life of
+  // this instance (one instance per running process — see app.ts). A table
+  // that has NEVER had a successful echo-back read since startup escalates
+  // its FIRST failure to a standing CRITICAL finding ('pdas_write_unverified',
+  // deduped in-memory so repeated failures on the same table raise only one
+  // row); once a read has succeeded at least once on a table, a later failure
+  // on that same table is treated as transient and stays a WARNING
+  // ('pdas_write_readback_failed', the pre-existing check_name).
+  private readonly readbackEverSucceeded = new Set<string>();
+  private readonly readbackUnverifiedRaised = new Set<string>();
+  private lastVerifiedUtc: Date | null = null;
+
+  /** Read by health.ts. Not cached — cheap, in-memory Set reads. */
+  getReadbackStatus(): { unverifiedSinceStartup: string[]; lastVerifiedUtc: string | null } {
+    return {
+      unverifiedSinceStartup: [...this.readbackUnverifiedRaised],
+      lastVerifiedUtc: this.lastVerifiedUtc ? this.lastVerifiedUtc.toISOString() : null,
+    };
+  }
+
+  /**
+   * RT24-05: whether this login can read back what it writes, asked of SQL
+   * Server directly via pdasPermissions.ts rather than inferred from a
+   * failed write. Read by health.ts. Null when writes are disabled — there
+   * is no writer pool to ask. Reuses this instance's own lazily-opened
+   * writer connection (this.pool()), never a second one.
+   */
+  async probePermissions(now = Date.now()): Promise<PdasPermissionStatus | null> {
+    if (!this.enabled) return null;
+    return probePdasPermissions({ writerPool: () => this.pool() }, now);
+  }
 
   constructor(
     private readonly appPool: ConnectionPool,
@@ -816,7 +849,14 @@ export class PdasWriter {
     // route entirely (500, no sms.product_change row) for an UPDATE that had
     // already committed. It is now the app's own follow-up, caught on its
     // own, never conflated with the write itself failing.
-    let observed: ProductFields;
+    // RT24-05 fix: `observed` is null on a failed check read (it used to be
+    // silently set to `p.after`, which claimed an observation SMS never
+    // actually made). Every consumer below that needs a concrete row —
+    // the mirror, the limit-version history, the audit line, the returned
+    // `observedAfter` — uses `mirrorFields`, which falls back to the
+    // REQUESTED values explicitly; only `observed` (and so
+    // sms.product_change.observed_after_json) stays null when unverified.
+    let observed: ProductFields | null = null;
     let checkReadFailed = false;
     let checkErrMessage = '';
     let echoOk = true;
@@ -830,22 +870,24 @@ export class PdasWriter {
             `${JSON.stringify(p.after)}. The write committed but the row does not read back as written.`,
         );
       }
+      this.markReadbackOk('product');
     } catch (checkErr) {
       checkReadFailed = true;
       checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
-      observed = p.after;
+      observed = null;
       await this.raiseReadbackFailed(
         'product',
         `Product ${p.productId}: updateProductLimits committed but the follow-up check read failed: ${checkErrMessage}`,
       );
     }
 
-    await this.mirrorProductFields(p.productId, observed);
+    const mirrorFields = observed ?? p.after;
+    await this.mirrorProductFields(p.productId, mirrorFields);
     await appendLimitVersion(this.appPool, {
       productId: p.productId,
-      setpointG: observed.setpointG,
-      offsetMinusG: observed.offsetMinusG,
-      offsetPlusG: observed.offsetPlusG,
+      setpointG: mirrorFields.setpointG,
+      offsetMinusG: mirrorFields.offsetMinusG,
+      offsetPlusG: mirrorFields.offsetPlusG,
       effectiveFromUtc: committedAt,
       effectiveIsLowerBound: false,
       source: 'sms_write',
@@ -855,7 +897,7 @@ export class PdasWriter {
     await this.recordChange({
       ...base, observedAfter: observed, outcome: 'ok', pdasErrorCode: null,
       message: checkReadFailed
-        ? `updateProductLimits committed but the follow-up check read failed: ${checkErrMessage}`
+        ? `UNVERIFIED — PDAS accepted the write but SMS could not read it back (${checkErrMessage})`
         : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
       effectiveFrom: committedAt,
     });
@@ -864,7 +906,7 @@ export class PdasWriter {
       `Product ${p.productId}: ${p.before.setpointG} ± ${p.before.offsetMinusG}/${p.before.offsetPlusG} g → ` +
         `${p.after.setpointG} ± ${p.after.offsetMinusG}/${p.after.offsetPlusG} g — ${p.reason}`,
     );
-    return { ok: true, productId: p.productId, observedAfter: observed };
+    return { ok: true, productId: p.productId, observedAfter: mirrorFields };
   }
 
   private async mirrorProductFields(productId: number, f: ProductFields): Promise<void> {
@@ -928,15 +970,42 @@ export class PdasWriter {
   }
 
   /**
-   * B1/B2 fix: a WARNING finding when the vendor proc committed the write but
-   * the app's own follow-up check-read (echo-back SELECT) then failed — e.g.
-   * the plant's EXECUTE-only role has no SELECT on the PDAS table. This is
-   * NOT a mismatch (we never learned what PDAS holds), so it is a different,
-   * lower-severity check_name than raiseEchoMismatch's, and it must never be
+   * B1/B2 fix, escalated by RT24-05: a finding when the vendor proc committed
+   * the write but the app's own follow-up check-read (echo-back SELECT) then
+   * failed — e.g. the plant's EXECUTE-only role has no SELECT on the PDAS
+   * table. This is NOT a mismatch (we never learned what PDAS holds), so it
+   * is a different check_name than raiseEchoMismatch's, and it must never be
    * conflated with a proc-level failure: the row really was written.
+   *
+   * RT24-05: a table that has never had a read-back succeed since this
+   * process started is not "occasionally failing to verify" — it is not
+   * being checked at all, silently, and the CRITICAL echo-mismatch finding
+   * can then never fire for it. The FIRST failure on such a table raises one
+   * standing CRITICAL 'pdas_write_unverified' finding (deduped in-memory so
+   * later failures on the same table are silent, not a growing pile of
+   * identical rows). Once a read-back has succeeded on a table at least once,
+   * a later failure is transient and stays the pre-existing WARNING
+   * 'pdas_write_readback_failed'.
    */
   private async raiseReadbackFailed(subjectTable: 'product' | 'pallet' | 'blend' | 'yarn_count' | 'tube_type', detail: string): Promise<void> {
-    await this.raiseDqFinding('pdas_write_readback_failed', 'WARNING', subjectTable, detail);
+    if (this.readbackEverSucceeded.has(subjectTable)) {
+      await this.raiseDqFinding('pdas_write_readback_failed', 'WARNING', subjectTable, detail);
+      return;
+    }
+    if (this.readbackUnverifiedRaised.has(subjectTable)) return;
+    this.readbackUnverifiedRaised.add(subjectTable);
+    await this.raiseDqFinding(
+      'pdas_write_unverified',
+      'CRITICAL',
+      subjectTable,
+      `Writes to ${subjectTable} are not being checked; grant the writer login SELECT on ${subjectTable} or accept unverified writes.`,
+    );
+  }
+
+  /** Marks a subject table as having read back successfully at least once since startup — see raiseReadbackFailed. */
+  private markReadbackOk(subjectTable: string): void {
+    this.readbackEverSucceeded.add(subjectTable);
+    this.lastVerifiedUtc = new Date();
   }
 
   /**
@@ -1006,9 +1075,11 @@ export class PdasWriter {
         if (!echoOk) {
           await this.raiseEchoMismatch('blend', `Blend ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddBlend requested ${JSON.stringify(blend)}.`);
         }
+        this.markReadbackOk('blend');
       } catch (checkErr) {
         checkReadFailed = true;
         checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        observed = null;
         await this.raiseReadbackFailed('blend', `Blend ${r.id}: AddBlend committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       await this.appPool
@@ -1021,9 +1092,9 @@ export class PdasWriter {
            WHEN NOT MATCHED THEN INSERT (blend_id, blend) VALUES (@id, @v);`,
         );
       await this.recordChange({
-        ...base, observedAfter: { blendId: r.id, blend: observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        ...base, observedAfter: checkReadFailed ? null : { blendId: r.id, blend: observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
         message: checkReadFailed
-          ? `AddBlend committed (blend ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          ? `UNVERIFIED — PDAS accepted the write but SMS could not read it back (${checkErrMessage})`
           : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
         effectiveFrom: now,
       });
@@ -1072,9 +1143,11 @@ export class PdasWriter {
         if (!echoOk) {
           await this.raiseEchoMismatch('yarn_count', `Count ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddCount requested ${JSON.stringify(count)}.`);
         }
+        this.markReadbackOk('yarn_count');
       } catch (checkErr) {
         checkReadFailed = true;
         checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        observed = null;
         await this.raiseReadbackFailed('yarn_count', `Count ${r.id}: AddCount committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       // Same cast rule as the sync's seed: the int where the text is one, the text always.
@@ -1091,9 +1164,9 @@ export class PdasWriter {
            WHEN NOT MATCHED THEN INSERT (count_id, count_val, count_text) VALUES (@id, @iv, @v);`,
         );
       await this.recordChange({
-        ...base, observedAfter: { countId: r.id, count: observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        ...base, observedAfter: checkReadFailed ? null : { countId: r.id, count: observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
         message: checkReadFailed
-          ? `AddCount committed (count ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          ? `UNVERIFIED — PDAS accepted the write but SMS could not read it back (${checkErrMessage})`
           : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
         effectiveFrom: now,
       });
@@ -1167,9 +1240,11 @@ export class PdasWriter {
         if (!echoOk) {
           await this.raiseEchoMismatch('tube_type', `Tube type ${r.id}: PDAS holds ${JSON.stringify(observed)} after AddTubeType requested ${JSON.stringify(after)}.`);
         }
+        this.markReadbackOk('tube_type');
       } catch (checkErr) {
         checkReadFailed = true;
         checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        observed = null;
         await this.raiseReadbackFailed('tube_type', `Tube type ${r.id}: AddTubeType committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       await this.appPool
@@ -1189,9 +1264,9 @@ export class PdasWriter {
            WHEN NOT MATCHED THEN INSERT (tube_type_id, tube_type, tube_weight_g, tube_form) VALUES (@id, @v, @w, @form);`,
         );
       await this.recordChange({
-        ...base, observedAfter: observed == null ? null : { tubeTypeId: r.id, ...observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        ...base, observedAfter: checkReadFailed || observed == null ? null : { tubeTypeId: r.id, ...observed }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
         message: checkReadFailed
-          ? `AddTubeType committed (tube type ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          ? `UNVERIFIED — PDAS accepted the write but SMS could not read it back (${checkErrMessage})`
           : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
         effectiveFrom: now,
       });
@@ -1345,16 +1420,18 @@ export class PdasWriter {
         if (!echoOk) {
           await this.raiseEchoMismatch('pallet', `Pallet ${r.id}: PDAS holds ${JSON.stringify(observed)} after CreatePallet requested ${JSON.stringify(f)}.`);
         }
+        this.markReadbackOk('pallet');
       } catch (checkErr) {
         checkReadFailed = true;
         checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        observed = null;
         await this.raiseReadbackFailed('pallet', `Pallet ${r.id}: CreatePallet committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       await this.mirrorPallet(observed ?? { ...f, palletId: r.id, pdasCreatedAt: null });
       await this.recordChange({
-        ...base, palletId: r.id, observedAfter: observed, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        ...base, palletId: r.id, observedAfter: checkReadFailed ? null : observed, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
         message: checkReadFailed
-          ? `CreatePallet committed (pallet ${r.id}) but the follow-up check read failed: ${checkErrMessage}`
+          ? `UNVERIFIED — PDAS accepted the write but SMS could not read it back (${checkErrMessage})`
           : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
         effectiveFrom: now,
       });
@@ -1414,9 +1491,11 @@ export class PdasWriter {
         if (!echoOk) {
           await this.raiseEchoMismatch('pallet', `Pallet ${p.palletId}: PDAS holds active=${observed?.active ?? 'missing'} after SetPalletStatusActive requested ${p.active}.`);
         }
+        this.markReadbackOk('pallet');
       } catch (checkErr) {
         checkReadFailed = true;
         checkErrMessage = checkErr instanceof Error ? checkErr.message : String(checkErr);
+        observed = null;
         await this.raiseReadbackFailed('pallet', `Pallet ${p.palletId}: SetPalletStatusActive committed but the follow-up check read failed: ${checkErrMessage}`);
       }
       if (observed) {
@@ -1425,9 +1504,9 @@ export class PdasWriter {
         await this.appPool.request().input('id', mssql.Int, p.palletId).input('a', mssql.Bit, p.active).query(`UPDATE sms.pallet SET active_flag = @a WHERE pallet_id = @id`);
       }
       await this.recordChange({
-        ...base, observedAfter: observed == null ? null : { active: observed.active }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
+        ...base, observedAfter: checkReadFailed || observed == null ? null : { active: observed.active }, outcome: checkReadFailed ? 'ok' : echoOk ? 'ok' : 'mismatch', pdasErrorCode: null,
         message: checkReadFailed
-          ? `SetPalletStatusActive committed (pallet ${p.palletId}) but the follow-up check read failed: ${checkErrMessage}`
+          ? `UNVERIFIED — PDAS accepted the write but SMS could not read it back (${checkErrMessage})`
           : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
         effectiveFrom: now,
       });

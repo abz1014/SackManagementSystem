@@ -1492,6 +1492,36 @@ export const W = {
          photograph of one command run once. */
       isManual: 'This is the record of one manual run of the sms verify command — not a live or continuous check. This system holds no standing connection that watches IFL’s database for changes.',
     } as const,
+
+    /* ---- RT24-05 (23 Sep 2026): PDAS write read-back verification. Appended
+       here, one block, so this fix never has to reopen words.ts a second
+       time — see api/src/services/pdasWrite.ts's raiseReadbackFailed and
+       api/src/services/pdasPermissions.ts. The point of every sentence below
+       is the project's own reliability rule: a fact this system could not
+       check must say so in words, never render as though nothing is wrong. */
+    pdasWriteTitle: 'PDAS write checking',
+    pdasWriteOffTitle: 'PDAS writes: off',
+    pdasWriteOff: 'This installation is not writing to PDAS. There is nothing to check.',
+    pdasWriteOnTitle: 'PDAS writes: on',
+    /* canReadBack === true: the writer login can read back every table it writes to. */
+    checkedYes: 'Checked after writing: yes. Every write is read back from PDAS and any mismatch raises a finding immediately.',
+    /* canReadBack === false: named tables the writer login cannot SELECT, so
+       a write to them can never be verified — this is not the same as a
+       failure, it is a standing gap in what this system can prove. */
+    checkedNo: (tables: string) => `Checked after writing: no — the writer login cannot read ${tables}. Writes there are accepted by PDAS but this system cannot confirm what PDAS now holds.`,
+    /* canReadBack === null: the permission probe itself could not run (writes
+       just turned on, or the probe's own connection failed) — distinct from
+       a confirmed "no", and must not collapse into one. */
+    checkedUnknown: 'Checked after writing: could not be determined — the permission check itself did not complete. Treat this the same as "no" until it does.',
+    missingExecuteNote: (procs: string) => `The writer login also cannot execute: ${procs}. Any write through one of those procedures will fail outright, not just go unverified.`,
+    /* Per the fix decided 23 Sep 2026: a write whose follow-up read fails is
+       still recorded as a successful write (PDAS accepted it) — only
+       unverified, never wrongly called a failure or a proven mismatch. */
+    unverifiedTablesTitle: 'Tables with unverified writes',
+    unverifiedTablesNone: 'No table has had a write go unverified since this service started.',
+    unverifiedTablesNote: (tables: string) => `${tables} — the first write to each since this service started could not be read back, and a standing finding has been raised for each on Setup › Sync health.`,
+    lastVerified: (when: string) => `Last confirmed read-back ${when}.`,
+    lastVerifiedNever: 'No write has been confirmed read back since this service started.',
   } as const,
 
   /* -------------------------------------------- cone weight (Phase 4) */
@@ -2098,6 +2128,19 @@ export const W = {
       `Columns ${fromCol}–${toCol} of ${total} · page ${page} of ${pages}`,
     /* Errors. */
     notAllowed: 'This report is for managers and above.',
+  } as const,
+  /* Per-machine state (Line/Product-Running/Wall), added 24 Sep 2026,
+     Task #8 — `machinesRunning.ts`'s new `state`/`lastSeenUtc` fields.
+     Appended, not interleaved: this file is append-only for concurrent
+     workers. */
+  machineState: {
+    running: 'Running',
+    quiet: (span: string, lastSeen: string) => `No cones for ${span} (last ${lastSeen})`,
+    stale: (lastSeen: string) => `Not seen since ${lastSeen}`,
+    silent: 'Not seen for over a week — check the machine or its scale',
+    /** Product › Running's new section heading for the machines
+     *  `groupByProduct` does not list (no cone in the current window). */
+    notRunning: 'Not currently running',
   } as const,
 } as const;
 

@@ -58,6 +58,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ConnectionPool } from 'mssql';
+import type { PdasPermissionStatus } from './pdasPermissions.js';
 import mssql from 'mssql';
 import {
   classifyHealth,
@@ -129,6 +130,24 @@ export interface BackupHealth {
   warning: boolean;
 }
 
+/**
+ * RT24-05: whether the PDAS write login can read back what it writes, folded
+ * from pdasPermissions.ts's direct SQL Server answer plus PdasWriter's own
+ * in-memory record of what has actually happened since startup. Null when
+ * writes are disabled (pdasWrite.ts's `enabled` is false — there is nothing
+ * to check) or for an anonymous caller (redacted like acquisition/backup).
+ */
+export interface PdasWriteHealth {
+  enabled: boolean;
+  /** Null when the permission probe itself could not run (e.g. writes disabled, or the probe threw). */
+  canReadBack: boolean | null;
+  missingSelect: string[];
+  missingExecute: string[];
+  /** Subject tables with a standing CRITICAL 'pdas_write_unverified' finding — see pdasWrite.ts's raiseReadbackFailed. */
+  unverifiedSinceStartup: string[];
+  lastVerifiedUtc: string | null;
+}
+
 export interface HealthReport {
   status: HealthStatus;
   service: ServiceHealth;
@@ -138,6 +157,8 @@ export interface HealthReport {
   backup: BackupHealth | null;
   /** Set while the pool has reported an error since the last good probe. */
   degradedReason: string | null;
+  /** Only for a signed-in caller, or when no pdas dep was supplied at all; null otherwise. */
+  pdasWrite: PdasWriteHealth | null;
 }
 
 /* ------------------------------------------------------------ the service */
@@ -404,6 +425,18 @@ const realDeps: HealthDeps = {
 };
 
 /**
+ * The PDAS write facts getHealth needs — supplied by app.ts from the single
+ * PdasWriter instance it already holds (see pdasWrite.ts). Kept as a narrow
+ * interface, not the PdasWriter class itself, so this file's own tests never
+ * need a real (or fake) database connection to exercise it.
+ */
+export interface PdasHealthDeps {
+  enabled: boolean;
+  readbackStatus: () => { unverifiedSinceStartup: string[]; lastVerifiedUtc: string | null };
+  probePermissions: () => Promise<PdasPermissionStatus | null>;
+}
+
+/**
  * The whole report. `authenticated` governs redaction only — every fact is
  * gathered regardless so `status` is honest for the anonymous probe too,
  * including the DQ finding count and the backup check (see the module
@@ -416,7 +449,7 @@ const realDeps: HealthDeps = {
  */
 export async function getHealth(
   pool: ConnectionPool,
-  opts: { lineId: number; backupDir: string; authenticated: boolean },
+  opts: { lineId: number; backupDir: string; authenticated: boolean; pdas?: PdasHealthDeps },
   deps: HealthDeps = realDeps,
 ): Promise<HealthReport> {
   const db = await deps.probeDatabase(pool);
@@ -440,6 +473,31 @@ export async function getHealth(
   const status = foldStatus(db, acq, reason != null, dqBlocking, backup.warning);
   const pct = db.sizeMb == null ? null : Math.round((db.sizeMb / EXPRESS_CAP_MB) * 1000) / 10;
   const a = opts.authenticated;
+
+  // RT24-05: the permission probe is a live PDAS round trip, so it only runs
+  // when writes are enabled at all, and its own failure must not take the
+  // whole health probe down — same reasoning as acquisitionHealth/dqBlockingFindings above.
+  let pdasWrite: PdasWriteHealth | null = null;
+  if (opts.pdas) {
+    const rb = opts.pdas.readbackStatus();
+    let perms: PdasPermissionStatus | null = null;
+    if (opts.pdas.enabled) {
+      try {
+        perms = await opts.pdas.probePermissions();
+      } catch {
+        perms = null; // the probe itself failed (e.g. the writer pool couldn't connect); report unknown, not down
+      }
+    }
+    pdasWrite = {
+      enabled: opts.pdas.enabled,
+      canReadBack: perms ? perms.canReadBack : null,
+      missingSelect: perms?.missingSelect ?? [],
+      missingExecute: perms?.missingExecute ?? [],
+      unverifiedSinceStartup: rb.unverifiedSinceStartup,
+      lastVerifiedUtc: rb.lastVerifiedUtc,
+    };
+  }
+
   return {
     status,
     service: serviceHealth(deps.now()),
@@ -461,5 +519,6 @@ export async function getHealth(
       : { kind: null, ageSeconds: null, cadenceSeconds: null, halted: null, generation: null },
     backup: a ? backup : null,
     degradedReason: a ? reason : null,
+    pdasWrite: a ? pdasWrite : null,
   };
 }

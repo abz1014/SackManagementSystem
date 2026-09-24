@@ -22,6 +22,7 @@ import { parsePeriodParams, resolvePeriod } from '../lib/period';
 import { getHealth, getReconciliation, type ConeState, type WeightAggregate } from '../api';
 import { SyncHealthBlock } from './health/SyncHealthBlock';
 import { SystemHistoryBlock } from './health/SystemHistoryBlock';
+import { PdasWriteBlock } from './health/PdasWriteBlock';
 
 /**
  * The reconciliation figures for `Period` — a census of SMS's OWN canonical
@@ -154,6 +155,8 @@ export function HealthScreen({
       </div>
 
       <SyncHealthBlock first isAdmin={isAdmin} onOpenReading={onOpenReading} />
+
+      <PdasWriteBlock report={r} error={h.error} onRetry={h.refresh} />
 
       <ReconciliationBlock />
 

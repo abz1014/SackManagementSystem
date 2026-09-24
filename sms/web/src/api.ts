@@ -1561,6 +1561,23 @@ export interface HealthReport {
   };
   backup: { dir: string; newestFile: string | null; newestAtUtc: string | null; ageDays: number | null; warning: boolean } | null;
   degradedReason: string | null;
+  /**
+   * RT24-05: whether the PDAS write login can read back what it just wrote.
+   * Null for an anonymous caller, like backup/acquisition above, and also
+   * null on a server build that predates this field (an older cached
+   * response, or a rolling deploy) — treat null the same as "unknown", never
+   * as "off" or "fine".
+   */
+  pdasWrite: {
+    enabled: boolean;
+    /** Null when the permission probe could not run — writes disabled, or the probe itself failed. */
+    canReadBack: boolean | null;
+    missingSelect: string[];
+    missingExecute: string[];
+    /** Subject tables (e.g. 'blend', 'product', 'pallet') with a standing CRITICAL finding — see pdasWrite.ts. */
+    unverifiedSinceStartup: string[];
+    lastVerifiedUtc: string | null;
+  } | null;
 }
 /** Unauthenticated on the server; the browser always has its cookie, so the full report comes back. */
 export function getHealth(): Promise<HealthReport> {
@@ -1740,6 +1757,9 @@ export function setLocalLimitVersion(p: {
   return post('/api/products/limits/local', p);
 }
 
+/** Mirrors api/src/services/machinesRunning.ts's MachineState (Task #8, 24 Sep 2026). */
+export type MachineState = 'running' | 'quiet' | 'stale' | 'silent';
+
 export interface MachineRunning {
   station: number;
   stationName: string | null;
@@ -1752,6 +1772,9 @@ export interface MachineRunning {
   sinceUtc: string | null;
   sinceIsWindowStart: boolean;
   quiet: boolean;
+  /** The newest reading EVER at this station (this generation), independent of the window. Null when never seen. */
+  lastSeenUtc: string | null;
+  state: MachineState;
 }
 export interface MachinesRunningData {
   asOfUtc: string | null;

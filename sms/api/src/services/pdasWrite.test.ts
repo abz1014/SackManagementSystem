@@ -397,34 +397,49 @@ function fakeWriterPoolFailingQuery(calls: Array<{ proc: string; params: string[
   return async () => pool as unknown as ConnectionPool;
 }
 
-describe('PdasWriter — B1: a permission-denied follow-up check read must not undo a committed write', () => {
+/**
+ * RT24-05 (23 Sep 2026) updated these six tests consciously, per the decision
+ * recorded in CLAUDE.md's current-phase section: a fresh PdasWriter instance
+ * (one per running process — see app.ts) has never had a read-back succeed
+ * on ANY table, so the FIRST failure on a table now escalates to a standing
+ * CRITICAL 'pdas_write_unverified' finding, not the WARNING
+ * 'pdas_write_readback_failed' these tests asserted before. The message also
+ * changed from "<Proc> committed (<id>) but the follow-up check read failed:
+ * <reason>" to the fixed "UNVERIFIED — PDAS accepted the write but SMS could
+ * not read it back (<reason>)" prefix. `observed_after_json` (`params.obs`)
+ * must now be exactly `null`, not an object naming the id with a null field —
+ * the fix this pass exists for (RT24-05's defect: an unread observation must
+ * never be recorded as though it were made). The transient-WARNING path (a
+ * table that HAS read back successfully before) is covered separately below.
+ */
+describe('PdasWriter — B1/RT24-05: a permission-denied follow-up check read must not undo a committed write', () => {
   const targets: Array<{
     name: string;
     run: (w: PdasWriter) => Promise<{ ok: boolean } & Record<string, unknown>>;
     idField: string;
     mirrorTable: RegExp;
-    verbPast: string;
+    subjectTable: string;
   }> = [
     {
       name: 'addBlend',
       run: (w) => w.addBlend({ blend: 'Cotton 30/1', reason: REASON, actor: ACTOR }),
       idField: 'blendId',
       mirrorTable: /MERGE sms\.blend\b/,
-      verbPast: 'AddBlend committed',
+      subjectTable: 'blend',
     },
     {
       name: 'addCount',
       run: (w) => w.addCount({ count: '30', reason: REASON, actor: ACTOR }),
       idField: 'countId',
       mirrorTable: /MERGE sms\.yarn_count\b/,
-      verbPast: 'AddCount committed',
+      subjectTable: 'yarn_count',
     },
     {
       name: 'addTubeType',
       run: (w) => w.addTubeType({ tubeType: 'PP-2', tubeWeightG: 12, reason: REASON, actor: ACTOR }),
       idField: 'tubeTypeId',
       mirrorTable: /MERGE sms\.tube_type\b/,
-      verbPast: 'AddTubeType committed',
+      subjectTable: 'tube_type',
     },
     {
       name: 'createPallet',
@@ -436,19 +451,19 @@ describe('PdasWriter — B1: a permission-denied follow-up check read must not u
         }),
       idField: 'palletId',
       mirrorTable: /MERGE sms\.pallet\b/,
-      verbPast: 'CreatePallet committed',
+      subjectTable: 'pallet',
     },
     {
       name: 'setPalletActive',
       run: (w) => w.setPalletActive({ palletId: 5, active: true, reason: REASON, actor: ACTOR }),
       idField: 'palletId',
       mirrorTable: /(MERGE sms\.pallet\b|UPDATE sms\.pallet\b)/,
-      verbPast: 'SetPalletStatusActive committed',
+      subjectTable: 'pallet',
     },
   ];
 
   for (const t of targets) {
-    it(`${t.name}: proc succeeds, follow-up check read throws permission-denied — still ok:true with the id, product_change 'ok', mirror written, dq finding raised`, async () => {
+    it(`${t.name}: proc succeeds, follow-up check read throws permission-denied — still ok:true with the id, product_change 'ok' and observed_after_json null, mirror written with requested values, one standing CRITICAL finding`, async () => {
       const calls: Array<{ proc: string; params: string[] }> = [];
       const log: Captured[] = [];
       const w = new PdasWriter(fakeAppPool(log), enabledCfg, 1, { writerPool: fakeWriterPoolFailingQuery(calls) });
@@ -462,20 +477,50 @@ describe('PdasWriter — B1: a permission-denied follow-up check read must not u
       const rows = changeRows(log);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.params.outcome).toBe('ok');
-      expect(String(rows[0]?.params.msg)).toMatch(/follow-up check read failed/);
-      expect(String(rows[0]?.params.msg)).toContain(t.verbPast);
+      expect(String(rows[0]?.params.msg)).toMatch(/^UNVERIFIED — PDAS accepted the write but SMS could not read it back/);
+      // RT24-05's own defect: observed_after_json must be NULL, not an
+      // object claiming an observation ("{blendId: 5, blend: null}") that
+      // was never actually made.
+      expect(rows[0]?.params.obs).toBeNull();
 
       // The sidecar mirror must still be written, with the requested values.
       expect(log.some((e) => t.mirrorTable.test(e.sql))).toBe(true);
 
-      // A dq finding under the new, non-CRITICAL check_name — not the
-      // existing 'pdas_write_echo_mismatch', which asserts a PROVEN mismatch.
+      // A first-ever failure on this table escalates to the standing
+      // CRITICAL finding, not the transient WARNING — this instance has
+      // never read this table back successfully.
       const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql));
       expect(dqRows).toHaveLength(1);
-      expect(dqRows[0]?.params.check).toBe('pdas_write_readback_failed');
-      expect(dqRows[0]?.params.sev).toBe('WARNING');
+      expect(dqRows[0]?.params.check).toBe('pdas_write_unverified');
+      expect(dqRows[0]?.params.sev).toBe('CRITICAL');
+      expect(dqRows[0]?.params.tbl).toBe(t.subjectTable);
     });
   }
+
+  it('a SECOND failed write to the SAME table (still no prior success) raises no second CRITICAL row — deduped in-memory, not by detail text', async () => {
+    const calls: Array<{ proc: string; params: string[] }> = [];
+    const log: Captured[] = [];
+    const w = new PdasWriter(fakeAppPool(log), enabledCfg, 1, { writerPool: fakeWriterPoolFailingQuery(calls) });
+
+    await w.addBlend({ blend: 'Cotton 30/1', reason: REASON, actor: ACTOR });
+    await w.addBlend({ blend: 'Cotton 40/1', reason: REASON, actor: ACTOR });
+
+    const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql) && e.params.check === 'pdas_write_unverified');
+    expect(dqRows).toHaveLength(1);
+  });
+
+  it('a failed write on a DIFFERENT table raises its OWN standing CRITICAL finding, independent of the first', async () => {
+    const calls: Array<{ proc: string; params: string[] }> = [];
+    const log: Captured[] = [];
+    const w = new PdasWriter(fakeAppPool(log), enabledCfg, 1, { writerPool: fakeWriterPoolFailingQuery(calls) });
+
+    await w.addBlend({ blend: 'Cotton 30/1', reason: REASON, actor: ACTOR });
+    await w.addCount({ count: '30', reason: REASON, actor: ACTOR });
+
+    const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql) && e.params.check === 'pdas_write_unverified');
+    expect(dqRows).toHaveLength(2);
+    expect(dqRows.map((r) => r.params.tbl).sort()).toEqual(['blend', 'yarn_count']);
+  });
 });
 
 /** A writer pool for updateProductLimits: the in-transaction optimistic-
@@ -521,8 +566,20 @@ function fakeUpdateLimitsPool(before: ProductFields): () => Promise<ConnectionPo
   return async () => pool as unknown as ConnectionPool;
 }
 
-describe('PdasWriter — B2: updateProductLimits post-commit check read must not throw out of the route', () => {
-  it('post-commit check read throws — ok:true, product_change row written, no throw', async () => {
+/**
+ * RT24-05 (23 Sep 2026) updated this test consciously — same reasoning as
+ * the B1 block above: a fresh instance has never verified 'product' before,
+ * so this is now the standing CRITICAL escalation, and `observedAfter` on
+ * the returned result and `observed_after_json` on the recorded row are no
+ * longer the same value. Before this fix `observed` was silently set to
+ * `p.after` in the catch branch — RT24-05's own defect, claiming an
+ * observation SMS never made — so the row and the return value happened to
+ * be identical for the wrong reason; the mirror still gets the REQUESTED
+ * values explicitly (never left to a fallback that could drift), but only
+ * the row's `observed_after_json` is null.
+ */
+describe('PdasWriter — B2/RT24-05: updateProductLimits post-commit check read must not throw out of the route', () => {
+  it('post-commit check read throws — ok:true with the REQUESTED fields, product_change row observed_after_json null, one standing CRITICAL finding, no throw', async () => {
     const log: Captured[] = [];
     const before = FIELDS;
     const after: ProductFields = { ...FIELDS, setpointG: 1965 };
@@ -530,13 +587,62 @@ describe('PdasWriter — B2: updateProductLimits post-commit check read must not
 
     const r = await w.updateProductLimits({ productId: 20, before, after, bounds: BOUNDS, reason: REASON, actor: ACTOR });
 
-    expect(r).toMatchObject({ ok: true, productId: 20 });
+    // The route/caller still gets a concrete, usable result — the REQUESTED
+    // values, since that is what the UPDATE actually sent, never a value
+    // pulled out of thin air.
+    expect(r).toMatchObject({ ok: true, productId: 20, observedAfter: after });
 
     const rows = changeRows(log);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.params.outcome).toBe('ok');
-    expect(String(rows[0]?.params.msg)).toMatch(/follow-up check read failed/);
-    expect(String(rows[0]?.params.msg)).toContain('updateProductLimits committed');
+    expect(String(rows[0]?.params.msg)).toMatch(/^UNVERIFIED — PDAS accepted the write but SMS could not read it back/);
+    expect(rows[0]?.params.obs).toBeNull();
+
+    const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql));
+    expect(dqRows).toHaveLength(1);
+    expect(dqRows[0]?.params.check).toBe('pdas_write_unverified');
+    expect(dqRows[0]?.params.sev).toBe('CRITICAL');
+    expect(dqRows[0]?.params.tbl).toBe('product');
+  });
+
+  it('a table that HAS read back successfully before falls back to the transient WARNING on a later failure', async () => {
+    const log: Captured[] = [];
+    const before = FIELDS;
+    const after1: ProductFields = { ...FIELDS, setpointG: 1960 };
+    const after2: ProductFields = { ...FIELDS, setpointG: 1965 };
+
+    // First call: a pool whose echo-back read SUCCEEDS (a plain, always-ok fake).
+    const okPool = (): Promise<ConnectionPool> => {
+      let selectCount = 0;
+      const pool = {
+        request: () => {
+          const req: { input: (n: string, ...r: unknown[]) => typeof req; query: (sql: string) => Promise<{ recordset: unknown[]; rowsAffected: number[] }> } = {
+            input: () => req,
+            query: async (sql: string) => {
+              if (/SELECT MaterialSetpointWeight/.test(sql)) {
+                selectCount += 1;
+                const f = selectCount === 1 ? before : after1;
+                return { recordset: [{ sp: f.setpointG, om: f.offsetMinusG, op: f.offsetPlusG, d1: f.desc1, d2: f.desc2, a: f.active }], rowsAffected: [1] };
+              }
+              return { recordset: [], rowsAffected: [1] };
+            },
+          };
+          return req;
+        },
+      };
+      return Promise.resolve(pool as unknown as ConnectionPool);
+    };
+    const w = new PdasWriter(fakeAppPool(log), enabledCfg, 1, { writerPool: okPool });
+    const first = await w.updateProductLimits({ productId: 20, before, after: after1, bounds: BOUNDS, reason: REASON, actor: ACTOR });
+    expect(first.ok).toBe(true);
+    expect(log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql))).toHaveLength(0);
+
+    // Second call on the SAME instance, now with a pool whose echo-back read fails.
+    // 'product' has already verified once on this instance, so this must be
+    // the transient WARNING, not a second CRITICAL escalation.
+    (w as unknown as { opts: { writerPool: () => Promise<ConnectionPool> } }).opts.writerPool = fakeUpdateLimitsPool(after1);
+    const second = await w.updateProductLimits({ productId: 20, before: after1, after: after2, bounds: BOUNDS, reason: REASON, actor: ACTOR });
+    expect(second.ok).toBe(true);
 
     const dqRows = log.filter((e) => /INSERT INTO sms\.dq_finding/.test(e.sql));
     expect(dqRows).toHaveLength(1);

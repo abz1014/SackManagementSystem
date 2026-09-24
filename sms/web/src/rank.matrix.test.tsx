@@ -219,6 +219,9 @@ const HEALTH_FIXTURE: HealthReport = {
   acquisition: { kind: 'ok', ageSeconds: 42, cadenceSeconds: 60, halted: null, generation: GENERATION_FIXTURE },
   backup: { dir: 'C:\\backups', newestFile: 'sidecar-20260907.bak', newestAtUtc: '2026-09-07T03:00:00Z', ageDays: 0.5, warning: false },
   degradedReason: null,
+  // RT24-05: this fixture predates the pdasWrite field; writes are off in
+  // this fixture's world, same as everywhere else the matrix drives its fake API.
+  pdasWrite: { enabled: false, canReadBack: null, missingSelect: [], missingExecute: [], unverifiedSinceStartup: [], lastVerifiedUtc: null },
 };
 
 const RECONCILIATION_FIXTURE: Envelope<ReconciliationData> = {
