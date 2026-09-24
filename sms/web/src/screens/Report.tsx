@@ -129,8 +129,8 @@ export function ReportScreen({
                 reader has to scroll past the content to find is a control they
                 do not know exists. Both are disabled while the report is still
                 arriving: a half-loaded report must not be printable. Export is
-                a LINK to the server's CSV or XLSX (rank 3, audited as
-                `export.csv` / `export.xlsx`) and is absent for a role the
+                a LINK to the server's CSV, XLSX or PDF (rank 3, audited as
+                `export.csv` / `export.xlsx` / `export.pdf`) and is absent for a role the
                 server would refuse — a 403 is a bug, not a state. CSV stays
                 first and is what a plain click reaches, so nothing already
                 depending on this control's position or default changes. */}
@@ -143,11 +143,13 @@ export function ReportScreen({
                   <>
                     <a className="btn" href={reportExportUrl(type, q)}>{W.report.exportCsv}</a>
                     <a className="btn" href={reportExportUrl(type, q, 'xlsx')}>{W.report.exportXlsx}</a>
+                    <a className="btn" href={reportExportUrl(type, q, 'pdf')}>{W.report.exportPdf}</a>
                   </>
                 ) : (
                   <>
                     <button type="button" className="btn" disabled>{W.report.exportCsv}</button>
                     <button type="button" className="btn" disabled>{W.report.exportXlsx}</button>
+                    <button type="button" className="btn" disabled>{W.report.exportPdf}</button>
                   </>
                 )
               )}

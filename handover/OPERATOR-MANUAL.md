@@ -328,36 +328,49 @@ product, station, or management-summary figures for a chosen period.
   columns legible on paper.
 
 **Exports:**
-- **CSV** and **Excel** buttons are on the Report screen (rank: manager
-  and above, since export can carry the full raw register). Attribution
-  (line, period, who generated it, SMS version) is written into the file
-  as trailing rows after a blank line — not as a comment header, because a
-  comment header renders as a mangled first row in Excel.
-- **There is no PDF button on the Report screen itself** (verified against
-  `web/src/screens/Report.tsx`: only CSV and Excel links are rendered next
-  to Print). To get a PDF from the screen as it stands today, use your
-  browser's own Print dialog and choose "Save as PDF" — SMS's print
-  stylesheet (landscape for reports, portrait for the Readings register)
-  is built for exactly this.
-- **Separately, the server itself CAN generate a true PDF** —
+- **CSV**, **Excel** and **PDF** buttons are on the Report screen (rank:
+  manager and above, since export can carry the full raw register).
+  Attribution (line, period, who generated it, SMS version) is written
+  into the CSV/Excel files as trailing rows after a blank line — not as a
+  comment header, because a comment header renders as a mangled first row
+  in Excel. **Corrected 24 Sep 2026 (WS-PDF1):** an earlier version of this
+  paragraph said there was no PDF button on the Report screen — that was
+  true when it was written and is no longer true. `web/src/screens/
+  Report.tsx` now offers a PDF link next to CSV and Excel, gated exactly
+  the same way (`rank >= EXPORT_MIN_RANK` and the report actually loaded;
+  a half-loaded report shows all three as disabled buttons, never a link).
+  It calls the same endpoint described below — no second implementation.
+- **The server itself generates a true PDF** —
   `GET /api/reports/:type/export?format=pdf` (rank: manager and above,
   audited as `export.pdf`) drives a headless copy of Microsoft Edge to
   load and print the same report page SMS already renders, so the PDF is
   never a second layout implementation (`api/src/services/reports/pdf.ts`).
-  **No button in the web app links to this endpoint** — reaching it today
-  means constructing the URL by hand (or scripting it), not clicking
-  anything in Report. Whoever next touches the Report screen should decide
-  whether to wire a button to it or remove it, rather than leave a working
-  server capability unreachable.
-- **Neither PDF path — browser Print-to-PDF, nor the server's own
-  `format=pdf` endpoint — has been verified end to end.** No real print
-  dialog and no real installation of Edge/`puppeteer-core` on a plant-like
-  host has ever produced and inspected an actual PDF file in this project;
-  the server endpoint's own automated tests deliberately mock the Edge
-  render rather than exercise it, precisely so the test suite does not need
-  Edge installed to pass. Treat both as unverified until someone opens a
-  produced PDF and checks it by eye. **[No real print/PDF driver has
-  verified this yet — see §8.]**
+  You can still get a PDF via the browser's own Print dialog ("Save as
+  PDF") instead — SMS's print stylesheet (landscape for reports, portrait
+  for the Readings register) is built for exactly this — but there is now
+  also an in-app button that reaches the server's own render directly.
+- **The in-app PDF button's own control logic is covered by an automated
+  test** (`web/src/screens/Report.export.test.tsx`, added 24 Sep 2026):
+  it asserts the link is present only at export rank, carries `format=pdf`
+  and otherwise the same query CSV/Excel use, and renders as a disabled
+  button while the report is still loading, exactly like its siblings.
+  **What that test does NOT prove, and what remains open:** whether the
+  server can actually PRODUCE a PDF on a real host. A same-day, read-only
+  live check (`renderReportPdf` invoked directly against a scratch API
+  instance on this development machine, never signing in with a password —
+  the function mints its own one-render token) found Edge itself launches
+  fine from a plain shell (`msedge.exe --headless --remote-debugging-port`
+  answered the DevTools protocol correctly), but `puppeteer-core`'s own
+  launch of that same executable failed immediately in this environment
+  with `Failed to launch the browser process: Code: 0` and empty stderr —
+  reproduced with a minimal script outside `pdf.ts` entirely, so it is a
+  property of this sandboxed shell's process spawning, not a bug in this
+  codebase's own render path. **The server endpoint's own automated tests
+  still deliberately mock the Edge render** rather than exercise it, so the
+  test suite does not need Edge installed to pass; nothing about that
+  changed this pass. Treat the PDF pipeline as unverified end to end until
+  someone runs it on a real (non-sandboxed) host and opens the produced
+  file. **[No real print/PDF driver has verified this yet — see §8.]**
 
 ### 2.8 Health
 
@@ -508,32 +521,43 @@ admin session has been used so far.
 
 ## 8. Reports and exports — honest limits
 
-- **CSV and Excel exports exist and are built.** Attribution is written as
-  trailing rows, never a header comment (Excel would show a mangled first
-  row).
-- **There is no in-app PDF button on the Report screen** (Report offers CSV
-  and Excel only — verified against `web/src/screens/Report.tsx`). The
-  everyday path to a PDF is still your browser's own Print-to-PDF, using
+- **CSV, Excel and PDF exports exist and are built.** CSV/Excel attribution
+  is written as trailing rows, never a header comment (Excel would show a
+  mangled first row).
+- **Corrected 24 Sep 2026 (WS-PDF1) — the Report screen now has an in-app
+  PDF button, next to CSV and Excel** (`web/src/screens/Report.tsx`, gated
+  identically: rank ≥ manager, disabled while the report is still loading).
+  This paragraph previously said there was no in-app PDF button and that
+  nothing in the UI reached the server's own PDF endpoint; that gap is
+  closed. The everyday alternative — your browser's own Print-to-PDF, using
   SMS's print stylesheet (reports print landscape; the Readings register
-  prints portrait — an explicit choice after both orientations were
-  compared side by side).
-- **A true, server-rendered PDF export ALSO exists, but nothing in the UI
-  reaches it.** `GET /api/reports/:type/export?format=pdf`
-  (`api/src/services/reports/pdf.ts`) drives a headless copy of Microsoft
-  Edge to load and print SMS's own report page, so the PDF is never a
-  second, hand-built layout — but no button, link or screen calls this
-  endpoint today. This is a real gap between what the server can do and
-  what an operator can reach, not a missing feature of the server itself.
+  prints portrait) — still works exactly as before and is unaffected.
+- **The server-rendered PDF path itself** is `GET /api/reports/:type/
+  export?format=pdf` (`api/src/services/reports/pdf.ts`), a headless copy
+  of Microsoft Edge loading and printing SMS's own report page — never a
+  second, hand-built layout. The new button is a thin link to this same
+  endpoint; no second rendering path was added.
 - **No print pipeline has been verified against a real printer or PDF
-  driver, for EITHER path.** Every print claim in this system's own build
-  notes comes from a simulated print layout in a test browser, cross-checked
-  against the page's own measured width — a close approximation, not a
-  proof that a real printer or a real "Print to PDF" dialog will render
-  identically. The server-rendered PDF path is even less proven: its own
-  automated tests deliberately mock the Edge render, so passing tests do
-  not mean a real installation of Edge/`puppeteer-core` has ever produced
-  an actual PDF file that someone opened and checked. **[UNVERIFIED on
-  plant data]**
+  driver, for EITHER path — and a same-day, read-only attempt to verify
+  the server-rendered path on this development machine found a launch
+  failure, not a success.** Every print-CSS claim in this system's own
+  build notes comes from a simulated print layout in a test browser,
+  cross-checked against the page's own measured width — a close
+  approximation, not proof that a real printer or a real "Print to PDF"
+  dialog will render identically. For the server-rendered path: `renderReportPdf`
+  was invoked directly (no sign-in — it mints its own one-render token)
+  against a scratch API instance on this machine; Edge itself launched
+  fine from a plain shell and answered the DevTools protocol, but
+  `puppeteer-core`'s own launch of the same executable failed immediately
+  with `Failed to launch the browser process: Code: 0` and no stderr,
+  reproduced with a minimal script outside this codebase's own `pdf.ts`
+  — i.e. this sandboxed development shell's process spawning, not a defect
+  in the render code. The server endpoint's own automated tests still
+  deliberately mock the Edge render, so passing tests never proved a real
+  Edge install could produce a file; this pass's attempt to prove it on a
+  real (if sandboxed) host hit a different, environment-level wall instead.
+  **[UNVERIFIED on plant data — and now also unverified on this development
+  machine, for a documented reason]**
 - **"Too much data"** — see §6.
 
 ---

@@ -2614,12 +2614,12 @@ export function getReportOf<T extends ReportType>(type: T, q: ReportQuery): Prom
 
 /**
  * The export's address — rank 3 on the server, audited `export.csv` /
- * `export.xlsx`. A link, so the browser downloads it. `format` defaults to
- * `csv` and is omitted from the URL in that case, matching the server's own
- * default (`exportQuery` in routes/reports.ts) so existing CSV links are
- * unchanged byte-for-byte.
+ * `export.xlsx` / `export.pdf`. A link, so the browser downloads it. `format`
+ * defaults to `csv` and is omitted from the URL in that case, matching the
+ * server's own default (`exportQuery` in routes/reports.ts) so existing CSV
+ * links are unchanged byte-for-byte.
  */
-export function reportExportUrl(type: ReportType, q: ReportQuery, format?: 'csv' | 'xlsx'): string {
+export function reportExportUrl(type: ReportType, q: ReportQuery, format?: 'csv' | 'xlsx' | 'pdf'): string {
   const p = reportParams(q);
   if (format && format !== 'csv') p.set('format', format);
   return `/api/reports/${type}/export?${p.toString()}`;

@@ -924,6 +924,7 @@ export const W = {
     print: 'Print',
     exportCsv: 'Export CSV',
     exportXlsx: 'Export Excel',
+    exportPdf: 'Export PDF',
     printedAt: 'Printed',
     printedBy: 'by',
     /* The label on the verdict mark — the one ink fill in the application,
