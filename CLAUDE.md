@@ -18,6 +18,10 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### PDAS write authority recorded; D-12 resolved (24 Sep 2026)
+
+Hassan sb of IFL gave the SMS project owner a written grant by WhatsApp on 19 September 2026 ("complete autonomy and permission to enable and work on the PDAS changing the DB"), by the project owner's statement covering all nine write rights, for both the local copy and the plant. The message itself is held by the project owner, not in this repo. See `DEFECTS.md` D-12 and `handover/PDAS-WRITE-GRANT-2026-09-19.md`. This does not turn the plant path on: `PDAS_WRITE_ENABLED=false` in `sms/.env`, and the gate is now the local end-to-end proof (all nine rights through our code against `PDAS_TP1U2_SEP07`, with backups, failure paths, and an EXECUTE-only "ibrahim"-shaped login rehearsal), not IFL's authority. See Phase 1 hard constraint 3 below for the full detail.
+
 ### Retire-and-recreate resolved by execution; PDAS error-code attribution corrected (23 Sep 2026, WS-PDAS2)
 
 Second authorised PDAS execution pass, same protocol and same boundary as the first
@@ -99,6 +103,7 @@ whether `sms_pdas_writer` (not yet created) or `pdasWrite.ts`'s own connection p
 identically to this pass's `sqlcmd -E` calls; whether IFL's own operational process depends on
 `nhs_events`' mislabelled MaterialId text. `PDAS_WRITE_ENABLED` remains `false`; none of this
 pass's findings change the fact that all nine write rights still await IFL's written authority.
+**(Superseded 24 Sep 2026: written grant 19 Sep, see D-12.)**
 
 ### Red-team audit and its 15-commit remediation wave (23 Sep 2026, later the same day than the entry below)
 
@@ -141,7 +146,8 @@ PDAS procedure had been executed against any database, local or plant, at the ti
 red-team wave was written**, and that remained true through this wave. **Superseded later the
 same day (23 Sep 2026):** see the WS-PDAS2 section above this one — two authorised passes
 executed PDAS procedures against the local `PDAS_TP1U2_SEP07` copy only, then restored it; the
-plant and `PDAS_WRITE_ENABLED` (still `false`) are unaffected.
+plant and `PDAS_WRITE_ENABLED` (still `false`) are unaffected. **(Superseded 24 Sep 2026: written
+grant 19 Sep, see D-12.)**
 
 **Suite and typecheck, measured directly this pass:** `npx vitest run` from `sms/` — **177
 files passed / 1 skipped, 1745 tests passed / 4 skipped**, no red files, one run, HEAD
@@ -233,7 +239,7 @@ AddTubeType  5             @tubeForm    int        4           0
 AddTubeType  6             @tubeWeight  float      8           0
 ```
 
-This is an **exact match**, in both name and parameter order, to `PROC_PARAMS.AddTubeType` in `pdasWrite.ts` (`['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight']`). The presumed `typeTypeId` output name — guessed by analogy with the vendor's other `Add*` procedures' own typo — was correct. **What this verifies, and no more:** the procedure's *signature* — its parameter names, order, types and OUTPUT flags. At the time this section was written (21 Sep 2026) the procedure's *runtime behaviour* was still unobserved. **Superseded 23 Sep 2026:** two authorised execution passes (`PDAS-EXECUTION-2026-09-23.md`, and the WS-PDAS2 section above "Current phase") have since executed `AddTubeType`, `CreateMaterial` and `SetMaterialStatusActive` against the local `PDAS_TP1U2_SEP07` copy only — the duplicate-refusal codes are now observed firing (`AddTubeType` → `-5001`; `CreateMaterial` → `-7001`), not merely read from the proc body. The plant was never touched and `PDAS_WRITE_ENABLED` stays `false`; all nine write rights still await IFL's written authority — nothing about that changes. Reproduce this yourself with the same query before relying on it further.
+This is an **exact match**, in both name and parameter order, to `PROC_PARAMS.AddTubeType` in `pdasWrite.ts` (`['error', 'errorMsg', 'typeTypeId', 'tubeType', 'tubeForm', 'tubeWeight']`). The presumed `typeTypeId` output name — guessed by analogy with the vendor's other `Add*` procedures' own typo — was correct. **What this verifies, and no more:** the procedure's *signature* — its parameter names, order, types and OUTPUT flags. At the time this section was written (21 Sep 2026) the procedure's *runtime behaviour* was still unobserved. **Superseded 23 Sep 2026:** two authorised execution passes (`PDAS-EXECUTION-2026-09-23.md`, and the WS-PDAS2 section above "Current phase") have since executed `AddTubeType`, `CreateMaterial` and `SetMaterialStatusActive` against the local `PDAS_TP1U2_SEP07` copy only — the duplicate-refusal codes are now observed firing (`AddTubeType` → `-5001`; `CreateMaterial` → `-7001`), not merely read from the proc body. The plant was never touched and `PDAS_WRITE_ENABLED` stays `false`; all nine write rights still await IFL's written authority — nothing about that changes. Reproduce this yourself with the same query before relying on it further. **(Superseded 24 Sep 2026: written grant 19 Sep, see D-12.)**
 
 Two other points established the same day, by direct measurement rather than by inference:
 
@@ -362,7 +368,9 @@ programme and it must not flatter what was actually verified:**
   see the section above — but that is not the authority to call it); weight
   basis (Q4/Q5); KPI approval (Q33-37); reject-code meanings (Q10); sack
   stock per machine (still not computable from IFL's data); the 10 Jul - 5
-  Aug data; the live read-only login and host (Q65-70). **36 questions
+  Aug data; the live read-only login and host (Q65-70). **(Superseded 24 Sep
+  2026 as to written PDAS authority only: written grant 19 Sep, see D-12; the
+  other items in this list are unaffected.)** **36 questions
   remain unsent.**
 - **The branch is unpushed**, roughly 95 commits ahead of `origin/main`; CI
   has never run against it. Only the owner pushes.
@@ -440,7 +448,9 @@ authority for the nine PDAS write rights (`AddTubeType`'s parameter
 Phase 9 entry — which does not itself grant authority to call it), weight
 basis (Q4/Q5), KPI approval (Q33-37), reject-code meanings (Q10), sack
 stock per machine, the 10 Jul – 5 Aug data, and the live read-only login/host
-(Q65-70). `sms.source_epoch.last_seen_utc` had no writer anywhere in the repo
+(Q65-70). **(Superseded 24 Sep 2026 as to written PDAS authority only: written
+grant 19 Sep, see D-12; the other items in this list are unaffected.)**
+`sms.source_epoch.last_seen_utc` had no writer anywhere in the repo
 when this was written; **corrected 23 Sep 2026 — `sync-worker/src/epoch.ts`
 writes it since `b31d574`, and it reads NULL only because no pass has run
 since.** Verified against the local `_SEP07` dev copy only, never real plant
@@ -531,7 +541,9 @@ gap. Blocked on IFL, unchanged: written authority for the nine PDAS write
 rights, `AddTubeType`'s parameter name, weight basis (Q4/Q5), KPI approval
 (Q33-37), reject-code meanings (Q10), sack stock per machine, the 10 Jul – 5
 Aug data, and the live read-only login/host (Q65-70, which is what blocks
-`sms verify` over HTTP). **The rank-1 (viewer) UI path has still never been
+`sms verify` over HTTP). **(Superseded 24 Sep 2026 as to written PDAS
+authority only: written grant 19 Sep, see D-12; the other items in this list
+are unaffected.)** **The rank-1 (viewer) UI path has still never been
 exercised live** — Phase 7's guards close the client-side *gating* question
 mechanically; they do not close the *rendering* one. Verified against the
 local `_SEP07` dev copy only, never real plant data. The branch remains
@@ -587,7 +599,9 @@ suite, and by hand), and visual polish of the Product screen. Blocked on IFL,
 unchanged: written authority for all nine PDAS write rights, `AddTubeType`'s
 parameter name, weight basis (Q4/Q5), KPI approval (Q33-37), reject-code
 meanings (Q10); sack stock per machine is still not computable from IFL's
-data. Everything above was verified against the local `_SEP07` dev copy only,
+data. **(Superseded 24 Sep 2026 as to written PDAS authority only: written
+grant 19 Sep, see D-12; the other items in this list are unaffected.)**
+Everything above was verified against the local `_SEP07` dev copy only,
 never against real plant data. The rank-1 (viewer) UI path was never exercised
 live in Phase 5 or 6 — workers stayed signed in as admin and were forbidden to
 create or reset accounts — so rank gating rests on code inspection and the
@@ -666,7 +680,7 @@ A second sample from IFL (`SPS.rar`, 7 Sep) showed the plant **dropped and recre
 2. **Product attribution is real.** `NullAttribution` is retired for rows that carry `MaterialId` (`attribution_method = 'source_column'`); older rows keep `'none'` honestly. Limits are **time-versioned** (`sms.product_limit_version`): a reading is judged by the limits in force at its own time, never by today's mirror. Up to six materials run concurrently on different machines, so the line-wide "Current Product" is now only the fallback for pre-`MaterialId` rows.
 3. **The PDAS write path exists and is OFF.** Add / Retire / Change-limits, through the vendor's own procs (there is no UPDATE proc; changing a setpoint is one guarded single-row UPDATE with the vendor's own event-log row), rank ≥ 3, `PDAS_WRITE_ENABLED=false`, a **separate** writer login. It stays off until IFL confirms **in writing** that SMS may write to PDAS — the read-only rule for `DATA_TP1U2` is unchanged. Retire-and-recreate is **not** an edit: `CreateMaterial` refuses a duplicate blend/count/tube regardless of active flag (IFL's own engineer hit this four times on 18 Aug). **Finding H6, closed 23 Sep 2026 (see the WS-PDAS2 section under "Current phase"):** the 15 Sep 2026 audit's "unverified" call was right about the ten SSMS screenshots at `Desktop/SPS unzip/SPS/*.jpg` (they show no error — every call shown returns `@error`/`@errorMsg` = `NULL`/`NULL`, because the errors went to `nhs_events`, not the grid) but wrong to conclude the incident itself was unverified. `nhs_events` EventIds 23204/23206/23207/23208 record the four `-7001` refusals at 10:35–10:41 on 18 Aug 2026, bracketed by `SetMaterialStatusActive` retiring and reactivating MaterialId 1022 — i.e. the engineer's own attempt at retire-then-recreate. A 23 Sep 2026 execution pass against the local `PDAS_TP1U2_SEP07` copy reproduced the identical sequence (create → retire → recreate same triple → **refused, `-7001`, no row inserted** → reactivate) and confirms it: retire-and-recreate cannot work, by the vendor's own uniqueness check, which never references `MaterialActive`.
 
-**Still to ask IFL for:** the 10 Jul – 5 Aug data (exists, not sent); `db_datareader` on both DBs; written authority for PDAS writes; whether the PLC reads limits live.
+**Still to ask IFL for:** the 10 Jul – 5 Aug data (exists, not sent); `db_datareader` on both DBs; written authority for PDAS writes; whether the PLC reads limits live. **(Superseded 24 Sep 2026 as to written PDAS authority only: written grant 19 Sep, see D-12; the other items in this list are unaffected.)**
 
 **Phase 1 — COMPLETE (build steps 0–13 done & verified).** Full stack under `sms/`: sync-worker (IFL→raw→canonical, continuous self-healing loop) · CLI (sync/verify/summary/rebuild/user:create) · Express API (auth, RBAC, /production, /operations, /shift-analysis, /rejects, /weights, admin) · React web (Dashboard, Shift, Rejects, Weights, Admin, login, Current Product). 31 app tables after 27 migrations (27 `sms.*` + 4 `sms_raw.*`; this line used to say 25, and README said 21 — both were wrong), session-cookie auth (argon2), 266 tests in 28 files (the "17 tests" this line carried was Phase 1's count), perf 11–15ms. Deployment: `DEPLOY.md`. All four blocked client questions (Q1/Q4-5/Q7/Q10) resolved or self-answering + one admin action from applying. **Awaiting IFL answers + go-live cutover — which is repointing `IFL_DB_*` *plus* `sms epoch:accept` for the live generation; "repoint and nothing else" stopped being true on 5 Aug 2026.**
 
@@ -1004,11 +1018,11 @@ Commissioning is split by **component**, not just by activity. Phase 1 does **no
 
 1. **Do not implement Component B.** No PLC reader logic. (Q22: PLC integration is out of scope entirely.)
 2. **Do not add any PLC dependency** — no `snap7`, `python-snap7`, `S7NetPlus`, or equivalent, in any manifest.
-3. **Do not write to IFL's acquisition database (`DATA_TP1U2`), and do not alter it in any way** — no schema, **indexes**, tables, procs, or data (Q21, hard client constraint). Reads only. Writes (Current Product, users, notes) go to the **app-owned DB only**. **The one exception, 11 Sep 2026, is the PDAS write path** — a separate `sms_pdas_writer` login, behind `PDAS_WRITE_ENABLED`, which **ships off and stays off until IFL confirms in writing** that SMS may write to PDAS. That confirmation has not happened, so none of what follows runs against any plant database today. What the write path actually does, as of roadmap Wave F (15 Sep 2026, `sms/api/src/services/pdasWrite.ts`), is wider than "Materials plus nhs_events" — corrected here (finding H6, 15 Sep 2026 audit) into what IFL has confirmed versus what is only built:
-   - **Authorised today** — the client confirmed on 2026-09-11 that these replace the hand-written SSMS `EXEC`s its engineers already run: `CreateMaterial` (create a product) and `SetMaterialStatusActive` (retire/reactivate a product).
-   - **Written into the code, awaiting IFL's written authority, never executed against any plant database:** `AddBlend`, `AddCount`, `AddTubeType`, `CreatePallet`, `SetPalletStatusActive` (roadmap Phase 6 / Wave F, the rest of IFL's own "QCS ID Creation by P-DAS" SOP — `sms/api/src/services/pdasWrite.ts`); the guarded single-row `UPDATE dbo.Materials` that changes limits (the vendor supplies no UPDATE proc for this); and the `INSERT dbo.nhs_events` row written alongside it, in the vendor's own event-log format.
+3. **Do not write to IFL's acquisition database (`DATA_TP1U2`), and do not alter it in any way** — no schema, **indexes**, tables, procs, or data (Q21, hard client constraint). Reads only. Writes (Current Product, users, notes) go to the **app-owned DB only**. **The one exception, 11 Sep 2026, is the PDAS write path** — a separate `sms_pdas_writer` login, behind `PDAS_WRITE_ENABLED`. **Written authority, owner's statement:** Hassan sb of IFL gave the SMS project owner a written grant by WhatsApp on 19 September 2026 ("complete autonomy and permission to enable and work on the PDAS changing the DB"), covering all nine write rights below, for both the local copy and the plant; process engineers will be the users. That message is held by the project owner, not in this repo. Timeline: 11 Sep verbal/partial (2 of 9), 15 Sep verbal (all nine), 19 Sep written (all nine), 22 Sep `af420a4` flipped `PDAS_WRITE_ENABLED` on locally only. See `DEFECTS.md` D-12 (resolved 24 Sep 2026) and `handover/PDAS-WRITE-GRANT-2026-09-19.md`.
 
-   That is **nine rights, not two** — every one of them across `dbo.Materials`, `dbo.Blends`, `dbo.Counts`, `dbo.TubeTypes`, `dbo.Pallets` and `dbo.nhs_events`. The two rules that bounded the old, shorter promise still bound the longer one without exception: **no new PDAS objects, no DELETE, no other table, ever.** The written-authority request to IFL must name all nine rights above — see `sms/DEPLOY.md`'s credentials table for the `sms_pdas_writer` grant they cover.
+   **The gate still in force:** the code path (`pdasWrite.ts`, `/api/changeover/execute`) has never run end to end. The plant stays off until the local end-to-end proof completes on the owner's Windows laptop: all nine rights exercised through our code against `PDAS_TP1U2_SEP07`, with backups, failure paths, and an EXECUTE-only "ibrahim"-shaped login rehearsal, plus any fixes that proof turns up. Q21 is unchanged for `DATA_TP1U2`. The PDAS exception stays bounded exactly as before: **no new PDAS objects, no DELETE, no other table, ever.** Retire-and-recreate is still not an edit: `CreateMaterial` refuses a duplicate blend/count/tube regardless of active flag.
+
+   **All nine rights, granted 19 Sep 2026 (owner's statement), none yet run through our code end to end:** `CreateMaterial` (create a product), `SetMaterialStatusActive` (retire/reactivate a product), `AddBlend`, `AddCount`, `AddTubeType`, `CreatePallet`, `SetPalletStatusActive` (roadmap Phase 6 / Wave F, the rest of IFL's own "QCS ID Creation by P-DAS" SOP — `sms/api/src/services/pdasWrite.ts`), the guarded single-row `UPDATE dbo.Materials` that changes limits (the vendor supplies no UPDATE proc for this), and the `INSERT dbo.nhs_events` row written alongside it, in the vendor's own event-log format, covering `dbo.Materials`, `dbo.Blends`, `dbo.Counts`, `dbo.TubeTypes`, `dbo.Pallets` and `dbo.nhs_events`. `PDAS_WRITE_ENABLED=false` in `sms/.env`; the `.env` comment there is the owner's to correct. See `sms/DEPLOY.md`'s credentials table for the `sms_pdas_writer` grant these cover.
 4. **Web app queries the app-owned DB** (sidecar). *Pending D0:* IFL's Q19 says "connect directly"; do not finalise the data-access path until D0 is decided.
 
 ### Phase 2 readiness — VERIFIED STATUS (audited 17 Aug 2026)

@@ -171,13 +171,13 @@ rule PDAS enforces, and shows every blocker before anything happens.
 sack figures. One role, called engineer, does all three. Show that the same account that can
 plan a changeover is the one that can set a limit.
 
-**Then show the execute button disabled, and say why.** SMS will not write to PDAS until the
-authority is in writing. The plan is real; the write is off by choice.
+**Then show the execute button disabled, and say why.** SMS will not write to PDAS until our
+own local end-to-end proof has passed. The plan is real; the write is off by choice.
 
-**Ask here — but only if the owner has confirmed beforehand that the authority was NOT
-already given.** See the note in *Before you start*. If it was given, the right move is the
-opposite: thank them for it, confirm the nine rights back to them in writing, and say when the
-path will be switched on.
+**Say here:** thank them for the written permission given on 19 September. Confirm the nine
+rights back to them: `Materials`, `Blends`, `Counts`, `TubeTypes`, `Pallets` and `nhs_events`,
+no new objects, no DELETE, no other table. Say it will be switched on once our own local
+end-to-end test has passed.
 
 ### 7. Report — now the best-answered section, not the most open one
 
@@ -263,10 +263,11 @@ Four things. Everything else on the list can go by email; these cannot.
 2. **A read-only login on the live server, the host name, and confirmation that the PC we
    supply can reach it.** This is what turns the demo into an installation. The script their
    DBA runs is ready and unchanged.
-3. **PDAS write authority** — *or*, if it has already been given, written confirmation of it
-   naming all nine rights across `Materials`, `Blends`, `Counts`, `TubeTypes`, `Pallets` and
-   `nhs_events`. No new objects, no DELETE, no other table. **Settle with the owner which of
-   these two it is before the meeting.**
+3. **PDAS write authority: thank you, and formal written confirmation back.** Permission was
+   given on 19 September, covering all nine rights across `Materials`, `Blends`, `Counts`,
+   `TubeTypes`, `Pallets` and `nhs_events`. No new objects, no DELETE, no other table. We ask
+   IFL to confirm this back to us in writing, and we will provision and switch it on once our
+   own local end-to-end test has passed.
 4. **How much history can be provided** — 6 months, 12 months, everything? Six months is the
    minimum before any predictive work is honest; we hold 53 production days.
 

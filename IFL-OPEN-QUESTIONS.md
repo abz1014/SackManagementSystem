@@ -41,12 +41,11 @@ above.**
    Without this the product cannot be installed — everything else is secondary to it.
 2. **Can the PC we supply actually reach those databases**, and if the PLC and server
    networks are genuinely segregated, which side does it sit on.
-3. **Written authority for the PDAS write path — held back, not sent.** Our own records
-   contradict each other about whether this was already given (see item 3's note below).
-   Until the owner resolves which record is true, asking IFL for it again risks asking for
-   permission they already gave; asking is therefore paused on our side, not on theirs.
-   **The fifteen-item list below still carries it in full, for the record, but the
-   covering note above deliberately omits it.**
+3. **Formal confirmation of the 19 September PDAS write permission, and the login for your
+   DBA (`sms_pdas_writer`).** Lower priority than the two above: the 19 September WhatsApp
+   go-ahead already lets us finish building and testing locally. We are simply asking for it
+   in writing, and for the DBA login, ahead of switching it on at the plant. See item 3
+   below.
 
 This is the single list. It replaces hunting through `IFL-QUESTIONS-STATUS.md`,
 `PROJECT_STATUS.md` §5, `ROADMAP-GAP-ANALYSIS.md` §18 and `DECISIONS-PENDING.md` for the same
@@ -99,32 +98,39 @@ PLC and server address ranges are genuinely segregated, which side the PC will s
 **Cost of staying blocked:** a PC is delivered, powered on, and discovers it cannot see the
 data. This is a cheap question now and an expensive one on site.
 
-### 3. Written authority for SMS to write product data to PDAS — or written confirmation that it has already been given
-*(70-pack Q18. **Owner action first — see the note.**)*
+### 3. Formal confirmation of the 19 September PDAS write permission, and the login for your DBA
+*(70-pack Q18)*
 
-The nine rights the write path uses, and no others, across `dbo.Materials`, `dbo.Blends`,
-`dbo.Counts`, `dbo.TubeTypes`, `dbo.Pallets` and `dbo.nhs_events`: EXECUTE on
-`CreateMaterial`, `SetMaterialStatusActive`, `AddBlend`, `AddCount`, `AddTubeType`,
-`CreatePallet` and `SetPalletStatusActive`; UPDATE on `dbo.Materials` alone (the vendor ships
-no UPDATE procedure, so a setpoint change is one guarded single-row update); INSERT on
-`dbo.nhs_events`, the vendor's own event-log row written alongside it. **No new objects, no
-DELETE, no other table, ever.**
+Thank you again for the go-ahead Hassan sb gave over WhatsApp on 19 September, allowing SMS
+to enable and work on the PDAS product database. We would like to ask you to confirm this
+formally, by email or a signed note, so the record does not rest on a single chat message.
+Please could the confirmation name the nine specific rights it covers, across
+`dbo.Materials`, `dbo.Blends`, `dbo.Counts`, `dbo.TubeTypes`, `dbo.Pallets` and
+`dbo.nhs_events`: EXECUTE on `CreateMaterial`, `SetMaterialStatusActive`, `AddBlend`,
+`AddCount`, `AddTubeType`, `CreatePallet` and `SetPalletStatusActive`; UPDATE on
+`dbo.Materials` alone (the vendor ships no UPDATE procedure, so a setpoint change is one
+guarded single-row update); and INSERT on `dbo.nhs_events`, the vendor's own event-log row
+written alongside it. **No new objects, no DELETE, no other table, ever.**
 
-**⚠️ Do not send this ask until the owner resolves a contradiction in our own records.**
-`handover/IFL-ANSWERS-2026-09-15.md` says the authority was still verbal on 15 September and
-that the write flag should stay off. Commit `af420a4` (22 September) says in its message that
-*"IFL granted permission for SMS to write product data to PDAS"* and that the owner instructed
-the path be enabled. No document records that grant — no date, no author, no scope — and the
-flag is off again today. Asking a client to re-give permission they already gave reads as
-badly as switching on a write path against a permission nobody can produce.
+For your DBA, we would also ask for a dedicated login, `sms_pdas_writer`, scoped to exactly
+those nine rights plus read-back SELECT on `dbo.Materials`, `dbo.Blends`, `dbo.Counts`,
+`dbo.TubeTypes` and `dbo.Pallets`, and nothing else. The full request letter and the grant
+script your DBA can run unchanged are at
+`handover/IFL-PDAS-WRITER-LOGIN-REQUEST-2026-09-24.md`.
+
+To be clear about timing: we will not switch this on against your live plant database until
+our own local end-to-end test, on the copy you already sent us, has passed. We will let you
+know before the very first write reaches the plant.
 
 **Blocked without it:** the product changeover workflow, which Hassan sb himself named as the
-key requirement on 15 September. The whole flow is built and reachable; the final step
-returns "disabled" by design.
+key requirement on 15 September. The flow is built and reachable; the final step, writing to
+the plant, stays disabled until our own local end-to-end test passes and the
+`sms_pdas_writer` login exists on your side. Formal written confirmation is asked for the
+record, not as a condition of switching the plant on.
 
-**Cost of staying blocked:** the headline feature of the last two months plans a change and
-then cannot make it. An engineer still has to go to SSMS and type the procedure call by hand,
-which is exactly what this was meant to replace.
+**Cost of staying blocked:** lower than before. The 19 September go-ahead lets us finish
+building and testing against the local copy now; the plant switch-on waits on the local
+end-to-end proof and the `sms_pdas_writer` login, not on this letter.
 
 ---
 

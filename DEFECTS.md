@@ -516,7 +516,7 @@ measurement above came from read-only `SELECT`s against the app-owned `sms` data
 proves stays visible.
 
 
-### D-12 — The PDAS write authority is recorded only in a commit message, and two records contradict each other — **MEDIUM (process/documentation), open, owner's call** (23 Sep 2026)
+### D-12 — The PDAS write authority is recorded only in a commit message, and two records contradict each other — **MEDIUM (process/documentation) → RESOLVED 24 Sep 2026 (owner's statement)** (23 Sep 2026)
 
 Found while bringing the IFL-facing documents current. Four facts, each checked on 23 Sep 2026:
 
@@ -555,6 +555,39 @@ against a permission nobody can produce.
 **Fix (owner only, not a code change):** state which of 1 and 2 is true, and put it in a
 document with a date and a name. If the grant is real, record which of the nine rights it
 covers; if it is not, `af420a4`'s message should be corrected in the record.
+
+**RESOLUTION, 24 Sep 2026 (owner's statement).** The project owner states, on 24 September
+2026, that the contradiction above is resolved. **Who:** Hassan sb, IFL (role not recorded
+anywhere in this repository). **When:** 19 September 2026. **Form:** a written WhatsApp message
+to the SMS project owner, sent directly to the owner and held by the owner; it is not itself in
+this repository, though an export or screenshot of it may be added under `handover/` at the
+owner's discretion. **Scope:** the owner states the message covers all nine rights listed in
+`IFL-OPEN-QUESTIONS.md` item 3, quoting IFL as giving "complete autonomy and permission to
+enable and work on the PDAS changing the DB," and states this covers both the local test copy
+and the plant. The owner notes the WhatsApp wording does not name the nine rights individually:
+**that "all nine" is the owner's reading of the message, not a rights-by-rights confirmation
+in IFL's own words.** Process engineers will be the users of the resulting workflow.
+**Timeline, for the record:** 11 Sep, 2 of the nine rights were confirmed (the form of that
+confirmation was not recorded, per `CLAUDE.md` hard constraint 3 as it stood before this
+change, not from the owner's 24 Sep statement); 15 Sep, the authority was
+verbal only (true as of that date,
+per `handover/IFL-ANSWERS-2026-09-15.md`); 19 Sep, the written WhatsApp message above; 22 Sep,
+commit `af420a4` enabled the flag locally only, against the local `PDAS_TP1U2_SEP07` copy, per
+that commit's own message. Read this way, the 15 Sep record and `af420a4`'s message were each
+true at their own date, and the "contradiction" this entry originally reported was a timeline
+gap, not two records disagreeing about the same date. **What this resolution does not change:**
+the code path (`pdasWrite.ts`, `/api/changeover/execute`) has still never run end to end; the
+plant stays off until Steps 2-5 run on the owner's Windows laptop: all nine rights exercised
+through our code against `PDAS_TP1U2_SEP07`, with backups, failure paths, and an EXECUTE-only
+"ibrahim"-shaped login rehearsal, plus any fixes those runs surface. `Q21` zero-modification
+still applies in full to `DATA_TP1U2`. The PDAS exception this grant covers stays bounded to the
+nine rights already named: no new objects, no `DELETE`, no other table. `PDAS_WRITE_ENABLED`
+reads `false` in `sms/.env` today, and its comment (which currently reads "ENABLED 22 Sep 2026
+... IFL granted permission" above a `=false` value) is the owner's to correct; this pass only
+flags that inconsistency, it does not edit `sms/.env`. **Left to do:** IFL's own formal
+confirmation, tracked as `IFL-OPEN-QUESTIONS.md` item 3, and provisioning of
+`sms_pdas_writer`. See `handover/PDAS-WRITE-GRANT-2026-09-19.md` for the citable record of this
+statement.
 
 ### D-13 — One `basis` setting answers two different questions; IFL was asked only one of them — **LOW, open (no wrong number today)** (23 Sep 2026)
 
@@ -636,7 +669,7 @@ worker has run against a database for a while — carried here so that follow-up
 | D-8 | MEDIUM | `sms.source_epoch.last_seen_utc` has no writer | **fixed**, `b31d574` |
 | D-10 | **HIGH** | X̄ control limits (`grandMean ± 3σ_within/√n`) do not fit the process — ~16% of subgroups "violate" at month scale post-D-1 vs an expected ~0.3% | **model replaced** (`6052b69`, I-MR on the subgroup means) and **rule-1 rendering restored** 23 Sep 2026, gated on `xLimits.valid`; rule-1 rate now 5.6–13.1% on real generations. **Rules 2-8 stay suppressed** — measured 37.6–54.8% flag rate on the same windows. Band not validated against a known-good reference process. |
 | D-11 | **HIGH** | Almost no query constrained which SOURCE GENERATION it read; `downtime.ts` ERASED 53 real stoppages on one measured day | **partly fixed** (`8673ffd`, `ca34a23`, `fc27b60`, and the 23 Sep live pass) — the shared filter builders, downtime/calibration/shiftCheck/reconcile, register/sackStock/productAt/machineProducts, and now the five live sites (`live.ts`, `health.ts`, `machinesRunning.ts`, `app.ts`, `envelope.ts`) read ONE generation and say what they excluded; **reports and `weightStations.ts` remain unconstrained**, listed by `file:line` in D-11 above |
-| D-12 | MEDIUM | PDAS write authority exists only in commit `af420a4`'s message; `handover/IFL-ANSWERS-2026-09-15.md` says it was still verbal and no document records a grant | open — **owner's call**, blocks sending `IFL-OPEN-QUESTIONS.md` ask 3 |
+| D-12 | MEDIUM | PDAS write authority exists only in commit `af420a4`'s message; `handover/IFL-ANSWERS-2026-09-15.md` says it was still verbal and no document records a grant | **resolved 24 Sep 2026 (owner's statement):** written WhatsApp grant, Hassan sb, 19 Sep 2026, owner's reading covers all nine rights, see `handover/PDAS-WRITE-GRANT-2026-09-19.md`; plant stays gated on the local end-to-end proof (Steps 2-5) |
 | D-13 | LOW | One `sms.weight_rule.basis` governs cones and sacks; IFL's 15 Sep answer covered sacks only, and `net` would apply placeholder tube/tare values | open — no wrong number today (`gross` is the identity conversion, `weights.ts:239`) |
 | D-14 | LOW | `CLAUDE.md` asserted in three places that `last_seen_utc` has no writer; it has had one since `b31d574` | **fixed** this pass (23 Sep 2026) |
 | RT-001…036 | mixed | Today's red-team audit findings — see Part 4 below for the full table | mixed, see Part 4 |
@@ -675,7 +708,7 @@ worker has run against a database for a while — carried here so that follow-up
 | RT-021 | HIGH | A 1970 clock-fault sentinel hijacks the live "anchor" under replay, at two independent call sites | **fixed, and a THIRD site was found while fixing it** — `7558854`'s own commit message names three anchor queries floored (`live.ts`'s data tip, `health.ts`'s acquisition tip, `machinesRunning.ts`'s running-grid anchor), one more than the audit's own header text ("at two independent call sites"). Recorded as D-15 below. |
 | RT-022 | HIGH | Weight basis/tare/shift-boundary rules read as "whatever is current", never "whatever was in force" | **open — not addressed by this wave.** Overlaps `DEFECTS.md` D-13 (LOW, already tracked, no wrong number today because `gross` is the identity conversion). |
 | RT-023 | MEDIUM | The running API process was serving code 26 minutes older than its own rebuilt `dist/` | **cannot determine — operational fact, not a code defect.** No commit fixes "restart the process"; whether the currently-running process (if any) is stale cannot be assessed by reading source. Not re-verified this pass. |
-| RT-024 | MEDIUM | `.env`'s `PDAS_WRITE_ENABLED` comment claims IFL authority was granted; the value says the gate is closed | **still open, re-confirmed today.** `sms/.env` read directly this pass: the comment still says "ENABLED 22 Sep 2026 ... IFL granted permission", `PDAS_WRITE_ENABLED=false` still holds. Same finding as `DEFECTS.md` D-12 (MEDIUM, owner's call) — not a duplicate entry, cross-referenced. |
+| RT-024 | MEDIUM | `.env`'s `PDAS_WRITE_ENABLED` comment claims IFL authority was granted; the value says the gate is closed | **authority half resolved by D-12's 24 Sep 2026 resolution** (owner's statement: written WhatsApp grant, Hassan sb, 19 Sep 2026); **the stale `sms/.env` comment itself is still open:** `PDAS_WRITE_ENABLED=false` still holds and the comment above it still reads "ENABLED 22 Sep 2026 ... IFL granted permission," which is now out of date given the flag's actual value, and is the owner's to correct, not this pass's to edit. Same finding as `DEFECTS.md` D-12, not a duplicate entry, cross-referenced. |
 | RT-025 | MEDIUM | `shift_code` baked in at ingest, never recomputed; a brief mixed-shift-rule regime confirmed real | **open — not addressed by this wave.** |
 | RT-026 | MEDIUM | Client/server rank crosscheck covers only ~6 of ~25–32 elevated-rank routes | **open — not addressed by this wave.** `rank.crosscheck.test.ts` was not touched by any of the fifteen commits (checked by `git log --oneline -- web/src/rank.crosscheck.test.ts` since `d2cba5e`: no hits). |
 | RT-027 | MEDIUM | Misleading "Login failed" message masks three distinct DB-connection causes | **open — not addressed by this wave.** |
