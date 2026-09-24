@@ -50,6 +50,9 @@ const HEADER: ReportHeader = {
   smsVersion: '1.9.0',
   definitions: 'KPI-DEFINITIONS.md',
   approval: 'awaiting',
+  spansGenerations: false,
+  sourceGeneration: null,
+  otherGenerationExcluded: null,
 };
 
 // `fmtPlantInstant` (PrintHead.tsx:20-24) renders `generatedAtPlantUtc` pinned

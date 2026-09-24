@@ -173,6 +173,7 @@ const CALIBRATION_REPORT_FIXTURE: Envelope<ReportResponse<'calibration'>> = {
       period: { period: 'day', from: REASON_DAY, to: REASON_DAY, days: 1 },
       filters: { station: 7 }, generatedAtPlantUtc: '2026-09-07T17:00:00Z', generatedBy: 'test-user',
       smsVersion: 'test', definitions: 'KPI-DEFINITIONS.md', approval: 'awaiting',
+      spansGenerations: false, sourceGeneration: null, otherGenerationExcluded: null,
     },
     report: {
       period: { period: 'day', from: REASON_DAY, to: REASON_DAY }, filters: { station: 7 },

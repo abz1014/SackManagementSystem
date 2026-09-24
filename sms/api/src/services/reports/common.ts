@@ -143,6 +143,38 @@ export interface ReportHeader {
   /** Repository-root KPI-DEFINITIONS.md — the sheet IFL signs. */
   definitions: 'KPI-DEFINITIONS.md';
   approval: 'awaiting';
+  /**
+   * RT24-03 (24 Sep 2026): whether this report's period crosses IFL's
+   * 2026-08-05 rebuild boundary and a source generation had to be excluded
+   * to keep every figure on this report describing one physical table
+   * generation — the same rule `generation.ts`'s `GenerationNote` states to
+   * a screen, now stated on every EXPORTED surface too (CSV/XLSX/PDF used to
+   * drop this silently; the JSON payload already carried it per report type,
+   * see daily.ts's own `generationNote`). This is the single source of
+   * truth every export format reads from — no format recomputes it.
+   */
+  spansGenerations: boolean;
+  /** The generation this report is centred on (the newest one present in the window), as a printable label; null when `spansGenerations` is false or the label is unknown. */
+  sourceGeneration: string | null;
+  /** How many readings in the window belong to the generation that was excluded; null when `spansGenerations` is false. `percent` is null unless a caller can back it with a real denominator — never fabricated. */
+  otherGenerationExcluded: { count: number; percent: number | null } | null;
+}
+
+/**
+ * The two lines every export surface (CSV trailing rows, XLSX header sheet,
+ * the printed page) states verbatim when a report spans a source-generation
+ * boundary — one wording, read from the header, never recomputed per
+ * format. Null when the report does not span generations, so a caller can
+ * test "nothing to disclose" with a single null check.
+ */
+export function generationDisclosureLines(h: Pick<ReportHeader, 'spansGenerations' | 'sourceGeneration' | 'otherGenerationExcluded'>): [string, string] | null {
+  if (!h.spansGenerations) return null;
+  const exc = h.otherGenerationExcluded;
+  const pctPart = exc?.percent != null ? ` (${exc.percent}%)` : '';
+  return [
+    `Source generation: ${h.sourceGeneration ?? 'unknown'}`,
+    `Excluded from other generation: ${exc ? exc.count : 0} readings${pctPart}`,
+  ];
 }
 
 /* ------------------------------------------------------- pure arithmetic */

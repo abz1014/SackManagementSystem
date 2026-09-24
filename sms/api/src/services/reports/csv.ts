@@ -15,7 +15,7 @@
  * stop at the blank line; anyone who opens the file properly finds the line,
  * the period, who generated it and from which version.
  */
-import type { ReportHeader } from './common.js';
+import { generationDisclosureLines, type ReportHeader } from './common.js';
 
 export type CsvCell = string | number | boolean | null | undefined;
 export type CsvRow = CsvCell[];
@@ -38,7 +38,7 @@ export function attributionRows(h: ReportHeader): [string, string][] {
     .filter(([, v]) => v != null)
     .map(([k, v]) => `${k}=${String(v)}`)
     .join(' ');
-  return [
+  const rows: [string, string][] = [
     ['report', h.title],
     ['line', h.lineName],
     ['period', `${h.period.from} to ${h.period.to}`],
@@ -49,6 +49,16 @@ export function attributionRows(h: ReportHeader): [string, string][] {
     ['definitions', h.definitions],
     ['ifl_approval', h.approval],
   ];
+  // RT24-03 (24 Sep 2026): a report spanning IFL's 2026-08-05 rebuild used to
+  // exclude the other generation's readings SILENTLY on every exported
+  // surface — the JSON payload already said so (per report type's own
+  // `generationNote`), but nobody who only ever opened the CSV/XLSX/PDF saw
+  // it. Two more trailing rows, in the same after-the-blank-line block as
+  // everything else here (never a comment header — CLAUDE.md's "Open
+  // question 4"), added only when there is something to disclose.
+  const disclosure = generationDisclosureLines(h);
+  if (disclosure) rows.push([disclosure[0], ''], [disclosure[1], '']);
+  return rows;
 }
 
 /**
@@ -61,10 +71,17 @@ export function csvDocument(headers: readonly string[], rows: readonly CsvRow[],
   return `${toCsv(headers, rows)}\n\n${toCsv([], attributionRows(header))}`;
 }
 
-/** `sms-report-<type>-<from>[_to_<to>].<ext>` — the filename does the everyday attribution work. */
+/**
+ * `sms-report-<type>-<from>[_to_<to>][-partial-generation].<ext>` — the
+ * filename does the everyday attribution work. RT24-03 (24 Sep 2026): the
+ * `-partial-generation` marker is appended whenever `spansGenerations` is
+ * true, so a file that left the building with readings excluded says so
+ * before anyone opens it.
+ */
 export function reportFilename(h: ReportHeader, ext: 'csv' | 'xlsx' | 'pdf'): string {
   const span = h.period.from === h.period.to ? h.period.from : `${h.period.from}_to_${h.period.to}`;
-  return `sms-report-${h.reportType}-${span}.${ext}`;
+  const marker = h.spansGenerations ? '-partial-generation' : '';
+  return `sms-report-${h.reportType}-${span}${marker}.${ext}`;
 }
 
 export function csvFilename(h: ReportHeader): string {

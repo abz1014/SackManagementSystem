@@ -209,6 +209,9 @@ function makeHeader(type: ReportType, title: string): ReportHeader {
     smsVersion: 'test-build',
     definitions: 'KPI-DEFINITIONS.md',
     approval: 'awaiting',
+    spansGenerations: false,
+    sourceGeneration: null,
+    otherGenerationExcluded: null,
   };
 }
 

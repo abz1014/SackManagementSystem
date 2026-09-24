@@ -44,6 +44,13 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
       </b>
       <div>{generatedLine(header)}</div>
       <div className="mut sm">{W.reports.definitionsNote}</div>
+      {header.spansGenerations && (
+        <div className="mut sm">
+          {`Source generation: ${header.sourceGeneration ?? 'unknown'}. Excluded from other generation: ` +
+            `${header.otherGenerationExcluded?.count ?? 0} readings` +
+            `${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}.`}
+        </div>
+      )}
     </div>
   );
 }

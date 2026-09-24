@@ -68,6 +68,7 @@ const HEADER: ReportHeader = {
   period: { period: 'shift', from: '2026-09-07', to: '2026-09-07', days: 1 },
   filters: {}, generatedAtPlantUtc: '2026-09-07T16:41:00Z', generatedBy: 'test-user',
   smsVersion: '1.0.0', definitions: 'KPI-DEFINITIONS.md', approval: 'awaiting',
+  spansGenerations: false, sourceGeneration: null, otherGenerationExcluded: null,
 };
 
 const PRODUCT_AT: ProductAtData = {

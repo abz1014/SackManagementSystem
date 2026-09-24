@@ -2215,6 +2215,10 @@ export interface ReportHeader {
   smsVersion: string;
   definitions: 'KPI-DEFINITIONS.md';
   approval: 'awaiting';
+  /** RT24-03 (24 Sep 2026): whether this report's period crosses IFL's 2026-08-05 rebuild boundary and a source generation had to be excluded. */
+  spansGenerations: boolean;
+  sourceGeneration: string | null;
+  otherGenerationExcluded: { count: number; percent: number | null } | null;
 }
 
 export interface ReportQuery {
