@@ -129,6 +129,27 @@ import { RejectsScreen } from './screens/Rejects';
 import { SacksScreen } from './screens/Sacks';
 import { ConeWeightSection } from './screens/report/ConeWeight';
 import { CalibrationSection } from './screens/report/Calibration';
+import { DailySection } from './screens/report/Daily';
+import { ShiftSection } from './screens/report/Shift';
+import { ProductSection } from './screens/report/Product';
+import { StationSection } from './screens/report/Station';
+import { RejectSection } from './screens/report/Reject';
+import { SackSection } from './screens/report/Sack';
+import { SummarySection } from './screens/report/Summary';
+import { MachineProductSection } from './screens/report/MachineProduct';
+import { SystemHistoryBlock } from './screens/health/SystemHistoryBlock';
+import type {
+  DailyReportData,
+  KpiRow,
+  ManagementSummaryData,
+  MachineProductReportData,
+  ProductReportData,
+  RejectReportData,
+  SackReportData,
+  ShiftReportData,
+  StationReportData,
+  SystemHistoryData,
+} from './api';
 
 /**
  * KNOWN_DEFECTS — currently-OPEN findings from this pass (23 Sep 2026,
@@ -872,5 +893,371 @@ describe('MISSING-FIELD FUZZ — Sacks, SackGroup.kg (SummaryFigures + headline)
     await waitFor(() => expect(container.textContent ?? '').toContain('94.1%'));
     expect(container.textContent ?? '').not.toContain('NaN');
     expect(container.textContent ?? '').toContain('0 kg');
+  });
+});
+
+/* ===================================================================== *
+ * RT24-13 (ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md): "Missing-field fuzz *
+ * coverage exists for Line/Weight/Rejects/Sacks and two report sections,  *
+ * but not for 6 of 8 report types, all 4 Product tabs, Health's two       *
+ * blocks, or the 4 sheets." This block closes the remaining 8 of 10       *
+ * report types (all of `ReportDataByType` except cone-weight and         *
+ * calibration, already covered above) and one Health block. Each section  *
+ * component takes its report's `data` as a plain prop (the same idiom     *
+ * ConeWeightSection/CalibrationSection use above), so no fake fetch is    *
+ * needed for any of them.                                                 *
+ *                                                                         *
+ * NOT reached by this pass, named rather than left implicit: the 4        *
+ * Product tabs (Running is already covered above, in the block that       *
+ * explains why it has no scalar figure to fuzz; Catalogue/Changeover/     *
+ * History are each a form or a table of names, not a headline/figure —    *
+ * the same "no defect shape found to fuzz" call this file already made    *
+ * for Running, not independently re-verified here for the other three);   *
+ * SyncHealthBlock (needs `useLive()` plus a second admin-only endpoint,    *
+ * real work of its own); and all 4 sheets (ReadingSheet/ReasonSheet/       *
+ * StationSheet/StockSheet, each its own `usePolling` fetch chain, not a    *
+ * plain-prop component like the report sections). Widening into any of    *
+ * those is more of this same kind of work, not a different kind.          *
+ * ===================================================================== */
+
+const REPORT_PERIOD = { period: 'day' as const, from: '2026-09-07', to: '2026-09-07' };
+const REPORT_COVERAGE = { daysInPeriod: 1, daysWithData: 1, firstDayWithData: '2026-09-07', lastDayWithData: '2026-09-07', complete: true };
+const REPORT_LINE_FIXTURE = {
+  group: 'total', cones: 500, rejectedCones: 10, rejectRatePct: 2, conesInRangePct: 98,
+  sacks: 20, sackWeightKg: 550, avgSackKg: 27.5, conesPerSack: 25, sacksPassedScalePct: 95,
+};
+
+/* --------------------------------------------------------------- Daily -- */
+
+const DAILY_FIXTURE: DailyReportData = {
+  period: REPORT_PERIOD, coverage: REPORT_COVERAGE, totals: REPORT_LINE_FIXTURE,
+  byShift: [REPORT_LINE_FIXTURE], byDay: [REPORT_LINE_FIXTURE],
+  shift: null, readings: { states: { within: 480, low: 10, high: 5, rejected: 3, unknown: 2 }, implausible: 0 },
+  shiftCheck: { compared: 500, mismatched: 0, mismatchPct: 0, topHour: null },
+  downtime: { stoppageCount: 3, stoppedSeconds: 600, thresholdSeconds: 120 },
+  rejectPopulations: { byScale: 10, byScalePct: 2, atInspection: 5, atInspectionPct: 1, note: 'a note' },
+};
+
+describe('MISSING-FIELD FUZZ — Report / Daily, ReportLine.cones (Totals gate, Daily.tsx:14, DailySection)', () => {
+  it('totals.cones DELETED on an otherwise-real, non-empty report: figures still render from the surviving fields (fmtInt(undefined) prints em dash), the report is NOT shown as Empty', () => {
+    const holed: DailyReportData = { ...DAILY_FIXTURE, totals: stripFields(DAILY_FIXTURE.totals, ['cones']) };
+    const { container } = render(<DailySection d={holed} />);
+    // Not a blanket "no Empty anywhere in the page" check: byShift/byDay's
+    // own LineTable prints W.nothingHere for THEIR OWN empty rows regardless
+    // of this fixture (this fixture's byShift/byDay rows carry
+    // group:'total', which LineTable's own, unrelated filter drops) — that
+    // would make a page-wide assertion pass for the wrong reason. The
+    // precise claim is that the TOP block (the one gated by totals.cones)
+    // rendered its real figures, never the whole-report Empty fallback:
+    // the em dash for the stripped field, and the surviving sacks figure.
+    expect(container.textContent ?? '').toContain('—');
+    expect(container.textContent ?? '').toContain('20');
+  });
+
+  it('two-sided partner: totals.cones PRESENT as the real number 0 correctly reads as the genuine-empty Block', () => {
+    const empty: DailyReportData = { ...DAILY_FIXTURE, totals: { ...DAILY_FIXTURE.totals, cones: 0 } };
+    const { container } = render(<DailySection d={empty} />);
+    expect(container.textContent ?? '').toContain(W.nothingHere);
+  });
+});
+
+/* --------------------------------------------------------------- Shift -- */
+
+const SHIFT_SECTION_FIXTURE = {
+  shift: 'evening' as const, coverage: REPORT_COVERAGE, totals: REPORT_LINE_FIXTURE,
+  byDay: [REPORT_LINE_FIXTURE], readings: null,
+};
+const SHIFT_FIXTURE: ShiftReportData = {
+  period: REPORT_PERIOD, shift: null, shifts: [SHIFT_SECTION_FIXTURE],
+  shiftCheck: null, timeLostNote: 'time lost note',
+};
+
+describe('MISSING-FIELD FUZZ — Report / Shift, ShiftSection.totals.cones (the whole-report empty gate, Shift.tsx: `d.shifts.some(s => s.totals.cones > 0)`)', () => {
+  // REAL DEFECT FOUND, not fixed here per this pass's brief (report, do not
+  // silently fix another worker's file): the gate is `s.totals.cones > 0`,
+  // not `=== 0`. `undefined > 0` is ALSO false, so a stripped `cones` on
+  // the only shift makes `.some(...)` false exactly as a genuine empty
+  // shift would — the whole report renders Empty/"Nothing recorded in
+  // this period", even though this shift's rejectedCones/sacks/
+  // sackWeightKg are all real, non-zero data. This is the false-empty
+  // shape CLAUDE.md's "name which part failed" rule and this file's own
+  // "confident zero" class both exist to catch, just inverted: instead of
+  // a confident zero, it is a confident "nothing here" over data that is
+  // actually present. File: web/src/screens/report/Shift.tsx (the
+  // `d.shifts.some((s) => s.totals.cones > 0)` gate).
+  it.skip('DEFECT (Shift.tsx, the whole-report empty gate): totals.cones DELETED on the only shift, with real non-zero rejectedCones/sacks/sackWeightKg: the report wrongly renders Empty instead of the real shift data', () => {
+    const holed: ShiftReportData = {
+      ...SHIFT_FIXTURE,
+      shifts: [{ ...SHIFT_SECTION_FIXTURE, totals: stripFields(SHIFT_SECTION_FIXTURE.totals, ['cones']) }],
+    };
+    const { container } = render(<ShiftSection d={holed} />);
+    // What SHOULD happen (fails today): the real sack figures render, not Empty.
+    expect(container.textContent ?? '').not.toContain(W.nothingHere);
+  });
+
+  it('two-sided partner: totals.cones PRESENT as the real number 0 on the only shift, and every other figure also genuinely 0: Empty is the correct rendering (proves the defect above is about the HOLE, not about the gate shape itself)', () => {
+    const genuinelyEmpty: ShiftReportData = {
+      ...SHIFT_FIXTURE,
+      shifts: [{
+        ...SHIFT_SECTION_FIXTURE,
+        totals: { ...SHIFT_SECTION_FIXTURE.totals, cones: 0, rejectedCones: 0, sacks: 0, sackWeightKg: 0 },
+      }],
+    };
+    const { container } = render(<ShiftSection d={genuinelyEmpty} />);
+    expect(container.textContent ?? '').toContain(W.nothingHere);
+  });
+});
+
+/* ------------------------------------------------------------- Product -- */
+
+const PRODUCT_ROW_FIXTURE = {
+  group: 'total', cones: 500, rejectedCones: 10, rejectRatePct: 2, conesInRangePct: 98,
+  sacks: 20, sackWeightKg: 550, avgSackKg: 27.5, conesPerSack: 25, sacksPassedScalePct: 95,
+  productId: 231, productLabel: 'Test Yarn', weight: { n: 500, avgG: 1948, sdG: 4, minG: 1930, maxG: 1970 },
+  states: { within: 480, low: 10, high: 5, rejected: 3, unknown: 2 }, implausible: 0,
+  target: { setpointG: 1950, loG: 1900, hiG: 2000, inForceAtUtc: '2026-09-01T00:00:00Z', limitsChangedInPeriod: 0 },
+  vsTargetG: -2,
+};
+const PRODUCT_FIXTURE: ProductReportData = {
+  period: REPORT_PERIOD, filters: {}, rows: [PRODUCT_ROW_FIXTURE],
+  unattributed: { cones: 0, rejects: 0, sacks: 0, ofCones: 500, ofRejects: 10, ofSacks: 20 }, note: 'a note',
+};
+
+describe('MISSING-FIELD FUZZ — Report / Product, ProductReportRow.cones (the per-row filter gate, Product.tsx: `r.cones > 0 || r.rejectedCones > 0 || r.sacks > 0`)', () => {
+  it('cones DELETED on the only row, with rejectedCones/sacks still real and non-zero: the row still renders (the OR gate is satisfied by a surviving field) — proves this gate, unlike Shift’s some(), is safe against a single stripped field', () => {
+    const holed: ProductReportData = { ...PRODUCT_FIXTURE, rows: [stripFields(PRODUCT_ROW_FIXTURE, ['cones'])] };
+    const { container } = render(<ProductSection d={holed} products={[]} />);
+    expect(container.textContent ?? '').not.toContain(W.nothingHere);
+    expect(container.textContent ?? '').toContain('Test Yarn');
+  });
+
+  it('DEFECT, recorded not fixed (same file, same gate): cones/rejectedCones/sacks ALL DELETED on the only row while its weight data is real (weight.n=500): the row silently vanishes from the table with no caveat that a row was dropped, not because the product genuinely ran nothing', () => {
+    const holed: ProductReportData = {
+      ...PRODUCT_FIXTURE,
+      rows: [stripFields(PRODUCT_ROW_FIXTURE, ['cones', 'rejectedCones', 'sacks'])],
+    };
+    const { container } = render(<ProductSection d={holed} products={[]} />);
+    // Documents the current (defective) behaviour: the row disappears and
+    // the section falls back to Empty even though weight.n (real cone
+    // weight readings) says this product was not, in fact, idle.
+    expect(container.textContent ?? '').toContain(W.nothingHere);
+  });
+
+  it('two-sided partner: cones/rejectedCones/sacks PRESENT as real 0s (a product that genuinely ran nothing this period): Empty is correct', () => {
+    const genuinelyIdle: ProductReportData = {
+      ...PRODUCT_FIXTURE,
+      rows: [{ ...PRODUCT_ROW_FIXTURE, cones: 0, rejectedCones: 0, sacks: 0 }],
+    };
+    const { container } = render(<ProductSection d={genuinelyIdle} products={[]} />);
+    expect(container.textContent ?? '').toContain(W.nothingHere);
+  });
+});
+
+/* ------------------------------------------------------------- Station -- */
+
+const STATION_ROW_FIXTURE = {
+  station: 7, cones: 500, weighedPlausible: 495, meanG: 1941, vsLineG: -7, vsTargetG: -9,
+  daysHeld: 30, flagged: true, rejectedAtInspection: 3, rejectRatePct: 0.6, conesInRangePct: 96,
+  lastAdjustedUtc: null, states: { within: 480, low: 10, high: 5, rejected: 3, unknown: 2 },
+};
+const STATION_FIXTURE: StationReportData = {
+  period: REPORT_PERIOD, lineMeanG: 1948, targetG: 1950, productLabel: 'Test Yarn',
+  thresholdG: 9, minDaysHeld: 2, lineRejectRatePct: 1.2, rows: [STATION_ROW_FIXTURE], note: 'a note',
+};
+
+describe('MISSING-FIELD FUZZ — Report / Station, StationReportRow.vsLineG (the deviation-bar value, Station.tsx: `value: r.vsLineG ?? 0`)', () => {
+  it('vsLineG DELETED on an otherwise-real row: the bar falls back to the documented `?? 0` (a real, deliberate default, not a stripped-field accident) — no crash, and the row’s own cone count still prints for real, never a fabricated bar value read as a real deviation', () => {
+    const holed: StationReportData = { ...STATION_FIXTURE, rows: [stripFields(STATION_ROW_FIXTURE, ['vsLineG'])] };
+    const { container } = render(<StationSection d={holed} names={[]} onOpen={noop} />);
+    expect(container.textContent ?? '').not.toContain(W.nothingHere);
+    expect(container.textContent ?? '').toContain('500');
+  });
+});
+
+/* -------------------------------------------------------------- Reject -- */
+
+const REJECT_TREND_POINT = {
+  day: '2026-09-07', produced: 500, inspected: 500, rejects: 10, ratePct: 2, uclPct: 4, lclPct: 0, outOfControl: false,
+};
+const REJECT_FIXTURE: RejectReportData = {
+  period: REPORT_PERIOD, filters: {}, total: 25,
+  reasons: [{ rejectCodeId: 1, rejectType: 'quality', tubeCode: null, materialCode: null, label: 'Broken', displayLabel: 'Broken', count: 25, pct: 100, cumulativePct: 100 }],
+  unattributed: null, dayBasis: 'production_day', denominator: 'cones_plus_rejects',
+  byDayCode: [], trend: [REJECT_TREND_POINT], pBarPct: 5, spansGenerations: false, note: 'a note',
+};
+
+describe('MISSING-FIELD FUZZ — Report / Reject, RejectReportData.total (the whole-report empty gate, Reject.tsx: `d.total === 0 && d.trend.every(t => t.produced === 0)`)', () => {
+  it('total DELETED, trend real and non-empty (produced=500): undefined === 0 is false, so the gate is NOT vacuously satisfied — the figures render from the surviving trend data, never "0 cones rejected" nor Empty', () => {
+    const holed: RejectReportData = stripFields(REJECT_FIXTURE, ['total']);
+    const { container } = render(<RejectSection d={holed} onOpenCode={noop} />);
+    // Not a blanket "no Empty anywhere": this fixture's own byDayCode is []
+    // (empty by construction, unrelated to the stripped field), and the
+    // by-day-and-reason table legitimately prints W.nothingHere for that.
+    // The precise claim is the figures tile, gated by `d.total`, rendered
+    // its real content — the em dash for the stripped total, plus the
+    // reasons list, which only renders past the whole-report gate.
+    expect(container.textContent ?? '').toContain('—'); // fmtInt(undefined)
+    expect(container.textContent ?? '').toContain('Broken');
+  });
+
+  it('two-sided partner: total PRESENT as the real number 0, AND every trend point genuinely produced 0: Empty is correct', () => {
+    const genuinelyEmpty: RejectReportData = {
+      ...REJECT_FIXTURE, total: 0, trend: [{ ...REJECT_TREND_POINT, produced: 0 }],
+    };
+    const { container } = render(<RejectSection d={genuinelyEmpty} onOpenCode={noop} />);
+    expect(container.textContent ?? '').toContain(W.nothingHere);
+  });
+});
+
+/* ---------------------------------------------------------------- Sack -- */
+
+const SACK_REPORT_FIXTURE: SackReportData = {
+  period: REPORT_PERIOD, filters: {}, weightBasis: 'gross', totals: REPORT_LINE_FIXTURE,
+  rejectedByScale: 4, inRangePct: 94, conesPerSack: 25, byShift: [REPORT_LINE_FIXTURE], byDay: [REPORT_LINE_FIXTURE],
+  byProduct: [], distribution: null,
+  caveats: { time: 'time caveat', machine: 'machine caveat', conesPerSack: 'cones-per-sack caveat' },
+};
+
+describe('MISSING-FIELD FUZZ — Report / Sack, ReportLine.sacks (the whole-report empty gate, Sack.tsx: `t.sacks === 0`)', () => {
+  it('totals.sacks DELETED on an otherwise-real, non-empty report: undefined === 0 is false, so the real figures render (fmtInt(undefined) prints an em dash for the sacks tile only), never Empty and never a fabricated "0 sacks"', () => {
+    const holed: SackReportData = { ...SACK_REPORT_FIXTURE, totals: stripFields(SACK_REPORT_FIXTURE.totals, ['sacks']) };
+    const { container } = render(<SackSection d={holed} products={[]} />);
+    // Not a blanket "no Empty anywhere": this fixture's byShift/byDay rows
+    // carry group:'total', which LineTable's own, unrelated filter drops,
+    // so THEIR OWN sub-tables legitimately print W.nothingHere regardless
+    // of the field under fuzz. The precise claim is the top figures tile,
+    // gated by totals.sacks, rendered its real content.
+    expect(container.textContent ?? '').toContain('—');
+    expect(container.textContent ?? '').toContain('550');
+  });
+
+  it('two-sided partner: totals.sacks PRESENT as the real number 0 correctly reads as the genuine-empty Block', () => {
+    const empty: SackReportData = { ...SACK_REPORT_FIXTURE, totals: { ...SACK_REPORT_FIXTURE.totals, sacks: 0 } };
+    const { container } = render(<SackSection d={empty} products={[]} />);
+    expect(container.textContent ?? '').toContain(W.nothingHere);
+  });
+});
+
+/* ------------------------------------------------------ Management Summary -- */
+
+const SUMMARY_KPI_FIXTURE: KpiRow = {
+  key: 'cones', label: 'Cones produced', unit: 'cones', betterWhen: 'higher', definition: 'def',
+  current: 500, prior: 480, delta: { abs: 20, pct: 4.1 }, comparable: true, incomparableReason: null,
+  approval: 'awaiting',
+};
+const SUMMARY_FIXTURE: ManagementSummaryData = {
+  period: REPORT_PERIOD, prior: { from: '2026-08-31', to: '2026-08-31' },
+  coverage: { current: REPORT_COVERAGE, prior: REPORT_COVERAGE },
+  kpis: [SUMMARY_KPI_FIXTURE],
+  productMix: { current: [], prior: [] },
+  verdict: { cones: 500, sacks: 20, sackWeightKg: 550 }, approval: 'awaiting', note: 'a note',
+};
+
+describe('MISSING-FIELD FUZZ — Report / Management summary, ManagementSummaryData.coverage.prior.daysWithData (Summary.tsx priorEmpty + W.reports.priorCoverage interpolation)', () => {
+  // REAL DEFECT FOUND, not fixed here per this pass's brief: `priorCoverage`
+  // (words.ts) is a bare template-literal interpolation of the two numbers
+  // it is given, with no fmtInt/null guard the way `fmtValue` (this same
+  // file, used for the KPI cells further down) already has. Stripping
+  // `daysWithData` prints the literal JavaScript word "undefined" onto the
+  // page — the same shape Calibration.tsx's WS-OR finding was, in a
+  // sibling file this pass does not own. File:
+  // web/src/screens/report/Summary.tsx (the `priorCoverage(...)` call) and
+  // web/src/lib/words.ts's `priorCoverage` definition.
+  it.skip('DEFECT (Summary.tsx priorCoverage call / words.ts priorCoverage): coverage.prior.daysWithData DELETED: prints the literal word "undefined", not a dash or a caveat', () => {
+    const holed: ManagementSummaryData = {
+      ...SUMMARY_FIXTURE,
+      coverage: { ...SUMMARY_FIXTURE.coverage, prior: stripFields(SUMMARY_FIXTURE.coverage.prior, ['daysWithData']) },
+    };
+    const { container } = render(<SummarySection d={holed} products={[]} />);
+    // What SHOULD happen (fails today): never the bare word "undefined".
+    expect(container.textContent ?? '').not.toContain('undefined');
+  });
+
+  it('two-sided partner: coverage.prior.daysWithData PRESENT as the real number 0 correctly triggers the priorNoData caveat sentence, with no "undefined"', () => {
+    const priorEmpty: ManagementSummaryData = {
+      ...SUMMARY_FIXTURE,
+      coverage: { ...SUMMARY_FIXTURE.coverage, prior: { ...SUMMARY_FIXTURE.coverage.prior, daysWithData: 0 } },
+    };
+    const { container } = render(<SummarySection d={priorEmpty} products={[]} />);
+    expect(container.textContent ?? '').not.toContain('undefined');
+    expect(container.textContent ?? '').toContain(W.reports.priorNoData);
+  });
+});
+
+/* -------------------------------------------------------- Machine product -- */
+
+const MACHINE_PRODUCT_ROW_FIXTURE = {
+  station: 7, stationName: 'Winder 7', machineName: null,
+  cells: [null], cones: 500, materials: 1,
+} as unknown as MachineProductReportData['rows'][number];
+const MACHINE_PRODUCT_FIXTURE: MachineProductReportData = {
+  period: REPORT_PERIOD, filters: {},
+  columns: [{ day: '2026-09-07', shift: 'evening', cones: 500 }],
+  rows: [MACHINE_PRODUCT_ROW_FIXTURE], changes: [], products: [],
+  labels: { '231': 'Test Yarn' }, conesWithoutStation: 0, note: 'a note',
+};
+
+describe('MISSING-FIELD FUZZ — Report / Machine product, MachineProductReportData.rows (the whole-report empty gate, MachineProduct.tsx: `d.rows.length === 0`)', () => {
+  it('a row is present (length 1) with cones DELETED: the report does not fall back to Empty — the array itself, not a scalar on it, is what the gate reads', () => {
+    const holed: MachineProductReportData = {
+      ...MACHINE_PRODUCT_FIXTURE,
+      rows: [stripFields(MACHINE_PRODUCT_ROW_FIXTURE, ['cones'])],
+    };
+    const { container } = render(<MachineProductSection d={holed} onOpen={noop} />);
+    expect(container.textContent ?? '').not.toContain(W.nothingHere);
+    expect(container.textContent ?? '').toContain('Winder 7');
+  });
+});
+
+/* ===================================================================== *
+ * HEALTH — screens/health/SystemHistoryBlock.tsx. Not one of the seven    *
+ * top-level nav screens, but named explicitly by RT24-13 ("Health's two   *
+ * blocks"). This block needs only installFakeFetch + the plain render     *
+ * helper — no useLive() — because, unlike SyncHealthBlock (also named by  *
+ * RT24-13, not reached by this pass: it additionally reads useLive() and  *
+ * a second admin-only endpoint, real work of its own, not attempted       *
+ * here), it calls exactly one route.                                     *
+ * ===================================================================== */
+
+const SYSTEM_HISTORY_GENERATION_FIXTURE = {
+  epochId: 1, sourceTable: 'pack1_TP1U2', label: 'September copy', generationOrdinal: 2,
+  provenance: 'ifl_copy', sourceServer: '.\\SQLEXPRESS', sourceDb: 'DATA_TP1U2_SEP07',
+  firstSeenUtc: '2026-09-07T12:00:00Z', lastSeenUtc: null, closedUtc: null, registeredBy: 'owner',
+  archivedBelowId: null, archivedObservedUtc: null, rawRowCount: 132552,
+};
+const SYSTEM_HISTORY_FIXTURE: SystemHistoryData = {
+  generations: [SYSTEM_HISTORY_GENERATION_FIXTURE], rebuilds: [], verifyRuns: [],
+};
+
+describe('MISSING-FIELD FUZZ — Health / System history, SourceGeneration.rawRowCount (SystemHistoryBlock.tsx: g.rawRowCount.toLocaleString(...))', () => {
+  // REAL DEFECT FOUND, not fixed here per this pass's brief: every other
+  // scalar in this table is read defensively (lastSeenUtc == null ? em
+  // dash : ..., closedUtc == null ? ... : ...), but rawRowCount goes
+  // straight to `.toLocaleString('en-GB')` with no null guard at all. A
+  // stripped field here is not a false zero, or the word "undefined" — it
+  // is a thrown TypeError ("Cannot read properties of undefined"), which,
+  // unlike every other case in this file, crashes the whole block. File:
+  // web/src/screens/health/SystemHistoryBlock.tsx (the
+  // `g.rawRowCount.toLocaleString('en-GB')` cell).
+  it.skip('DEFECT (SystemHistoryBlock.tsx, rawRowCount cell): rawRowCount DELETED on an otherwise-real generation row: throws instead of rendering a dash', async () => {
+    const holed = {
+      data: { ...SYSTEM_HISTORY_FIXTURE, generations: [stripFields(SYSTEM_HISTORY_GENERATION_FIXTURE, ['rawRowCount'])] },
+      metadata: META_FIXTURE,
+    };
+    installFakeFetch({ '/api/system-history': holed });
+    const { findByText } = render(<SystemHistoryBlock />);
+    // What SHOULD happen (fails today — the render throws before this text
+    // ever appears): the row still shows, with a dash for the missing count.
+    await findByText('pack1_TP1U2');
+  });
+
+  it('two-sided partner: rawRowCount PRESENT as the real number 0 renders "0", not a crash, proving the defect above is specific to the missing key, not to a small/zero value', async () => {
+    const zero = {
+      data: { ...SYSTEM_HISTORY_FIXTURE, generations: [{ ...SYSTEM_HISTORY_GENERATION_FIXTURE, rawRowCount: 0 }] },
+      metadata: META_FIXTURE,
+    };
+    installFakeFetch({ '/api/system-history': zero });
+    const { findByText } = render(<SystemHistoryBlock />);
+    await findByText('pack1_TP1U2');
   });
 });

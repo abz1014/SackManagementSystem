@@ -223,9 +223,20 @@ export function Failed({ error, onRetry }: { error?: string | null; onRetry?: ()
   // they simply are not allowed to see something sends them to look for a
   // fault that does not exist.
   const refused = !!error && /insufficient role|authentication required/i.test(error);
+  // RT-014 (ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md): the API now caps
+  // oversized results server-side and answers 413 {error, limit, hint}
+  // instead of letting an unbounded query run. `usePolling` (lib/live.tsx)
+  // encodes a thrown ApiError's status as a `[<status>] ` prefix on the
+  // string it hands here — the same technique the `refused` check above
+  // already relied on a message substring for, just keyed on status instead
+  // of wording. A 413 is neither a refusal nor an outage: telling a reader
+  // "the plant connection may be down" when their own query was simply too
+  // big sends them to check a fault that does not exist, the same failure
+  // this component already fixed once for `refused`.
+  const tooMuch = !!error && /^\[413\]/.test(error);
   return (
     <p className="state err" role="status">
-      {refused ? W.notAllowed : W.couldNotLoad}
+      {tooMuch ? W.errorDisplay.tooMuchData : refused ? W.notAllowed : W.couldNotLoad}
       {onRetry && !refused && (
         <>
           {' '}

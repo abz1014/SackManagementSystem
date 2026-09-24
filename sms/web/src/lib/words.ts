@@ -2142,6 +2142,16 @@ export const W = {
      *  `groupByProduct` does not list (no cone in the current window). */
     notRunning: 'Not currently running',
   } as const,
+  /* RT-014 (ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md): the API now caps
+     oversized results server-side and answers 413 {error, limit, hint}
+     instead of letting an unbounded query run. `Failed` (ui/bits.tsx) shows
+     this instead of the generic "could not load" sentence when the status
+     is 413, so a genuinely huge query reads as "narrow your request", not
+     as a fault with the plant connection. Appended, not interleaved: this
+     file is append-only for concurrent workers. */
+  errorDisplay: {
+    tooMuchData: 'Too much data for one view — choose a shorter period or filter.',
+  } as const,
 } as const;
 
 export type Words = typeof W;

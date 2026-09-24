@@ -54,9 +54,6 @@ const ALLOW_LIST: Record<string, string> = {
     'superseded by recordAdjustment — same POST /api/calibration/adjustments plus before/after/reference/product — used by screens/StationSheet.tsx.',
   getRejectSpc:
     'superseded by getRejectSpcFiltered — same GET /api/reject-spc plus station/product/code filters — used by screens/Rejects.tsx.',
-  getReport:
-    'superseded by getReportOf("daily", …) via /api/reports/daily, the roadmap Phase 8 rebuild of Report.tsx (its own header comment calls /api/report "the old one").',
-
   // getSystemHistory and getDqDestination were here (Brief 2, backend only,
   // 21 Sep 2026) — UX Phase 7 Brief 3 wired both to Health's SyncHealthBlock
   // (DqSourceLink) and SystemHistoryBlock; the gap is closed.

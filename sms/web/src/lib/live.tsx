@@ -13,7 +13,7 @@
  * it is shown again, so the first thing a returning viewer sees is current.
  */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { getLive, type LiveLine, type Meta } from '../api';
+import { ApiError, getLive, type LiveLine, type Meta } from '../api';
 
 export const LIVE_POLL_MS = 10_000;
 export const LIST_POLL_MS = 15_000;
@@ -91,7 +91,19 @@ export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: str
         setError(null);
         setUpdatedAt(Date.now());
       } catch (e) {
-        if (!cancelled) setError(String((e as Error).message ?? e));
+        if (!cancelled) {
+          // RT-014 (ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md): `Failed`
+          // (ui/bits.tsx) needs to tell a 413 "your own query was too big"
+          // apart from a genuine outage, and the only place that status
+          // survives is here, on the thrown ApiError — by the time this
+          // reaches a screen it is already just `error: string | null`. A
+          // `[<status>] ` prefix carries it through without widening
+          // PollState's own shape, the same "encode it in the string" idiom
+          // the pre-existing `refused` check in `Failed` already relied on.
+          const status = e instanceof ApiError ? e.status : null;
+          const message = String((e as Error).message ?? e);
+          setError(status != null ? `[${status}] ${message}` : message);
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);

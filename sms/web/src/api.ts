@@ -1217,20 +1217,6 @@ export interface ReportData {
   byDay: ReportLine[];
   downtime: { stoppageCount: number; stoppedSeconds: number; thresholdSeconds: number };
 }
-export function getReport(q: {
-  period: ReportPeriod;
-  anchor?: string;
-  from?: string;
-  to?: string;
-}): Promise<Envelope<ReportData>> {
-  const p = new URLSearchParams();
-  p.set('period', q.period);
-  if (q.anchor) p.set('anchor', q.anchor);
-  if (q.from) p.set('from', q.from);
-  if (q.to) p.set('to', q.to);
-  return get(`/api/report?${p.toString()}`);
-}
-
 /* ==================================================================== */
 /* The redesign's additions (REDESIGN.md §12 step 2).                    */
 /* ==================================================================== */
