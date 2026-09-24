@@ -33,6 +33,7 @@ import {
 } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';
 import { machineGridGenerationLine } from '../../lib/generationWords';
+import { machineStateText } from '../Line';
 
 export function RunningTab({
   period,
@@ -384,6 +385,41 @@ function ByProduct({
               : null,
           )}
         </p>
+      )}
+      {/* Task #8 (24 Sep 2026): `groupByProduct` above only ever lists
+          machines running inside the 2 h window (`!m.quiet`) — that is its
+          job, one row per product in force now. It used to say nothing at
+          all about the rest of the roster, so a station silent for a week
+          looked identical to one this pivot simply had no reason to
+          mention. This names every OTHER machine and how long it has
+          actually been quiet for, graded from `machinesRunning.ts`'s new
+          `state`/`lastSeenUtc` via the same `machineStateText` Line's own
+          MachinesBlock uses — one wording, not two. */}
+      {asOfUtc && data.some((m) => m.quiet) && (
+        <div style={{ marginTop: 14 }}>
+          <p className="mut sm">{W.machineState.notRunning}</p>
+          <table style={{ marginTop: 6 }}>
+            <tbody>
+              {data.filter((m) => m.quiet).map((m) => (
+                <tr
+                  key={m.station}
+                  className="click"
+                  tabIndex={0}
+                  onClick={() => onOpenStation(m.station)}
+                  onKeyDown={rowKeys(() => onOpenStation(m.station))}
+                >
+                  <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>
+                    {stationLabel(nameOf.get(m.station), m.station)}
+                  </td>
+                  <td>
+                    <span className="mut">{machineStateText(m, asOfUtc)}</span>
+                    <Chevron />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

@@ -49,6 +49,31 @@ import { epochFragment, noteOf } from './generation.js';
 import { findNewerElsewhere, resolveLiveScope, type LiveGenerationNote } from './live.js';
 
 export const RUNNING_WINDOW_MS = 2 * 60 * 60 * 1000;
+const QUIET_AFTER_MS = RUNNING_WINDOW_MS; // 2 h — 'running' vs 'quiet'
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000; // 24 h — 'quiet' vs 'stale'
+const SILENT_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — 'stale' vs 'silent'
+
+/**
+ * Per-machine state (24 Sep 2026, Task #8). Anchored on the SAME reading
+ * `asOfMs` already is — never `Date.now()`, per this file's own rule 1 — so
+ * a station reported 5 minutes before the newest reading elsewhere on the
+ * line is 'running', not penalised for the 18-minute acquisition lag.
+ *
+ *  - 'running': a cone within RUNNING_WINDOW_MS (2 h) of the anchor.
+ *  - 'quiet':   none in 2 h, but one within 24 h of the anchor.
+ *  - 'stale':   none in 24 h, but one within 7 days of the anchor.
+ *  - 'silent':  none in 7 days, or never seen at all (`lastSeenUtc: null`).
+ *
+ * EXCEPTION: when the whole line is quiet — `asOfMs` itself is null, i.e.
+ * no reading at all exists in this generation for this line — every machine
+ * reports 'quiet' rather than 'silent'. Without this, a line that simply
+ * has not started today (or whose generation just changed) would print
+ * every station's row as "check the machine or its scale", which is a
+ * statement about THAT machine's own scale that this data cannot support;
+ * the honest statement is about the line, which the caller already renders
+ * once via `data.asOfUtc == null`.
+ */
+export type MachineState = 'running' | 'quiet' | 'stale' | 'silent';
 
 export interface MachineRunning {
   station: number;
@@ -67,6 +92,9 @@ export interface MachineRunning {
   sinceUtc: string | null;
   sinceIsWindowStart: boolean;
   quiet: boolean;
+  /** The newest reading EVER recorded at this station (this generation), independent of the 2 h window. Null when never seen. Plant clock labelled UTC. */
+  lastSeenUtc: string | null;
+  state: MachineState;
 }
 
 export interface MachinesRunningData {
@@ -136,6 +164,36 @@ export async function getMachinesRunning(
     );
   const stations = roster.recordset.filter((r) => r.is_active == null || Boolean(r.is_active));
 
+  // 2b. `lastSeenUtc`: the newest reading EVER at each station in this
+  // generation — a MAX() over the whole table, not the 2 h window. Reuses
+  // IX_cone_line_station_shift (021_source_station_index.sql:
+  // `(line_id, source_station, shift_date) INCLUDE (weight_g, in_range,
+  // production_ts_utc_ms)`), the covering index this file's own per-station
+  // queries already lean on — `shift_date` is not filtered here, so this is
+  // a full SCAN of that index rather than a SEEK on it, but it stays a
+  // covering scan (no key lookups against the clustered table) bounded by
+  // this line's own row count, not the whole database's. No new index was
+  // added — CLAUDE.md rule 2, read-only, no schema changes. (Reasoned from
+  // the migration's own index definition; this sandbox has no live
+  // connection to run SET STATISTICS/an actual execution plan against —
+  // reproduce with `SET STATISTICS IO, TIME ON` before relying on this
+  // further at scale.)
+  const lastSeen = await bindCone(pool.request().input('line', mssql.Int, lineId)).query<{
+    st: number; ms: string | number;
+  }>(
+    `SELECT source_station AS st, MAX(production_ts_utc_ms) AS ms
+       FROM sms.cone_event
+      WHERE line_id = @line AND source_station IS NOT NULL AND production_ts_utc_ms > 0${andCone}
+      GROUP BY source_station`,
+  );
+  const lastSeenByStation = new Map<number, number>(
+    lastSeen.recordset.map((row) => [Number(row.st), Number(row.ms)]),
+  );
+  const lastSeenUtcOf = (station: number): string | null => {
+    const ms = lastSeenByStation.get(station);
+    return ms == null ? null : new Date(ms).toISOString();
+  };
+
   const machines: MachineRunning[] = stations.map((r) => ({
     station: Number(r.station_id),
     stationName: r.name,
@@ -148,9 +206,15 @@ export async function getMachinesRunning(
     sinceUtc: null,
     sinceIsWindowStart: false,
     quiet: true,
+    lastSeenUtc: lastSeenUtcOf(Number(r.station_id)),
+    state: 'silent',
   }));
 
   if (asOfMs == null) {
+    // Whole-line exception (see MachineState's doc comment above): nothing
+    // in this generation, so every machine follows the LINE's state —
+    // 'quiet' — rather than each being individually condemned as 'silent'.
+    for (const m of machines) m.state = 'quiet';
     return {
       asOfUtc: null,
       windowMs,
@@ -223,6 +287,7 @@ export async function getMachinesRunning(
       m = {
         station: st, stationName: null, machineName: null, materialId: null, productName: null,
         cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false, quiet: true,
+        lastSeenUtc: lastSeenUtcOf(st), state: 'silent',
       };
       machines.push(m);
       byStation.set(st, m);
@@ -238,6 +303,28 @@ export async function getMachinesRunning(
     m.quiet = false;
   }
   machines.sort((a, b) => a.station - b.station);
+
+  // 4. State, per machine, anchored on `asOfMs` (never `Date.now()` — rule 1
+  // above). A machine the window already found running needs no further
+  // check; a quiet one is graded by how long ago its own last-ever reading
+  // was, relative to the SAME anchor everything else on this screen uses.
+  for (const m of machines) {
+    if (!m.quiet) {
+      m.state = 'running';
+      continue;
+    }
+    if (m.lastSeenUtc == null) {
+      m.state = 'silent';
+      continue;
+    }
+    // m.quiet is already true here, so lastSeenUtc is necessarily older than
+    // the window start (age > QUIET_AFTER_MS) — no separate 'running' branch
+    // is reachable from this side.
+    const age = asOfMs - Date.parse(m.lastSeenUtc);
+    m.state = age <= STALE_AFTER_MS ? 'quiet'
+      : age <= SILENT_AFTER_MS ? 'stale'
+      : 'silent';
+  }
 
   const materials = new Set(machines.filter((m) => !m.quiet && m.materialId != null).map((m) => m.materialId));
   // Why the grid is quiet, when it is: the newest reading anywhere on record

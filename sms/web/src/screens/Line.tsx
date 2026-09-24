@@ -39,7 +39,7 @@ import { DeviationBars, fmtDayShort, type DeviationRow } from './report/shared';
 import {
   getAttention, getProduction, getProductAt, getProducts, getStations, stationLabel, getMachinesRunning,
   type AttentionFinding, type LiveLine, type ProductionRow, type ProductionDataIssue, type StationRow,
-  type MachinesRunningData, type StateCounts, type ProductOption,
+  type MachinesRunningData, type StateCounts, type ProductOption, type MachineRunning,
 } from '../api';
 import type { Screen, ReadingsFilter } from '../ui/Bar';
 import { projectionSentence } from './StationSheet';
@@ -531,13 +531,21 @@ function periodFigures(
   // so Line and Report can never print two different rates for one period
   // again — see `rejectRateThreeWayAgreement.test.ts` on the server side
   // and `Line.render.test.tsx`'s RED 1 here.
+  // WS-B7 (24 Sep 2026): a payload missing `unmatchedRejects` entirely used
+  // to fall back to `rejected`, silently reviving the same double-counting
+  // formula defect 1 above already closed — the field going missing is a
+  // data issue, not license to guess. Treated the same way every other
+  // figure here treats a missing field: the rate reads UNREADABLE, never a
+  // silently-recomputed percentage.
+  const unmatchedRejectsMissing = fieldMissing(r, 'unmatchedRejects');
   const unmatchedRejects = r?.unmatchedRejects ?? rejected;
   const weighed = cones + unmatchedRejects;
   const rejectRatePct = weighed > 0 ? Math.round((10000 * rejected) / weighed) / 100 : null;
   const rejectRateText = weighed > 0 ? fmtPct1(rejectRatePct) : '0%';
-  // A rate needs BOTH halves read correctly; a cones data issue poisons the
-  // denominator even when rejectedCones itself is fine.
-  const rateUnreadable = conesUnreadable || rejectedUnreadable;
+  // A rate needs every field it depends on read correctly; a cones data
+  // issue poisons the denominator even when rejectedCones itself is fine,
+  // and a missing unmatchedRejects poisons it the same way.
+  const rateUnreadable = conesUnreadable || rejectedUnreadable || unmatchedRejectsMissing;
   // states is computed once for the whole range at rank 1 on every
   // /api/production call (app.ts withStates: true) — served today and
   // discarded by the client until now. low/high = passed the scale, outside
@@ -911,6 +919,30 @@ export function windowOutsidePeriod(asOfUtc: string, period: Period): boolean {
   return day > at(period.to) + DAY || day < at(period.from) - DAY;
 }
 
+/**
+ * The words for a machine's per-station state (Task #8, 24 Sep 2026) —
+ * shared with Product › Running, which imports this rather than reimplementing
+ * it, so the two screens can never describe the same `state` differently.
+ * Anchored on `asOfUtc` (the newest reading on record), never the browser's
+ * clock — the same rule `quietSeconds`/`MachinesBlock` below already follow.
+ */
+export function machineStateText(m: MachineRunning, asOfUtc: string): string {
+  switch (m.state) {
+    case 'running':
+      return W.machineState.running;
+    case 'quiet': {
+      const span = m.lastSeenUtc == null ? null : secondsBetween(m.lastSeenUtc, asOfUtc);
+      return W.machineState.quiet(span == null ? '—' : fmtSpan(span), m.lastSeenUtc == null ? '—' : fmtClock(m.lastSeenUtc));
+    }
+    case 'stale':
+      return W.machineState.stale(m.lastSeenUtc == null ? '—' : fmtDay(m.lastSeenUtc));
+    case 'silent':
+      return W.machineState.silent;
+    default:
+      return W.machineState.silent;
+  }
+}
+
 function MachinesBlock({
   data,
   period,
@@ -943,7 +975,7 @@ function MachinesBlock({
               <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>{stationLabel(nameOf.get(m.station), m.station)}</td>
               <td>
                 {m.quiet ? (
-                  <span className="mut">{W.cone.quietWindow}</span>
+                  <span className="mut">{machineStateText(m, data.asOfUtc!)}</span>
                 ) : (
                   <>
                     <span style={{ fontWeight: 500 }}>

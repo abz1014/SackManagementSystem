@@ -79,9 +79,9 @@ const MACHINES: Envelope<MachinesRunningData> = {
     materialsRunning: 3,
     generation: GENERATION_FIXTURE,
     machines: [
-      { station: 1, stationName: 'S1', machineName: 'M1', materialId: 20, productName: SHARED_DESC, cones: 40, conesOnMaterial: 40, newestUtc: '2026-09-21T13:59:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false },
-      { station: 2, stationName: 'S2', machineName: 'M2', materialId: 21, productName: SHARED_DESC, cones: 30, conesOnMaterial: 30, newestUtc: '2026-09-21T13:58:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false },
-      { station: 3, stationName: 'S3', machineName: 'M3', materialId: 1021, productName: SHARED_DESC, cones: 20, conesOnMaterial: 20, newestUtc: '2026-09-21T13:57:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false },
+      { station: 1, stationName: 'S1', machineName: 'M1', materialId: 20, productName: SHARED_DESC, cones: 40, conesOnMaterial: 40, newestUtc: '2026-09-21T13:59:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false, lastSeenUtc: '2026-09-21T13:59:00Z', state: 'running' },
+      { station: 2, stationName: 'S2', machineName: 'M2', materialId: 21, productName: SHARED_DESC, cones: 30, conesOnMaterial: 30, newestUtc: '2026-09-21T13:58:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false, lastSeenUtc: '2026-09-21T13:58:00Z', state: 'running' },
+      { station: 3, stationName: 'S3', machineName: 'M3', materialId: 1021, productName: SHARED_DESC, cones: 20, conesOnMaterial: 20, newestUtc: '2026-09-21T13:57:00Z', sinceUtc: '2026-09-21T12:05:00Z', sinceIsWindowStart: false, quiet: false, lastSeenUtc: '2026-09-21T13:57:00Z', state: 'running' },
     ],
   },
   metadata: META_FIXTURE,
@@ -114,5 +114,42 @@ describe('Product › Running — "products in force now" headings', () => {
     // each is distinguishable, and none is the bare colliding description.
     expect(new Set(headingTexts).size).toBe(3);
     for (const t of headingTexts) expect(t).not.toBe(SHARED_DESC);
+  });
+});
+
+// Task #8 (24 Sep 2026): `groupByProduct` only ever lists machines running
+// inside the window — a quiet, stale or silent machine used to be invisible
+// on this screen entirely. It now gets its own section, graded the same way
+// Line's MachinesBlock grades it (`machineStateText`).
+describe('Product › Running — machines not currently running', () => {
+  it('lists a quiet machine under "Not currently running" with its graded state, beside the running ones', async () => {
+    const machinesWithOneQuiet: Envelope<MachinesRunningData> = {
+      data: {
+        ...MACHINES.data,
+        machines: [
+          ...MACHINES.data.machines,
+          {
+            station: 4, stationName: 'S4', machineName: 'M4', materialId: null, productName: null,
+            cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false,
+            quiet: true, lastSeenUtc: '2026-09-18T14:00:00Z', state: 'stale',
+          },
+        ],
+      },
+      metadata: META_FIXTURE,
+    };
+    installFakeFetch({
+      '/api/product-at': PRODUCT_AT,
+      '/api/products': { products: PRODUCTS },
+      '/api/machines/running': machinesWithOneQuiet,
+      '/api/stations': { stations: [] },
+      '/api/current-product': { current: null },
+    });
+
+    const { findByText, container } = render(
+      <RunningTab period={PERIOD} canWrite={false} onOpenStation={noop} onSeeStationReadings={noop} />,
+    );
+
+    await findByText('Station 4');
+    expect(container.textContent ?? '').toContain('Not seen since Fri 18 Sept');
   });
 });

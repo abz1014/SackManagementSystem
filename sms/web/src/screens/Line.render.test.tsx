@@ -146,6 +146,81 @@ describe('Line — periodFigures catches a structurally missing field with NO da
     const figVals = Array.from(container.querySelectorAll('.fig-val')).map((el) => el.textContent);
     expect(figVals[2]).toMatch(/^—/); // the rejected tile is the third of the four figures
   });
+
+  // WS-B7 (24 Sep 2026): `unmatchedRejects ?? rejected` used to fall back
+  // silently to the pre-fix double-counting formula (see the block comment
+  // above `unmatchedRejectsMissing` in Line.tsx) whenever the field itself
+  // went missing from the payload — a payload shape `dataIssues` never
+  // names, exactly the same structural gap `fieldMissing` closes elsewhere
+  // in this file. The rejected COUNT is still readable (rejectedCones is
+  // present); only the RATE, which depends on unmatchedRejects, must go
+  // unreadable.
+  it('unmatchedRejects KEY absent, rejectedCones PRESENT: the rate note reads could-not-read, never a computed percentage', async () => {
+    const holedRow = stripFields(
+      { group: 'total', cones: 20_000, rejectedCones: 400, unmatchedRejects: 350, sacks: 800, sackWeightKg: 22_000, conesInRangePct: 97, sacksPassedScalePct: 95 } as ProductionRow,
+      ['unmatchedRejects'],
+    );
+    installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRoute(holedRow, []) });
+
+    const { findAllByText, container } = renderWithLive(<LineScreen {...props()} />);
+    const notes = await findAllByText(W.fig.couldNotRead);
+    expect(notes.length).toBeGreaterThan(0);
+
+    const figVals = Array.from(container.querySelectorAll('.fig-val')).map((el) => el.textContent);
+    // The rejected COUNT is still readable — rejectedCones itself is present.
+    expect(figVals[2]).toMatch(/^400/);
+    // But no computed rate (e.g. "2% of everything weighed" from the old
+    // rejected/(cones+rejected) fallback) may appear anywhere on screen.
+    expect(container.textContent ?? '').not.toMatch(/\d+(\.\d+)?%\s*of everything weighed/i);
+  });
+});
+
+// Task #8 (24 Sep 2026): MachinesBlock used to render a binary
+// quiet/not-quiet row (`W.cone.quietWindow`, "nothing in this window") for
+// every station with no cone inside the 2 h window — a station silent for
+// a week read identically to one that stopped 90 minutes ago. It now grades
+// the row from `machinesRunning.ts`'s new `state`/`lastSeenUtc` via
+// `machineStateText`, exported from Line.tsx for Product/Running to reuse.
+describe('Line — MachinesBlock renders the graded per-machine state, not a flat quiet/not-quiet', () => {
+  it('a quiet, a stale and a silent machine each render their own words, anchored on asOfUtc (never the browser clock)', async () => {
+    const asOfUtc = '2026-09-07T16:40:00Z';
+    const machinesRoute = {
+      data: {
+        asOfUtc,
+        windowMs: 7_200_000,
+        windowStartUtc: '2026-09-07T14:40:00Z',
+        machines: [
+          {
+            station: 1, stationName: 'Station 1', machineName: 'M1', materialId: null, productName: null,
+            cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false,
+            quiet: true, lastSeenUtc: '2026-09-07T13:40:00Z', state: 'quiet', // 3 h before asOfUtc
+          },
+          {
+            station: 2, stationName: 'Station 2', machineName: 'M2', materialId: null, productName: null,
+            cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false,
+            quiet: true, lastSeenUtc: '2026-09-04T16:40:00Z', state: 'stale', // 3 days before
+          },
+          {
+            station: 3, stationName: 'Station 3', machineName: 'M3', materialId: null, productName: null,
+            cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false,
+            quiet: true, lastSeenUtc: null, state: 'silent', // never seen
+          },
+        ],
+        materialsRunning: 0,
+        generation: LIVE_FIXTURE.data.lines[0]!.generation,
+      },
+      metadata: META_FIXTURE,
+    };
+    installFakeFetch({ ...BASE_ROUTES, '/api/machines/running': machinesRoute });
+
+    const { findByText, container } = renderWithLive(<LineScreen {...props()} />);
+
+    await findByText(W.machineState.silent);
+    expect(container.textContent ?? '').toContain(W.machineState.quiet('3 h', '1:40 PM'));
+    expect(container.textContent ?? '').toContain(W.machineState.stale('Fri 4 Sept'));
+    // The old flat sentence must not appear now that a graded word is available.
+    expect(container.textContent ?? '').not.toContain(W.cone.quietWindow);
+  });
 });
 
 /* ===================================================================== *
