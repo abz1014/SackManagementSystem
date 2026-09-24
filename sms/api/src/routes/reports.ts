@@ -171,7 +171,18 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     return resolved;
   }
 
-  function headerFor(p: Parsed, req: Request): Promise<ReportHeader> {
+  // RT24-03 fix (24 Sep 2026): `reportData` must be passed through so
+  // `extractGenerationNote` (header.ts) can read whichever report's own
+  // generation disclosure and `buildHeader` can set `spansGenerations` /
+  // `sourceGeneration` / `otherGenerationExcluded` for real. Every caller
+  // below now has the composed report in hand before it builds the header
+  // (or fetches it itself for exactly this purpose) — previously the header
+  // was always built with no `reportData` at all, so `spansGenerations` was
+  // permanently `false` on every JSON, CSV, XLSX and PDF export, and the
+  // `-partial-generation` filename marker / CSV trailing rows / XLSX header
+  // sheet / PrintHead disclosure (commit f60e04a) never actually fired
+  // outside their own unit tests.
+  function headerFor(p: Parsed, req: Request, reportData?: unknown): Promise<ReportHeader> {
     return buildHeader(pool, cfg.lineId, {
       reportType: p.type,
       period: p.resolved,
@@ -179,6 +190,7 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
       user: (req as AuthedRequest).user,
       lineNameFallback: cfg.lineName,
       plantNowMsOverride: p.atMs,
+      reportData,
     });
   }
 
@@ -208,20 +220,31 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     }
   });
 
+  // The header carries who asked and when, so it is built per request; only
+  // the composed report — the expensive part — is cached, keyed the same
+  // way for every caller (JSON, PDF's own filename header, CSV/XLSX) so a
+  // PDF export doesn't force a second, uncached fetch of the same report.
+  function reportKey(p: Parsed): string {
+    return `reports:${p.type}:${JSON.stringify(p.resolved)}:${JSON.stringify(p.filters)}`;
+  }
+  async function reportDataFor(p: Parsed): Promise<AnyReportData> {
+    const key = reportKey(p);
+    let data = cache.get(key);
+    if (data == null) {
+      data = await buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters);
+      cache.set(key, data);
+    }
+    return data;
+  }
+
   const serveReport = (fixedType?: ReportType) => async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const p = await parse(req, res, fixedType);
       if (!p) return;
-      // The header carries who asked and when, so it is built per request;
-      // only the composed report — the expensive part — is cached.
-      const key = `reports:${p.type}:${JSON.stringify(p.resolved)}:${JSON.stringify(p.filters)}`;
-      let data = cache.get(key);
-      const hit = data != null;
-      if (data == null) {
-        data = await buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters);
-        cache.set(key, data);
-      }
-      const header = await headerFor(p, req);
+      const key = reportKey(p);
+      const hit = cache.get(key) != null;
+      const data = await reportDataFor(p);
+      const header = await headerFor(p, req, data);
       res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(await envelope(pool, cfg.lineId, { header, report: data }));
     } catch (err) {
       next(err);
@@ -274,10 +297,13 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
         // somewhere this process cannot actually reach.
         const baseUrl = `${req.protocol}://127.0.0.1:${req.socket.localPort}`;
         try {
-          const rendered = await renderReportPdf({
-            baseUrl, type: p.type, resolved: p.resolved, filters: p.filters, atMs: p.atMs, user, edgePath: edge.path,
-          });
-          const header = await headerFor(p, req);
+          const [rendered, data] = await Promise.all([
+            renderReportPdf({
+              baseUrl, type: p.type, resolved: p.resolved, filters: p.filters, atMs: p.atMs, user, edgePath: edge.path,
+            }),
+            reportDataFor(p),
+          ]);
+          const header = await headerFor(p, req, data);
           res.setHeader('Content-Type', PDF_CONTENT_TYPE);
           res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'pdf')}"`);
           res.send(rendered.buffer);
@@ -289,7 +315,8 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
         return;
       }
 
-      const [header, data] = await Promise.all([headerFor(p, req), buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters)]);
+      const data = await reportDataFor(p);
+      const header = await headerFor(p, req, data);
       const table = reportCsv(p.type, data);
       if (fmt.data.format === 'xlsx') {
         res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
