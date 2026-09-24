@@ -13,7 +13,8 @@
  *  - the export answers text/csv with an attachment filename, the trailing
  *    attribution rows, and writes the `export.csv` audit row naming the
  *    report and its window;
- *  - `/api/report` (app.ts) binds `shift` through to the SQL.
+ *  - `/api/report` (app.ts, the legacy period-summary route) is deleted —
+ *    RT24-10, 24 Sep 2026 red-team audit — and now answers 404.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import type { Server } from 'http';
@@ -430,21 +431,15 @@ describe('GET /api/reports/:type/export', () => {
   });
 });
 
-describe('GET /api/report gains shift (app.ts)', () => {
-  it('binds shift_code = @shift on the production queries and drops downtime', async () => {
+describe('GET /api/report — deleted (RT24-10, 24 Sep 2026)', () => {
+  // The legacy period-summary route (app.ts, superseded by
+  // /api/reports/:type) had no UI caller and silently ignored from/to unless
+  // period=custom was also passed. Deleted rather than aligned; this pins
+  // the deletion so it is never accidentally reintroduced. The shift-binding
+  // behaviour these two cases used to pin now lives only in report.ts's own
+  // tests (getReport is still exported and still used by nothing in app.ts).
+  it('answers 404 — the route no longer exists', async () => {
     const r = await get('/api/report?period=custom&from=2026-09-01&to=2026-09-07&shift=evening', 'viewer');
-    expect(r.status).toBe(200);
-    expect(r.json.data.shift).toBe('evening');
-    expect(r.json.data.downtime).toBeNull();
-    const prod = db.statements.filter((s) => s.sql.includes('FROM sms.cone_event') && s.sql.includes('shift_code = @shift'));
-    expect(prod.length).toBeGreaterThan(0);
-    for (const s of prod) expect(s.inputs.get('shift')).toBe('evening');
-    expect(db.statements.some((s) => s.sql.includes('COUNT(DISTINCT shift_date)') && s.sql.includes('shift_code = @shift'))).toBe(true);
-  });
-  it('without a shift, downtime is computed and the shift is null', async () => {
-    const r = await get('/api/report?period=custom&from=2026-09-01&to=2026-09-07', 'viewer');
-    expect(r.status).toBe(200);
-    expect(r.json.data.shift).toBeNull();
-    expect(r.json.data.downtime).toEqual({ stoppageCount: 0, stoppedSeconds: 0, thresholdSeconds: 120 });
+    expect(r.status).toBe(404);
   });
 });

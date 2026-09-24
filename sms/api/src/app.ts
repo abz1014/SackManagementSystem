@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { z } from 'zod';
-import { MAX_RANGE_DAYS, type ApiConfig } from './config.js';
+import { MAX_RANGE_DAYS, MAX_SPC_RANGE_DAYS, type ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
 import { getOperations, resolveDqDestination, isDqDestinationTable, type DqDestinationTable } from './services/operations.js';
 import { getSystemHistory } from './services/systemHistory.js';
@@ -29,7 +29,6 @@ import { loadProductCatalogue } from './services/productLimits.js';
 import { PdasWriter } from './services/pdasWrite.js';
 import { plantNowMs, plantOffsetMinutes } from './services/plantClock.js';
 import { getWeightStations } from './services/weightStations.js';
-import { getReport, resolvePeriod, REPORT_PERIODS, type ReportPeriod } from './services/report.js';
 import {
   listUsers, createUser, updateUser,
   listStations, setStation,
@@ -69,6 +68,7 @@ import { mountCalibrationRoutes } from './routes/calibration.js';
 import { mountSacksRoutes } from './routes/sacks.js';
 import { mountChangeoverRoutes } from './routes/changeover.js';
 import { isoDate } from './dates.js';
+import { responseCap } from './middleware/responseCap.js';
 
 const dateStr = isoDate.optional();
 
@@ -119,11 +119,20 @@ const productionQuery = z.object({
 
 export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   const app = express();
+  // RT24-11 (24 Sep 2026 red-team audit): every other security header is set
+  // deliberately (security.ts); this one Express sets on its own, for free,
+  // and it only helps an attacker fingerprint the framework. No behaviour
+  // depends on its presence — disabling it is pure removal.
+  app.disable('x-powered-by');
   // First, so every later line about this request — access log, 500, auth
   // warning — carries the same correlationId (roadmap Phase 2 item 6).
   app.use(requestId());
   app.use(securityHeaders());
   app.use(express.json());
+  // RT-014: independent-of-SQL response cap (row + byte), mounted once for
+  // every JSON route below — see middleware/responseCap.ts's own header for
+  // the full decision record.
+  app.use(responseCap());
   app.use(authMiddleware(pool)); // attaches req.user (or null) from session cookie
   // The PDAS write path (§5). Holds the ONLY writable IFL connection in the
   // API, opened lazily and only if PDAS_WRITE_ENABLED + a writer login are
@@ -790,59 +799,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     }
   });
 
-  // ---- Production report — the period summary (IFL requirement: "comprehensive reporting") ----
-  const reportQuery = z.object({
-    period: z.enum(REPORT_PERIODS).default('day'),
-    /** Day the period is derived from. Defaults to the newest production day. */
-    anchor: dateStr,
-    from: dateStr,
-    to: dateStr,
-    /** Roadmap Phase 8 (15 Sep 2026): one shift across the period's days; "This shift" used to print the whole day. */
-    shift: z.enum(['morning', 'evening', 'night']).optional(),
-  });
-  app.get('/api/report', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const q = reportQuery.safeParse(req.query);
-      if (!q.success) {
-        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
-        return;
-      }
-      const { period } = q.data;
-      if (period === 'custom' && (!q.data.from || !q.data.to)) {
-        res.status(400).json({ error: 'custom period requires from and to' });
-        return;
-      }
-      if (q.data.from && q.data.to) {
-        const bad = validateRange(q.data.from, q.data.to);
-        if (bad) {
-          res.status(400).json({ error: bad });
-          return;
-        }
-      }
-      // Anchor defaults to the newest production day, so a bare /api/report
-      // answers "the latest day" rather than whatever today happens to be on a
-      // server whose source data has stopped.
-      const anchor = q.data.anchor ?? (await newestProductionDay());
-      const resolved = resolvePeriod(period as ReportPeriod, anchor, q.data.from, q.data.to);
-      const spanBad = validateRange(resolved.from, resolved.to);
-      if (spanBad) {
-        res.status(400).json({ error: spanBad });
-        return;
-      }
-      const key = `report:${JSON.stringify(resolved)}:${q.data.shift ?? 'all'}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const data = await getReport(pool, cfg.lineId, resolved, q.data.shift ?? null);
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
-    } catch (err) {
-      next(err);
-    }
-  });
+  // RT24-10 (24 Sep 2026 red-team audit): the legacy `/api/report` route
+  // (period summary, superseded by `/api/reports/:type` — routes/reports.ts)
+  // is deleted, not aligned. It had no UI caller (`getReport` unreferenced
+  // from any screen; `web/src/api.ts`'s wrapper is dead code owned by
+  // another worker) and silently ignored `from`/`to` unless `period=custom`
+  // was also passed — a script hitting it directly got misled, not refused.
+  // `getReport`/`resolvePeriod`/`REPORT_PERIODS` (services/report.ts) are
+  // left in place: deleting the route is this finding's fix, not a service
+  // rewrite, and nothing else in this file still imports them.
 
   // operations — sync health, schema, DQ roll-up
   //
@@ -1020,9 +985,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           /** One station's stream (cone only; roadmap Phase 4, 14 Sep 2026). */
           station: z.coerce.number().int().positive().optional(),
         })
+        // RT-014(c): this is the one aggregated route the 24 Sep 2026
+        // red-team audit itself measured as slow at scale (a full-population
+        // I-MR/Cp-Cpk computation over every reading in the range) — its own
+        // tighter span cap, half of the shared MAX_RANGE_DAYS, plain message.
+        .refine(
+          (v) => {
+            const days = Math.round((new Date(v.to).getTime() - new Date(v.from).getTime()) / 86_400_000) + 1;
+            return days <= MAX_SPC_RANGE_DAYS;
+          },
+          { message: `range too large for /api/spc — max ${MAX_SPC_RANGE_DAYS} days; choose a shorter period` },
+        )
         .safeParse(req.query);
       if (!q.success) {
-        res.status(400).json({ error: 'invalid query — from/to=YYYY-MM-DD required' });
+        const spanIssue = q.error.issues.find((i) => i.message.startsWith('range too large for /api/spc'));
+        res.status(400).json({ error: spanIssue ? spanIssue.message : 'invalid query — from/to=YYYY-MM-DD required' });
         return;
       }
       const rangeErr = validateRange(q.data.from, q.data.to);

@@ -63,6 +63,29 @@ export const DEFAULT_DB_REQUEST_TIMEOUT_MS = 30_000;
  */
 export const MAX_RANGE_DAYS = 366;
 
+/**
+ * RT-014 (HIGH, 23/24 Sep 2026 red-team audits): "no server-side response-
+ * size/row-count cap independent of SQL." The decision, recorded in
+ * DEFECTS.md and CLAUDE.md's WS-* history: no silent truncation, ever. A
+ * response that would exceed either cap below is refused outright (413),
+ * never quietly cut down — see middleware/responseCap.ts, which is where
+ * both are enforced, independent of whatever the SQL layer itself did.
+ * Defaults only; no .env key is required for either.
+ */
+export const MAX_RESPONSE_ROWS = 50_000;
+/** 20 MB. */
+export const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * RT-014(c): the one aggregated/KPI route the audit itself measured as slow
+ * at scale (`/api/spc`, a full-population I-MR/Cp-Cpk computation over every
+ * reading in the range) gets its OWN, tighter span cap — 186 days, half of
+ * MAX_RANGE_DAYS — enforced in app.ts's `/api/spc` handler via zod, with a
+ * plain-language message. Every other aggregated report/KPI route keeps
+ * MAX_RANGE_DAYS unchanged; this is not a second general-purpose range cap.
+ */
+export const MAX_SPC_RANGE_DAYS = 186;
+
 const schema = z.object({
   port: z.coerce.number().int().positive().default(4000),
   lineId: z.coerce.number().int().positive().default(1),
