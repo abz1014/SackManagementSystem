@@ -51,6 +51,54 @@ describe('shiftRuleDriftFindingsFor — a fixture that mismatches', () => {
   });
 });
 
+describe('shiftRuleDriftFindingsFor — BIGINT-as-string from mssql (the diagnosed bug)', () => {
+  // Standard 06/14/22 boundaries, matching the plant's real shift_rule.
+  const standardRule: ShiftRuleVersion = {
+    effectiveAtPlantMs: -Infinity,
+    rule: { boundaries: { morningStart: 360, eveningStart: 840, nightStart: 1320 }, nightBelongsTo: 'start_day', mode: 'corrected' },
+  };
+
+  it('does not flag a row whose production_ts_utc_ms arrives as a numeric string with a correctly-stamped value', () => {
+    // mssql returns BIGINT columns as JS strings. Any digit string of this length,
+    // fed straight into `new Date(...)`, parses as an (invalid) date string, not
+    // as milliseconds — this fixture is built to fail loudly if that regresses.
+    const rowMs = Date.parse('2026-09-20T10:00:00.000Z'); // plant time, mid-morning shift
+    const wc = wallClockOf(new Date(rowMs));
+    const expectedCode = shiftCodeOf(wc, standardRule.rule.boundaries);
+    const expectedDate = shiftDateOf(wc, standardRule.rule.nightBelongsTo, standardRule.rule.boundaries);
+    const rows = [
+      {
+        raw_id: 7,
+        production_ts_utc_ms: String(rowMs), // <-- the BIGINT-as-string shape mssql actually returns
+        shift_code: expectedCode,
+        shift_date: expectedDate,
+      },
+    ];
+    const findings = shiftRuleDriftFindingsFor(rows, [standardRule], 1);
+    expect(findings).toEqual([]);
+  });
+
+  it('counts a non-numeric/unparseable time as "unreadable", never as a shift-rule mismatch', () => {
+    const rows = [
+      {
+        raw_id: 9,
+        production_ts_utc_ms: 'not-a-timestamp',
+        shift_code: 'morning',
+        shift_date: new Date('2026-09-20'),
+      },
+    ];
+    const findings = shiftRuleDriftFindingsFor(rows, [standardRule], 1);
+    // Must not be reported as a drift mismatch...
+    const driftFinding = findings.find((f) => f.check_name === 'shift_rule_drift');
+    expect(driftFinding).toBeUndefined();
+    // ...but must still be surfaced, distinctly, as unreadable.
+    const unreadable = findings.find((f) => f.check_name === 'shift_rule_drift_unreadable_time');
+    expect(unreadable).toBeDefined();
+    expect(unreadable!.count).toBe(1);
+    expect(unreadable!.subject_ref).toBe(9);
+  });
+});
+
 describe('checkShiftRuleDrift — DB wrapper', () => {
   it('is a no-op and never queries when only one shift_rule version exists', async () => {
     let queried = false;

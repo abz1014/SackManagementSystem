@@ -34,7 +34,8 @@ const plantTime = (ms: number): string => new Date(ms).toISOString().slice(0, 19
 
 interface SampledRow {
   raw_id: number | null;
-  production_ts_utc_ms: number;
+  /** mssql returns BIGINT columns as JS strings — accept both, and convert at the boundary below. */
+  production_ts_utc_ms: number | string;
   shift_code: string | null;
   shift_date: Date | null;
 }
@@ -45,22 +46,32 @@ export function shiftRuleDriftFindingsFor(rows: SampledRow[], history: readonly 
   let minMs = Infinity;
   let maxMs = -Infinity;
   let firstRawId: number | null = null;
+  let unreadable = 0;
+  let firstUnreadableRawId: number | null = null;
   for (const row of rows) {
-    const rule = resolveShiftRuleAt(history, row.production_ts_utc_ms);
-    const wc = wallClockOf(new Date(row.production_ts_utc_ms));
+    const ms = Number(row.production_ts_utc_ms);
+    if (!Number.isFinite(ms)) {
+      // A row whose time we cannot even parse is never drift — it is a separate,
+      // honestly-named defect (bad data), not a shift-rule mismatch.
+      unreadable++;
+      if (firstUnreadableRawId == null) firstUnreadableRawId = row.raw_id;
+      continue;
+    }
+    const rule = resolveShiftRuleAt(history, ms);
+    const wc = wallClockOf(new Date(ms));
     const expectedCode = shiftCodeOf(wc, rule.boundaries);
     const expectedDate = shiftDateOf(wc, rule.nightBelongsTo, rule.boundaries);
     const storedDateMs = row.shift_date == null ? null : new Date(row.shift_date).getTime();
     if (row.shift_code !== expectedCode || storedDateMs !== expectedDate.getTime()) {
       mismatches++;
-      minMs = Math.min(minMs, row.production_ts_utc_ms);
-      maxMs = Math.max(maxMs, row.production_ts_utc_ms);
+      minMs = Math.min(minMs, ms);
+      maxMs = Math.max(maxMs, ms);
       if (firstRawId == null) firstRawId = row.raw_id;
     }
   }
-  if (mismatches === 0) return [];
-  return [
-    {
+  const findings: Finding[] = [];
+  if (mismatches > 0) {
+    findings.push({
       check_name: 'shift_rule_drift',
       severity: 'WARNING',
       subject_table: 'cone_event',
@@ -70,8 +81,21 @@ export function shiftRuleDriftFindingsFor(rows: SampledRow[], history: readonly 
         `force at their OWN production time (${history.length} sms.shift_rule versions on file) — affected rows ` +
         `span ${plantTime(minMs)} to ${plantTime(maxMs)} plant time; rebuild canonical to restamp them`,
       subject_ref: firstRawId,
-    },
-  ];
+    });
+  }
+  if (unreadable > 0) {
+    findings.push({
+      check_name: 'shift_rule_drift_unreadable_time',
+      severity: 'WARNING',
+      subject_table: 'cone_event',
+      count: unreadable,
+      detail:
+        `${unreadable} of ${sampleSize} sampled rows had a production_ts_utc_ms that could not be parsed as a ` +
+        `number — these rows were skipped, not counted as shift-rule drift`,
+      subject_ref: firstUnreadableRawId,
+    });
+  }
+  return findings;
 }
 
 /**
@@ -95,7 +119,7 @@ export async function checkShiftRuleDrift(
   const r = await pool
     .request()
     .input('line', mssql.Int, lineId)
-    .query<{ raw_id: number | null; production_ts_utc_ms: number; shift_code: string | null; shift_date: Date | null }>(
+    .query<{ raw_id: number | null; production_ts_utc_ms: number | string; shift_code: string | null; shift_date: Date | null }>(
       `SELECT TOP (${SAMPLE_LIMIT}) raw_id, production_ts_utc_ms, shift_code, shift_date
          FROM sms.cone_event WHERE line_id = @line ORDER BY production_ts_utc_ms DESC`,
     );
