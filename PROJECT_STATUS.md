@@ -62,14 +62,26 @@ time-versioned rule tables read as "newest" rather than as-of, including at tran
 (`1315d23` + `8f5c80c`); RT24-06, calendar-invalid dates returning `200`-empty instead of `400`
 (`11ce30b`).
 
-**Not yet fixed, stated plainly rather than rounded up:** RT24-05 (the PDAS write path's own
-echo-back verification structurally cannot detect a real mismatch under the plant's EXECUTE-only
-role, and self-disables to WARNING — HIGH now, becomes CRITICAL the moment `PDAS_WRITE_ENABLED`
-is ever set true against that role; **must close before any plant enablement**) — in progress,
-hash pending. RT24-07 (Line's headline reject rate silently reverts to the double-count formula
-if `unmatchedRejects` is absent from a response) and RT24-08 (no stale-vs-dead distinction per
-machine) — both in progress, hash pending. RT24-09 (a phantom production row inside the
-documented 10 Jul–5 Aug gap, no temporal-plausibility check), RT24-10 (dead `/api/report`
+**Corrected 24 Sep 2026, later the same day (docs-only pass):** the paragraph below,
+"not yet fixed," is now stale for RT24-05/07/08/09 — kept in place with this note rather
+than rewritten, per this file's own convention. See `DEFECTS.md` Part 6 for the full,
+current per-finding disposition.
+
+**Fixed since the paragraph below was written:** RT24-05 (`25b02bc`) — `observed`/
+`observed_after_json` now go NULL rather than a false `p.after` claim on a failed
+read-back; the product_change message is prefixed UNVERIFIED; the first read-back
+failure per subject table raises a standing CRITICAL `pdas_write_unverified` finding;
+new `api/src/services/pdasPermissions.ts` probes SELECT rights; Health gained a "Checked
+after writing" line. The new CRITICAL path is proven by code path and unit tests, not by
+a live structural-failure repro — the local dev login still has SELECT rights, so
+`canReadBack: true` locally. RT24-07 (`4e8513c`) — Line's headline reject rate now routes
+through `rateUnreadable`/`fieldMissing` when `unmatchedRejects` is missing, instead of
+reverting to the double-count formula. RT24-08 (`4e8513c`) — machines now carry
+`lastSeenUtc` and a `running`/`quiet`/`stale`/`silent` state instead of a flat boolean;
+query cost under load not yet measured. RT24-09 (`edae627`) — new read-only DQ check
+`isolated_production_day`; a local run flags exactly the cited row (source_row_id 4130).
+
+**Not yet fixed, stated plainly rather than rounded up:** RT24-10 (dead `/api/report`
 ignores dates), RT24-11 (`X-Powered-By` header present), RT24-12 (`degradedReason` sometimes
 null while degraded — partly touched by `3e0d349`'s `markDegraded` change, not specifically
 re-verified), RT24-13 (missing-field fuzz coverage absent on ~13 screens) — all open.
@@ -95,13 +107,19 @@ failed. This closes the "no browser harness exists" gap several earlier entries 
 state; those entries are corrected in place with a dated note rather than rewritten, per this
 file's own convention.
 
-**Suite, observed this pass (documentation-only, not a full verification pass):** `npx vitest
-run` from `sms/`, HEAD `8f5c80c` — **196 files passed / 1 skipped, 2030 tests passed / 4
+**Suite, observed this pass (documentation-only, not a full verification pass), HEAD `8f5c80c`:**
+`npx vitest run` from `sms/` — **196 files passed / 1 skipped, 2030 tests passed / 4
 skipped, 2 tests failed** (`sync-worker/src/transform/isolatedDay.test.ts`). Not investigated
 this pass; several files were under concurrent, uncommitted edit at the time (see §6). Not
 green — stated as such rather than rounded to "green."
 
-**Not done by this pass:** RT24-05/07/08/09/10/11/12/13 remain open (see above); the branch is
+**Superseded 24 Sep 2026, later the same day (this docs pass, HEAD `22d7440`):** the two
+`isolatedDay.test.ts` failures above are gone — that fixture is the same one `edae627` (RT24-09)
+touched. `npx vitest run` from `sms/` now measures **197 files passed / 1 skipped, 2032 tests
+passed / 4 skipped, 0 failed**; `npm run typecheck` (all five workspaces) clean. This is a real
+green run, not rounded up.
+
+**Not done by this pass:** RT24-10/11/12/13 remain open (see above, corrected); the branch is
 still unpushed; nothing here has touched the plant.
 
 ### 23 September 2026 — red-team audit and its 15-commit remediation wave (later same day than the entry below)
@@ -627,7 +645,17 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 
 ## 6. Test status
 
-> **Re-captured 24 September 2026 (superseding the 23 Sep note below — kept, not deleted).**
+> **Re-captured 24 September 2026, later the same day (superseding the note immediately below —
+> kept, not deleted), HEAD `22d7440`.** `npx vitest run` from `sms/`, this pass, directly:
+> **197 test files passed / 1 skipped (198), 2032 tests passed / 4 skipped, 0 failed.** The
+> tree has settled since the note below was written and the fix wave (`25b02bc`, `4e8513c`,
+> `edae627`, `b077815`, `22d7440`) has landed: the two `isolatedDay.test.ts` failures the note
+> below flags are gone, closed by RT24-09's own fix. `npm run typecheck` (`tsc -b shared
+> sync-worker cli api web`) is clean. This is a real green run, stated as such because it was
+> actually observed this pass, not carried over.
+
+> **Superseded note, 24 September 2026, earlier the same day (kept for its own history, not
+> current):**
 > `npx vitest run` from `sms/`, this pass, directly: **196 test files passed / 1 skipped (198),
 > 2030 tests passed / 4 skipped, 2 tests failed** — both in
 > `sync-worker/src/transform/isolatedDay.test.ts`, HEAD `8f5c80c`. This is NOT a green suite;
