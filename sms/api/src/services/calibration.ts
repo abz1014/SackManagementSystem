@@ -340,6 +340,86 @@ export async function getStationDrift(
 
 /* ------------------------------------------------------------ projection */
 
+/**
+ * RT-020 (25 Sep 2026): the projection used to print a precise day count from
+ * 3-5 noisy daily means with no uncertainty stated at all — "168 days to the
+ * lower limit" reads as a fact when it is a point estimate from a handful of
+ * points. This adds the OLS slope's standard error and a 90% confidence
+ * interval on the slope (t-distribution, n-2 degrees of freedom), converts
+ * that into a RANGE of days-to-limit, and refuses a projection outright
+ * (`status: 'not_established'`, `daysToLimit: null`) when the interval
+ * includes zero or disagrees in sign with the point slope — i.e. the data
+ * cannot rule out "no real trend" or "the wrong direction" at 90% confidence.
+ *
+ * MINIMUM 5 DAILY POINTS for any projection at all (raised from 2): an OLS
+ * line through 2-4 points has 0-2 residual degrees of freedom, and Student's
+ * t blows the interval up so wide the range is not worth printing — the
+ * finding this projects from typically needs 5+ days to have fired in the
+ * first place under the day-to-day I-MR sigma this module already uses, so
+ * this is not a stricter gate than the rest of the module already implies.
+ */
+const T_TABLE_90: Record<number, number> = {
+  1: 6.314, 2: 2.92, 3: 2.353, 4: 2.132, 5: 2.015, 6: 1.943, 7: 1.895, 8: 1.86,
+  9: 1.833, 10: 1.812, 11: 1.796, 12: 1.782, 13: 1.771, 14: 1.761, 15: 1.753,
+  16: 1.746, 17: 1.74, 18: 1.734, 19: 1.729, 20: 1.725, 21: 1.721, 22: 1.717,
+  23: 1.714, 24: 1.711, 25: 1.708, 26: 1.706, 27: 1.703, 28: 1.701, 29: 1.699,
+  30: 1.697,
+};
+/** Normal-approximation critical value for the 90% two-sided interval (z), used above df=30. */
+const Z_90 = 1.645;
+
+/** Student's t critical value for a 90% two-sided interval at `df` degrees of
+ *  freedom: the hard-coded table for df 1..30, the normal approximation
+ *  above it (t converges to z as df→∞; the two agree to 3 d.p. by df≈100). */
+export function tCritical90(df: number): number {
+  if (df < 1) return NaN;
+  if (df <= 30) return T_TABLE_90[df]!;
+  return Z_90;
+}
+
+export interface OlsSlopeStats {
+  slope: number;
+  /** Standard error of the slope estimate. NaN when df < 1 (fewer than 3 points). */
+  se: number;
+  df: number;
+  /** 90% confidence interval on the slope. */
+  ciLow: number;
+  ciHigh: number;
+}
+
+/** OLS slope with its standard error and a 90% CI (t, n-2 df). Same x/y
+ *  convention as slopePerDay: x is whole calendar days from the first point. */
+export function olsSlopeStats(points: { date: string; mean: number }[]): OlsSlopeStats | null {
+  const n = points.length;
+  if (n < 3) return null; // need df >= 1 to say anything about uncertainty
+  const x0 = new Date(`${points[0]!.date}T12:00:00Z`).getTime();
+  const xs = points.map((p) => Math.round((new Date(`${p.date}T12:00:00Z`).getTime() - x0) / 86_400_000));
+  const ys = points.map((p) => p.mean);
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i]! - mx) * (ys[i]! - my);
+    sxx += (xs[i]! - mx) ** 2;
+  }
+  if (sxx === 0) return null; // every point on the same day — no x variation to fit against
+  const slope = sxy / sxx;
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const yhat = my + slope * (xs[i]! - mx);
+    sse += (ys[i]! - yhat) ** 2;
+  }
+  const df = n - 2;
+  const mse = sse / df;
+  const se = Math.sqrt(mse / sxx);
+  const t = tCritical90(df);
+  return { slope, se, df, ciLow: slope - t * se, ciHigh: slope + t * se };
+}
+
+/** Minimum daily points for any projection (RT-020). */
+export const MIN_PROJECTION_POINTS = 5;
+
 export interface DriftProjection {
   /** Signed grams per day, a least-squares line through the run's daily means. */
   slopeGPerDay: number;
@@ -362,9 +442,29 @@ export interface DriftProjection {
    * that is under the target and falling IS projected (station 3, 19-20 Aug
    * 2026 on the real data: 9 g heavier than the line, 1 g under the target,
    * -0.23 g/day, 168 days to the lower limit — which the screen prints as
-   * "not within 90 days").
+   * "not within 90 days"). Also null when `status` is 'not_established'.
    */
   daysToLimit: number | null;
+  /** RT-020: the days-to-limit computed from the slope's 90% CI bounds
+   *  instead of the point slope — the faster/slower ends of the range. Null
+   *  under the same conditions as daysToLimit, or when there are too few
+   *  points to compute a CI at all (n < 5, though MIN_PROJECTION_POINTS
+   *  already enforces that for the whole projection). */
+  daysLow: number | null;
+  daysHigh: number | null;
+  /** The confidence level the interval and daysLow/daysHigh were built at. */
+  confidence: 0.9;
+  /** How many daily points the slope (and its CI) were fitted over. */
+  nPoints: number;
+  /**
+   * 'established': the 90% CI excludes zero and agrees in sign with the
+   * point slope — the range is worth printing. 'not_established': the CI
+   * includes zero, or disagrees in sign with the point slope (which can
+   * happen right at the boundary of a wide interval) — daysToLimit/daysLow/
+   * daysHigh are null and `reason` says why.
+   */
+  status: 'established' | 'not_established';
+  reason?: string;
   /** The assumption, restated as data so a screen cannot omit it. */
   assumption: 'linear_over_run';
 }
@@ -399,7 +499,7 @@ export function slopePerDay(points: { date: string; mean: number }[]): number {
 export function projectDaysToLimit(
   run: { date: string; mean: number }[],
   limits: { loG: number; hiG: number; targetG?: number | null } | null,
-  minDays = 2,
+  minDays = MIN_PROJECTION_POINTS,
 ): DriftProjection | null {
   if (!limits || run.length < minDays) return null;
   const slope = slopePerDay(run);
@@ -415,6 +515,44 @@ export function projectDaysToLimit(
   const offset = last - centre;
   const returning = offset !== 0 && Math.sign(offset) !== Math.sign(slope);
   const daysToLimit = beyond ? 0 : returning ? null : Math.max(0, Math.round(distanceG / slope));
+
+  // RT-020: the slope's own uncertainty. `stats` is null only when there are
+  // fewer than 3 points (df < 1) — cannot happen here given MIN_PROJECTION_POINTS
+  // gates the caller at 5, but kept defensive since minDays is a parameter.
+  const stats = olsSlopeStats(run);
+  let daysLow: number | null = null;
+  let daysHigh: number | null = null;
+  let status: 'established' | 'not_established' = 'not_established';
+  let reason: string | undefined;
+  if (!stats) {
+    reason = `Only ${run.length} daily points — too few to estimate the slope's uncertainty.`;
+  } else if (beyond) {
+    // Already past the limit: "now" needs no interval around it.
+    status = 'established';
+    daysLow = 0;
+    daysHigh = 0;
+  } else if (stats.ciLow <= 0 && stats.ciHigh >= 0) {
+    reason = `The 90% confidence interval on the drift rate (${round(stats.ciLow, 2)} to ${round(stats.ciHigh, 2)} g/day) includes zero — a real trend is not established from ${run.length} days.`;
+  } else if (Math.sign(stats.ciLow) !== Math.sign(stats.ciHigh)) {
+    // Cannot happen given the branch above, kept for clarity/defensiveness.
+    reason = `The 90% confidence interval on the drift rate spans zero — a real trend is not established from ${run.length} days.`;
+  } else if (returning) {
+    // A confidently-signed slope heading back toward the target: established
+    // as a rate, but there is still no forward days-to-limit to give (see
+    // daysToLimit's own note) — the range fields stay null, not the status.
+    status = 'established';
+  } else {
+    // The bound of the CI CLOSER to zero (shallower slope) gives the LONGER
+    // days-to-limit; the bound FARTHER from zero (steeper) gives the shorter.
+    const slopeNearer = Math.abs(stats.ciLow) < Math.abs(stats.ciHigh) ? stats.ciLow : stats.ciHigh;
+    const slopeFarther = Math.abs(stats.ciLow) < Math.abs(stats.ciHigh) ? stats.ciHigh : stats.ciLow;
+    const dNearer = Math.max(0, Math.round(distanceG / slopeNearer));
+    const dFarther = Math.max(0, Math.round(distanceG / slopeFarther));
+    daysLow = Math.min(dNearer, dFarther);
+    daysHigh = Math.max(dNearer, dFarther);
+    status = 'established';
+  }
+
   return {
     slopeGPerDay: round(slope, 2),
     overDays: run.length,
@@ -422,7 +560,13 @@ export function projectDaysToLimit(
     limitG,
     targetG: limits.targetG ?? null,
     distanceG: round(distanceG, 2),
-    daysToLimit,
+    daysToLimit: status === 'established' ? daysToLimit : null,
+    daysLow,
+    daysHigh,
+    confidence: 0.9,
+    nPoints: run.length,
+    status,
+    ...(reason ? { reason } : {}),
     assumption: 'linear_over_run',
   };
 }

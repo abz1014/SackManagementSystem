@@ -200,7 +200,7 @@ function Body({
       {/* The projection, only for a flagged station, with its assumption. */}
       {row.flagged && (
         <p className="sm" style={{ marginTop: 8 }}>
-          {projectionSentence(row.projection, data)}{' '}
+          {projectionSentence(row.projection, data, row.longestRun)}{' '}
           <span className="mut">{row.projection ? W.calibration.projectionAssumption : ''}</span>
         </p>
       )}
@@ -340,7 +340,7 @@ function Body({
             {(data.rules ?? []).map((r) => `${r.id}: ${r.label} (${r.minPoints})`).join(' · ')}
           </p>
         )}
-        {row.flagged && !row.projection && <p>{W.calibration.projectionNoLimits}</p>}
+        {row.flagged && !row.projection && <p>{projectionSentence(null, data, row.longestRun)}</p>}
       </Details>
     </>
   );
@@ -353,15 +353,43 @@ function verdict(row: WeightStationRow): string {
   return row.vsLineG > 0 ? W.weight.readsHeavier(g, row.daysHeld) : W.weight.readsLighter(g, row.daysHeld);
 }
 
-/** The projection, in words, with the limit stated relative to the target. */
-export function projectionSentence(p: DriftProjection | null, data: { targetG: number | null }): string {
-  if (!p) return W.calibration.projectionNoLimits;
+/**
+ * The projection, in words, with the limit stated relative to the target.
+ *
+ * RT-020 (25 Sep 2026): `p` being null now has two distinct causes — no
+ * product limits were in force (unchanged), or there were fewer than
+ * MIN_PROJECTION_POINTS (5) daily points in the run (new: previously any
+ * 2+ point run was projected with no uncertainty at all). `runLength`, when
+ * given, disambiguates the second case; omit it only where the caller has
+ * no run length to hand (there is no regression risk in falling back to the
+ * older, less specific sentence).
+ */
+export function projectionSentence(
+  p: DriftProjection | null,
+  data: { targetG: number | null },
+  runLength?: number,
+): string {
+  if (!p) {
+    if (data.targetG != null && runLength != null && runLength < 5) {
+      return W.calibration.projectionTooFewPoints(runLength, 5);
+    }
+    return W.calibration.projectionNoLimits;
+  }
   const rate = W.calibration.gPerDay(`${p.slopeGPerDay > 0 ? '+' : '−'}${Math.abs(p.slopeGPerDay).toFixed(1)} g`);
   const rel = data.targetG == null ? p.limitG : p.limitG - data.targetG;
   const limit = data.targetG == null ? fmtG(p.limitG) : `${rel >= 0 ? '+' : '−'}${fmtG(Math.abs(rel))}`;
+  if (p.status === 'not_established') {
+    return W.calibration.projectionNotEstablished(p.overDays, p.reason ?? '');
+  }
   if (p.daysToLimit == null) return W.calibration.projectionAway(rate, p.overDays);
   if (p.daysToLimit === 0) return W.calibration.projectionNow(rate, p.overDays, limit);
   if (p.daysToLimit > 90) return W.calibration.projectionFar(rate, p.overDays, limit);
+  if (p.daysLow != null && p.daysHigh != null) {
+    const lowK = p.daysLow > 90 ? 90 : p.daysLow;
+    const highK = p.daysHigh > 90 ? 90 : p.daysHigh;
+    if (p.daysHigh > 90) return W.calibration.projectionFar(rate, p.overDays, limit);
+    return W.calibration.projectionRange(rate, p.overDays, limit, lowK, highK);
+  }
   return W.calibration.projection(rate, p.overDays, limit, p.daysToLimit);
 }
 

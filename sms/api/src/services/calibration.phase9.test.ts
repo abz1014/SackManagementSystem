@@ -170,19 +170,26 @@ describe('slopePerDay', () => {
 });
 
 describe('projectDaysToLimit — a projection from recent readings, with its assumption stated', () => {
+  // RT-020 (25 Sep 2026): MIN_PROJECTION_POINTS raised 2 -> 5, and every
+  // projection now carries a 90% CI on the slope — these fixtures were
+  // extended from 4 to 5+ perfectly-linear points so the CI excludes zero
+  // and the original point-estimate assertions still hold exactly.
   const limits = { loG: 1920, hiG: 2000, targetG: 1960 };
   const rising = [
     { date: '2026-09-01', mean: 1970 },
     { date: '2026-09-02', mean: 1972 },
     { date: '2026-09-03', mean: 1974 },
     { date: '2026-09-04', mean: 1976 },
+    { date: '2026-09-05', mean: 1978 },
   ];
 
   it('extends the run’s line to the limit in its direction of travel', () => {
     const p = projectDaysToLimit(rising, limits)!;
-    expect(p).toMatchObject({ slopeGPerDay: 2, overDays: 4, towards: 'upper', limitG: 2000, targetG: 1960, distanceG: 24, assumption: 'linear_over_run' });
-    // 24 g at 2 g/day.
-    expect(p.daysToLimit).toBe(12);
+    expect(p).toMatchObject({ slopeGPerDay: 2, overDays: 5, towards: 'upper', limitG: 2000, targetG: 1960, distanceG: 22, assumption: 'linear_over_run', status: 'established' });
+    // 22 g at 2 g/day.
+    expect(p.daysToLimit).toBe(11);
+    expect(p.daysLow).not.toBeNull();
+    expect(p.daysHigh).not.toBeNull();
   });
 
   it('heads for the lower limit when falling', () => {
@@ -191,19 +198,23 @@ describe('projectDaysToLimit — a projection from recent readings, with its ass
     expect(p.towards).toBe('lower');
     expect(p.limitG).toBe(1920);
     expect(p.slopeGPerDay).toBe(-2);
-    // last mean 1924, 4 g to go at 2 g/day.
-    expect(p.daysToLimit).toBe(2);
+    // last mean 1922, 2 g to go at 2 g/day.
+    expect(p.daysToLimit).toBe(1);
   });
 
   it('is 0 days when the last mean is already past the limit', () => {
     const past = rising.map((d) => ({ date: d.date, mean: d.mean + 30 }));
-    expect(projectDaysToLimit(past, limits)!.daysToLimit).toBe(0);
+    const p = projectDaysToLimit(past, limits)!;
+    expect(p.daysToLimit).toBe(0);
+    expect(p.daysLow).toBe(0);
+    expect(p.daysHigh).toBe(0);
   });
 
   it('has no days-to-limit when the run is heading back toward the target (the station 3 case, 19-20 Aug 2026)', () => {
-    // 9 g heavy, but the four-day line slopes gently DOWN: extending it to
-    // the lower limit 168 days away is arithmetic, not a projection.
+    // 9 g heavy, but the line slopes gently DOWN: extending it to the lower
+    // limit far away is arithmetic, not a projection.
     const returning = [
+      { date: '2026-08-16', mean: 1970.3 },
       { date: '2026-08-17', mean: 1969.9 },
       { date: '2026-08-18', mean: 1969.5 },
       { date: '2026-08-19', mean: 1969.3 },
@@ -215,10 +226,26 @@ describe('projectDaysToLimit — a projection from recent readings, with its ass
     expect(p.daysToLimit).toBeNull();
   });
 
-  it('is null with no limits, a flat run, or fewer than two days — nothing to project', () => {
+  it('is null with no limits, a flat run, or fewer than MIN_PROJECTION_POINTS days — nothing to project', () => {
     expect(projectDaysToLimit(rising, null)).toBeNull();
     expect(projectDaysToLimit(rising.map((d) => ({ ...d, mean: 1970 })), limits)).toBeNull();
-    expect(projectDaysToLimit(rising.slice(0, 1), limits)).toBeNull();
+    expect(projectDaysToLimit(rising.slice(0, 4), limits)).toBeNull();
+  });
+
+  it('is not_established when the 5-day trend is noisy — the CI on the slope includes zero', () => {
+    const noisy = [
+      { date: '2026-09-01', mean: 1948 },
+      { date: '2026-09-02', mean: 1974 },
+      { date: '2026-09-03', mean: 1949 },
+      { date: '2026-09-04', mean: 1977 },
+      { date: '2026-09-05', mean: 1951 },
+    ];
+    const p = projectDaysToLimit(noisy, limits)!;
+    expect(p.status).toBe('not_established');
+    expect(p.daysToLimit).toBeNull();
+    expect(p.daysLow).toBeNull();
+    expect(p.daysHigh).toBeNull();
+    expect(p.reason).toBeTruthy();
   });
 });
 

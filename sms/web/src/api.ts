@@ -1878,8 +1878,23 @@ export interface DriftProjection {
   towards: 'upper' | 'lower';
   limitG: number;
   distanceG: number;
-  /** 0 = already beyond the limit; null = not moving toward one. */
+  /** 0 = already beyond the limit; null = not moving toward one, or status is 'not_established'. */
   daysToLimit: number | null;
+  /**
+   * RT-020 (25 Sep 2026): a 90% confidence range on daysToLimit, from the
+   * OLS slope's own confidence interval — null under the same conditions as
+   * daysToLimit, or when 'not_established'.
+   */
+  daysLow: number | null;
+  daysHigh: number | null;
+  confidence: 0.9;
+  /** How many daily points the slope (and its CI) were fitted over. */
+  nPoints: number;
+  /** 'not_established' when the slope's 90% CI includes zero (or disagrees
+   *  in sign with the point estimate) — a real trend cannot be stated at
+   *  that confidence, so no day count or range is given. `reason` explains why. */
+  status: 'established' | 'not_established';
+  reason?: string;
   assumption: 'linear_over_run';
 }
 

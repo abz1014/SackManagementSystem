@@ -1689,15 +1689,36 @@ export const W = {
        so it cannot be quoted without it. */
     projection: (rate: string, days: number, limitG: string, k: number) =>
       `At the current drift (${rate} over ${days} days) this station reaches the action limit (${limitG} from target) in about ${k} ${k === 1 ? 'day' : 'days'}, if it continues at that rate.`,
+    /* RT-020 (25 Sep 2026): the range version of `projection`, used whenever
+       the slope's 90% confidence interval is available (daysLow/daysHigh
+       both non-null and not equal to a single day, i.e. not the "already
+       past" case, which keeps using `projectionNow`). `lowK`/`highK` are the
+       days-to-limit computed from the shallow and steep ends of the CI. */
+    projectionRange: (rate: string, days: number, limitG: string, lowK: number, highK: number) =>
+      lowK === highK
+        ? `At the current drift (${rate} over ${days} days) this station reaches the action limit (${limitG} from target) in about ${lowK} ${lowK === 1 ? 'day' : 'days'} (90% range), if it continues at that rate.`
+        : `At the current drift (${rate} over ${days} days) this station reaches the action limit (${limitG} from target) in about ${lowK}\u2013${highK} days (90% range), if it continues at that rate.`,
     projectionFar: (rate: string, days: number, limitG: string) =>
       `At the current drift (${rate} over ${days} days) this station would not reach the action limit (${limitG} from target) within 90 days, if it continues at that rate.`,
     projectionNow: (rate: string, days: number, limitG: string) =>
       `At the current drift (${rate} over ${days} days) this station is already past the action limit (${limitG} from target).`,
     projectionAway: (rate: string, days: number) =>
       `The daily average is moving back toward the target (${rate} over ${days} days).`,
+    /* RT-020: printed instead of a day count when the slope's 90% CI
+       includes zero (or disagrees in sign with the point estimate) \u2014 the
+       drift itself is not established at that confidence, so no day count,
+       range or otherwise, is stated. `reason` is the server's own sentence
+       naming the interval and the point count. */
+    projectionNotEstablished: (days: number, reason: string) =>
+      `Drift not established from ${days} days. ${reason}`,
     projectionAssumption:
-      'A projection from recent readings: a straight line through the run\u2019s daily averages, assumed to continue at the same rate. It is not a forecast of what the scale will do.',
+      'A projection from recent readings: a straight line through the run\u2019s daily averages, assumed to continue at the same rate, with a 90% confidence range on the rate itself. It is not a forecast of what the scale will do.',
     projectionNoLimits: 'No product limits were in force, so there is no action limit to project to.',
+    /* RT-020: fewer than MIN_PROJECTION_POINTS (5) daily points \u2014 the run
+       fired the pattern test but there is not enough data for even a point
+       estimate, let alone an uncertainty range. */
+    projectionTooFewPoints: (n: number, min: number) =>
+      `Only ${n} day${n === 1 ? '' : 's'} in this run \u2014 at least ${min} are needed before a drift projection, with a confidence range, can be stated.`,
     gPerDay: (g: string) => `${g}/day`,
     /* The adjustment ledger form and list. */
     adjustedAt: 'Adjusted at (plant time)',
