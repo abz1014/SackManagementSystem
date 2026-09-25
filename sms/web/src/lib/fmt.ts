@@ -13,6 +13,21 @@ export function fmtClock(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: UTC, hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+/**
+ * "5:53 PM" when `iso` falls on the same plant day as `nowIso`, otherwise
+ * "12:00 PM, 7 Sep" — a bare time on a reading from another day hides that it
+ * is old. Both arguments must be on the SAME clock (the plant's, labelled
+ * UTC — e.g. `dataAsOfUtc` against `plantNowUtc`); never pass an app-written
+ * instant here (TWO CLOCKS).
+ */
+export function fmtClockOn(iso: string, nowIso: string): string {
+  if (iso.slice(0, 10) === nowIso.slice(0, 10)) return fmtClock(iso);
+  // Built by hand: en-GB's short month is "Sept" in current ICU.
+  const d = new Date(iso);
+  const month = d.toLocaleDateString('en-US', { timeZone: UTC, month: 'short' });
+  return `${fmtClock(iso)}, ${d.getUTCDate()} ${month}`;
+}
+
 /** "5:53:36 PM" */
 export function fmtClockSec(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', {

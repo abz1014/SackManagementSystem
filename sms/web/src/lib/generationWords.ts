@@ -60,58 +60,50 @@ export function currentIsSimulator(n: LiveGenerationNote | null | undefined): bo
 }
 
 /**
- * The reason, in one sentence, for a screen that has stopped moving.
+ * The reason, in plain words, for a Line screen that has stopped moving.
  *
- * `newestClock` and `newerClock` are already formatted by the caller with the
- * screen's own clock formatter — this module never formats a time, because
- * the plant clock conversion lives in `lib/plantClock.ts` and must not be
- * done twice.
+ * Owner complaint (25 Sep 2026): the old paragraph ("one source generation —
+ * September copy — cones … pack1_TP1U2 gen 4 … row identities start again at
+ * 1") was written for an engineer debugging the sidecar, not a plant manager.
+ * It also printed the newest reading as a bare time ("12:00 PM") that hid the
+ * fact it was 18 days old. Now: one sentence of fact (newest reading, WITH
+ * its date when not today, and its age), one of what is left out. The
+ * technical detail (which data set, how many rows) lives on Health, behind
+ * the bar's "details" link — `healthExcludedLine` below.
  *
- * BOTH DIRECTIONS, NEVER JUST ONE (RT-007). The old sentence named only
- * `theirs` — the EXCLUDED generation — as simulator or not, and never
- * inspected `mine`'s own `simulator` flag. Read together with a mislabelled
- * `mine`, that let the sentence call excluded rows synthetic while staying
- * silent about the (also synthetic) rows actually on screen — true of the
- * excluded rows, false by omission about the displayed ones. The claim for
- * each side is now read from that side's own `simulator` flag and cannot
- * disagree with it.
+ * `newestWhen` is already formatted by the caller (plant clock, date included
+ * when it is not the plant's today); `age` is a length of time or null. This
+ * module never formats a time — see `lib/plantClock.ts`.
+ *
+ * Never says the line is stopped or running (the headline already says it
+ * cannot tell). RT-007 still holds: whether the figures ON SCREEN are the
+ * simulator's is read from `mine`'s own flag, whether the LEFT-OUT ones are
+ * from `theirs`'s, and the two claims are made separately.
  */
 export function quietBecauseGeneration(
   n: LiveGenerationNote,
-  newestClock: string,
-  newerClock: string,
+  newestWhen: string,
+  age: string | null,
 ): string | null {
   if (n.newerElsewhereUtc == null) return null;
-  const mine = generationName(n.generation) ?? 'the source generation in use';
-  const theirs =
-    n.newerElsewhereLabel ?? n.newerElsewhereSourceDb ?? 'another source generation';
-  const mineIsSimulator = currentIsSimulator(n);
-  const theirsIsSimulator = n.newerElsewhereSimulator === true;
-
-  const mineClause = mineIsSimulator
-    ? `Every figure here is the plant simulator’s, not the plant’s. It is read from one source generation — ${mine} —`
-    : `Every figure here is read from one source generation — ${mine} —`;
-  const synthetic = theirsIsSimulator ? ' Those readings are the plant simulator’s, not the plant’s.' : '';
-  const leftOutClause = mineIsSimulator
-    ? ` They are not folded into these simulator figures, which would make every number a sum across two tables.`
-    : ` They are left out rather than added to these totals, which would make every figure a sum across two tables.`;
-
-  return (
-    `This is not a stopped line. ${mineClause} ` +
-    `whose newest reading is ${newestClock}. There are newer readings, to ${newerClock}, ` +
-    `but they belong to ${theirs}: a physically different set of tables, whose row identities start again at 1.` +
-    `${synthetic}${leftOutClause}`
-  );
+  const ageText = age ? ` (${age} old)` : '';
+  const first = currentIsSimulator(n)
+    ? `Figures here are the plant simulator’s, not the plant’s; newest reading: ${newestWhen}${ageText}.`
+    : `Newest plant reading: ${newestWhen}${ageText}.`;
+  const second =
+    n.newerElsewhereSimulator === true
+      ? 'Newer simulator readings are not counted.'
+      : 'Newer readings from a different data set are not counted.';
+  return `${first} ${second}`;
 }
 
 /** The short form, for the Wall footer and anywhere a full sentence will not fit. */
 export function quietBecauseGenerationShort(n: LiveGenerationNote, newestClock: string): string | null {
   if (n.newerElsewhereUtc == null) return null;
-  const mine = generationName(n.generation) ?? 'one source generation';
   if (currentIsSimulator(n)) {
-    return `Not a stopped line — these are the plant simulator’s readings (${mine}), ending ${newestClock}; newer rows are another generation's and are not shown`;
+    return `Simulator readings, not the plant’s — newest ${newestClock}; newer readings not counted`;
   }
-  return `Not a stopped line — readings end ${newestClock} in ${mine}; newer rows are another generation's and are not shown`;
+  return `Newest plant reading ${newestClock}; newer readings from a different data set not counted`;
 }
 
 /** What Health says about the generation it measured freshness and lag from. */

@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { W } from '../lib/words';
 import { PERIOD_KEYS, type PeriodKey, type PeriodParams } from '../lib/period';
 import type { Health } from '../lib/health';
-import { fmtClockSec, fmtClock, fmtSpan } from '../lib/fmt';
+import { fmtClockSec, fmtClock, fmtClockOn, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
 import { AccountSheet } from '../screens/Account';
 
@@ -235,21 +235,31 @@ function dotClass(health: Health): string {
 }
 
 /** The lag sentence, in whichever of its three states is true. */
-export function HealthLine({ health, onOpen, canOpen }: { health: Health; onOpen: () => void; canOpen: boolean }) {
+export function HealthLine({
+  health, onOpen, canOpen, plantNowUtc,
+}: { health: Health; onOpen: () => void; canOpen: boolean; plantNowUtc?: string | null }) {
   let text: string;
+  // A reading from another plant day carries its date, so an old reading is
+  // never shown as a bare time (25 Sep 2026). Same clock on both sides.
+  const when = (iso: string) => (plantNowUtc ? fmtClockOn(iso, plantNowUtc) : fmtClock(iso));
 
   switch (health.kind) {
     case 'ok':
       text =
         health.lagSeconds != null
-          ? W.lag.ok(fmtClock(health.readingUtc), fmtSpan(health.lagSeconds))
-          : W.lag.okNoLag(fmtClock(health.readingUtc));
+          ? W.lag.ok(when(health.readingUtc), fmtSpan(health.lagSeconds))
+          : W.lag.okNoLag(when(health.readingUtc));
       break;
     case 'stale':
-      text = W.lag.stale(health.readingUtc ? fmtClock(health.readingUtc) : '—');
+      text = W.lag.stale(health.readingUtc ? when(health.readingUtc) : '—');
       break;
     case 'late':
       text = W.lag.late(fmtSpan(health.lagSeconds));
+      break;
+    case 'lag_unknown':
+      // Was folded into `default` and printed "Nothing has been received from
+      // the plant yet" — false: a reading exists, only its delay is unmeasured.
+      text = W.lag.lagUnknown(when(health.readingUtc));
       break;
     default:
       text = W.lag.noData;
@@ -363,7 +373,7 @@ export function Bar({
         </span>
         {/* Every account may open the Health screen (roadmap Phase 11); the
             gear above stays admin-only. */}
-        <HealthLine health={health} onOpen={onOpenSync} canOpen />
+        <HealthLine health={health} onOpen={onOpenSync} canOpen plantNowUtc={plantNowUtc} />
       </div>
     </>
   );

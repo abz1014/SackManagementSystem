@@ -68,7 +68,7 @@ const BOTH_REAL: LiveGenerationNote = {
 
 describe('RT-007 RED — the banner must never call simulator figures real', () => {
   it('discloses that the figures on screen are the simulator\'s when the ACTIVE generation is', () => {
-    const s = quietBecauseGeneration(MINE_IS_SIMULATOR, '9:00 AM', '9:05 AM')!;
+    const s = quietBecauseGeneration(MINE_IS_SIMULATOR, '9:00 AM', null)!;
     // The old sentence only ever said "simulator" about the EXCLUDED
     // generation (newerElsewhereSimulator). It never inspected its own
     // `mine`'s `simulator` flag, so this failed before the fix.
@@ -76,18 +76,19 @@ describe('RT-007 RED — the banner must never call simulator figures real', () 
   });
 
   it('does not let the reader conclude the displayed data is real merely because the excluded rows were named synthetic', () => {
-    const s = quietBecauseGeneration(MINE_IS_SIMULATOR, '9:00 AM', '9:05 AM')!;
+    const s = quietBecauseGeneration(MINE_IS_SIMULATOR, '9:00 AM', null)!;
     // Old text: "...Those readings are the plant simulator's... They are
     // left out..." — true of the EXCLUDED rows, silent about `mine`, and so
     // false by omission about what is actually on screen. The fixed
     // sentence must say, before it ever names `mine`'s own label, that
     // what's on screen is the simulator's — never let the label alone stand
     // unqualified as the reader's first impression of it.
-    const labelIndex = s.indexOf('September copy - cones');
-    const disclosureIndex = s.toLowerCase().indexOf('plant simulator');
-    expect(labelIndex).toBeGreaterThan(-1);
-    expect(disclosureIndex).toBeGreaterThan(-1);
-    expect(disclosureIndex).toBeLessThan(labelIndex);
+    // Since 25 Sep 2026 the sentence names no data-set label at all (owner:
+    // no jargon on Line), so the misleading label can never lead. The
+    // disclosure must still come FIRST, before the reading is described.
+    expect(s).not.toContain('September copy - cones');
+    expect(s.toLowerCase().indexOf('plant simulator')).toBe(s.toLowerCase().indexOf('figures here are the plant simulator') + 'figures here are the '.length);
+    expect(s.toLowerCase().indexOf('plant simulator')).toBeLessThan(s.toLowerCase().indexOf('newest reading'));
   });
 
   it('the short form (Wall footer) carries the same disclosure, not just the long one', () => {
@@ -99,20 +100,20 @@ describe('RT-007 RED — the banner must never call simulator figures real', () 
 describe('RT-007 proof, both directions — claim and payload cannot disagree', () => {
   it('SIMULATOR-only: mine is flagged simulator, theirs is real — the claim must say MINE is synthetic', () => {
     const mineSimOnly: LiveGenerationNote = { ...MINE_IS_SIMULATOR, newerElsewhereSimulator: false, newerElsewhereLabel: 'October copy - cones', newerElsewhereSourceDb: 'DATA_TP1U2_OCT' };
-    const s = quietBecauseGeneration(mineSimOnly, '9:00 AM', '9:05 AM')!;
+    const s = quietBecauseGeneration(mineSimOnly, '9:00 AM', null)!;
     expect(s).toMatch(/simulator/i);
+    expect(s).not.toMatch(/newer simulator readings/i);
     // And it must NOT ALSO claim the real, newer generation is synthetic —
     // that specific clause ("Those readings are the plant simulator's")
     // exists only for `theirs`, and `theirs` here is real.
     expect(s).not.toContain('Those readings are the plant simulator');
-    expect(s).toContain('October copy - cones');
+    expect(s).toContain('different data set');
   });
 
   it('REAL-only: neither side is the simulator — the sentence never says the word', () => {
-    const s = quietBecauseGeneration(BOTH_REAL, '12:00 PM 7 Sep', '9:00 AM 1 Oct')!;
+    const s = quietBecauseGeneration(BOTH_REAL, '12:00 PM, 7 Sep', '24 days')!;
     expect(s).not.toMatch(/simulator/i);
-    expect(s).toContain('September copy - cones');
-    expect(s).toContain('October copy - cones');
+    expect(s).toContain('Newest plant reading: 12:00 PM, 7 Sep (24 days old).');
   });
 });
 

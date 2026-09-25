@@ -203,6 +203,7 @@ export function RefLine({
   label,
   tone = 'muted',
   dashed,
+  labelInside,
 }: {
   y: number;
   x1: number;
@@ -210,12 +211,32 @@ export function RefLine({
   label?: string;
   tone?: 'ink' | 'muted' | 'accent';
   dashed?: boolean;
+  /** Draw the label INSIDE the plot, right-aligned just above the line,
+   *  for charts that reserve no right margin (DeviationBars' R is 8px, so
+   *  the default `x2 + 8` placement put "row median" / "Flag threshold"
+   *  outside the viewBox, clipped — 25 Sep 2026). A page-coloured halo keeps
+   *  it legible where it crosses a bar. */
+  labelInside?: boolean;
 }) {
   const stroke = tone === 'ink' ? 'var(--graphite)' : tone === 'accent' ? 'var(--acc)' : 'var(--grid)';
   return (
     <g aria-hidden="true">
       <line x1={x1} x2={x2} y1={y} y2={y} stroke={stroke} strokeWidth={1} strokeDasharray={dashed ? '3 3' : undefined} />
-      {label && (
+      {label && labelInside && (
+        <text
+          x={x2 - 2}
+          y={y - 5}
+          fontSize="var(--fs-tick)"
+          textAnchor="end"
+          fill={tone === 'accent' ? 'var(--acc)' : 'var(--graphite)'}
+          stroke="var(--paper)"
+          strokeWidth={3}
+          paintOrder="stroke"
+        >
+          {label}
+        </text>
+      )}
+      {label && !labelInside && (
         <text x={x2 + 8} y={y + 4} fontSize="var(--fs-tick)" fill={tone === 'accent' ? 'var(--acc)' : 'var(--graphite)'}>
           {label}
         </text>

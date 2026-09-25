@@ -612,11 +612,11 @@ export function DeviationBars({
         ))}
         {threshold != null && (
           <>
-            <RefLine y={y(threshold)} x1={L} x2={width - R} label={thresholdLabel} tone="muted" dashed />
+            <RefLine y={y(threshold)} x1={L} x2={width - R} label={thresholdLabel} tone="muted" dashed labelInside />
             <RefLine y={y(-threshold)} x1={L} x2={width - R} tone="muted" dashed />
           </>
         )}
-        <RefLine y={zeroY} x1={L} x2={width - R} label={zeroLabel} tone="ink" />
+        <RefLine y={zeroY} x1={L} x2={width - R} label={zeroLabel} tone="ink" labelInside />
         {rows.map((r, i) => {
           const barTop = Math.min(zeroY, y(r.value));
           const h = Math.abs(y(r.value) - zeroY);

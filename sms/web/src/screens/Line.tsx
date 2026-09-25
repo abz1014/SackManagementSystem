@@ -33,7 +33,7 @@ import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
   SkelChart, SkelFigures, SkelLines, SkelStations, type FigureProps,
 } from '../ui/bits';
-import { fmtClock, fmtDay, fmtDayLong, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
+import { fmtClock, fmtClockOn, fmtDay, fmtDayLong, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan, secondsBetween } from '../lib/fmt';
 import { CategoryBars, type BarDatum } from '../ui/chart';
 import { DeviationBars, fmtDayShort, type DeviationRow } from './report/shared';
 import {
@@ -174,8 +174,8 @@ export function LineScreen({
           <p className="mut sm" style={{ marginTop: 10, maxWidth: '68ch' }}>
             {quietBecauseGeneration(
               line.generation,
-              fmtClock(line.dataAsOfUtc),
-              fmtClock(line.generation.newerElsewhereUtc!),
+              fmtClockOn(line.dataAsOfUtc, line.plantNowUtc),
+              readingAge(line.dataAsOfUtc, line.plantNowUtc),
             )}
           </p>
         )}
@@ -429,7 +429,7 @@ function Headline({ line, knowable, period }: { line: LiveLine; knowable: boolea
     default:
       return (
         <>
-          {W.state.idle(line.dataAsOfUtc ? fmtClock(line.dataAsOfUtc) : '—')}. {scope}
+          {W.state.idle(line.dataAsOfUtc ? fmtClockOn(line.dataAsOfUtc, line.plantNowUtc) : '—')}. {scope}
         </>
       );
   }
@@ -1274,4 +1274,14 @@ function LastReadings({
       </tbody>
     </table>
   );
+}
+
+/**
+ * How old the newest reading is, on the plant's own clock (both instants are
+ * plant wall-clock labelled UTC, so the subtraction is on one clock). Null
+ * under a minute, where "0 min old" would say nothing useful.
+ */
+function readingAge(readingUtc: string, plantNowUtc: string): string | null {
+  const s = secondsBetween(readingUtc, plantNowUtc);
+  return s >= 60 ? fmtSpan(s) : null;
 }

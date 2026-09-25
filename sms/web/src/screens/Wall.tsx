@@ -39,7 +39,7 @@ import { LIVE_POLL_MS, useLive, usePlantNow, usePolling, useTicker } from '../li
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import { hasNewerElsewhere, quietBecauseGenerationShort } from '../lib/generationWords';
-import { fmtClock, fmtClockSec, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
+import { fmtClock, fmtClockOn, fmtClockSec, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { getAttention, getStations, type LiveLine } from '../api';
 
 /**
@@ -355,7 +355,7 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
               only when the server reports a newer reading outside the
               generation in use, which at IFL never happens. */}
           {!outOfContact && hasNewerElsewhere(line.generation) && (
-            <> · {quietBecauseGenerationShort(line.generation, fmtClock(line.dataAsOfUtc ?? line.plantNowUtc))}</>
+            <> · {quietBecauseGenerationShort(line.generation, fmtClockOn(line.dataAsOfUtc ?? line.plantNowUtc, line.plantNowUtc))}</>
           )}
         </span>
         <span>

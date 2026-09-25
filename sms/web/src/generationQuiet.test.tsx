@@ -55,16 +55,21 @@ const ENDED: LiveGenerationNote = {
 /* ------------------------------------------------------- the sentences */
 
 describe('the sentences themselves', () => {
-  it('say it is NOT a stopped line, and name both generations', () => {
-    const s = quietBecauseGeneration(ENDED, '12:00 PM 7 Sep', '12:29 PM 22 Sep')!;
-    expect(s).toMatch(/not a stopped line/i);
-    expect(s).toContain('September copy - cones');
-    expect(s).toContain('12:00 PM 7 Sep');
-    expect(s).toContain('pack1_TP1U2 gen 4');
-    expect(s).toContain('12:29 PM 22 Sep');
-    // And that the newer rows are synthetic — derived from source_db, since
-    // epoch 13 is registered `ifl_copy` and is the simulator.
-    expect(s).toMatch(/simulator/i);
+  it('state the newest reading, its date and age, in plain words — no jargon, no stopped/running claim', () => {
+    const s = quietBecauseGeneration(ENDED, '12:00 PM, 7 Sep', '18 days')!;
+    expect(s).toBe('Newest plant reading: 12:00 PM, 7 Sep (18 days old). Newer simulator readings are not counted.');
+    // Owner complaint 25 Sep 2026: none of the sidecar's internals on Line.
+    for (const jargon of [/generation/i, /pack1_TP1U2/, /gen \d/, /row identit/i, /tables?\b/i]) {
+      expect(s).not.toMatch(jargon);
+    }
+    // Never implies either state.
+    expect(s).not.toMatch(/\b(stopped|running)\b/i);
+  });
+
+  it('omit the age when none is given', () => {
+    expect(quietBecauseGeneration(ENDED, '12:00 PM', null)).toBe(
+      'Newest plant reading: 12:00 PM. Newer simulator readings are not counted.',
+    );
   });
 
   it('do NOT claim the newer rows are synthetic when they are IFL’s own', () => {
@@ -78,13 +83,13 @@ describe('the sentences themselves', () => {
       newerElsewhereLabel: 'October copy - cones',
       newerElsewhereSimulator: false,
     };
-    const s = quietBecauseGeneration(real, '12:00 PM 7 Sep', '08:00 AM 3 Oct')!;
+    const s = quietBecauseGeneration(real, '12:00 PM, 7 Sep', '26 days')!;
     expect(s).not.toMatch(/simulator/i);
-    expect(s).toContain('October copy - cones');
+    expect(s).toContain('different data set');
   });
 
   it('print NOTHING when no reading anywhere is newer — the ordinary case at IFL', () => {
-    expect(quietBecauseGeneration(GENERATION_FIXTURE, '12:00 PM', '—')).toBeNull();
+    expect(quietBecauseGeneration(GENERATION_FIXTURE, '12:00 PM', null)).toBeNull();
     expect(quietBecauseGenerationShort(GENERATION_FIXTURE, '12:00 PM')).toBeNull();
     expect(hasNewerElsewhere(GENERATION_FIXTURE)).toBe(false);
     expect(hasNewerElsewhere(ENDED)).toBe(true);
@@ -110,7 +115,8 @@ describe('the sentences themselves', () => {
 
   it('the Wall’s short form fits a footer and still refuses the word "stopped" as a claim', () => {
     const s = quietBecauseGenerationShort(ENDED, '12:00 PM 7 Sep')!;
-    expect(s).toMatch(/not a stopped line/i);
+    expect(s).toMatch(/newest plant reading/i);
+    expect(s).not.toMatch(/\b(stopped|running)\b|generation/i);
     expect(s).toContain('12:00 PM 7 Sep');
     expect(s.length).toBeLessThan(200);
   });
@@ -210,8 +216,8 @@ describe('Line — the headline stops asserting a state it cannot read', () => {
         canWrite={false}
       />,
     );
-    await findByText(/This is not a stopped line\./);
-    await findByText(/belong to pack1_TP1U2 gen 4/);
+    await findByText(/^Newest plant reading: .*Newer simulator readings are not counted\.$/);
+    expect(queryByText(/pack1_TP1U2|source generation/)).toBeNull();
     // W.state.unknown is what the headline falls back to; the "stopped"
     // and "idle" sentences must be gone.
     await findByText(W.state.unknown);
@@ -231,7 +237,7 @@ describe('Line — the headline stops asserting a state it cannot read', () => {
       />,
     );
     await findByText(/Is the line running/i);
-    expect(queryByText(/This is not a stopped line/)).toBeNull();
+    expect(queryByText(/Newest plant reading/)).toBeNull();
   });
 });
 
@@ -240,13 +246,13 @@ describe('Wall — the board refuses to assert a state from a generation that en
     installFakeFetch(lineRoutes(ENDED));
     const { findByText } = renderWithLive(<WallScreen onExit={() => {}} />);
     await findByText(W.state.unknown);
-    await findByText(/Not a stopped line — readings end/);
+    await findByText(/Newest plant reading .*not counted/);
   });
 
   it('ORDINARY: the board asserts the state and prints no generation sentence', async () => {
     installFakeFetch(lineRoutes(GENERATION_FIXTURE));
     const { findByText, queryByText } = renderWithLive(<WallScreen onExit={() => {}} />);
     await findByText(/Line 3/);
-    expect(queryByText(/Not a stopped line/)).toBeNull();
+    expect(queryByText(/Newest plant reading/)).toBeNull();
   });
 });

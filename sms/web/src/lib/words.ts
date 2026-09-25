@@ -96,6 +96,9 @@ export const W = {
     stale: (since: string) => `No new readings since ${since} — the plant link may be down.`,
     /* Lag beyond the credible ceiling: the figures stand, the state does not. */
     late: (lag: string) => `Readings are arriving ${lag} late — the line state below may be out of date.`,
+    /* A reading exists but its delay is not measured yet (RT-006): state it,
+       without claiming the line is running or stopped. */
+    lagUnknown: (reading: string) => `Readings to ${reading} · delay not measured yet.`,
     details: 'details',
     noData: 'Nothing has been received from the plant yet.',
   } as const,
