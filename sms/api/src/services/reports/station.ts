@@ -46,6 +46,14 @@ export interface StationReportData {
   lineMeanG: number | null;
   targetG: number | null;
   productLabel: string | null;
+  /**
+   * RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md): the line-wide
+   * target's own retired flag, carried straight through from
+   * `getWeightStations`'s own `productActive` — PDAS's MaterialActive, as
+   * last mirrored, no retirement TIMESTAMP anywhere in PDAS or its mirror.
+   * Null when there was no line-wide target at all.
+   */
+  productActive: boolean | null;
   thresholdG: number;
   minDaysHeld: number;
   lineRejectRatePct: number | null;
@@ -140,6 +148,7 @@ export async function getStationReport(
     lineMeanG: ws.lineMeanG,
     targetG: ws.targetG,
     productLabel: ws.productLabel,
+    productActive: ws.productActive ?? null,
     thresholdG: ws.thresholdG,
     minDaysHeld: ws.minDaysHeld,
     lineRejectRatePct: ws.lineRejectRatePct,
@@ -155,6 +164,17 @@ export const STATION_CSV_HEADERS = [
   'station', 'cones', 'weighed_plausible', 'mean_g', 'vs_line_g', 'vs_target_g', 'days_held', 'flagged',
   'rejected_at_inspection', 'reject_rate_pct', 'cones_in_range_pct', 'last_adjusted_utc',
   'within', 'low', 'high', 'rejected', 'unknown',
+  // RT-018 (25 Sep 2026): two columns appended at the END so every existing
+  // positional row/index above is untouched. `row_kind` distinguishes an
+  // ordinary station row from the one trailing summary row this report's
+  // line-wide target fact goes in — the same "trailing row after the table,
+  // never a header comment" convention `coneWeight.ts`'s summary kv rows and
+  // the generic attribution block (csv.ts) already use; Excel shows a `#`
+  // comment header as a mangled first row (CLAUDE.md's "Open question 4").
+  // `target_product_active` is null on every ordinary station row (the fact
+  // belongs to the PERIOD, not to any one station) and set only on the
+  // trailing row.
+  'row_kind', 'target_product_active',
 ] as const;
 
 export function stationCsv(d: StationReportData): CsvTable {
@@ -162,7 +182,13 @@ export function stationCsv(d: StationReportData): CsvTable {
     r.station, r.cones, r.weighedPlausible, r.meanG, r.vsLineG, r.vsTargetG, r.daysHeld, r.flagged,
     r.rejectedAtInspection, r.rejectRatePct, r.conesInRangePct, r.lastAdjustedUtc,
     r.states.within, r.states.low, r.states.high, r.states.rejected, r.states.unknown,
+    'station', null,
   ]);
+  // Emitted only when there was a line-wide target at all — the ordinary
+  // "no product was in force" case needs no extra row to say so twice.
+  if (d.productLabel != null) {
+    rows.push([null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'summary', d.productActive]);
+  }
   return { headers: STATION_CSV_HEADERS, rows };
 }
 

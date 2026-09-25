@@ -244,7 +244,10 @@ function Body({
         {p?.product && (
           <>
             <dt>Product then</dt>
-            <dd>{p.product.label}</dd>
+            <dd>
+              {p.product.label}
+              {p.productActive === false && <span className="mut sm" style={{ marginLeft: 6 }}>{W.retiredProduct.marker}</span>}
+            </dd>
           </>
         )}
       </dl>

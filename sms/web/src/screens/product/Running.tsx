@@ -321,14 +321,23 @@ function ByProduct({
   if (groups.length === 0) return <Empty message={W.product.runningNowEmpty} />;
   const nameOf = new Map(names.map((n) => [n.stationId, n]));
   const labels = useMemo(() => distinctProductLabels(products), [products]);
+  const productById = useMemo(() => new Map(products.map((p) => [p.productId, p])), [products]);
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
-      {groups.map((g, i) => (
+      {groups.map((g, i) => {
+        // RT-018: PDAS's own MaterialActive as last mirrored, matched by the
+        // group's materialId — the same lookup the changeover picker already
+        // does. `undefined` (product not in the master at all) is left
+        // unmarked, same as `null`; only an EXPLICIT false is a retired flag.
+        const retired = g.materialId != null && productById.get(g.materialId)?.activeFlag === false;
+        return (
         <div key={g.materialId ?? `station-${i}`}>
           <p style={{ fontWeight: 500 }}>
             {(g.materialId != null ? labels.get(g.materialId) : null) ?? g.productName ?? (g.materialId != null ? W.cone.noProductName(g.materialId) : W.cone.noMaterial)}
+            {retired && <span className="mut sm" style={{ marginLeft: 8 }}>{W.retiredProduct.marker}</span>}
           </p>
+          {retired && <p className="mut sm" style={{ marginTop: 2 }}>{W.retiredProduct.stillRunning}</p>}
           <table style={{ marginTop: 6 }}>
             <tbody>
               {g.machines.map((m) => (
@@ -367,7 +376,8 @@ function ByProduct({
             </tbody>
           </table>
         </div>
-      ))}
+        );
+      })}
       {asOfUtc && (
         <p className="mut sm">{W.cone.machinesWindow(`${fmtDay(asOfUtc)}, ${fmtClock(asOfUtc)}`)}</p>
       )}

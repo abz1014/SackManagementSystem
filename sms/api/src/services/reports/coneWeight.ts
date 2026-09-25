@@ -89,6 +89,16 @@ export interface ConeWeightReportData {
      * product was in force" case, which needs no explanation beyond itself.
      */
     omittedReason: string | null;
+    /**
+     * RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md): PDAS's own
+     * MaterialActive, as last mirrored — carried straight through from
+     * `getWeightStations`' own `productActive`, the same source this
+     * report's `setpointG`/`label` already come from. No retirement
+     * TIMESTAMP exists anywhere in PDAS or its mirror; this is the
+     * product's status as of NOW, not as of the period. Null when no
+     * target is stated (`source: 'none'`) or the mirror carries no flag.
+     */
+    productActive: boolean | null;
   };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
   lineMeanG: number | null;
@@ -202,6 +212,7 @@ export async function getConeWeightReport(
       limitsChangedInPeriod: stateTarget ? (stations.limitsChangedInWindow ?? 0) : 0,
       source: stateTarget ? 'in_force_at_period_end' : 'none',
       omittedReason: stateTarget ? null : resolvedTarget.omittedReason,
+      productActive: stateTarget ? stations.productActive ?? null : null,
     },
     byStation: stations.stations.map((s) => ({
       station: s.station, n: s.n, meanG: s.meanG, vsLineG: s.vsLineG, vsTargetG: s.vsTargetG, flagged: s.flagged,
@@ -245,6 +256,10 @@ export function coneWeightCsv(d: ConeWeightReportData): CsvTable {
     kv('target_in_force_at_utc', d.target.inForceAtUtc),
     kv('target_in_force_is_lower_bound', d.target.inForceIsLowerBound),
     kv('target_omitted_reason', d.target.omittedReason),
+    // RT-018: attribution as a trailing row, same convention every other
+    // attribution fact in this CSV already follows — never a header
+    // comment, which Excel shows as a mangled first row.
+    kv('target_product_active', d.target.productActive),
     kv('plausible_lo_g', d.plausibility.loG),
     kv('plausible_hi_g', d.plausibility.hiG),
   ];

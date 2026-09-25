@@ -113,4 +113,24 @@ describe('ConeWeightSection — the target tile states the RIGHT reason for a mi
     );
     expect(container.textContent).toContain('in force since');
   });
+
+  // RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026: a
+  // product PDAS has retired could be printed on this tile with no marker.
+  it('marks the target as "(retired in PDAS)" when productActive is false, and not otherwise', () => {
+    const retired = render(
+      <ConeWeightSection
+        d={fixture({ source: 'in_force_at_period_end', setpointG: 1960, label: '201-IH0-SD', productActive: false })}
+        names={[]}
+      />,
+    );
+    expect(retired.container.textContent).toContain('retired in PDAS');
+
+    const active = render(
+      <ConeWeightSection
+        d={fixture({ source: 'in_force_at_period_end', setpointG: 1960, label: '201-IH0-SD', productActive: true })}
+        names={[]}
+      />,
+    );
+    expect(active.container.textContent).not.toContain('retired in PDAS');
+  });
 });

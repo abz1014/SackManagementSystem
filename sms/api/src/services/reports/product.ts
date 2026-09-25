@@ -63,6 +63,17 @@ export interface ProductReportRow extends ReportLine {
   vsTargetG: number | null;
   /** F6: why `target` is null although the product has recorded limits; null otherwise. */
   targetOmittedReason: string | null;
+  /**
+   * RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md): PDAS's own
+   * MaterialActive, as last mirrored (`ProductCatalogue.product().activeFlag`)
+   * — this row names a specific product for the whole period, so it carries
+   * the flag regardless of whether `target` itself resolved (a retired
+   * product with no usable limits version is still worth flagging as
+   * retired). No retirement TIMESTAMP exists anywhere in PDAS or its mirror;
+   * this is the product's status AS OF NOW. Null for the "No product on the
+   * reading" row (`productId` null).
+   */
+  productActive: boolean | null;
 }
 
 export interface ProductReportData {
@@ -195,6 +206,7 @@ export async function getProductReport(
       target,
       vsTargetG: target == null || avgG == null ? null : round(avgG - target.setpointG),
       targetOmittedReason,
+      productActive: productId == null ? null : (catalogue.product(productId)?.activeFlag ?? null),
     };
   });
 
@@ -227,6 +239,9 @@ export const PRODUCT_CSV_HEADERS = [
   // F6 (23 Sep 2026): a target may never travel without the instant it was in
   // force at, and "no later than" is a different claim from "since".
   'target_in_force_at_utc', 'target_in_force_is_lower_bound', 'target_omitted_reason',
+  // RT-018 (25 Sep 2026): this row's own product's retired flag, as a plain
+  // column beside its other facts — never a header comment.
+  'product_active',
 ] as const;
 
 export function productCsv(d: ProductReportData): CsvTable {
@@ -236,6 +251,7 @@ export function productCsv(d: ProductReportData): CsvTable {
     r.states.within, r.states.low, r.states.high, r.states.rejected, r.states.unknown, r.implausible,
     r.target?.setpointG ?? null, r.vsTargetG, r.target?.limitsChangedInPeriod ?? null,
     r.target?.inForceAtUtc ?? null, r.target?.inForceIsLowerBound ?? null, r.targetOmittedReason,
+    r.productActive,
   ]);
   return { headers: PRODUCT_CSV_HEADERS, rows };
 }

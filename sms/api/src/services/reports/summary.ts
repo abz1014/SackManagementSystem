@@ -137,6 +137,15 @@ export interface ProductMixRow {
   productId: number | null;
   label: string;
   cones: number;
+  /**
+   * RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md): PDAS's own
+   * MaterialActive, as last mirrored — this row names a specific product
+   * that ran in the period, so it carries the same flag Product › Running
+   * and the other per-product reports do. No retirement TIMESTAMP exists
+   * anywhere in PDAS or its mirror; this is the product's status AS OF NOW.
+   * Null for the "No product on the reading" row.
+   */
+  productActive: boolean | null;
 }
 
 export interface ManagementSummaryData {
@@ -330,9 +339,11 @@ export async function getManagementSummary(
   });
   // F7 (23 Sep 2026): the DISTINCT label — see productNames.ts.
   const labelFor = (pid: number | null) => (pid == null ? 'No product on the reading' : catalogue.distinctLabel(pid));
+  // RT-018: same catalogue lookup product.ts and weightStations.ts already use.
+  const activeFlagFor = (pid: number | null) => (pid == null ? null : (catalogue.product(pid)?.activeFlag ?? null));
   const productMix = {
-    current: cur.productMix.map((m) => ({ ...m, label: labelFor(m.productId) })),
-    prior: prev.productMix.map((m) => ({ ...m, label: labelFor(m.productId) })),
+    current: cur.productMix.map((m) => ({ ...m, label: labelFor(m.productId), productActive: activeFlagFor(m.productId) })),
+    prior: prev.productMix.map((m) => ({ ...m, label: labelFor(m.productId), productActive: activeFlagFor(m.productId) })),
   };
   return {
     period: resolved,

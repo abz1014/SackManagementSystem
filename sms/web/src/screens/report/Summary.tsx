@@ -176,9 +176,16 @@ function ProductMixRows({ current, prior, labels }: { current: ProductMixRow[]; 
       {ids.map((id) => {
         const c = curOf.get(id);
         const p = priorOf.get(id);
+        // RT-018: either period's own row can carry the retired flag —
+        // PDAS's MaterialActive is a CURRENT fact, not a per-period one, so
+        // the two rows for the same product always agree; either suffices.
+        const retired = (c ?? p)?.productActive === false;
         return (
           <tr key={id ?? 'none'}>
-            <td>{nameOf(id, c ?? p)}</td>
+            <td>
+              {nameOf(id, c ?? p)}
+              {retired && <span className="mut sm" style={{ marginLeft: 6 }}>{W.retiredProduct.marker}</span>}
+            </td>
             <td className="n">{c ? fmtInt(c.cones) : '—'}</td>
             <td className="n">{p ? fmtInt(p.cones) : '—'}</td>
           </tr>

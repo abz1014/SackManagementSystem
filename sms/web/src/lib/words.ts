@@ -2175,6 +2175,20 @@ export const W = {
   errorDisplay: {
     tooMuchData: 'Too much data for one view — choose a shorter period or filter.',
   } as const,
+  /* RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026: a
+     product PDAS has retired (`MaterialActive = 0`) could still be shown, on
+     Weight's target, the station table, Line, and Product › Running, as an
+     unflagged live target or "running" product — real data confirms this:
+     MaterialId 17 is retired in PDAS yet still carries production rows on
+     the dev copy. PDAS records no retirement TIMESTAMP, only this current
+     bit, so the marker states the product's status AS OF NOW, never a date
+     it does not have. */
+  retiredProduct: {
+    /** Suffix appended after a product label, e.g. "205-XX (retired in PDAS)". */
+    marker: '(retired in PDAS)',
+    /** One sentence shown once, wherever a retired product is still the live/running target. */
+    stillRunning: 'This product is marked retired in PDAS but is still being produced — worth checking.',
+  } as const,
 } as const;
 
 export type Words = typeof W;

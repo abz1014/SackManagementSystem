@@ -468,6 +468,44 @@ describe('product report', () => {
     const t = productCsv(d);
     expect(t.headers).toEqual(PRODUCT_CSV_HEADERS);
     expect(t.rows[0]!.slice(0, 3)).toEqual([21, '205-IL0-SD', 700]);
+    // Default catalogue fixture (beforeEach above) has product 21 active.
+    expect(d.rows[0]!.productActive).toBe(true);
+    expect(d.rows[1]!.productActive).toBeNull(); // "No product on the reading"
+    expect(t.rows[0]![t.headers.indexOf('product_active')]).toBe(true);
+  });
+
+  // RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026: a
+  // per-product row could name a product PDAS has retired with no marker,
+  // even though `target` itself may still resolve fine (retirement and a
+  // usable limits version are independent facts). Overrides only
+  // `catalogue.product`'s `activeFlag`, same fixture otherwise.
+  it('RT-018: a retired product carries productActive: false through the JSON payload and the CSV column', async () => {
+    vi.mocked(loadProductCatalogue).mockResolvedValueOnce({
+      product: (id: number) => (id === 21 ? { productId: 21, label: '205-IL0-SD', activeFlag: false } : null),
+      distinctLabel: (id: number) => (id === 21 ? '205-IL0-SD' : `Product ${id}`),
+      versionAt: (id: number, ms: number) => (id === 21 && ms >= Date.parse('2026-08-20T00:00:00Z') ? {
+        productId: 21, setpointG: 1960, offsetMinusG: 30, offsetPlusG: 30,
+        effectiveFromMs: Date.parse('2026-08-20T00:00:00Z'), effectiveFromUtc: '2026-08-20T00:00:00.000Z',
+        effectiveIsLowerBound: false, source: 'pdas_observed' as const,
+      } : null),
+      versionsAscending: () => [],
+      limitsAt: (id: number) => (id === 21 ? { targetG: 1960, loG: 1930, hiG: 1990, label: '1,960 ± 30 g' } : null),
+      latest: () => null,
+      productIds: () => [21],
+      isEmpty: false,
+    } as never);
+    const { pool } = fakePool((sql) => {
+      if (sql.includes('STDEV')) return [{ grp: '21', n: 690, avg: 1958.4, sd: 11.2, mn: 1900, mx: 2010, excluded: 10 }];
+      if (sql.includes('GROUP BY ISNULL') && sql.includes('CASE')) return [{ grp: '21', state: 'within', n: 690 }];
+      return [];
+    });
+    const d = await getProductReport(pool, 1, PERIOD, {});
+    const row21 = d.rows.find((r) => r.productId === 21)!;
+    expect(row21.productActive).toBe(false);
+    // Retirement does not blank an otherwise-usable target — they are independent facts.
+    expect(row21.target).not.toBeNull();
+    const t = productCsv(d);
+    expect(t.rows.find((r) => r[0] === 21)![t.headers.indexOf('product_active')]).toBe(false);
   });
 
   it("product report resolves each row's target from that product's own limit version", async () => {
@@ -524,6 +562,35 @@ describe('station report', () => {
     const t = stationCsv(d);
     expect(t.headers).toEqual(STATION_CSV_HEADERS);
     expect(t.rows[0]!.slice(0, 2)).toEqual([3, 480]);
+  });
+  // RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026: the
+  // station report's line-wide target could be a product PDAS has retired
+  // with no marker. `getWeightStations`' own `productActive` (mocked here,
+  // same fixture the test above uses) is now carried through as
+  // `StationReportData.productActive`, and into a trailing CSV row —
+  // `row_kind: 'summary'` — appended AFTER the per-station rows, never as a
+  // header comment (CLAUDE.md's "Open question 4").
+  it('RT-018: carries a retired line-wide target through as productActive, in the JSON payload and as a trailing CSV row', async () => {
+    vi.mocked(getWeightStations).mockResolvedValueOnce({ ...fakeStations(), productActive: false } as never);
+    const { pool } = fakePool((sql) => (sql.includes('GROUP BY source_station') ? [] : []));
+    const d = await getStationReport(pool, 1, PERIOD, {});
+    expect(d.productActive).toBe(false);
+    const t = stationCsv(d);
+    const summaryRow = t.rows.find((r) => r[t.headers.indexOf('row_kind')] === 'summary')!;
+    expect(summaryRow[t.headers.indexOf('target_product_active')]).toBe(false);
+    // Every ordinary station row still carries no value in that column.
+    for (const r of t.rows.filter((r) => r[t.headers.indexOf('row_kind')] === 'station')) {
+      expect(r[t.headers.indexOf('target_product_active')]).toBeNull();
+    }
+  });
+  it('RT-018: no line-wide target at all emits no trailing summary row', async () => {
+    vi.mocked(getWeightStations).mockResolvedValueOnce({
+      ...fakeStations(), targetG: null, productId: null, productLabel: null, productActive: null, targetEffectiveFromUtc: null, limitsChangedInWindow: null,
+    } as never);
+    const { pool } = fakePool((sql) => (sql.includes('GROUP BY source_station') ? [] : []));
+    const d = await getStationReport(pool, 1, PERIOD, {});
+    const t = stationCsv(d);
+    expect(t.rows.find((r) => r[t.headers.indexOf('row_kind')] === 'summary')).toBeUndefined();
   });
 });
 
@@ -595,9 +662,25 @@ describe('cone weight report', () => {
       limitsChangedInPeriod: 0,
       source: 'in_force_at_period_end',
       omittedReason: null,
+      productActive: null,
     });
     const t = coneWeightCsv(d);
     expect(t.rows.find((r) => r[1] === 'target_source')![2]).toBe('in_force_at_period_end');
+  });
+  // RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026: a
+  // product PDAS has retired (MaterialActive = 0) could still be printed on
+  // this report's own target tile with no marker. `getWeightStations`
+  // (mocked here, same as every other test in this block) already carries
+  // `productActive`; this pins that the cone-weight report threads it
+  // through unchanged, and into the CSV/XLSX as a trailing key/value row
+  // (never a header comment — CLAUDE.md's "Open question 4").
+  it('RT-018: carries a retired target product\'s activeFlag through as target.productActive, in both the JSON payload and the CSV', async () => {
+    vi.mocked(getWeightStations).mockResolvedValueOnce({ ...fakeStations(), productActive: false } as never);
+    const { pool } = fakePool();
+    const d = await getConeWeightReport(pool, 1, PERIOD, {});
+    expect(d.target.productActive).toBe(false);
+    const t = coneWeightCsv(d);
+    expect(t.rows.find((r) => r[1] === 'target_product_active')![2]).toBe(false);
   });
   it('a period with no product in force reports target null, never 1950', async () => {
     vi.mocked(getWeightStations).mockResolvedValueOnce({
@@ -607,7 +690,7 @@ describe('cone weight report', () => {
     const d = await getConeWeightReport(pool, 1, PERIOD, {});
     expect(d.target).toEqual({
       setpointG: null, productId: null, label: null, inForceAtUtc: null, inForceIsLowerBound: false,
-      limitsChangedInPeriod: 0, source: 'none', omittedReason: null,
+      limitsChangedInPeriod: 0, source: 'none', omittedReason: null, productActive: null,
     });
     const t = coneWeightCsv(d);
     expect(t.rows.find((r) => r[1] === 'target_g')![2]).toBeNull();
@@ -794,8 +877,8 @@ describe('management summary', () => {
     // U5's product mix: the same getProduction(groupBy:'product') fixture
     // used elsewhere ('21' and 'none'), labelled through loadProductCatalogue.
     expect(d.productMix.current).toEqual([
-      { productId: 21, label: '205-IL0-SD', cones: 700 },
-      { productId: null, label: 'No product on the reading', cones: 300 },
+      { productId: 21, label: '205-IL0-SD', cones: 700, productActive: true },
+      { productId: null, label: 'No product on the reading', cones: 300, productActive: null },
     ]);
     expect(d.productMix.prior).toEqual(d.productMix.current); // same fixture answers getProduction for both periods here
   });

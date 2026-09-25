@@ -293,6 +293,11 @@ export function WeightScreen({
                           ? W.reports.targetNoLaterThan(fmtAppInstant(d.targetEffectiveFromUtc))
                           : W.reports.targetSince(fmtAppInstant(d.targetEffectiveFromUtc))
                       }`}
+                    {/* RT-018: the target product may be marked retired in PDAS
+                        (no retirement date exists, only this current bit) while
+                        readings against it keep arriving — say so beside the
+                        figure, not as a silent unflagged number. */}
+                    {d.productActive === false && <> · {W.retiredProduct.marker}</>}
                   </>
                 ) : d.targetOmittedReason ? (
                   <>
@@ -742,7 +747,8 @@ function lineOffsetSentence(d: WeightStationsData): string | null {
  *  not in the commit. The rule the whole pass exists for applies here too: a
  *  version the app merely OBSERVED in place has no start date to state. */
 function targetPhrase(d: WeightStationsData): string {
-  const base = `${fmtG(d.targetG)} (${d.productLabel ?? W.reports.wholeLine})`;
+  const retired = d.productActive === false ? ` ${W.retiredProduct.marker}` : '';
+  const base = `${fmtG(d.targetG)} (${d.productLabel ?? W.reports.wholeLine}${retired})`;
   if (!d.targetEffectiveFromUtc) return base;
   const instant = fmtAppInstant(d.targetEffectiveFromUtc);
   return `${base}, ${d.targetEffectiveIsLowerBound ? W.reports.targetNoLaterThan(instant) : W.reports.targetSince(instant)}`;
@@ -1105,13 +1111,21 @@ function StationTable({
    *  - 'station_material': the plain signed figure, unmarked.
    */
   const vsTargetCell = (r: WeightStationRow) => {
+    // RT-018: a retired-in-PDAS target is marked the same way regardless of
+    // which of the three bases produced it — the figure itself is unaffected,
+    // only what it should prompt a reader to check.
+    const retired = r.targetProductActive === false && (
+      <span className="mut sm" style={{ marginLeft: 4 }} title={W.retiredProduct.stillRunning}>
+        {W.retiredProduct.marker}
+      </span>
+    );
     if (r.targetBasis === 'mixed') {
       return <span className="mut">{W.weight.mixedTarget(r.materialsInWindow ?? 0)}</span>;
     }
     if (r.targetBasis === 'line_product') {
-      return <span title={W.weight.targetLineProduct}>{signed(r.vsTargetG)}</span>;
+      return <span title={W.weight.targetLineProduct}>{signed(r.vsTargetG)}{retired}</span>;
     }
-    return signed(r.vsTargetG);
+    return <>{signed(r.vsTargetG)}{retired}</>;
   };
 
   return (

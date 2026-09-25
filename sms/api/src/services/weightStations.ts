@@ -213,6 +213,15 @@ export interface WeightStationRow {
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
   /**
+   * RT-018: whether the material this row's target came from is marked
+   * retired in PDAS (`sms.product.active_flag`, last mirrored) — PDAS keeps
+   * no retirement date, only this current bit, so it describes the
+   * product's status AS OF NOW, not at the window. Null when `targetBasis`
+   * is 'mixed' (no single material), when nothing is running, or when the
+   * mirror carries no flag for the material.
+   */
+  targetProductActive: boolean | null;
+  /**
    * F6 (23 Sep 2026), the row-level half of the same defect as
    * `WeightStationsData.targetEffectiveIsLowerBound`: this row's target came
    * from a limits version that the app merely OBSERVED already in place, so
@@ -287,6 +296,8 @@ export interface WeightStationsData {
   limits: { loG: number; hiG: number } | null;
   productId: number | null;
   productLabel: string | null;
+  /** RT-018: the line-wide target's own retired flag — same convention as WeightStationRow.targetProductActive. */
+  productActive: boolean | null;
   /**
    * When the line-wide target (above) was last recorded — the same instant
    * convention as spc.ts's `limitsEffectiveFromUtc` — so a consumer (the
@@ -422,6 +433,9 @@ export async function getWeightStations(
   const endMs = new Date(`${to}T23:59:59Z`).getTime();
   const product = timeline.at(endMs);
   const limits = product ? (catalogue.limitsAt(product.productId, endMs) ?? limitsOf(product)) : null;
+  // RT-018: the line-wide target's own retired flag, read from the same
+  // catalogue every other activeFlag on this line comes from.
+  const productActive = product ? (catalogue.product(product.productId)?.activeFlag ?? null) : null;
   // Same rule as spc.ts's getSpec (:218-231): a version in force at the
   // window's end is not itself "a change inside the window" unless it also
   // BEGAN inside it.
@@ -579,12 +593,15 @@ export async function getWeightStations(
     let rowTargetProvenance = lineTargetProvenance;
     let rowVsTargetG: number | null =
       limits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - limits.targetG);
+    // RT-018: the line-wide fallback's retired flag is the line target's own.
+    let rowTargetProductActive: boolean | null = productActive;
     if (distinctMaterials.length === 1) {
       targetBasis = 'station_material';
       const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
       stationLimits = mLimits;
       rowTargetProvenance = resolveTarget(distinctMaterials[0]!);
       rowVsTargetG = mLimits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - mLimits.targetG);
+      rowTargetProductActive = catalogue.product(distinctMaterials[0]!)?.activeFlag ?? null;
     } else if (distinctMaterials.length > 1) {
       targetBasis = 'mixed';
       materialsInWindow = distinctMaterials.length;
@@ -592,6 +609,7 @@ export async function getWeightStations(
       rowVsTargetG = null; // NO NUMBER — there is no single target, so printing one would be over-claiming.
       // No single target means no single target provenance either.
       rowTargetProvenance = { usable: false, effectiveFromUtc: null, isLowerBound: false, afterWindowEnd: false, omittedReason: null };
+      rowTargetProductActive = null;
     }
 
     const r = rejects.get(st.station);
@@ -608,6 +626,7 @@ export async function getWeightStations(
       runMeanG: runMeanIsRun ? round(runMean) : null,
       runVsLineG: runMeanIsRun && lineMeanG != null ? round(runMean - lineMeanG) : null,
       targetBasis,
+      targetProductActive: rowTargetProductActive,
       ...(materialsInWindow != null ? { materialsInWindow } : {}),
       // F6: these describe the VERSION this row resolved, and they are no
       // longer gated on `vsTargetG != null` — under the withholding rule
@@ -661,6 +680,7 @@ export async function getWeightStations(
     limits: limits ? { loG: limits.loG, hiG: limits.hiG } : null,
     productId: product?.productId ?? null,
     productLabel: product?.label ?? null,
+    productActive,
     targetEffectiveFromUtc,
     targetEffectiveIsLowerBound: lineTargetProvenance.isLowerBound,
     targetEffectiveAfterWindowEnd: lineTargetProvenance.afterWindowEnd,

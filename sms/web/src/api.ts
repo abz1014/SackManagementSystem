@@ -1256,6 +1256,8 @@ export interface ProductAtData {
   at: string;
   /** Null when nothing was in force then — the screen says so, and computes nothing. */
   product: ProductInForce | null;
+  /** RT-018: PDAS's own MaterialActive as last mirrored — current status, no retirement date exists. Null/absent when there is no product, or an older fixture predates this field. */
+  productActive?: boolean | null;
   limits: ProductLimits | null;
   /** True when no product has ever been recorded for this line. */
   neverRecorded: boolean;
@@ -1752,6 +1754,8 @@ export interface MachineRunning {
   machineName: string | null;
   materialId: number | null;
   productName: string | null;
+  /** RT-018: PDAS's own MaterialActive as last mirrored — current state, no retirement timestamp exists. Null/absent when no material is running, or an older fixture predates this field. */
+  productActive?: boolean | null;
   cones: number;
   conesOnMaterial: number;
   newestUtc: string | null;
@@ -1927,6 +1931,8 @@ export interface WeightStationRow {
   targetBasis: 'station_material' | 'mixed' | 'line_product';
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
+  /** RT-018: whether the material this row's target came from is retired in PDAS, as last mirrored. Null/absent when 'mixed', unknown, or an older fixture predates this field. */
+  targetProductActive?: boolean | null;
   /**
    * F6 (23 Sep 2026), optional for the same reason as the data-level flags
    * above: absent reads as "not flagged". `targetIsLowerBound` means this
@@ -1973,6 +1979,8 @@ export interface WeightStationsData {
   limitsChangedInWindow: number | null;
   /** How many times the line-wide Current Product itself changed inside the window (a new product_timeline entry, not just a limits revision). */
   productChangesInWindow: number;
+  /** RT-018: the line-wide target's own retired flag, PDAS's MaterialActive as last mirrored. Optional/absent for the same reason as the other F6-style flags above — older fixtures keep compiling. */
+  productActive?: boolean | null;
 }
 
 export interface AttentionFinding {
@@ -2318,6 +2326,8 @@ export interface ProductReportRow extends ReportLine {
   target: { setpointG: number; loG: number; hiG: number; inForceAtUtc: string; limitsChangedInPeriod: number } | null;
   /** Signed grams of this row's own mean weight against its own target; null when `target` is null or the mean is unknown. */
   vsTargetG: number | null;
+  /** RT-018: PDAS's own MaterialActive as last mirrored. Null/absent for the "No product on the reading" row, or an older fixture. */
+  productActive?: boolean | null;
 }
 export interface ProductReportData {
   period: ReportData['period'];
@@ -2347,6 +2357,8 @@ export interface StationReportData {
   lineMeanG: number | null;
   targetG: number | null;
   productLabel: string | null;
+  /** RT-018: the line-wide target's own retired flag. Null/absent when there was no target, or an older fixture. */
+  productActive?: boolean | null;
   thresholdG: number;
   minDaysHeld: number;
   lineRejectRatePct: number | null;
@@ -2422,6 +2434,8 @@ export interface ConeWeightReportData {
     /** Why no target is stated, composed server-side. Null = nothing omitted. */
     omittedReason?: string | null;
     source: 'in_force_at_period_end' | 'none';
+    /** RT-018: PDAS's own MaterialActive as last mirrored. Null/absent when no target is stated, or an older fixture. */
+    productActive?: boolean | null;
   };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
   lineMeanG: number | null;
@@ -2508,6 +2522,8 @@ export interface ProductMixRow {
   productId: number | null;
   label: string;
   cones: number;
+  /** RT-018: PDAS's own MaterialActive as last mirrored. Null/absent for the "No product on the reading" row, or an older fixture. */
+  productActive?: boolean | null;
 }
 
 export interface ManagementSummaryData {

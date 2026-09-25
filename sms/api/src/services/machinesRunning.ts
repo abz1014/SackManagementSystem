@@ -82,6 +82,17 @@ export interface MachineRunning {
   /** null when quiet. */
   materialId: number | null;
   productName: string | null;
+  /**
+   * RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md): PDAS's own
+   * `MaterialActive` flag, mirrored to `sms.product.active_flag` — no
+   * retirement TIMESTAMP exists anywhere in PDAS or its mirror, only this
+   * current bit, so this is the product's state AS OF NOW, not as of the
+   * reading. A station can still be weighing cones against a material PDAS
+   * has since retired (real data: MaterialId 17 on this dev copy) — that is
+   * exactly the fact this field exists to surface, never to hide. Null when
+   * no material is running, or the mirror carries no flag for it.
+   */
+  productActive: boolean | null;
   /** Cones this station weighed in the window (any material). */
   cones: number;
   /** Cones in the window on the current material. */
@@ -200,6 +211,7 @@ export async function getMachinesRunning(
     machineName: r.machine_name,
     materialId: null,
     productName: null,
+    productActive: null,
     cones: 0,
     conesOnMaterial: 0,
     newestUtc: null,
@@ -239,7 +251,7 @@ export async function getMachinesRunning(
       .input('end', mssql.BigInt, asOfMs),
   )
     .query<{
-      st: number; material_id: number | null; product_name: string | null;
+      st: number; material_id: number | null; product_name: string | null; product_active: boolean | number | null;
       cones: number; on_material: number; newest_ms: string | number; since_ms: string | number | null;
       since_is_window_start: number;
     }>(
@@ -268,6 +280,7 @@ export async function getMachinesRunning(
           GROUP BY t.source_station
        )
        SELECT n.source_station AS st, n.material_id, COALESCE(p.description, p.lot_code) AS product_name,
+              p.active_flag AS product_active,
               x.cones, r.on_material, n.newest_ms, r.since_ms,
               CASE WHEN x.last_other_ms IS NULL THEN 1 ELSE 0 END AS since_is_window_start
          FROM newest n
@@ -285,7 +298,7 @@ export async function getMachinesRunning(
       // A reading from a station Setup does not list: shown, so the screen
       // never hides a running machine, and the DQ finding names it.
       m = {
-        station: st, stationName: null, machineName: null, materialId: null, productName: null,
+        station: st, stationName: null, machineName: null, materialId: null, productName: null, productActive: null,
         cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false, quiet: true,
         lastSeenUtc: lastSeenUtcOf(st), state: 'silent',
       };
@@ -295,6 +308,7 @@ export async function getMachinesRunning(
     const sinceMs = row.since_ms == null ? null : Number(row.since_ms);
     m.materialId = row.material_id == null ? null : Number(row.material_id);
     m.productName = row.product_name ?? (m.materialId != null ? `Product ${m.materialId}` : null);
+    m.productActive = row.product_active == null ? null : Boolean(row.product_active);
     m.cones = Number(row.cones);
     m.conesOnMaterial = Number(row.on_material);
     m.newestUtc = new Date(Number(row.newest_ms)).toISOString();

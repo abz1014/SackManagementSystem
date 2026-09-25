@@ -61,6 +61,7 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
                       ? W.reports.targetNoLaterThan(fmtAppInstant(d.target.inForceAtUtc))
                       : W.reports.targetSince(fmtAppInstant(d.target.inForceAtUtc))
                   }`}
+                {d.target.productActive === false && <> · {W.retiredProduct.marker}</>}
               </span>
             )}
           </div>

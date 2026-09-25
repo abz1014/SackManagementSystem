@@ -836,7 +836,13 @@ function ProductFooter({
   canWrite,
   onOpenProduct,
 }: {
-  data: { product: { label: string } | null; limits: { targetG: number; label: string } | null; neverRecorded: boolean } | null;
+  data: {
+    product: { label: string } | null;
+    /** RT-018: PDAS's own MaterialActive as last mirrored. Null when there is no product, or the mirror carries no flag. */
+    productActive?: boolean | null;
+    limits: { targetG: number; label: string } | null;
+    neverRecorded: boolean;
+  } | null;
   canWrite: boolean;
   onOpenProduct: () => void;
 }) {
@@ -852,7 +858,11 @@ function ProductFooter({
           <p className="g">{data.neverRecorded ? W.product.none : W.product.noneAtThisTime}</p>
         ) : (
           <>
-            <div className="product-name">{data.product.label}</div>
+            <div className="product-name">
+              {data.product.label}
+              {data.productActive === false && <span className="mut sm" style={{ marginLeft: 8 }}>{W.retiredProduct.marker}</span>}
+            </div>
+            {data.productActive === false && <p className="mut sm">{W.retiredProduct.stillRunning}</p>}
             {data.limits && (
               <div className="g">
                 {W.product.target} {fmtG(data.limits.targetG)} · {W.product.limits} {data.limits.label}

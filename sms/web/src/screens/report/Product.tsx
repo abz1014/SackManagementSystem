@@ -65,7 +65,13 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
             <tbody>
               {rows.map((r) => (
                 <tr key={r.productId ?? 'none'}>
-                  <td>{nameOf(r)}</td>
+                  <td>
+                    {nameOf(r)}
+                    {/* RT-018: this row's own product may be retired in PDAS
+                        while still carrying real production for the period —
+                        the fact belongs beside its name, not just its target. */}
+                    {r.productActive === false && <span className="mut sm" style={{ marginLeft: 6 }}>{W.retiredProduct.marker}</span>}
+                  </td>
                   <td className="n">{fmtInt(r.cones)}</td>
                   <td className="n">{fmtPct1(r.conesInRangePct)}</td>
                   <td className="n">{fmtInt(r.rejectedCones)}</td>

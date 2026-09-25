@@ -695,6 +695,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       res.json({
         at: new Date(atMs).toISOString(),
         product: v.product,
+        /**
+         * RT-018 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md): PDAS's own
+         * MaterialActive as last mirrored — `v.product` (ProductTimeline's
+         * own shape) carries no such flag, so it is looked up from the
+         * catalogue this route already loaded. Null when there is no
+         * product, or the mirror carries no flag for it. No retirement
+         * TIMESTAMP exists anywhere in PDAS or its mirror; this is the
+         * product's status as of now, not as of `at`.
+         */
+        productActive: v.product ? (catalogue.product(v.product.productId)?.activeFlag ?? null) : null,
         limits: v.limits,
         /** 'row' = the reading's own MaterialId; 'timeline' = the hand-entered line-wide product. */
         attribution: v.attribution,

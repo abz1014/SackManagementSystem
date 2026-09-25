@@ -22,7 +22,13 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
     );
   }
   const nameOf = (n: number) => stationLabel(names.find((s) => s.stationId === n), n);
-  const targetNote = d.targetG != null ? W.reports.target(fmtG1(d.targetG), d.productLabel ?? '') : W.reports.noTarget;
+  // RT-018: the line-wide target may be a product PDAS has retired while
+  // still carrying production — say so beside the figure this report leads
+  // with, the same convention Weight.tsx and ConeWeight.tsx use.
+  const targetNote =
+    d.targetG != null
+      ? `${W.reports.target(fmtG1(d.targetG), d.productLabel ?? '')}${d.productActive === false ? ` · ${W.retiredProduct.marker}` : ''}`
+      : W.reports.noTarget;
   // The bar IS `vsLineG`, already the "vs line" column; the threshold IS
   // `thresholdG`, already the input to the "flagged" column. Nothing new.
   const devRows: DeviationRow[] = d.rows.map((r) => ({
