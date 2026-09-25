@@ -1117,7 +1117,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
 @page report-landscape {
   size: A4 landscape;
-  margin: 14mm 12mm;
+  margin: 13mm 14mm 16mm;
+  /* [REPORT DOC, 25 Sep 2026] Running footer on every sheet of a report:
+     the confidentiality line and "Page X of Y". Page-margin boxes (Chrome /
+     Edge 131+), so browser Print and the server's PDF export both carry it. */
+  @bottom-left {
+    content: "IFL internal · Ibrahim Fibres Limited · Sack Management System";
+    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
+  }
 }
 
 @media print {
@@ -1202,3 +1213,123 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
   .mp-page:not(:last-child) { break-after: page; }
 }
 .print-head { display: none; }
+
+
+/* ---------------------------------------------------------------------------
+ * [REPORT DOC] 25 Sep 2026 — the printed / PDF report as a DOCUMENT.
+ * Owner: "just generating numbers, not a proper report". Everything below is
+ * `@media print` only; no screen rule changes. It adds: a branded cover band
+ * (PrintHead.tsx), an executive summary and closing notes (PrintDoc.tsx),
+ * one print type scale (body and table cells the SAME size as their headers
+ * — data rows used to print at 8pt under 15px headers), zebra-ruled tables
+ * with right-aligned numbers, section headings, and page-break rules that
+ * stop a block from being pushed whole onto a fresh sheet (the cause of the
+ * near-empty pages).
+ * ------------------------------------------------------------------------- */
+@media print {
+  :root {
+    --fs-tick: 7.5pt; --fs-small: 8.5pt; --fs-body: 9.5pt; --fs-qual: 11pt;
+    --fs-head: 15pt; --fs-display: 22pt;
+  }
+  html, body { background: #fff; }
+  body { font-size: 9.5pt; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #root { height: auto; }
+
+  /* Cover band */
+  .print-head { margin: 0 0 14pt; padding: 0; border: 0; }
+  .ph-brand {
+    display: flex; align-items: baseline; gap: 10pt;
+    background: var(--ink); color: #fff; padding: 9pt 12pt 8pt; border-bottom: 3pt solid var(--acc-fill);
+  }
+  .ph-co { font-size: 12pt; font-weight: 600; letter-spacing: 0.01em; }
+  .ph-sys { font-size: 9.5pt; opacity: 0.8; }
+  .ph-tag {
+    margin-left: auto; font-size: 7.5pt; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    border: 0.75pt solid rgba(255,255,255,0.7); padding: 1.5pt 6pt; border-radius: 2pt;
+  }
+  .ph-title { display: block; font-size: 20pt; font-weight: 600; letter-spacing: -0.015em; line-height: 1.15; margin: 10pt 0 6pt; color: var(--ink); }
+  .ph-meta {
+    display: grid; grid-template-columns: repeat(6, auto); justify-content: start; gap: 0 22pt;
+    margin: 0; padding: 7pt 0; border-top: 0.75pt solid var(--rule-2); border-bottom: 0.75pt solid var(--rule-2);
+  }
+  .ph-meta dt { font-size: 7pt; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .ph-meta dd { margin: 1pt 0 0; font-size: 9.5pt; font-weight: 500; }
+  .ph-foot > span:first-child { display: none; } /* repeats the meta grid above */
+  .ph-foot { display: flex; justify-content: space-between; gap: 12pt; font-size: 7.5pt; color: var(--muted); margin-top: 4pt; }
+
+  /* The on-screen headline becomes the coverage line under the band; the
+     screen's own verdict mark is replaced by the executive summary. */
+  .head-row { display: block !important; padding: 0 !important; margin: 0 !important; }
+  .page.pd-host, .head-row + * { padding-top: 0 !important; }
+  .head-actions { padding: 0 !important; }
+  .head-row h1 { font-size: 10.5pt; font-weight: 500; color: var(--graphite); max-width: none; margin: 0 0 4pt; }
+  .head-actions .verdict { display: none !important; }
+
+  /* Executive summary */
+  .pd-summary { margin: 6pt 0 0; }
+  .pd-h {
+    font-size: 11pt; font-weight: 600; letter-spacing: 0.02em; color: var(--ink);
+    padding-bottom: 3pt; border-bottom: 1.25pt solid var(--ink); margin: 0 0 9pt;
+    break-after: avoid;
+  }
+  .pd-h.pd-detail { margin-top: 12pt; margin-bottom: 0; }
+  .pd-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8pt; break-inside: avoid; }
+  .pd-tile {
+    display: flex; flex-direction: column; gap: 2pt; padding: 8pt 10pt 9pt;
+    background: var(--paper-3); border-top: 2pt solid var(--ink);
+  }
+  .pd-tile.attn { border-top-color: var(--acc-fill); }
+  .pd-tile.attn .pd-v { color: var(--acc); }
+  .pd-k { font-size: 7pt; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .pd-v { font-size: 17pt; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; overflow-wrap: anywhere; }
+  .pd-v small { font-size: 9pt; font-weight: 500; color: var(--graphite); letter-spacing: 0; }
+  .pd-n { font-size: 8pt; color: var(--graphite); }
+  .pd-assess { display: grid; grid-template-columns: 90pt 1fr; gap: 12pt; margin-top: 10pt; padding: 8pt 0 0; break-inside: avoid; }
+  .pd-assess .pd-k { padding-top: 2pt; }
+  .pd-verdict { font-size: 10pt; line-height: 1.5; max-width: 190mm; }
+
+  /* Sections: a visible heading per block, no whole-block page jumps. */
+  .block { break-inside: auto; padding-top: 10pt !important; padding-bottom: 6pt; }
+  .band { border-top: 0 !important; }
+  .band > .page { padding-top: 4pt; padding-bottom: 4pt; }
+  .h2, .block > .h2 {
+    font-size: 10pt; font-weight: 600; color: var(--ink); margin-bottom: 6pt;
+    padding-bottom: 2pt; border-bottom: 0.75pt solid var(--rule-2); break-after: avoid;
+  }
+  .h2 .note, .block > .note { font-weight: 400; color: var(--muted); font-size: 8pt; }
+  svg.chart, .chart { break-inside: avoid; max-height: 70mm; }
+  .figs > * { padding: 0 14pt; }
+  .fig-val { font-size: 18pt; }
+  .fig-note { font-size: 8pt; }
+  .g { font-size: 9.5pt; }
+  .mut.sm, .sm { font-size: 8pt; }
+
+  /* Tables: one size for head and body, ruled, zebra, numbers right. */
+  table { font-size: 8.5pt !important; border-collapse: collapse; }
+  .tw table { font-size: 8.5pt !important; }
+  th, .tw th {
+    font-size: 7.5pt !important; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--graphite); background: var(--paper-2); padding: 4pt 6pt !important;
+    border-top: 0.75pt solid var(--ink); border-bottom: 0.75pt solid var(--ink); vertical-align: bottom;
+  }
+  td, .tw td { font-size: 8.5pt !important; padding: 3pt 6pt !important; border-bottom: 0.5pt solid var(--rule); }
+  th.n, td.n { text-align: right; }
+  tbody tr:nth-child(even) td { background: #f9f9f7; }
+  tbody tr:last-child td { border-bottom: 0.75pt solid var(--ink); }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+
+  /* The first block after the summary repeats its headline figures as
+     display numerals; the summary tiles already carry them on paper. */
+  .pd-host + .page > .block > div > .figs { display: none !important; }
+  .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 20pt !important; }
+
+  /* Notes & definitions */
+  .pd-notes { margin-top: 10pt; }
+  /* The PDF prints backgrounds (print-color-adjust: exact above), so the
+     Pareto bar can be a solid bar again instead of [P3]'s outline. */
+  .bars i { background: var(--graphite) !important; border: 0 !important; }
+  .pd-notes ol { margin: 0; padding-left: 12pt; columns: 3; column-gap: 18pt; font-size: 7.5pt; line-height: 1.4; color: var(--graphite); }
+  .pd-notes li { margin-bottom: 3pt; break-inside: avoid; }
+  .pd-conf { margin-top: 10pt; padding-top: 5pt; border-top: 0.75pt solid var(--rule-2); font-size: 7.5pt; color: var(--muted); }
+}

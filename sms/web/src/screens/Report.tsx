@@ -43,6 +43,7 @@ import {
 import { distinctProductLabels } from '../lib/productLabel';
 import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_MIN_RANK } from './report/model';
 import { PrintHead, generatedLine } from './report/PrintHead';
+import { ExecSummary, PrintNotes } from './report/PrintDoc';
 import { fmtDayShort } from './report/shared';
 import { DailySection } from './report/Daily';
 import { ShiftSection } from './report/Shift';
@@ -240,7 +241,11 @@ export function ReportScreen({
       ) : !data ? (
         <ReportSkeleton />
       ) : (
-        <Sections type={type} data={data} names={names} products={productList} onOpenStation={onOpenStation} onOpenCode={onOpenCode} />
+        <>
+          <div className="page print-only pd-host"><ExecSummary type={type} data={data} /></div>
+          <Sections type={type} data={data} names={names} products={productList} onOpenStation={onOpenStation} onOpenCode={onOpenCode} />
+          <div className="page print-only"><PrintNotes type={type} data={data} header={data.header} /></div>
+        </>
       )}
     </>
   );

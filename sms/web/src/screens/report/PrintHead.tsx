@@ -29,6 +29,18 @@ export function generatedLine(h: ReportHeader): string {
   return `${W.reports.generated} ${fmtPlantInstant(h.generatedAtPlantUtc)} ${W.reports.generatedBy} ${h.generatedBy} · ${W.reports.version} ${h.smsVersion}`;
 }
 
+/** "5 September 2026" or "5 – 7 September 2026" style period for the cover band. */
+function periodText(from: string, to: string): string {
+  const f = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
+  return from === to ? f(from) : `${f(from)} to ${f(to)}`;
+}
+
+/**
+ * The branded cover band (25 Sep 2026 report-document pass): company and
+ * system, the report's title, and a labelled grid of line / period /
+ * filters, then the one attribution line every printed page carries. The
+ * "generated" instant is the PLANT clock (TWO CLOCKS) and is labelled so.
+ */
 export function PrintHead({ header, title }: { header: ReportHeader | null; title?: string }) {
   if (!header) return null;
   const filters = Object.entries(header.filters)
@@ -37,15 +49,26 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
     .join(' · ');
   return (
     <div className="print-head">
-      <b>
-        {header.lineName} · {title ?? header.title} · {header.period.from}
-        {header.period.to !== header.period.from ? ` to ${header.period.to}` : ''}
-        {filters ? ` · ${filters}` : ''}
-      </b>
-      <div>{generatedLine(header)}</div>
-      <div className="mut sm">{W.reports.definitionsNote}</div>
+      <div className="ph-brand">
+        <span className="ph-co">{W.printDoc.company}</span>
+        <span className="ph-sys">{W.printDoc.system}</span>
+        <span className="ph-tag">{W.printDoc.internal}</span>
+      </div>
+      <div className="ph-title">{title ?? header.title}</div>
+      <dl className="ph-meta">
+        <div><dt>{W.printDoc.line}</dt><dd>{header.lineName}</dd></div>
+        <div><dt>{W.printDoc.period}</dt><dd>{periodText(header.period.from, header.period.to)}</dd></div>
+        {filters && <div><dt>{W.printDoc.filters}</dt><dd>{filters}</dd></div>}
+        <div><dt>{W.printDoc.generatedAt}</dt><dd>{fmtPlantInstant(header.generatedAtPlantUtc)}</dd></div>
+        <div><dt>{W.printDoc.generatedBy}</dt><dd>{header.generatedBy}</dd></div>
+        <div><dt>{W.printDoc.version}</dt><dd>{W.reports.version} {header.smsVersion}</dd></div>
+      </dl>
+      <div className="ph-foot">
+        <span>{generatedLine(header)}</span>
+        <span>{W.reports.definitionsNote}</span>
+      </div>
       {header.spansGenerations && (
-        <div className="mut sm">
+        <div className="ph-foot mut">
           {`Source generation: ${header.sourceGeneration ?? 'unknown'}. Excluded from other generation: ` +
             `${header.otherGenerationExcluded?.count ?? 0} readings` +
             `${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}.`}
@@ -86,7 +109,12 @@ export function RegisterPrintHead({ from, to, at, title }: { from: string; to: s
   if (h.error) {
     return (
       <div className="print-head">
-        <b>
+        <div className="ph-brand">
+          <span className="ph-co">{W.printDoc.company}</span>
+          <span className="ph-sys">{W.printDoc.system}</span>
+          <span className="ph-tag">{W.printDoc.internal}</span>
+        </div>
+        <b className="ph-title">
           {line?.lineName ? `${line.lineName} · ` : ''}
           {title}
           {' · '}

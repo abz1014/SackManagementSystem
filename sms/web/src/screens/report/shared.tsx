@@ -161,7 +161,7 @@ export function DayBars({ rows, label = W.report.conesPerDay }: { rows: ReportLi
   const h = hover != null ? days[hover] : null;
 
   return (
-    <div ref={box}>
+    <div ref={box} className={days.length < 2 ? 'no-print' : undefined}>
       <Readout
         hovered={h ? `${fmtDayLong(h.group)} · ${fmtInt(h.cones)} cones · ${fmtInt(h.sacks)} sacks` : null}
         resting={`${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(Math.min(...days.map((d) => d.cones)))} to ${fmtInt(max)} cones`}

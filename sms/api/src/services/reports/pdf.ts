@@ -49,6 +49,9 @@ import type { ResolvedPeriod } from '../report.js';
 /** One page load must complete (network-idle, then the header actually rendering) within this long, or the render fails loudly. */
 export const RENDER_TIMEOUT_MS = 30_000;
 
+/** A4 landscape (297 mm) less app.css's 14 mm side margins, at 96 px/in: the width the report actually prints at. */
+export const PRINT_VIEWPORT_WIDTH_PX = Math.round(((297 - 28) / 25.4) * 96);
+
 /**
  * The exact SPA URL the on-screen report uses, reproduced from the ALREADY
  * RESOLVED server-side period rather than re-deriving one client-side from
@@ -178,8 +181,17 @@ export async function renderReportPdf(input: RenderReportPdfInput): Promise<Rend
       path: '/',
       httpOnly: true,
     });
+    // Lay the page out at the PRINTED width, in print media, before it
+    // loads (25 Sep 2026 report-document pass). The charts size their SVG
+    // from the measured width of their block (ui/chart.tsx useChartWidth);
+    // under puppeteer's default 800px screen viewport they were drawn for
+    // 800px and then scaled up onto the ~1,017px landscape sheet, printing
+    // axis ticks at nearly twice their intended size.
+    await page.setViewport({ width: PRINT_VIEWPORT_WIDTH_PX, height: 1400 });
+    await page.emulateMediaType('print');
     const url = buildRenderUrl(input.baseUrl, input.type, input.resolved, input.filters, input.atMs);
     await page.goto(url, { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
+    await page.evaluate('document.fonts.ready.then(() => true)');
     // The print header (`PrintHead.tsx`) renders nothing at all until the
     // report's header has actually arrived from the server — the same
     // signal a human would judge "has this finished loading" by, and one

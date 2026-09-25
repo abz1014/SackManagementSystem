@@ -2214,6 +2214,34 @@ export const W = {
     /** One sentence shown once, wherever a retired product is still the live/running target. */
     stillRunning: 'This product is marked retired in PDAS but is still being produced — worth checking.',
   } as const,
+
+  /* The printed / PDF report document (25 Sep 2026): cover band, executive
+     summary and closing notes. Print-only — none of this appears on screen. */
+  printDoc: {
+    company: 'Ibrahim Fibres Limited',
+    system: 'Sack Management System',
+    internal: 'IFL internal',
+    confidential: 'For internal use within Ibrahim Fibres Limited. Not for distribution outside the company.',
+    period: 'Period',
+    line: 'Line',
+    generatedAt: 'Generated (plant clock)',
+    generatedBy: 'Prepared by',
+    version: 'Software',
+    filters: 'Filters',
+    summary: 'Executive summary',
+    assessment: 'Assessment',
+    detail: 'Detail',
+    notes: 'Notes, method and definitions',
+    approvalNote: 'Figures follow KPI-DEFINITIONS.md, awaiting IFL’s approval.',
+    clockNote: 'All times, including “generated”, are on the plant’s own clock.',
+    weightNote:
+      'Weighing data cannot tell a heavy scale from heavy cones: differences are stated, never a direction to adjust.',
+    sourceNote: 'Source: IFL’s weighing records for this line, read only.',
+    generationNote: (gen: string, n: string) => `Source generation ${gen}. Readings from another generation excluded: ${n}.`,
+    coverage: (withData: number, of: number) =>
+      withData === of ? (of === 1 ? 'Readings are present for the day.' : `Readings are present on all ${of} days of the period.`) : `Readings are present on ${withData} of the ${of} days in the period; the other days hold no data, so totals cover only the days with readings.`,
+    noData: 'The period holds no production readings, so there is nothing to summarise.',
+  } as const,
 } as const;
 
 export type Words = typeof W;
