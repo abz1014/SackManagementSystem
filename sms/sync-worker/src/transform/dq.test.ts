@@ -74,6 +74,27 @@ describe('stale_timestamp (station clock faults)', () => {
     ];
     expect(run(rows).map((f) => f.check_name)).not.toContain('stale_timestamp');
   });
+
+  it('flags an epoch-zero (1970-01-01) phantom timestamp the same way as any other stale row (D-29)', () => {
+    // cone_event_id 699273 (epoch 1, raw_id 3824) and 843007 (epoch 9, raw_id
+    // 5047): both real IFL rows — a plausible weight, inRange=1, a real INSERT
+    // time — but ProductionDate is the vendor's 1970-01-01T00:00:00.000Z
+    // sentinel (confirmed by direct query against both DATA_TP1U2 copies,
+    // 25 Sep 2026). production_ts_utc_ms is therefore exactly 0, which is
+    // already ">STALE_TS_LAG_MS behind" any real running maximum, so this
+    // check already catches it — this test only proves that, since nothing
+    // named this specific row shape before D-29.
+    const rows = [
+      cone('2026-08-06T11:10:17'),
+      cone('2026-08-06T11:10:38'),
+      { ...cone('2026-08-06T10:45:27'), production_ts_utc_ms: 0 }, // the epoch-zero phantom row
+      cone('2026-08-06T11:11:02'),
+    ];
+    const f = find(rows, 'stale_timestamp');
+    expect(f).toBeDefined();
+    expect(f!.count).toBe(1);
+    expect(f!.severity).toBe('WARNING');
+  });
 });
 
 describe('no_station (unattributable readings)', () => {
