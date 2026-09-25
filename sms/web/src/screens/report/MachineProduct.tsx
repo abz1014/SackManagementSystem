@@ -95,31 +95,44 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
       </Block>
 
       <Block label={W.reports.colMachine}>
-        {/* Screen: one continuous table, unchanged — a browser window scrolls. */}
-        <div className="tw no-print">
+        {/* Screen: TRANSPOSED (RT-017, 25 Sep 2026) — machines run across
+            (~14 columns, fits without horizontal scroll), day×shift runs
+            down as rows (up to ~102), inside a fixed-height, independently
+            scrolling box with a sticky header row and a sticky first
+            column. See the `.mp-scroll` comment in app.css for the
+            measurement that showed the old layout losing the machine label
+            off-screen. Same `d`, same cells, only the axes are swapped. */}
+        <div className="tw mp-scroll no-print">
           <table>
             <thead>
               <tr>
-                <th>{W.reports.colMachine}</th>
-                {d.columns.map((c) => (
-                  <th key={`${c.day}|${c.shift}`} className="n">
-                    {fmtDayShort(c.day)}
-                    <br />
-                    {W.shiftName[c.shift]}
+                <th>{W.reports.colWhen}</th>
+                {d.rows.map((r) => (
+                  <th
+                    key={r.station}
+                    className="click"
+                    tabIndex={0}
+                    onClick={() => onOpen(r.station)}
+                    onKeyDown={rowKeys(() => onOpen(r.station))}
+                  >
+                    {machineLabel(r.station, r.machineName, r.stationName)}
+                    <Chevron label={W.openRecord} />
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {d.rows.map((r) => (
-                <tr key={r.station}>
-                  <td className="click" tabIndex={0} onClick={() => onOpen(r.station)} onKeyDown={rowKeys(() => onOpen(r.station))}>
-                    {machineLabel(r.station, r.machineName, r.stationName)}
-                    <Chevron label={W.openRecord} />
+              {d.columns.map((c, ci) => (
+                <tr key={`${c.day}|${c.shift}`}>
+                  <td className="n">
+                    {fmtDayShort(c.day)}
+                    <br />
+                    {W.shiftName[c.shift]}
                   </td>
-                  {r.cells.map((cell, i) => (
-                    <td key={i}>{cell ? <Cell cell={cell} labels={d.labels} /> : '—'}</td>
-                  ))}
+                  {d.rows.map((r) => {
+                    const cell = r.cells[ci];
+                    return <td key={r.station}>{cell ? <Cell cell={cell} labels={d.labels} /> : '—'}</td>;
+                  })}
                 </tr>
               ))}
             </tbody>

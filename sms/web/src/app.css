@@ -668,6 +668,32 @@ tr.click { cursor: pointer; }
 tr.click:hover td { background: var(--paper-3); }
 tbody tr:last-child td { border-bottom: 0; }
 .tw { overflow-x: auto; }                 /* wide tables scroll, the page never does */
+/* RT-017 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026:
+   MachineProduct's on-screen matrix used to be one row per machine and one
+   column per day×shift (~102 columns on the dev range) inside a plain `.tw`
+   — measured `scrollWidth: 4616px` against a `clientWidth: 816px` viewport,
+   with NO sticky first column, so scrolling right to reach column 90 lost
+   the machine-name label entirely (`position: static`, confirmed via
+   getComputedStyle). The matrix is now TRANSPOSED for the screen
+   (MachineProduct.tsx `MachineProductScreenTable`): machines run across
+   (~14 columns, fits without horizontal scroll at any normal viewport) and
+   day×shift runs down the page as rows, which is the axis a table is
+   supposed to be long on. `.mp-scroll` caps the box at a fixed viewport
+   height so the ~102 rows scroll inside their own box rather than pushing
+   the whole page down out of reach of the header; `.mp-scroll thead th` and
+   `.mp-scroll td:first-child`/`th:first-child` stay pinned with `position:
+   sticky` so the day/shift label and the column headers are visible at
+   every scroll position, which is the fix for the actual defect (the
+   label vanishing), not just a narrower table. The print path
+   (`MachineProductPrintPages`, unchanged) already paginates machine columns
+   across sheets and is untouched by this. */
+.mp-scroll { max-height: 70vh; overflow: auto; position: relative; }
+.mp-scroll table { border-collapse: separate; border-spacing: 0; }
+.mp-scroll thead th { position: sticky; top: 0; background: var(--paper); z-index: 2; }
+.mp-scroll td:first-child, .mp-scroll th:first-child {
+  position: sticky; left: 0; background: var(--paper); z-index: 1;
+}
+.mp-scroll thead th:first-child { z-index: 3; }
 /* UX overflow sweep (23 Sep 2026): a `.two-col` half is 498px at the desktop
    width both Daily's and Sack's "by shift"/"by day" LineTable live at — `th`'s
    global `white-space: nowrap` (above) forced "Rejected at inspection" onto
