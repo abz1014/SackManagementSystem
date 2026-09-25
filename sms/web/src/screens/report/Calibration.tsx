@@ -70,7 +70,7 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
               pattern, reused rather than reinvented) fits it without
               dropping a column; "Last adjusted" wraps to two lines on its
               17%-wide column instead of forcing the table wider. */}
-          <div className="tw">
+          <div className="tw tw-span">
             <table className="calib-tbl">
               <colgroup>
                 <col style={{ width: '10%' }} />
@@ -80,9 +80,9 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
                 <col style={{ width: '9%' }} />
                 <col style={{ width: '8%' }} />
                 <col style={{ width: '8%' }} />
+                <col style={{ width: '10%' }} />
                 <col style={{ width: '12%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '17%' }} />
+                <col style={{ width: '15%' }} />
               </colgroup>
               <thead>
                 <tr>

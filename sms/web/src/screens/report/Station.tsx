@@ -54,7 +54,7 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
           thresholdLabel={W.report.refLineThreshold(fmtSignedG(d.thresholdG))}
           zeroLabel={W.report.refLineZero}
         />
-        <div className="tw">
+        <div className="tw tw-span">
           <table>
             <thead>
               <tr>

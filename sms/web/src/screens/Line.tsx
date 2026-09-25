@@ -1147,7 +1147,10 @@ function StationCompare({ ids, counts, stations }: { ids: number[]; counts: Prod
   const rows: DeviationRow[] = readableIds.map((id) => ({
     key: String(id),
     label: stationLabel(nameOf.get(id), id),
+    // Station number on the axis, matching the tiles below: all fourteen fit.
+    tick: String(id),
     value: (rowById.get(id)?.cones ?? 0) - med,
+    title: `${stationLabel(nameOf.get(id), id)}: ${fmtInt(rowById.get(id)?.cones ?? 0)} cones (${fmtSignedCount((rowById.get(id)?.cones ?? 0) - med)} vs median)`,
   }));
   return (
     <DeviationBars

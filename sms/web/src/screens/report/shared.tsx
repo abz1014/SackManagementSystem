@@ -519,6 +519,11 @@ export interface DeviationRow {
   value: number;
   /** A genuinely flagged row — the ONLY thing allowed to draw in the accent. */
   flagged?: boolean;
+  /** Short x-axis label (e.g. "5" for a station) when `label` is too wide to
+   *  show every tick; `label` still names the bar in its hover tooltip. */
+  tick?: string;
+  /** Hover tooltip text; defaults to "label: value". */
+  title?: string;
 }
 
 /**
@@ -590,7 +595,8 @@ export function DeviationBars({
   // overprinted each other (seen on Sacks, 23 Sep 2026). Station labels are
   // shorter than the old 60px assumption in the common case, so no existing
   // caller loses a tick it was drawing before.
-  const labelPx = Math.max(...rows.map((r) => r.label.length)) * 7 + 16;
+  const tickOf = (r: DeviationRow) => r.tick ?? r.label;
+  const labelPx = Math.max(...rows.map((r) => tickOf(r).length)) * 7 + 16;
   const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / labelPx))));
 
   return (
@@ -622,11 +628,15 @@ export function DeviationBars({
               width={bw}
               height={h}
               fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'}
-            />
+            >
+              <title>{r.title ?? `${r.label}: ${valueFmt(r.value)}`}</title>
+            </rect>
           );
         })}
+        {/* Evenly thinned: every `step`-th label only. Forcing the last one in
+            as well crammed it against its neighbour (Line, 25 Sep 2026). */}
         {rows.map((r, i) =>
-          i % step === 0 || i === rows.length - 1 ? (
+          i % step === 0 ? (
             <text
               key={`t${r.key}`}
               x={cx(i)}
@@ -635,7 +645,7 @@ export function DeviationBars({
               fill="var(--muted)"
               textAnchor={edgeAnchor(i, rows.length)}
             >
-              {r.label}
+              {tickOf(r)}
             </text>
           ) : null,
         )}

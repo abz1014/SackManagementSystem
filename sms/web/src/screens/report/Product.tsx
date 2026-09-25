@@ -43,7 +43,7 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
         <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>
       </Block>
       <Block label={W.reports.colProduct}>
-        <div className="tw">
+        <div className="tw tw-span">
           <table>
             <thead>
               <tr>

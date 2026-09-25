@@ -124,7 +124,7 @@ export function RejectSection({ d, onOpenCode }: { d: RejectReportData; onOpenCo
         {d.byDayCode.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : (
-          <div className="tw">
+          <div className="tw tw-span">
             <table>
               <thead>
                 <tr>

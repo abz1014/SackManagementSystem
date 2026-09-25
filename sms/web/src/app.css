@@ -710,6 +710,17 @@ tbody tr:last-child td { border-bottom: 0; }
    widening the table past its container. */
 .station-tbl, .calib-tbl, .epoch-tbl { table-layout: fixed; }
 .station-tbl th, .calib-tbl th, .epoch-tbl th { white-space: normal; }
+/* Report tables too wide for the content column (25 Sep 2026): Calibration's
+   ten columns in the ~816px column beside the 180px hanging label overprinted
+   "Adjustments" onto "Last adjusted" and wrapped "Station 11". A block whose
+   content holds a `.tw-span` table drops that content (Block's one wrapper
+   div) UNDER the label, across the block's full width, and the table's
+   headers (numeric ones included) wrap between words. Screen only; the print
+   path collapses the label gutter by its own rules. */
+@media screen and (min-width: 861px) {
+  .block > div:has(.tw-span) { grid-column: 1 / -1; margin-top: 14px; }
+}
+.tw-span th, .tw-span th.n { white-space: normal; vertical-align: bottom; }
 .chev { color: var(--grid); margin-left: 8px; }
 /* A row the scale rejected. Wash plus accent text — never a red left border,
    which would read as a card. */
