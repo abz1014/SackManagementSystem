@@ -541,7 +541,7 @@ function StepRow({ step }: { step: ChangeoverPlanStep }) {
   );
 }
 
-function PlanReview({
+export function PlanReview({
   plan,
   canWrite,
   buildBody,
@@ -554,7 +554,15 @@ function PlanReview({
   const [execError, setExecError] = useState<{ status: number; message: string } | null>(null);
   const [outcome, setOutcome] = useState<ChangeoverOutcome | null>(null);
 
-  const canExecute = plan.writesEnabled && plan.blockers.length === 0 && canWrite;
+  // RT24-13 remainder (25 Sep 2026): `blockers` is required on the wire
+  // type (ChangeoverPlan) but was read with a bare `.length` — a
+  // malformed/partial plan response missing it used to crash this whole
+  // block instead of refusing to execute. blockers gates a real PDAS
+  // write, so "could not read whether there are blockers" must resolve to
+  // "cannot execute", the same direction as an actual blocker, never to
+  // "0 blockers" by accident of `undefined.length` never being reached.
+  const blockersUnknown = plan.blockers == null;
+  const canExecute = plan.writesEnabled && !blockersUnknown && plan.blockers.length === 0 && canWrite;
 
   const onExecute = async () => {
     const body = buildBody();
@@ -591,7 +599,11 @@ function PlanReview({
         <dd>{plan.limits.label}</dd>
       </dl>
 
-      {plan.blockers.length > 0 && (
+      {blockersUnknown && (
+        <p className="acc sm" style={{ marginTop: 14 }}>{W.product.changeover.blockersUnknown}</p>
+      )}
+
+      {!blockersUnknown && plan.blockers.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <p style={{ fontWeight: 500 }}>{W.product.changeover.blockers}</p>
           <p className="mut sm">{W.product.changeover.blockersNote}</p>
@@ -603,7 +615,7 @@ function PlanReview({
         </div>
       )}
 
-      {plan.warnings.length > 0 && (
+      {plan.warnings != null && plan.warnings.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <p style={{ fontWeight: 500 }}>{W.product.changeover.warnings}</p>
           <p className="mut sm">{W.product.changeover.warningsNote}</p>

@@ -304,7 +304,14 @@ export function Bar({
   onOpenSync: () => void;
   onSignOut: () => void;
 }) {
-  const alarm = health.kind === 'stale' || health.kind === 'late';
+  // 25 Sep 2026 (RT24-13 follow-up): was `=== 'stale' || === 'late'`, the same
+  // fallthrough-to-fine shape as SyncHealthBlock.tsx's verdict — Health has
+  // five kinds (lib/health.ts), and 'lag_unknown'/'none' fell through to
+  // "not alarmed" even though dotClass (above) already colours the dot
+  // 'warn' for both. `!== 'ok'` matches every sibling boolean in this
+  // codebase built on the same Health type (Wall.tsx's own `alarm`,
+  // Readings.tsx's/Sacks.tsx's `stale`, SyncHealthBlock.tsx's own acc class).
+  const alarm = health.kind !== 'ok';
   return (
     <>
       <div className="bar no-print">

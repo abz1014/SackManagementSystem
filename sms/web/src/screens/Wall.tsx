@@ -331,7 +331,15 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
           {/* The pulse stops when the board is blind, for the same reason it
               stops when the readings are stale: motion on a TV reads as
               "this is live". */}
-          <span className={`dot live${health.kind === 'stale' || outOfContact ? ' bad' : health.kind === 'late' ? ' warn' : ''}`} />
+          {/* 25 Sep 2026 (RT24-13 follow-up): was `=== 'stale' ? bad : === 'late'
+              ? warn : ''` — the same fallthrough-to-fine shape as
+              SyncHealthBlock.tsx's verdict and Bar.tsx's `alarm`. Health has
+              five kinds; 'lag_unknown'/'none' used to leave the dot plain
+              (no warn/bad class) even though `alarm` (`!== 'ok'`)
+              already puts the footer itself into `.acc`, and the lag
+              sentence already prints a non-ok fact — the dot alone
+              disagreed with its own row. */}
+          <span className={`dot live${health.kind === 'stale' || outOfContact ? ' bad' : health.kind === 'late' ? ' warn' : health.kind !== 'ok' ? ' warn' : ''}`} />
           {/* Out of contact REPLACES the lag sentence rather than sitting
               beside it. "Readings to 10:59 AM · they reach this system about
               17 min after weighing" is the all-clear, and printing it next to

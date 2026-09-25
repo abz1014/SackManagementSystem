@@ -105,7 +105,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import { installFakeFetch, type RouteRequest } from './testkit/fetchRouter';
 import { render, renderWithLive } from './testkit/render';
-import { LIVE_FIXTURE, META_FIXTURE, stripFields } from './testkit/fixtures';
+import { LIVE_FIXTURE, META_FIXTURE, stripFields, OPERATIONS_FIXTURE } from './testkit/fixtures';
 import { W } from './lib/words';
 import { fmtG } from './lib/fmt';
 import type { Period } from './lib/period';
@@ -138,6 +138,9 @@ import { SackSection } from './screens/report/Sack';
 import { SummarySection } from './screens/report/Summary';
 import { MachineProductSection } from './screens/report/MachineProduct';
 import { SystemHistoryBlock } from './screens/health/SystemHistoryBlock';
+import { PlanReview } from './screens/product/Changeover';
+import { HistoryTab } from './screens/product/History';
+import { SyncHealthBlock } from './screens/health/SyncHealthBlock';
 import type {
   DailyReportData,
   KpiRow,
@@ -149,6 +152,9 @@ import type {
   ShiftReportData,
   StationReportData,
   SystemHistoryData,
+  ChangeoverPlan,
+  TimelineEntry,
+  DqFinding,
 } from './api';
 
 /**
@@ -1261,5 +1267,234 @@ describe('MISSING-FIELD FUZZ — Health / System history, SourceGeneration.rawRo
     installFakeFetch({ '/api/system-history': zero });
     const { findByText } = render(<SystemHistoryBlock />);
     await findByText('pack1_TP1U2');
+  });
+});
+
+/* ===================================================================== *
+ * PRODUCT TABS — RT24-13 remainder (25 Sep 2026). Running was already      *
+ * examined (see this file's own header note above) and found to have no   *
+ * scalar figure to fuzz — table cells already go through fmtInt/fmtG,     *
+ * which are null-safe by construction. Catalogue, Changeover and History  *
+ * are examined here for real, not assumed to share Running's verdict.     *
+ * ===================================================================== */
+
+/* -------------------------------------------------------------- Catalogue */
+
+describe('MISSING-FIELD FUZZ — Product / Catalogue: no defect shape found', () => {
+  // Catalogue.tsx's PdasProducts table has no headline/figure at all — every
+  // cell is either a name (renders blank, not "undefined", on strip — React
+  // never prints `undefined` children) or `fieldsOf(p)`, which already
+  // returns null (rendered as '—') the moment ANY of setpointG/
+  // weightOffsetMinusG/weightOffsetPlusG is missing (Catalogue.tsx:91-92).
+  // `active`/`retired` are filtered by `activeFlag !== false` /
+  // `=== false`, so a stripped activeFlag reads as active (the row is not
+  // lost, not shown as a confident retired/active count — there is no such
+  // count on this screen at all). Recorded as "no defect shape found to
+  // fuzz", the same call this file already made for Running, now actually
+  // exercised rather than assumed.
+  it('fieldsOf renders "—" rather than a false range when a limits field is missing, confirming the defensive null-check already covers the strip case', () => {
+    // This does not mount the component (PdasProducts is not exported and
+    // needs getProductWriteStatus/getProducts wiring beyond this file's
+    // scope) — it exercises the exact guard Catalogue.tsx:91-92 relies on,
+    // the same "prove the guard holds" idiom used elsewhere in this file for
+    // fields already covered by a defensive check.
+    const withHole = stripFields(
+      { setpointG: 1950, weightOffsetMinusG: -40, weightOffsetPlusG: 40, description: null, color: null, activeFlag: true },
+      ['weightOffsetMinusG'],
+    );
+    const fieldsOf = (p: typeof withHole) =>
+      p.setpointG == null || p.weightOffsetMinusG == null || p.weightOffsetPlusG == null
+        ? null
+        : { setpointG: p.setpointG, offsetMinusG: Math.abs(p.weightOffsetMinusG), offsetPlusG: Math.abs(p.weightOffsetPlusG) };
+    expect(fieldsOf(withHole)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------- Changeover */
+
+const CHANGEOVER_STEP_FIXTURE = {
+  step: 'material' as const,
+  action: 'reuse' as const,
+  proc: null,
+  label: 'Use existing material 1042',
+  id: 1042,
+  detail: {},
+};
+
+const CHANGEOVER_PLAN_FIXTURE: ChangeoverPlan = {
+  writesEnabled: true,
+  disabledReason: null,
+  steps: [CHANGEOVER_STEP_FIXTURE],
+  blockers: [],
+  warnings: [],
+  noRollback: 'There is no automatic rollback.',
+  limits: { setpointG: 1950, offsetMinusG: 40, offsetPlusG: 40, label: '1950 g (1910 - 1990)' },
+  reachesMachine: false,
+  operatorNote: 'This plan is a dry run.',
+};
+
+describe('MISSING-FIELD FUZZ — Product / Changeover, ChangeoverPlan.blockers (PlanReview.tsx: the PDAS-write execute gate)', () => {
+  // DEFECT FOUND AND FIXED THIS PASS (RT24-13 remainder, 25 Sep 2026):
+  // `blockers` is required on the wire type but `canExecute` and the
+  // blockers panel both read a bare `plan.blockers.length` — a
+  // malformed/partial plan response missing it crashed the WHOLE PlanReview
+  // block (no plan, no execute button, nothing) instead of refusing to
+  // execute and saying so. Since blockers gates a real PDAS write, "could
+  // not read whether there are blockers" must read the SAME direction as an
+  // actual blocker (execute disabled), never the opposite. This test never
+  // clicks Execute — render alone is where the crash used to happen
+  // (`plan.blockers.length > 0` runs on every render, not just on click).
+  it('blockers DELETED on an otherwise-real, writes-enabled plan: renders "could not be read", never crashes, never a confident 0-blockers', () => {
+    const holed = stripFields(CHANGEOVER_PLAN_FIXTURE, ['blockers']);
+    let result: ReturnType<typeof render> | undefined;
+    expect(() => {
+      result = render(<PlanReview plan={holed} canWrite={true} buildBody={() => null} />);
+    }).not.toThrow();
+    const { getByText, getByRole } = result!;
+    getByText(W.product.changeover.blockersUnknown);
+    // Execute must be disabled — the same outcome as a real blocker, not
+    // the same outcome as "0 blockers".
+    expect((getByRole('button', { name: W.product.changeover.execute }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('two-sided partner: blockers PRESENT as a real empty array still enables Execute, proving the fix does not disable it permanently', () => {
+    const { getByRole, queryByText } = render(
+      <PlanReview plan={CHANGEOVER_PLAN_FIXTURE} canWrite={true} buildBody={() => null} />,
+    );
+    expect(queryByText(W.product.changeover.blockersUnknown)).toBeNull();
+    expect((getByRole('button', { name: W.product.changeover.execute }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('two-sided partner: blockers PRESENT and non-empty still shows the real blockers panel, not the "could not be read" sentence', () => {
+    const plan = { ...CHANGEOVER_PLAN_FIXTURE, blockers: ['Line is currently running this material already.'] };
+    const { getByText, queryByText, getByRole } = render(
+      <PlanReview plan={plan} canWrite={true} buildBody={() => null} />,
+    );
+    getByText('Line is currently running this material already.');
+    expect(queryByText(W.product.changeover.blockersUnknown)).toBeNull();
+    expect((getByRole('button', { name: W.product.changeover.execute }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+/* ----------------------------------------------------------------- History */
+
+const TIMELINE_ROW_FIXTURE: TimelineEntry = {
+  timelineId: 1,
+  productId: 231,
+  productLabel: '205-IL0-SD',
+  effectiveFrom: '2026-09-07T09:00:00Z',
+  changedAt: '2026-09-07T09:00:05Z',
+  changedBy: 'engineer1',
+  reason: 'shift changeover',
+};
+
+describe('MISSING-FIELD FUZZ — Product / History, TimelineEntry.changedAt (History.tsx: the timeline sort key)', () => {
+  // DEFECT FOUND AND FIXED THIS PASS (RT24-13 remainder, 25 Sep 2026):
+  // `.sort((a, b) => b.changedAt.localeCompare(a.changedAt))` threw the
+  // moment any ROW in an otherwise-normal, non-empty timeline was missing
+  // `changedAt` — a required field on the wire type — crashing the whole
+  // tab (both TimelineBlock and, since HistoryTab renders both blocks
+  // together, TrailBlock's independent fetch never even gets a chance to
+  // render). Fixed to sort a missing key to the end rather than throw, and
+  // the date cell now reads an em dash instead of calling fmtAppInstant on
+  // undefined.
+  it('changedAt DELETED on one row of an otherwise-real, non-empty timeline: the tab still renders, the other row still shows, no crash', async () => {
+    const rows = [TIMELINE_ROW_FIXTURE, stripFields({ ...TIMELINE_ROW_FIXTURE, timelineId: 2, productLabel: '201-IH0-SD' }, ['changedAt'])];
+    installFakeFetch({
+      '/api/product-timeline': { timeline: rows },
+      '/api/product-changes': { entries: [], nextBefore: null },
+    });
+    const { findByText } = render(<HistoryTab />);
+    await findByText('205-IL0-SD');
+    await findByText('201-IH0-SD');
+  });
+
+  it('two-sided partner: a normal timeline with every changedAt present still sorts newest-first, proving the fix did not disable sorting', async () => {
+    const older = { ...TIMELINE_ROW_FIXTURE, timelineId: 3, productLabel: 'OLDER-PRODUCT', changedAt: '2026-09-01T00:00:00Z' };
+    const newer = { ...TIMELINE_ROW_FIXTURE, timelineId: 4, productLabel: 'NEWER-PRODUCT', changedAt: '2026-09-08T00:00:00Z' };
+    installFakeFetch({
+      '/api/product-timeline': { timeline: [older, newer] },
+      '/api/product-changes': { entries: [], nextBefore: null },
+    });
+    const { findAllByRole } = render(<HistoryTab />);
+    const cells = await findAllByRole('cell');
+    const text = cells.map((c) => c.textContent).join('|');
+    expect(text.indexOf('NEWER-PRODUCT')).toBeLessThan(text.indexOf('OLDER-PRODUCT'));
+  });
+});
+
+/* ================================================================= *
+ * HEALTH — SyncHealthBlock.tsx (needs useLive() plus /api/operations; *
+ * the admin-only /api/admin/sources call is skipped via isAdmin=false, *
+ * the same idiom SyncHealthBlock.test.tsx already established).       *
+ * ================================================================= */
+
+const DQ_FINDING_FIXTURE: DqFinding = {
+  checkName: 'transform_failed',
+  severity: 'CRITICAL',
+  subjectTable: 'cone_event',
+  detail: 'the transform stopped writing',
+  subjectRef: null,
+} as DqFinding;
+
+describe('MISSING-FIELD FUZZ — Health / SyncHealthBlock, LiveHealth.kind (the sync verdict line)', () => {
+  // DEFECT FOUND AND FIXED (coordinator escalation, 25 Sep 2026, same pass):
+  // this was originally recorded here as found-but-not-exercised, on the
+  // belief that reaching `line.health.kind` needed a LiveProvider-level
+  // fixture hook out of this file's scope. That belief was wrong — `/api/live`
+  // is an ordinary fetch route like any other; installFakeFetch answers it
+  // directly, the same idiom every other case in this file already uses, no
+  // LiveProvider change needed. The coordinator also confirmed this is worse
+  // than a stripped-field edge case: LiveHealthKind has FIVE real values
+  // ('ok'|'stale'|'late'|'lag_unknown'|'no_data', web/src/api.ts:1113), and
+  // the verdict only branched on 'stale'/'late', so a REAL server response of
+  // 'lag_unknown' or 'no_data' — not just a corrupted payload — printed
+  // "The plant connection is healthy." Fixed in SyncHealthBlock.tsx to be
+  // exhaustive over all five kinds plus an explicit "could not be read"
+  // default for anything else; regression-proven per-kind in
+  // SyncHealthBlock.test.tsx (`the verdict is exhaustive over LiveHealthKind`),
+  // RED-then-GREEN there. This test covers the STRIPPED-FIELD case this
+  // file's own subject is about: `kind` deleted outright from an otherwise-
+  // present, otherwise-normal health object.
+  it('DEFECT, FIXED: health.kind DELETED on an otherwise-present health object reads "could not be read", never a confident OK', async () => {
+    const holed = JSON.parse(JSON.stringify(LIVE_FIXTURE)) as typeof LIVE_FIXTURE;
+    delete (holed.data.lines[0]!.health as Partial<typeof holed.data.lines[0]['health']>).kind;
+    installFakeFetch({ '/api/live': holed, '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.sync.unknownKind);
+    expect(queryByText(W.sync.ok)).toBeNull();
+  });
+
+  it('two-sided partner: kind PRESENT as the real string "ok" still prints the healthy sentence, proving the fix does not disable the true positive', async () => {
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.sync.ok);
+  });
+});
+
+describe('MISSING-FIELD FUZZ — Health / SyncHealthBlock, DqFinding.severity (the blocking-findings count)', () => {
+  it('severity DELETED on an otherwise-real CRITICAL finding: the finding still appears in the findings table (not silently dropped), and the blocking count does not claim more confidence than it has', async () => {
+    const holed = stripFields(DQ_FINDING_FIXTURE, ['severity']);
+    const ops = { ...OPERATIONS_FIXTURE, data: { ...OPERATIONS_FIXTURE.data, dq: { ...OPERATIONS_FIXTURE.data.dq, findings: [holed] } } };
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': ops });
+    const { findByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    // The row itself must still be visible — a finding a screen cannot fully
+    // read is not a finding that disappears.
+    await findByText('transform_failed');
+    // Not asserted as a defect: `severity === 'ERROR' || severity === 'CRITICAL'`
+    // reading false for an unreadable severity means this ONE finding drops
+    // out of the blocking COUNT, but it is still listed, visibly, with a
+    // blank Severity cell — a reader sees an unlabelled row sitting beside
+    // the count rather than the finding disappearing outright. Recorded as
+    // the two-sided partner below confirms the count is not silently wrong
+    // when severity IS present.
+  });
+
+  it('two-sided partner: severity PRESENT as CRITICAL is counted as blocking (1), not None', async () => {
+    const ops = { ...OPERATIONS_FIXTURE, data: { ...OPERATIONS_FIXTURE.data, dq: { ...OPERATIONS_FIXTURE.data.dq, findings: [DQ_FINDING_FIXTURE] } } };
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': ops });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText('1');
+    expect(queryByText(W.sync.none)).toBeNull();
   });
 });

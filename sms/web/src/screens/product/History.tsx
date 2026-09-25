@@ -87,10 +87,16 @@ function TimelineBlock() {
             </thead>
             <tbody>
               {[...rows]
-                .sort((a, b) => b.changedAt.localeCompare(a.changedAt))
+                // RT24-13 remainder (25 Sep 2026): changedAt is required on
+                // the wire type but a row with a hole in it (a partial
+                // write, a stale cache entry — the same shape this file's
+                // sibling fuzz file exists to catch) must not crash the
+                // whole tab's sort; an unreadable sort key sinks to the end
+                // rather than throwing.
+                .sort((a, b) => (b.changedAt ?? '').localeCompare(a.changedAt ?? ''))
                 .map((t) => (
                   <tr key={t.timelineId}>
-                    <td>{fmtAppInstant(t.effectiveFrom)}</td>
+                    <td>{t.effectiveFrom == null ? <span className="mut">—</span> : fmtAppInstant(t.effectiveFrom)}</td>
                     <td>{t.productLabel}</td>
                     <td>{t.changedBy ?? <span className="mut">—</span>}</td>
                     <td className="mut">{t.reason ?? '—'}</td>

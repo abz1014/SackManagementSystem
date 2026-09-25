@@ -113,6 +113,14 @@ export function SyncHealthBlock({
   const sources = useResource(() => (isAdmin ? adminGetSources() : Promise.resolve(null)));
   const h = line?.health ?? null;
 
+  // Exhaustive over LiveHealthKind (web/src/api.ts:1113: 'ok'|'stale'|'late'|
+  // 'lag_unknown'|'no_data') — found live, not a fuzz-only edge case: this
+  // used to branch on 'stale'/'late' only and fall through to W.sync.ok for
+  // anything else, so a real 'lag_unknown' or 'no_data' response printed a
+  // false all-clear on the one screen whose job is to report breakage. The
+  // final `default` covers a value this union does not admit today (a
+  // future kind added server-side before this switch is updated) — it must
+  // say "could not be read", never OK, exactly like every other case here.
   const verdict =
     h == null
       ? W.loading
@@ -120,7 +128,13 @@ export function SyncHealthBlock({
         ? W.sync.stale
         : h.kind === 'late'
           ? W.lag.late(fmtSpan(line?.ingestLagSeconds ?? 0))
-          : W.sync.ok;
+          : h.kind === 'lag_unknown'
+            ? W.sync.lagUnknown
+            : h.kind === 'no_data'
+              ? W.lag.noData
+              : h.kind === 'ok'
+                ? W.sync.ok
+                : W.sync.unknownKind;
 
   const failures = ops.data?.data.sync.filter((s) => s.outcome !== 'success') ?? [];
   // The severities are the database's own: CK_dq_severity allows exactly

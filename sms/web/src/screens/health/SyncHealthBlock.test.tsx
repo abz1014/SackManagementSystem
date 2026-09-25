@@ -88,3 +88,64 @@ describe('SyncHealthBlock — the DQ-findings disclosure', () => {
     expect(queryByText(W.health.dqFindingsNone)).toBeNull();
   });
 });
+
+/**
+ * The verdict must be EXHAUSTIVE over LiveHealthKind (web/src/api.ts:1113:
+ * 'ok'|'stale'|'late'|'lag_unknown'|'no_data'), found live 25 Sep 2026: the
+ * verdict only branched on 'stale'/'late' and fell through to W.sync.ok for
+ * anything else, so a real server response of 'lag_unknown' or 'no_data'
+ * printed "The plant connection is healthy." — a false all-clear on the one
+ * screen whose job is to report breakage. One case per real kind, plus an
+ * unrecognised string standing in for a future kind this switch does not
+ * know about yet, each asserting W.sync.ok is ABSENT (the two-sided partner
+ * for the real 'ok' kind asserts the opposite: it is the only kind allowed
+ * to print it).
+ */
+function liveWithHealthKind(kind: string): typeof LIVE_FIXTURE {
+  const clone = JSON.parse(JSON.stringify(LIVE_FIXTURE)) as typeof LIVE_FIXTURE;
+  clone.data.lines[0]!.health.kind = kind as never;
+  return clone;
+}
+
+describe('SyncHealthBlock — the verdict is exhaustive over LiveHealthKind (found live, 25 Sep 2026)', () => {
+  it('ok: prints the healthy sentence — the only kind allowed to', async () => {
+    installFakeFetch({ '/api/live': liveWithHealthKind('ok'), '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.sync.ok);
+  });
+
+  it('stale: never prints W.sync.ok', async () => {
+    installFakeFetch({ '/api/live': liveWithHealthKind('stale'), '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.sync.stale);
+    expect(queryByText(W.sync.ok)).toBeNull();
+  });
+
+  it('late: never prints W.sync.ok', async () => {
+    installFakeFetch({ '/api/live': liveWithHealthKind('late'), '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(/Readings are arriving/);
+    expect(queryByText(W.sync.ok)).toBeNull();
+  });
+
+  it('lag_unknown: a reading has arrived but its lag is unmeasured — never prints W.sync.ok', async () => {
+    installFakeFetch({ '/api/live': liveWithHealthKind('lag_unknown'), '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.sync.lagUnknown);
+    expect(queryByText(W.sync.ok)).toBeNull();
+  });
+
+  it('no_data: nothing has arrived — never prints W.sync.ok', async () => {
+    installFakeFetch({ '/api/live': liveWithHealthKind('no_data'), '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.lag.noData);
+    expect(queryByText(W.sync.ok)).toBeNull();
+  });
+
+  it('an unrecognised kind (a future value this switch does not know about yet): reads as "could not be read", never as OK', async () => {
+    installFakeFetch({ '/api/live': liveWithHealthKind('something_new'), '/api/operations': OPERATIONS_FIXTURE });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    await findByText(W.sync.unknownKind);
+    expect(queryByText(W.sync.ok)).toBeNull();
+  });
+});

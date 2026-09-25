@@ -61,7 +61,13 @@ export function assessHealth(line: LiveLine | null): Health {
       return { kind: 'lag_unknown', readingUtc: line.dataAsOfUtc };
     case 'no_data':
       return { kind: 'none' };
-    default:
+    case 'ok':
       return { kind: 'ok', readingUtc: line.dataAsOfUtc, lagSeconds: line.ingestLagSeconds };
+    default:
+      // A missing health object (a partial 200) or a kind this client does
+      // not know. Never 'ok': a reading exists, but nothing may assert the
+      // line's state from a payload that carried no verdict (25 Sep 2026;
+      // see health.test.ts).
+      return { kind: 'lag_unknown', readingUtc: line.dataAsOfUtc };
   }
 }

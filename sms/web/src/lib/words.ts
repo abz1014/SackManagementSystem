@@ -347,6 +347,14 @@ export const W = {
          string covers a mirror row whose form has not been recorded yet
          (an old row, before the next reference mirror refresh). */
       tubeFormUnknown: 'form unknown until the reference mirror refreshes',
+      /* RT24-13 remainder (25 Sep 2026): plan.blockers is required on the
+         wire type but was read with a bare `.length`, which threw if a
+         malformed/partial plan response ever arrived without it — the
+         PDAS write gate itself is not something to guess about, so a
+         missing blockers list must read as "cannot confirm safe", not
+         crash and not silently allow execute. See Changeover.tsx's
+         PlanReview. */
+      blockersUnknown: 'This plan’s safety checks could not be read. Execute is disabled until the plan can be checked again.',
     } as const,
 
     /* ---- History tab (Brief 3 builds the screen; strings fixed here so
@@ -1145,6 +1153,23 @@ export const W = {
     ok: 'The plant connection is healthy.',
     stale: 'The plant connection has not delivered anything recently.',
     failing: 'The last sync attempt failed.',
+    /* 25 Sep 2026 (SyncHealthBlock.tsx verdict, found live by the red-team follow-up —
+       not a stripped-field edge case): LiveHealthKind has FIVE values
+       ('ok'|'stale'|'late'|'lag_unknown'|'no_data', web/src/api.ts:1113),
+       but the verdict only branched on 'stale'/'late' and fell through to
+       W.sync.ok for anything else — so a real server response of
+       'lag_unknown' or 'no_data' printed "The plant connection is healthy."
+       lagUnknown reuses lib/health.ts's own RT-006 distinction (a reading
+       HAS arrived, its lag simply has not been measured yet) rather than
+       Wall.tsx's coarser lagSentence(), which collapses lag_unknown and
+       no_data into the same W.lag.noData sentence — SyncHealthBlock is a
+       per-table diagnostic screen, where that distinction is worth keeping.
+       noData reuses W.lag.noData verbatim (same fact, same words, per the
+       one-vocabulary rule) rather than restating it. unknownKind is the
+       exhaustive default: an unrecognised string must read as "cannot
+       tell", never as OK. */
+    lagUnknown: 'A reading has arrived, but its acquisition lag has not been measured yet — the connection state cannot be judged.',
+    unknownKind: 'The plant connection state could not be read.',
     /* Requirement 1's real status, visible in the product rather than only in
        a document. */
     source: 'Source: IFL SQL Server, read-only. There is no PLC connection.',
