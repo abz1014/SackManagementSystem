@@ -1711,7 +1711,7 @@ export interface ProductAtData {
 }
 export interface ReportData {
   readings: { states: StateCounts; implausible: number } | null;
-  shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null } | null;
+  shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null; hours?: { hour: number; mismatched: number }[] } | null;
 }
 export interface LimitHistoryVersion {
   versionId: number;
@@ -2151,6 +2151,10 @@ export interface StockLedgerData {
   days: LedgerDay[];
   byMaterial: MaterialLedger[];
   kgMissing: number;
+  /** First production day the balance counts weighed sacks from (verification 25 Sep 2026, K8). */
+  countedSinceDay?: string | null;
+  /** Manual movement rows (opening counts, issues, consumption, adjustments) up to the period end. */
+  manualMovementRows?: number;
 }
 export function getSackStock(q: { from: string; to: string; product?: number; tsTo?: string }): Promise<Envelope<StockLedgerData>> {
   const p = new URLSearchParams({ from: q.from, to: q.to });
@@ -2250,7 +2254,9 @@ export interface ReportHeader {
   /** RT24-03 (24 Sep 2026): whether this report's period crosses IFL's 2026-08-05 rebuild boundary and a source generation had to be excluded. */
   spansGenerations: boolean;
   sourceGeneration: string | null;
-  otherGenerationExcluded: { count: number; percent: number | null } | null;
+  otherGenerationExcluded: { count: number; percent: number | null; simulator?: number } | null;
+  /** Server-composed disclosure sentence; names simulator data as the plant simulator (verification 25 Sep 2026). */
+  generationLine?: string | null;
 }
 
 export interface ReportQuery {
@@ -2374,7 +2380,10 @@ export interface RejectTrendPoint {
   ratePct: number | null;
   uclPct: number | null;
   lclPct: number | null;
+  /** Above the upper limit. */
   outOfControl: boolean;
+  /** Below the lower limit (an unusually good day). Absent on older payloads. */
+  belowLower?: boolean;
 }
 export interface RejectReportData {
   period: ReportData['period'];
@@ -2489,6 +2498,10 @@ export interface CalibrationReportData {
   productLabel: string | null;
   thresholdG: number;
   minDaysHeld: number;
+  /** Production days in the period; the drift rule cannot fire when fewer than minDaysHeld. */
+  periodDays?: number;
+  driftRuleCanFire?: boolean;
+  targetOmittedReason?: string | null;
   stations: CalibrationStationRow[];
   flaggedStationCount: number;
   adjustments: CalibrationAdjustmentRow[];
@@ -2617,6 +2630,8 @@ export interface MachineProductReportData {
   /** materialId → the label the report prints (unique names plain, shared names with the id appended). */
   labels: Record<string, string>;
   conesWithoutStation: number;
+  /** Machines that weighed at least one cone (rows also hold idle roster machines). Absent on older payloads. */
+  machinesWeighing?: number;
   note: string;
 }
 

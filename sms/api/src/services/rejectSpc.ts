@@ -119,6 +119,7 @@ const MIN_EXPECTED_REJECTS_FOR_VALID_LIMITS = 5;
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { bindConeFilters, bindRejectFilters, type RejectCodeFilter, type RejectFilters } from './rejects.js';
+import { epochWhere, type GenerationScope } from './generation.js';
 
 export type RejectBucketSize = 'hour' | 'day';
 export type RejectTypeFilter = 'all' | 'quality' | 'weight';
@@ -144,6 +145,16 @@ export interface RejectSpcFilters {
   station?: number;
   product?: number;
   code?: RejectCodeFilter;
+  /**
+   * Optional: confine every query (cones, rejects AND the cone side of the
+   * unmatched-reject match) to one resolved source generation. The reject
+   * report passes the scope its Pareto and per-day table use, so the three
+   * sections cover the same days (verification 25 Sep 2026, R5/R9: without
+   * it the trend carried 14 simulator days, and a real reject "matched" a
+   * simulator cone and dropped out of the denominator — 29 Aug 11.34% vs
+   * 11.33%).
+   */
+  scope?: GenerationScope;
 }
 
 export interface RejectBucket {
@@ -248,6 +259,7 @@ export async function getRejectSpc(
   // are bound the same way through rejects.ts.
   const base: RejectFilters = {
     from, to, shift: filters.shift, tsTo: filters.tsTo, station: filters.station, product: filters.product,
+    scope: filters.scope,
   };
   const numerator: RejectFilters = { ...base, code: filters.code };
   const numeratorIsNarrowed = rejectType !== 'all' || filters.code != null;
@@ -324,6 +336,9 @@ export async function getRejectSpc(
   // is NOT NULL on every row observed so far.
   const unmatchedReq = pool.request();
   const unmatchedWhere = bindRejectFilters(unmatchedReq, lineId, base, 're.', false);
+  const unmatchedConeEpoch = filters.scope
+    ? epochWhere(unmatchedReq, filters.scope, 'cone_event', { alias: 'ce.', prefix: 'um' })
+    : null;
   const unmatchedRes = await unmatchedReq.query<{ source_epoch: number; bucket_ts: Date; n: number }>(
     `SELECT re.source_epoch, ${bucketExprCone('re.')} AS bucket_ts, COUNT(*) AS n
        FROM sms.reject_event re
@@ -332,7 +347,8 @@ export async function getRejectSpc(
           SELECT 1 FROM sms.cone_event ce
            WHERE ce.line_id = re.line_id
              AND ce.production_ts_utc_ms = re.production_ts_utc_ms
-             AND ISNULL(ce.hanger_num, -1) = ISNULL(re.hanger_num, -1)
+             AND ISNULL(ce.hanger_num, -1) = ISNULL(re.hanger_num, -1)${unmatchedConeEpoch ? `
+             AND ${unmatchedConeEpoch}` : ''}
         )
       GROUP BY re.source_epoch, ${bucketExprCone('re.')}`,
   );

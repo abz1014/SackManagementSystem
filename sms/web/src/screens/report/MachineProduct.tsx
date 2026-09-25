@@ -87,7 +87,7 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
   return (
     <>
       <Block first>
-        <p className="g">{W.reports.machineProductSummary(fmtInt(d.rows.length), fmtInt(d.products.length))}</p>
+        <p className="g">{W.reports.machineProductSummary(fmtInt(d.machinesWeighing ?? d.rows.filter((r) => r.cones > 0).length), fmtInt(d.products.length))}</p>
         <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>
         {d.conesWithoutStation > 0 && (
           <p className="mut sm" style={{ marginTop: 6 }}>{W.reports.conesWithoutStation(fmtInt(d.conesWithoutStation))}</p>

@@ -101,8 +101,13 @@ function StockBlock({ from, to }: { from: string; to: string }) {
   // usePolling keeps the error as its message; the API's JSON 404 handler
   // answers `{ error: 'not found' }`, which is what an unmounted route says.
   const notStarted = s.error != null && /not found|HTTP 404/i.test(s.error);
+  const led = s.data?.data;
+  const cumulative = led != null && led.manualMovementRows === 0 && led.countedSinceDay != null;
   return (
-    <Block label={W.reports.stock} note={W.reports.stockBasis}>
+    <Block
+      label={cumulative ? W.reports.stockCumulative : W.reports.stock}
+      note={cumulative ? W.reports.stockCumulativeBasis(fmtDayShort(led.countedSinceDay!)) : W.reports.stockBasis}
+    >
       {notStarted ? (
         <p className="mut">{W.reports.stockNotStarted}</p>
       ) : s.error && !s.data ? (

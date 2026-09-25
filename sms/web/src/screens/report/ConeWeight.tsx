@@ -51,7 +51,7 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
                 been on the wire since `71ac170` (coneWeight.ts's `target`).
                 Reported: they belong on that interface once the tree settles. */}
             {d.target.source === 'none' ? (
-              <span className="fig-note">{targetOmittedReason(d.target) ?? W.reports.targetNone}</span>
+              <span className="fig-note">{d.target.label ? `${d.target.label}. ` : ''}{targetOmittedReason(d.target) ?? W.reports.targetNone}</span>
             ) : (
               <span className="fig-note">
                 {W.reports.target(fmtG1(d.target.setpointG), d.target.label ?? W.reports.wholeLine)}

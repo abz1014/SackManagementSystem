@@ -165,7 +165,7 @@ export interface ReportData {
    * item 5): the count that disagree, of the count compared, and the hour of
    * day they most often disagree at. Null when nothing could be compared.
    */
-  shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null } | null;
+  shiftCheck: { compared: number; mismatched: number; mismatchPct: number; topHour: number | null; hours?: { hour: number; mismatched: number }[] } | null;
   /**
    * WS-GF (23 Sep 2026 red-team remediation, `generationScope.guard.test.ts`
    * KNOWN_DEFECTS): which source generation `coverage` above was computed
@@ -321,6 +321,9 @@ export async function getReport(
             mismatched: shiftCheck.mismatched,
             mismatchPct: shiftCheck.mismatchPct,
             topHour: shiftCheck.topHours[0]?.hour ?? null,
+            // The distribution, not just its mode (verification 25 Sep 2026,
+            // D11): 39 of 99 is not "mostly".
+            hours: shiftCheck.topHours,
           }
         : null,
     generationNote: noteOf(scope),

@@ -46,8 +46,8 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
                   same "state the absence, never a number" rule Line.tsx's
                   `fig.couldNotRead` and Weight.tsx's `countCouldNotRead` already
                   apply elsewhere, reworded as a full sentence for this summary. */}
-              {d.flaggedStationCount != null ? W.reports.stationsFlagged(d.flaggedStationCount) : W.reports.stationsFlaggedUnknown} · {W.reports.lineMean(fmtG1(d.lineMeanG))}
-              {d.targetG != null ? ` · ${W.reports.target(fmtG1(d.targetG), d.productLabel ?? '')}` : ` · ${W.reports.noTarget}`}
+              {d.driftRuleCanFire === false ? `Drift rule cannot fire: the period covers ${d.periodDays ?? 0} day${d.periodDays === 1 ? '' : 's'}, the rule needs ${d.minDaysHeld}` : d.flaggedStationCount != null ? W.reports.stationsFlagged(d.flaggedStationCount) : W.reports.stationsFlaggedUnknown} · {W.reports.lineMean(fmtG1(d.lineMeanG))}
+              {d.targetG != null ? ` · ${W.reports.target(fmtG1(d.targetG), d.productLabel ?? '')}` : d.productLabel ? ` · ${d.productLabel}` : ` · ${W.reports.noTarget}`}
             </p>
             <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>
           </>

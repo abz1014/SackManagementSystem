@@ -203,7 +203,7 @@ describe('machineProductCsv', () => {
         firstUtc: '2026-09-10T01:00:00.000Z', lastUtc: '2026-09-10T02:00:00.000Z',
       }],
       labels: { '5': 'Blend A' }, // material 9 deliberately absent: exercises the labelOf fallback
-      conesWithoutStation: 0,
+      conesWithoutStation: 0, machinesWeighing: 1,
       note: 'x',
     };
 

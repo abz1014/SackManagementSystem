@@ -30,7 +30,10 @@ import mssql from 'mssql';
 import { fromPlantMs } from '../plantClock.js';
 import type { ResolvedPeriod } from '../report.js';
 import { getWeightStations } from '../weightStations.js';
-import type { ReportFilters } from './common.js';
+import { daysIn, type ReportFilters } from './common.js';
+import { noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
+import { loadProductCatalogue } from '../productLimits.js';
+import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
 export interface CalibrationStationRow {
@@ -68,10 +71,21 @@ export interface CalibrationReportData {
   productLabel: string | null;
   thresholdG: number;
   minDaysHeld: number;
+  /**
+   * Production days in the period. When fewer than `minDaysHeld`, the drift
+   * rule CANNOT fire by construction, so "no station flagged" is not evidence
+   * of anything (verification 25 Sep 2026, C8) — `driftRuleCanFire` says so.
+   */
+  periodDays: number;
+  driftRuleCanFire: boolean;
+  /** Verification 25 Sep 2026 (C6/C7): the products the readings carried. */
+  productsRan: RanProduct[];
+  targetOmittedReason: string | null;
   stations: CalibrationStationRow[];
   flaggedStationCount: number;
   adjustments: CalibrationAdjustmentRow[];
   note: string;
+  generationNote: GenerationNote;
 }
 
 /** The plant-day range as genuine-UTC bounds for an app-written column. */
@@ -128,10 +142,15 @@ export async function getCalibrationReport(
 ): Promise<CalibrationReportData> {
   const { from, to } = resolved;
   const station = filters.station ?? null;
-  const [ws, adjustments] = await Promise.all([
+  const [ws, adjustments, scope, catalogue] = await Promise.all([
     getWeightStations(pool, lineId, from, to),
     listAdjustmentsInPeriod(pool, lineId, from, to, station),
+    resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
+    loadProductCatalogue(pool),
   ]);
+  const ran = describeRanTarget(await productsRanInPeriod(pool, lineId, from, to, catalogue, scope, station));
+  const useRan = ran.products.length > 0;
+  const periodDays = daysIn(from, to);
   const adjustmentsOf = new Map<number, number>();
   for (const a of adjustments) {
     if (a.stationId != null) adjustmentsOf.set(a.stationId, (adjustmentsOf.get(a.stationId) ?? 0) + 1);
@@ -156,10 +175,15 @@ export async function getCalibrationReport(
     period: resolved,
     filters,
     lineMeanG: ws.lineMeanG,
-    targetG: ws.targetG,
-    productLabel: ws.productLabel,
+    targetG: useRan ? ran.targetG : ws.targetG,
+    productLabel: useRan ? ran.label : ws.productLabel,
     thresholdG: ws.thresholdG,
     minDaysHeld: ws.minDaysHeld,
+    periodDays,
+    driftRuleCanFire: periodDays >= ws.minDaysHeld,
+    productsRan: ran.products,
+    targetOmittedReason: useRan ? ran.omittedReason : null,
+    generationNote: noteOf(scope),
     stations,
     flaggedStationCount: stations.filter((s) => s.flagged).length,
     adjustments,

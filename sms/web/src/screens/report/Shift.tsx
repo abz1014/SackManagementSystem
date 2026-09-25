@@ -1,7 +1,7 @@
 /** Shift report: one section per shift, its totals and its day-by-day rows. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
-import { fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
+import { fmtInt, fmtKg, fmtPct1, describeMismatchHours } from '../../lib/fmt';
 import type { ShiftReportData, ShiftSection as ShiftSectionData } from '../../api';
 import { Fig, LineTable, DayBars } from './shared';
 
@@ -36,7 +36,7 @@ export function ShiftSection({ d }: { d: ShiftReportData }) {
             {W.cone.shiftSentence(
               fmtInt(d.shiftCheck.mismatched),
               fmtInt(d.shiftCheck.compared),
-              d.shiftCheck.topHour == null ? null : `${String(d.shiftCheck.topHour).padStart(2, '0')}:00`,
+              describeMismatchHours(d.shiftCheck.hours, d.shiftCheck.mismatched, d.shiftCheck.topHour),
             )}
           </p>
         )}

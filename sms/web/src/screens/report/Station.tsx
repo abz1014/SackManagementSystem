@@ -28,7 +28,9 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
   const targetNote =
     d.targetG != null
       ? `${W.reports.target(fmtG1(d.targetG), d.productLabel ?? '')}${d.productActive === false ? ` · ${W.retiredProduct.marker}` : ''}`
-      : W.reports.noTarget;
+      : d.productLabel
+        ? d.productLabel
+        : W.reports.noTarget;
   // The bar IS `vsLineG`, already the "vs line" column; the threshold IS
   // `thresholdG`, already the input to the "flagged" column. Nothing new.
   const devRows: DeviationRow[] = d.rows.map((r) => ({

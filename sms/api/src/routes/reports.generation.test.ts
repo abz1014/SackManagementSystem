@@ -221,7 +221,7 @@ describe('generation disclosure reaches real exports (RT24-03 route fix)', () =>
     const body = await res.json() as any;
     expect(body.data.header.spansGenerations).toBe(true);
     expect(body.data.header.sourceGeneration).toBe('DATA_TP1U2_SEP07#2');
-    expect(body.data.header.otherGenerationExcluded).toEqual({ count: 4321, percent: null });
+    expect(body.data.header.otherGenerationExcluded).toEqual({ count: 4321, percent: null, simulator: 0 });
   });
 
   it('a non-spanning report: CSV, XLSX and JSON are all unaffected (no -partial-generation, no disclosure text)', async () => {

@@ -121,6 +121,14 @@ export interface GenerationNote {
   spansGenerations: boolean;
   /** How many rows in the window belong to a generation that was NOT used. */
   otherGenerationExcluded: number;
+  /**
+   * Of `otherGenerationExcluded`, how many came from a PLANT SIMULATOR
+   * generation (source_db ending `_SIM`, or provenance 'simulator') —
+   * verification 25 Sep 2026, R6/R7: a printed report must name simulated
+   * data as simulated, never as "another generation" or "a source rebuild".
+   * Optional for the same reason the note itself is (hand-built fakes).
+   */
+  excludedSimulator?: number;
 }
 
 export interface GenerationScope extends GenerationNote {
@@ -138,14 +146,26 @@ export const UNSCOPED: GenerationScope = {
   generation: null,
   spansGenerations: false,
   otherGenerationExcluded: 0,
+  excludedSimulator: 0,
   epochIds: () => [],
 };
+
+/**
+ * A generation holding less than this share of the window's REAL rows is a
+ * stray, not coverage (verification 25 Sep 2026, M19/M20): IFL's September
+ * copy holds one clock-fault cone dated 2026-07-12, and "newest generation
+ * present" chose it over the July copy's 67,044 cones for 2 Jul - 4 Aug. The
+ * stray is still counted in `otherGenerationExcluded`; it just cannot be the
+ * generation a period is read from while a real one covers the period.
+ */
+export const STRAY_GENERATION_SHARE = 0.01;
 
 export function noteOf(s: GenerationScope): GenerationNote {
   return {
     generation: s.generation,
     spansGenerations: s.spansGenerations,
     otherGenerationExcluded: s.otherGenerationExcluded,
+    excludedSimulator: s.excludedSimulator ?? 0,
   };
 }
 
@@ -272,18 +292,35 @@ export async function resolveGenerationScope(
   // generation, still counted honestly, and the caller can see that
   // `generation.simulator` says so.
   const real = candidates.filter((c) => !c.ref.simulator);
-  const pool_ = real.length > 0 ? real : candidates;
+  let pool_ = real.length > 0 ? real : candidates;
+  // Drop stray generations (see STRAY_GENERATION_SHARE) while a
+  // non-stray one remains.
+  const poolRows = pool_.reduce((a, c) => a + c.rows, 0);
+  const substantial = pool_.filter((c) => c.rows >= poolRows * STRAY_GENERATION_SHARE);
+  if (substantial.length > 0) pool_ = substantial;
   // Newest ordinal. Ties (two source databases at the same ordinal) cannot
   // arise from one plant but are broken by row count so the choice is total.
   const chosen = pool_.reduce((a, b) =>
     b.ref.ordinal !== a.ref.ordinal ? (b.ref.ordinal > a.ref.ordinal ? b : a) : b.rows > a.rows ? b : a,
   );
 
+  const excludedSimulator = candidates
+    .filter((c) => c !== chosen && c.ref.simulator)
+    .reduce((a, c) => a + c.rows, 0);
+  // A table with rows in the window from OTHER generations but none in the
+  // chosen one must read NOTHING, never "unconstrained" (verification
+  // 25 Sep 2026, M20): the management summary's prior period read its cones
+  // from the chosen generation and its rejects and sacks, unconstrained,
+  // from another. -1 is never an epoch id (IDENTITY from 1). Only rows with
+  // NO epoch at all (a sidecar built before epoch tracking) stay unconstrained.
+  const taggedTables = new Set<EventTable>();
+  for (const p of present) if (p.epoch_id != null && Number(p.n) > 0) taggedTables.add(p.tbl);
   return {
     generation: chosen.ref,
     spansGenerations: totalRows - chosen.rows > 0,
     otherGenerationExcluded: totalRows - chosen.rows,
-    epochIds: (t) => chosen.epochIds.get(t) ?? [],
+    excludedSimulator,
+    epochIds: (t) => chosen.epochIds.get(t) ?? (taggedTables.has(t) ? [-1] : []),
   };
 }
 

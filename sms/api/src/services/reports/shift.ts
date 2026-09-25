@@ -17,6 +17,7 @@ import type { ConnectionPool } from 'mssql';
 import { SHIFT_CODES, type ShiftCode } from '@sms/shared';
 import { getReport, type ReportCoverage, type ReportData, type ReportLine, type ResolvedPeriod } from '../report.js';
 import type { ReportFilters } from './common.js';
+import type { GenerationNote } from '../generation.js';
 import { dailyLine, DAILY_CSV_HEADERS } from './daily.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
@@ -35,6 +36,8 @@ export interface ShiftReportData {
   shifts: ShiftSection[];
   shiftCheck: ReportData['shiftCheck'];
   timeLostNote: string;
+  /** Verification 25 Sep 2026: which source generation the figures were read from (same resolution as the daily report). */
+  generationNote?: GenerationNote;
 }
 
 export async function getShiftReport(
@@ -57,6 +60,9 @@ export async function getShiftReport(
     })),
     // The same check for every shift (it is a line-wide, per-day comparison).
     shiftCheck: reports[0]?.shiftCheck ?? null,
+    // Every shift's getReport resolves the same (line, from, to) window, so
+    // they share one generation; the first one's note describes all three.
+    generationNote: reports[0]?.generationNote,
     timeLostNote:
       'Time lost is not split by shift: a stoppage is a gap between consecutive cones over the whole day, ' +
       'and a gap across a shift boundary belongs to neither shift. The daily report carries the whole-day figure.',

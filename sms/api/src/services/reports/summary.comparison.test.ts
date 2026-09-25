@@ -109,7 +109,7 @@ beforeEach(() => {
 });
 
 describe('management summary — a comparison may not be an artefact of coverage (U5)', () => {
-  it('a prior with 9 of 34 days makes cones_weighed incomparable, while the rate KPI stays comparable', async () => {
+  it('a prior with 9 of 34 days withholds EVERY comparison, rates and means included (verification 25 Sep 2026, M21-M23)', async () => {
     vi.mocked(getReport).mockImplementation(async (_p, _l, resolved) =>
       resolved.from === CURRENT.from
         ? fakeReport(34, 34, 8000) // current: fully covered
@@ -119,37 +119,19 @@ describe('management summary — a comparison may not be an artefact of coverage
 
     const cones = d.kpis.find((k) => k.key === 'cones_weighed')!;
     expect(cones.comparable).toBe(false);
-    expect(cones.incomparableReason).not.toBeNull();
     expect(cones.incomparableReason).toMatch(/9 of 34/);
     expect(cones.incomparableReason).toMatch(/34 of 34/);
 
-    // Every other COUNT-shaped KPI (unit cones/sacks/kg/seconds/stops/readings) is incomparable too.
-    for (const key of ['sacks_weighed', 'sack_weight_kg', 'time_lost_seconds', 'stoppages', 'implausible_readings', 'rejects_at_inspection', 'cones_rejected_by_scale']) {
-      const k = d.kpis.find((x) => x.key === key)!;
-      expect(k.comparable, key).toBe(false);
+    // Before 25 Sep 2026 rates, means and days_with_data stayed comparable
+    // here, and the printed summary showed "reject rate −95.4 pts" and
+    // "days +3300 %" beside a prior period of one stray reading. Now no
+    // delta is PRESENTED for any KPI (comparable false on every row; the
+    // delta stays computed, as the F12 test below documents, and every
+    // surface — screen, print tile, CSV `comparable` — withholds it).
+    for (const k of d.kpis) {
+      expect(k.comparable, k.key).toBe(false);
+      expect(k.incomparableReason, k.key).toMatch(/9 of 34/);
     }
-
-    // Rate and mean KPIs are coverage-independent and stay comparable.
-    const rate = d.kpis.find((k) => k.key === 'inspection_reject_rate_pct')!;
-    expect(rate.comparable).toBe(true);
-    expect(rate.incomparableReason).toBeNull();
-    const mean = d.kpis.find((k) => k.key === 'mean_cone_weight_g')!;
-    expect(mean.comparable).toBe(true);
-
-    // Defect fix (16 Sep 2026): these two are MEANS/RATIOS whose unit happens
-    // to match a count KPI's unit ('kg' like sack_weight_kg, 'cones' like
-    // cones_weighed) — they must not be swept into the count-shaped group by
-    // unit alone. A coverage gap does not make the average sack lighter or
-    // change how many cones go in a sack.
-    const avgSack = d.kpis.find((k) => k.key === 'avg_sack_kg')!;
-    expect(avgSack.comparable).toBe(true);
-    expect(avgSack.incomparableReason).toBeNull();
-    const conesPerSack = d.kpis.find((k) => k.key === 'cones_per_sack')!;
-    expect(conesPerSack.comparable).toBe(true);
-    expect(conesPerSack.incomparableReason).toBeNull();
-
-    // days_with_data IS the coverage figure — always comparable, never suppressed.
-    expect(d.kpis.find((k) => k.key === 'days_with_data')!.comparable).toBe(true);
   });
 
   it('equal coverage on both sides leaves every KPI comparable', async () => {
@@ -278,7 +260,10 @@ describe('management summary — an attribution discontinuity is not a trend (F1
     const d = await getManagementSummary({} as unknown as ConnectionPool, 1, CURRENT, {});
     expect(d.attribution.prior).toBeNull();
     const within = d.kpis.find((k) => k.key === 'cones_within_limits_pct')!;
-    expect(within.comparable).toBe(true);
+    // Not an ATTRIBUTION break (the reason names coverage, not attribution);
+    // since 25 Sep 2026 a 0-of-34 prior withholds every KPI on coverage.
+    expect(within.comparable).toBe(false);
+    expect(within.incomparableReason).not.toMatch(/product attribution/);
     expect(within.prior).toBeNull();
     expect(within.delta).toBeNull();
   });

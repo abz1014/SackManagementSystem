@@ -1681,9 +1681,9 @@ export const W = {
     /* Report and Setup › Rules: the shift attribution check. */
     readingsSentence: (n: string, m: string) =>
       `${n} cone readings, of which ${m} implausible were excluded from the weight figures.`,
-    shiftSentence: (n: string, m: string, hour: string | null) =>
+    shiftSentence: (n: string, m: string, hours: string | null) =>
       `SMS re-derives the shift from the weighing time; the plant\u2019s own column disagrees on ${n} of ${m} readings this period` +
-      (hour ? `, mostly around ${hour}.` : '.'),
+      (hours ? `, ${hours}.` : '.'),
     shiftFormNote: (n: string, m: string, pct: string) =>
       `Over the last 7 days the plant\u2019s stored shift differs from the derived shift on ${n} of ${m} readings (${pct}). That is what the mode above would change.`,
     shiftFormNone: 'Over the last 7 days there are no readings to compare the plant\u2019s stored shift against.',
@@ -2068,9 +2068,9 @@ export const W = {
     colInspected: 'Inspected',
     colRate: 'Rate',
     colBand: 'Band',
-    outOfControl: 'out of band',
+    outOfControl: 'above the upper limit',
     pBar: (p: string) => `Usual rate ${p}`,
-    spansGenerations: 'The period spans a source rebuild; the band is the newest generation’s.',
+    spansGenerations: 'The period holds more than one source generation; the band is the one generation’s the report was read from.',
     rejectUnattributed: (n: string, of: string) => `${n} of ${of} rejects in this period predate product recording.`,
     /* Cone weight report. */
     meanLabel: 'mean',
@@ -2117,6 +2117,10 @@ export const W = {
     stockColAdjustments: 'Adjustments',
     stockColClosing: 'Closing',
     stockBasis: 'Line-level stock; no sack is attributed to a machine.',
+    /* Verification 25 Sep 2026 (K8): with no issue ever recorded, the ledger is cumulative packing, not stock. */
+    stockCumulative: 'Cumulative sacks packed',
+    stockCumulativeBasis: (since: string) =>
+      `Sacks packed on the line since ${since}, counted from the first sack weighed in this source generation. No issue, consumption or adjustment has ever been recorded, so this is a running total of packing, not a count of sacks on hand. No sack is attributed to a machine.`,
     /* Calibration report. */
     stationsFlagged: (n: number) => (n === 1 ? '1 station flagged for drift' : `${n} stations flagged for drift`),
     /* WS-OR (23 Sep 2026 red-team remediation, missingField.fuzz.test.tsx):

@@ -21,6 +21,8 @@ import { getProduction } from '../production.js';
 import type { ResolvedPeriod } from '../report.js';
 import { getWeightStations, type WeightStationsData } from '../weightStations.js';
 import { pct, type ReportFilters } from './common.js';
+import { loadProductCatalogue } from '../productLimits.js';
+import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
 export interface StationReportRow {
@@ -58,6 +60,10 @@ export interface StationReportData {
   minDaysHeld: number;
   lineRejectRatePct: number | null;
   rows: StationReportRow[];
+  /** Verification 25 Sep 2026 (C6/T4): the products the readings themselves carried, with their setpoints. */
+  productsRan: RanProduct[];
+  /** Why no single line-wide target is stated although products ran; null otherwise. */
+  targetOmittedReason: string | null;
   note: string;
   /**
    * RT-002/RT-029 (23 Sep 2026 red-team audit): the raw per-station state
@@ -86,12 +92,15 @@ export async function getStationReport(
   // land on the same generation as production.ts's own scoping of `prod`
   // below, without threading a scope through either signature. One extra
   // round trip, accepted per the remediation brief.
-  const [ws, prod, ctx, scope] = await Promise.all([
+  const [ws, prod, ctx, scope, catalogue] = await Promise.all([
     getWeightStations(pool, lineId, from, to),
     getProduction(pool, lineId, { from, to, groupBy: 'station' }),
     loadStateContext(pool, lineId),
     resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
+    loadProductCatalogue(pool),
   ]);
+  const ran = describeRanTarget(await productsRanInPeriod(pool, lineId, from, to, catalogue, scope));
+  const useRan = ran.products.length > 0;
 
   const sReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const stateCase = bindStateCase(sReq, ctx, '', 'cs');
@@ -146,16 +155,21 @@ export async function getStationReport(
   return {
     period: resolved,
     lineMeanG: ws.lineMeanG,
-    targetG: ws.targetG,
-    productLabel: ws.productLabel,
-    productActive: ws.productActive ?? null,
+    // Verification 25 Sep 2026: the products that RAN, not the app's
+    // "current product" setting; retired products are marked inline in the
+    // label, so productActive is null in that case (no second marker).
+    targetG: useRan ? ran.targetG : ws.targetG,
+    productLabel: useRan ? ran.label : ws.productLabel,
+    productActive: useRan ? null : (ws.productActive ?? null),
     thresholdG: ws.thresholdG,
     minDaysHeld: ws.minDaysHeld,
     lineRejectRatePct: ws.lineRejectRatePct,
     rows,
+    productsRan: ran.products,
+    targetOmittedReason: useRan ? ran.omittedReason : null,
     note:
       'The mean and the bias are over readings inside the plausibility window; the cone count is every reading. ' +
-      'The target is the product in force at the end of the period, line-wide. Weighing data cannot tell a heavy scale from heavy cones.',
+      'The line-wide target names the products the readings themselves carried, with the setpoint in force for each at the end of the period. Weighing data cannot tell a heavy scale from heavy cones.',
     generationNote: noteOf(scope),
   };
 }

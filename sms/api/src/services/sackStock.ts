@@ -97,8 +97,8 @@ export type MovementType = (typeof MOVEMENT_TYPES)[number];
 export const MACHINE_LEVEL_REASON =
   "Stock is kept for the line, not per machine: the plant's sack record carries no machine or station " +
   'at any layer, the sack scale publishes no machine, and this system does not infer one from which ' +
-  'cones were weighed around a sack. The question of how a sack is to be linked to a machine is with ' +
-  'the developer to put to IFL and has not been asked.';
+  'cones were weighed around a sack. IFL answered on 15 Sep 2026 that sack stock means production per ' +
+  'shift, which the production figures on this report already give.';
 
 export const RECEIPT_MEANING =
   'Every sack weighed at the packing scale counts as one receipt into line stock. That is the ' +
@@ -189,6 +189,15 @@ export interface StockLedger {
   openingOtherGenerations?: number;
   /** RT24-04, 24 Sep 2026: true when sms.weight_rule changed at least once inside [from, to]. */
   weightRuleChangedInPeriod?: boolean;
+  /**
+   * Verification 25 Sep 2026 (K8): the first production day whose weighed
+   * sacks (this generation's) the balance counts from, and how many manual
+   * movement rows exist up to the period's end. With zero manual rows the
+   * "stock" is cumulative packing since that day — nothing has ever been
+   * issued or consumed against it — and must be printed as that.
+   */
+  countedSinceDay?: string | null;
+  manualMovementRows?: number;
 }
 
 export interface WeighedFact {
@@ -419,7 +428,7 @@ export interface LedgerQuery {
   tsTo?: string;
 }
 
-interface WeighedRow { day: string | null; material_id: number | null; n: number; kg: number }
+interface WeighedRow { day: string | null; material_id: number | null; n: number; kg: number; first_day?: string | null }
 interface ManualRow { day: string | null; material_id: number | null; movement_type: MovementType; sacks: number; kg: number | null; nokg: number; n_rows: number }
 
 export async function getStockLedger(pool: ConnectionPool, lineId: number, q: LedgerQuery): Promise<StockLedger> {
@@ -451,7 +460,8 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
   // 1. Weighed sacks before the period, per material — this generation's.
   const priorWeighedReq = bindGen(bind(pool.request(), false));
   const priorWeighed = await priorWeighedReq.query<WeighedRow>(
-    `SELECT NULL AS day, material_id, COUNT(*) n, ISNULL(SUM(weight_kg), 0) kg
+    `SELECT NULL AS day, material_id, COUNT(*) n, ISNULL(SUM(weight_kg), 0) kg,
+            CONVERT(varchar(10), MIN(CASE WHEN shift_date >= '2000-01-01' THEN shift_date END), 120) AS first_day
        FROM sms.sack_event
       WHERE line_id = @line AND shift_date < @from${productClause('material_id')}${genClause}
       GROUP BY material_id`,
@@ -527,7 +537,16 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
     noKg: Number(r.nokg),
     rows: Number(r.n_rows),
   });
-  return buildLedger({
+  // Verification 25 Sep 2026 (K8): what the "stock" actually is. The first
+  // day this generation's weighed sacks are counted from (clock-fault
+  // sentinel dates excluded), and how many manual movements (opening counts,
+  // issues, consumption, adjustments) exist at all up to the period's end.
+  const firstDays = [
+    ...priorWeighed.recordset.map((r) => r.first_day ?? null),
+    ...weighed.recordset.map((r) => (r.day != null && r.day >= '2000-01-01' ? r.day : null)),
+  ].filter((d): d is string => typeof d === 'string' && d.length > 0).sort();
+  const manualRows = [...priorManual.recordset, ...manual.recordset].reduce((a, r) => a + Number(r.n_rows ?? 0), 0);
+  const ledger = buildLedger({
     from: q.from,
     to: q.to,
     product: q.product ?? null,
@@ -542,6 +561,7 @@ export async function getStockLedger(pool: ConnectionPool, lineId: number, q: Le
     generationNote: noteOf(scope),
     openingOtherGenerations,
   });
+  return { ...ledger, countedSinceDay: firstDays[0] ?? null, manualMovementRows: manualRows };
 }
 
 /* -------------------------------------------------------------- movements */

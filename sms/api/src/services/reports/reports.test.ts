@@ -598,11 +598,11 @@ describe('reject report', () => {
   it('composes the Pareto, the per-day-per-code table and the daily trend with the same filters', async () => {
     const d = await getRejectReport(fakePool().pool, 1, PERIOD, { shift: 'evening', station: 2, product: 21 });
     const f = { from: PERIOD.from, to: PERIOD.to, shift: 'evening', station: 2, product: 21 };
-    expect(getRejectPareto).toHaveBeenCalledWith(expect.anything(), 1, f);
-    expect(getRejectsByDayCode).toHaveBeenCalledWith(expect.anything(), 1, f);
-    expect(getRejectSpc).toHaveBeenCalledWith(expect.anything(), 1, PERIOD.from, PERIOD.to, 'day', 'all', { shift: 'evening', station: 2, product: 21 });
+    expect(getRejectPareto).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining(f));
+    expect(getRejectsByDayCode).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining(f));
+    expect(getRejectSpc).toHaveBeenCalledWith(expect.anything(), 1, PERIOD.from, PERIOD.to, 'day', 'all', expect.objectContaining({ shift: 'evening', station: 2, product: 21 }));
     expect(d.total).toBe(20);
-    expect(d.trend[1]).toEqual({ day: '2026-09-02', produced: 500, inspected: 510, rejects: 10, ratePct: 4.5, uclPct: 3.8, lclPct: 0.1, outOfControl: true });
+    expect(d.trend[1]).toEqual({ day: '2026-09-02', produced: 500, inspected: 510, rejects: 10, ratePct: 1.96, uclPct: 3.8, lclPct: 0.1, outOfControl: true, belowLower: false });
     expect(d.pBarPct).toBe(1.96);
     const t = rejectCsv(d);
     expect(t.headers).toEqual(REJECT_CSV_HEADERS);
@@ -663,6 +663,7 @@ describe('cone weight report', () => {
       source: 'in_force_at_period_end',
       omittedReason: null,
       productActive: null,
+      productsRan: [],
     });
     const t = coneWeightCsv(d);
     expect(t.rows.find((r) => r[1] === 'target_source')![2]).toBe('in_force_at_period_end');
@@ -690,7 +691,7 @@ describe('cone weight report', () => {
     const d = await getConeWeightReport(pool, 1, PERIOD, {});
     expect(d.target).toEqual({
       setpointG: null, productId: null, label: null, inForceAtUtc: null, inForceIsLowerBound: false,
-      limitsChangedInPeriod: 0, source: 'none', omittedReason: null, productActive: null,
+      limitsChangedInPeriod: 0, source: 'none', omittedReason: null, productActive: null, productsRan: [],
     });
     const t = coneWeightCsv(d);
     expect(t.rows.find((r) => r[1] === 'target_g')![2]).toBeNull();
@@ -897,12 +898,12 @@ describe('management summary', () => {
     // even though its own delta happens to already be null here.
     expect(cones.comparable).toBe(false);
     expect(cones.incomparableReason).toMatch(/coverage gap/);
-    // days_with_data is not count-shaped (it IS the coverage figure) and a
-    // rate KPI is coverage-independent — both stay comparable regardless.
+    // Since 25 Sep 2026 (verification M21-M23) a thin prior withholds EVERY
+    // comparison, days_with_data and rates included.
     const days = d.kpis.find((k) => k.key === 'days_with_data')!;
-    expect(days).toMatchObject({ current: 7, prior: 0, delta: { abs: 7, pct: null }, comparable: true, incomparableReason: null });
+    expect(days).toMatchObject({ current: 7, prior: 0, comparable: false });
     const rate = d.kpis.find((k) => k.key === 'inspection_reject_rate_pct')!;
-    expect(rate.comparable).toBe(true);
+    expect(rate.comparable).toBe(false);
   });
   it('H8 (15 Sep 2026): the weight KPIs relay whatever basis getWeights resolved, unchanged — the report does no arithmetic of its own', async () => {
     vi.mocked(getWeights).mockResolvedValue({ ...fakeWeights(), cone: { ...fakeWeights().cone, avg: 1887.1, stdev: 12.3 }, basis: 'net' } as never);

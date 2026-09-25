@@ -117,19 +117,28 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
     case 'reject': {
       const d = (data as ReportResponse<'reject'>).report;
       const top = d.reasons[0];
+      // Verification 25 Sep 2026 (R4): count BOTH sides of the band and say
+      // which is which — the upper side alone used to be printed as "outside
+      // the control limits".
       const ooc = d.trend.filter((p) => p.outOfControl).length;
+      const below = d.trend.filter((p) => p.belowLower === true).length;
+      const outside = ooc + below;
       out.tiles = [
         { label: 'Rejects', value: fmtInt(d.total) },
         { label: 'Average reject rate', value: fmtPct(d.pBarPct), note: 'over cones plus rejects' },
         { label: 'Top reason', value: top ? top.displayLabel : '—', note: top ? `${fmtInt(top.count)} · ${fmtPct(top.pct)} of rejects` : null },
-        { label: 'Days outside control limits', value: fmtInt(ooc), unit: `of ${d.trend.length}`, attn: ooc > 0 },
+        { label: 'Days outside control limits', value: fmtInt(outside), unit: `of ${d.trend.length}`, note: `${fmtInt(ooc)} above · ${fmtInt(below)} below`, attn: ooc > 0 },
       ];
       if (d.total > 0) {
         out.sentences.push(`${fmtInt(d.total)} cones were rejected${d.pBarPct != null ? `, an average rate of ${fmtPct(d.pBarPct)}` : ''}.`);
         if (top) out.sentences.push(`The most frequent reason was ${top.displayLabel} (${fmtPct(top.pct)} of rejects).`);
         const top3 = d.reasons.slice(0, 3);
         if (top3.length === 3) out.sentences.push(`The top three reasons account for ${fmtPct(top3[2]!.cumulativePct)} of all rejects.`);
-        out.sentences.push(ooc > 0 ? `${plural(ooc, 'day')} fell outside the control limits.` : 'No day fell outside the control limits.');
+        out.sentences.push(
+          outside === 0
+            ? `No day fell outside the control limits (${plural(d.trend.length, 'day')} charted).`
+            : `${fmtInt(outside)} of ${plural(d.trend.length, 'day')} fell outside the control limits: ${fmtInt(ooc)} above the upper limit (more rejects than usual) and ${fmtInt(below)} below the lower limit (fewer than usual).`,
+        );
       }
       break;
     }
@@ -169,11 +178,16 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
         { label: 'Stations reporting', value: fmtInt(d.stations.length) },
         { label: 'Line mean', value: fmtG1(d.lineMeanG) },
         { label: 'Target in force', value: fmtG1(d.targetG), note: d.productLabel },
-        { label: 'Flagged for drift', value: d.flaggedStationCount != null ? fmtInt(d.flaggedStationCount) : '—', unit: 'stations', attn: (d.flaggedStationCount ?? 0) > 0 },
+        { label: 'Flagged for drift', value: d.driftRuleCanFire === false ? '—' : d.flaggedStationCount != null ? fmtInt(d.flaggedStationCount) : '—', unit: 'stations', note: d.driftRuleCanFire === false ? 'period too short for the rule' : null, attn: (d.flaggedStationCount ?? 0) > 0 },
         { label: 'Adjustments logged', value: fmtInt(d.adjustments.length) },
       ];
       out.sentences.push(...stationSentences(d.stations.map((s) => ({ station: s.station, vsLineG: s.vsLineG, flagged: s.flagged })), d.lineMeanG, d.targetG));
-      if (d.flaggedStationCount === 0) out.sentences.push('No station met the drift rule, so no calibration action is indicated by this data.');
+      // Verification 25 Sep 2026 (C8): on a period shorter than the rule's
+      // minimum run the rule cannot fire at all, so "no station flagged" is
+      // a guaranteed result, not evidence.
+      if (d.driftRuleCanFire === false) {
+        out.sentences.push(`The period covers ${plural(d.periodDays ?? 0, 'day')}; the drift rule needs a run of at least ${plural(d.minDaysHeld, 'day')}, so it cannot flag any station over a period this short. Choose a longer period to judge drift.`);
+      } else if (d.flaggedStationCount === 0) out.sentences.push('No station met the drift rule, so no calibration action is indicated by this data.');
       else if (d.flaggedStationCount) out.sentences.push(`${plural(d.flaggedStationCount, 'station')} met the drift rule and should be checked.`);
       out.sentences.push(d.adjustments.length === 0 ? 'No calibration adjustments were logged in the period.' : `${plural(d.adjustments.length, 'adjustment')} were logged in the period.`);
       out.weightCaveat = true;
@@ -217,13 +231,16 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
     case 'machine-product': {
       const d = (data as ReportResponse<'machine-product'>).report;
       const within = d.changes.filter((c) => c.kind === 'within_shift').length;
+      // Verification 25 Sep 2026 (X1): machines that WEIGHED cones, not roster rows.
+      const ran = d.machinesWeighing ?? d.rows.filter((r) => r.cones > 0).length;
+      const idle = d.rows.length - ran;
       out.tiles = [
-        { label: 'Machines', value: fmtInt(d.rows.length) },
+        { label: 'Machines weighing', value: fmtInt(ran), note: idle > 0 ? `${fmtInt(idle)} on the roster weighed nothing` : null },
         { label: 'Products', value: fmtInt(d.products.length) },
         { label: 'Shifts covered', value: fmtInt(d.columns.length) },
         { label: 'Product changes', value: fmtInt(d.changes.length), note: `${fmtInt(within)} during a shift` },
       ];
-      if (d.rows.length > 0) out.sentences.push(`${plural(d.rows.length, 'machine')} ran ${plural(d.products.length, 'product')} across ${plural(d.columns.length, 'shift')}.`);
+      if (ran > 0) out.sentences.push(`${plural(ran, 'machine')} ran ${plural(d.products.length, 'product')} across ${plural(d.columns.length, 'shift')}${idle > 0 ? `; ${plural(idle, 'machine')} on the roster weighed no cones` : ''}.`);
       out.sentences.push(d.changes.length === 0 ? 'No product changeover was recorded.' : `${plural(d.changes.length, 'changeover')} were recorded, ${fmtInt(within)} of them part-way through a shift.`);
       if (d.conesWithoutStation > 0) out.notes.push(`${fmtInt(d.conesWithoutStation)} cones carry no station and are not placed on any machine.`);
       break;
@@ -325,7 +342,9 @@ export function PrintNotes({ type, data, header }: { type: ReportType; data: Rep
     W.printDoc.clockNote,
     W.printDoc.approvalNote,
     W.printDoc.sourceNote,
-    ...(header.spansGenerations
+    ...(header.spansGenerations && header.generationLine
+      ? [header.generationLine]
+      : header.spansGenerations
       ? [W.printDoc.generationNote(header.sourceGeneration ?? 'unknown', `${fmtInt(header.otherGenerationExcluded?.count ?? 0)} readings${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}`)]
       : []),
   ];

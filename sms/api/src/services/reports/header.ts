@@ -16,7 +16,7 @@ import type { GenerationNote } from '../generation.js';
 import { getLineIdentity } from '../lineConfig.js';
 import { SERVICE_VERSION } from '../health.js';
 import { plantNowMs } from '../plantClock.js';
-import { daysIn, REPORT_TITLES, type ReportFilters, type ReportHeader, type ReportType } from './common.js';
+import { daysIn, generationDisclosureLines, REPORT_TITLES, type ReportFilters, type ReportHeader, type ReportType } from './common.js';
 
 export interface HeaderInput {
   reportType: ReportType;
@@ -50,7 +50,7 @@ export function extractGenerationNote(data: unknown): GenerationNote | null {
   if (data == null || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
   const gn = d.generationNote;
-  if (gn == null) {
+  if (gn == null || (typeof gn === 'object' && gn !== null && 'current' in (gn as Record<string, unknown>) && (gn as { current: unknown }).current == null)) {
     // reject.ts's own shape: a bare `spansGenerations` boolean, no
     // generation reference and no excluded-row count.
     if (typeof d.spansGenerations === 'boolean') {
@@ -70,6 +70,18 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
   const nowMs = input.plantNowMsOverride ?? plantNowMs();
   const gn = extractGenerationNote(input.reportData);
   const spansGenerations = gn?.spansGenerations ?? false;
+  const g = gn?.generation ?? null;
+  // A simulator generation is named as one, detected from its source database
+  // name (…_SIM), not from the recorded provenance — see generation.ts.
+  const genLabel = g ? (g.simulator ? `${g.label ?? g.sourceDb ?? 'unknown'} (plant simulator, synthetic data)` : g.label) : null;
+  const disclosure = {
+    spansGenerations,
+    sourceGeneration: spansGenerations ? (genLabel ?? null) : null,
+    otherGenerationExcluded: spansGenerations && gn
+      ? { count: gn.otherGenerationExcluded, percent: null, simulator: gn.excludedSimulator ?? 0 }
+      : null,
+  };
+  const lines = generationDisclosureLines(disclosure);
   return {
     reportType: input.reportType,
     title: REPORT_TITLES[input.reportType],
@@ -83,8 +95,7 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
     smsVersion: SERVICE_VERSION,
     definitions: 'KPI-DEFINITIONS.md',
     approval: 'awaiting',
-    spansGenerations,
-    sourceGeneration: spansGenerations ? (gn?.generation?.label ?? null) : null,
-    otherGenerationExcluded: spansGenerations && gn ? { count: gn.otherGenerationExcluded, percent: null } : null,
+    ...disclosure,
+    generationLine: lines ? `${lines[0]}. ${lines[1]}.` : null,
   };
 }

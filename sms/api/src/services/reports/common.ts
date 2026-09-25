@@ -157,7 +157,13 @@ export interface ReportHeader {
   /** The generation this report is centred on (the newest one present in the window), as a printable label; null when `spansGenerations` is false or the label is unknown. */
   sourceGeneration: string | null;
   /** How many readings in the window belong to the generation that was excluded; null when `spansGenerations` is false. `percent` is null unless a caller can back it with a real denominator — never fabricated. */
-  otherGenerationExcluded: { count: number; percent: number | null } | null;
+  otherGenerationExcluded: { count: number; percent: number | null; simulator?: number } | null;
+  /**
+   * The one printable disclosure sentence (verification 25 Sep 2026, R6/R7):
+   * names simulator data as "the plant simulator", never as "another
+   * generation" or a rebuild. Null when there is nothing to disclose.
+   */
+  generationLine?: string | null;
 }
 
 /**
@@ -167,13 +173,20 @@ export interface ReportHeader {
  * format. Null when the report does not span generations, so a caller can
  * test "nothing to disclose" with a single null check.
  */
+/** How a simulator source is named in print — its database name ends in _SIM. */
+export const SIMULATOR_DB_HINT = 'DATA_TP1U2_SIM, synthetic data, not IFL’s';
+
 export function generationDisclosureLines(h: Pick<ReportHeader, 'spansGenerations' | 'sourceGeneration' | 'otherGenerationExcluded'>): [string, string] | null {
   if (!h.spansGenerations) return null;
   const exc = h.otherGenerationExcluded;
   const pctPart = exc?.percent != null ? ` (${exc.percent}%)` : '';
+  const count = exc ? exc.count : 0;
+  const sim = Math.min(exc?.simulator ?? 0, count);
+  const simPart =
+    sim === 0 ? '' : sim === count ? `, all from the plant simulator (${SIMULATOR_DB_HINT})` : `, of which ${sim} from the plant simulator (${SIMULATOR_DB_HINT})`;
   return [
     `Source generation: ${h.sourceGeneration ?? 'unknown'}`,
-    `Excluded from other generation: ${exc ? exc.count : 0} readings${pctPart}`,
+    `Excluded from other generation: ${count} readings${pctPart}${simPart}`,
   ];
 }
 

@@ -15,6 +15,7 @@ import type { ConnectionPool } from 'mssql';
 import { getRejectPareto, getRejectsByDayCode, type RejectDayCodeRow, type RejectFilters, type RejectReason } from '../rejects.js';
 import { getRejectSpc, type RejectBucket } from '../rejectSpc.js';
 import type { ResolvedPeriod } from '../report.js';
+import { noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
 import { round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
@@ -26,7 +27,10 @@ export interface RejectTrendPoint {
   ratePct: number | null;
   uclPct: number | null;
   lclPct: number | null;
+  /** Above the upper limit (rejectSpc's own one-sided flag). */
   outOfControl: boolean;
+  /** Below the lower limit — an unusually GOOD day; printed, never an alarm. */
+  belowLower: boolean;
 }
 
 export interface RejectReportData {
@@ -44,6 +48,8 @@ export interface RejectReportData {
   /** p̄ over the period (or the newest generation's when the period spans a rebuild), as a percentage. */
   pBarPct: number | null;
   spansGenerations: boolean;
+  /** Verification 25 Sep 2026 (R5-R7): the ONE generation all three sections were read from, and what was excluded. */
+  generationNote: GenerationNote;
   note: string;
 }
 
@@ -59,10 +65,14 @@ export function trendPoint(b: RejectBucket): RejectTrendPoint {
     produced: b.produced,
     inspected: b.inspected,
     rejects: b.rejects,
-    ratePct: toPct(b.rate),
+    // From the counts, not from the 5-dp-rounded `b.rate` (verification
+    // 25 Sep 2026, R9: 321/2832 = 11.3347% printed as 11.34% through double
+    // rounding 0.11335 → 11.34).
+    ratePct: b.rate == null ? null : b.inspected > 0 ? round((b.rejects / b.inspected) * 100, 2) : toPct(b.rate),
     uclPct: toPct(b.ucl),
     lclPct: toPct(b.lcl),
     outOfControl: b.outOfControl,
+    belowLower: b.rate != null && b.lcl != null && b.lcl > 0 && b.rate < b.lcl,
   };
 }
 
@@ -72,7 +82,11 @@ export async function getRejectReport(
   resolved: ResolvedPeriod,
   filters: ReportFilters,
 ): Promise<RejectReportData> {
-  const f = toFilters(resolved, filters);
+  // One scope for all three sections — the same resolution every other
+  // report uses — so the trend cannot carry days (e.g. the plant
+  // simulator's) that the Pareto and the per-day table exclude.
+  const scope = await resolveGenerationScope(pool, lineId, { from: resolved.from, to: resolved.to });
+  const f = { ...toFilters(resolved, filters), scope };
   const [pareto, byDayCode, spc] = await Promise.all([
     getRejectPareto(pool, lineId, f),
     getRejectsByDayCode(pool, lineId, f),
@@ -80,6 +94,7 @@ export async function getRejectReport(
       shift: filters.shift,
       station: filters.station,
       product: filters.product,
+      scope,
     }),
   ]);
   return {
@@ -94,6 +109,7 @@ export async function getRejectReport(
     trend: spc.buckets.map(trendPoint),
     pBarPct: toPct(spc.pBar),
     spansGenerations: spc.spansGenerations,
+    generationNote: noteOf(scope),
     // Corrected 23 Sep 2026 (reject-denominator brief): "before they were
     // weighed as cones" and "divides by cones plus rejects" both asserted the
     // premise rejectSpc.ts's own header shows is false for 98%+ of rejects —

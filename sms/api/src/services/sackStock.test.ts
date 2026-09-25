@@ -139,7 +139,8 @@ describe('buildLedger — the balance arithmetic', () => {
     expect(led.basis).toBe('line');
     expect(led.machineLevel.enabled).toBe(false);
     expect(led.machineLevel.reason).toMatch(/no machine or station/);
-    expect(led.machineLevel.reason).toMatch(/has not been asked/);
+    expect(led.machineLevel.reason).not.toMatch(/has not been asked/);
+    expect(led.machineLevel.reason).toMatch(/production per shift/);
     expect(led.dayBasis).toBe('production_day');
     expect(led.sackTimeIsInsertTime).toBe(true);
     expect(led.receiptMeaning).toMatch(/developer's reading/);

@@ -384,6 +384,7 @@ describe('GET /api/health — shape, redaction, status', () => {
         generation: null,
         spansGenerations: false,
         otherGenerationExcluded: 0,
+        excludedSimulator: 0,
         newerElsewhereUtc: null,
         newerElsewhereSourceDb: null,
         newerElsewhereLabel: null,

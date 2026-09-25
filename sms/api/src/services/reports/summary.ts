@@ -305,10 +305,23 @@ export async function getManagementSummary(
   // artefact of one having far fewer days of data than the other (the
   // record's 10 Jul – 5 Aug hole makes this a real, not hypothetical, case).
   const covDiffers = coverageDiffers(cur.coverage, prev.coverage);
+  // Verification 25 Sep 2026 (M19-M23): the prior period's figures are all
+  // read from ONE source generation (generation.ts, stray-generation rule and
+  // no unconstrained tables), and it is named here. When coverage is thin the
+  // comparison is withheld for EVERY KPI, rates included: a rate or a mean
+  // over a handful of days beside a whole period is not a trend either.
+  const priorGen = prev.generationNote.generation;
+  const priorGenText = priorGen
+    ? ` The prior period was read from ${priorGen.label ?? priorGen.sourceDb ?? 'one source generation'}` +
+      (priorGen.simulator ? ' (plant simulator, synthetic data)' : '') +
+      (prev.generationNote.otherGenerationExcluded > 0
+        ? `; ${prev.generationNote.otherGenerationExcluded} ${prev.generationNote.otherGenerationExcluded === 1 ? 'reading' : 'readings'} from another generation in that period ${prev.generationNote.otherGenerationExcluded === 1 ? 'was' : 'were'} left out.`
+        : '.')
+    : '';
   const incomparableReason =
     `Prior period covers ${prev.coverage.daysWithData} of ${prev.coverage.daysInPeriod} days with readings, versus ` +
-    `${cur.coverage.daysWithData} of ${cur.coverage.daysInPeriod} for the current period — comparing the totals would ` +
-    'measure that coverage gap, not a change in production.';
+    `${cur.coverage.daysWithData} of ${cur.coverage.daysInPeriod} for the current period — no change is stated for any ` +
+    'figure, because it would measure that coverage gap, not a change in production.' + priorGenText;
   // F12 (23 Sep 2026): an attribution-sensitive KPI compared across the
   // 2026-08-05 rebuild is not a trend. Before that date no reading carried a
   // MaterialId, so nothing could be judged against product limits and the
@@ -323,7 +336,7 @@ export async function getManagementSummary(
   const kpis: KpiRow[] = KPI_DEFINITIONS.map((k) => {
     const current = round(cur.values[k.key] ?? null);
     const before = round(prev.values[k.key] ?? null);
-    const coverageBlocks = k.shape === 'total' && covDiffers;
+    const coverageBlocks = covDiffers;
     const attributionBlocks = k.attributionSensitive === true && attrDiffers;
     const comparable = !coverageBlocks && !attributionBlocks;
     return {

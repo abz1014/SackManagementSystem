@@ -6,7 +6,7 @@
  */
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
-import { fmtInt, fmtKg, fmtPct1, fmtSpan } from '../../lib/fmt';
+import { fmtInt, fmtKg, fmtPct1, fmtSpan, describeMismatchHours } from '../../lib/fmt';
 import type { DailyReportData, ReportLine } from '../../api';
 import { DayBars, Fig, LineTable } from './shared';
 
@@ -46,7 +46,7 @@ export function DailySection({ d }: { d: DailyReportData }) {
             {W.cone.shiftSentence(
               fmtInt(d.shiftCheck.mismatched),
               fmtInt(d.shiftCheck.compared),
-              d.shiftCheck.topHour == null ? null : `${String(d.shiftCheck.topHour).padStart(2, '0')}:00`,
+              describeMismatchHours(d.shiftCheck.hours, d.shiftCheck.mismatched, d.shiftCheck.topHour),
             )}
           </p>
         )}

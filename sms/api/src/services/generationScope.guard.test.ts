@@ -229,13 +229,8 @@ const EXEMPTIONS: Record<string, string> = {
     "canonical PK (cone_event_id/sack_event_id/reject_event_id, globally unique across all generations since 5 Aug " +
     '2026 — see this file\'s own IDENTITY comment), never by a range, so there is no pooling to guard against there ' +
     'either.',
-  'api/src/services/rejectSpc.ts::getRejectSpc':
-    'Deliberately does NOT filter to one generation — it PARTITIONS: every query groups by `source_epoch` and the ' +
-    "caller (spc chart) plots each generation as its own series, never summing pÌ„ across the 5 Aug rebuild boundary. " +
-    "generation.ts's own header names this file as one of the two pre-existing correct queries its 23 Sep 2026 " +
-    'inventory found, and generation.ts\'s "alternatives considered" section explicitly keeps the partition-and-report ' +
-    'shape here rather than generalising it: "Right for a chart whose x-axis can carry two series; wrong for a single ' +
-    'figure... Kept where it already is; not generalised here." Checked 23 Sep 2026.',
+  // rejectSpc.ts::getRejectSpc removed 25 Sep 2026: it now accepts an optional
+  // generation scope (the reject report passes one), so the guard sees epoch scoping.
   'api/src/services/live.ts::findNewerElsewhere':
     'Deliberately queries OUTSIDE the chosen generation — that is its entire job. Its own doc comment: "The newest ' +
     'reading on record that the chosen generation does NOT contain, and which generation owns it," keyed on ' +

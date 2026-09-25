@@ -34,6 +34,7 @@ import { getWeights, type Basis, type Bucket } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { loadProductCatalogue } from '../productLimits.js';
 import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
+import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
 
 export interface ConeWeightReportData {
@@ -99,6 +100,8 @@ export interface ConeWeightReportData {
      * target is stated (`source: 'none'`) or the mirror carries no flag.
      */
     productActive: boolean | null;
+    /** Verification 25 Sep 2026 (W8): the products the readings themselves carried, with their setpoints. */
+    productsRan: RanProduct[];
   };
   byStation: { station: number; n: number; meanG: number; vsLineG: number; vsTargetG: number | null; flagged: boolean }[];
   lineMeanG: number | null;
@@ -185,8 +188,15 @@ export async function getConeWeightReport(
   // RT-002/RT-029: only resolved when this report is about to run its own
   // query — a scope round trip nobody will bind a predicate with is a cost
   // with no corresponding claim.
-  const medianScope = serviceMedian != null ? null : await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
-  const medianG = serviceMedian != null ? serviceMedian : await medianConeWeight(pool, lineId, from, to, window, medianScope ?? UNSCOPED);
+  // Verification 25 Sep 2026: the scope is now always resolved — the
+  // products-ran query below and the printed generation line both need it.
+  const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
+  const medianG = serviceMedian != null ? serviceMedian : await medianConeWeight(pool, lineId, from, to, window, scope ?? UNSCOPED);
+  // W8: name the products that RAN (from each cone's own material_id), not
+  // the app's "current product" setting. Falls back to the old line-wide
+  // resolution only when no reading carried a product (pre-MaterialId data).
+  const ran = describeRanTarget(await productsRanInPeriod(pool, lineId, from, to, catalogue, scope));
+  const useRan = ran.products.length > 0;
 
   return {
     period: resolved,
@@ -203,17 +213,32 @@ export async function getConeWeightReport(
     states: prod.states,
     bucketSizeG: w.cone.bucketSize,
     histogram: w.cone.histogram,
-    target: {
-      setpointG: stateTarget ? stations.targetG : null,
-      productId: stations.productId,
-      label: stateTarget ? stations.productLabel : null,
-      inForceAtUtc: stateTarget ? (resolvedTarget.inForceAtUtc ?? stations.targetEffectiveFromUtc) : null,
-      inForceIsLowerBound: stateTarget && resolvedTarget.isLowerBound,
-      limitsChangedInPeriod: stateTarget ? (stations.limitsChangedInWindow ?? 0) : 0,
-      source: stateTarget ? 'in_force_at_period_end' : 'none',
-      omittedReason: stateTarget ? null : resolvedTarget.omittedReason,
-      productActive: stateTarget ? stations.productActive ?? null : null,
-    },
+    target: useRan
+      ? {
+          setpointG: ran.targetG,
+          productId: ran.products.length === 1 ? ran.products[0]!.productId : null,
+          label: ran.label,
+          inForceAtUtc: ran.inForceAtUtc,
+          inForceIsLowerBound: ran.inForceIsLowerBound,
+          limitsChangedInPeriod: 0,
+          source: ran.targetG != null ? 'in_force_at_period_end' : 'none',
+          omittedReason: ran.omittedReason,
+          // Retired products are marked inline in `label`; no second marker.
+          productActive: null,
+          productsRan: ran.products,
+        }
+      : {
+          setpointG: stateTarget ? stations.targetG : null,
+          productId: stations.productId,
+          label: stateTarget ? stations.productLabel : null,
+          inForceAtUtc: stateTarget ? (resolvedTarget.inForceAtUtc ?? stations.targetEffectiveFromUtc) : null,
+          inForceIsLowerBound: stateTarget && resolvedTarget.isLowerBound,
+          limitsChangedInPeriod: stateTarget ? (stations.limitsChangedInWindow ?? 0) : 0,
+          source: stateTarget ? 'in_force_at_period_end' : 'none',
+          omittedReason: stateTarget ? null : resolvedTarget.omittedReason,
+          productActive: stateTarget ? stations.productActive ?? null : null,
+          productsRan: [],
+        },
     byStation: stations.stations.map((s) => ({
       station: s.station, n: s.n, meanG: s.meanG, vsLineG: s.vsLineG, vsTargetG: s.vsTargetG, flagged: s.flagged,
     })),
@@ -225,14 +250,15 @@ export async function getConeWeightReport(
         : w.basis === 'gross'
           ? `Gross basis: weights as the scale recorded them (identical to As-recorded until IFL confirms the basis, Q4/Q5). `
           : `Weights as the scale recorded them (the weight basis is not yet confirmed by IFL). `) +
-      'Every statistic is over readings inside the plausibility window; the excluded count is stated. The target is the ' +
-      'line-wide product in force at the END of this period, from the same versioned limits the station table below uses ' +
-      '— never today\'s product applied backwards over the whole period, and never an invented number when none was in force.' +
-      (resolvedTarget.omittedReason ? ` ${resolvedTarget.omittedReason}` : '') +
-      (stateTarget && resolvedTarget.isLowerBound
+      'Every statistic is over readings inside the plausibility window; the excluded count is stated. The target names the ' +
+      'products the readings themselves carried, with the limits in force for each at the END of this period, from the same ' +
+      'versioned limits the station table below uses — never today\'s product applied backwards over the whole period, and ' +
+      'never an invented number when none was in force.' +
+      (useRan ? (ran.omittedReason ? ` ${ran.omittedReason}` : '') : resolvedTarget.omittedReason ? ` ${resolvedTarget.omittedReason}` : '') +
+      ((useRan ? ran.inForceIsLowerBound : stateTarget && resolvedTarget.isLowerBound)
         ? ' Those limits were first SEEN at the instant stated, not known to have started then, so read it as "no later than".'
         : ''),
-    generationNote: medianScope != null ? noteOf(medianScope) : null,
+    generationNote: noteOf(scope),
   };
 }
 

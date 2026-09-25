@@ -25,6 +25,7 @@
  * rule is applied once here so the screen, the CSV and the workbook agree.
  */
 import type { ConnectionPool } from 'mssql';
+import type { GenerationNote } from '../generation.js';
 import type { ShiftCode } from '@sms/shared';
 import { SHIFT_CODES } from '@sms/shared';
 import { cellOrder, getMachineProductShifts, type MachineProductChange, type MachineShiftCell } from '../machineProducts.js';
@@ -72,7 +73,14 @@ export interface MachineProductReportData {
   /** materialId → the label the report prints (unique names plain, shared names with the id). */
   labels: Record<string, string>;
   conesWithoutStation: number;
+  /**
+   * Machines that weighed at least one cone in the period (verification
+   * 25 Sep 2026, X1). `rows` also carries roster machines that weighed
+   * nothing — a row of dashes — so `rows.length` is not "machines that ran".
+   */
+  machinesWeighing: number;
   note: string;
+  generationNote?: GenerationNote;
 }
 
 /** Every production day in [from, to], in order. */
@@ -179,6 +187,8 @@ export async function getMachineProductReport(
     products,
     labels,
     conesWithoutStation: data.conesWithoutStation,
+    machinesWeighing: rows.filter((r) => r.cones > 0).length,
+    generationNote: data.generationNote,
     note:
       'Each cell is the product recorded on the cones that machine weighed in that shift, as the operator selected it on the machine’s panel; ' +
       'every cone counts, and a cell with two products shows both in the order they ran. Sacks carry no machine and are not on this page.',

@@ -65,7 +65,11 @@ export function fmtAppInstant(iso: string): string {
   return new Date(iso).toLocaleString('en-GB');
 }
 
-/** "6 min", "3 h 12 min", "2 days" — a length of time. */
+/**
+ * "6 min", "3 h 12 min", "12 d 16 h" — a length of time. Above a day the
+ * hours are kept (verification 25 Sep 2026, M16: 1,094,406 s printed as
+ * "12 days", dropping 16 hours).
+ */
 export function fmtSpan(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s} s`;
@@ -75,7 +79,9 @@ export function fmtSpan(seconds: number): string {
   const rm = m % 60;
   if (h < 24) return rm > 0 ? `${h} h ${rm} min` : `${h} h`;
   const d = Math.floor(h / 24);
-  return d === 1 ? '1 day' : `${d} days`;
+  const rh = h % 24;
+  if (rh === 0) return d === 1 ? '1 day' : `${d} days`;
+  return `${d} d ${rh} h`;
 }
 
 /** "just now", "12 s ago", "6 min ago" — time since. */
@@ -149,4 +155,33 @@ export function addDays(date: string, n: number): string {
 /** Seconds between two ISO timestamps, or from `a` until now-ish. */
 export function secondsBetween(a: string, b: string): number {
   return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000);
+}
+
+/**
+ * Where the shift-column disagreements fall in the day, in words
+ * (verification 25 Sep 2026, D11/S7). "mostly around 21:00" only when that
+ * hour holds a MAJORITY; otherwise the hours are listed with their counts,
+ * and named as the hour before each shift change when that is what they are
+ * (shifts change at 06:00, 14:00 and 22:00).
+ */
+export function describeMismatchHours(
+  hours: { hour: number; mismatched: number }[] | null | undefined,
+  total: number,
+  topHour?: number | null,
+): string | null {
+  const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
+  const list = (hours ?? []).filter((h) => h.mismatched > 0);
+  if (list.length === 0) return topHour == null ? null : `most often around ${hh(topHour)}`;
+  const top = [...list].sort((a, b) => b.mismatched - a.mismatched)[0]!;
+  if (total > 0 && top.mismatched * 2 > total) return `mostly around ${hh(top.hour)} (${top.mismatched.toLocaleString('en-US')})`;
+  const byTime = [...list].sort((a, b) => a.hour - b.hour);
+  const parts = byTime.map((h) => `${hh(h.hour)} (${h.mismatched.toLocaleString('en-US')})`);
+  const joined = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  const covered = list.reduce((a, h) => a + h.mismatched, 0);
+  const beforeChange = byTime.every((h) => h.hour === 5 || h.hour === 13 || h.hour === 21);
+  return (
+    `spread across the hours ${joined}` +
+    (beforeChange ? ', each the hour before a shift change' : '') +
+    (covered < total ? `; the other ${(total - covered).toLocaleString('en-US')} fall in other hours` : '')
+  );
 }

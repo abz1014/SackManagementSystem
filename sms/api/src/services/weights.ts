@@ -354,9 +354,9 @@ export async function getWeights(
   const [chReq, chPlaus] = coneReq();
   chReq.input('coneBucket', mssql.Float, coneBucket);
   const coneHist = await chReq.query<{ bin: number; count: number }>(
-    `SELECT FLOOR((weight_g - @coneAdj)/@coneBucket) bin, COUNT(*) count
+    `SELECT FLOOR(ROUND((weight_g - @coneAdj)/@coneBucket, 6)) bin, COUNT(*) count
      FROM sms.cone_event WHERE ${dateWhere('cone')} AND ${chPlaus}
-     GROUP BY FLOOR((weight_g - @coneAdj)/@coneBucket) ORDER BY bin`,
+     GROUP BY FLOOR(ROUND((weight_g - @coneAdj)/@coneBucket, 6)) ORDER BY bin`,
   );
   // The excluded readings themselves, lightest first — shown, on purpose.
   const [coReq, coAll] = coneReq({ includeImplausible: true });
@@ -386,10 +386,13 @@ export async function getWeights(
   const sackDp = bucketDecimals(sackBucket);
   const [shReq, shPlaus] = sackReq();
   shReq.input('sackBucket', mssql.Float, sackBucket);
+  // ROUND before FLOOR (verification 25 Sep 2026, K6): 49.40 / 0.05 is
+  // 987.9999… in floating point, so FLOOR put the heaviest sack in the
+  // 49.35 bucket. Six decimals is far below any real bucket boundary.
   const sackHist = await shReq.query<{ bin: number; count: number }>(
-    `SELECT FLOOR((weight_kg - @sackAdj)/@sackBucket) bin, COUNT(*) count
+    `SELECT FLOOR(ROUND((weight_kg - @sackAdj)/@sackBucket, 6)) bin, COUNT(*) count
      FROM sms.sack_event WHERE ${dateWhere('sack')} AND ${shPlaus}
-     GROUP BY FLOOR((weight_kg - @sackAdj)/@sackBucket) ORDER BY bin`,
+     GROUP BY FLOOR(ROUND((weight_kg - @sackAdj)/@sackBucket, 6)) ORDER BY bin`,
   );
   const [soReq, soAll] = sackReq({ includeImplausible: true });
   const sackOut = await soReq.query<{ w: number; d: string; id: number }>(
