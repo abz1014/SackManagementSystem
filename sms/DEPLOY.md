@@ -84,8 +84,10 @@ for a TV, refreshing itself every ten seconds. Setting one up:
    the wall URL — Edge: `msedge --kiosk http://<plant-ip>:4000/?s=wall --edge-kiosk-type=fullscreen`,
    Chrome: `chrome --kiosk http://<plant-ip>:4000/?s=wall`. Add it to the PC's
    startup so a power cut brings the display back on its own.
-2. Sign in **once**, with an operator account made for the display:
-   `node cli/dist/index.js user:create --username=wall --password=<strong> --role=operator`.
+2. Sign in **once**, with a viewer account made for the display (rank 1, read
+   only; `operator` was renamed `viewer` by migration 035 on 15 Sep 2026 and
+   the CLI now refuses the old name):
+   `node cli/dist/index.js user:create --username=wall --password=<strong> --role=viewer`.
    Sessions renew while they are in use, so the display never returns to the
    login page by itself; it will only if the browser's cookies are cleared or
    the account is disabled in Setup.
