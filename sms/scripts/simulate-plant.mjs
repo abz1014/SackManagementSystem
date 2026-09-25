@@ -266,7 +266,7 @@ const clampLag = (ms) => Math.min(LAG_MAX * 1000, Math.max(LAG_MIN * 1000, ms));
  * time plus the acquisition lag; in live mode it is the moment the tick runs,
  * because that is what the plant's acquisition layer does.
  */
-function generate(fromMs, toMs, ids, state, insertAt) {
+export function generate(fromMs, toMs, ids, state, insertAt, sackInsertAt = insertAt) {
   const cones = [];
   const sacks = [];
   const qcs = [];
@@ -317,7 +317,7 @@ function generate(fromMs, toMs, ids, state, insertAt) {
     }
 
     while (nextSack <= t) {
-      const insertSack = insertAt(nextSack);
+      const insertSack = sackInsertAt(nextSack);
       let kg = gauss(SACK_WEIGHT_MEAN, SACK_WEIGHT_SD);
       const sackInRange = rand() < 0.985;
       if (!sackInRange) kg += rand() < 0.5 ? -uniform(0.3, 1.2) : uniform(0.3, 1.2);
@@ -538,7 +538,8 @@ async function main() {
       const target = now - clampLag(sampleLagMs());
       if (target > sim.coneCursor) {
         // Rows inserted NOW carry a production time ~18 minutes old.
-        const batch = generate(sim.coneCursor, target, state.ids, sim, () => now);
+        const t = liveInsertTimes(now);
+        const batch = generate(sim.coneCursor, target, state.ids, sim, t.cone, t.sack);
         const n = await writeAll(pool, batch);
         if (n.cones || n.sacks || n.qcs || n.wrej) {
           console.log(
@@ -554,7 +555,31 @@ async function main() {
   await pool.close();
 }
 
-main().catch((e) => {
+/**
+ * Insert-time rules for live mode.
+ *
+ * Cones: the tick instant, as the plant's acquisition layer does. Their event
+ * time is ProductionDate, a separate column, so a catch-up tick still lands
+ * each cone on its own production day.
+ *
+ * Sacks: sack1_TP1U2 has NO production-time column; `Date` is the only
+ * timestamp and the app reads it as the sack's event time. Stamping it with
+ * the tick instant meant a live run restarted after a pause piled every
+ * missed sack onto that one instant: on 25 Sep 2026 a restart after a ~3-day
+ * pause wrote 1,129 sacks at four timestamps inside 12 minutes, and the Line
+ * screen printed "1,127 sacks" beside ~130 cones for one shift. A sack is now
+ * stamped at its own weighing time plus the acquisition lag, never later than
+ * now, which is the tick instant in steady state.
+ */
+export function liveInsertTimes(now, lagMs = () => clampLag(sampleLagMs())) {
+  return {
+    cone: () => now,
+    sack: (prodMs) => Math.min(now, prodMs + lagMs()),
+  };
+}
+
+// Run only when executed directly, so tests can import the generator.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main().catch((e) => {
   console.error('simulator failed:', e.message);
   process.exit(1);
 });
