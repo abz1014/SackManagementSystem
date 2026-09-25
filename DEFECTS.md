@@ -677,7 +677,11 @@ worker has run against a database for a while — carried here so that follow-up
 | RT24-01…13 | mixed | 24 Sep 2026 red-team audit findings (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`) — see Part 6 below for the full table | **all 13 now fixed or extended** — RT24-10/11/12/13 and RT-014 closed this pass, see Part 7 |
 | D-27 | HIGH | `shift_rule_drift` DQ check false-positived 20,000/20,000 rows — `mssql` returns BIGINT as a JS string, `new Date(<string ms>)` parses it as an invalid date string, not milliseconds | **fixed**, `32e9d0d` — see Part 7 |
 | D-28 | MEDIUM | `eventMsOfRaw` threw a bare `TypeError` (`.getTime()` on `undefined`) naming neither the row nor its table, on a raw row missing both production and insert time | **fixed**, `95b3aff` — see Part 7 |
-| D-29 | LOW | 2 `sms.cone_event` rows carry `production_ts_utc_ms` before year 2000 (min 0 — an epoch-zero phantom timestamp) | **open, not fixed this pass** — see Part 7 |
+| D-29 | LOW | 2 `sms.cone_event` rows carry `production_ts_utc_ms` before year 2000 (min 0 — an epoch-zero phantom timestamp) | **closed 25 Sep 2026 — vendor source sentinel, unreachable from every screen, already DQ-flagged; regression test `b4284ac`** — see Part 8 |
+| D-30 | HIGH | Health › sync verdict (and Bar's alarm, Wall's dot, `assessHealth`'s default) fell through to "OK" for `lag_unknown`/`no_data`/a missing or unknown health kind — a false all-clear | **fixed 25 Sep 2026**, `5b2b56a` — see Part 8 |
+| D-31 | MEDIUM | Changeover plan review threw on a plan without `blockers` (the PDAS write gate) | **fixed 25 Sep 2026**, `5b2b56a` — Execute disabled, safety checks named unreadable |
+| D-32 | LOW | Product › History sort threw on a row without `changedAt` | **fixed 25 Sep 2026**, `5b2b56a` |
+| D-33 | LOW | `sms/DEPLOY.md`'s wall-display example used `--role=operator`, refused by the CLI since migration 035 | **fixed 25 Sep 2026**, `39c2c37` |
 | D-24 | MEDIUM | `pdasWrite.ts`'s post-commit echo-back check reads, run inside the same `try` as the write itself (Add*/CreatePallet/SetPalletActive), or entirely unguarded (`updateProductLimits`), misreported a committed write as failed when the check read itself failed | **fixed 24 Sep 2026**, `bdbb0eb` (B1/B2) |
 | D-25 | MEDIUM | `planChangeover` compared a requested new blend/count/tube name to existing rows by exact equality only, so a name that is a `LIKE`-pattern match for an existing row (T-SQL wildcard collision, e.g. `"R_D"` vs `"RED"`) planned clean and only failed mid-sequence against PDAS's own duplicate check | **fixed 24 Sep 2026**, `a9b85b5` (B4), new `api/src/services/likePattern.ts`; proven by F3b, `PDAS-EXECUTION-2026-09-24.md` | 
 | D-26 | MEDIUM | `changeover.ts`'s `resolveTube` compared candidate tube types by name only; `sms.tube_type` carried no `tube_form` column, so it could either silently reuse a wrong-form tube type PDAS would have accepted as new, or over-block a same-form name that only collided by `LIKE` pattern against a different form | **fixed 24 Sep 2026**, `d6a58d4` (migration `041_tube_type_form.sql` + `changeover.ts`/`pdasWrite.ts`'s `addTubeType` MERGE/`seedProducts.ts`); **proven live 24 Sep 2026** — the final re-run section of `PDAS-EXECUTION-2026-09-24.md`: `AddTubeType` writes `tube_form` into the mirror (TubeTypeId 28, `tube_form=2`, matches PDAS's own `TubeForm`), and a plan-only `resolveTube` check confirms same-name/same-form plans `reuse` while same-name/different-form plans `add` |
@@ -708,10 +712,10 @@ worker has run against a database for a while — carried here so that follow-up
 | RT-014 | HIGH | No server-side response-size/row-count cap independent of SQL (DoS-adjacent) | **open — not addressed by this wave.** No commit among the fifteen touches request/response size limiting; grepped for `MAX_ROWS`/size-limit middleware, none found added. Carried into `COMMISSIONING-GAPS.md`. |
 | RT-015 | HIGH | Malformed/missing/null production rows silently coerced to zero, server-side | **fixed, at least for the two files exercised: `production.ts` and `register.ts`.** `71757a3` (`production.ts::readNum`), `410c179` (`register.ts::foldGenerationTally`/`countEvents`, a second NaN→null defect found mid-pass, see D-19 below). Not confirmed fixed everywhere the audit may have meant — no full-repo sweep for the same `?? 0` / bare `Number()` pattern was done this pass. |
 | RT-016 | MEDIUM/HIGH (audit rated as calendar-invalid-date crash) | A calendar-invalid date crashes the DB driver instead of app-level validation, on 9 of 9 endpoints tried | **open — not addressed by this wave.** No date-validation commit among the fifteen. |
-| RT-017 | HIGH | MachineProduct report clips ~82% of its columns on screen, no in-app fallback | **open — not addressed.** (CLAUDE.md's Phase 9, 21 Sep, suppresses this table in *print* only; the on-screen clipping RT-017 describes is untouched.) |
-| RT-018 | HIGH | A retired product is shown as the live weight target with no marker | **open — not addressed by this wave.** |
-| RT-019 | HIGH | Nelson rules, unsuppressed, flag 78.6% of stations / 12.7% of station-days | **open, owner decision pending** — this is the same item as `DEFECTS.md` D-10's "Rules 2-8 stay suppressed" resolution (23 Sep, predates this wave): four options were put to the owner, none chosen yet. Re-measured this wave at 37.6–54.8% on real generations after the limit-model replacement (still noise, still withheld). |
-| RT-020 | HIGH | Days-to-limit projections print precise numbers from 3–5 noisy points, no confidence interval | **open — not addressed by this wave.** |
+| RT-017 | HIGH | MachineProduct report clips ~82% of its columns on screen, no in-app fallback | **fixed 25 Sep 2026**, `fb9fd9d` — see Part 8 |
+| RT-018 | HIGH | A retired product is shown as the live weight target with no marker | **fixed 25 Sep 2026**, `c52a34d` — see Part 8 |
+| RT-019 | HIGH | Nelson rules, unsuppressed, flag 78.6% of stations / 12.7% of station-days | **closed 25 Sep 2026 as a decision, by evidence: rules 2–8 stay withheld; EWMA was tried at two granularities and failed on real data** — see Part 8. Original status: **open, owner decision pending** — this is the same item as `DEFECTS.md` D-10's "Rules 2-8 stay suppressed" resolution (23 Sep, predates this wave): four options were put to the owner, none chosen yet. Re-measured this wave at 37.6–54.8% on real generations after the limit-model replacement (still noise, still withheld). |
+| RT-020 | HIGH | Days-to-limit projections print precise numbers from 3–5 noisy points, no confidence interval | **fixed 25 Sep 2026**, `b182297` — see Part 8 |
 | RT-021 | HIGH | A 1970 clock-fault sentinel hijacks the live "anchor" under replay, at two independent call sites | **fixed, and a THIRD site was found while fixing it** — `7558854`'s own commit message names three anchor queries floored (`live.ts`'s data tip, `health.ts`'s acquisition tip, `machinesRunning.ts`'s running-grid anchor), one more than the audit's own header text ("at two independent call sites"). Recorded as D-15 below. |
 | RT-022 | HIGH | Weight basis/tare/shift-boundary rules read as "whatever is current", never "whatever was in force" | **open — not addressed by this wave.** Overlaps `DEFECTS.md` D-13 (LOW, already tracked, no wrong number today because `gross` is the identity conversion). |
 | RT-023 | MEDIUM | The running API process was serving code 26 minutes older than its own rebuilt `dist/` | **cannot determine — operational fact, not a code defect.** No commit fixes "restart the process"; whether the currently-running process (if any) is stale cannot be assessed by reading source. Not re-verified this pass. |
@@ -1123,3 +1127,154 @@ directly for this pass, HEAD at the time of the run included `61de930`.
 RT24-13's two remaining named gaps (Product tabs, `SyncHealthBlock`) stay unfuzzed. D-29 (the
 epoch-zero cone_event rows) is found, not triaged or fixed. This is a documentation pass; no
 production code was changed by it.
+
+---
+
+## Part 8 — 25 Sep 2026: the remaining red-team items closed, decided, or handed to the owner as a kit
+
+Six commits on `floor-first-rework` (`b182297`, `fb9fd9d`, `c52a34d`, `b4284ac`, `5b2b56a`,
+`39c2c37`) on top of `6d000cd`. Every item the 24 Sep audit and its fix wave left open is
+dispositioned below. Verified against the local dev copy only, never the plant.
+
+### RT-020 — days-to-limit had no uncertainty — **fixed**, `b182297`
+
+`calibration.ts` `projectDaysToLimit` now fits the OLS slope's standard error and a 90%
+t-interval (`olsSlopeStats`, `tCritical90`: t-table df 1–30, normal above). It reports
+`daysLow`/`daysHigh` from the interval's two ends, and returns `status: 'not_established'`
+with a `reason` when the interval includes zero. The minimum is raised to 5 daily points
+(`MIN_PROJECTION_POINTS`). StationSheet and the attention list print the range, the reason, or
+a too-few-points sentence. **Measured on real September data** (epoch 9, 08-05→09-07, in
+process, read-only): the old code printed confident counts of **437, 1,046, 1,883 and 1,986
+days** for stations 13, 6, 12 and 7. All four are now `not_established`. Everywhere the old
+code was already null, the new code agrees.
+
+### RT-019 — Nelson rules 2–8 — **closed as a decision, by evidence** (owner delegated the call, 25 Sep 2026)
+
+The owner chose to replace rules 2–8 with an EWMA drift signal, and it was built and measured
+before being wired anywhere. **It failed at both granularities tried**, so nothing shipped and
+rules 2–8 stay withheld exactly as before (`W.weight.patternsWithheld` unchanged).
+- **15-min subgroup means** (the series the I-MR band uses; σ̂ = MR̄/1.128 between-subgroup,
+  gap/generation resets): every λ ∈ {0.1, 0.2, 0.3} × L ∈ {2.7, 3.0} flagged **27.9–68.2%** of
+  groups (July epoch 1: 48.1–68.2%; Sept epoch 9: 27.9–47.8%). The target was 1–5%.
+- **Daily per-station means**: pooled **5.6% (July) / 10.9% (Sept)** at the best setting
+  (λ=0.1, L=3.0), which **missed an injected +0.3 g/day ramp entirely** on a real July
+  station. Per-station n is 16–34 days, so a single day moves a station's rate 3–7 points.
+- **Why:** the weight level genuinely carries momentum. Lag-1 autocorrelation of 15-min
+  subgroup means is **0.713 (July) and 0.517 (Sept)**. Pattern rules built for independent
+  samples cannot separate signal from wander on this process.
+
+The calibration question stays answered by what does work: the station-vs-line-and-target
+table, rule 1 (the I-MR band, 5.6–13.1% on real generations, D-10), and RT-020's honest
+days-to-limit. The EWMA code was not committed. Unused code would be a backend capability
+with no caller, and the measurement tables above are the record. **For IFL:** the app watches
+single out-of-band points and station bias. It deliberately does not raise pattern alarms,
+because on this line's data they fire on 2 groups in 5.
+
+### RT-017 — MachineProduct on-screen clipping — **fixed**, `fb9fd9d`
+
+The screen table is transposed: machines across (~14 columns), production day × shift down.
+It sits in its own scroll box (`.mp-scroll`, 70vh) with a sticky header row and first
+column, so no label is lost at any scroll position. Cell contents, click-through, CSV/XLSX
+and the print path are unchanged. A 14 × 34 days × 3 shifts component test, which failed on
+the old markup, asserts every row and header renders.
+
+### RT-018 — retired product shown as target unmarked — **fixed**, `c52a34d`
+
+`productActive` (PDAS `MaterialActive`, **current status only**, because PDAS keeps no
+retirement date) is threaded through `machinesRunning.ts` (LEFT JOIN on `sms.product`'s
+primary key, so a station can be neither dropped nor duplicated, with a test), `weightStations.ts`,
+`/api/product-at`, and the cone-weight, station, product and management-summary reports. It
+renders as "(retired in PDAS)" plus one sentence on Weight, the station table, Line, Product ›
+Running, ReadingSheet and those report sections. CSV/XLSX carry it as a column or trailing row;
+the PDF follows the screen. **Live check on the rebuilt API, 25 Sep:** station 7 running
+MaterialId 17 → `productActive: false`. The **cone-weight report for Sept real
+(08-05→08-20) names product 12 `201-IH0-SD` as its target, and that product is retired**
+(`productActive: false`). That is exactly the case RT-018 described, and it is now marked.
+
+### D-29 — epoch-zero cone rows — **closed, no code change needed**; regression test `b4284ac`
+
+Both rows are traced: July `pack1_TP1U2` id 3824 (epoch 1) and September id 5047 (epoch 9).
+Each has a real insert time and plausible weight, `ProductionDate` 1970-01-01, and machine and
+material zeroed. This is a **vendor source-data sentinel**, recurring across both generations,
+not a transform defect. It is unreachable from every screen: each row lands alone on
+`shift_date` 1969-12-31, and `/api/range` offers no day under 20 rows
+(`MIN_PRODUCTION_ROWS`). Every period query is from/to-bounded, and the RT-021 floor keeps
+them out of the anchors. The rows are kept, per the clock-fault rule. The existing
+`stale_timestamp` DQ check already flags them. The new test pins that. Residual, not fixed:
+that finding is aggregate, so it names the batch's first offender rather than these two rows
+by id.
+
+### D-30 — false "OK" health verdicts — **fixed**, `5b2b56a` (HIGH)
+
+Found live while closing RT24-13's last gap, not as a fuzz-only edge case.
+`SyncHealthBlock.tsx`'s verdict handled `stale`/`late` only, so a real `lag_unknown` or
+`no_data` from `/api/live` printed "The plant connection is healthy." That is a false
+all-clear on the one block whose job is to report breakage. The same fall-through was in
+`ui/Bar.tsx`'s header alarm and `Wall.tsx`'s per-line dot. It was also in `lib/health.ts`'s
+`assessHealth`, whose default returned `ok` for a `/api/live` line with **no health object
+at all** (a partial 200), so every screen would then have asserted running/stopped. All four
+are fixed: exhaustive, with an unrecognised kind reading "could not be read" and
+`assessHealth` defaulting to `lag_unknown`. RED→GREEN: one case per kind plus an unknown
+string (`SyncHealthBlock.test.tsx`), and `web/src/lib/health.test.ts`.
+
+### RT24-13 — missing-field fuzz — **closed**, `5b2b56a`
+
+The fuzz now covers the four Product tabs and SyncHealthBlock, the last named gaps. It found two
+crashes, both fixed: **D-31** (MEDIUM), Changeover's `PlanReview` threw on a plan without
+`blockers`, so Execute is now disabled and the safety checks are named unreadable; **D-32**
+(LOW), History's sort threw on a row without `changedAt`. Running and Catalogue were shown to
+have no defect of this shape.
+
+### PDF export — **proven end to end**, no defect
+
+A fresh `api/dist` rendered daily, machine-product and calibration for 08-05→08-20, plus an
+empty gap period (07-20→07-25), through the real route and headless Edge. The in-memory render
+token wrote no session. Results: valid `%PDF`, 1–9 pages, landscape (`MediaBox 841.9 × 594.9`).
+The provenance block is present. Daily figures match the JSON field for field (77,492 cones,
+3,125 sacks, 147,623 kg, 3.4% rejects). The empty period says "Nothing recorded in this
+period", not zeros. Renders take 1.2–2.3 s. With Edge missing the route returns a clean 503 in
+0.1 s, with no hang.
+
+### Owner-run kits — the two items an agent may not close — `39c2c37`
+
+- **RT24-05 / FAT PW10**: `handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` plus
+  `sms/scripts/rehearse-rt24-05.mjs`. Proves the `pdas_write_unverified` CRITICAL fires under
+  a login with EXECUTE on the vendor procedures and no SELECT on the tables. It runs against
+  the local `PDAS_TP1U2_SEP07` copy only, with backup first and restore after. Guard:
+  localhost plus `*_SEP07`/`*_E2E`, with no override. It refuses missing credentials before
+  any connection, and it uses the real `updateProductLimits` signature (MaterialId 1024, +1 g).
+  The refusal paths were proven, and the localhost TCP read path was confirmed from the
+  owner's shell. **The write itself has not been run**: it needs the owner's login.
+- **Below-rank RBAC / FAT SEC6**: `handover/REHEARSAL-RBAC-BELOW-RANK.md`. The owner creates
+  viewer and engineer accounts with `user:create`, signs in in the browser pane, and the
+  orchestrator drives the checklist, which comes from `rank.crosscheck.test.ts`'s client/server
+  rank pairings. Forced-write probes go to gated routes only and never to `changeover/execute`.
+  **Not yet run**: no such accounts exist.
+- **D-33**: `sms/DEPLOY.md`'s wall-display example used `--role=operator`, which the CLI has
+  refused since migration 035. It now reads `--role=viewer`.
+
+### Still open after this pass — named, not implied
+
+- **Needs the owner:** run the two kits above (RT24-05 live firing, below-rank RBAC live).
+- **Needs IFL or the plant:** load on IFL's real server under concurrency, and behaviour
+  across a real sequential generation cutover. Neither can be produced on the dev copy.
+- **Carried from the 23 Sep register, untouched by this pass:** RT-025, RT-026, RT-027,
+  RT-028, RT-030 (see Part 4's table). None is a false-number defect.
+
+### Process notes
+
+- A first attempt to commit RT-020/RT-017 staged `words.ts` hunks with zero context, and git
+  placed one string inside an existing comment block. The resulting commit had 25 syntax errors
+  in `words.ts`. It was caught before any push by parsing the staged file, and the two local,
+  unpushed commits were soft-reset and redone with full-context hunks. Every commit in this
+  pass has its shared-file content parse-checked.
+- One worker reported proving a RED case "by stashing" despite the no-`git stash` rule. The
+  stash list was empty afterwards, no conflict markers were found in any changed file, and
+  the full suite passed on the combined tree. Nothing was lost, but the rule was broken, and
+  it is recorded here.
+
+### Suite and typecheck, measured this pass
+
+`npx vitest run` from `sms/` on committed HEAD `39c2c37`: **208 files passed / 1 skipped,
+2,137 tests passed / 4 skipped, 0 failed** (Part 7 recorded 2,088). `npm run typecheck`, all five
+workspaces: clean.

@@ -414,3 +414,57 @@ These were attacked and held up — reported because "what works" is part of the
 CRITICAL and HIGH finding was independently re-verified by the orchestrator against the
 code and the local databases before being recorded here. Findings that only re-confirm
 the existing RT-/D- register (RT-014/016/017/018/019/020, D-10) are not re-listed.*
+
+---
+
+## Addendum — live verification + fix-wave re-check (24 Sep 2026, later same day)
+
+After the report above was written (audit baseline `a9b85b5`), the owner signed in for a
+live browser pass and a fix wave landed (commits `8e8a188`…`b1f355b`, HEAD `b1f355b`,
+"Record RT24 fix-wave dispositions"). The orchestrator re-verified every finding against
+current code — some at runtime, some in source. **Suite on `b1f355b`: 198 files, 2035
+passed, 4 skipped; typecheck clean** (was 1815 at baseline; the wave added ~220 tests,
+including `auth.malformedCookie.test.ts` for RT24-01).
+
+| ID | Report severity | Status on HEAD `b1f355b` | How verified |
+|---|---|---|---|
+| RT24-01 | CRITICAL | **FIXED** | Runtime: scratch API from current dist — malformed cookie → `401`, process stays up, 0 crashes. `GUID_RE` shape-check + try/catch in `authMiddleware` (cites RT24-01). *(No `unhandledRejection` handler added — the specific vector is closed; a broader guard is still absent.)* |
+| RT24-02 | HIGH | **FIXED** | Source: `scope` now in `unmatchedFilters` (`production.ts:462`). Commit `8e8a188`. |
+| RT24-03 | HIGH | **FIXED** (per disposition; not independently re-run) | `buildHeader` now takes `reportData`; commits `f60e04a`/`b077815`. |
+| RT24-04 | HIGH | **FIXED** | Source: rule reads guarded `effective_from <= SYSUTCDATETIME()` and resolved per-reading (`1315d23`/`8f5c80c`). |
+| RT24-05 | HIGH (CRITICAL-on-enable) | **FIXED** | Per disposition (`25b02bc`): `observed` goes NULL on a failed read-back (no false `p.after` claim), standing CRITICAL `pdas_write_unverified` via new `pdasPermissions.ts` probe, Health "Checked after writing" line. New CRITICAL path unobserved locally (probe reports `canReadBack:true`). |
+| RT24-06 | MEDIUM | **FIXED** | Runtime: `2026-02-30` → `400 "not a real calendar date"` (`11ce30b`). |
+| RT24-07 | MEDIUM | **FIXED** | Source: `unmatchedRejectsMissing` now feeds `rateUnreadable` (`Line.tsx:540/548`, "WS-B7"); `4e8513c`. |
+| RT24-08 | ~~MEDIUM~~ | **WITHDRAWN — not a real defect** | Live: `/api/machines/running` and `machinesRunning.ts` already carry `lastSeenUtc` + a `running/quiet/stale/silent` `MachineState` (2 h / 24 h / 7-day). The live Line screen shows "for at least 2 h" vs "Not seen for over a week" per machine. The worker read only lines 139-239 and asserted structural absence of the exact machinery at lines 96-97/167/192; its "recommended fix" is what line 167 already does. Query cost under load not yet measured. |
+| RT24-09 | MEDIUM | **FIXED by flagging** | Runtime: `/api/production` for `2026-07-12` still returns `cones:1` (the row is not dropped — consistent with "flag, never delete"), but a new `isolated_production_day` DQ check now flags source row 4130 (`edae627`). The period *total* still includes the phantom cone. |
+| RT24-10..13 | LOW | **Open** (per disposition, by design/priority) | Not addressed this wave. |
+
+**Net current state:** RT24-08 was never a defect (correction). Of the remaining 12, the
+fix wave closes RT24-01 through RT24-07 and RT24-09 (RT24-09 by surfacing rather than
+hiding the anomaly); RT24-10..13 (all LOW) remain open. The CRITICAL DoS is closed and
+runtime-verified. RT24-05 must still be seen firing against a real EXECUTE-only role
+before PDAS writes are trusted in production — the local probe can read back, so its new
+CRITICAL path has not yet been observed to fire.
+
+**Still genuinely unproven (unchanged):** below-rank RBAC with real non-admin accounts;
+the PDF export pipeline end to end; source-DB load on IFL's real server under concurrent
+load; and behaviour across a real *sequential* generation cutover (the SIM overlap
+approximates but is not the same). The live browser walk-through of every screen at
+desktop/mobile width was only partially done — the pane dropped its session after the API
+restart and was not re-driven across all screens.
+
+---
+
+## Addendum 2 — follow-through, 25 Sep 2026
+
+Every item this report and its addendum left open is now dispositioned, in `DEFECTS.md`
+Part 8 (commits `b182297`…`39c2c37`).
+- **RT24-10/11/12/13, RT-014:** closed by the 24 Sep evening pass (`DEFECTS.md` Part 7). The
+  last RT24-13 gaps (Product tabs, SyncHealthBlock) are closed here, and closing them found a
+  live false-"OK" health verdict (D-30, HIGH), now fixed.
+- **RT-017, RT-018, RT-020:** fixed. **RT-019:** decided by evidence. Rules 2–8 stay withheld,
+  because EWMA failed on real data at both granularities.
+- **PDF pipeline:** proven end to end.
+- **RT24-05 live firing and below-rank RBAC:** ready-to-run owner kits exist, but they have
+  not been run. They need logins an agent may not create.
+- **IFL-server load and a real sequential cutover:** still unprovable on the dev copy.

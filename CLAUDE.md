@@ -18,6 +18,23 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### Red-team follow-through: every remaining item closed, decided, or kitted (25 Sep 2026)
+
+Six commits `b182297`…`39c2c37`; full record in `DEFECTS.md` Part 8. **Fixed:** RT-020
+(days-to-limit now has a 90% range and says "not established" when the interval includes zero;
+the old code gave 437–1,986-day figures for four real stations that the data cannot support),
+RT-017 (machine-product report transposed on screen, nothing clipped), RT-018 (retired
+products marked "(retired in PDAS)" everywhere they appear as target or running; live, the Sept
+cone-weight report's target, product 12, is retired), and D-30 (Health's sync verdict, Bar,
+Wall and `assessHealth` fell through to "OK" for `lag_unknown`/`no_data`/missing health: a
+false all-clear, now exhaustive). **Decided by evidence (owner delegated):** RT-019. Nelson
+rules 2–8 stay withheld; EWMA failed at 15-min (27.9–68.2% flagged) and daily per-station
+granularity, because the weight level is autocorrelated (lag-1 0.71/0.52). **Closed without
+code:** D-29 (1970 rows are a vendor sentinel no screen can reach). **Proven:** PDF export end
+to end. **Owner must run:** `handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` and
+`handover/REHEARSAL-RBAC-BELOW-RANK.md`, because agents may not create logins. Suite 2,137
+passed / 4 skipped, typecheck clean. Verified on the local dev copy only.
+
 ### PDAS write authority recorded; D-12 resolved (24 Sep 2026)
 
 Hassan sb of IFL gave the SMS project owner a written grant by WhatsApp on 19 September 2026 ("complete autonomy and permission to enable and work on the PDAS changing the DB"), by the project owner's statement covering all nine write rights, for both the local copy and the plant. The message itself is held by the project owner, not in this repo. See `DEFECTS.md` D-12 and `handover/PDAS-WRITE-GRANT-2026-09-19.md`. This does not turn the plant path on: `PDAS_WRITE_ENABLED=false` in `sms/.env`, and the gate is now the local end-to-end proof (all nine rights through our code against `PDAS_TP1U2_SEP07`, with backups, failure paths, and an EXECUTE-only "ibrahim"-shaped login rehearsal), not IFL's authority. See Phase 1 hard constraint 3 below for the full detail.
