@@ -2323,6 +2323,30 @@ export const W = {
       withData === of ? (of === 1 ? 'Readings are present for the day.' : `Readings are present on all ${of} days of the period.`) : `Readings are present on ${withData} of the ${of} days in the period; the other days hold no data, so totals cover only the days with readings.`,
     noData: 'The period holds no production readings, so there is nothing to summarise.',
   } as const,
+
+  /* Chart overhaul, wave 2, Task T3 (28 Sep 2026): the shared ChartFrame's
+     own copy — the tooltip, the resize handle and the drag-select brush.
+     Every string a later chart task's tooltip context needs lives here too,
+     so no chart adds its own ad hoc phrase for "station" or "above usual". */
+  chart: {
+    backToPreviousRange: 'Back to previous range',
+    releaseToShow: (range: string) => `Release to show ${range}`,
+    dragToSelectRange: 'Drag across the chart to choose a range',
+    dragToResize: "Drag to change the chart's height",
+    limitsOverPeriod: (range: string) => `Limits are worked out over the period shown: ${range}`,
+    vsRowMedian: 'vs row median',
+    vsTarget: 'vs target',
+    openStation: (n: string) => `Open station ${n}`,
+    /* Tooltip context phrases the later chart tasks (stations, day/shift
+       breakdowns, reject rate bands) need. Plain words, no jargon. */
+    station: 'Station',
+    day: 'Day',
+    shift: 'Shift',
+    bin: 'Bin',
+    rate: 'Rate',
+    ucl: 'Upper control limit',
+    aboveUsual: 'above usual',
+  } as const,
 } as const;
 
 export type Words = typeof W;

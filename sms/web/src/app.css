@@ -845,6 +845,85 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .chart .mark { fill: var(--acc-fill); }
 .chart .hit { fill: transparent; cursor: crosshair; }
 
+/* ---- ChartFrame (chart overhaul, wave 2, Task T3, 28 Sep 2026) ---------- */
+/* The shared frame every chart mounts inside: a resizable, re-layouting
+   plot area plus a floating tooltip, a drag-select brush and a drag handle
+   — all owned by `web/src/ui/ChartFrame.tsx`, never by an individual chart.
+   RULE 3's old text in `chart.tsx` ("never a floating tooltip") is
+   superseded for anything built on this frame — see that file's header
+   comment (not edited here) and `ChartFrame.tsx`'s own header for the
+   replacement text. */
+.chart-frame { position: relative; }
+.chart-frame-body {
+  position: relative; width: 100%; overflow: visible;
+  /* A touch drag starts scrolling the page unless it is a deliberate,
+     held-still brush attempt (`useChartBrush`'s own long-press gate) —
+     `pan-y` lets vertical scroll through immediately and leaves horizontal
+     motion to the brush. */
+  touch-action: pan-y;
+}
+.chart-frame-body:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.chart-frame-caption { font-size: var(--fs-small); color: var(--muted); margin-top: 6px; }
+
+/* The tooltip. Positioned in JS (`placeTip`) so it never covers the mark it
+   describes; this rule is only its box, never its placement. Readable
+   against the page background — this app has no dark theme (verified: no
+   `prefers-color-scheme` rule exists anywhere in this file), so the same
+   ink-on-paper pairing used by `.menu` (app.css:362-363) is reused rather
+   than inventing a second one. */
+.chart-tip {
+  z-index: 5; box-sizing: border-box; padding: 10px 12px;
+  border: 1px solid var(--rule-2); border-radius: var(--radius);
+  background: var(--paper); box-shadow: 0 6px 20px rgba(22, 25, 28, 0.14);
+  font-size: var(--fs-tick);
+}
+.chart-tip-h { margin: 0 0 6px; font-weight: 600; color: var(--ink); }
+.chart-tip ul { list-style: none; margin: 0; padding: 0; }
+.chart-tip li { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; color: var(--graphite); }
+.chart-tip li b { color: var(--ink); font-weight: 600; }
+.chart-tip li.m-acc b { color: var(--acc); }
+.chart-tip li.m-graphite span::before,
+.chart-tip li.m-dashed span::before,
+.chart-tip li.m-acc span::before,
+.chart-tip li.m-ink span::before {
+  content: ''; display: inline-block; width: 8px; height: 2px; margin-right: 6px; vertical-align: middle;
+}
+.chart-tip li.m-ink span::before { background: var(--ink); }
+.chart-tip li.m-graphite span::before { background: var(--graphite); }
+.chart-tip li.m-acc span::before { background: var(--acc); }
+.chart-tip li.m-dashed span::before { background: none; border-top: 2px dashed var(--grid); height: 0; }
+.chart-tip-ctx { margin: 6px 0 0; color: var(--muted); }
+.chart-tip-hint { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--rule); color: var(--acc); }
+
+/* The live brush selection, and its "Release to show …" label. The brush
+   itself sets the WHOLE PAGE period on commit (owner decision) — this box
+   is only the in-progress visual, never a persisted selection. */
+.chart-brush {
+  z-index: 4; background: var(--acc-pale); border-left: 1px solid var(--acc); border-right: 1px solid var(--acc);
+  pointer-events: none;
+}
+.chart-brush-label {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 6; padding: 4px 10px; border-radius: var(--radius);
+  background: var(--ink); color: #fff; font-size: var(--fs-tick); white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The resize handle: a thin strip along the bottom edge. `role="separator"`
+   plus `aria-valuenow` (the height in px) makes the drag a first-class
+   control for a screen reader, not just a mouse affordance. */
+.chart-resize {
+  position: absolute; left: 0; right: 0; bottom: -6px; height: 10px;
+  cursor: ns-resize; touch-action: none;
+}
+.chart-resize::after {
+  content: ''; position: absolute; left: 50%; bottom: 3px; width: 40px; height: 3px;
+  transform: translateX(-50%); border-radius: 2px; background: var(--rule-2);
+}
+.chart-resize:hover::after, .chart-resize:focus-visible::after { background: var(--muted); }
+.chart-resize:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.chart-frame-body.resizing { user-select: none; }
+
 /* ---- horizontal bars (reject reasons) --------------------------------- */
 
 /* CORRECTION, the third and last. The spec puts the reasons in the RIGHT
@@ -1143,6 +1222,12 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
 
 @media print {
   .bar, .strip, .replay, .no-print, .scrim, .sheet, .wall, .toggle { display: none !important; } /* [PHASE 9 PRINT P5] .toggle added */
+  /* [CHART T3, 28 Sep 2026] Owner decision: print gets no tooltip, no drag
+     handle, no brush — fixed width, default height. `print.chart.guard.
+     test.ts` reads this rule off disk and fails if any of the three
+     classes is missing, the way `print.landscape.guard.test.ts` already
+     guards the Report aria-label coupling above. */
+  .chart-tip, .chart-resize, .chart-brush, .chart-brush-label { display: none !important; }
   body { font-size: 11pt; }
   .page { max-width: none; padding: 0; }
   .band { border-top: 0; }
