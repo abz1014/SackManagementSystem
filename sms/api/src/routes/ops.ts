@@ -23,12 +23,35 @@
  *
  * Both go through auditedWrite (services/audit.ts): the hash, the session
  * revocation and the audit row commit together or not at all.
+ *
+ * GET /api/data-batch?from&to (Task D, 28 Sep 2026) — rank 1, the same as
+ * everything else in this file. Answers one question only: which source
+ * generation does THIS window's figures come from, and is it the plant
+ * simulator. It is the server side of the global "simulated data" banner
+ * (`web/src/ui/SimulatorBanner.tsx`) — deliberately routed here rather than
+ * through `production.ts`/`app.ts` so it stays out of the file another
+ * worker owns this pass. Mounted from `mountOpsRoutes` for that reason only;
+ * it has nothing to do with passwords.
+ *
+ * Deliberately calls `resolveGenerationScope` directly, never
+ * `resolveLiveScope` — the banner's PERIOD half answers "what generation is
+ * this chosen date range's data drawn from", which must never move under the
+ * dev-only `LIVE_ALLOW_SIMULATOR` policy that only ever governs the LIVE
+ * half (`live.ts`'s `resolveLiveScope`/`setLiveScopeIncludesSimulator`). The
+ * default `preferReal: true` therefore always applies here: a period the
+ * simulator polluted still reports its real generation as the one in force,
+ * with the simulator rows folded into `excludedSimulator` — the shape every
+ * other report/register consumer already reads.
  */
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import type { RouteContext } from './context.js';
 import { requireRole, revokeSessions, sessionIdOf, type AuthedRequest } from '../auth.js';
 import { auditedWrite } from '../services/audit.js';
+import { envelope } from '../envelope.js';
+import { isoDate } from '../dates.js';
+import { MAX_RANGE_DAYS } from '../config.js';
+import { noteOf, resolveGenerationScope } from '../services/generation.js';
 import {
   hashPassword,
   passwordHashOf,
@@ -41,8 +64,73 @@ import {
 /** The default when the config was built without the key (hand-built test fixtures). */
 export const DEFAULT_PASSWORD_MIN_LENGTH = 10;
 
+/** One selectable source generation — mirrors `web/src/api.ts`'s `DataBatch`. */
+export interface DataBatch {
+  key: string;
+  ordinal: number | null;
+  sourceDb: string | null;
+  label: string | null;
+  simulator: boolean;
+  rows?: number;
+}
+export interface DataBatchData {
+  batches: DataBatch[];
+}
+
+/** Same cap as app.ts's validateRange, sacks.ts's rangeError, rejects.ts. */
+function rangeError(from: string, to: string): string | null {
+  if (from > to) return 'from must be <= to';
+  const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86_400_000) + 1;
+  if (days > MAX_RANGE_DAYS) return `range too large — max ${MAX_RANGE_DAYS} days, requested ${days}`;
+  return null;
+}
+
+const dataBatchQuery = z.object({
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+});
+
 export function mountOpsRoutes({ app, pool, cfg }: RouteContext): void {
   const minLength = cfg.passwordMinLength ?? DEFAULT_PASSWORD_MIN_LENGTH;
+
+  // ---- GET /api/data-batch — the source generation behind a window --------
+  app.get('/api/data-batch', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const q = dataBatchQuery.safeParse(req.query);
+      if (!q.success) {
+        res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
+        return;
+      }
+      const { from, to } = q.data;
+      if (from && to) {
+        const bad = rangeError(from, to);
+        if (bad) {
+          res.status(400).json({ error: bad });
+          return;
+        }
+      } else if ((from && !to) || (!from && to)) {
+        res.status(400).json({ error: 'from and to must both be given, or both omitted' });
+        return;
+      }
+      const scope = await resolveGenerationScope(pool, cfg.lineId, { from, to });
+      const note = noteOf(scope);
+      const batches: DataBatch[] = note.generation
+        ? [
+            {
+              key: note.generation.key,
+              ordinal: note.generation.ordinal,
+              sourceDb: note.generation.sourceDb,
+              label: note.generation.label,
+              simulator: note.generation.simulator,
+            },
+          ]
+        : [];
+      const data: DataBatchData = { batches };
+      res.json(await envelope(pool, cfg.lineId, data));
+    } catch (err) {
+      next(err);
+    }
+  });
   const actor = (req: Request) => (req as AuthedRequest).user!;
 
   // ---- self-service password change (any signed-in account) ----------------

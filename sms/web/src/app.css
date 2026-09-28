@@ -456,6 +456,16 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
 }
 .replay a { color: #fff; }
 
+/* Task D (28 Sep 2026) — the global "simulated data" notice
+   (ui/SimulatorBanner.tsx). Sits beside .replay above (same stripe shape,
+   same font size) but in the warn colour, never the ink one: a replay is a
+   deliberate, harmless viewing mode; simulated data is a fact about the
+   figures themselves that must read as a caution, not as chrome. */
+.simulator-banner {
+  padding: 7px 32px; background: var(--warn); color: var(--ink); font-size: var(--fs-small);
+  font-weight: 600;
+}
+
 /* ---- the page: one column, 1100px --------------------------------------- */
 
 .page { width: 100%; max-width: 1100px; margin: 0 auto; padding: 34px 32px 64px; }

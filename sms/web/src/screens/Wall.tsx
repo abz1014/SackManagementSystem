@@ -38,7 +38,8 @@ import { useEffect, useMemo } from 'react';
 import { LIVE_POLL_MS, useLive, usePlantNow, usePolling, useTicker } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
-import { hasNewerElsewhere, quietBecauseGenerationShort } from '../lib/generationWords';
+import { currentIsSimulator, hasNewerElsewhere, quietBecauseGenerationShort } from '../lib/generationWords';
+import { wallSimulatorNote } from '../lib/simulatorWords';
 import { fmtClock, fmtClockOn, fmtClockSec, fmtG, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { getAttention, getStations, type LiveLine } from '../api';
 
@@ -357,6 +358,15 @@ export function WallScreen({ onExit }: { onExit: () => void }) {
           {!outOfContact && hasNewerElsewhere(line.generation) && (
             <> · {quietBecauseGenerationShort(line.generation, fmtClockOn(line.dataAsOfUtc ?? line.plantNowUtc, line.plantNowUtc))}</>
           )}
+          {/* Task D (28 Sep 2026): the wall's own short form of the global
+              "simulated data" notice (ui/SimulatorBanner.tsx carries the
+              full sentences everywhere else). Appended, not a replacement —
+              same reasoning as the generation-ended note just above: both
+              can be true, and the lag sentence this follows is not the one
+              that is misleading. Never fires at IFL — currentIsSimulator
+              reads the same `generation.simulator` flag every other
+              simulator/real disclosure in this app reads. */}
+          {currentIsSimulator(line.generation) && <> · {wallSimulatorNote}</>}
         </span>
         <span>
           {line.lastSack && `${W.lastSack} ${fmtKg(line.lastSack.weightKg)} ${fmtClock(line.lastSack.ts)}`}

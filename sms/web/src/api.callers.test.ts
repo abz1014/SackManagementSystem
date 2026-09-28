@@ -58,9 +58,10 @@ const ALLOW_LIST: Record<string, string> = {
   // 21 Sep 2026) — UX Phase 7 Brief 3 wired both to Health's SyncHealthBlock
   // (DqSourceLink) and SystemHistoryBlock; the gap is closed.
 
-  // ---- (b) unreachable feature — client contract added ahead of its route ----
-  getDataBatch:
-    'GET /api/data-batch does not exist yet (28 Sep 2026) — this is the client contract only, added ahead of the route and the batch-picker screen so the two can be built independently. Remove this entry when a screen calls it.',
+  // getDataBatch was here (28 Sep 2026) — Task D wired it to
+  // ui/SimulatorBanner.tsx (the global "simulated data" notice's period
+  // half), and GET /api/data-batch now exists (api/src/routes/ops.ts). The
+  // gap is closed.
 };
 
 function listSourceFiles(dir: string): string[] {

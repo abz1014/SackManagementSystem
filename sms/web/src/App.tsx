@@ -25,6 +25,7 @@ import { W } from './lib/words';
 import { Bar, SCREENS, PRODUCT_TABS, type Screen, type ReadingsFilter, type ProductTab } from './ui/Bar';
 import { Loading } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { SimulatorBanner } from './ui/SimulatorBanner';
 import { LineScreen } from './screens/Line';
 import { ReadingsScreen, LISTINGS, type Listing } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
@@ -479,6 +480,13 @@ function Chrome({
           here already sits one click away from Line via the Bar that stays
           standing beside it. */}
       <ErrorBoundary key={screenKey} variant="default" label={route.view}>
+        {/* Task D (28 Sep 2026): the global "simulated data" notice. One
+            instance, beside the replay banner below, so every screen's
+            simulator/real disclosure is decided in one place. Renders
+            nothing on Setup, Wall (its own short form lives in Wall.tsx's
+            footer) or Product's non-Running tabs, and nothing at all at
+            IFL — see SimulatorBanner.tsx's own file header. */}
+        <SimulatorBanner view={route.view} productTab={route.productTab} from={period.from} to={period.to} />
         {line.replay && (
           <div className="replay no-print">
             <span>
