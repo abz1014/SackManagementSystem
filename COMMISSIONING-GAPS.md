@@ -29,10 +29,31 @@ or labelled superseded, not deleted, so the file shows its own history.
 
 ## 2. Wrong on screen today
 
-- MachineProduct report: ~82% of columns are off-screen with no sticky column or fallback (RT-017, unfixed) → ours
-- Product › Running shows a retired product with no "retired" marker while reports cite it as "the target" (RT-018, unfixed) → ours
-- No server-side response-size/row-count cap independent of SQL (RT-014, unfixed) → ours
+- ~~MachineProduct report: ~82% of columns are off-screen with no sticky column or fallback (RT-017, unfixed) → ours~~
+  **Superseded 28 Sep 2026:** fixed 25 Sep 2026, `fb9fd9d` — table transposed (machines
+  across, day×shift down) inside its own scroll box with a sticky header row and sticky
+  first column; verified present in `sms/web/src/screens/report/MachineProduct.tsx`. See
+  `DEFECTS.md` Part 8.
+- ~~Product › Running shows a retired product with no "retired" marker while reports cite it as "the target" (RT-018, unfixed) → ours~~
+  **Superseded 28 Sep 2026:** fixed 25 Sep 2026, `c52a34d` — a new `productActive` field is
+  carried by `machinesRunning.ts`, `weightStations.ts`, `/api/product-at`, and the
+  cone-weight/station/product/management-summary reports, shown as "(retired in PDAS)";
+  verified present in `sms/api/src/services/weightStations.ts:300,438`. See `DEFECTS.md`
+  Part 8.
+- ~~No server-side response-size/row-count cap independent of SQL (RT-014, unfixed) → ours~~
+  **Superseded 28 Sep 2026:** fixed 24 Sep 2026, `855045f` — `sms/api/src/middleware/
+  responseCap.ts`, wired at `app.ts:135` (`app.use(responseCap())`), ahead of RT-020/RT-017/
+  RT-018 despite the shared 25 Sep commit dates. See `DEFECTS.md` Part 7 and Part 8's own
+  correction of this file.
 - A calendar-invalid date (`2026-13-45`) crashes the DB driver instead of being validated by the app, on 9 of 9 endpoints tried (RT-016, unfixed) → ours
+  **Checked 28 Sep 2026: still open, no fix found.** No commit named "RT24-06" or "RT-016"
+  exists in `git log --all`; `DEFECTS.md` line 714 confirms "open — not addressed by this
+  wave." Text unchanged.
+- **Added 28 Sep 2026:** D-30 — Health's sync verdict, Bar's header alarm, Wall's per-line
+  dot, and `lib/health.ts`'s `assessHealth` all fell through to a false "OK"/"healthy" for
+  `lag_unknown`/`no_data`/a missing health kind. **Fixed 25 Sep 2026, `5b2b56a`** — now
+  exhaustive, unrecognised kinds read "could not be read"; verified present in
+  `sms/web/src/lib/health.ts:44,60-71`. See `DEFECTS.md` Part 8.
 - Nelson rules 2–8 flag 37.6–54.8% of station-groups on real data and stay deliberately suppressed pending an owner decision on one of four options (RT-019/`DEFECTS.md` D-10) → ours
 - `routes/reports.ts`'s `newestProductionDay()` anchor still pools every source generation when picking the "default" report day (D-11's report-layer fix covers the report bodies; this one anchor query was not in that list) → ours
 - **Added 24 Sep 2026, second audit (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`, `DEFECTS.md` Part 6):**
