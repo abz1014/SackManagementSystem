@@ -592,7 +592,7 @@ export const W = {
       insertedAt: 'Written by the plant',
       transform: 'Processing version',
       product: 'Product determined',
-      rawRow: 'Source row',
+      rawRow: 'Ingest record id',
       syncPass: 'Sync pass',
       nightRule: 'Night shift counted to',
       plantShift: 'Plant-stored shift',
