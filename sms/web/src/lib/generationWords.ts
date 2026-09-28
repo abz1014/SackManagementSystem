@@ -31,7 +31,7 @@ import type { LiveGenerationNote } from '../api';
 /** The generation's own name, as a person should read it. */
 export function generationName(g: LiveGenerationNote['generation']): string | null {
   if (!g) return null;
-  return g.label ?? g.sourceDb ?? `generation ${g.ordinal}`;
+  return g.label ?? g.sourceDb ?? `data copy ${g.ordinal}`;
 }
 
 /**
@@ -110,20 +110,20 @@ export function quietBecauseGenerationShort(n: LiveGenerationNote, newestClock: 
 export function healthGenerationLine(n: LiveGenerationNote): string | null {
   const mine = generationName(n.generation);
   if (!mine) return null;
-  return `Freshness, the acquisition lag and the newest reading above are all measured from ${mine}, one source generation.`;
+  return `Freshness, the acquisition lag and the newest reading above are all measured from ${mine}, one batch of recorded data.`;
 }
 
 /** What Health says about the rows it did NOT measure. Null when there are none. */
 export function healthExcludedLine(n: LiveGenerationNote, newerClock: string | null): string | null {
   if (!n.spansGenerations) return null;
-  const theirs = n.newerElsewhereLabel ?? n.newerElsewhereSourceDb ?? 'another source generation';
+  const theirs = n.newerElsewhereLabel ?? n.newerElsewhereSourceDb ?? 'another batch of recorded data';
   const rows = n.otherGenerationExcluded;
   const newer =
     newerClock == null
       ? ''
-      : ` The newest reading outside it is ${newerClock}, in ${theirs} — so a quiet Line or Wall screen means that generation has ended, not that the plant has.`;
+      : ` The newest reading outside it is ${newerClock}, in ${theirs} — so a quiet Line or Wall screen means that batch has ended, not that the plant has.`;
   return (
-    `${rows.toLocaleString()} reading${rows === 1 ? '' : 's'} on record belong to a different generation and were not ` +
+    `${rows.toLocaleString()} reading${rows === 1 ? '' : 's'} on record belong to a different batch and were not ` +
     `measured here.${newer}`
   );
 }
@@ -132,9 +132,9 @@ export function healthExcludedLine(n: LiveGenerationNote, newerClock: string | n
 export function machineGridGenerationLine(n: LiveGenerationNote, newerClock: string | null): string | null {
   const mine = generationName(n.generation);
   if (!mine) return null;
-  if (newerClock == null) return `Read from ${mine}, one source generation.`;
+  if (newerClock == null) return `Read from ${mine}, one data copy.`;
   return (
-    `Read from ${mine}, one source generation. Its readings end here; newer readings to ${newerClock} belong to ` +
-    `another generation and would put two tables' machines in one grid, so they are not shown.`
+    `Read from ${mine}, one data copy. Its readings end here; newer readings to ${newerClock} belong to ` +
+    `another data copy and would put two tables' machines in one grid, so they are not shown.`
   );
 }

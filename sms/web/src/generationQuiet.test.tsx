@@ -123,7 +123,7 @@ describe('the sentences themselves', () => {
 
   it('the machine grid names its window’s generation, with and without a newer one', () => {
     expect(machineGridGenerationLine(GENERATION_FIXTURE, null)).toBe(
-      'Read from September copy - cones, one source generation.',
+      'Read from September copy - cones, one data copy.',
     );
     const s = machineGridGenerationLine(ENDED, '12:29 PM 22 Sep')!;
     expect(s).toContain('12:29 PM 22 Sep');
@@ -150,9 +150,9 @@ describe('Health — SyncHealthBlock states the generation it measured from', ()
     installFakeFetch({ '/api/live': liveWith(ENDED), '/api/operations': OPERATIONS_FIXTURE });
     const { findByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
     await findByText(
-      'Freshness, the acquisition lag and the newest reading above are all measured from September copy - cones, one source generation.',
+      'Freshness, the acquisition lag and the newest reading above are all measured from September copy - cones, one batch of recorded data.',
     );
-    await findByText(/284,520 readings on record belong to a different generation/);
+    await findByText(/284,520 readings on record belong to a different batch/);
     await findByText(/not that the plant has/);
   });
 
@@ -161,8 +161,8 @@ describe('Health — SyncHealthBlock states the generation it measured from', ()
     // sentence there would be a false statement about their data.
     installFakeFetch({ '/api/live': liveWith(GENERATION_FIXTURE), '/api/operations': OPERATIONS_FIXTURE });
     const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
-    await findByText(/all measured from September copy - cones, one source generation\./);
-    expect(queryByText(/belong to a different generation/)).toBeNull();
+    await findByText(/all measured from September copy - cones, one batch of recorded data\./);
+    expect(queryByText(/belong to a different batch/)).toBeNull();
     expect(queryByText(/not that the plant has/)).toBeNull();
   });
 });
