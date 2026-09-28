@@ -279,19 +279,36 @@ interface NewerRow {
  * generation, so anything past it belongs to another one. That keeps this an
  * index seek on the merge index's leading columns and returns zero rows in
  * the ordinary case — which is the case on every poll at IFL.
+ *
+ * `self`, WHEN GIVEN, excludes the chosen generation's OWN rows from the
+ * answer (28 Sep 2026, Task T1). `machinesRunning.ts` anchors its tip on
+ * `sms.cone_event` alone (rule 1, this file's — its own — header), but this
+ * query unions cones AND rejects: a reject in the SAME generation that is
+ * newer than the cone-only tip used to win this MAX() and get reported as
+ * "newer elsewhere", even though it belongs to the very generation already
+ * being read. `self` is the chosen generation's own `(sourceDb, ordinal)`,
+ * so a row from it is filtered out rather than mistaken for a different one.
+ * Still never `NOT IN (…)` — the exclusion is a plain equality check on the
+ * two columns that key a generation, ORed with "no epoch row at all", which
+ * stays true (an unregistered epoch is never "self").
  */
 export async function findNewerElsewhere(
   pool: ConnectionPool,
   lineId: number,
   tipMs: number,
   nowMs: number,
+  self?: { sourceDb: string | null; ordinal: number } | null,
 ): Promise<Pick<LiveGenerationNote, 'newerElsewhereUtc' | 'newerElsewhereSourceDb' | 'newerElsewhereLabel' | 'newerElsewhereSimulator'>> {
-  const r = await pool
+  const req = pool
     .request()
     .input('line', mssql.Int, lineId)
     .input('tip', mssql.BigInt, tipMs)
-    .input('now', mssql.BigInt, nowMs)
-    .query<NewerRow>(`
+    .input('now', mssql.BigInt, nowMs);
+  if (self) {
+    req.input('selfDb', mssql.NVarChar, self.sourceDb);
+    req.input('selfOrd', mssql.Int, self.ordinal);
+  }
+  const r = await req.query<NewerRow>(`
       SELECT TOP 1 e.source_db AS sourceDb, e.provenance AS provenance, e.label AS label, MAX(t.ms) AS ms
         FROM (
           SELECT production_ts_utc_ms AS ms, source_epoch FROM sms.cone_event
@@ -301,6 +318,7 @@ export async function findNewerElsewhere(
            WHERE line_id = @line AND production_ts_utc_ms > @tip AND production_ts_utc_ms <= @now
         ) t
         LEFT JOIN sms.source_epoch e ON e.epoch_id = t.source_epoch
+        ${self ? `WHERE e.epoch_id IS NULL OR ISNULL(e.source_db, N'') <> @selfDb OR ISNULL(e.generation_ordinal, -1) <> @selfOrd` : ''}
        GROUP BY e.source_db, e.provenance, e.label
        ORDER BY MAX(t.ms) DESC`);
   const row = r.recordset[0];
@@ -772,9 +790,15 @@ export async function getLive(
   // Why the screens are quiet, when they are. Only asked once there IS a tip
   // to be newer than, and only when the window genuinely holds more than one
   // generation — so the ordinary single-generation poll pays nothing.
+  //
+  // `self` excludes the chosen generation's own rows: this query unions
+  // cones AND rejects (dataAsOfMs's tip does too), so without it a reject
+  // newer than the cone-only anchor elsewhere in machinesRunning.ts could
+  // self-report — see findNewerElsewhere's own doc comment.
+  const self = scope.generation ? { sourceDb: scope.generation.sourceDb, ordinal: scope.generation.ordinal } : null;
   const newerElsewhere =
     dataAsOfMs != null && scope.spansGenerations
-      ? await findNewerElsewhere(pool, lineId, dataAsOfMs, nowMs)
+      ? await findNewerElsewhere(pool, lineId, dataAsOfMs, nowMs, self)
       : {
           newerElsewhereUtc: null,
           newerElsewhereSourceDb: null,

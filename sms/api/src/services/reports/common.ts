@@ -185,8 +185,8 @@ export function generationDisclosureLines(h: Pick<ReportHeader, 'spansGeneration
   const simPart =
     sim === 0 ? '' : sim === count ? `, all from the plant simulator (${SIMULATOR_DB_HINT})` : `, of which ${sim} from the plant simulator (${SIMULATOR_DB_HINT})`;
   return [
-    `Source generation: ${h.sourceGeneration ?? 'unknown'}`,
-    `Excluded from other generation: ${count} readings${pctPart}${simPart}`,
+    `Data batch: ${h.sourceGeneration ?? 'unknown'}`,
+    `Excluded from another data batch: ${count} readings${pctPart}${simPart}`,
   ];
 }
 

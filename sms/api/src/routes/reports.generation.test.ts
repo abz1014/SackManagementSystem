@@ -191,8 +191,8 @@ describe('generation disclosure reaches real exports (RT24-03 route fix)', () =>
     expect(disposition).toContain('-partial-generation');
     expect(disposition).toMatch(/-partial-generation\.csv"$/);
     const text = await res.text();
-    expect(text).toContain('Source generation: DATA_TP1U2_SEP07#2');
-    expect(text).toContain('Excluded from other generation: 4321 readings');
+    expect(text).toContain('Data batch: DATA_TP1U2_SEP07#2');
+    expect(text).toContain('Excluded from another data batch: 4321 readings');
   });
 
   it('a boundary-spanning report: the XLSX header sheet carries the disclosure row and the filename carries -partial-generation', async () => {
@@ -210,7 +210,7 @@ describe('generation disclosure reaches real exports (RT24-03 route fix)', () =>
     // reportSheets/buildXlsx — its shared-strings-free inline text carries
     // the same disclosure wording `headerSheet` (xlsx.ts) writes.
     const allText = entries.filter((e) => e.name.endsWith('.xml')).map((e) => e.data.toString('utf8')).join('\n');
-    expect(allText).toContain('Source generation: DATA_TP1U2_SEP07#2');
+    expect(allText).toContain('Data batch: DATA_TP1U2_SEP07#2');
   });
 
   it('a boundary-spanning report: the JSON header also carries spansGenerations (the route\'s own primary path)', async () => {
@@ -229,7 +229,7 @@ describe('generation disclosure reaches real exports (RT24-03 route fix)', () =>
     const csv = await fetch(`${base}/api/reports/daily/export?${Q}&format=csv`, { headers: { Cookie: cookie } });
     expect(csv.headers.get('content-disposition')).not.toContain('-partial-generation');
     const csvText = await csv.text();
-    expect(csvText).not.toContain('Source generation');
+    expect(csvText).not.toContain('Data batch');
 
     vi.mocked(getDailyReport).mockResolvedValue(fixture(false));
     const xlsx = await fetch(`${base}/api/reports/daily/export?${Q}&format=xlsx`, { headers: { Cookie: cookie } });

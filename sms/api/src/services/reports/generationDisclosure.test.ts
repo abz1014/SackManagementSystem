@@ -51,14 +51,14 @@ describe.each(REPORT_TYPES)('generation disclosure — %s', (type) => {
     it('attributionRows carries exactly the original 9 rows, no disclosure rows', () => {
       const rows = attributionRows(header);
       expect(rows).toHaveLength(NON_SPANNING_TRAILING_ROW_COUNT);
-      expect(rows.some(([k]) => k.includes('Source generation'))).toBe(false);
-      expect(rows.some(([k]) => k.includes('Excluded from other generation'))).toBe(false);
+      expect(rows.some(([k]) => k.includes('Data batch'))).toBe(false);
+      expect(rows.some(([k]) => k.includes('Excluded from another data batch'))).toBe(false);
     });
 
     it('csvDocument trailing block is unaffected', () => {
       const doc = csvDocument(['a'], [[1]], header);
-      expect(doc).not.toContain('Source generation');
-      expect(doc).not.toContain('Excluded from other generation');
+      expect(doc).not.toContain('Data batch');
+      expect(doc).not.toContain('Excluded from another data batch');
     });
 
     it('reportFilename carries no -partial-generation marker', () => {
@@ -70,8 +70,8 @@ describe.each(REPORT_TYPES)('generation disclosure — %s', (type) => {
     it('headerSheet (XLSX) carries no disclosure row', () => {
       const sheet = headerSheet(header);
       const values = sheet.rows.map((r) => String(r.item ?? '') + String(r.value ?? ''));
-      expect(values.some((v) => v.includes('Source generation'))).toBe(false);
-      expect(values.some((v) => v.includes('Excluded from other generation'))).toBe(false);
+      expect(values.some((v) => v.includes('Data batch'))).toBe(false);
+      expect(values.some((v) => v.includes('Excluded from another data batch'))).toBe(false);
     });
 
     it('generationDisclosureLines (the PDF/print wording source) is null', () => {
@@ -82,23 +82,23 @@ describe.each(REPORT_TYPES)('generation disclosure — %s', (type) => {
   describe('spanning (the disclosure must appear everywhere)', () => {
     const header = makeHeader(type, true);
 
-    it('attributionRows\' trailing block contains "Source generation" and "Excluded from other generation" lines', () => {
+    it('attributionRows\' trailing block contains "Data batch" and "Excluded from another data batch" lines', () => {
       const rows = attributionRows(header);
-      expect(rows.some(([k]) => k.startsWith('Source generation: DATA_TP1U2_SEP07#2'))).toBe(true);
-      expect(rows.some(([k]) => k.startsWith('Excluded from other generation: 4321 readings (12.3%)'))).toBe(true);
+      expect(rows.some(([k]) => k.startsWith('Data batch: DATA_TP1U2_SEP07#2'))).toBe(true);
+      expect(rows.some(([k]) => k.startsWith('Excluded from another data batch: 4321 readings (12.3%)'))).toBe(true);
     });
 
     it('csvDocument\'s CSV text carries both lines after the blank-line trailing block, never as a leading comment header', () => {
       const doc = csvDocument(['a'], [[1]], header);
-      expect(doc).toContain('Source generation');
-      expect(doc).toContain('Excluded from other generation');
+      expect(doc).toContain('Data batch');
+      expect(doc).toContain('Excluded from another data batch');
       expect(doc.startsWith('#')).toBe(false);
       const sep = doc.indexOf('\n\n');
       expect(sep).toBeGreaterThan(-1);
       const table = doc.slice(0, sep);
       const trailing = doc.slice(sep + 2);
-      expect(table).not.toContain('Source generation');
-      expect(trailing).toContain('Source generation');
+      expect(table).not.toContain('Data batch');
+      expect(trailing).toContain('Data batch');
     });
 
     it('reportFilename carries the -partial-generation marker for every export extension', () => {
@@ -111,15 +111,15 @@ describe.each(REPORT_TYPES)('generation disclosure — %s', (type) => {
     it('headerSheet (XLSX) carries a row with the same disclosure text', () => {
       const sheet = headerSheet(header);
       const values = sheet.rows.map((r) => String(r.item ?? ''));
-      expect(values.some((v) => v.startsWith('Source generation: DATA_TP1U2_SEP07#2'))).toBe(true);
-      expect(values.some((v) => v.startsWith('Excluded from other generation: 4321 readings (12.3%)'))).toBe(true);
+      expect(values.some((v) => v.startsWith('Data batch: DATA_TP1U2_SEP07#2'))).toBe(true);
+      expect(values.some((v) => v.startsWith('Excluded from another data batch: 4321 readings (12.3%)'))).toBe(true);
     });
 
     it('generationDisclosureLines (the PDF/print wording source, read verbatim by PrintHead.tsx) states both facts', () => {
       const lines = generationDisclosureLines(header);
       expect(lines).not.toBeNull();
-      expect(lines![0]).toBe('Source generation: DATA_TP1U2_SEP07#2');
-      expect(lines![1]).toBe('Excluded from other generation: 4321 readings (12.3%)');
+      expect(lines![0]).toBe('Data batch: DATA_TP1U2_SEP07#2');
+      expect(lines![1]).toBe('Excluded from another data batch: 4321 readings (12.3%)');
     });
   });
 });
@@ -129,13 +129,13 @@ describe('generationDisclosureLines — edge cases', () => {
     const header = makeHeader('daily', true);
     header.otherGenerationExcluded = { count: 7, percent: null };
     const lines = generationDisclosureLines(header)!;
-    expect(lines[1]).toBe('Excluded from other generation: 7 readings');
+    expect(lines[1]).toBe('Excluded from another data batch: 7 readings');
   });
 
   it('states "unknown" for the generation label when none is known, rather than omitting the line', () => {
     const header = makeHeader('daily', true);
     header.sourceGeneration = null;
     const lines = generationDisclosureLines(header)!;
-    expect(lines[0]).toBe('Source generation: unknown');
+    expect(lines[0]).toBe('Data batch: unknown');
   });
 });
