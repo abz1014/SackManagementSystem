@@ -711,7 +711,7 @@ worker has run against a database for a while — carried here so that follow-up
 | RT-013 | HIGH | Wall's per-station bars silently rendered a stripped field as "quiet", the one screen with no drilldown | **fixed** — `add32c5` (same commit as RT-012's Wall half) |
 | RT-014 | HIGH | No server-side response-size/row-count cap independent of SQL (DoS-adjacent) | **open — not addressed by this wave.** No commit among the fifteen touches request/response size limiting; grepped for `MAX_ROWS`/size-limit middleware, none found added. Carried into `COMMISSIONING-GAPS.md`. |
 | RT-015 | HIGH | Malformed/missing/null production rows silently coerced to zero, server-side | **fixed, at least for the two files exercised: `production.ts` and `register.ts`.** `71757a3` (`production.ts::readNum`), `410c179` (`register.ts::foldGenerationTally`/`countEvents`, a second NaN→null defect found mid-pass, see D-19 below). Not confirmed fixed everywhere the audit may have meant — no full-repo sweep for the same `?? 0` / bare `Number()` pattern was done this pass. |
-| RT-016 | MEDIUM/HIGH (audit rated as calendar-invalid-date crash) | A calendar-invalid date crashes the DB driver instead of app-level validation, on 9 of 9 endpoints tried | **open — not addressed by this wave.** No date-validation commit among the fifteen. |
+| RT-016 | MEDIUM/HIGH (audit rated as calendar-invalid-date crash) | A calendar-invalid date crashes the DB driver instead of app-level validation, on 9 of 9 endpoints tried | **open — not addressed by this wave.** No date-validation commit among the fifteen. **Fixed 28 Sep 2026, all three surfaces — query timestamps (`5d42cf5`), query dates (`11ce30b`, predates this wave), sack-stock form field (`60d397f`) — see Part 9.** |
 | RT-017 | HIGH | MachineProduct report clips ~82% of its columns on screen, no in-app fallback | **fixed 25 Sep 2026**, `fb9fd9d` — see Part 8 |
 | RT-018 | HIGH | A retired product is shown as the live weight target with no marker | **fixed 25 Sep 2026**, `c52a34d` — see Part 8 |
 | RT-019 | HIGH | Nelson rules, unsuppressed, flag 78.6% of stations / 12.7% of station-days | **closed 25 Sep 2026 as a decision, by evidence: rules 2–8 stay withheld; EWMA was tried at two granularities and failed on real data** — see Part 8. Original status: **open, owner decision pending** — this is the same item as `DEFECTS.md` D-10's "Rules 2-8 stay suppressed" resolution (23 Sep, predates this wave): four options were put to the owner, none chosen yet. Re-measured this wave at 37.6–54.8% on real generations after the limit-model replacement (still noise, still withheld). |
@@ -785,7 +785,7 @@ A 200 response with `count` itself deleted (the RT-005 shape, applied to a diffe
 ### What this worker did NOT get to, named rather than left implicit
 
 - **RT-030** (`CLAUDE.md`'s stale clock-fault-row count) was not corrected this pass — `CLAUDE.md` is shared with several other workers today and this pass prioritised the three files it was explicitly assigned. Left for a follow-up pass that owns a `CLAUDE.md` hunk cleanly.
-- **RT-014, RT-016, RT-017, RT-018, RT-020, RT-025, RT-026, RT-027, RT-028, RT-031, RT-034** are unaddressed by any of the fifteen commits — confirmed by reading each, not assumed from the absence of a matching commit message. Carried into `COMMISSIONING-GAPS.md` §2 and this table above.
+- **RT-014, RT-016, RT-017, RT-018, RT-020, RT-025, RT-026, RT-027, RT-028, RT-031, RT-034** are unaddressed by any of the fifteen commits — confirmed by reading each, not assumed from the absence of a matching commit message. Carried into `COMMISSIONING-GAPS.md` §2 and this table above. **(RT-016 since fixed, 28 Sep 2026 — see Part 9. The rest of this list is as it stood on 23 Sep 2026 and is not otherwise updated here; see the per-item table above and later Parts for each one's current status.)**
 - **RT-023** (stale running process) is an operational fact this worker cannot check from source alone — marked cannot-determine, not fixed and not disproven.
 - No independent re-verification of RT-008's "five live sites" resolution was done this pass beyond reading `generation.ts` and its call sites; the live numbers in Part 3's D-11 above are from the pass that produced them, not re-measured here.
 
@@ -1278,3 +1278,53 @@ period", not zeros. Renders take 1.2–2.3 s. With Edge missing the route return
 `npx vitest run` from `sms/` on committed HEAD `39c2c37`: **208 files passed / 1 skipped,
 2,137 tests passed / 4 skipped, 0 failed** (Part 7 recorded 2,088). `npm run typecheck`, all five
 workspaces: clean.
+
+---
+
+## Part 9 — 28 Sep 2026: RT-016 closed
+
+### RT-016 — calendar-invalid date reaches the DB driver / silently rolls over — **fixed, all three surfaces**
+
+RT-016 (`ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md:712`) named a calendar-invalid date
+(`2026-13-45`) crashing the DB driver on 9 of 9 endpoints tried. This carried as **open** through
+Part 4 (line 714 above), the 25 Sep 2026 Part 8 pass, and a 28 Sep 2026 doc-correction commit
+(`083a750`/`26151a5`) that re-checked `git log --all` for a fix and found none. It is closed now,
+by three separate fixes covering the three places a value like this entered the app, landed on
+three different dates:
+
+1. **Query-string timestamp params** (`tsTo`/`tsFrom`/`asOf`/`at` etc. across `app.ts` and
+   `routes/{sacks,rejects,reports,cone}.ts`) — **fixed 28 Sep 2026, `5d42cf5`.** Adds
+   `isoTimestamp` (`api/src/dates.ts`): shape regex, then round-trip through `Date` and compare
+   the Y-M-D-h-m-s fields. Proven red first (73 failures, including bare 500s, against the
+   pre-fix regex-only validator) then green. Suite at that commit: 2,270 passed / 4 skipped.
+2. **Query-string date-only params** (`from`/`to`/`date`/`day`) — **fixed earlier, `11ce30b`**
+   (`isoDate` in `api/src/dates.ts`, same round-trip technique). This predates both the 23 Sep
+   audit's fix wave and `5d42cf5`; it is `RT24-06`'s own fix, and per `DEFECTS.md` line 920 and
+   `CLAUDE.md`'s prior correction it is a **distinct, non-crashing sibling** of RT-016 (a silent
+   empty `200` rather than a driver crash) — named here because it closes one of RT-016's three
+   surfaces, not because it was ever the same finding.
+3. **The sack-stock movement form's `occurredAtPlant` field** (`POST
+   /api/sack-stock/movements`, `web/src/screens/Sacks.tsx:714`'s `datetime-local` input) —
+   **fixed 28 Sep 2026, `60d397f`.** `api/src/services/sackStock.ts::parsePlantLocal` NaN-guarded
+   `Invalid Date` but otherwise trusted `new Date(...)`'s calendar arithmetic, so
+   `2026-02-30T10:00` silently became `2026-03-02T10:00` instead of being refused — the same
+   rollover shape RT-016 named, on a form field rather than a query param, and not covered by
+   either `isoTimestamp` or `isoDate` (this field is neither: no `Z`, seconds optional). Fixed
+   with the same round-trip technique, now returning the DB driver never sees the value: the 400
+   `occurredAtPlant must be a plant-clock time like ...` path (`validateMovement`) fires before
+   any query runs. Proven red first (3 of the new test cases failed against the pre-fix
+   function: 2026-02-30, hour 24, and 2026-02-29 in non-leap 2026, all silently rolled over)
+   then green; the web form's actual values (`Sacks.tsx:714`, no seconds, no `Z`) still parse
+   unchanged.
+
+**All three of RT-016's surfaces this repo has found are now validated before reaching the DB
+driver or rolling over silently.** No fourth surface is known; this was not a full-repo grep for
+every remaining shape-only date/time regex, only the three named above (the two `dates.ts`
+exports' call sites, and the one form field this pass was assigned).
+
+`npx vitest run` from `sms/`, HEAD `60d397f`: **2,277 passed / 4 skipped** (>= 2,270 carried
+from `5d42cf5`). `npm run typecheck`, all five workspaces: clean.
+
+`COMMISSIONING-GAPS.md` §2, `PROJECT_STATUS.md` and `CLAUDE.md` each carried RT-016 as open (the
+last two as of a same-day, earlier doc-correction pass) and are corrected in place, in this
+file's own convention (old text kept, a dated note added), not rewritten.

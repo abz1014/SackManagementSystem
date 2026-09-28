@@ -45,10 +45,14 @@ or labelled superseded, not deleted, so the file shows its own history.
   responseCap.ts`, wired at `app.ts:135` (`app.use(responseCap())`), ahead of RT-020/RT-017/
   RT-018 despite the shared 25 Sep commit dates. See `DEFECTS.md` Part 7 and Part 8's own
   correction of this file.
-- A calendar-invalid date (`2026-13-45`) crashes the DB driver instead of being validated by the app, on 9 of 9 endpoints tried (RT-016, unfixed) → ours
-  **Checked 28 Sep 2026: still open, no fix found.** No commit named "RT24-06" or "RT-016"
+- ~~A calendar-invalid date (`2026-13-45`) crashes the DB driver instead of being validated by the app, on 9 of 9 endpoints tried (RT-016, unfixed) → ours~~
+  ~~**Checked 28 Sep 2026: still open, no fix found.** No commit named "RT24-06" or "RT-016"
   exists in `git log --all`; `DEFECTS.md` line 714 confirms "open — not addressed by this
-  wave." Text unchanged.
+  wave." Text unchanged.~~
+  **Superseded later the same day, 28 Sep 2026:** fixed, all three surfaces — query-string
+  timestamps (`5d42cf5`), query-string dates (`11ce30b`, predates both this note and the 23 Sep
+  fix wave), and the sack-stock movement form's `occurredAtPlant` field
+  (`sms/api/src/services/sackStock.ts::parsePlantLocal`, `60d397f`). See `DEFECTS.md` Part 9.
 - **Added 28 Sep 2026:** D-30 — Health's sync verdict, Bar's header alarm, Wall's per-line
   dot, and `lib/health.ts`'s `assessHealth` all fell through to a false "OK"/"healthy" for
   `lag_unknown`/`no_data`/a missing health kind. **Fixed 25 Sep 2026, `5b2b56a`** — now

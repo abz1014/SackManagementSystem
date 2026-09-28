@@ -158,7 +158,12 @@ in `PROJECT_STATUS.md`; see that file's phase board. **(Fixed the next day, 24 S
 Part 7. Noted here 28 Sep 2026; this passage otherwise describes the 23 Sep state and is left
 as written.)** RT-016 (an invalid calendar date crashes
 the DB driver) **[checked 28 Sep 2026: still open — no fix commit found; `RT24-06`/`11ce30b`
-is a distinct, related finding per `DEFECTS.md` line 920, not a fix for RT-016 itself]**,
+is a distinct, related finding per `DEFECTS.md` line 920, not a fix for RT-016 itself —
+fixed later the same day, all three surfaces: `5d42cf5` (query-string timestamps), `11ce30b`
+itself now also counted (query-string dates, predates this wave), and `60d397f`
+(`sms/api/src/services/sackStock.ts::parsePlantLocal`, the sack-stock movement form's
+`occurredAtPlant` field). See `DEFECTS.md` Part 9. Do not read the "still open" clause above
+as current]**,
 RT-017 (MachineProduct's on-screen column clipping — distinct from this file's
 own Phase 9 entry below, which suppressed it only in *print*) **(Fixed 25 Sep 2026, `fb9fd9d`;
 see DEFECTS.md Part 8)**, RT-018 (a retired product shown

@@ -252,7 +252,11 @@ without re-checking `DEFECTS.md` Part 4):** RT-014 (no response-size cap —
 **fixed 24 Sep 2026, `855045f`, see §2's dated entry above; do not read this
 line as current**),
 RT-016 (an invalid calendar date crashes the DB driver instead of being
-validated — **checked 28 Sep 2026: still open, no fix commit found**), RT-017
+validated — **checked 28 Sep 2026: still open, no fix commit found; fixed
+later the same day, all three surfaces — `5d42cf5` (query timestamps),
+`11ce30b` (query dates, predates this wave), `60d397f` (sack-stock form
+field) — see DEFECTS.md Part 9; do not read the "still open" clause as
+current**), RT-017
 (MachineProduct's on-screen column clipping — distinct
 from CLAUDE.md's Phase 9, which only suppressed it in *print* —
 **fixed 25 Sep 2026, `fb9fd9d`, see DEFECTS.md Part 8; do not read this line
