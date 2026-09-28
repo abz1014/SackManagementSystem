@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { exportEventsCsv, getEventDetail, listEvents } from './register.js';
+import { UNSCOPED } from './generation.js';
 import type { StateContext } from './coneState.js';
 
 interface Captured { sql: string; params: Map<string, unknown> }
@@ -44,7 +45,7 @@ const answer = (sql: string) => (sql.includes('COUNT(*)') ? [{ n: 1 }] : [{ even
 describe('listEvents — state', () => {
   it('emits a state column for cones when a classification context is given', async () => {
     const { pool, calls } = recordingPool(answer);
-    const page = await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX });
+    const page = await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX }, UNSCOPED);
     const rows = calls.find((c) => c.sql.includes('OFFSET'))!;
     expect(rows.sql).toMatch(/\) AS state FROM sms\.cone_event e/);
     expect(rows.sql).toContain("WHEN e.in_range = 0 THEN 'rejected'");
@@ -55,15 +56,15 @@ describe('listEvents — state', () => {
 
   it('emits no state column without a context, and never for sacks or rejects', async () => {
     const { pool, calls } = recordingPool(answer);
-    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 });
-    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX });
-    await listEvents(pool, 1, 'reject', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX });
+    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 }, UNSCOPED);
+    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX }, UNSCOPED);
+    await listEvents(pool, 1, 'reject', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX }, UNSCOPED);
     for (const c of calls) expect(c.sql).not.toContain('AS state');
   });
 
   it('filters by the SAME CASE: `(CASE …) IN (@state0, @state1)` with the names bound', async () => {
     const { pool, calls } = recordingPool(answer);
-    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX, states: ['low', 'high'] });
+    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX, states: ['low', 'high'] }, UNSCOPED);
     const count = calls[0]!;
     expect(count.sql).toMatch(/\(CASE WHEN e\.weight_g IS NULL[^]*END\) IN \(@state0, @state1\)/);
     expect(count.params.get('state0')).toBe('low');
@@ -77,15 +78,15 @@ describe('listEvents — state', () => {
 
   it('an empty state list, or a list with no context, matches nothing rather than everything', async () => {
     const { pool, calls } = recordingPool(answer);
-    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX, states: [] });
+    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX, states: [] }, UNSCOPED);
     expect(calls[0]!.sql).toContain('1 = 0');
-    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, states: ['within'] });
+    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, states: ['within'] }, UNSCOPED);
     expect(calls[2]!.sql).toContain('1 = 0');
   });
 
   it('ignores a state filter on sacks — they have no classification', async () => {
     const { pool, calls } = recordingPool(answer);
-    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX, states: ['rejected'] });
+    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, classification: CTX, states: ['rejected'] }, UNSCOPED);
     expect(calls[0]!.sql).not.toContain('CASE');
     expect(calls[0]!.sql).not.toContain('1 = 0');
   });
@@ -94,9 +95,9 @@ describe('listEvents — state', () => {
 describe('listEvents — product', () => {
   it('filters cones and rejects by material_id, never sacks', async () => {
     const { pool, calls } = recordingPool(answer);
-    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, product: 14 });
-    await listEvents(pool, 1, 'reject', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, product: 14 });
-    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, product: 14 });
+    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, product: 14 }, UNSCOPED);
+    await listEvents(pool, 1, 'reject', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, product: 14 }, UNSCOPED);
+    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50, product: 14 }, UNSCOPED);
     expect(calls[0]!.sql).toContain('e.material_id = @product');
     expect(calls[0]!.params.get('product')).toBe(14);
     expect(calls[2]!.sql).toContain('e.material_id = @product');
@@ -105,8 +106,8 @@ describe('listEvents — product', () => {
 
   it('cone and reject rows carry product_name from the mirror; sacks do not join it', async () => {
     const { pool, calls } = recordingPool(answer);
-    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 });
-    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 });
+    await listEvents(pool, 1, 'cone', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 }, UNSCOPED);
+    await listEvents(pool, 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 }, UNSCOPED);
     expect(calls[1]!.sql).toContain('AS product_name');
     expect(calls[1]!.sql).toContain('LEFT JOIN sms.product p ON p.product_id = e.material_id');
     expect(calls[3]!.sql).not.toContain('sms.product p');
@@ -125,7 +126,7 @@ describe('detail and CSV carry the same state', () => {
     const { pool, calls } = recordingPool(() => [
       { event_id: 1, weight_g: 1900, in_range: true, state: 'low', prov_source_system: 'ifl_sql', prov_epoch_label: 'x' },
     ]);
-    const { csv } = await exportEventsCsv(pool, 1, 'cone', { sort: 'time', dir: 'desc', classification: CTX, states: ['low'] });
+    const { csv } = await exportEventsCsv(pool, 1, 'cone', { sort: 'time', dir: 'desc', classification: CTX, states: ['low'] }, UNSCOPED);
     // Selected by SHAPE, not by position: since 23 Sep 2026 the export also
     // runs a generation tally first (register.ts, RegisterPage's header), and
     // that one is a COUNT with no column list to carry `state`.

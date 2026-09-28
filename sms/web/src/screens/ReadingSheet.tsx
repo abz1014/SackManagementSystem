@@ -33,6 +33,7 @@ import { useEffect, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Details, Loading } from '../ui/bits';
 import { W } from '../lib/words';
+import { batchName } from '../lib/batchName';
 import { fmtAppInstant, fmtClock, fmtClockSec, fmtDayLong, fmtG, fmtKg } from '../lib/fmt';
 import { describeAttribution } from '../lib/provenance';
 import {
@@ -101,7 +102,7 @@ export function ReadingSheet({
 
         let around: State['around'] = null;
         if (type === 'sack') {
-          around = await conesSincePreviousSack(row.production_ts_utc);
+          around = await conesSincePreviousSack(row.production_ts_utc, row.provenance?.epochId ?? null);
           if (cancelled) return;
         }
         setS({ row, product, stations: stations.stations, around, error: null });
@@ -331,7 +332,11 @@ function ProvenanceBlock({ row }: { row: RegisterRow }) {
                 rebuild the id alone names two rows, and until Phase 3 the
                 label was on Setup, three screens away from the id. */}
             <dt>{L.generation}</dt>
-            <dd>{p.epochLabel ?? dash}</dd>
+            {/* Task B (28 Sep 2026): a plain batch name ("IFL data batch 3")
+                when the server sent the pair it takes — the raw table label
+                ("pack1_TP1U2 gen 4") is a debugging detail, not a reader-
+                facing name. Falls back to the label for an older server. */}
+            <dd>{p.epochOrdinal != null ? batchName({ ordinal: p.epochOrdinal, simulator: !!p.epochSimulator }) : (p.epochLabel ?? dash)}</dd>
             <dt>{L.sourceRow}</dt>
             <dd>{id(p.sourceRowId)}</dd>
             <dt>{L.insertedAt}</dt>
@@ -385,9 +390,20 @@ function describeMiss(byG: number): string {
  * and this runs once, when somebody opens a sheet. If no earlier sack exists
  * the answer is simply not shown, rather than silently substituting a window
  * of arbitrary length and presenting it as the same fact.
+ *
+ * Task B (28 Sep 2026): both requests carry `batch=epoch:<this sack's own
+ * epochId>` — the shape `resolveGenerationScope`'s `opts.key` exists for.
+ * Without it, `?type=sack&tsTo=…` with no `from`/`to` resolves the register's
+ * OWN 'auto' default over an unbounded window, which need not be the same
+ * generation the sack on screen belongs to; the "cones since the previous
+ * sack" count would then silently mix two source generations, exactly the
+ * pooling this whole task closes everywhere else. Scoping both calls to the
+ * open sack's own generation keeps "the previous sack" and "the cones
+ * between them" describing the same physical table.
  */
-async function conesSincePreviousSack(sackTs: string): Promise<{ cones: number; sinceUtc: string } | null> {
-  const prev = await getEvents({ type: 'sack', tsTo: sackTs, pageSize: 2, sort: 'time', dir: 'desc' });
+async function conesSincePreviousSack(sackTs: string, epochId: number | null): Promise<{ cones: number; sinceUtc: string } | null> {
+  const batch = epochId != null ? `epoch:${epochId}` : undefined;
+  const prev = await getEvents({ type: 'sack', tsTo: sackTs, pageSize: 2, sort: 'time', dir: 'desc', batch });
   const previous = prev.data.rows.find((r) => r.production_ts_utc < sackTs);
   if (!previous) return null;
   const cones = await getEvents({
@@ -395,6 +411,7 @@ async function conesSincePreviousSack(sackTs: string): Promise<{ cones: number; 
     tsFrom: previous.production_ts_utc,
     tsTo: sackTs,
     pageSize: 1,
+    batch,
   });
   return { cones: cones.data.total, sinceUtc: previous.production_ts_utc };
 }

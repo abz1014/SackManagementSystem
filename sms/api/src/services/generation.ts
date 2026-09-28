@@ -214,25 +214,41 @@ export interface GenerationWindow {
  *
  * `opts.preferReal` (28 Sep 2026, Task T1): LIVE SCOPE ONLY, DEV ONLY. Every
  * period-scoped report/analytics call site keeps the true default (prefer a
- * real generation over a simulator one, unconditionally — the owner's 23 Sep
+ * real generation over a simulator one, unconditionally -- the owner's 23 Sep
  * 2026 decision, unchanged for anything a viewer reads about a chosen
  * period). The ONLY caller that ever passes `preferReal: false` is
  * `live.ts`'s `resolveLiveScope`, and only while `LIVE_ALLOW_SIMULATOR` is
  * both requested AND verified local-only (`config.ts`'s
- * `resolveLiveSimulator`) — see `setLiveScopeIncludesSimulator` there. This
+ * `resolveLiveSimulator`) -- see `setLiveScopeIncludesSimulator` there. This
  * does not change what a report, register or reject chart may show; it only
  * changes which generation the live "now" screens poll on a development
  * machine that runs the plant simulator alongside a frozen real copy.
+ *
+ * `opts.key` (28 Sep 2026, Task B -- the Readings/Sacks register's own
+ * default-to-one-batch rule): overrides the auto "newest, preferring real"
+ * choice with an EXPLICIT generation, addressed either by its own
+ * `GenerationRef.key` (`${sourceDb}#${ordinal}`) or by `epoch:<id>`, naming
+ * one `sms.source_epoch` row and letting a caller resolve that row's own
+ * generation without knowing its key up front -- the shape `ReadingSheet.tsx`
+ * needs for "cones since the previous sack", scoped to that sack's own
+ * generation. `'auto'` or omitted keeps the default unchanged. A key naming a
+ * real generation with NO rows in this exact window still resolves -- to that
+ * generation, honestly holding zero rows here -- rather than falling through
+ * to "unconstrained", which would silently pool every generation back
+ * together, the one thing an explicit batch choice must never do. A key
+ * naming no generation this line has ever registered gets `NO_MATCH_SCOPE`:
+ * a scope that matches nothing, never one that pools everything.
  */
 export async function resolveGenerationScope(
   pool: ConnectionPool,
   lineId: number,
   window: GenerationWindow,
   tables: readonly EventTable[] = EVENT_TABLES,
-  opts: { preferReal?: boolean } = {},
+  opts: { preferReal?: boolean; key?: string } = {},
 ): Promise<GenerationScope> {
   if (tables.length === 0) return UNSCOPED;
   const preferReal = opts.preferReal ?? true;
+  const explicitKey = opts.key && opts.key !== 'auto' ? opts.key : null;
 
   const req = pool.request().input('line', mssql.Int, lineId);
   const w: string[] = ['line_id = @line'];
@@ -254,7 +270,9 @@ export async function resolveGenerationScope(
   const present = (await req.query<PresentRow>(parts.join(' UNION ALL '))).recordset;
 
   const totalRows = present.reduce((s, r) => s + Number(r.n), 0);
-  if (totalRows === 0) return UNSCOPED;
+  // An explicit batch request still needs the epoch catalogue even when this
+  // exact window holds nothing at all -- see this function's own doc comment.
+  if (totalRows === 0 && !explicitKey) return UNSCOPED;
 
   const epochs = (
     await pool
@@ -269,7 +287,7 @@ export async function resolveGenerationScope(
 
   // Group the epochs actually present into GENERATIONS. One generation spans
   // several source tables (and therefore several epoch_id values), so the key
-  // is (source_db, generation_ordinal) — the pair that is shared across the
+  // is (source_db, generation_ordinal) -- the pair that is shared across the
   // four tables a single rebuild produced.
   interface Candidate {
     ref: GenerationRef;
@@ -305,16 +323,48 @@ export async function resolveGenerationScope(
     c.epochIds.set(p.tbl, list);
   }
 
+  // A table with rows in the window from OTHER generations but none in the
+  // chosen one must read NOTHING, never "unconstrained" (verification
+  // 25 Sep 2026, M20): the management summary's prior period read its cones
+  // from the chosen generation and its rejects and sacks, unconstrained,
+  // from another. -1 is never an epoch id (IDENTITY from 1). Only rows with
+  // NO epoch at all (a sidecar built before epoch tracking) stay unconstrained.
+  const taggedTables = new Set<EventTable>();
+  for (const p of present) if (p.epoch_id != null && Number(p.n) > 0) taggedTables.add(p.tbl);
+
+  if (explicitKey) {
+    let targetKey = explicitKey;
+    if (explicitKey.startsWith('epoch:')) {
+      const id = Number(explicitKey.slice('epoch:'.length));
+      const e = byId.get(id);
+      if (!e || e.generation_ordinal == null) return NO_MATCH_SCOPE(tables);
+      targetKey = `${e.source_db ?? ''}#${Number(e.generation_ordinal)}`;
+    }
+    const chosen = byKey.get(targetKey);
+    if (!chosen) return NO_MATCH_SCOPE(tables);
+    const excludedSimulator = [...byKey.values()]
+      .filter((c) => c !== chosen && c.ref.simulator)
+      .reduce((a, c) => a + c.rows, 0);
+    return {
+      generation: chosen.ref,
+      spansGenerations: totalRows - chosen.rows > 0,
+      otherGenerationExcluded: totalRows - chosen.rows,
+      excludedSimulator,
+      epochIds: (t) => chosen.epochIds.get(t) ?? (taggedTables.has(t) ? [-1] : []),
+    };
+  }
+
+  // ---- 'auto' (the default): newest generation present, preferring real ----
   const candidates = [...byKey.values()];
   if (candidates.length === 0) return UNSCOPED; // nothing carries an ordinal
 
   // Prefer a REAL generation over a simulator one even when the simulator is
   // the newer generation (it is, on this dev copy). With no real generation
-  // in the window at all, fall back to the newest simulator one — still ONE
+  // in the window at all, fall back to the newest simulator one -- still ONE
   // generation, still counted honestly, and the caller can see that
   // `generation.simulator` says so.
   //
-  // `preferReal === false` (live scope, dev only — see this function's own
+  // `preferReal === false` (live scope, dev only -- see this function's own
   // doc comment above) drops the real-only filter entirely, so "newest
   // ordinal" below is free to choose a simulator generation over an older
   // real one. Still never a partial mix of the two: exactly one generation
@@ -335,20 +385,30 @@ export async function resolveGenerationScope(
   const excludedSimulator = candidates
     .filter((c) => c !== chosen && c.ref.simulator)
     .reduce((a, c) => a + c.rows, 0);
-  // A table with rows in the window from OTHER generations but none in the
-  // chosen one must read NOTHING, never "unconstrained" (verification
-  // 25 Sep 2026, M20): the management summary's prior period read its cones
-  // from the chosen generation and its rejects and sacks, unconstrained,
-  // from another. -1 is never an epoch id (IDENTITY from 1). Only rows with
-  // NO epoch at all (a sidecar built before epoch tracking) stay unconstrained.
-  const taggedTables = new Set<EventTable>();
-  for (const p of present) if (p.epoch_id != null && Number(p.n) > 0) taggedTables.add(p.tbl);
   return {
     generation: chosen.ref,
     spansGenerations: totalRows - chosen.rows > 0,
     otherGenerationExcluded: totalRows - chosen.rows,
     excludedSimulator,
     epochIds: (t) => chosen.epochIds.get(t) ?? (taggedTables.has(t) ? [-1] : []),
+  };
+}
+
+/**
+ * The scope for an explicit batch request that names no generation this line
+ * has ever registered (never present in `sms.source_epoch` at all) -- matches
+ * NOTHING, deliberately distinct from `UNSCOPED` (which matches everything).
+ * A caller reading `total`/`count` from this scope must see zero, not the
+ * pooled figure `UNSCOPED` would produce -- see `register.ts`'s `scopedTotal`.
+ */
+function NO_MATCH_SCOPE(tables: readonly EventTable[]): GenerationScope {
+  const tset = new Set(tables);
+  return {
+    generation: null,
+    spansGenerations: false,
+    otherGenerationExcluded: 0,
+    excludedSimulator: 0,
+    epochIds: (t) => (tset.has(t) ? [-1] : []),
   };
 }
 

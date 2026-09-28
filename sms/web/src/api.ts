@@ -597,6 +597,18 @@ export interface Provenance {
   attributionConfidence: AttributionConfidence | null;
   /** The night rule the row's shift_date was stamped under (migration 023). */
   nightBelongsTo: NightBelongsTo | null;
+  /** `sms.source_epoch.epoch_id` this reading was ingested under — the key `RegisterQuery.batch`'s `epoch:<id>` form takes. */
+  epochId: number | null;
+  /**
+   * The epoch's own generation number and simulator flag (Task B, 28 Sep
+   * 2026, mirroring Health defect 4's `SyncStatus.epochOrdinal`/
+   * `epochSimulator`) — the pair `batchName()` (lib/batchName.ts) takes, so
+   * a sheet prints "IFL data batch 3" instead of the raw `epochLabel` table
+   * name ("pack1_TP1U2 gen 4"). Optional: absent on a server built before
+   * this field existed, never itself a claim of "not the simulator".
+   */
+  epochOrdinal?: number | null;
+  epochSimulator?: boolean;
 }
 
 /**
@@ -1591,6 +1603,9 @@ export interface RejectReasonRow {
   weightG: number | null;
   sourceRowId: number | null;
   epochLabel: string | null;
+  /** Task B (28 Sep 2026): the pair `batchName()` takes — see Provenance's own fields above for the full reasoning. */
+  epochOrdinal: number | null;
+  epochSimulator: boolean;
   attributionMethod: string | null;
 }
 export interface RejectReasonData {

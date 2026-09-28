@@ -42,6 +42,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { listEvents, exportEventsCsv, foldGenerationTally, countExported } from './register.js';
+import { UNSCOPED } from './generation.js';
 import { getStockLedger } from './sackStock.js';
 import { getMachineProductShifts } from './machineProducts.js';
 import { productDisagreement } from './productAt.js';
@@ -183,7 +184,7 @@ describe('register — the rows stay pooled and labelled; the COUNT stops being 
 
     const page = await listEvents(pool, 1, 'cone', {
       from: '1969-12-31', to: '1969-12-31', sort: 'time', dir: 'desc', page: 1, pageSize: 50,
-    });
+    }, UNSCOPED);
     // BOTH rows still list — the register does not hide a generation.
     expect(page.rows).toHaveLength(2);
     expect(page.total).toBe(2);
@@ -224,7 +225,7 @@ describe('register — the rows stay pooled and labelled; the COUNT stops being 
             { line_id: 1, event_id: 3, weight_g: 1955, prov_epoch_id: 9, prov_epoch_label: 'September copy - cones' },
           ],
     );
-    const out = await exportEventsCsv(pool, 1, 'cone', { from: '1969-12-31', to: '2026-09-07', sort: 'time', dir: 'desc' });
+    const out = await exportEventsCsv(pool, 1, 'cone', { from: '1969-12-31', to: '2026-09-07', sort: 'time', dir: 'desc' }, UNSCOPED);
     expect(out.generations.map((g) => g.rows)).toEqual([2, 1]);
     expect(out.exported.map((g) => g.rows)).toEqual([2, 1]);
     // Every row carries its own epoch id as a trailing CSV column.

@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { getEventDetail, listEvents, exportEventsCsv, idCol } from './register.js';
+import { UNSCOPED } from './generation.js';
 
 type Row = Record<string, unknown>;
 
@@ -188,6 +189,11 @@ const EXPECTED_SEPT_PROVENANCE = {
   attributionConfidence: 'high',
   nightBelongsTo: 'start_day',
   epochId: 9,
+  // SEPT_CONE_FULL carries no prov_epoch_ordinal/prov_epoch_source_db (the
+  // fixture predates Task B, 28 Sep 2026) — the honest reading is "not
+  // known", never an invented 3/false.
+  epochOrdinal: null,
+  epochSimulator: false,
 };
 
 describe('provenance — where a reading came from, on every row (Phase 3 item 4)', () => {
@@ -211,7 +217,7 @@ describe('provenance — where a reading came from, on every row (Phase 3 item 4
     const second = { ...SEPT_CONE_FULL, cone_event_id: 200_002, event_id: 200_002 };
     const page = await listEvents(registerPool([SEPT_CONE_FULL, second]), 1, 'cone', {
       sort: 'time', dir: 'desc', page: 1, pageSize: 50,
-    });
+    }, UNSCOPED);
     expect(page.total).toBe(2);
     expect(page.rows).toHaveLength(2);
     for (const r of page.rows) expect(r.provenance).toEqual(EXPECTED_SEPT_PROVENANCE);
@@ -229,7 +235,7 @@ describe('provenance — where a reading came from, on every row (Phase 3 item 4
   });
 
   it('the CSV keeps every existing column in place and appends provenance as trailing columns', async () => {
-    const { csv, truncated } = await exportEventsCsv(registerPool([SEPT_CONE_FULL]), 1, 'cone', { sort: 'time', dir: 'desc' });
+    const { csv, truncated } = await exportEventsCsv(registerPool([SEPT_CONE_FULL]), 1, 'cone', { sort: 'time', dir: 'desc' }, UNSCOPED);
     expect(truncated).toBe(false);
     const [header, line] = csv.split('\n');
     const headers = header!.split(',');
@@ -239,12 +245,13 @@ describe('provenance — where a reading came from, on every row (Phase 3 item 4
       'provenance.sourceSystem', 'provenance.sourceTable', 'provenance.epochLabel', 'provenance.sourceRowId',
       'provenance.rawId', 'provenance.sourceInsertUtc', 'provenance.ingestedAtUtc', 'provenance.ingestRunId',
       'provenance.transformVersion', 'provenance.attributionMethod', 'provenance.attributionConfidence',
-      'provenance.nightBelongsTo', 'provenance.epochId',
+      'provenance.nightBelongsTo', 'provenance.epochId', 'provenance.epochOrdinal', 'provenance.epochSimulator',
     ]);
     const cells = line!.split(',');
     expect(cells.slice(own.length)).toEqual([
       'ifl_sql', 'pack1_TP1U2', 'Live source - cones', '5', '275113', '2026-09-07T03:30:51.000Z',
       '2026-09-07T03:31:02.417Z', 'C0FFEE00-0000-4000-8000-000000000001', '2', 'source_column', 'high', 'start_day', '9',
+      '', 'false',
     ]);
     // The object itself is never a cell.
     expect(headers).not.toContain('provenance');

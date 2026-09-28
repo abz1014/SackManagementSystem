@@ -27,6 +27,7 @@
 import { useState } from 'react';
 import { useLive, usePolling, usePlantNow, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
+import { batchName } from '../lib/batchName';
 import type { Period } from '../lib/period';
 import { Block, Details, Empty, Failed, Figures, SkelChart, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
@@ -777,7 +778,20 @@ export function History({
       : health.kind === 'late'
         ? W.lag.late(fmtSpan(health.lagSeconds))
         : W.lag.noData;
-  const note = !data ? null : countUnknown ? W.sacks.historyCountUnknown : W.sacks.historyNote(fmtInt(total));
+  // Task B (28 Sep 2026, owner decision): the history register also lists
+  // ONE data batch by default ('auto', the same one this screen's own
+  // headline and ledger already read for the period) — one sentence, no
+  // switch (Readings owns the switch; this is the same rows in a second
+  // place, per the file header).
+  const genName = data?.generation?.generation ? batchName(data.generation.generation) : null;
+  const batchNote = genName ? W.readings.batch.current(genName) : null;
+  const note = !data
+    ? null
+    : countUnknown
+      ? W.sacks.historyCountUnknown
+      : batchNote
+        ? `${W.sacks.historyNote(fmtInt(total))} ${batchNote}`
+        : W.sacks.historyNote(fmtInt(total));
 
   return (
     <Block label={W.sacks.history} note={note}>

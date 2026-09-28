@@ -493,6 +493,15 @@ export interface RejectReasonRow {
   /** IFL's own row id and the generation it belongs to — one id, labelled. */
   sourceRowId: number | null;
   epochLabel: string | null;
+  /**
+   * The epoch's own generation number and simulator flag (Task B, 28 Sep
+   * 2026, mirroring Health defect 4 / register.ts's own Provenance fields)
+   * — the pair `batchName()` takes, so ReasonSheet.tsx can print "IFL data
+   * batch 3" instead of the raw `epochLabel` table name. Null/false when
+   * the row predates epoch tracking (nothing to join).
+   */
+  epochOrdinal: number | null;
+  epochSimulator: boolean;
   attributionMethod: string | null;
 }
 
@@ -552,11 +561,13 @@ export async function listRejectsOfDayCode(
   const rows = await rowsReq.query<{
     event_id: number; production_ts_utc: Date; shift_code: string; source_station: number | null;
     material_id: number | null; description: string | null; lot_code: string | null; weight_g: number | null;
-    source_row_id: number | null; epoch_label: string | null; attribution_method: string | null;
+    source_row_id: number | null; epoch_label: string | null; epoch_ordinal: number | null; epoch_source_db: string | null;
+    attribution_method: string | null;
   }>(`
     SELECT e.reject_event_id AS event_id, e.production_ts_utc, e.shift_code, e.source_station,
            e.material_id, p.description, p.lot_code, e.weight_g,
-           e.source_row_id, ep.label AS epoch_label, e.attribution_method
+           e.source_row_id, ep.label AS epoch_label, ep.generation_ordinal AS epoch_ordinal, ep.source_db AS epoch_source_db,
+           e.attribution_method
     FROM sms.reject_event e
     LEFT JOIN sms.product p ON p.product_id = e.material_id
     LEFT JOIN sms.source_epoch ep ON ep.epoch_id = e.source_epoch
@@ -594,6 +605,12 @@ export async function listRejectsOfDayCode(
       weightG: x.weight_g == null ? null : Number(x.weight_g),
       sourceRowId: x.source_row_id == null ? null : Number(x.source_row_id),
       epochLabel: x.epoch_label ?? null,
+      epochOrdinal: x.epoch_ordinal == null ? null : Number(x.epoch_ordinal),
+      // Mirrors generation.ts's own isSimulator source_db check (operations.ts's
+      // local copy, same reasoning): the plant simulator's rows carry their
+      // recorded provenance mislabelled as 'ifl_copy', so source_db is the
+      // only signal trusted here.
+      epochSimulator: /_SIM$/i.test(x.epoch_source_db ?? ''),
       attributionMethod: x.attribution_method ?? null,
     })),
     generationNote: note,

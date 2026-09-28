@@ -1,20 +1,28 @@
 /**
  * `register.ts::countEvents` — RT-002/RT-029 follow-up (23 Sep 2026, WS-R).
  *
- * `listEvents` is deliberately unscoped (see its own "WHY THE REGISTER
- * LABELS AND DOES NOT FILTER" header): it is a LISTING, every row already
- * carries its own generation label, and filtering it would break drill-down
- * permalinks. `total`, on that same object, is a bare `COUNT(*)` summed
- * across every generation present in the window — correct as the sum of
- * what the listing shows, but wrong the moment a caller reads it alone as a
- * figure. `reports/sack.ts` and `reports/summary.ts` both did exactly that
- * (`listEvents(...).total`), and on 21 Aug – 7 Sep — the local dev sidecar's
- * simulator generation (epochs 13-16) overlapping IFL's real September
- * generation (epochs 9-12) — that reads a scale-rejected count roughly 6x
- * the true one (see the fixture below). `reports/daily.ts` hit the same
- * defect and, not owning this file, worked around it with its own private
- * COUNT query (23 Sep 2026); `countEvents` is the fix that query should have
- * been able to call instead of duplicating it.
+ * SUPERSEDED IN PART, 28 Sep 2026 (owner decision: one batch by default).
+ * `listEvents` used to be deliberately unscoped — every row carried its own
+ * generation label, and `total` was a bare `COUNT(*)` summed across every
+ * generation present in the window. Measured on the dev copy for 1-28 Sep
+ * that read 179,097 cones weighed where the real count is 19,792: labelling
+ * each row did not make the pooled headline honest, because a reader reads
+ * `total`, not each row's own label. `listEvents` now REQUIRES a resolved
+ * `GenerationScope` (the caller's job, via `resolveGenerationScope`) and
+ * scopes BOTH the row listing and `total` to it — see register.ts's own
+ * "WHY THE REGISTER LISTS ONE BATCH BY DEFAULT" header. `total` now agrees
+ * with `countEvents` by construction, not by coincidence.
+ *
+ * `countEvents` remains the right call for a caller that wants ONLY a bare
+ * figure with no rows and no pagination — `reports/sack.ts` and
+ * `reports/summary.ts` both read `listEvents(...).total` before this fix
+ * existed, and on 21 Aug – 7 Sep — the local dev sidecar's simulator
+ * generation (epochs 13-16) overlapping IFL's real September generation
+ * (epochs 9-12) — that read a scale-rejected count roughly 6x the true one
+ * (see the fixture below). `reports/daily.ts` hit the same defect and, not
+ * owning this file, worked around it with its own private COUNT query
+ * (23 Sep 2026); `countEvents` is the fix that query should have been able
+ * to call instead of duplicating it.
  *
  * `countEvents` resolves its own `resolveGenerationScope` and never sees a
  * row: it is a second, separate function precisely so a caller after a
@@ -39,6 +47,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { countEvents, listEvents } from './register.js';
+import type { GenerationScope } from './generation.js';
 import { boundEpochsOf, type Captured } from '../testkit/generations.js';
 
 const REAL_JULY = { epoch: 1, ordinal: 1, db: 'DATA_TP1U2', prov: 'ifl_copy' };
@@ -115,15 +124,15 @@ describe('countEvents — a figure cannot pool two generations, even when the wi
     expect(r.note.spansGenerations).toBe(false);
   });
 
-  it('row 3 — RED reproduced then fixed: 21 Aug – 7 Sep spans the real September generation and the simulator; countEvents excludes the simulator, listEvents.total still pools both by design', async () => {
+  it('row 3 — RED reproduced then fixed: 21 Aug – 7 Sep spans the real September generation and the simulator; both listEvents.total (owner decision, 28 Sep 2026) and countEvents exclude the simulator', async () => {
     const from = '2026-08-21';
     const to = '2026-09-07';
 
-    // The LISTING path — listEvents — is untouched by this fix and MUST
-    // still pool: it is a listing, and every row it returns is individually
-    // labelled with its own generation (proven in register.test.ts and
-    // again just below). This is what "Before" in the table above records:
-    // reports/sack.ts and reports/summary.ts read exactly this `.total`.
+    // Every row this fixture returns is individually labelled with its own
+    // generation (proven in register.test.ts and again just below) — that
+    // was always true. What changed 28 Sep 2026 is `total`: it no longer
+    // reads as the pooled sum of every row the listing shows; it now reads
+    // as the ONE batch the resolved scope names, exactly like countEvents.
     const rowFor = (epoch: number, id: number) => ({
       line_id: 1, event_id: id, sack_event_id: id, source_row_id: id, source_epoch: epoch,
       weight_kg: 49, in_range: false,
@@ -133,19 +142,35 @@ describe('countEvents — a figure cannot pool two generations, even when the wi
       ...Array.from({ length: 2 }, (_, i) => rowFor(SIM.epoch, 13_000 + i)),
     ];
     const listingPool = registerFakePool(pooledRows);
+    // The scope a caller resolves for this window (the same September choice
+    // countEvents makes below) — built directly rather than through
+    // `resolveGenerationScope`, since `registerFakePool` is a listing fixture,
+    // not a generation-resolution one.
+    const scope: GenerationScope = {
+      generation: { key: `${REAL_SEPT.db}#${REAL_SEPT.ordinal}`, ordinal: REAL_SEPT.ordinal, sourceDb: REAL_SEPT.db, provenance: REAL_SEPT.prov, label: null, simulator: false },
+      spansGenerations: true,
+      otherGenerationExcluded: 2,
+      excludedSimulator: 2,
+      epochIds: (t) => (t === 'sack_event' ? [REAL_SEPT.epoch] : []),
+    };
     const listed = await listEvents(listingPool, 1, 'sack', {
       from, to, inRange: false, sort: 'time', dir: 'desc', page: 1, pageSize: 50,
-    });
-    // The pooled figure this whole fix exists to stop a bare consumer from
-    // reading: two generations' rows, summed into one number.
-    expect(listed.total).toBe(4);
+    }, scope);
+    // `total` now counts ONLY the listed batch (the 2 September rows in this
+    // fixture) — the pooled figure this whole fix exists to stop a bare
+    // consumer from reading no longer reaches `total` at all; it survives
+    // only inside `generations`, labelled per batch.
+    expect(listed.total).toBe(2);
     expect(listed.generations?.map((g) => g.simulator).sort()).toEqual([false, true]);
-    // But every row is labelled — the listing is not silently wrong, only
-    // its bare `.total` is dangerous read alone.
+    expect(listed.generation?.spansGenerations).toBe(true);
+    expect(listed.generation?.otherGenerationExcluded).toBe(2);
+    // Every row is still labelled — the disclosure survives even though the
+    // headline is now scoped.
     for (const row of listed.rows) expect((row.provenance as { epochId: number }).epochId).toBeDefined();
 
-    // The FIGURE path — countEvents — is the fix: scoped to the newest real
-    // generation (September), the simulator's 301 rows excluded and named.
+    // The FIGURE path — countEvents — is the same fix for a caller that
+    // wants no rows at all: scoped to the newest real generation
+    // (September), the simulator's 301 rows excluded and named.
     const { pool, calls } = fakePool([REAL_SEPT, SIM]);
     const r = await countEvents(pool, 1, 'sack', { from, to, inRange: false });
     expect(r.count).toBe(54); // NOT 355 (54 + 301) — the pooled figure the old `listEvents(...).total` call produced

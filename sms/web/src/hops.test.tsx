@@ -154,7 +154,8 @@ const REASON_DATA_FIXTURE: Envelope<RejectReasonData> = {
     rejectCodeId: null, label: null, displayLabel: 'Weight reject', isPass: false, total: 1, page: 1, pageSize: 200,
     rows: [{
       eventId: 1, productionTsUtc: `${REASON_DAY}T10:00:00Z`, shiftCode: 'morning', station: 7, materialId: 21,
-      productLabel: 'Test Yarn', weightG: 2100, sourceRowId: 1, epochLabel: 'September copy', attributionMethod: 'source_column',
+      productLabel: 'Test Yarn', weightG: 2100, sourceRowId: 1, epochLabel: 'September copy',
+      epochOrdinal: 3, epochSimulator: false, attributionMethod: 'source_column',
     }],
   },
   metadata: META_FIXTURE,

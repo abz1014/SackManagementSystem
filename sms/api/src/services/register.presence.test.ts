@@ -33,6 +33,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { countEvents, foldGenerationTally, listEvents, type RegisterDataIssue } from './register.js';
+// owner decision 28 Sep: one batch by default — listEvents now REQUIRES a
+// resolved GenerationScope; UNSCOPED reproduces the pre-28-Sep pooled
+// behaviour this file's own fakes assume (a single, untracked generation),
+// which is exactly what these malformed-row cases are testing.
+import { UNSCOPED } from './generation.js';
 
 describe('NaN -> null: the exact serialisation this whole file exists to prevent', () => {
   it('Number(undefined) is NaN, and JSON.stringify renders a NaN field as null — the chain Sacks.tsx inherits if register.ts ever emits one', () => {
@@ -104,7 +109,7 @@ describe('listEvents — the malformed tally row cannot reach the wire as a fals
       epoch_id: 9, source_db: 'DATA_TP1U2_SEP07', generation_ordinal: 3, provenance: 'ifl_copy', label: null, n: 2,
     };
     delete malformed.n;
-    const page = await listEvents(listingPool([malformed]), 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 });
+    const page = await listEvents(listingPool([malformed]), 1, 'sack', { sort: 'time', dir: 'desc', page: 1, pageSize: 50 }, UNSCOPED);
     expect(page.total).toBe(0);
     expect(page.total).not.toBeNaN();
     expect(JSON.parse(JSON.stringify(page)).total).toBe(0); // never coerces to null on the wire

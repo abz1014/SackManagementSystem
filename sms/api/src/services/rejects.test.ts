@@ -17,6 +17,7 @@ import {
   type RejectFilters,
 } from './rejects.js';
 import { listEvents } from './register.js';
+import { UNSCOPED } from './generation.js';
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
 
@@ -361,7 +362,11 @@ describe('listRejectsOfDayCode — the reason sheet\'s list', () => {
     expect(out.total).toBe(2);
     expect(out.rows[0]).toEqual({
       eventId: 501, productionTsUtc: '2026-09-06T07:12:00.000Z', shiftCode: 'morning', station: 3, materialId: 21,
-      productLabel: '205-IL0-SD', weightG: null, sourceRowId: 88, epochLabel: 'Sept live - quality rejects', attributionMethod: 'source_column',
+      productLabel: '205-IL0-SD', weightG: null, sourceRowId: 88, epochLabel: 'Sept live - quality rejects',
+      // The fixture carries no epoch_ordinal/epoch_source_db (predates Task
+      // B, 28 Sep 2026) — null/false is the honest "not known", not a guess.
+      epochOrdinal: null, epochSimulator: false,
+      attributionMethod: 'source_column',
     });
     expect(out.rows[1]!.productLabel).toBeNull();
 
@@ -395,7 +400,7 @@ describe('listRejectsOfDayCode — the reason sheet\'s list', () => {
 describe('the register lists a reject under ITS line\'s code row', () => {
   it('joins reject_code on the line as well as the pair — codes are per line since migration 028', async () => {
     const { pool, statements } = recordingPool([[{ n: 0 }], []]);
-    await listEvents(pool, 1, 'reject', { page: 1, pageSize: 50, sort: 'time', dir: 'desc' });
+    await listEvents(pool, 1, 'reject', { page: 1, pageSize: 50, sort: 'time', dir: 'desc' }, UNSCOPED);
     // Both the count and the page read through the same FROM; every reject
     // query in the application (Pareto, seed, register) now matches the code
     // row on the line, so a second line's identical pair cannot double a row.

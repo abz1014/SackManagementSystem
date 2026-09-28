@@ -619,6 +619,21 @@ export const W = {
        where it would read as a packing list. */
     aroundSack: (n: number) =>
       `About ${n} cones were weighed between the previous sack and this one (approximate; the plant records no link between a cone and its sack).`,
+    /* Task B (28 Sep 2026, owner decision): the register lists ONE data
+       batch by default, the same one Line and Report use for the period, and
+       DISCLOSES the others rather than pooling them in silently — the
+       pooling defect measured on the dev copy: Readings said 179,097 cones
+       weighed where the real count is 19,792. */
+    batch: {
+      current: (name: string) => `Data batch: ${name}.`,
+      /* `count` is that OTHER batch's own row count in this period — the
+         reader decides whether it is worth switching to, rather than being
+         told only that something else exists. */
+      also: (name: string, count: string) => `Also in this period: ${name}, ${count} readings`,
+      show: 'Show them',
+      showing: (name: string) => `Now showing: ${name}.`,
+      backToDefault: 'Back to the default batch',
+    },
   } as const,
 
   /* ---------------------------------------------------------------- weight */

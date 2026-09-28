@@ -219,16 +219,17 @@ function allOwners(): Owner[] {
  */
 const EXEMPTIONS: Record<string, string> = {
   'api/src/services/register.ts::fromFor':
-    "The register's own shared FROM builder, consumed by listEvents, getEventDetail and exportEventsCsv. UNSCOPED BY " +
-    'DESIGN (owner decision, confirmed 23 Sep 2026, see this task\'s own brief): a register is a LISTING that labels ' +
-    'each row with its generation via EPOCH_JOIN (`LEFT JOIN sms.source_epoch ep`) rather than filtering to one. ' +
-    'listEvents\' and exportEventsCsv\'s COUNTS are separately generation-honest — TALLY_SQL groups by source_epoch and ' +
-    'foldGenerationTally reports every generation present, per-generation, rather than pooling into one number — the ' +
-    'defect this guard exists to catch would be a SILENT pool, and there is none: a multi-generation period returns ' +
-    "`generations.length > 1` and the caller is required to say so. getEventDetail's own TOP 1 is addressed by the " +
-    "canonical PK (cone_event_id/sack_event_id/reject_event_id, globally unique across all generations since 5 Aug " +
-    '2026 — see this file\'s own IDENTITY comment), never by a range, so there is no pooling to guard against there ' +
-    'either.',
+    "The register's own shared FROM builder, consumed by listEvents, getEventDetail and exportEventsCsv — a helper " +
+    'that builds a FROM clause, not a query, so it carries no epoch token itself. UNSCOPED BY DESIGN, updated for ' +
+    "owner decision 28 Sep: one batch by default (superseding the 23 Sep 2026 design this exemption used to describe, " +
+    'which kept the register deliberately pooled). `listEvents` and `exportEventsCsv` are no longer unscoped: both ' +
+    'now REQUIRE a `GenerationScope` argument and apply it via `andEpoch` directly in their OWN bodies — the guard ' +
+    'sees the epoch token on the owner function itself for both, with no exemption needed there. This entry stays ' +
+    'only because `fromFor` itself is a helper with no query and no epoch token to carry; every row it feeds still ' +
+    'joins `sms.source_epoch` via EPOCH_JOIN and is labelled, and the scoping now happens one level up, in the ' +
+    "callers that consume it. getEventDetail's own TOP 1 is addressed by the canonical PK (cone_event_id/" +
+    'sack_event_id/reject_event_id, globally unique across all generations since 5 Aug 2026 — see this file\'s own ' +
+    'IDENTITY comment), never by a range, so there is no pooling to guard against there either.',
   // rejectSpc.ts::getRejectSpc removed 25 Sep 2026: it now accepts an optional
   // generation scope (the reject report passes one), so the guard sees epoch scoping.
   'api/src/services/live.ts::findNewerElsewhere':

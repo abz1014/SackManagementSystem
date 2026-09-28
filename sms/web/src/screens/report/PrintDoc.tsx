@@ -342,7 +342,10 @@ export function PrintNotes({ type, data, header }: { type: ReportType; data: Rep
     W.printDoc.clockNote,
     W.printDoc.approvalNote,
     W.printDoc.sourceNote,
-    ...(header.spansGenerations && header.generationLine
+    // Task B (28 Sep 2026): the same widened trigger as PrintHead.tsx —
+    // spanning batches OR the source itself being the simulator, since a
+    // simulator-only period excludes nothing and never sets spansGenerations.
+    ...((header.spansGenerations || header.simulatorSource) && header.generationLine
       ? [header.generationLine]
       : header.spansGenerations
       ? [W.printDoc.generationNote(header.sourceGeneration ?? 'unknown', `${fmtInt(header.otherGenerationExcluded?.count ?? 0)} readings${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}`)]

@@ -23,9 +23,10 @@
  * the reading's own product beside it. Nothing about a cone's state is
  * decided in this file.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
+import { batchName } from '../lib/batchName';
 import type { Period } from '../lib/period';
 import { Block, Chevron, Empty, Failed, rowKeys, SkelLines, Toolbar, Toggle } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
@@ -33,7 +34,7 @@ import { assessHealth } from '../lib/health';
 import type { ReadingsFilter } from '../ui/Bar';
 import {
   getEvents, eventsExportUrl, getStations, stationLabel, CONE_STATES,
-  type ConeState, type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,
+  type ConeState, type GenerationTally, type RegisterQuery, type RegisterRow, type RegisterType, type StationRow,
 } from '../api';
 import { RegisterPrintHead } from './report/PrintHead';
 
@@ -54,6 +55,10 @@ function queryFor(
   page: number,
   outsideLimitsOnly: boolean,
   states: ConeState[] = [],
+  /** Task B (28 Sep 2026): which data batch to list — 'auto' (the default,
+   *  one batch, the same one Line/Report use for the period) or an explicit
+   *  GenerationTally.key the reader switched to. */
+  batch: string = 'auto',
 ): RegisterQuery {
   const type: RegisterType = listing === 'sacks' ? 'sack' : listing === 'inspectionRejects' ? 'reject' : 'cone';
   const base: RegisterQuery = {
@@ -67,6 +72,7 @@ function queryFor(
     pageSize: PAGE_SIZE,
     sort: 'time',
     dir: 'desc',
+    batch,
   };
   // "Rejected cones" means the SCALE rejected them — cone_event.in_range = 0.
   // It is a different population from the Rejects screen, which counts cones
@@ -143,6 +149,17 @@ export function ReadingsScreen({
     if (page !== 1) onPageChange(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period.from, period.to, period.shift]);
+  // Task B (28 Sep 2026, owner decision): which data batch is listed. Local
+  // state, not lifted to the URL — the default ('auto') is the answer for
+  // every period, and the switch is a momentary "show me the other one"
+  // rather than a filter worth bookmarking. Resets whenever the period
+  // changes: a batch switch made for last week's period should not silently
+  // carry over to this week's, where it may not even exist.
+  const [batch, setBatch] = useState('auto');
+  useEffect(() => {
+    setBatch('auto');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period.from, period.to, period.shift]);
   const { line, asOf } = useLive();
   const health = assessHealth(line);
   const stale = health.kind !== 'ok';
@@ -153,9 +170,9 @@ export function ReadingsScreen({
         ? W.lag.late(fmtSpan(health.lagSeconds))
         : W.lag.noData;
 
-  const key = `${listing}:${period.from}:${period.to}:${period.shift ?? 'all'}:${station ?? 'any'}:${outsideOnly}:${states.join('+')}:${page}`;
+  const key = `${listing}:${period.from}:${period.to}:${period.shift ?? 'all'}:${station ?? 'any'}:${outsideOnly}:${states.join('+')}:${page}:${batch}`;
   const rows = usePolling(
-    () => getEvents(queryFor(listing, period, station, page, outsideOnly, states)),
+    () => getEvents(queryFor(listing, period, station, page, outsideOnly, states, batch)),
     // Only a live period can gain rows while it is open; a closed one is
     // polled at a slow heartbeat rather than never, so a re-sync still shows.
     period.live ? LIST_POLL_MS : 5 * 60_000,
@@ -164,12 +181,24 @@ export function ReadingsScreen({
 
   // The count of readings the SCALE rejected, for the count line. Asked for
   // separately rather than derived from a percentage, so the sentence states a
-  // number the register itself would return.
+  // number the register itself would return. Carries the SAME batch as the
+  // listing above — otherwise "N weighed, M rejected" could describe two
+  // different data batches.
   const rejected = usePolling(
-    () => getEvents({ ...queryFor('rejected', period, station, 1, false), pageSize: 1 }),
+    () => getEvents({ ...queryFor('rejected', period, station, 1, false, [], batch), pageSize: 1 }),
     period.live ? LIST_POLL_MS : 5 * 60_000,
     `rejcount:${key}`,
   );
+
+  // The batch disclosure: what is listed, and what else exists in this
+  // period. `generations` is the full, unconstrained tally (every batch
+  // present); `generation` is the scope the listing was actually read
+  // through — both come from the SAME response, so they can never disagree
+  // about the period they describe.
+  const genTally = rows.data?.data.generations ?? [];
+  const genNote = rows.data?.data.generation;
+  const currentKey = genNote?.generation?.key ?? null;
+  const others = genTally.filter((g) => g.key !== currentKey);
 
   const stations = usePolling(() => getStations(), 10 * 60_000, 'stations');
   const stationList = stations.data?.stations ?? [];
@@ -194,6 +223,7 @@ export function ReadingsScreen({
         from={period.from}
         to={period.to}
         at={asOf}
+        batch={batch}
         title={`${W.nav.readings} · ${listingTitle(listing)}${station != null ? ` · ${stationLabel(stationList.find((s) => s.stationId === station), station)}` : ''}`}
       />
       <div className="page">
@@ -201,6 +231,11 @@ export function ReadingsScreen({
         <h1 className="wide">
           {countLine(period, listing, totalState, rejectedState, outsideOnly, states)}
         </h1>
+        {/* Task B (28 Sep 2026): which batch the headline above describes,
+            and what else this period holds. Never silent — the pooling
+            defect this whole change exists to close was exactly a headline
+            that did not say so. */}
+        <BatchDisclosure genNote={genNote} others={others} batch={batch} onSwitch={setBatch} />
       </div>
 
       <Block first tight>
@@ -252,7 +287,7 @@ export function ReadingsScreen({
           right={
             <>
               {canExport && (
-                <a className="btn" href={eventsExportUrl(queryFor(listing, period, station, 1, outsideOnly, states))}>
+                <a className="btn" href={eventsExportUrl(queryFor(listing, period, station, 1, outsideOnly, states, batch))}>
                   {W.report.exportCsv}
                 </a>
               )}
@@ -391,6 +426,59 @@ export function countLine(
   }
   const pct = total.n > 0 ? `${Math.round((1000 * rejected.n) / total.n) / 10}%` : '0%';
   return `${what}: ${W.readings.countLine(fmtInt(total.n), fmtInt(rejected.n), pct)}`;
+}
+
+/**
+ * Task B (28 Sep 2026, owner decision): "the Readings and Sacks registers
+ * list ONE data batch by default, the same one Line and Report use for that
+ * period. They disclose the others and offer a switch to them."
+ *
+ * Silent while the batch response has not arrived, or while the period
+ * carries only one batch (or none tracked at all) — there is nothing to
+ * disclose then, and a permanent "Data batch: —" line would be worse than
+ * no line, exactly the over-claiming rule this whole feature exists to
+ * avoid on the OTHER side of the fence.
+ */
+function BatchDisclosure({
+  genNote,
+  others,
+  batch,
+  onSwitch,
+}: {
+  genNote: { generation: { key: string; ordinal: number; sourceDb: string | null; simulator: boolean } | null } | undefined;
+  others: GenerationTally[];
+  batch: string;
+  onSwitch: (b: string) => void;
+}) {
+  if (!genNote?.generation) return null;
+  const currentName = batchName(genNote.generation);
+  if (others.length === 0) {
+    return <p className="mut sm no-print" style={{ marginTop: 6 }}>{W.readings.batch.current(currentName)}</p>;
+  }
+  return (
+    <p className="mut sm no-print" style={{ marginTop: 6 }}>
+      {batch === 'auto' ? (
+        <>
+          {W.readings.batch.current(currentName)}{' '}
+          {others.map((g) => (
+            <span key={g.key}>
+              {W.readings.batch.also(batchName(g), fmtInt(g.rows))}{' '}
+              <button type="button" className="linkish" onClick={() => onSwitch(g.key)}>
+                {W.readings.batch.show}
+              </button>
+            </span>
+          ))}
+        </>
+      ) : (
+        <>
+          {W.readings.batch.showing(currentName)}{' '}
+          <button type="button" className="linkish" onClick={() => onSwitch('auto')}>
+            {W.readings.batch.backToDefault}
+          </button>
+        </>
+      )}
+    </p>
+  );
 }
 
 /* ------------------------------------------------------------ the filters */

@@ -34,7 +34,8 @@ import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import type { ConeState } from '@sms/shared';
 import { bindStateCase, type StateContext } from './coneState.js';
-import { andEpoch, noteOf, resolveGenerationScope, type EventTable, type GenerationNote } from './generation.js';
+import { andEpoch, noteOf, resolveGenerationScope, UNSCOPED, type EventTable, type GenerationNote, type GenerationScope } from './generation.js';
+import { generationDisclosureLines, type ReportHeader } from './reports/common.js';
 
 export type EventType = 'cone' | 'sack' | 'reject';
 export type SortField = 'time' | 'weight';
@@ -236,7 +237,8 @@ const PROVENANCE_COLS = `e.source_system AS prov_source_system, ep.source_table 
   e.ingest_ts_utc AS prov_source_insert_utc, e.ingested_at_utc AS prov_ingested_at_utc,
   e.ingest_run_id AS prov_ingest_run_id, e.transform_version AS prov_transform_version,
   e.attribution_method AS prov_attribution_method, e.attribution_confidence AS prov_attribution_confidence,
-  e.night_belongs_to AS prov_night_belongs_to, e.source_epoch AS prov_epoch_id`;
+  e.night_belongs_to AS prov_night_belongs_to, e.source_epoch AS prov_epoch_id,
+  ep.generation_ordinal AS prov_epoch_ordinal, ep.source_db AS prov_epoch_source_db`;
 
 /** Column alias → JSON key, in the order the CSV's trailing columns take. */
 const PROVENANCE_KEYS: readonly [column: string, key: string][] = [
@@ -257,6 +259,11 @@ const PROVENANCE_KEYS: readonly [column: string, key: string][] = [
   // and `sms rebuild --epoch=` take, so a row quoted back to an operator can
   // be scoped without a lookup.
   ['prov_epoch_id', 'epochId'],
+  // Appended 28 Sep 2026 (Task B, mirroring Health defect 4 fix,
+  // operations.ts's SyncStatus.epochOrdinal/epochSimulator): so a screen can
+  // print `batchName({ordinal, simulator})` instead of the raw `epochLabel`
+  // table-name string ("pack1_TP1U2 gen 4") — see web/src/lib/batchName.ts.
+  ['prov_epoch_ordinal', 'epochOrdinal'],
 ];
 
 export interface Provenance {
@@ -274,6 +281,16 @@ export interface Provenance {
   nightBelongsTo: string | null;
   /** `sms.source_epoch.epoch_id` this reading was ingested under. */
   epochId: number | null;
+  /** The epoch's own generation number, joined from `sms.source_epoch` — null when `epochId` is null (nothing to join). */
+  epochOrdinal: number | null;
+  /**
+   * Derived from `sms.source_epoch.source_db` (`/_SIM$/i`), never from the
+   * row's own recorded `provenance` — the plant simulator's rows carry that
+   * mislabelled as `ifl_copy` (generation.ts's own `isSimulator`, mirrored
+   * here rather than imported so this file gains no new dependency for one
+   * boolean). `false` when `epochId` is null: nothing to call the simulator.
+   */
+  epochSimulator: boolean;
 }
 
 /**
@@ -290,6 +307,14 @@ export function foldProvenance(row: Record<string, unknown>): Record<string, unk
     provenance[key] = v == null ? null : v instanceof Date ? v.toISOString() : v;
     delete row[column];
   }
+  // `prov_epoch_source_db` feeds ONLY this derived boolean — it is not a
+  // Provenance field of its own (source_table/epochLabel already name the
+  // epoch to a reader; the raw database name is the debugging detail
+  // batchName exists to hide). Read and deleted here rather than through
+  // the PROVENANCE_KEYS loop, which assumes a 1:1 column->field passthrough.
+  const sourceDb = row.prov_epoch_source_db as string | null | undefined;
+  provenance.epochSimulator = /_SIM$/i.test(sourceDb ?? '');
+  delete row.prov_epoch_source_db;
   row.provenance = provenance as unknown as Provenance;
   return row;
 }
@@ -346,39 +371,41 @@ const fromFor = (type: EventType) =>
 const ALIAS = 'e.';
 
 /**
- * WHY THE REGISTER LABELS AND DOES NOT FILTER (23 Sep 2026).
+ * WHY THE REGISTER LISTS ONE BATCH BY DEFAULT (owner decision, 28 Sep 2026,
+ * SUPERSEDING the 23 Sep 2026 design below).
  *
- * Every other consumer of the canonical tables was constrained to ONE source
- * generation in ca34a23/8673ffd, because a mean, a rate or a LAG sequence
- * fitted across IFL's 2026-08-05 rebuild is not a measurement of anything.
- * The register is the one place where that reasoning does not carry: it is a
- * LISTING of individual readings, every row already joins `sms.source_epoch`
- * and carries `provenance.sourceTable` / `provenance.epochLabel`, and a
- * reader who asks for "every reading in this period" and is silently shown
- * one generation's has been lied to more than one who is shown both and told
- * which is which. Filtering here would also break the drill-down hops: a
- * screen's figure links to the rows behind it, and those rows must still be
- * addressable.
+ * Measured on the dev copy for 1-28 Sep: Readings said 179,097 cones weighed
+ * where the real count is 19,792, and 4,523 rejected by inspection where the
+ * real count is 901; the Sacks register said 8,130 where its own headline
+ * said 842 — the same pooling defect the 23 Sep design below deliberately
+ * chose to keep, on the theory that per-row labelling made pooling honest.
+ * It did not: a reader asking "how many readings this period" reads `total`,
+ * not each row's own `provenance.epochLabel`, and a screen whose headline and
+ * whose register disagree about the same period is not a screen a reader can
+ * trust either number from.
  *
- * WHAT WAS NEVERTHELESS WRONG. `total` was a single `COUNT(*)` over both
- * generations with nothing beside it — a pooled figure of exactly the kind
- * `sms summary` stopped printing in 0a0f030, rendered as "N readings" at the
- * top of the page. On the dev sidecar over 2026-08-21 – 2026-09-07 that read
- * 190,306 cones where IFL's own generation holds 55,058, and 8,509 sacks
- * where generation 3 holds 2,310. So the count is now DECOMPOSED rather than
- * filtered: `total` still counts exactly the rows the register lists (it is
- * what pagination is over, and it must stay that), and `generations` says
- * what it is made of. One query does both — the old `COUNT(*)` became a
- * `GROUP BY source_epoch` summed in memory, so this costs no extra round trip
- * and no extra scan.
+ * THE RULE NOW: `listEvents` and `exportEventsCsv` both take a
+ * `GenerationScope`, resolved by the CALLER (never internally — see each
+ * function's own signature) via `resolveGenerationScope`'s `'auto'` default
+ * (the same newest-real-generation choice `production.ts`/Line uses) or an
+ * explicit `opts.key` batch a reader picked. Both queries — the row listing
+ * AND `total` — are constrained to that one scope, via `andEpoch`. What used
+ * to be the ONLY tally (`generations`, from an UNCONSTRAINED `GROUP BY
+ * source_epoch`) is kept, unconstrained, specifically so the screen can
+ * still say what else exists in the period and offer it — never again as a
+ * number folded silently into `total`.
  *
- * THE CSV EXPORT carries the same breakdown for a different reason. Its rows
- * are individually labelled, so it presents no pooled figure — but its
- * 20,000-row cap is applied to a time-ordered pooled set, so on the range
- * above an export would be 20,000 rows drawn almost entirely from whichever
- * generation sorts first, with the other generation absent and nothing saying
- * so. `truncated` said the list was cut; it could not say a whole generation
- * was.
+ * THE CSV EXPORT uses the same scope, plus a two-line disclosure trailer
+ * (`generationDisclosureLines`, the same wording every report export already
+ * carries: "Data batch: …" / "Excluded from another data batch: … readings")
+ * after a blank line, matching the reports' own CSV convention — never a
+ * `#` comment header (CLAUDE.md's "Open question 4").
+ *
+ * fromFor (below) stays UNSCOPED by design and carries its own exemption in
+ * `generationScope.guard.test.ts` — it is the shared FROM builder, not a
+ * query; every row it feeds still joins `sms.source_epoch` and is labelled,
+ * and it is `listEvents`/`exportEventsCsv` themselves that now apply the
+ * scope via `andEpoch`, which the guard recognises directly.
  */
 export interface GenerationTally {
   /** `${sourceDb}#${ordinal}` — one physical generation, as generation.ts keys it. */
@@ -411,6 +438,16 @@ export interface RegisterPage {
    */
   generations?: GenerationTally[];
   /**
+   * The single batch this page was scoped to (owner decision, 28 Sep 2026) —
+   * `resolveGenerationScope`'s own `GenerationNote` shape, so the client uses
+   * one vocabulary for "which generation" everywhere. `generation: null`
+   * means nothing was excluded — either the window carries no epoch-tracked
+   * rows at all (pre-tracking sidecar), or the requested batch matched
+   * nothing (`NO_MATCH_SCOPE`, `total` reads 0 in that case). Optional for
+   * the same back-compat reason `generations` is.
+   */
+  generation?: GenerationNote;
+  /**
    * See RegisterDataIssue. Empty on every healthy response — declared
    * OPTIONAL for the same back-compat reason `generations` is: `listEvents`
    * always sets it, and a missing value must read as "not stated", never as
@@ -422,36 +459,74 @@ export interface RegisterPage {
   dataIssues?: RegisterDataIssue[];
 }
 
+/**
+ * `total` counts ONLY the rows of the scope's own chosen batch (owner
+ * decision, 28 Sep 2026) — read off the UNCONSTRAINED tally rather than a
+ * second round trip, since `generations` already holds every batch's count
+ * over the identical FROM/WHERE. `scope === UNSCOPED` (reference equality,
+ * the exported singleton) means the window carries no epoch-tracked rows at
+ * all, so there is nothing to scope BY and `total` is the plain pooled sum
+ * (unchanged from before this pass, for that one case only). A `scope` whose
+ * `generation` is null for any OTHER reason (an explicit batch that matched
+ * nothing — `NO_MATCH_SCOPE`) must read 0, never the pooled figure.
+ */
+export function scopedTotal(scope: GenerationScope, generations: readonly GenerationTally[], pooledTotal: number): number {
+  if (scope === UNSCOPED) return pooledTotal;
+  if (!scope.generation) return 0;
+  return generations.find((g) => g.key === scope.generation!.key)?.rows ?? 0;
+}
+
 export async function listEvents(
   pool: ConnectionPool,
   lineId: number,
   type: EventType,
   q: RegisterQuery,
+  /** REQUIRED — resolved by the caller (`resolveGenerationScope`), never
+   *  computed internally. See this file's own "WHY THE REGISTER LISTS ONE
+   *  BATCH BY DEFAULT" header. */
+  scope: GenerationScope,
 ): Promise<RegisterPage> {
   const from = fromFor(type);
   const cols = colsFor(type);
+  const table = tableFor(type);
   const order = `${ALIAS}${sortCol(type, q.sort)} ${q.dir === 'asc' ? 'ASC' : 'DESC'}`;
   const offset = (q.page - 1) * q.pageSize;
 
-  const countReq = pool.request();
-  const where = bindFilters(countReq, lineId, type, q, ALIAS);
-  const { total, generations, dataIssues } = foldGenerationTally(
-    (await countReq.query<TallyRow>(TALLY_SQL(from, where))).recordset,
+  // Unconstrained tally — what EVERY batch in the window holds, never what is
+  // listed. Feeds `generations` (the full disclosure) and `total` (via
+  // `scopedTotal`, above), so a scoped listing costs no extra round trip.
+  const tallyReq = pool.request();
+  const tallyWhere = bindFilters(tallyReq, lineId, type, q, ALIAS);
+  const { total: pooledTotal, generations, dataIssues } = foldGenerationTally(
+    (await tallyReq.query<TallyRow>(TALLY_SQL(from, tallyWhere))).recordset,
   );
+  const total = scopedTotal(scope, generations, pooledTotal);
 
   const rowsReq = pool.request();
-  bindFilters(rowsReq, lineId, type, q, ALIAS);
+  const rowsWhere0 = bindFilters(rowsReq, lineId, type, q, ALIAS);
+  const rowsWhere = andEpoch(rowsWhere0, rowsReq, scope, table);
   const stateCol = stateColumn(rowsReq, type, q);
   rowsReq.input('offset', mssql.Int, offset).input('take', mssql.Int, q.pageSize);
   const res = await rowsReq.query<Record<string, unknown>>(
-    `SELECT ${cols}${stateCol} FROM ${from} WHERE ${where}
+    `SELECT ${cols}${stateCol} FROM ${from} WHERE ${rowsWhere}
      ORDER BY ${order}
      OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY`,
   );
-  return { rows: res.recordset.map(foldProvenance), total, page: q.page, pageSize: q.pageSize, generations, dataIssues };
+  return {
+    rows: res.recordset.map(foldProvenance),
+    total,
+    page: q.page,
+    pageSize: q.pageSize,
+    generations,
+    generation: noteOf(scope),
+    dataIssues,
+  };
 }
 
-const tableFor = (type: EventType): EventTable =>
+/** The canonical event table a register `EventType` maps to — exported so
+ *  route handlers can resolve a `GenerationScope` for exactly the one table
+ *  a listing/export needs, without duplicating this mapping. */
+export const tableFor = (type: EventType): EventTable =>
   type === 'cone' ? 'cone_event' : type === 'sack' ? 'sack_event' : 'reject_event';
 
 /**
@@ -659,15 +734,41 @@ export async function getEventDetail(
 
 const CSV_ROW_CAP = 20_000;
 
+/**
+ * The two disclosure trailer lines (owner decision, 28 Sep 2026) — the same
+ * wording every report CSV already carries (`generationDisclosureLines`,
+ * reports/common.ts): "Data batch: …" / "Excluded from another data batch:
+ * … readings". Built from the scope's own `GenerationNote` rather than a
+ * report's `ReportHeader`, since the register has no report type of its own;
+ * only the three fields `generationDisclosureLines` reads are constructed.
+ * Null when the scope excludes nothing (nothing to disclose).
+ */
+export function registerDisclosureLines(scope: GenerationScope): [string, string] | null {
+  const note = noteOf(scope);
+  const g = note.generation;
+  const sourceGeneration = g == null ? null : g.simulator ? `${g.label ?? g.sourceDb ?? 'unknown'} (plant simulator, synthetic data)` : g.label;
+  const header: Pick<ReportHeader, 'spansGenerations' | 'sourceGeneration' | 'otherGenerationExcluded'> = {
+    spansGenerations: note.spansGenerations,
+    sourceGeneration: note.spansGenerations ? sourceGeneration : null,
+    otherGenerationExcluded: note.spansGenerations
+      ? { count: note.otherGenerationExcluded, percent: null, simulator: note.excludedSimulator ?? 0 }
+      : null,
+  };
+  return generationDisclosureLines(header);
+}
+
 /** Bounded CSV export honouring the same filters/sort as the list view. */
 export async function exportEventsCsv(
   pool: ConnectionPool,
   lineId: number,
   type: EventType,
   f: RegisterFilters & { sort: SortField; dir: SortDir },
+  /** REQUIRED — see listEvents' own doc comment; resolved by the caller. */
+  scope: GenerationScope,
 ): Promise<{ csv: string; truncated: boolean; generations: GenerationTally[]; exported: GenerationTally[] }> {
   const from = fromFor(type);
   const cols = colsFor(type);
+  const table = tableFor(type);
   const order = `${ALIAS}${sortCol(type, f.sort)} ${f.dir === 'asc' ? 'ASC' : 'DESC'}`;
 
   // What the filters MATCH, per generation — against which the caller can
@@ -679,7 +780,8 @@ export async function exportEventsCsv(
   );
 
   const req = pool.request();
-  const where = bindFilters(req, lineId, type, f, ALIAS);
+  const where0 = bindFilters(req, lineId, type, f, ALIAS);
+  const where = andEpoch(where0, req, scope, table);
   const stateCol = stateColumn(req, type, f);
   req.input('cap', mssql.Int, CSV_ROW_CAP + 1);
   const res = await req.query<Record<string, unknown>>(
@@ -693,7 +795,10 @@ export async function exportEventsCsv(
   // `generations` and absent from `exported` was cut entirely; that is the
   // fact `truncated` alone could never state.
   const exported = countExported(rows, generations, keyOfEpoch);
-  if (rows.length === 0) return { csv: '', truncated: false, generations, exported };
+  const trailer = registerDisclosureLines(scope);
+  if (rows.length === 0) {
+    return { csv: trailer ? ['', trailer[0], trailer[1]].join('\n') : '', truncated: false, generations, exported };
+  }
 
   // The reading's own columns first, exactly as before; the provenance
   // fields follow as trailing columns named by their JSON path
@@ -701,7 +806,12 @@ export async function exportEventsCsv(
   // finds every column where it was and the new ones are unmistakably one
   // group. `provenance` itself is an object and is never emitted as a cell.
   const ownHeaders = Object.keys(rows[0]!).filter((h) => h !== 'provenance');
-  const provHeaders = PROVENANCE_KEYS.map(([, key]) => `provenance.${key}`);
+  // `epochSimulator` is DERIVED (foldProvenance computes it from the raw
+  // source_db column, never selected as its own prov_* passthrough — see
+  // foldProvenance's own comment), so it is appended here rather than via
+  // PROVENANCE_KEYS' generic column->field loop; `cell()` below still reads
+  // it straight off `row.provenance`, exactly like every other trailing key.
+  const provHeaders = [...PROVENANCE_KEYS.map(([, key]) => `provenance.${key}`), 'provenance.epochSimulator'];
   const headers = [...ownHeaders, ...provHeaders];
   const cell = (r: Record<string, unknown>, h: string): unknown =>
     h.startsWith('provenance.') ? (r.provenance as Record<string, unknown>)[h.slice('provenance.'.length)] : r[h];
@@ -717,6 +827,7 @@ export async function exportEventsCsv(
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.join(','), ...rows.map((r) => headers.map((h) => esc(cell(r, h))).join(','))];
+  if (trailer) lines.push('', trailer[0], trailer[1]);
   return { csv: lines.join('\n'), truncated, generations, exported };
 }
 

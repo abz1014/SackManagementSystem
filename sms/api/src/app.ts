@@ -14,7 +14,7 @@ import { getRejectPareto, listRejectCodes, updateRejectCode, REJECT_SEVERITIES, 
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
 import {
-  listEvents, getEventDetail, exportEventsCsv, type EventType,
+  listEvents, getEventDetail, exportEventsCsv, tableFor, type EventType,
 } from './services/register.js';
 import { loadStateContext, parseStates } from './services/coneState.js';
 import { getDowntime } from './services/downtime.js';
@@ -22,7 +22,7 @@ import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { adjustmentRestarts, getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
 import { getLive, invalidateLiveConfigCache, resolveLiveScope, setLiveScopeIncludesSimulator } from './services/live.js';
-import { epochFragment, createScopeCache } from './services/generation.js';
+import { epochFragment, createScopeCache, resolveGenerationScope } from './services/generation.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
@@ -482,7 +482,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       if (q.data.asOf && !cfg.liveAllowAsOf) {
-        res.status(400).json({ error: 'asOf replay is disabled on this server (LIVE_ALLOW_AS_OF)' });
+        res.status(400).json({ error: 'replaying an earlier moment (asOf) is turned off on this server' });
         return;
       }
       const asOfMs = q.data.asOf ? new Date(q.data.asOf).getTime() : undefined;
@@ -1112,6 +1112,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     product: z.coerce.number().int().positive().optional(),
     sort: z.enum(['time', 'weight']).default('time'),
     dir: z.enum(['asc', 'desc']).default('desc'),
+    /**
+     * Which data batch to list (owner decision, 28 Sep 2026): 'auto' (the
+     * default — the newest real generation covering the window, the same
+     * choice production.ts/Line makes), a `GenerationTally.key`
+     * (`<sourceDb>#<ordinal>`), or `epoch:<id>` naming one `sms.source_epoch`
+     * row directly (what ReadingSheet.tsx uses to scope "cones since the
+     * previous sack" to that sack's own generation).
+     */
+    batch: z.string().regex(/^(auto|[A-Za-z0-9_]*#\d+|epoch:\d+)$/).optional(),
   });
 
   /**
@@ -1150,7 +1159,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const { classification, states } = await registerClassification(q);
-      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states });
+      const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
+      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states }, scope);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -1168,7 +1178,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const { classification, states } = await registerClassification(q);
-      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, classification, states });
+      const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
+      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, classification, states }, scope);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${q.type}-events.csv"`);
       if (truncated) res.setHeader('X-Export-Truncated', 'true');

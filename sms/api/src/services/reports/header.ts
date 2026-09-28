@@ -38,6 +38,15 @@ export interface HeaderInput {
    * route) genuinely cannot state one either way.
    */
   reportData?: unknown;
+  /**
+   * Task B (28 Sep 2026): the register's own resolved `GenerationNote`,
+   * passed by `/api/reports/header` when it resolves a `batch` param for the
+   * Readings/Sacks print header — a SEPARATE input from `reportData`, since
+   * the register has no `AnyReportData` shape of its own to extract one
+   * from. When both are given, `reportData`'s own note wins (a composed
+   * report always has one); this is the register-only fallback.
+   */
+  generationNote?: GenerationNote | null;
 }
 
 /**
@@ -68,20 +77,37 @@ export function extractGenerationNote(data: unknown): GenerationNote | null {
 export async function buildHeader(pool: ConnectionPool, lineId: number, input: HeaderInput): Promise<ReportHeader> {
   const line = await getLineIdentity(pool, lineId);
   const nowMs = input.plantNowMsOverride ?? plantNowMs();
-  const gn = extractGenerationNote(input.reportData);
+  // `reportData`'s own note wins when both are given — a composed report
+  // always carries one; `generationNote` is the register-only fallback for
+  // the standalone header route (Task B, 28 Sep 2026 — see HeaderInput).
+  const gn = extractGenerationNote(input.reportData) ?? input.generationNote ?? null;
   const spansGenerations = gn?.spansGenerations ?? false;
   const g = gn?.generation ?? null;
   // A simulator generation is named as one, detected from its source database
   // name (…_SIM), not from the recorded provenance — see generation.ts.
   const genLabel = g ? (g.simulator ? `${g.label ?? g.sourceDb ?? 'unknown'} (plant simulator, synthetic data)` : g.label) : null;
+  // Task B (28 Sep 2026): the disclosure prints when the period spans
+  // batches OR the source itself is the simulator — a period entirely
+  // covered by the simulator never sets `spansGenerations` (nothing was
+  // EXCLUDED), so that alone used to leave a simulator-only report silently
+  // unlabelled. `simulatorSource` names this case, and `sourceGeneration`
+  // states it even when nothing else was excluded.
+  const simulatorSource = g?.simulator === true;
   const disclosure = {
     spansGenerations,
-    sourceGeneration: spansGenerations ? (genLabel ?? null) : null,
+    sourceGeneration: spansGenerations || simulatorSource ? (genLabel ?? null) : null,
     otherGenerationExcluded: spansGenerations && gn
       ? { count: gn.otherGenerationExcluded, percent: null, simulator: gn.excludedSimulator ?? 0 }
       : null,
   };
   const lines = generationDisclosureLines(disclosure);
+  // When nothing was excluded but the source IS the simulator, there is no
+  // "excluded" line to compose — state the one fact plainly instead.
+  const generationLine = lines
+    ? `${lines[0]}. ${lines[1]}.`
+    : simulatorSource
+      ? `Data batch: ${genLabel ?? 'unknown'}.`
+      : null;
   return {
     reportType: input.reportType,
     title: REPORT_TITLES[input.reportType],
@@ -96,6 +122,7 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
     definitions: 'KPI-DEFINITIONS.md',
     approval: 'awaiting',
     ...disclosure,
-    generationLine: lines ? `${lines[0]}. ${lines[1]}.` : null,
+    generationLine,
+    simulatorSource,
   };
 }

@@ -27,6 +27,7 @@ import { useEffect, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Chevron, Failed, Loading, rowKeys } from '../ui/bits';
 import { W } from '../lib/words';
+import { batchName } from '../lib/batchName';
 import { fmtClock, fmtDayLong, fmtG, fmtInt } from '../lib/fmt';
 import {
   getRejectReason, getStations, rejectCodeParam, setRejectLabel, stationLabel,
@@ -258,7 +259,11 @@ function Body({
                 {/* One id, labelled with its generation: the number alone names two rows since 5 Aug 2026. */}
                 <td style={{ paddingLeft: 24 }}>
                   {r.sourceRowId == null ? '—' : String(r.sourceRowId)}
-                  {r.epochLabel && <span className="mut sm"> · {r.epochLabel}</span>}
+                  {/* Task B (28 Sep 2026): a plain batch name, not the raw
+                      table label ("pack1_TP1U2 gen 4"). */}
+                  {r.epochOrdinal != null && (
+                    <span className="mut sm"> · {batchName({ ordinal: r.epochOrdinal, simulator: r.epochSimulator })}</span>
+                  )}
                 </td>
                 <td className="n"><Chevron label={W.openRecord} /></td>
               </tr>

@@ -53,6 +53,7 @@ import { locateEdge } from '../services/reports/edge.js';
 import { renderReportPdf } from '../services/reports/pdf.js';
 import type { RouteContext } from './context.js';
 import { isoDate, isoTimestamp } from '../dates.js';
+import { EVENT_TABLES, noteOf, resolveGenerationScope } from '../services/generation.js';
 
 const PDF_CONTENT_TYPE = 'application/pdf';
 
@@ -196,22 +197,42 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
   // period, line name or printed-by line"). Cheap: one line-identity read.
   app.get('/api/reports/header', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const q = z.object({ from: dateStr, to: dateStr, at: isoTs }).safeParse(req.query);
+      const q = z
+        .object({
+          from: dateStr,
+          to: dateStr,
+          at: isoTs,
+          type: z.string().optional(),
+          // Task B (28 Sep 2026): same batch grammar as the register's own
+          // `?batch=` — 'auto' (default), a GenerationTally.key, or
+          // `epoch:<id>`. See app.ts's registerQuery for the shared regex.
+          batch: z.string().regex(/^(auto|[A-Za-z0-9_]*#\d+|epoch:\d+)$/).optional(),
+        })
+        .safeParse(req.query);
       if (!q.success) {
         res.status(400).json({ error: 'invalid query', detail: q.error.flatten().fieldErrors });
         return;
       }
       const atMs = q.data.at && cfg.liveAllowAsOf ? new Date(q.data.at).getTime() : null;
       const day = new Date(atMs ?? plantNowMs()).toISOString().slice(0, 10);
+      const from = q.data.from ?? day;
+      const to = q.data.to ?? q.data.from ?? day;
+      // The register spans all three event tables (cone/sack/reject), so its
+      // own header resolves the batch across every one of them — the same
+      // window `production.ts`/Line would scope, widened to cover a Sacks
+      // print header too.
+      const scope = await resolveGenerationScope(pool, cfg.lineId, { from, to }, EVENT_TABLES, { key: q.data.batch });
+      const reportType = q.data.type && isReportType(q.data.type) ? q.data.type : 'daily';
       const header = await buildHeader(pool, cfg.lineId, {
-        reportType: 'daily',
-        period: { period: 'custom', from: q.data.from ?? day, to: q.data.to ?? q.data.from ?? day },
+        reportType,
+        period: { period: 'custom', from, to },
         filters: {},
         user: (req as AuthedRequest).user,
         lineNameFallback: cfg.lineName,
         plantNowMsOverride: atMs,
+        generationNote: noteOf(scope),
       });
-      res.json({ header: { ...header, reportType: 'register', title: 'Register' } });
+      res.json({ header: { ...header, reportType: q.data.type ? header.reportType : 'register', title: q.data.type ? header.title : 'Register' } });
     } catch (err) {
       next(err);
     }

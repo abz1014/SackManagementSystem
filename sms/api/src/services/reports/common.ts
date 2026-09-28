@@ -164,6 +164,15 @@ export interface ReportHeader {
    * generation" or a rebuild. Null when there is nothing to disclose.
    */
   generationLine?: string | null;
+  /**
+   * Task B (28 Sep 2026): true when `sourceGeneration` names a plant-
+   * simulator generation — a period entirely covered by the simulator never
+   * sets `spansGenerations` (nothing was excluded from IT), so a screen that
+   * only checked `spansGenerations` used to print a simulator-only report
+   * with no disclosure at all. Optional: absent on a header built before this
+   * field existed, never itself a claim of "no".
+   */
+  simulatorSource?: boolean;
 }
 
 /**

@@ -67,7 +67,12 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
         <span>{generatedLine(header)}</span>
         <span>{W.reports.definitionsNote}</span>
       </div>
-      {header.spansGenerations && (
+      {/* Task B (28 Sep 2026): prints when the period spans batches OR the
+          source itself is the simulator — a period entirely covered by the
+          simulator excludes nothing (spansGenerations stays false), so
+          spansGenerations alone used to leave a simulator-only page with no
+          disclosure at all. */}
+      {(header.spansGenerations || header.simulatorSource) && (
         <div className="ph-foot mut">
           {header.generationLine ?? `Data batch: ${header.sourceGeneration ?? 'unknown'}. Excluded from another batch: ` +
             `${header.otherGenerationExcluded?.count ?? 0} readings` +
@@ -102,8 +107,27 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
  * `api/src/services/plantClock.ts`), and a wrong instant printed as fact is
  * worse than an admitted gap.
  */
-export function RegisterPrintHead({ from, to, at, title }: { from: string; to: string; at: string | null; title: string }) {
-  const h = usePolling(() => getReportHeader({ from, to, at }), 5 * 60_000, `print-head:${from}:${to}:${at ?? ''}`);
+export function RegisterPrintHead({
+  from,
+  to,
+  at,
+  title,
+  /** Task B (28 Sep 2026): the batch the on-screen register is reading —
+   *  the printed header must name the SAME batch the screen shows, never a
+   *  second, independently-resolved default. */
+  batch,
+}: {
+  from: string;
+  to: string;
+  at: string | null;
+  title: string;
+  batch?: string;
+}) {
+  const h = usePolling(
+    () => getReportHeader({ from, to, at, batch }),
+    5 * 60_000,
+    `print-head:${from}:${to}:${at ?? ''}:${batch ?? 'auto'}`,
+  );
   const { line } = useLive();
   if (h.data?.header) return <PrintHead header={h.data.header} title={title} />;
   if (h.error) {
