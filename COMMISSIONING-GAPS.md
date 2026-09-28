@@ -57,9 +57,35 @@ or labelled superseded, not deleted, so the file shows its own history.
 - Nelson rules 2–8 flag 37.6–54.8% of station-groups on real data and stay deliberately suppressed pending an owner decision on one of four options (RT-019/`DEFECTS.md` D-10) → ours
 - `routes/reports.ts`'s `newestProductionDay()` anchor still pools every source generation when picking the "default" report day (D-11's report-layer fix covers the report bodies; this one anchor query was not in that list) → ours
 - **Added 24 Sep 2026, second audit (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`, `DEFECTS.md` Part 6):**
-  - Line's headline reject rate silently reverts to the pre-fix double-count formula if `unmatchedRejects` is missing from a response, no caveat shown (RT24-07, in progress, hash pending) → ours
-  - No stale-vs-dead distinction per machine — a machine quiet 3 minutes and one dead for weeks render identically (RT24-08, in progress, hash pending) → ours
-  - A mis-generation row can sit inside the documented 10 Jul–5 Aug "no data" gap and count as real, unflagged (RT24-09, open) → ours
+  - ~~Line's headline reject rate silently reverts to the pre-fix double-count formula if `unmatchedRejects` is missing from a response, no caveat shown (RT24-07, in progress, hash pending) → ours~~
+    **Fixed 24 Sep 2026, `4e8513c`.** Verified 28 Sep 2026: `Line.tsx` now reads
+    could-not-read via the existing `rateUnreadable`/`fieldMissing` idiom instead of
+    silently falling back to the old formula when `unmatchedRejects` is missing; the
+    rejected COUNT still renders. `Line.render.test.tsx` (new case in this commit) is
+    green (`npx vitest run web/src/screens/Line.render.test.tsx` — 14 tests passed).
+  - ~~No stale-vs-dead distinction per machine — a machine quiet 3 minutes and one dead for weeks render identically (RT24-08, in progress, hash pending) → ours~~
+    **Fixed 24 Sep 2026, `4e8513c`.** Verified 28 Sep 2026: `machinesRunning.ts` now
+    carries `lastSeenUtc` and a four-way `state: 'running'|'quiet'|'stale'|'silent'`
+    graded off `lastSeenUtc` relative to the file's existing `asOfMs` anchor (never
+    `Date.now()`). `machinesRunning.test.ts` is new in this commit (did not exist at
+    `4e8513c^`, so it was red by non-existence before the fix) and is green
+    (`npx vitest run api/src/services/machinesRunning.test.ts` — 3 tests passed).
+    **Owner must confirm the thresholds**: "running" under 2h since last seen; "silent"
+    means nothing seen for 7 days (intermediate window graded "stale").
+  - ~~A mis-generation row can sit inside the documented 10 Jul–5 Aug "no data" gap and count as real, unflagged (RT24-09, open) → ours~~
+    **Fixed 24 Sep 2026, `edae627`.** Verified 28 Sep 2026: a new read-only DQ check,
+    `isolated_production_day` (`sms/sync-worker/src/transform/isolatedDay.ts`, registered
+    in `dq.ts`'s `CHECK_NAMES` and run once per pass at the end of `runTransform.ts`),
+    flags a shift_date with fewer than 5 rows whose ±3-day neighbourhood in the same
+    source generation has no data, or which falls outside that generation's coverage
+    range — a WARNING naming the first raw_id, not a deletion or exclusion; flagged rows
+    are still counted. Verified read-only on the local DB per the commit message: exactly
+    one row flagged (source_epoch 9, shift_date 2026-07-12, raw_id 208207 → source_row_id
+    4130, matching RT24-09's cited id). `isolatedDay.test.ts` is new in this commit (did
+    not exist at `edae627^`, so red by non-existence before the fix) and is green
+    (`npx vitest run sync-worker/src/transform/isolatedDay.test.ts` — 6 tests passed).
+    **Owner must confirm**: the day is flagged as a warning only; its rows are still
+    counted, not excluded.
   - `/api/health` can report `degraded` with `degradedReason:null` (RT24-12, treated as still open pending re-check) → ours
 
 ## 3. Fixed today, worth naming so it is not re-reported
