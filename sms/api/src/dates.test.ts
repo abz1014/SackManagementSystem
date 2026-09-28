@@ -5,7 +5,7 @@
  * including the one genuine edge case (a leap day).
  */
 import { describe, it, expect } from 'vitest';
-import { isoDate } from './dates.js';
+import { isoDate, isoTimestamp } from './dates.js';
 
 describe('isoDate', () => {
   it('accepts a real calendar date', () => {
@@ -56,6 +56,70 @@ describe('isoDate', () => {
           expect(isoDate.safeParse(s).success, s).toBe(true);
         }
       }
+    }
+  });
+});
+
+describe('isoTimestamp (RT-016)', () => {
+  it('accepts a real timestamp without milliseconds', () => {
+    expect(isoTimestamp.safeParse('2026-09-24T10:30:00Z').success).toBe(true);
+  });
+
+  it('accepts a real timestamp with milliseconds', () => {
+    expect(isoTimestamp.safeParse('2026-09-24T10:30:00.123Z').success).toBe(true);
+  });
+
+  it('accepts 1- and 2-digit millisecond forms', () => {
+    expect(isoTimestamp.safeParse('2026-09-24T10:30:00.1Z').success).toBe(true);
+    expect(isoTimestamp.safeParse('2026-09-24T10:30:00.12Z').success).toBe(true);
+  });
+
+  it('accepts a leap-year 29 Feb timestamp', () => {
+    expect(isoTimestamp.safeParse('2024-02-29T00:00:00Z').success).toBe(true);
+  });
+
+  it('rejects month 13', () => {
+    const r = isoTimestamp.safeParse('2026-13-01T10:00:00Z');
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects day 31 in a 30-day month', () => {
+    const r = isoTimestamp.safeParse('2026-04-31T10:00:00Z');
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]!.message).toBe('That date or time does not exist.');
+  });
+
+  it('rejects 30 Feb outright', () => {
+    expect(isoTimestamp.safeParse('2026-02-30T10:00:00Z').success).toBe(false);
+  });
+
+  it('rejects a non-leap-year 29 Feb', () => {
+    expect(isoTimestamp.safeParse('2025-02-29T10:00:00Z').success).toBe(false);
+  });
+
+  it('rejects hour 24', () => {
+    expect(isoTimestamp.safeParse('2026-09-24T24:00:00Z').success).toBe(false);
+  });
+
+  it('rejects minute 60', () => {
+    expect(isoTimestamp.safeParse('2026-09-24T10:60:00Z').success).toBe(false);
+  });
+
+  it('rejects second 60', () => {
+    expect(isoTimestamp.safeParse('2026-09-24T10:30:60Z').success).toBe(false);
+  });
+
+  it('rejects the wrong shape before ever reaching the calendar check', () => {
+    expect(isoTimestamp.safeParse('2026-09-24').success).toBe(false);
+    expect(isoTimestamp.safeParse('2026-09-24 10:30:00').success).toBe(false);
+    expect(isoTimestamp.safeParse('not-a-timestamp').success).toBe(false);
+    expect(isoTimestamp.safeParse('').success).toBe(false);
+  });
+
+  it('accepts every hour boundary of a full day', () => {
+    for (let h = 0; h < 24; h++) {
+      const s = `2026-09-24T${String(h).padStart(2, '0')}:00:00Z`;
+      expect(isoTimestamp.safeParse(s).success, s).toBe(true);
     }
   });
 });

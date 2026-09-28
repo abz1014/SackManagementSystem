@@ -67,7 +67,7 @@ import { mountReportsRoutes } from './routes/reports.js';
 import { mountCalibrationRoutes } from './routes/calibration.js';
 import { mountSacksRoutes } from './routes/sacks.js';
 import { mountChangeoverRoutes } from './routes/changeover.js';
-import { isoDate } from './dates.js';
+import { isoDate, isoTimestamp } from './dates.js';
 import { responseCap } from './middleware/responseCap.js';
 
 const dateStr = isoDate.optional();
@@ -110,10 +110,7 @@ const productionQuery = z.object({
   // Caps the window at an INSTANT so a replay (?at=) shows only what existed
   // then. The route spreads parsed.data straight into getProduction and keys
   // its cache on the same object, so both follow automatically.
-  tsTo: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-    .optional(),
+  tsTo: isoTimestamp.optional(),
   groupBy: z.enum(['day', 'shift', 'station', 'none']).default('day'),
 });
 
@@ -466,10 +463,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // Cached under the same short TTL as production so a room of wall screens
   // and floor PCs costs one set of queries per TTL, not one per viewer.
   const liveQuery = z.object({
-    asOf: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-      .optional(),
+    asOf: isoTimestamp.optional(),
   });
   app.get('/api/live', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -558,10 +552,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     // to move the fixed 14-production-day trailing window rules 1 and 2 use
     // off the server's TRUE newest day onto the replayed one. Optional and
     // additive: absent, every default below is exactly what it was before.
-    tsTo: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-      .optional(),
+    tsTo: isoTimestamp.optional(),
   });
   app.get('/api/attention', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -612,10 +603,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
    * Weight screens mean by "the product running".
    */
   const productAtQuery = z.object({
-    at: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-      .optional(),
+    at: isoTimestamp.optional(),
     /**
      * The reading's OWN product — IFL's MaterialId, stamped on every row since
      * their 2026-08-05 rebuild. When given, the answer is that product's label
@@ -1060,7 +1048,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           // product and code are the drilldown dimensions. `code` is
           // `weight` or `<tube>-<material>` (rejects.ts parseCodeParam).
           shift: z.enum(['morning', 'evening', 'night']).optional(),
-          tsTo: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp').optional(),
+          tsTo: isoTimestamp.optional(),
           station: z.coerce.number().int().positive().optional(),
           product: z.coerce.number().int().positive().optional(),
           code: z.string().max(24).optional(),
@@ -1091,10 +1079,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   });
 
   // ---- Sack & Cone Register — drill-down list, detail, CSV export ----
-  const isoTs = z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-    .optional();
+  const isoTs = isoTimestamp.optional();
   const registerQuery = z.object({
     type: z.enum(['cone', 'sack', 'reject']),
     from: dateStr,
@@ -1217,7 +1202,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         from: dateStr,
         to: dateStr,
         shift: z.enum(['morning', 'evening', 'night']).optional(),
-        tsTo: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp').optional(),
+        tsTo: isoTimestamp.optional(),
         station: z.coerce.number().int().positive().optional(),
         product: z.coerce.number().int().positive().optional(),
         code: z.string().max(24).optional(),

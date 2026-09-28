@@ -149,3 +149,64 @@ describe('date query params reject impossible calendar dates', () => {
     });
   });
 });
+
+/**
+ * RT-016, ISO-timestamp half. Every `tsTo`/`tsFrom`/`asOf`/`at` param was
+ * checked for shape only (`/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/`),
+ * the same flaw `isoDate` had already been fixed for plain dates. A
+ * calendar-invalid-but-shape-valid timestamp (`2026-02-30T..`, `..T24:00:00Z`,
+ * `..T10:60:00Z`) either silently rolled over or became an `Invalid Date`
+ * that reached mssql and crashed the driver with a raw stack trace instead
+ * of a 400. `isoTimestamp` (dates.ts) closes this the same way `isoDate`
+ * closes the plain-date case; this block proves it on every route that
+ * takes one of these params, and proves the fake pool is never queried —
+ * i.e. validation happens before any DB access, so the real driver never
+ * sees the bad value either.
+ */
+const BAD_TIMESTAMPS = [
+  '2026-02-30T10:00:00Z', // no such day
+  '2026-13-01T10:00:00Z', // no such month
+  '2026-04-31T10:00:00Z', // April has 30 days
+  '2026-09-24T24:00:00Z', // hour 24
+  '2026-09-24T10:60:00Z', // minute 60
+  '2026-09-24T10:30:60Z', // second 60
+];
+const VALID_TS = '2026-09-07T12:00:00Z';
+const VALID_DAY = '2026-09-01';
+
+describe('ISO-timestamp query params reject impossible calendar instants (RT-016)', () => {
+  describe.each([
+    ['/api/production tsTo', (d: string) => `/api/production?tsTo=${d}`],
+    ['/api/live asOf', (d: string) => `/api/live?asOf=${d}`],
+    ['/api/attention tsTo', (d: string) => `/api/attention?tsTo=${d}`],
+    ['/api/product-at at', (d: string) => `/api/product-at?at=${d}`],
+    ['/api/reject-spc tsTo', (d: string) => `/api/reject-spc?from=${VALID_DAY}&to=${VALID_DAY}&tsTo=${d}`],
+    ['/api/rejects tsTo (Pareto)', (d: string) => `/api/rejects?tsTo=${d}`],
+    ['/api/events tsTo', (d: string) => `/api/events?type=cone&tsTo=${d}`],
+    ['/api/sacks/summary tsTo', (d: string) => `/api/sacks/summary?from=${VALID_DAY}&to=${VALID_DAY}&tsTo=${d}`],
+    ['/api/sacks/stock tsTo', (d: string) => `/api/sacks/stock?from=${VALID_DAY}&to=${VALID_DAY}&tsTo=${d}`],
+    ['/api/reports/header at', (d: string) => `/api/reports/header?at=${d}`],
+    ['/api/reports/daily at', (d: string) => `/api/reports/daily?period=day&at=${d}`],
+    ['/api/machines/running at', (d: string) => `/api/machines/running?at=${d}`],
+    ['/api/rejects/by-day-code tsTo', (d: string) => `/api/rejects/by-day-code?from=${VALID_DAY}&to=${VALID_DAY}&tsTo=${d}`],
+  ])('%s', (_name, buildUrl) => {
+    it.each(BAD_TIMESTAMPS)('%s is refused with 400, no query beyond session auth', async (d) => {
+      const before = db.statements.length;
+      const r = await get(buildUrl(d));
+      expect(r.status).toBe(400);
+      // Every request pays exactly one query for the session-cookie lookup
+      // (auth.ts's authMiddleware, which runs before any route handler).
+      // Zod rejecting the bad timestamp must stop the request there — no
+      // production/weights/rejects/etc. query is ever issued for a value
+      // that will never reach the DB.
+      const issued = db.statements.slice(before);
+      expect(issued.length).toBe(1);
+      expect(issued[0]!.sql).toMatch(/FROM sms\.session s/);
+    });
+
+    it('a real timestamp is accepted (not 400)', async () => {
+      const r = await get(buildUrl(VALID_TS));
+      expect(r.status).not.toBe(400);
+    });
+  });
+});

@@ -21,9 +21,7 @@ import type { RouteContext } from './context.js';
 import { envelope } from '../envelope.js';
 import { MAX_RANGE_DAYS } from '../config.js';
 import { getRejectsByDayCode, listRejectsOfDayCode, parseCodeParam, type RejectFilters } from '../services/rejects.js';
-import { isoDate } from '../dates.js';
-
-const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+import { isoDate, isoTimestamp } from '../dates.js';
 
 /**
  * Same cap as app.ts's validateRange (MAX_RANGE_DAYS, config.ts: 366 days,
@@ -39,7 +37,7 @@ function rangeError(from: string, to: string): string | null {
 
 const filterSchema = {
   shift: z.enum(['morning', 'evening', 'night']).optional(),
-  tsTo: z.string().regex(ISO_TS, 'expected ISO timestamp').optional(),
+  tsTo: isoTimestamp.optional(),
   station: z.coerce.number().int().positive().optional(),
   product: z.coerce.number().int().positive().optional(),
   /** `weight`, or `<tube>-<material>` with `null` for a missing half. */

@@ -21,13 +21,10 @@ import { getPlausibilityRule } from '../services/admin.js';
 import { getReconciliation } from '../services/reconcile.js';
 import { getMachinesRunning } from '../services/machinesRunning.js';
 import { getShiftCheck } from '../services/shiftCheck.js';
-import { isoDate } from '../dates.js';
+import { isoDate, isoTimestamp } from '../dates.js';
 
 const dateStr = isoDate;
-const isoTs = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-  .optional();
+const isoTs = isoTimestamp.optional();
 
 // Same cap as app.ts's analytics routes (MAX_RANGE_DAYS, config.ts): a
 // period query over years would scan without bound once the record is

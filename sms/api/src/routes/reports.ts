@@ -52,15 +52,12 @@ import {
 import { locateEdge } from '../services/reports/edge.js';
 import { renderReportPdf } from '../services/reports/pdf.js';
 import type { RouteContext } from './context.js';
-import { isoDate } from '../dates.js';
+import { isoDate, isoTimestamp } from '../dates.js';
 
 const PDF_CONTENT_TYPE = 'application/pdf';
 
 const dateStr = isoDate.optional();
-const isoTs = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/, 'expected ISO timestamp')
-  .optional();
+const isoTs = isoTimestamp.optional();
 
 // Same cap as app.ts's analytics routes and the /api/report route
 // (MAX_RANGE_DAYS, config.ts).
