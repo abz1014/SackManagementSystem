@@ -21,7 +21,7 @@ import { getDowntime } from './services/downtime.js';
 import { getSpec, getWeightSpc, type SpcType } from './services/spc.js';
 import { adjustmentRestarts, getStationDrift, listCalibrationAdjustments, recordCalibrationAdjustment } from './services/calibration.js';
 import { getRejectSpc, type RejectBucketSize, type RejectTypeFilter } from './services/rejectSpc.js';
-import { getLive, invalidateLiveConfigCache, resolveLiveScope } from './services/live.js';
+import { getLive, invalidateLiveConfigCache, resolveLiveScope, setLiveScopeIncludesSimulator } from './services/live.js';
 import { epochFragment, createScopeCache } from './services/generation.js';
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
@@ -115,6 +115,15 @@ const productionQuery = z.object({
 });
 
 export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
+  // Task T1, 28 Sep 2026: the dev-only live-scope policy (live.ts's own
+  // `setLiveScopeIncludesSimulator`/`resolveLiveScope`) is module-level, so it
+  // must be set from EVERY createApp call, not just the one index.ts makes at
+  // startup — otherwise a later createApp in the same process (a second test
+  // in this suite, most concretely) would inherit whatever the PREVIOUS call
+  // left behind. `cfg.liveSimulator?.enabled === true` reads false for any
+  // hand-built test ApiConfig that predates this field, which is the correct
+  // "not enabled" answer, not a crash on a missing optional.
+  setLiveScopeIncludesSimulator(cfg.liveSimulator?.enabled === true);
   const app = express();
   // RT24-11 (24 Sep 2026 red-team audit): every other security header is set
   // deliberately (security.ts); this one Express sets on its own, for free,

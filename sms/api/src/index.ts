@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import { loadDotEnv, createPool } from '@sms/sync-worker';
 import { checkPlantOffset } from '@sms/shared';
-import { loadApiConfig, apiPoolOptions } from './config.js';
+import { loadApiConfig, apiPoolOptions, type LiveSimulatorConfig } from './config.js';
 import { createApp } from './app.js';
 import { markDegraded, SERVICE_VERSION } from './services/health.js';
 import { log } from './log.js';
@@ -46,6 +46,25 @@ function checkPlantOffsetOnStartup(expectedMinutes: number | undefined): void {
     plantOffsetMinutes: result.plantOffsetMinutes,
     offsetMismatchMinutes: result.offsetMismatchMinutes,
   });
+}
+
+/**
+ * Task T1 (28 Sep 2026): one startup line naming whether LIVE_ALLOW_SIMULATOR
+ * took effect. Silent when it was never requested at all (the ordinary case
+ * at IFL and on a fresh dev checkout) — a warning nobody asked for is noise;
+ * a warning for a flag that WAS asked for but refused, or that was granted,
+ * both earn a line, because either is a fact about this process's live
+ * screens an operator should be able to find in the log.
+ */
+function logLiveSimulatorPolicyOnStartup(cfg: LiveSimulatorConfig | undefined): void {
+  if (!cfg || !cfg.requested) return;
+  if (cfg.enabled) {
+    log.warn('LIVE_ALLOW_SIMULATOR is on — development only', {});
+  } else {
+    log.warn(`LIVE_ALLOW_SIMULATOR requested but refused: ${cfg.disabledReason}`, {
+      disabledReason: cfg.disabledReason,
+    });
+  }
 }
 
 /**
@@ -97,6 +116,7 @@ async function main(): Promise<void> {
   installProcessGuards(log, markDegraded);
   const cfg = loadApiConfig();
   checkPlantOffsetOnStartup(cfg.plantUtcOffsetMinutes);
+  logLiveSimulatorPolicyOnStartup(cfg.liveSimulator);
   // 16 Sep 2026 fix: without an explicit override, createPool falls back to
   // sync-worker's own batch profile (sync-worker/src/config.ts's
   // SYNC_POOL_DEFAULT / SYNC_REQUEST_TIMEOUT_MS: 5 connections, a 10-minute

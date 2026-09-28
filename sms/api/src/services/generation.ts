@@ -73,6 +73,14 @@
  * The `_SIM` test is a SAFETY NET, not the mechanism. The mechanism is
  * "newest generation, one at a time", and it is correct for IFL's rebuild
  * where every generation is real and no name ends in `_SIM`.
+ *
+ * `opts.preferReal` (28 Sep 2026, Task T1) — LIVE SCOPE ONLY, DEV ONLY. The
+ * real-first rule above is the default for every call site and stays
+ * unconditional for anything a viewer reads about a chosen period. The one
+ * exception is `live.ts`'s `resolveLiveScope`, which may pass `preferReal:
+ * false` when `LIVE_ALLOW_SIMULATOR` is both requested and verified
+ * local-only (`config.ts`'s `resolveLiveSimulator`) — see
+ * `resolveGenerationScope`'s own doc comment below for the full reasoning.
  */
 import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
@@ -203,14 +211,28 @@ export interface GenerationWindow {
  *
  * One round trip: a UNION ALL of per-table counts, joined in memory to the
  * line's `sms.source_epoch` rows (a handful of rows, PK-keyed).
+ *
+ * `opts.preferReal` (28 Sep 2026, Task T1): LIVE SCOPE ONLY, DEV ONLY. Every
+ * period-scoped report/analytics call site keeps the true default (prefer a
+ * real generation over a simulator one, unconditionally — the owner's 23 Sep
+ * 2026 decision, unchanged for anything a viewer reads about a chosen
+ * period). The ONLY caller that ever passes `preferReal: false` is
+ * `live.ts`'s `resolveLiveScope`, and only while `LIVE_ALLOW_SIMULATOR` is
+ * both requested AND verified local-only (`config.ts`'s
+ * `resolveLiveSimulator`) — see `setLiveScopeIncludesSimulator` there. This
+ * does not change what a report, register or reject chart may show; it only
+ * changes which generation the live "now" screens poll on a development
+ * machine that runs the plant simulator alongside a frozen real copy.
  */
 export async function resolveGenerationScope(
   pool: ConnectionPool,
   lineId: number,
   window: GenerationWindow,
   tables: readonly EventTable[] = EVENT_TABLES,
+  opts: { preferReal?: boolean } = {},
 ): Promise<GenerationScope> {
   if (tables.length === 0) return UNSCOPED;
+  const preferReal = opts.preferReal ?? true;
 
   const req = pool.request().input('line', mssql.Int, lineId);
   const w: string[] = ['line_id = @line'];
@@ -291,8 +313,14 @@ export async function resolveGenerationScope(
   // in the window at all, fall back to the newest simulator one — still ONE
   // generation, still counted honestly, and the caller can see that
   // `generation.simulator` says so.
+  //
+  // `preferReal === false` (live scope, dev only — see this function's own
+  // doc comment above) drops the real-only filter entirely, so "newest
+  // ordinal" below is free to choose a simulator generation over an older
+  // real one. Still never a partial mix of the two: exactly one generation
+  // is chosen either way.
   const real = candidates.filter((c) => !c.ref.simulator);
-  let pool_ = real.length > 0 ? real : candidates;
+  let pool_ = preferReal ? (real.length > 0 ? real : candidates) : candidates;
   // Drop stray generations (see STRAY_GENERATION_SHARE) while a
   // non-stray one remains.
   const poolRows = pool_.reduce((a, c) => a + c.rows, 0);
