@@ -496,7 +496,7 @@ let __NEW_TUBE_FORM__ = 2;
 
 // ============================================================ T1 — resolveTube same-name reuse vs add
 {
-  const mirrorRow = await appPool.request().query(`SELECT tube_type_id, tube_type, tube_form FROM sms.tube_type WHERE tube_type = '${__NEW_TUBE_NAME__}'`);
+  const mirrorRow = await appPool.request().input('tubeType', mssql.NVarChar, __NEW_TUBE_NAME__).query('SELECT tube_type_id, tube_type, tube_form FROM sms.tube_type WHERE tube_type = @tubeType');
   rec('T1 — mirror row for the tube R1 created', mirrorRow.recordset);
   const bounds = { setpointLoG: 100, setpointHiG: 3000 };
   async function planWith(tubeForm, label) {
