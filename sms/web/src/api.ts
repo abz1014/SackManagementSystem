@@ -514,6 +514,14 @@ export interface RegisterQuery {
   dir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
+  /**
+   * Which source generation to read, overriding the default (the newest real
+   * generation covering the window — resolveGenerationScope's own rule).
+   * `'auto'` states that default explicitly; `'<sourceDb>#<ordinal>'` is a
+   * GenerationTally.key; `'epoch:<id>'` names one `sms.source_epoch` row
+   * directly. Optional: the route this drives does not exist yet.
+   */
+  batch?: string;
 }
 
 export interface RegisterRow {
@@ -603,11 +611,54 @@ export interface RegisterDataIssue {
   reason: string;
 }
 
+/**
+ * One physical source generation's share of a register page's `total` —
+ * mirrors api/src/services/register.ts's `GenerationTally` (foldGenerationTally)
+ * field for field. `key` is `${sourceDb}#${ordinal}`, the same key
+ * `RegisterQuery.batch` takes.
+ */
+export interface GenerationTally {
+  key: string;
+  ordinal: number | null;
+  sourceDb: string | null;
+  label: string | null;
+  /** Derived from sourceDb/provenance server-side, never from provenance alone. */
+  simulator: boolean;
+  /** Rows of this generation matching the register's filters. */
+  rows: number;
+}
+
 export interface RegisterPage {
   rows: RegisterRow[];
   total: number;
   page: number;
   pageSize: number;
+  /**
+   * What `total` is made of, newest generation first — mirrors the server's
+   * `RegisterPage.generations` (register.ts). Optional for the same
+   * back-compat reason as there: a caller must read a missing value as "not
+   * stated", never as "one generation".
+   */
+  generations?: GenerationTally[];
+  /**
+   * The single generation a `batch`-scoped read resolved to, when the route
+   * resolves one rather than pooling every generation present — same shape
+   * as LiveGenerationNote's own `generation` field (see below), so one
+   * vocabulary describes "which generation" everywhere in this client.
+   */
+  generation?: {
+    generation: {
+      key: string;
+      ordinal: number;
+      sourceDb: string | null;
+      provenance: string | null;
+      label: string | null;
+      simulator: boolean;
+    } | null;
+    spansGenerations: boolean;
+    otherGenerationExcluded: number;
+    excludedSimulator?: number;
+  };
   /**
    * See RegisterDataIssue. OPTIONAL and, when present, empty on a healthy
    * response — mirrors the server's own back-compat reasoning: a caller that
@@ -635,6 +686,7 @@ function registerParams(q: RegisterQuery): URLSearchParams {
   // roadmap Phase 4 (14 Sep 2026): the state filter and the product filter.
   if (q.state && q.state.length > 0) p.set('state', q.state.join(','));
   if (q.product != null) p.set('product', String(q.product));
+  if (q.batch) p.set('batch', q.batch);
   p.set('sort', q.sort ?? 'time');
   p.set('dir', q.dir ?? 'desc');
   if (q.page) p.set('page', String(q.page));
@@ -652,6 +704,33 @@ export function getEventDetail(type: RegisterType, id: number | string): Promise
 
 export function eventsExportUrl(q: RegisterQuery): string {
   return `/api/events/export?${registerParams(q).toString()}`;
+}
+
+/**
+ * One selectable source generation, for a batch picker — the same key
+ * `RegisterQuery.batch` and `GenerationTally.key` use. The route this
+ * client function calls (`GET /api/data-batch`) does not exist yet; this is
+ * the client contract only, added ahead of it so the picker component and
+ * the route can be built independently.
+ */
+export interface DataBatch {
+  key: string;
+  ordinal: number | null;
+  sourceDb: string | null;
+  label: string | null;
+  simulator: boolean;
+  /** Rows of this generation within the queried window, when the server states one. */
+  rows?: number;
+}
+export interface DataBatchData {
+  batches: DataBatch[];
+}
+export function getDataBatch(from?: string, to?: string): Promise<Envelope<DataBatchData>> {
+  const p = new URLSearchParams();
+  if (from) p.set('from', from);
+  if (to) p.set('to', to);
+  const qs = p.toString();
+  return get(qs ? `/api/data-batch?${qs}` : '/api/data-batch');
 }
 
 // ---- Downtime & Throughput ----
@@ -910,6 +989,15 @@ export interface SyncStatus {
   /** null = a pass recorded before epochs existed. */
   epochId: number | null;
   epochLabel: string | null;
+  /**
+   * The epoch's own generation number and simulator flag, joined from
+   * `sms.source_epoch` — the same pair `GenerationTally`/`GenerationRef`
+   * carry, so Health can print a batch name instead of the raw `epochLabel`
+   * table-name string. Optional: absent on a server built before this field
+   * (or when `epochId` is null, since there is nothing to join).
+   */
+  epochOrdinal?: number | null;
+  epochSimulator?: boolean;
   rowsRead: number;
   rowsWritten: number;
   finishedAtUtc: string | null;
@@ -2257,6 +2345,8 @@ export interface ReportHeader {
   otherGenerationExcluded: { count: number; percent: number | null; simulator?: number } | null;
   /** Server-composed disclosure sentence; names simulator data as the plant simulator (verification 25 Sep 2026). */
   generationLine?: string | null;
+  /** True when `sourceGeneration` names a plant-simulator generation. Optional: absent on a server built before this field, never itself a claim of "no". */
+  simulatorSource?: boolean;
 }
 
 export interface ReportQuery {
@@ -2671,12 +2761,19 @@ export function reportExportUrl(type: ReportType, q: ReportQuery, format?: 'csv'
   return `/api/reports/${type}/export?${p.toString()}`;
 }
 
-/** The print header on its own, for the register's Print button. */
-export function getReportHeader(q: { from?: string; to?: string; at?: string | null }): Promise<{ header: ReportHeader }> {
+/**
+ * The print header on its own, for the register's Print button. `type` and
+ * `batch` are optional and additive: the server's route defaults `type` to
+ * `'daily'`/`'register'` and `batch` to the default generation, exactly as
+ * before, when either is omitted.
+ */
+export function getReportHeader(q: { from?: string; to?: string; at?: string | null; type?: ReportType; batch?: string }): Promise<{ header: ReportHeader }> {
   const p = new URLSearchParams();
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
   if (q.at) p.set('at', q.at);
+  if (q.type) p.set('type', q.type);
+  if (q.batch) p.set('batch', q.batch);
   const qs = p.toString();
   return get(qs ? `/api/reports/header?${qs}` : '/api/reports/header');
 }
