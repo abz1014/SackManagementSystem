@@ -263,12 +263,12 @@ export const W = {
     newProduct: 'Create a new product',
     newProductNote: 'A new product gets a new number. Readings from now on are recorded against it; nothing already recorded moves.',
     newProductTriple: (blend: string, count: string, tube: string, id: number) =>
-      `PDAS allows only one product per blend + count + tube type. ${blend} · ${count} · ${tube} already exists as product ${id}. To create a new product, change one of those three — or change the limits on product ${id} instead.`,
+      `${blend} · ${count} · ${tube} already exists as product ${id} — PDAS allows only one product per blend, count and tube type. To create a new product, change one of those three, or change the limits on product ${id} instead.`,
     newProductConfirm: 'Create the product',
     retire: 'Retire',
     activate: 'Activate',
     retireNote: (id: number) =>
-      `Retire product ${id}. It stops being selectable on the machine. Readings already recorded keep it, and you can bring it back later.`,
+      `Retiring product ${id} stops it being selectable on the machine. Readings already recorded keep it, and you can bring it back later.`,
     activateNote: (id: number) => `Make product ${id} selectable on the machine again.`,
     setpointG: 'Target (g)',
     offsetMinusG: 'Below target (g)',
@@ -590,9 +590,9 @@ export const W = {
       sourceRow: 'Source row id',
       readAt: 'Read into this system',
       insertedAt: 'Written by the plant',
-      transform: 'Transform version',
+      transform: 'Processing version',
       product: 'Product determined',
-      rawRow: 'Raw row',
+      rawRow: 'Source row',
       syncPass: 'Sync pass',
       nightRule: 'Night shift counted to',
       plantShift: 'Plant-stored shift',
@@ -655,11 +655,16 @@ export const W = {
        single shared target; if stations disagree, or more than one target
        is in force among them, nothing is said and the per-row column is left
        to speak for itself. */
+    /* T1a copy trim (28 Sep 2026): dropped the trailing "depends on the
+       weight basis, which is not yet confirmed" clause — this sentence is
+       always appended straight after `headlineUnconfirmed`, which already
+       says "(weight basis not yet confirmed)" a few words earlier on the
+       same headline. Repeating it here was the same fact twice on one line. */
     lineOffset: (n: number, total: number, lo: string, hi: string, dir: string, target: string) =>
       (n === total
         ? `All ${n} stations`
         : `${n} of ${total} stations`) +
-      ` read ${lo}–${hi} g ${dir} the ${target} target. That is a line-wide offset, not a station fault; whether it is a real shortfall depends on the weight basis, which is not yet confirmed.`,
+      ` read ${lo}–${hi} g ${dir} the ${target} target. That is a line-wide offset, not a station fault.`,
     above: 'above',
     below: 'below',
     spread: (lo: string, hi: string) => `${lo} to ${hi}`,
@@ -1674,7 +1679,7 @@ export const W = {
     /* The local (non-PDAS) limits editor. */
     changeLimitsLocal: 'Change limits',
     changeLimitsLocalNote:
-      'This records a new limits version in SMS. It does not change PDAS or the product master, and it does not rewrite any past version: readings already recorded keep the limits that were in force when they were weighed.',
+      'This records a new limits version in SMS. It does not change PDAS or the product master.',
     changeLimitsLocalUnavailable: 'Changing limits needs an engineer account.',
     localWasLabel: (from: string, to: string) => `${from} → ${to}`,
     localFirstRecorded: 'first recorded here',
@@ -1834,7 +1839,7 @@ export const W = {
     avgPerDayAria: 'Average sack weight per day, as a difference from the period average',
     avgPerDayZero: (mean: string) => `period average ${mean}`,
     avgPerDayResting: (mean: string, worst: string) =>
-      `Period average ${mean}. No day’s own average sits more than ${worst} from it. The axis is held at ±0.1 kg or wider, so a steady period draws flat.`,
+      `Period average ${mean}, with no day’s own average sitting more than ${worst} from it. The axis is held at ±0.1 kg or wider, so a steady period draws flat.`,
     avgPerDayTooShort: 'Two production days or more are needed before a day can be compared to the period.',
     /* Named, not blanket (CLAUDE.md, "name which part failed"): every other
        figure on this screen comes from a different endpoint and is unaffected. */
@@ -1867,7 +1872,6 @@ export const W = {
     /* The three facts, as one footnote under the ledger. */
     ledgerCaveat:
       'Every sack weighed at the packing scale counts as a receipt into line stock; that reading of \u201creceipt\u201d, and whether the ledger is kept in sacks or kg, are not yet confirmed by IFL. ' +
-      'Stock is for the line, not per machine: the plant\u2019s sack record carries no machine, the sack scale publishes none, and this system does not infer one from which cones were weighed around a sack. ' +
       'A sack\u2019s time is when the plant wrote the reading, which can trail the weighing.',
     perMachine: 'Per machine',
     perMachineNone: 'not available',
