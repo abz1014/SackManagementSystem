@@ -18,6 +18,12 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+**Commit-count note, added 28 Sep 2026:** `git rev-list --count origin/main..HEAD` measured
+**251** on this date. Every older "N commits ahead of origin/main" figure below this line
+(85, 90, 95, 114, 179, ...) is historical — a count taken on the date its own section states,
+not the current count — and is left as written rather than rewritten in place, per this
+file's own convention of dated, superseded-not-deleted entries.
+
 ### Red-team follow-through: every remaining item closed, decided, or kitted (25 Sep 2026)
 
 Six commits `b182297`…`39c2c37`; full record in `DEFECTS.md` Part 8. **Fixed:** RT-020
@@ -147,11 +153,19 @@ simulator figures real (RT-007).
 **What did not change, named rather than implied.** RT-014 (no server-side
 response-size/row-count cap independent of SQL) is untouched by any of the fifteen commits —
 this is the one finding that kept Phase 11 (Security & operations) from returning to COMPLETE
-in `PROJECT_STATUS.md`; see that file's phase board. RT-016 (an invalid calendar date crashes
-the DB driver), RT-017 (MachineProduct's on-screen column clipping — distinct from this file's
-own Phase 9 entry below, which suppressed it only in *print*), RT-018 (a retired product shown
-as the live target with no marker), RT-020 (no confidence interval on the days-to-limit
-projection), RT-022/RT-025/RT-026/RT-027/RT-028/RT-031/RT-034 are each confirmed still open by
+in `PROJECT_STATUS.md`; see that file's phase board. **(Fixed the next day, 24 Sep 2026,
+`855045f` — `sms/api/src/middleware/responseCap.ts`, wired at `app.ts:135`; see DEFECTS.md
+Part 7. Noted here 28 Sep 2026; this passage otherwise describes the 23 Sep state and is left
+as written.)** RT-016 (an invalid calendar date crashes
+the DB driver) **[checked 28 Sep 2026: still open — no fix commit found; `RT24-06`/`11ce30b`
+is a distinct, related finding per `DEFECTS.md` line 920, not a fix for RT-016 itself]**,
+RT-017 (MachineProduct's on-screen column clipping — distinct from this file's
+own Phase 9 entry below, which suppressed it only in *print*) **(Fixed 25 Sep 2026, `fb9fd9d`;
+see DEFECTS.md Part 8)**, RT-018 (a retired product shown
+as the live target with no marker) **(Fixed 25 Sep 2026, `c52a34d`; see DEFECTS.md Part 8)**,
+RT-020 (no confidence interval on the days-to-limit
+projection) **(Fixed 25 Sep 2026, `b182297`; see DEFECTS.md Part 8)**,
+RT-022/RT-025/RT-026/RT-027/RT-028/RT-031/RT-034 are each confirmed still open by
 reading the code, not assumed from a missing commit message. RT-019 (Nelson rules 2–8 flagging
 37.6–54.8% of station-groups on real generations) stays a pending owner decision, unchanged
 from `DEFECTS.md` D-10 — four options already put to the owner, none chosen. RT-024's own
