@@ -766,7 +766,7 @@ let __NEW_TUBE_FORM__ = 2;
       const materialId = created.productId;
 
       const c0retire = await maxChangeId();
-      const retired = await writer.setProductActive({ productId: materialId, active: false, reason: 'F7 retire', actor });
+      const retired = await writer.setProductActive({ productId: materialId, active: false, reason: 'F7 retire for recreate test', actor });
       rec('F7 — retire', retired);
       A1_ENTRIES.push({ label: 'F7-retire', expected: { operation: 'set_active', procName: null, outcome: 'ok', pdasErrorCode: null }, rows: await changeRowsSince(c0retire) });
 
