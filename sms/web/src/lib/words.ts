@@ -361,6 +361,15 @@ export const W = {
          crash and not silently allow execute. See Changeover.tsx's
          PlanReview. */
       blockersUnknown: 'This plan’s safety checks could not be read. Execute is disabled until the plan can be checked again.',
+      /* Fix 2 (28 Sep 2026, Task K2 live pass): a tester ticking only a
+         pallet-retire box and filling in the reason got no plan and no
+         explanation — the Plan button was silently disabled because a
+         changeover plan always requires a blend, count and tube type
+         (services/changeover.ts's request shape has no retire-only variant;
+         SetPalletStatusActive is one step alongside the create sequence,
+         never plannable alone). Shown beside the Plan button whenever it is
+         disabled for this reason. */
+      needsFullSelection: 'A changeover plan always includes a blend, count and tube type. Pick an existing one for each (or add a new one) — even if you only mean to retire a product or pallet below.',
     } as const,
 
     /* ---- History tab (Brief 3 builds the screen; strings fixed here so

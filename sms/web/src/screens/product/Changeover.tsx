@@ -263,6 +263,15 @@ export function ChangeoverTab({ canWrite }: { canWrite: boolean }) {
             <button type="button" className="btn" disabled={planBusy || !canSubmitPlan} onClick={checkPlan}>
               {W.product.changeover.dryRun}
             </button>
+            {/* FIX 2 (28 Sep 2026): the button used to go disabled with no
+                visible reason when blend/count/tube were left unpicked — e.g.
+                a tester who only ticked a pallet-retire box and filled in the
+                reason. A plan always needs all three (services/changeover.ts
+                has no retire-only request shape), so say so instead of
+                staying silent. */}
+            {!canSubmitPlan && !planBusy && (
+              <p className="mut sm" style={{ marginTop: 8 }}>{W.product.changeover.needsFullSelection}</p>
+            )}
             {planError && <p className="acc sm" style={{ marginTop: 8 }}>{planError}</p>}
           </div>
         )}
