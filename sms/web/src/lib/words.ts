@@ -1184,8 +1184,8 @@ export const W = {
        every halt (14 Sep 2026). Before that a halt wrote nothing, so this
        screen could only say the data was ageing, never why. */
     lastFailure: (table: string) => `Last failure, on ${table}:`,
-    /** A pass recorded before source generations existed — true, and worth saying. */
-    preEpochPass: 'before generations were recorded',
+    /** A pass recorded before data batches were tracked — true, and worth saying. */
+    preEpochPass: 'before data batches were tracked',
     /* The H5 hazard, said plainly. Changing the night rule restamps only
        NEW rows, so until a rebuild runs the table holds two regimes and every
        shift_date figure blends them. Migration 023 marks each row so this can
@@ -1214,7 +1214,7 @@ export const W = {
        all and does not appear here — but when it happens nothing else on
        this screen says why the age is climbing. */
     noOpenEpoch: (sourceTable: string) =>
-      `No source generation is registered for ${sourceTable} — the worker halts on it until sms epoch:accept is run.`,
+      `No data batch is registered for ${sourceTable} — syncing stays halted on it until an administrator registers one.`,
   } as const,
 
   /* ------------------------------------------------------------- the sheet */
@@ -1439,11 +1439,11 @@ export const W = {
        tables on 2026-08-05, restarting every identity, so each physical
        generation of each source table is named and tracked separately). */
     epochRegister: {
-      title: 'Source generations',
-      note: 'Every physical generation of each source table this system has ever read from. A generation is registered by hand, with sms epoch:accept — never automatically — and the worker halts on any table with no open generation.',
-      none: 'No source generation is registered yet.',
+      title: 'Data batches',
+      note: 'Every physical batch of each source table this system has ever read from. A batch is registered by an administrator, never automatically, and syncing halts on any table with no open batch.',
+      none: 'No data batch is registered yet.',
       colTable: 'Source table',
-      colOrdinal: 'Generation',
+      colOrdinal: 'Batch',
       /* UX Phase 7 Brief 5 (21 Sep 2026): this column renders `g.provenance`
          (sms.source_epoch.provenance — 'ifl_live' | 'ifl_copy' | 'simulator',
          db/migrations/025_source_epoch.sql:29), which of the three physical
@@ -1481,13 +1481,13 @@ export const W = {
          constraint DF_se_first, migration 025:38), not the timestamp of the
          earliest raw row this system observed under it. Honest about which
          one it is, rather than let the column name imply the latter. */
-      firstSeenIsRegistration: 'first seen = when this generation was registered, not the earliest reading under it',
+      firstSeenIsRegistration: 'first seen = when this batch was registered, not the earliest reading under it',
       lastSeenNeverRecorded: '"Last seen" is not yet written by any part of this system — it always reads "—", not a fault in this row.',
       /* The archived floor: the oldest day this system still holds a copy
-         of, for a table whose earlier generations are no longer local —
+         of, for a table whose earlier batches are no longer local —
          IFL keeps about a month of the plant's own copy (CLAUDE.md), so an
-         old generation can be closed here and gone from the plant both. */
-      archivedFloor: (day: string) => `Readings before ${day} are archived, not deleted — the sidecar database is the record of them, not IFL's source.`,
+         old batch can be closed here and gone from the plant both. */
+      archivedFloor: (day: string) => `Readings before ${day} are archived, not deleted — this system's own database is the record of them, not IFL's source.`,
     } as const,
 
     /* sms.rebuild_audit — every canonical rebuild this system has run
@@ -1512,14 +1512,14 @@ export const W = {
        whole application that does, and only when a person runs the command. */
     lastVerify: {
       title: 'Last reconciliation against IFL’s source',
-      none: 'sms verify has not been run against this copy.',
+      none: 'No reconciliation has been run against this copy.',
       ranAt: (when: string) => `Last run ${when}.`,
       against: (server: string, db: string) => `against ${server} / ${db}`,
       verdict: { ok: 'matched', mismatch: 'did not match', notRun: 'not yet run' } as const,
       /* This sentence is load-bearing: without it a reader could mistake a
          green "matched" verdict for an ongoing guarantee, when it is a
          photograph of one command run once. */
-      isManual: 'This is the record of one manual run of the sms verify command — not a live or continuous check. This system holds no standing connection that watches IFL’s database for changes.',
+      isManual: 'This is the record of one manually run reconciliation — not a live or continuous check. This system holds no standing connection that watches IFL’s database for changes.',
     } as const,
 
     /* ---- RT24-05 (23 Sep 2026): PDAS write read-back verification. Appended
@@ -1961,7 +1961,7 @@ export const W = {
     generated: 'Generated',
     generatedBy: 'by',
     version: 'SMS',
-    definitionsNote: 'Definitions: KPI-DEFINITIONS.md — awaiting IFL’s approval.',
+    definitionsNote: 'Figure definitions are awaiting IFL’s approval.',
     /* UX Phase 9: the register's Print button has no `disabled` gate, so a
        failed /api/reports/header must still leave a printed page with SOME
        statement of what it is — never silence, and never the viewer's own
@@ -2070,7 +2070,7 @@ export const W = {
     colBand: 'Band',
     outOfControl: 'above the upper limit',
     pBar: (p: string) => `Usual rate ${p}`,
-    spansGenerations: 'The period holds more than one source generation; the band is the one generation’s the report was read from.',
+    spansGenerations: 'This period includes more than one batch of recorded data; the band shown is from the batch the report was read from.',
     rejectUnattributed: (n: string, of: string) => `${n} of ${of} rejects in this period predate product recording.`,
     /* Cone weight report. */
     meanLabel: 'mean',
@@ -2120,7 +2120,7 @@ export const W = {
     /* Verification 25 Sep 2026 (K8): with no issue ever recorded, the ledger is cumulative packing, not stock. */
     stockCumulative: 'Cumulative sacks packed',
     stockCumulativeBasis: (since: string) =>
-      `Sacks packed on the line since ${since}, counted from the first sack weighed in this source generation. No issue, consumption or adjustment has ever been recorded, so this is a running total of packing, not a count of sacks on hand. No sack is attributed to a machine.`,
+      `Sacks packed on the line since ${since}, the start of this batch of records. No issue, consumption or adjustment has ever been recorded, so this is a running total of packing, not a count of sacks on hand. No sack is attributed to a machine.`,
     /* Calibration report. */
     stationsFlagged: (n: number) => (n === 1 ? '1 station flagged for drift' : `${n} stations flagged for drift`),
     /* WS-OR (23 Sep 2026 red-team remediation, missingField.fuzz.test.tsx):
@@ -2244,7 +2244,7 @@ export const W = {
     weightNote:
       'Weighing data cannot tell a heavy scale from heavy cones: differences are stated, never a direction to adjust.',
     sourceNote: 'Source: IFL’s weighing records for this line, read only.',
-    generationNote: (gen: string, n: string) => `Source generation ${gen}. Readings from another generation excluded: ${n}.`,
+    generationNote: (gen: string, n: string) => `Data batch ${gen}. Readings from another batch excluded: ${n}.`,
     coverage: (withData: number, of: number) =>
       withData === of ? (of === 1 ? 'Readings are present for the day.' : `Readings are present on all ${of} days of the period.`) : `Readings are present on ${withData} of the ${of} days in the period; the other days hold no data, so totals cover only the days with readings.`,
     noData: 'The period holds no production readings, so there is nothing to summarise.',

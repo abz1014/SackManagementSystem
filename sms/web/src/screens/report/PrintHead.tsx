@@ -69,7 +69,7 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
       </div>
       {header.spansGenerations && (
         <div className="ph-foot mut">
-          {header.generationLine ?? `Source generation: ${header.sourceGeneration ?? 'unknown'}. Excluded from other generation: ` +
+          {header.generationLine ?? `Data batch: ${header.sourceGeneration ?? 'unknown'}. Excluded from another batch: ` +
             `${header.otherGenerationExcluded?.count ?? 0} readings` +
             `${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}.`}
         </div>
