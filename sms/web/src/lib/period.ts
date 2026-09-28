@@ -27,11 +27,50 @@
  */
 import { addDays } from './fmt';
 
-export type PeriodKey = 'shift' | 'today' | 'yesterday' | 'week' | 'month' | 'pick';
+export type PeriodKey = 'shift' | 'today' | 'yesterday' | 'week' | 'month' | 'pick' | 'range';
 
-export const PERIOD_KEYS: readonly PeriodKey[] = ['shift', 'today', 'yesterday', 'week', 'month', 'pick'] as const;
+export const PERIOD_KEYS: readonly PeriodKey[] = ['shift', 'today', 'yesterday', 'week', 'month', 'pick', 'range'] as const;
 
 export type ShiftCode = 'morning' | 'evening' | 'night';
+
+/**
+ * Chart overhaul T0 (28 Sep 2026): the type a chart drag-select produces.
+ * Alias of ShiftCode — same three values, named for the new call sites
+ * (snapToShifts, ShiftRef) so this module's shift vocabulary reads as one
+ * thing rather than two coincidentally-identical unions.
+ */
+export type ShiftName = ShiftCode;
+
+/** One shift, unambiguously: the production day it BELONGS TO (the day it
+ *  starts on — night's own shift_date convention) plus which of the three it
+ *  is. This is the unit a chart drag snaps to and the URL range encodes. */
+export interface ShiftRef {
+  date: string;
+  shift: ShiftName;
+}
+
+const SHIFT_ORDER: readonly ShiftName[] = ['morning', 'evening', 'night'] as const;
+const SHIFT_START_HOUR: Record<ShiftName, number> = { morning: 6, evening: 14, night: 22 };
+
+/** Sortable key: fixed-width date plus a single ordering digit, so plain
+ *  string comparison orders any two ShiftRefs correctly. */
+function shiftRefKey(r: ShiftRef): string {
+  return `${r.date}#${SHIFT_ORDER.indexOf(r.shift)}`;
+}
+
+/** The instant (plant clock, labelled UTC) a shift begins. */
+function shiftStartUtc(r: ShiftRef): string {
+  const h = String(SHIFT_START_HOUR[r.shift]).padStart(2, '0');
+  return `${r.date}T${h}:00:00.000Z`;
+}
+
+/** The instant (plant clock, labelled UTC) a shift ends — the next shift's
+ *  start, or, for night, 06:00 on the day after the one it belongs to. */
+function shiftEndUtc(r: ShiftRef): string {
+  const idx = SHIFT_ORDER.indexOf(r.shift);
+  if (idx < SHIFT_ORDER.length - 1) return shiftStartUtc({ date: r.date, shift: SHIFT_ORDER[idx + 1]! });
+  return shiftStartUtc({ date: addDays(r.date, 1), shift: 'morning' });
+}
 
 /**
  * Everything the resolver needs, all of it from /api/live so the plant's clock
@@ -63,7 +102,8 @@ export interface Period {
    * Harmless when live.
    */
   tsTo: string;
-  /** Set only when the period IS exactly one shift. */
+  /** Set only when the period IS exactly one shift (key 'shift', or key
+   *  'range' whose from/to resolve to the same single shift). */
   shift?: ShiftCode;
   /** New rows can still land inside this window. */
   live: boolean;
@@ -71,6 +111,10 @@ export interface Period {
   days: number;
   /** For "Pick dates", so the control can show what was picked. */
   picked?: { from: string; to: string };
+  /** Set only for key 'range': the shift-bounded endpoints a chart drag
+   *  produced (or that were restored from the URL). */
+  fromShift?: ShiftRef;
+  toShift?: ShiftRef;
 }
 
 /* --------------------------------------------------------------- resolving */
@@ -93,12 +137,46 @@ export function daysBetween(from: string, to: string): number {
 /** Never resolve a window that runs past the production day in progress. */
 const clip = (date: string, notAfter: string) => (date > notAfter ? notAfter : date);
 
-export function resolvePeriod(key: PeriodKey, a: PeriodAnchor, picked?: { from: string; to: string }): Period {
+export function resolvePeriod(
+  key: PeriodKey,
+  a: PeriodAnchor,
+  picked?: { from: string; to: string },
+  range?: { from: ShiftRef; to: ShiftRef },
+): Period {
   const today = a.shiftDate;
   const tsTo = a.plantNowUtc;
   const base = { key, tsTo } as const;
 
   switch (key) {
+    case 'range': {
+      // No range given (URL lost it, or the caller hasn't picked one yet):
+      // degrade to the current shift rather than throw — the same shape
+      // 'shift' already returns, just carrying key 'range' so a caller can
+      // tell a drag-select is in play.
+      if (!range) {
+        const s = resolvePeriod('shift', a);
+        return { ...s, key: 'range', fromShift: { date: today, shift: a.shiftCode }, toShift: { date: today, shift: a.shiftCode } };
+      }
+      const { from, to } = range;
+      const sameShift = from.date === to.date && from.shift === to.shift;
+      const current: ShiftRef = { date: a.shiftDate, shift: a.shiftCode };
+      const live = shiftRefKey(from) <= shiftRefKey(current) && shiftRefKey(current) <= shiftRefKey(to);
+      const rangeEndUtc = shiftEndUtc(to);
+      return {
+        ...base,
+        from: from.date,
+        to: to.date,
+        tsFrom: shiftStartUtc(from),
+        // Cap at the plant clock, same replay-cap rule every other key
+        // follows: a selected range cannot report rows that do not exist yet.
+        tsTo: rangeEndUtc < a.plantNowUtc ? rangeEndUtc : a.plantNowUtc,
+        shift: sameShift ? from.shift : undefined,
+        fromShift: from,
+        toShift: to,
+        live,
+        days: daysBetween(from.date, to.date),
+      };
+    }
     case 'shift':
       // A night shift spans two calendar dates; shift_date already resolves
       // that the same way the transform stamped it, so day bounds plus the
@@ -140,6 +218,99 @@ export function resolvePeriod(key: PeriodKey, a: PeriodAnchor, picked?: { from: 
       };
     }
   }
+}
+
+/**
+ * Snaps a chart drag-select's two endpoints (in either order — a drag can run
+ * left-to-right or right-to-left) to a whole-page 'range' period. Order-
+ * independent: whichever of `first`/`last` is earlier becomes `range.from`.
+ * Returns null, rather than a PeriodParams identical to what is already
+ * selected, so a caller can skip a pointless navigation/refetch — e.g. a
+ * drag that starts and ends inside the shift already shown.
+ */
+export function snapToShifts(first: ShiftRef, last: ShiftRef, current?: PeriodParams): PeriodParams | null {
+  const firstIsEarlier = shiftRefKey(first) <= shiftRefKey(last);
+  const from = firstIsEarlier ? first : last;
+  const to = firstIsEarlier ? last : first;
+  if (
+    current?.key === 'range' &&
+    current.range &&
+    current.range.from.date === from.date &&
+    current.range.from.shift === from.shift &&
+    current.range.to.date === to.date &&
+    current.range.to.shift === to.shift
+  ) {
+    return null;
+  }
+  return { key: 'range', range: { from, to } };
+}
+
+/** The full-day span D1.morning .. D2.night for two production days, in
+ *  whichever order they were given — the shift-range equivalent of a plain
+ *  day picker's [from, to]. Feed the result to snapToShifts to get a
+ *  PeriodParams (dayToShiftRange never itself no-ops against `current`). */
+export function dayToShiftRange(fromDate: string, toDate: string): { from: ShiftRef; to: ShiftRef } {
+  const lo = fromDate <= toDate ? fromDate : toDate;
+  const hi = fromDate <= toDate ? toDate : fromDate;
+  return { from: { date: lo, shift: 'morning' }, to: { date: hi, shift: 'night' } };
+}
+
+const SHIFT_LABEL: Record<ShiftName, string> = { morning: 'morning', evening: 'evening', night: 'night' };
+
+/** "2 Sep" — day and short month only, no weekday, no year (a period is
+ *  always within one plant record, never ambiguous across years in practice).
+ *  Built by hand, the same workaround fmt.ts's fmtClockOn uses: en-GB's short
+ *  month is "Sept" in current ICU, not "Sep". Plant time is stated elsewhere
+ *  (Health), never repeated per period. */
+function shortDate(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  const month = d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short' });
+  return `${d.getUTCDate()} ${month}`;
+}
+
+/**
+ * The period, in the plain words a reader (not a developer) can act on:
+ *
+ *   "2 Sep morning shift – 3 Sep night shift"  — a 'range' spanning more than one shift
+ *   "2 Sep, evening shift"                     — exactly one shift (key 'shift', or a
+ *                                                 'range' that snapped to a single shift)
+ *   "2 Sep"                                    — a single whole day (today/yesterday/a
+ *                                                 one-day pick)
+ *   "2 Sep – 9 Sep"                             — any other multi-day span (week/month/pick)
+ */
+export function describePeriod(p: Period): string {
+  if (p.key === 'range' && p.fromShift && p.toShift && !p.shift) {
+    return `${shortDate(p.fromShift.date)} ${SHIFT_LABEL[p.fromShift.shift]} shift – ${shortDate(p.toShift.date)} ${SHIFT_LABEL[p.toShift.shift]} shift`;
+  }
+  if (p.shift) return `${shortDate(p.from)}, ${SHIFT_LABEL[p.shift]} shift`;
+  if (p.from === p.to) return shortDate(p.from);
+  return `${shortDate(p.from)} – ${shortDate(p.to)}`;
+}
+
+/**
+ * Every fetch's period-scoped query params in one object, so a caller does
+ * `{...periodQuery(period), ...otherFilters}` instead of re-deriving from/to/
+ * shift by hand at each call site. `fromShift`/`toShift` are the URL-ready
+ * encoded form (see encodeShiftRef) because that is what ends up in a
+ * URLSearchParams either way; the API does not accept them yet (T0, 28 Sep
+ * 2026) but passing them is harmless until it does, and each api.ts function
+ * that takes from/to now forwards them.
+ */
+export interface PeriodQuery {
+  from: string;
+  to: string;
+  shift?: ShiftCode;
+  fromShift?: string;
+  toShift?: string;
+  tsTo?: string;
+}
+
+export function periodQuery(p: Period): PeriodQuery {
+  const q: PeriodQuery = { from: p.from, to: p.to, tsTo: p.tsTo };
+  if (p.shift) q.shift = p.shift;
+  if (p.fromShift) q.fromShift = encodeShiftRef(p.fromShift);
+  if (p.toShift) q.toShift = encodeShiftRef(p.toShift);
+  return q;
 }
 
 /* --------------------------------------------------- the detectors' window */
@@ -207,13 +378,57 @@ export function tooShortFor(p: Period, minDays: number): boolean {
 export interface PeriodParams {
   key: PeriodKey;
   picked?: { from: string; to: string };
+  /** Set only for key 'range'. */
+  range?: { from: ShiftRef; to: ShiftRef };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SHIFT_REF_RE = /^(\d{4}-\d{2}-\d{2})\.(morning|evening|night)$/;
+
+/**
+ * "2026-09-02.morning" — the URL form of one ShiftRef. Never '#': the period
+ * lives in the query string like every other param here, not a fragment, so
+ * it survives a server round-trip and a pasted link the same way `p=`/
+ * `from=`/`to=` already do.
+ */
+export function encodeShiftRef(ref: ShiftRef): string {
+  return `${ref.date}.${ref.shift}`;
+}
+
+function decodeShiftRef(raw: string | null): ShiftRef | null {
+  const m = raw ? SHIFT_REF_RE.exec(raw) : null;
+  return m ? { date: m[1]!, shift: m[2] as ShiftName } : null;
+}
+
+/** `{from, to}` ready to assign onto a URLSearchParams as `from=`/`to=`. */
+export function encodeRangeParams(range: { from: ShiftRef; to: ShiftRef }): { from: string; to: string } {
+  return { from: encodeShiftRef(range.from), to: encodeShiftRef(range.to) };
+}
+
+/**
+ * The inverse: raw `from=`/`to=` query values back to a range. Null on
+ * anything malformed (bad date, unknown shift name, missing side) or on a
+ * start strictly after the end — a caller falls back to the default period
+ * exactly as parsePeriodParams already does for a malformed 'pick'.
+ */
+export function decodeRangeParams(rawFrom: string | null, rawTo: string | null): { from: ShiftRef; to: ShiftRef } | null {
+  const from = decodeShiftRef(rawFrom);
+  const to = decodeShiftRef(rawTo);
+  if (!from || !to) return null;
+  if (shiftRefKey(from) > shiftRefKey(to)) return null;
+  return { from, to };
+}
 
 export function parsePeriodParams(sp: URLSearchParams): PeriodParams {
   const raw = sp.get('p');
   const key: PeriodKey = (PERIOD_KEYS as readonly string[]).includes(raw ?? '') ? (raw as PeriodKey) : 'shift';
+  if (key === 'range') {
+    const range = decodeRangeParams(sp.get('from'), sp.get('to'));
+    if (range) return { key, range };
+    // A malformed range is not an error worth a message; it falls back to
+    // the default rather than rendering an empty screen (same rule as pick).
+    return { key: 'shift' };
+  }
   if (key !== 'pick') return { key };
   const from = sp.get('from');
   const to = sp.get('to');
@@ -230,5 +445,10 @@ export function writePeriodParams(sp: URLSearchParams, p: PeriodParams): void {
   if (p.key === 'pick' && p.picked) {
     sp.set('from', p.picked.from);
     sp.set('to', p.picked.to);
+  }
+  if (p.key === 'range' && p.range) {
+    const enc = encodeRangeParams(p.range);
+    sp.set('from', enc.from);
+    sp.set('to', enc.to);
   }
 }

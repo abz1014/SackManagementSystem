@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   daysBetween,
+  dayToShiftRange,
+  decodeRangeParams,
+  describePeriod,
+  encodeRangeParams,
   parsePeriodParams,
+  periodQuery,
   resolvePeriod,
+  snapToShifts,
   tooShortFor,
   trailingWindow,
   writePeriodParams,
   TRAILING_DAYS,
   type PeriodAnchor,
+  type PeriodParams,
+  type ShiftRef,
 } from './period';
 
 /** Tue 1 Sep 2026, evening shift, 16:39 on the plant clock. */
@@ -159,5 +167,234 @@ describe('the period travels in the URL', () => {
     expect(parsePeriodParams(new URLSearchParams('p=nonsense'))).toEqual({ key: 'shift' });
     expect(parsePeriodParams(new URLSearchParams('p=pick&from=yesterday&to=today'))).toEqual({ key: 'shift' });
     expect(parsePeriodParams(new URLSearchParams('p=pick&from=2026-08-26'))).toEqual({ key: 'shift' });
+  });
+
+  it('round-trips a shift-bounded range, never via a fragment', () => {
+    const range = { from: { date: '2026-09-02', shift: 'morning' } as ShiftRef, to: { date: '2026-09-03', shift: 'night' } as ShiftRef };
+    const sp = new URLSearchParams();
+    writePeriodParams(sp, { key: 'range', range });
+    expect(sp.toString()).toBe('p=range&from=2026-09-02.morning&to=2026-09-03.night');
+    expect(sp.toString()).not.toContain('#');
+    expect(parsePeriodParams(sp)).toEqual({ key: 'range', range });
+  });
+
+  it('rejects a malformed range and falls back to this shift', () => {
+    expect(parsePeriodParams(new URLSearchParams('p=range&from=nonsense&to=2026-09-03.night'))).toEqual({ key: 'shift' });
+    expect(parsePeriodParams(new URLSearchParams('p=range&from=2026-09-02.morning'))).toEqual({ key: 'shift' });
+    expect(parsePeriodParams(new URLSearchParams('p=range&from=2026-09-02.brunch&to=2026-09-03.night'))).toEqual({ key: 'shift' });
+  });
+
+  it('rejects a range whose start is after its end', () => {
+    expect(
+      parsePeriodParams(new URLSearchParams('p=range&from=2026-09-03.night&to=2026-09-02.morning')),
+    ).toEqual({ key: 'shift' });
+    expect(decodeRangeParams('2026-09-03.night', '2026-09-02.morning')).toBeNull();
+  });
+
+  it('clears a previous range when the key changes', () => {
+    const sp = new URLSearchParams('p=range&from=2026-09-02.morning&to=2026-09-03.night');
+    writePeriodParams(sp, { key: 'today' });
+    expect(sp.toString()).toBe('p=today');
+  });
+
+  it('encodeRangeParams and decodeRangeParams round-trip a single shift', () => {
+    const range = { from: { date: '2026-09-02', shift: 'evening' } as ShiftRef, to: { date: '2026-09-02', shift: 'evening' } as ShiftRef };
+    const enc = encodeRangeParams(range);
+    expect(enc).toEqual({ from: '2026-09-02.evening', to: '2026-09-02.evening' });
+    expect(decodeRangeParams(enc.from, enc.to)).toEqual(range);
+  });
+});
+
+describe('resolvePeriod — range (chart overhaul T0)', () => {
+  it('spans whole days end to end, tsFrom at the first day\'s 06:00 and tsTo capped at the plant clock', () => {
+    const range = { from: { date: '2026-08-30', shift: 'morning' } as ShiftRef, to: { date: '2026-09-01', shift: 'night' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(p).toMatchObject({ key: 'range', from: '2026-08-30', to: '2026-09-01', days: 3, live: true });
+    expect(p.shift).toBeUndefined();
+    expect(p.fromShift).toEqual(range.from);
+    expect(p.toShift).toEqual(range.to);
+    expect(p.tsFrom).toBe('2026-08-30T06:00:00.000Z');
+    // 2026-09-01 night ends 2026-09-02T06:00, past the plant clock (16:39 on
+    // the 1st) only because the anchor's own shift is 'evening' — the true
+    // end of the selected range (night) has not happened yet, so tsTo caps.
+    expect(p.tsTo).toBe(anchor.plantNowUtc);
+  });
+
+  it('within one day, across shifts', () => {
+    const range = { from: { date: '2026-09-01', shift: 'morning' } as ShiftRef, to: { date: '2026-09-01', shift: 'evening' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(p).toMatchObject({ from: '2026-09-01', to: '2026-09-01', days: 1, live: true });
+    expect(p.shift).toBeUndefined();
+  });
+
+  it('a single shift carries the shift code, matching what key "shift" already returns', () => {
+    const range = { from: { date: '2026-09-01', shift: 'evening' } as ShiftRef, to: { date: '2026-09-01', shift: 'evening' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(p).toMatchObject({ from: '2026-09-01', to: '2026-09-01', shift: 'evening', days: 1 });
+    expect(p.tsFrom).toBe('2026-09-01T14:00:00.000Z');
+  });
+
+  it('night crosses midnight: its end is 06:00 the NEXT production day', () => {
+    const range = { from: { date: '2026-08-30', shift: 'night' } as ShiftRef, to: { date: '2026-08-30', shift: 'night' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(p.tsFrom).toBe('2026-08-30T22:00:00.000Z');
+    // The night of 30 Aug ended 06:00 on 31 Aug, well before the plant clock
+    // (1 Sep evening) — so tsTo is the true range end, not the cap.
+    expect(p.tsTo).toBe('2026-08-31T06:00:00.000Z');
+    expect(p.live).toBe(false);
+  });
+
+  it('the live flag is true for a range ending in the current shift', () => {
+    const range = { from: { date: '2026-08-30', shift: 'morning' } as ShiftRef, to: { date: '2026-09-01', shift: 'evening' } as ShiftRef };
+    expect(resolvePeriod('range', anchor, undefined, range).live).toBe(true);
+  });
+
+  it('the live flag is false for a range ending earlier than the current shift', () => {
+    const range = { from: { date: '2026-08-28', shift: 'morning' } as ShiftRef, to: { date: '2026-08-31', shift: 'night' } as ShiftRef };
+    expect(resolvePeriod('range', anchor, undefined, range).live).toBe(false);
+  });
+
+  it('a live flag stays true when the range starts in the future relative to the anchor... (not reachable via the UI, but the key check is inclusive both ends)', () => {
+    const range = { from: { date: '2026-09-01', shift: 'evening' } as ShiftRef, to: { date: '2026-09-01', shift: 'night' } as ShiftRef };
+    expect(resolvePeriod('range', anchor, undefined, range).live).toBe(true);
+  });
+
+  it('no range given degrades to the current shift, keyed "range"', () => {
+    const p = resolvePeriod('range', anchor);
+    expect(p).toMatchObject({ key: 'range', from: '2026-09-01', to: '2026-09-01', shift: 'evening' });
+    expect(p.fromShift).toEqual({ date: '2026-09-01', shift: 'evening' });
+    expect(p.toShift).toEqual({ date: '2026-09-01', shift: 'evening' });
+  });
+
+  it('every period caps its instant bound at the plant clock, range included', () => {
+    const range = { from: { date: '2026-08-01', shift: 'morning' } as ShiftRef, to: { date: '2026-09-01', shift: 'night' } as ShiftRef };
+    expect(resolvePeriod('range', anchor, undefined, range).tsTo).toBe(anchor.plantNowUtc);
+  });
+});
+
+describe('snapToShifts', () => {
+  it('days to whole days', () => {
+    const from: ShiftRef = { date: '2026-08-30', shift: 'morning' };
+    const to: ShiftRef = { date: '2026-09-01', shift: 'night' };
+    expect(snapToShifts(from, to)).toEqual({ key: 'range', range: { from, to } });
+  });
+
+  it('is order-independent — a drag ending before it started still snaps correctly', () => {
+    const from: ShiftRef = { date: '2026-08-30', shift: 'morning' };
+    const to: ShiftRef = { date: '2026-09-01', shift: 'night' };
+    expect(snapToShifts(to, from)).toEqual({ key: 'range', range: { from, to } });
+  });
+
+  it('within one day across shifts', () => {
+    const from: ShiftRef = { date: '2026-09-01', shift: 'morning' };
+    const to: ShiftRef = { date: '2026-09-01', shift: 'evening' };
+    expect(snapToShifts(from, to)).toEqual({ key: 'range', range: { from, to } });
+  });
+
+  it('a single shift, dragged within itself', () => {
+    const s: ShiftRef = { date: '2026-09-01', shift: 'night' };
+    expect(snapToShifts(s, s)).toEqual({ key: 'range', range: { from: s, to: s } });
+  });
+
+  it('night crossing midnight is still one shift, not two days', () => {
+    const s: ShiftRef = { date: '2026-08-30', shift: 'night' };
+    const result = snapToShifts(s, s);
+    expect(result?.range?.from).toEqual(s);
+    expect(result?.range?.to).toEqual(s);
+  });
+
+  it('the no-op case: returns null when the snapped result equals current', () => {
+    const from: ShiftRef = { date: '2026-08-30', shift: 'morning' };
+    const to: ShiftRef = { date: '2026-09-01', shift: 'night' };
+    const current: PeriodParams = { key: 'range', range: { from, to } };
+    expect(snapToShifts(from, to, current)).toBeNull();
+    expect(snapToShifts(to, from, current)).toBeNull(); // order-independent no-op too
+  });
+
+  it('is not a no-op when current is a different key or a different range', () => {
+    const from: ShiftRef = { date: '2026-08-30', shift: 'morning' };
+    const to: ShiftRef = { date: '2026-09-01', shift: 'night' };
+    expect(snapToShifts(from, to, { key: 'today' })).not.toBeNull();
+    expect(snapToShifts(from, to, { key: 'range', range: { from, to: { date: '2026-09-02', shift: 'night' } } })).not.toBeNull();
+  });
+});
+
+describe('dayToShiftRange', () => {
+  it('spans D1.morning to D2.night', () => {
+    expect(dayToShiftRange('2026-08-30', '2026-09-01')).toEqual({
+      from: { date: '2026-08-30', shift: 'morning' },
+      to: { date: '2026-09-01', shift: 'night' },
+    });
+  });
+
+  it('orders its two dates regardless of argument order', () => {
+    expect(dayToShiftRange('2026-09-01', '2026-08-30')).toEqual({
+      from: { date: '2026-08-30', shift: 'morning' },
+      to: { date: '2026-09-01', shift: 'night' },
+    });
+  });
+
+  it('composes with snapToShifts to produce a whole-days range period', () => {
+    const { from, to } = dayToShiftRange('2026-08-30', '2026-09-01');
+    expect(snapToShifts(from, to)).toEqual({
+      key: 'range',
+      range: { from: { date: '2026-08-30', shift: 'morning' }, to: { date: '2026-09-01', shift: 'night' } },
+    });
+  });
+});
+
+describe('describePeriod', () => {
+  it('a range spanning more than one shift', () => {
+    const range = { from: { date: '2026-09-02', shift: 'morning' } as ShiftRef, to: { date: '2026-09-03', shift: 'night' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(describePeriod(p)).toBe('2 Sep morning shift – 3 Sep night shift');
+  });
+
+  it('exactly one shift, via key "shift"', () => {
+    expect(describePeriod(resolvePeriod('shift', anchor))).toBe('1 Sep, evening shift');
+  });
+
+  it('exactly one shift, via a "range" that snapped to a single shift', () => {
+    const range = { from: { date: '2026-09-02', shift: 'evening' } as ShiftRef, to: { date: '2026-09-02', shift: 'evening' } as ShiftRef };
+    expect(describePeriod(resolvePeriod('range', anchor, undefined, range))).toBe('2 Sep, evening shift');
+  });
+
+  it('a whole day', () => {
+    expect(describePeriod(resolvePeriod('today', anchor))).toBe('1 Sep');
+    expect(describePeriod(resolvePeriod('yesterday', anchor))).toBe('31 Aug');
+  });
+
+  it('a multi-day span that is not shift-bounded', () => {
+    expect(describePeriod(resolvePeriod('week', anchor))).toBe('31 Aug – 1 Sep');
+  });
+});
+
+describe('periodQuery', () => {
+  it('a plain day period carries from/to/tsTo and nothing shift-related', () => {
+    const q = periodQuery(resolvePeriod('today', anchor));
+    expect(q).toEqual({ from: '2026-09-01', to: '2026-09-01', tsTo: anchor.plantNowUtc });
+  });
+
+  it('key "shift" adds the shift code but no fromShift/toShift (those are range-only)', () => {
+    const q = periodQuery(resolvePeriod('shift', anchor));
+    expect(q).toEqual({ from: '2026-09-01', to: '2026-09-01', tsTo: anchor.plantNowUtc, shift: 'evening' });
+  });
+
+  it('a range carries the encoded fromShift/toShift', () => {
+    const range = { from: { date: '2026-08-30', shift: 'morning' } as ShiftRef, to: { date: '2026-09-01', shift: 'night' } as ShiftRef };
+    const q = periodQuery(resolvePeriod('range', anchor, undefined, range));
+    expect(q).toMatchObject({
+      from: '2026-08-30',
+      to: '2026-09-01',
+      fromShift: '2026-08-30.morning',
+      toShift: '2026-09-01.night',
+    });
+    expect(q.shift).toBeUndefined();
+  });
+
+  it('a range that resolves to a single shift also carries the shift code', () => {
+    const range = { from: { date: '2026-09-01', shift: 'evening' } as ShiftRef, to: { date: '2026-09-01', shift: 'evening' } as ShiftRef };
+    const q = periodQuery(resolvePeriod('range', anchor, undefined, range));
+    expect(q.shift).toBe('evening');
   });
 });

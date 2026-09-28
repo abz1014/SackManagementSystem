@@ -45,6 +45,11 @@ export interface ProductionQuery {
   from?: string;
   to?: string;
   shift?: string;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery), for a chart
+   *  drag-selected range (T0, 28 Sep 2026). The route does not read these
+   *  yet — harmless extras until it does. */
+  fromShift?: string;
+  toShift?: string;
   station?: number;
   /** Instant cap, so a replay (?at=) counts only what existed at that moment. */
   tsTo?: string;
@@ -445,10 +450,12 @@ export interface RejectData {
   reasons: RejectReason[];
 }
 
-export function getRejects(from?: string, to?: string): Promise<Envelope<RejectData>> {
+export function getRejects(from?: string, to?: string, fromShift?: string, toShift?: string): Promise<Envelope<RejectData>> {
   const p = new URLSearchParams();
   if (from) p.set('from', from);
   if (to) p.set('to', to);
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
   return get(`/api/rejects?${p.toString()}`);
 }
 
@@ -488,11 +495,13 @@ export interface WeightsData {
   sack: WeightStats;
   note: string;
 }
-export function getWeights(basis: Basis, from?: string, to?: string): Promise<Envelope<WeightsData>> {
+export function getWeights(basis: Basis, from?: string, to?: string, fromShift?: string, toShift?: string): Promise<Envelope<WeightsData>> {
   const p = new URLSearchParams();
   p.set('basis', basis);
   if (from) p.set('from', from);
   if (to) p.set('to', to);
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
   return get(`/api/weights?${p.toString()}`);
 }
 
@@ -507,6 +516,8 @@ export function getProduction(q: ProductionQuery): Promise<Envelope<ProductionDa
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.station != null) p.set('station', String(q.station));
   if (q.tsTo) p.set('tsTo', q.tsTo);
   if (q.product != null) p.set('product', String(q.product));
@@ -524,6 +535,9 @@ export interface RegisterQuery {
   from?: string;
   to?: string;
   shift?: string;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery). Harmless until the route reads them (T0, 28 Sep 2026). */
+  fromShift?: string;
+  toShift?: string;
   station?: number;
   inRange?: boolean;
   wMin?: number;
@@ -709,6 +723,8 @@ function registerParams(q: RegisterQuery): URLSearchParams {
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.station != null) p.set('station', String(q.station));
   if (q.inRange != null) p.set('inRange', String(q.inRange));
   if (q.rejectType) p.set('rejectType', q.rejectType);
@@ -759,10 +775,12 @@ export interface DataBatch {
 export interface DataBatchData {
   batches: DataBatch[];
 }
-export function getDataBatch(from?: string, to?: string): Promise<Envelope<DataBatchData>> {
+export function getDataBatch(from?: string, to?: string, fromShift?: string, toShift?: string): Promise<Envelope<DataBatchData>> {
   const p = new URLSearchParams();
   if (from) p.set('from', from);
   if (to) p.set('to', to);
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
   const qs = p.toString();
   return get(qs ? `/api/data-batch?${qs}` : '/api/data-batch');
 }
@@ -902,6 +920,9 @@ export interface SpcQuery {
   usl?: number;
   lsl?: number;
   shift?: string;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery). Harmless until the route reads them (T0, 28 Sep 2026). */
+  fromShift?: string;
+  toShift?: string;
 }
 export function getSpc(q: SpcQuery): Promise<Envelope<SpcData>> {
   const p = new URLSearchParams({ type: q.type, from: q.from, to: q.to });
@@ -909,6 +930,8 @@ export function getSpc(q: SpcQuery): Promise<Envelope<SpcData>> {
   if (q.usl != null) p.set('usl', String(q.usl));
   if (q.lsl != null) p.set('lsl', String(q.lsl));
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.station != null) p.set('station', String(q.station)); // roadmap Phase 4
   return get(`/api/spc?${p.toString()}`);
 }
@@ -948,8 +971,11 @@ export interface CalibrationAdjustment {
   /** Signed grams the scale was moved by — positive = now reads heavier. */
   amountG: number | null;
 }
-export function getCalibration(from: string, to: string): Promise<Envelope<CalibrationData>> {
-  return get(`/api/calibration?${new URLSearchParams({ from, to }).toString()}`);
+export function getCalibration(from: string, to: string, fromShift?: string, toShift?: string): Promise<Envelope<CalibrationData>> {
+  const p = new URLSearchParams({ from, to });
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
+  return get(`/api/calibration?${p.toString()}`);
 }
 export function getCalibrationAdjustments(): Promise<{ adjustments: CalibrationAdjustment[] }> {
   return get('/api/calibration/adjustments');
@@ -1007,9 +1033,18 @@ export interface RejectSpcData {
   buckets: RejectBucket[];
   episodes: RejectEpisode[];
 }
-export function getRejectSpc(from: string, to: string, rejectType: RejectTypeFilter, bucket?: RejectBucketSize): Promise<Envelope<RejectSpcData>> {
+export function getRejectSpc(
+  from: string,
+  to: string,
+  rejectType: RejectTypeFilter,
+  bucket?: RejectBucketSize,
+  fromShift?: string,
+  toShift?: string,
+): Promise<Envelope<RejectSpcData>> {
   const p = new URLSearchParams({ from, to, rejectType });
   if (bucket) p.set('bucket', bucket);
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
   return get(`/api/reject-spc?${p.toString()}`);
 }
 
@@ -1459,12 +1494,16 @@ export function getAttention(q: {
   from?: string;
   to?: string;
   shift?: string | null;
+  fromShift?: string;
+  toShift?: string;
   trailingDays?: number;
 }): Promise<Envelope<AttentionData>> {
   const p = new URLSearchParams();
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.trailingDays) p.set('trailingDays', String(q.trailingDays));
   return get(`/api/attention?${p.toString()}`);
 }
@@ -1522,6 +1561,11 @@ export function getWeightStations(q: {
   periodFrom?: string;
   periodTo?: string;
   shift?: string | null;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery) for the SELECTED
+   *  period — periodFrom/periodTo's own shift-precise form, not the trailing
+   *  detector window's. Harmless until the route reads them (T0, 28 Sep 2026). */
+  periodFromShift?: string;
+  periodToShift?: string;
 }): Promise<Envelope<WeightStationsData>> {
   const p = new URLSearchParams();
   if (q.trailingDays) p.set('trailingDays', String(q.trailingDays));
@@ -1530,6 +1574,8 @@ export function getWeightStations(q: {
   if (q.periodFrom) p.set('periodFrom', q.periodFrom);
   if (q.periodTo) p.set('periodTo', q.periodTo);
   if (q.shift) p.set('shift', q.shift);
+  if (q.periodFromShift) p.set('periodFromShift', q.periodFromShift);
+  if (q.periodToShift) p.set('periodToShift', q.periodToShift);
   return get(`/api/weight-stations?${p.toString()}`);
 }
 
@@ -1544,6 +1590,9 @@ export interface RejectFilters {
   from?: string;
   to?: string;
   shift?: string;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery). Harmless until the route reads them (T0, 28 Sep 2026). */
+  fromShift?: string;
+  toShift?: string;
   /** Instant cap, so a replay (?at=) counts only what existed at that moment. */
   tsTo?: string;
   station?: number;
@@ -1557,6 +1606,8 @@ function rejectFilterParams(f: RejectFilters): URLSearchParams {
   if (f.from) p.set('from', f.from);
   if (f.to) p.set('to', f.to);
   if (f.shift) p.set('shift', f.shift);
+  if (f.fromShift) p.set('fromShift', f.fromShift);
+  if (f.toShift) p.set('toShift', f.toShift);
   if (f.tsTo) p.set('tsTo', f.tsTo);
   if (f.station != null) p.set('station', String(f.station));
   if (f.product != null) p.set('product', String(f.product));
@@ -1918,8 +1969,11 @@ export interface ShiftCheckData {
   topHours: { hour: number; mismatched: number }[];
   note: string;
 }
-export function getShiftCheck(from: string, to: string): Promise<Envelope<ShiftCheckData>> {
-  return get(`/api/shift-check?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+export function getShiftCheck(from: string, to: string, fromShift?: string, toShift?: string): Promise<Envelope<ShiftCheckData>> {
+  const p = new URLSearchParams({ from, to });
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
+  return get(`/api/shift-check?${p.toString()}`);
 }
 
 export interface WeightAggregate { n: number; sumG: number | null; avgG: number | null; minG: number | null; maxG: number | null }
@@ -1938,9 +1992,17 @@ export interface ReconciliationData {
   note: string;
 }
 /** Rank 1 — a read of SMS's own canonical aggregates, no more sensitive than /api/production (0d8b74a lowered this from rank 3). */
-export function getReconciliation(from: string, to: string, shift?: string | null): Promise<Envelope<ReconciliationData>> {
+export function getReconciliation(
+  from: string,
+  to: string,
+  shift?: string | null,
+  fromShift?: string,
+  toShift?: string,
+): Promise<Envelope<ReconciliationData>> {
   const p = new URLSearchParams({ from, to });
   if (shift) p.set('shift', shift);
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
   return get(`/api/reconciliation?${p.toString()}`);
 }
 
@@ -2136,10 +2198,14 @@ export interface AdjustmentList {
  * station's rows PLUS the line-wide rows (station null), which apply to it.
  * The Calibration report (Phase 8) calls this with from/to.
  */
-export function listAdjustments(q: { from?: string; to?: string; station?: number | null } = {}): Promise<AdjustmentList> {
+export function listAdjustments(
+  q: { from?: string; to?: string; fromShift?: string; toShift?: string; station?: number | null } = {},
+): Promise<AdjustmentList> {
   const p = new URLSearchParams();
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.station != null) p.set('station', String(q.station));
   const qs = p.toString();
   return get(qs ? `/api/calibration/adjustments?${qs}` : '/api/calibration/adjustments');
@@ -2215,12 +2281,17 @@ export interface SackSummaryQuery {
   from: string;
   to: string;
   shift?: string;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery). Harmless until the route reads them (T0, 28 Sep 2026). */
+  fromShift?: string;
+  toShift?: string;
   tsTo?: string;
   product?: number;
 }
 export function getSackSummary(q: SackSummaryQuery): Promise<Envelope<SackSummaryData>> {
   const p = new URLSearchParams({ from: q.from, to: q.to });
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.tsTo) p.set('tsTo', q.tsTo);
   if (q.product != null) p.set('product', String(q.product));
   return get(`/api/sacks/summary?${p.toString()}`);
@@ -2281,8 +2352,12 @@ export interface StockLedgerData {
   /** Manual movement rows (opening counts, issues, consumption, adjustments) up to the period end. */
   manualMovementRows?: number;
 }
-export function getSackStock(q: { from: string; to: string; product?: number; tsTo?: string }): Promise<Envelope<StockLedgerData>> {
+export function getSackStock(
+  q: { from: string; to: string; fromShift?: string; toShift?: string; product?: number; tsTo?: string },
+): Promise<Envelope<StockLedgerData>> {
   const p = new URLSearchParams({ from: q.from, to: q.to });
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.product != null) p.set('product', String(q.product));
   if (q.tsTo) p.set('tsTo', q.tsTo);
   return get(`/api/sacks/stock?${p.toString()}`);
@@ -2315,9 +2390,17 @@ export interface SackMovementsData {
   weighed: { day: string; sacks: number; kg: number }[];
   machineLevel: { enabled: false; reason: string };
 }
-export function getSackMovements(from: string, to: string, product?: number): Promise<Envelope<SackMovementsData>> {
+export function getSackMovements(
+  from: string,
+  to: string,
+  product?: number,
+  fromShift?: string,
+  toShift?: string,
+): Promise<Envelope<SackMovementsData>> {
   const p = new URLSearchParams({ from, to });
   if (product != null) p.set('product', String(product));
+  if (fromShift) p.set('fromShift', fromShift);
+  if (toShift) p.set('toShift', toShift);
   return get(`/api/sacks/movements?${p.toString()}`);
 }
 export interface SackMovementInput {
@@ -2392,6 +2475,9 @@ export interface ReportQuery {
   from?: string;
   to?: string;
   shift?: string | null;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery). Harmless until the route reads them (T0, 28 Sep 2026). */
+  fromShift?: string;
+  toShift?: string;
   product?: number | null;
   station?: number | null;
   /** Replay instant — the header is stamped with it when the server allows replays. */
@@ -2405,6 +2491,8 @@ function reportParams(q: ReportQuery): URLSearchParams {
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
   if (q.product != null) p.set('product', String(q.product));
   if (q.station != null) p.set('station', String(q.station));
   if (q.at) p.set('at', q.at);
