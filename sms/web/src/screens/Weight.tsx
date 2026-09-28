@@ -836,7 +836,19 @@ function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | nu
     const atTop = value > hi;
     const arrow = atTop ? '↑' : '↓';
     const yy = atTop ? T + offTop++ * 13 : H - B - offBottom++ * 13;
-    return <RefLine y={yy} x1={L} x2={width - R} label={`${arrow} ${label} · off scale`} tone={tone} dashed={dashed} />;
+    // 28 Sep 2026: the default (non-`labelInside`) RefLine label starts at
+    // `x2 + 8` and grows RIGHTWARD with no reserved room beyond it — fine for
+    // the in-range labels above, which are short ("upper limit 2,000 g") and
+    // fit inside the R=150 gutter. The off-scale label appends the arrow and
+    // "· off scale", which was long enough to run 2-5px past the SVG's own
+    // right edge (measured at common chart widths). `labelInside` is the
+    // SAME prop RefLine already offers DeviationBars for an identical
+    // problem (see chart.tsx's own doc comment) — text-anchor end, growing
+    // LEFTWARD from `x2`, so it can never exceed the viewBox's right edge
+    // regardless of label length. The wording is unchanged.
+    return (
+      <RefLine y={yy} x1={L} x2={width - R} label={`${arrow} ${label} · off scale`} tone={tone} dashed={dashed} labelInside />
+    );
   };
 
   // Width-aware for the same reason as Rejects: a multi-day window labels
