@@ -223,6 +223,44 @@ describe('validateMovement — the rules beyond shape', () => {
     expect(parsePlantLocal('2026-09-15 10:30')).toBeNull();
     expect(parsePlantLocal('2026-13-45T10:30')).toBeNull();
   });
+
+  // RT-016: parsePlantLocal used to silently roll an impossible Y-M-D-h-m(-s)
+  // over into the next real instant (2026-02-30T10:00 -> 2026-03-02T10:00)
+  // instead of rejecting it, because `new Date(...)` does calendar
+  // arithmetic rather than validating. Fixed by round-tripping through
+  // toISOString and comparing the Y/M/D/h/m(/s) parts, the same technique
+  // `isoTimestamp` in dates.ts uses (commit 5d42cf5).
+  it('parsePlantLocal rejects a calendar date that does not exist (RT-016)', () => {
+    expect(parsePlantLocal('2026-02-30T10:00')).toBeNull(); // Feb has 28/29 days
+    expect(parsePlantLocal('2026-04-31T10:00')).toBeNull(); // April has 30 days
+  });
+
+  it('parsePlantLocal rejects a month outside 01-12', () => {
+    expect(parsePlantLocal('2026-13-01T10:00')).toBeNull();
+  });
+
+  it('parsePlantLocal rejects an hour outside 00-23', () => {
+    expect(parsePlantLocal('2026-09-15T24:00')).toBeNull();
+  });
+
+  it('parsePlantLocal rejects a minute outside 00-59', () => {
+    expect(parsePlantLocal('2026-09-15T10:60')).toBeNull();
+  });
+
+  it('parsePlantLocal rejects a seconds value outside 00-59', () => {
+    expect(parsePlantLocal('2026-09-15T10:30:60')).toBeNull();
+  });
+
+  it('parsePlantLocal still accepts valid values, with and without seconds/Z', () => {
+    expect(parsePlantLocal('2026-09-15T10:30')?.toISOString()).toBe('2026-09-15T10:30:00.000Z');
+    expect(parsePlantLocal('2026-09-15T10:30:45')?.toISOString()).toBe('2026-09-15T10:30:45.000Z');
+    expect(parsePlantLocal('2026-09-15T10:30:45Z')?.toISOString()).toBe('2026-09-15T10:30:45.000Z');
+    expect(parsePlantLocal('2024-02-29T10:00')?.toISOString()).toBe('2024-02-29T10:00:00.000Z'); // 2024 is a leap year
+  });
+
+  it('parsePlantLocal rejects Feb 29 in a non-leap year', () => {
+    expect(parsePlantLocal('2026-02-29T10:00')).toBeNull(); // 2026 is not a leap year
+  });
 });
 
 /* ---------------------------------------------------------- the SQL side */

@@ -679,8 +679,23 @@ export async function listMovements(
 export function parsePlantLocal(s: string): Date | null {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?Z?$/.exec(s.trim());
   if (!m) return null;
-  const d = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4] ?? '00'}.${(m[5] ?? '0').padEnd(3, '0')}Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const [, datePart, hh, mm, ss, msDigits] = m;
+  const secPart = ss ?? '00';
+  const normalizedMs = (msDigits ?? '0').padEnd(3, '0');
+  const iso = `${datePart}T${hh}:${mm}:${secPart}.${normalizedMs}Z`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  // `new Date(...)` silently rolls over impossible Y-M-D-h-m(-s) values (e.g.
+  // 2026-02-30 -> 2026-03-02); round-trip through toISOString to catch that,
+  // the same technique `isoTimestamp` in dates.ts uses (commit 5d42cf5).
+  // Seconds are compared only when the input supplied them, since a
+  // datetime-local value with no seconds legitimately normalizes to :00.
+  const rt = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})\./.exec(d.toISOString());
+  if (!rt) return null;
+  const [, rtDate, rtHH, rtMM, rtSS] = rt;
+  if (rtDate !== datePart || rtHH !== hh || rtMM !== mm) return null;
+  if (ss != null && rtSS !== ss) return null;
+  return d;
 }
 
 export const movementSchema = z.object({
