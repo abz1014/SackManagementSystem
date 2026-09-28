@@ -56,7 +56,7 @@ import type { CountState } from './Readings';
 import {
   getRange, getStations, getProducts, stationLabel, setRejectLabel,
   getRejectsFiltered, getRejectSpcFiltered, getRejectsByDayCode, rejectCodeParam,
-  type RejectReason, type RejectSpcData, type RejectDayCodeRow, type RejectFilters,
+  type RejectReason, type RejectSpcData, type RejectGeneration, type RejectDayCodeRow, type RejectFilters,
   type StationRow, type ProductOption,
 } from '../api';
 
@@ -87,6 +87,27 @@ const never = (): Promise<never> => new Promise<never>(() => {});
  * never a fabricated number.
  */
 const finiteOrNull = (n: number): number | null => (Number.isFinite(n) ? n : null);
+
+/**
+ * The ONE generation entry that `d.totalProduced`/`d.totalRejects` already
+ * describe (28 Sep 2026 fix — see the `inspected` computation below for the
+ * defect this closes). `rejectSpc.ts` derives those two top-level fields
+ * from a SINGLE preferred generation (real-over-simulator, then newest
+ * ordinal — `newestGenTotals` in that file), while `d.generations[]` lists
+ * EVERY generation the query touched. There is exactly one entry whose own
+ * `totalProduced`/`totalRejects` equal the top-level pair, because that is
+ * where the top-level pair came from; matching on both fields finds it
+ * without this file re-implementing the server's real/simulator preference
+ * rule (which needs `sms.source_epoch.provenance`/`source_db`, not sent to
+ * the client). When only one generation is present — the common case, and
+ * the only case at IFL, where the two generations never overlap in time —
+ * it is trivially that one.
+ */
+function preferredGeneration(d: RejectSpcData | null): RejectGeneration | null {
+  if (!d) return null;
+  if (d.generations.length <= 1) return d.generations[0] ?? null;
+  return d.generations.find((g) => g.totalProduced === d.totalProduced && g.totalRejects === d.totalRejects) ?? null;
+}
 
 /** What the by-day table hands the reason sheet. */
 export interface ReasonRef {
@@ -297,28 +318,42 @@ export function RejectsScreen({
         ? { kind: 'failed' }
         : { kind: 'pending' };
   /**
-   * WS-B1 (23 Sep 2026 red-team remediation, defect 1). This used to divide
-   * by `q.totalProduced + rejectCount.n` — cones plus EVERY reject of
+   * WS-B1 (23 Sep 2026 red-team remediation, defect 1), CORRECTED 28 Sep
+   * 2026 — the fix above double-counted in the OTHER direction. This used to
+   * divide by `q.totalProduced + rejectCount.n` — cones plus EVERY reject of
    * either type — which double-counts the ~98% of rejects that are the SAME
    * physical cone as an existing cone_event row, weighed then separately
    * rejected. `rejectSpc.ts` (this screen's own service) already computes
    * the correction per generation as `totalInspected` (cones + only the
-   * UNMATCHED rejects), exposed per generation in `generations[]`, and
-   * `q`/`w` share one denominator by construction — the unmatched query
-   * `getRejectSpc` runs is never narrowed by `rejectType`, so it counts both
-   * series' unmatched rejects once regardless of which type the call asked
-   * for. Summing `q`'s own generations (equivalently `w`'s — same base
-   * filters, same population) is therefore the one population this
-   * combined quality+weight headline may divide by, and it is the same
-   * population `rejectRateThreeWayAgreement.test.ts` pins report.ts,
-   * weightStations.ts and rejectSpc.ts's own p-chart to on the server side.
+   * UNMATCHED rejects), exposed per generation in `generations[]`.
+   *
+   * WS-B1's own fix then summed EVERY entry in `q.generations` — every
+   * generation the query touched, not just the one the numerator counts.
+   * `rejectCount.n` (`q.totalRejects + w.totalRejects`) is scoped to a
+   * SINGLE preferred generation (rejectSpc.ts's `newestGenTotals`: real
+   * over simulator, then newest ordinal); `generations[]` lists all of
+   * them. A period spanning more than one generation therefore pooled an
+   * unrelated generation's cones into a numerator counting only one,
+   * diluting the rate toward zero. Measured on the dev copy, 1–28 Sep
+   * (real September generation + the local `_SIM` sidecar generation in
+   * range together): this screen read 0.5% where Line and the reports —
+   * both scoped to the same single generation — read 4.5%
+   * (901 / (19,792 + unmatched)).
+   *
+   * `preferredGeneration` (above) picks the ONE entry whose own totals
+   * equal the top-level pair `rejectCount.n` was built from, so the
+   * denominator and numerator now describe the same population — the same
+   * rule `rejectRateThreeWayAgreement.test.ts` pins report.ts,
+   * weightStations.ts and rejectSpc.ts's own p-chart to on the server side,
+   * for a single-generation period. `q`/`w` still share one denominator by
+   * construction (the unmatched query `getRejectSpc` runs is never narrowed
+   * by `rejectType`), so `q`'s matching generation is `w`'s too.
    */
-  // Same guard as `rejectSum` above: a stripped `totalInspected` on any one
-  // generation row poisons the whole `reduce` into `NaN`, which `inspected >
-  // 0` below would pass straight through (`NaN > 0` is `false`... but so is
-  // `NaN === 0`, and neither branch of a strict comparison is a safe place to
-  // discover a NaN silently) — `finiteOrNull` catches it explicitly instead.
-  const inspected = q && w ? finiteOrNull(q.generations.reduce((sum, g) => sum + g.totalInspected, 0)) : null;
+  // Same guard as `rejectSum` above: a stripped `totalInspected` on the
+  // matching generation row must not pass a NaN straight through — `inspected
+  // > 0` below would let it slip by silently (`NaN > 0` is `false`... but so
+  // is `NaN === 0`) — `finiteOrNull` catches it explicitly instead.
+  const inspected = q && w ? finiteOrNull(preferredGeneration(q)?.totalInspected ?? NaN) : null;
   const ratePct =
     rejectCount.kind === 'ok' && inspected != null && inspected > 0
       ? (100 * rejectCount.n) / inspected
