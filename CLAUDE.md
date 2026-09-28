@@ -24,6 +24,41 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 not the current count — and is left as written rather than rewritten in place, per this
 file's own convention of dated, superseded-not-deleted entries.
 
+### PDAS write path proven end to end through the UI, local copy only (28 Sep 2026, Task K2)
+
+At HEAD `fa48303`, with `PDAS_WRITE_ENABLED=true` locally, the automated harness
+(`scripts/pdas-e2e-local.mjs`) was run for the first time and aborted before any case:
+its same-day live pre-flight guard compares `.env`'s `PDAS_WRITE_SERVER` (`localhost`)
+literally against the live `@@SERVERNAME` (`DESKTOP-G1MSH4I\SQLEXPRESS`) and refused
+on the mismatch — a standing guard defect under the app's own "connect via localhost"
+convention, not a PDAS-side failure. Not patched, per this pass's scope. Zero writes
+came from the harness attempt.
+
+**The write path was instead proven directly through the browser UI**, real clicks
+against the local `PDAS_TP1U2_SEP07` copy: CreateMaterial (new MaterialId 1025),
+SetMaterialStatusActive both directions (retired product 20 and 1025, reactivated
+1025), AddBlend, AddCount, AddTubeType, CreatePallet, and the guarded limits UPDATE —
+each confirmed by reading back PDAS's own tables, `nhs_events` (9 new rows, matching
+the vendor's own event-log format and reconfirming the known `CreateMaterial` logging
+bug — it logs `@blendId`, not the real MaterialId), and `sms.product_change` (9 new
+rows, all outcome `ok`, plain-language on Product › History, no raw env names). The
+plan-time duplicate-triple blocker (`-7001` shape) was reproduced live: replanning the
+same blend+count+tube showed the blocker and "Execute" did nothing while blocked.
+**Not proven this pass:** `SetPalletStatusActive` — attempted via the Changeover
+pallet-retire checkbox, the plan request never fired; the pallet created this pass
+(1023) was left active. Everything else not re-exercised live (the `-5001`/`-5002`/
+`-5003` codes, optimistic-concurrency conflict, rank gate, disabled 503) remains
+covered by the automated suite (`pdasWrite.http.test.ts`, `pdasWrite.echo.test.ts`)
+and the 23 Sep 2026 direct-SQL execution pass.
+
+Full before/after backup, `RESTORE VERIFYONLY`, scratch-restore-and-compare, and
+final-restore evidence — anchors matched step 1 exactly, before and after — plus the
+per-right table: `handover/PDAS-E2E-RESULTS-2026-09-28.md`; register entry:
+`DEFECTS.md` Part 10. The plant was never touched; `DATA_TP1U2`/`DATA_TP1U2_SEP07`
+were never written; no logins were created. **Owner must still run:**
+`handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` and
+`handover/REHEARSAL-RBAC-BELOW-RANK.md`, and anything on the plant.
+
 ### Red-team follow-through: every remaining item closed, decided, or kitted (25 Sep 2026)
 
 Six commits `b182297`…`39c2c37`; full record in `DEFECTS.md` Part 8. **Fixed:** RT-020

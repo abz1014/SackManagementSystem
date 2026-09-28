@@ -1487,3 +1487,44 @@ effect (`e91d222`, a docs-only commit, and `740d473`, `c9e51f3`, which are pure 
 covered under items 2/8/10's commits, are not separately itemised). Suite and build were green on
 first attempt, both full runs identical (2,400/4), confirming no regression was introduced by
 `df02425..HEAD` beyond what each commit's own tests already covered.
+
+### 28 Sep 2026, later the same day (Task K2) — PDAS write path proven end to end through the UI; harness pre-flight guard has a standing defect
+
+The `scripts/pdas-e2e-local.mjs` harness cited in item 11 above as "not run this
+pass" was run for the first time this same date, at HEAD `fa48303`, against the
+local `PDAS_TP1U2_SEP07` copy with `PDAS_WRITE_ENABLED=true`. It aborted before any
+case: its live pre-flight guard (Task P, added the same day) compares `.env`'s
+`PDAS_WRITE_SERVER` literally against the live `@@SERVERNAME`, and `.env` states
+`PDAS_WRITE_SERVER=localhost` while `@@SERVERNAME` on this machine reports
+`DESKTOP-G1MSH4I\SQLEXPRESS` — these will never literally match under the app's own
+connection convention (connect via `localhost`, report the real hostname), so this
+looks like a standing defect in the guard's comparison rather than a one-off
+misconfiguration. Not patched, per this pass's instructions; zero PDAS writes
+occurred from the harness attempt (exit code 1, no output file written). Full detail
+and the exact console output: `handover/PDAS-E2E-RESULTS-2026-09-28.md`.
+
+**The write path was instead proven directly through the browser UI**, real clicks,
+same local copy, same session: CreateMaterial (MaterialId 1025), SetMaterialStatusActive
+both directions (retired product 20 and 1025, reactivated 1025), AddBlend (11),
+AddCount (15), AddTubeType (28), CreatePallet (1023), and the guarded limits UPDATE
+(1025's target 1965→1970 g) — all confirmed by reading back PDAS's own tables,
+`nhs_events` (9 new rows, EventId 23446–23454), and `sms.product_change` (9 new rows,
+`change_id` 4–12, all outcome `ok`). The plan-time duplicate-triple blocker (the
+`-7001` shape) was also reproduced live: replanning the same blend+count+tube showed
+the blocker and "Execute" did nothing while blocked. `SetPalletStatusActive` was
+attempted (checked the pallet-retire box, filled a reason) but the plan request never
+fired — not proven this pass; the created pallet (1023) was left active. Full
+per-right table: `handover/PDAS-E2E-RESULTS-2026-09-28.md`.
+
+Before any write: `BACKUP DATABASE ... COPY_ONLY, CHECKSUM, INIT` for both
+`PDAS_TP1U2_SEP07` and `sms`, `RESTORE VERIFYONLY ... WITH CHECKSUM` on both (valid),
+then a full restore-and-compare into `PDAS_SCRATCH_E2E_0928` /
+`SMS_SCRATCH_E2E_0928` (anchors matched exactly), both scratch DBs dropped. After the
+UI pass: `sms-api` stopped, both databases restored `WITH REPLACE, CHECKSUM` from the
+pre-run backups, anchors re-verified to match step 1 exactly (Materials 24/max 1024,
+Blends 10, Counts 14, TubeTypes 27, Pallets 25/max 1022, nhs_events 3631/max 23445;
+sms.product_change 3, product_limit_version 14, dq_finding 30, audit_log 150, session
+5, blend 10, yarn_count 14, tube_type 27, product 14, pallet 15, product_timeline 22),
+`sms-api` restarted, and the browser's signed-in session confirmed still valid via
+`GET /api/auth/me` with no re-login. The plant was never touched;
+`DATA_TP1U2`/`DATA_TP1U2_SEP07` were never written; no logins were created.
