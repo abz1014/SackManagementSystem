@@ -20,6 +20,7 @@ import type { ReportFilters } from './common.js';
 import type { GenerationNote } from '../generation.js';
 import { dailyLine, DAILY_CSV_HEADERS } from './daily.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 export interface ShiftSection {
   shift: ShiftCode;
@@ -45,9 +46,11 @@ export async function getShiftReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026). */
+  shiftRange?: ShiftRange,
 ): Promise<ShiftReportData> {
   const wanted: ShiftCode[] = filters.shift ? [filters.shift] : [...SHIFT_CODES];
-  const reports = await Promise.all(wanted.map((s) => getReport(pool, lineId, resolved, s)));
+  const reports = await Promise.all(wanted.map((s) => getReport(pool, lineId, resolved, s, shiftRange)));
   return {
     period: resolved,
     shift: filters.shift ?? null,

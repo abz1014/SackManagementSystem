@@ -36,6 +36,8 @@ import type { ConeState } from '@sms/shared';
 import { bindStateCase, type StateContext } from './coneState.js';
 import { andEpoch, noteOf, resolveGenerationScope, UNSCOPED, type EventTable, type GenerationNote, type GenerationScope } from './generation.js';
 import { generationDisclosureLines, type ReportHeader } from './reports/common.js';
+import { shiftRangeEdgesUtc, type ShiftRange } from '../shiftRange.js';
+import { loadShiftRule } from './live.js';
 
 export type EventType = 'cone' | 'sack' | 'reject';
 export type SortField = 'time' | 'weight';
@@ -72,6 +74,51 @@ export interface RegisterFilters {
    */
   states?: ConeState[];
   classification?: StateContext;
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period.
+   * Unlike production.ts/rejects.ts (which AND `shiftRangeClause` onto
+   * `shift_date`/`shift_code`), the register applies this through its own
+   * `tsFrom`/`tsTo` instant window above — see `withShiftRangeEdges`'s own
+   * doc for why: this is the "compares instants rather than shift columns"
+   * case `shiftRange.ts`'s file header calls out, since `tsFrom`/`tsTo`
+   * already exist here as the fine-grained deep-link mechanism and every
+   * caller (`listEvents`/`countEvents`/`exportEventsCsv`) resolves it once,
+   * up front, via `withShiftRangeEdges`, rather than each carrying its own
+   * shift-rule lookup.
+   */
+  shiftRange?: ShiftRange;
+}
+
+/**
+ * Resolves `f.shiftRange` (if given) into `tsFrom`/`tsTo` on the PRODUCTION
+ * convention, via `shiftRangeEdgesUtc` and the line's shift rule in force
+ * (`loadShiftRule` — the same source live.ts reads), and merges them with
+ * any `tsFrom`/`tsTo` the caller already supplied. The caller's own values
+ * win where present — they are the deep-link window, always the tighter,
+ * more specific ask — so the shift-range edges only FILL IN a bound the
+ * caller left open, never override one it set.
+ *
+ * A no-op, returning `f` unchanged, when `f.shiftRange` is absent — every
+ * existing caller (no shift range) keeps its exact prior behaviour and
+ * costs no extra query.
+ *
+ * Exported so `listEvents`/`countEvents`/`exportEventsCsv` share one
+ * resolution rather than three copies, and so the edge arithmetic is
+ * tested directly (`register.shiftRange.test.ts`) without a pool.
+ */
+export async function withShiftRangeEdges(
+  pool: ConnectionPool,
+  lineId: number,
+  f: RegisterFilters,
+): Promise<RegisterFilters> {
+  if (!f.shiftRange) return f;
+  const rule = await loadShiftRule(pool, lineId);
+  const edges = shiftRangeEdgesUtc(f.shiftRange, rule.boundaries);
+  return {
+    ...f,
+    tsFrom: f.tsFrom ?? new Date(edges.fromMs).toISOString(),
+    tsTo: f.tsTo ?? new Date(edges.toMs).toISOString(),
+  };
 }
 
 export interface RegisterQuery extends RegisterFilters {
@@ -486,6 +533,11 @@ export async function listEvents(
    *  BATCH BY DEFAULT" header. */
   scope: GenerationScope,
 ): Promise<RegisterPage> {
+  // Chart overhaul wave 2 (Task TB2, 28 Sep 2026): resolves `q.shiftRange`
+  // (if any) into `tsFrom`/`tsTo` once, up front — see `withShiftRangeEdges`.
+  // A no-op when `q.shiftRange` is absent. `withShiftRangeEdges` spreads the
+  // whole input back out, so this keeps `sort`/`dir`/`page`/`pageSize`.
+  q = (await withShiftRangeEdges(pool, lineId, q)) as RegisterQuery;
   const from = fromFor(type);
   const cols = colsFor(type);
   const table = tableFor(type);
@@ -614,6 +666,8 @@ export async function countEvents(
   type: EventType,
   f: RegisterFilters,
 ): Promise<EventCount> {
+  // Chart overhaul wave 2 (Task TB2, 28 Sep 2026): see `withShiftRangeEdges`.
+  f = await withShiftRangeEdges(pool, lineId, f);
   const table = tableFor(type);
   const scope = await resolveGenerationScope(pool, lineId, { from: f.from, to: f.to }, [table]);
   const req = pool.request();
@@ -766,6 +820,8 @@ export async function exportEventsCsv(
   /** REQUIRED — see listEvents' own doc comment; resolved by the caller. */
   scope: GenerationScope,
 ): Promise<{ csv: string; truncated: boolean; generations: GenerationTally[]; exported: GenerationTally[] }> {
+  // Chart overhaul wave 2 (Task TB2, 28 Sep 2026): see `withShiftRangeEdges`.
+  f = (await withShiftRangeEdges(pool, lineId, f)) as typeof f;
   const from = fromFor(type);
   const cols = colsFor(type);
   const table = tableFor(type);

@@ -32,6 +32,7 @@ import { cellOrder, getMachineProductShifts, type MachineProductChange, type Mac
 import type { ResolvedPeriod } from '../report.js';
 import type { ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 export interface MachineProductColumn {
   day: string;
@@ -116,9 +117,11 @@ export async function getMachineProductReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026). */
+  shiftRange?: ShiftRange,
 ): Promise<MachineProductReportData> {
   const data = await getMachineProductShifts(pool, lineId, {
-    from: resolved.from, to: resolved.to, shift: filters.shift ?? null, station: filters.station ?? null,
+    from: resolved.from, to: resolved.to, shift: filters.shift ?? null, station: filters.station ?? null, shiftRange,
   });
 
   const shifts: ShiftCode[] = filters.shift ? [filters.shift] : [...SHIFT_CODES];

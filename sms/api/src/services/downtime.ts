@@ -38,6 +38,8 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { epochFragment, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
+import { loadShiftRule } from './live.js';
+import { shiftRangeEdgesUtc, type ShiftRange } from '../shiftRange.js';
 
 export interface Stoppage {
   startTs: string;
@@ -79,6 +81,42 @@ export interface StoppagePatternData {
 }
 
 /**
+ * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period
+ * clips the RIBBON, it does not filter it — a gap is a span of two instants,
+ * not a row carrying `shift_date`/`shift_code`, so this is the
+ * "compares instants rather than shift columns" case `shiftRange.ts`'s file
+ * header calls out, and `shiftRangeEdgesUtc` (not `shiftRangeClause`) is the
+ * right tool. `getStoppagePatterns`'s own `from`/`to` bound which DAYS the gap
+ * stream is built from (unchanged, still shift_date BETWEEN); this trims the
+ * few gaps at either end of that stream that start before the range's own
+ * first shift began or end after its last shift ended, so a stoppage a
+ * reader did not ask about does not appear on their ribbon. A gap entirely
+ * outside `[fromMs, toMs]` is dropped, not clipped to a zero-length stub.
+ *
+ * Pure and exported so the trimming is tested without SQL. Both edges are on
+ * the PRODUCTION convention (plant wall clock labelled UTC), the same
+ * convention `gap_start`/`gap_end` already carry — see shiftRange.ts's TWO
+ * CLOCKS note. Never pass a genuine-UTC instant here without converting it
+ * through plantClock.ts first.
+ */
+export function clipStoppagesToEdges(stoppages: readonly Stoppage[], edges: { fromMs: number; toMs: number }): Stoppage[] {
+  const out: Stoppage[] = [];
+  for (const s of stoppages) {
+    const startMs = new Date(s.startTs).getTime();
+    const endMs = new Date(s.endTs).getTime();
+    if (endMs <= edges.fromMs || startMs >= edges.toMs) continue; // entirely outside — dropped, not stubbed
+    const clippedStartMs = Math.max(startMs, edges.fromMs);
+    const clippedEndMs = Math.min(endMs, edges.toMs);
+    out.push({
+      startTs: new Date(clippedStartMs).toISOString(),
+      endTs: new Date(clippedEndMs).toISOString(),
+      durationSeconds: Math.round((clippedEndMs - clippedStartMs) / 1000),
+    });
+  }
+  return out;
+}
+
+/**
  * Every stoppage across a DATE RANGE, in one query.
  *
  * The per-day endpoint above is right for "what happened on this shift", but
@@ -95,6 +133,15 @@ export async function getStoppagePatterns(
   from: string,
   to: string,
   thresholdSeconds: number,
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): clips the returned ribbon
+   * to the shift boundaries — see `clipStoppagesToEdges`'s own doc for why
+   * this is an edge-instant clip, not a `shiftRangeClause` predicate. The
+   * shift rule in force is loaded here (mirrors live.ts's own
+   * `loadShiftRule` call site) rather than threaded in, so this stays a
+   * drop-in optional parameter for every existing caller.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<StoppagePatternData> {
   const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
   const gen = epochFragment(scope, 'cone_event');
@@ -134,16 +181,21 @@ export async function getStoppagePatterns(
        WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}`,
     );
 
+  const stoppages: Stoppage[] = res.recordset.map((g) => ({
+    startTs: new Date(g.gap_start).toISOString(),
+    endTs: new Date(g.gap_end).toISOString(),
+    durationSeconds: g.gap_s,
+  }));
+  const clipped = shiftRange
+    ? clipStoppagesToEdges(stoppages, shiftRangeEdgesUtc(shiftRange, (await loadShiftRule(pool, lineId)).boundaries))
+    : stoppages;
+
   return {
     from,
     to,
     thresholdSeconds,
     dayCount: dayRes.recordset[0]?.n ?? 0,
-    stoppages: res.recordset.map((g) => ({
-      startTs: new Date(g.gap_start).toISOString(),
-      endTs: new Date(g.gap_end).toISOString(),
-      durationSeconds: g.gap_s,
-    })),
+    stoppages: clipped,
     generationNote: noteOf(scope),
   };
 }

@@ -16,6 +16,7 @@ import {
 } from './generation.js';
 import { getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 import { plantNowMs } from '@sms/shared';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 /**
  * 'product' since roadmap Phase 8 (15 Sep 2026): the product report. The key
@@ -46,6 +47,15 @@ export interface ProductionParams {
    * simply was never plumbed through to here.
    */
   tsTo?: string;
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed into every table's WHERE via `shiftRangeClause` alongside `from`/
+   * `to`/`shift` above (never replacing them — a caller that also narrows to
+   * one shift name keeps that narrowing). See `shiftRange.ts`'s file header:
+   * both bounds are on the stored `shift_date`/`shift_code` columns, the
+   * production convention, so no plantClock conversion is needed here.
+   */
+  shiftRange?: ShiftRange;
   groupBy: GroupBy;
   /**
    * Also count the cones per classification state (roadmap Phase 4, 14 Sep
@@ -247,6 +257,9 @@ function bindFilters(
     // whole generation; getProduction reports how many via `unattributed`.
     w.push('material_id = @product');
     req.input('product', mssql.Int, p.product);
+  }
+  if (p.shiftRange) {
+    w.push(shiftRangeClause(p.shiftRange, { date: 'shift_date', code: 'shift_code' }, req));
   }
   return andEpoch(w.join(' AND '), req, scope, table);
 }
@@ -459,7 +472,7 @@ export async function getProduction(
   // unmatchedRejects and rejects.ts `getUnmatchedRejects`).
   const unmatchedFilters: RejectFilters = {
     from: p.from, to: p.to, shift: p.shift as RejectFilters['shift'], tsTo: p.tsTo,
-    station: p.station, product: p.product, scope,
+    station: p.station, product: p.product, scope, shiftRange: p.shiftRange,
   };
   const unmatchedOf = await getUnmatchedRejects(pool, lineId, unmatchedFilters, unmatchedGroupExpr(p.groupBy));
 

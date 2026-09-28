@@ -16,7 +16,35 @@ import type { GenerationNote } from '../generation.js';
 import { getLineIdentity } from '../lineConfig.js';
 import { SERVICE_VERSION } from '../health.js';
 import { plantNowMs } from '../plantClock.js';
+import type { ShiftRange } from '../../shiftRange.js';
 import { daysIn, generationDisclosureLines, REPORT_TITLES, type ReportFilters, type ReportHeader, type ReportType } from './common.js';
+
+/**
+ * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): the plain-words form of a
+ * shift-bounded period — "2 Sep morning shift – 3 Sep night shift" — for the
+ * report header, the CSV/PDF/XLSX attribution block and the printed page.
+ * "Plant time" is stated ONCE on the header (see `ReportHeader.period`'s own
+ * caller, which already prints "plant time" beside `generatedAtPlantUtc"),
+ * never repeated in this string.
+ *
+ * A same-shift, same-day range prints as one shift, not a redundant range —
+ * `shiftRangeQuery`'s own pairing rule explicitly allows `from === to &&
+ * fromShift === toShift` to name exactly one shift.
+ *
+ * `web/src/lib/period.ts`'s `describePeriod` (T0) is the client's copy of
+ * this same wording; keep the two in sync — both take a `ShiftRange` and
+ * must read identically on screen and on paper.
+ */
+export function describeShiftRangePeriod(range: ShiftRange): string {
+  const day = (iso: string): string => {
+    const d = new Date(`${iso}T00:00:00Z`);
+    return `${d.getUTCDate()} ${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`;
+  };
+  const shiftWord = (s: ShiftRange['fromShift']): string => `${s} shift`;
+  const sameShift = range.from === range.to && range.fromShift === range.toShift;
+  if (sameShift) return `${day(range.from)} ${shiftWord(range.fromShift)}`;
+  return `${day(range.from)} ${shiftWord(range.fromShift)} – ${day(range.to)} ${shiftWord(range.toShift)}`;
+}
 
 export interface HeaderInput {
   reportType: ReportType;
@@ -47,6 +75,13 @@ export interface HeaderInput {
    * report always has one); this is the register-only fallback.
    */
   generationNote?: GenerationNote | null;
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): when the caller resolved
+   * a shift-bounded period, its plain-words form is built from THIS rather
+   * than from `period.from`/`period.to` alone — see `periodLabel` and
+   * `describeShiftRangePeriod`.
+   */
+  shiftRange?: ShiftRange | null;
 }
 
 /**
@@ -100,6 +135,7 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
       ? { count: gn.otherGenerationExcluded, percent: null, simulator: gn.excludedSimulator ?? 0 }
       : null,
   };
+  const periodLabel = input.shiftRange ? describeShiftRangePeriod(input.shiftRange) : `${input.period.from} to ${input.period.to}`;
   const lines = generationDisclosureLines(disclosure);
   // When nothing was excluded but the source IS the simulator, there is no
   // "excluded" line to compose — state the one fact plainly instead.
@@ -115,6 +151,7 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
     plantName: line?.plant.name ?? null,
     unitName: line?.unit.name ?? null,
     period: { ...input.period, days: daysIn(input.period.from, input.period.to) },
+    periodLabel,
     filters: input.filters,
     generatedAtPlantUtc: new Date(nowMs).toISOString(),
     generatedBy: input.user ? (input.user.displayName ?? input.user.username) : 'unknown',

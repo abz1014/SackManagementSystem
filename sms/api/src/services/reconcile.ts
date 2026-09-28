@@ -30,6 +30,7 @@ import mssql from 'mssql';
 import type { ConeState } from '@sms/shared';
 import { bindStateCase, loadStateContext, plausibleWhere, type StateContext } from './coneState.js';
 import { epochWhere, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 export interface WeightAggregate {
   n: number;
@@ -86,6 +87,11 @@ export async function getReconciliation(
   to: string,
   shift: string | null = null,
   ctx?: StateContext,
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed via `shiftRangeClause` alongside `from`/`to`/`shift` above.
+   */
+  shiftRange?: ShiftRange | null,
 ): Promise<ReconciliationData> {
   const context = ctx ?? (await loadStateContext(pool, lineId));
   const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
@@ -108,6 +114,7 @@ export async function getReconciliation(
        FROM sms.cone_event
       WHERE line_id = @line AND shift_date BETWEEN @from AND @to
         ${shift ? 'AND shift_code = @shift' : ''}
+        ${shiftRange ? `AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, req)}` : ''}
         ${gen ? `AND ${gen}` : ''}
       GROUP BY ${stateCase}, CASE WHEN weight_g IS NULL THEN 2 WHEN ${plausible} THEN 0 ELSE 1 END`,
   );

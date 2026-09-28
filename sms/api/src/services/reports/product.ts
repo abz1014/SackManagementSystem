@@ -28,6 +28,7 @@ import { loadProductCatalogue, limitsFromVersion } from '../productLimits.js';
 import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js';
 import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
 
 export interface ProductReportRow extends ReportLine {
   /** material_id, or null for readings that predate product recording. */
@@ -101,12 +102,14 @@ export async function getProductReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026). */
+  shiftRange?: ShiftRange,
 ): Promise<ProductReportData> {
   const { from, to } = resolved;
   const [ctx, catalogue, prod, scope] = await Promise.all([
     loadStateContext(pool, lineId),
     loadProductCatalogue(pool),
-    getProduction(pool, lineId, { from, to, shift: filters.shift, station: filters.station, groupBy: 'product' }),
+    getProduction(pool, lineId, { from, to, shift: filters.shift, station: filters.station, groupBy: 'product', shiftRange }),
     // RT-002/RT-029: this service's own scope, over the same (lineId, from,
     // to) key getProduction resolves internally — guaranteed to agree with
     // `prod` without threading a scope through either signature.
@@ -118,6 +121,7 @@ export async function getProductReport(
     const w = ['line_id = @line', 'shift_date BETWEEN @from AND @to'];
     if (filters.shift) { w.push('shift_code = @shift'); req.input('shift', mssql.VarChar(10), filters.shift); }
     if (filters.station != null) { w.push('source_station = @station'); req.input('station', mssql.Int, filters.station); }
+    if (shiftRange) w.push(shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, req));
     return andEpoch(w.join(' AND '), req, scope, 'cone_event');
   };
   const grp = `ISNULL(CAST(material_id AS varchar(12)), '${NO_PRODUCT_GROUP}')`;

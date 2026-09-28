@@ -69,6 +69,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { SHIFT_CODES, type ShiftCode } from '@sms/shared';
 import { resolveGenerationScope, andEpoch, noteOf, type GenerationNote } from './generation.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 export interface ShiftMaterial {
   /** material_id from the reading; null when the reading predates product recording (before 2026-08-05). */
@@ -137,6 +138,13 @@ export interface MachineProductShiftsParams {
   station?: number | null;
   /** ISO instant; caps production_ts_utc_ms for a replay. */
   tsTo?: string | null;
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed via `shiftRangeClause` alongside `from`/`to`/`shift` above, into
+   * both the cell query and the no-station count so the two stay scoped to
+   * the same window.
+   */
+  shiftRange?: ShiftRange | null;
 }
 
 const SHIFT_ORDER: Record<ShiftCode, number> = { morning: 0, evening: 1, night: 2 };
@@ -206,6 +214,9 @@ export async function getMachineProductShifts(
     where.push('c.production_ts_utc_ms <= @tsTo');
     req.input('tsTo', mssql.BigInt, new Date(p.tsTo).getTime());
   }
+  if (p.shiftRange) {
+    where.push(shiftRangeClause(p.shiftRange, { date: 'c.shift_date', code: 'c.shift_code' }, req));
+  }
   const r = await req.query<RawRow>(
     `SELECT c.source_station AS st, CONVERT(varchar(10), c.shift_date, 120) AS day, c.shift_code,
             c.material_id, COALESCE(p.description, p.lot_code) AS product_name,
@@ -228,6 +239,9 @@ export async function getMachineProductShifts(
   if (p.tsTo) {
     noStWhere.push('production_ts_utc_ms <= @tsTo');
     noSt.input('tsTo', mssql.BigInt, new Date(p.tsTo).getTime());
+  }
+  if (p.shiftRange) {
+    noStWhere.push(shiftRangeClause(p.shiftRange, { date: 'shift_date', code: 'shift_code' }, noSt));
   }
   // Scoped to the SAME generation as the grid: this count is read as "and
   // these readings are in no cell", which is only true of the generation the

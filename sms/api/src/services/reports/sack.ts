@@ -30,6 +30,7 @@ import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js
 import { getConfiguredBasis, getWeights, type WeightStats } from '../weights.js';
 import { pct, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 export interface SackReportData {
   period: ResolvedPeriod;
@@ -56,15 +57,17 @@ export async function getSackReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026). */
+  shiftRange?: ShiftRange,
 ): Promise<SackReportData> {
   const { from, to } = resolved;
   const shift = filters.shift;
   const [total, byShift, byDay, byProduct, rejected, catalogue, weights, shiftBasis] = await Promise.all([
-    getProduction(pool, lineId, { from, to, shift, groupBy: 'none' }),
-    getProduction(pool, lineId, { from, to, shift, groupBy: 'shift' }),
-    getProduction(pool, lineId, { from, to, shift, groupBy: 'day' }),
-    getProduction(pool, lineId, { from, to, shift, groupBy: 'product' }),
-    countEvents(pool, lineId, 'sack', { from, to, shift, inRange: false }),
+    getProduction(pool, lineId, { from, to, shift, groupBy: 'none', shiftRange }),
+    getProduction(pool, lineId, { from, to, shift, groupBy: 'shift', shiftRange }),
+    getProduction(pool, lineId, { from, to, shift, groupBy: 'day', shiftRange }),
+    getProduction(pool, lineId, { from, to, shift, groupBy: 'product', shiftRange }),
+    countEvents(pool, lineId, 'sack', { from, to, shift, inRange: false, shiftRange }),
     loadProductCatalogue(pool),
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
     // resolves that to the basis Setup has on file.

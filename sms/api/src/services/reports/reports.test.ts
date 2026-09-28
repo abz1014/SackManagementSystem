@@ -373,13 +373,16 @@ describe('daily report', () => {
     vi.mocked(countEvents).mockResolvedValueOnce({ count: 17, note, dataIssues: [] });
     const { pool } = fakePool();
     const d = await getDailyReport(pool, 1, PERIOD, { shift: 'night' });
-    expect(getReport).toHaveBeenCalledWith(expect.anything(), 1, PERIOD, 'night');
+    // Chart overhaul wave 2 (Task TB2, 28 Sep 2026): getDailyReport now takes
+    // an optional trailing `shiftRange`, threaded verbatim (undefined here,
+    // since this call did not pass one) into both getReport and countEvents.
+    expect(getReport).toHaveBeenCalledWith(expect.anything(), 1, PERIOD, 'night', undefined);
     // The register's listEvents (the pooled total) is still never this
     // report's source — RT-002/RT-029's original finding.
     expect(listEvents).not.toHaveBeenCalled();
     expect(countEvents).toHaveBeenCalledWith(
       expect.anything(), 1, 'cone',
-      { from: PERIOD.from, to: PERIOD.to, shift: 'night', inRange: false },
+      { from: PERIOD.from, to: PERIOD.to, shift: 'night', inRange: false, shiftRange: undefined },
     );
     // THE INVARIANT THIS TEST EXISTS TO PROVE: the switch changed HOW the
     // count is obtained, never WHAT it is. Same 17/1.7% the private query

@@ -24,6 +24,7 @@ import { pct, type ReportFilters } from './common.js';
 import { loadProductCatalogue } from '../productLimits.js';
 import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
 
 export interface StationReportRow {
   station: number;
@@ -85,6 +86,14 @@ export async function getStationReport(
   lineId: number,
   resolved: ResolvedPeriod,
   _filters: ReportFilters,
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): not yet threaded into
+   * `getWeightStations` (weightStations.ts, TB1-owned) — `ws.rows[].mean/
+   * vsLine/...` still describe the whole `[from, to]` window until that file
+   * takes the same parameter. `prod` and the per-station state counts below
+   * are scoped now.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<StationReportData> {
   const { from, to } = resolved;
   // RT-002/RT-029: resolved by THIS service, over the SAME (lineId, from, to)
@@ -94,7 +103,7 @@ export async function getStationReport(
   // round trip, accepted per the remediation brief.
   const [ws, prod, ctx, scope, catalogue] = await Promise.all([
     getWeightStations(pool, lineId, from, to),
-    getProduction(pool, lineId, { from, to, groupBy: 'station' }),
+    getProduction(pool, lineId, { from, to, groupBy: 'station', shiftRange }),
     loadStateContext(pool, lineId),
     resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
     loadProductCatalogue(pool),
@@ -105,7 +114,8 @@ export async function getStationReport(
   const sReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const stateCase = bindStateCase(sReq, ctx, '', 'cs');
   const statesWhere = andEpoch(
-    'line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL',
+    'line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL' +
+      (shiftRange ? ` AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, sReq)}` : ''),
     sReq, scope, 'cone_event',
   );
   const states = await sReq.query<{ st: number; state: string; n: number }>(

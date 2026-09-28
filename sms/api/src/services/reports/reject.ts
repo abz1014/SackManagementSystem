@@ -18,6 +18,7 @@ import type { ResolvedPeriod } from '../report.js';
 import { noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
 import { round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 export interface RejectTrendPoint {
   day: string;
@@ -53,8 +54,8 @@ export interface RejectReportData {
   note: string;
 }
 
-function toFilters(resolved: ResolvedPeriod, f: ReportFilters): RejectFilters {
-  return { from: resolved.from, to: resolved.to, shift: f.shift, station: f.station, product: f.product };
+function toFilters(resolved: ResolvedPeriod, f: ReportFilters, shiftRange?: ShiftRange): RejectFilters {
+  return { from: resolved.from, to: resolved.to, shift: f.shift, station: f.station, product: f.product, shiftRange };
 }
 
 const toPct = (v: number | null): number | null => (v == null ? null : round(v * 100, 2));
@@ -81,12 +82,14 @@ export async function getRejectReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026); not yet threaded into `getRejectSpc` (rejectSpc.ts, TB1-owned). */
+  shiftRange?: ShiftRange,
 ): Promise<RejectReportData> {
   // One scope for all three sections — the same resolution every other
   // report uses — so the trend cannot carry days (e.g. the plant
   // simulator's) that the Pareto and the per-day table exclude.
   const scope = await resolveGenerationScope(pool, lineId, { from: resolved.from, to: resolved.to });
-  const f = { ...toFilters(resolved, filters), scope };
+  const f = { ...toFilters(resolved, filters, shiftRange), scope };
   const [pareto, byDayCode, spc] = await Promise.all([
     getRejectPareto(pool, lineId, f),
     getRejectsByDayCode(pool, lineId, f),

@@ -135,6 +135,18 @@ export interface ReportHeader {
   plantName: string | null;
   unitName: string | null;
   period: { period: string; from: string; to: string; days: number };
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): the plain-words form of
+   * the period — "2 Sep morning shift – 3 Sep night shift" when a shift
+   * range was given (`describeShiftRangePeriod`), or the plain calendar
+   * range otherwise (`${period.from} to ${period.to}`, unchanged from
+   * before this field existed). Optional for the same back-compat reason
+   * `generationLine`/`simulatorSource` are: `buildHeader` always sets it,
+   * but a required field would break hand-built `ReportHeader` fakes other
+   * workers hold open mid-flight. A missing value means "read `period`
+   * plainly", never "no period".
+   */
+  periodLabel?: string;
   filters: ReportFilters;
   /** Plant wall clock, on the production-time convention (render in UTC). */
   generatedAtPlantUtc: string;

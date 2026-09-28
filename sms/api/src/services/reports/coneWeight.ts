@@ -36,6 +36,7 @@ import { loadProductCatalogue } from '../productLimits.js';
 import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 export interface ConeWeightReportData {
   period: ResolvedPeriod;
@@ -149,6 +150,13 @@ export async function getConeWeightReport(
   lineId: number,
   resolved: ResolvedPeriod,
   _filters: ReportFilters,
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): not yet threaded into
+   * `getWeights`/`getWeightStations` (weights.ts/weightStations.ts,
+   * TB1-owned) — `w`/`stations` below still describe the whole `[from, to]`
+   * window until those files take the same parameter. `prod` is scoped now.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<ConeWeightReportData> {
   const { from, to } = resolved;
   const [w, prod, stations, plausibility, catalogue] = await Promise.all([
@@ -156,7 +164,7 @@ export async function getConeWeightReport(
     // resolves that to the basis Setup has on file (weights.ts's loadWeightRule),
     // the same row every other basis-aware figure in the app reads.
     getWeights(pool, lineId, undefined, from, to),
-    getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true }),
+    getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true, shiftRange }),
     getWeightStations(pool, lineId, from, to),
     getPlausibilityRule(pool, lineId),
     // F6 (23 Sep 2026): the versioned limits history, read HERE rather than

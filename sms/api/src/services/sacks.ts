@@ -36,6 +36,7 @@ import {
   type EventTable, type GenerationNote, type GenerationScope,
 } from './generation.js';
 import { getPlausibilityRuleAsOf, getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 export interface SackSummaryQuery {
   from: string;
@@ -45,6 +46,12 @@ export interface SackSummaryQuery {
   tsTo?: string;
   /** material_id — the sack's own; pre-August sacks carry none and drop out (see `unattributed`). */
   product?: number;
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed via `shiftRangeClause` into every sack/cone query `bindFilters`
+   * builds, alongside `from`/`to`/`shift` above.
+   */
+  shiftRange?: ShiftRange;
 }
 
 export interface SackGroup {
@@ -133,6 +140,9 @@ function bindFilters(
   if (withProduct && q.product != null) {
     w.push(`${c('material_id')} = @product`);
     req.input('product', mssql.Int, q.product);
+  }
+  if (q.shiftRange) {
+    w.push(shiftRangeClause(q.shiftRange, { date: c('shift_date'), code: c('shift_code') }, req));
   }
   return andEpoch(w.join(' AND '), req, scope, table, { alias });
 }

@@ -34,6 +34,7 @@ import { toPlantMs } from './plantClock.js';
 import { getPlausibilityRule } from './admin.js';
 import type { ProductCatalogue } from './productLimits.js';
 import { resolveGenerationScope, epochWhere, noteOf, type GenerationNote, type ScopeResolver } from './generation.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 export interface ProductInForce {
   productId: number;
@@ -427,6 +428,12 @@ export interface DayRange {
    * not.
    */
   tsTo?: string | null;
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed via `shiftRangeClause` into `productDisagreement`'s final WHERE
+   * alongside `from`/`to`/`shift` above.
+   */
+  shiftRange?: ShiftRange | null;
 }
 
 /**
@@ -580,6 +587,7 @@ export async function productDisagreement(
       WHERE line_id = @line AND shift_date BETWEEN @from AND @to
         ${range.shift ? 'AND shift_code = @shift' : ''}
         ${range.tsTo ? 'AND production_ts_utc_ms <= @tsTo' : ''}
+        ${range.shiftRange ? `AND ${shiftRangeClause(range.shiftRange, { date: 'shift_date', code: 'shift_code' }, req)}` : ''}
         ${epochPredicate ? `AND ${epochPredicate}` : ''}
         AND weight_g BETWEEN @plausLo AND @plausHi`,
   );

@@ -46,6 +46,7 @@ import { getReport, type ReportData, type ReportLine, type ResolvedPeriod } from
 import { pct, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import type { GenerationNote } from '../generation.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 export interface RejectPopulations {
   /** cone_event rows the scale's own bit marked out of range — what Readings lists as "Rejected cones". */
@@ -69,6 +70,8 @@ export async function getDailyReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026). */
+  shiftRange?: ShiftRange,
 ): Promise<DailyReportData> {
   const shift = filters.shift ?? null;
   const { from, to } = resolved;
@@ -85,8 +88,8 @@ export async function getDailyReport(
   // rendering, out of this pass's two-file (Sacks.tsx, daily.ts) scope —
   // flagged, not fixed, the way this file already flags other known gaps.
   const [report, scaleCount] = await Promise.all([
-    getReport(pool, lineId, resolved, shift),
-    countEvents(pool, lineId, 'cone', { from, to, shift: shift ?? undefined, inRange: false }),
+    getReport(pool, lineId, resolved, shift, shiftRange),
+    countEvents(pool, lineId, 'cone', { from, to, shift: shift ?? undefined, inRange: false, shiftRange }),
   ]);
   const byScale = scaleCount.count;
   const cones = report.totals.cones;

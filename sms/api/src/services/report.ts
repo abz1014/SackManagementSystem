@@ -29,6 +29,7 @@ import { getProduction, type ProductionRow, type ProductionStates } from './prod
 import { getStoppagePatterns } from './downtime.js';
 import { getShiftCheck } from './shiftCheck.js';
 import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 /** Same 120 s split the downtime screen uses; see downtime.ts for why. */
 export const REPORT_STOP_THRESHOLD_SECONDS = 120;
@@ -236,6 +237,15 @@ export async function getReport(
   resolved: ResolvedPeriod,
   /** Narrow every count to one shift (roadmap Phase 8). Coverage counts days with readings IN that shift. */
   shift: ShiftCode | null = null,
+  /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed via `shiftRangeClause` into `coverageReq`'s WHERE and threaded
+   * into every `getProduction`/`getStoppagePatterns` call below, alongside
+   * `shift` above (the two are independent narrowings — a caller may give
+   * both, a single-shift range plus a further shift-name filter, though
+   * ordinarily only one is used at a time).
+   */
+  shiftRange?: ShiftRange,
 ): Promise<ReportData> {
   const { from, to } = resolved;
   const shiftArg = shift ?? undefined;
@@ -254,15 +264,16 @@ export async function getReport(
     .input('from', mssql.Date, from)
     .input('to', mssql.Date, to);
   if (shift) coverageReq.input('shift', mssql.VarChar(10), shift);
+  const shiftRangeSql = shiftRange ? shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, coverageReq) : null;
   const coverageWhere = andEpoch(
-    `line_id = @line AND shift_date BETWEEN @from AND @to${shift ? ' AND shift_code = @shift' : ''}`,
+    `line_id = @line AND shift_date BETWEEN @from AND @to${shift ? ' AND shift_code = @shift' : ''}${shiftRangeSql ? ` AND ${shiftRangeSql}` : ''}`,
     coverageReq, scope, 'cone_event',
   );
 
   const [totalRes, shiftRes, dayRes, coverageRes, stops, shiftCheck] = await Promise.all([
-    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'none', withStates: true }),
-    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'shift' }),
-    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'day' }),
+    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'none', withStates: true, shiftRange }),
+    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'shift', shiftRange }),
+    getProduction(pool, lineId, { from, to, shift: shiftArg, groupBy: 'day', shiftRange }),
     coverageReq.query<{ n: number; firstDay: string | null; lastDay: string | null }>(
       `SELECT COUNT(DISTINCT shift_date) AS n,
                 CONVERT(varchar(10), MIN(shift_date), 120) AS firstDay,
@@ -270,7 +281,7 @@ export async function getReport(
            FROM sms.cone_event
           WHERE ${coverageWhere}`,
     ),
-    shift ? Promise.resolve(null) : getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS),
+    shift ? Promise.resolve(null) : getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS, shiftRange),
     getShiftCheck(pool, lineId, from, to),
   ]);
 

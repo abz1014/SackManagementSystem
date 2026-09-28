@@ -24,6 +24,7 @@ import {
   andEpoch, epochWhere, noteOf, resolveGenerationScope, UNSCOPED,
   type GenerationNote, type GenerationScope,
 } from './generation.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 /**
  * Resolve the source generation for a filter bag and return the bag with it
@@ -81,6 +82,14 @@ export interface RejectFilters {
   product?: number;
   code?: RejectCodeFilter;
   /**
+   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
+   * ANDed into `bindRejectFilters`/`bindConeFilters` via `shiftRangeClause`
+   * alongside `from`/`to`/`shift` above. Propagates through every `{ ...f }`
+   * spread in this file (`bindConeFilters`, `getUnmatchedRejects`,
+   * `countUnattributed`), same as `scope`.
+   */
+  shiftRange?: ShiftRange;
+  /**
    * The SOURCE GENERATION these filters are confined to (generation.ts,
    * 23 Sep 2026). Carried ON THE FILTER BAG rather than as a parameter so it
    * propagates through every `{ ...f }` spread in this file and through
@@ -123,6 +132,7 @@ export function bindRejectFilters(
   if (f.tsTo) { w.push(`${c('production_ts_utc_ms')} <= @tsTo`); req.input('tsTo', mssql.BigInt, new Date(f.tsTo).getTime()); }
   if (f.station != null) { w.push(`${c('source_station')} = @station`); req.input('station', mssql.Int, f.station); }
   if (f.product != null) { w.push(`${c('material_id')} = @product`); req.input('product', mssql.Int, f.product); }
+  if (f.shiftRange) { w.push(shiftRangeClause(f.shiftRange, { date: c('shift_date'), code: c('shift_code') }, req)); }
   if (withCode && f.code) {
     w.push(`${c('reject_type')} = @codeType`);
     req.input('codeType', mssql.VarChar(10), f.code.kind);
