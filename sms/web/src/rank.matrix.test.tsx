@@ -249,7 +249,7 @@ const SYSTEM_HISTORY_FIXTURE: Envelope<SystemHistoryData> = {
   metadata: META_FIXTURE,
 };
 
-/** Every route every one of the seven screens (plus Health) needs on its
+/** Every route every one of the eight screens needs on its
  *  DEFAULT mount — pathname-keyed, per fetchRouter's contract; an
  *  unregistered path throws rather than silently answering `{}`, so a
  *  missing route here fails LOUDLY as a test error, not a false green. */
@@ -280,8 +280,14 @@ const ALL_ROUTES = {
 const RANKS = ['viewer', 'engineer', 'manager', 'admin'] as const;
 type Rank = (typeof RANKS)[number];
 
-/** The seven nav screens, in Bar.tsx's own SCREENS order. */
-const SEVEN = ['line', 'readings', 'weight', 'rejects', 'sacks', 'product', 'report'] as const;
+/**
+ * The eight nav screens, in Bar.tsx's own SCREENS order. Was seven until
+ * 28 Sep 2026, when Health joined as the 8th item (owner decision) — see
+ * ui/Bar.tsx's SCREENS note. Still named EIGHT rather than SCREENS_MIRROR:
+ * this is a hand-written expectation, deliberately not imported from
+ * Bar.tsx, so a change there has to be reviewed here too.
+ */
+const EIGHT = ['line', 'readings', 'weight', 'rejects', 'sacks', 'product', 'report', 'health'] as const;
 
 async function mountAt(role: Rank) {
   const result = renderApp({ role, routes: ALL_ROUTES });
@@ -306,22 +312,22 @@ describe('UX Phase 8 Brief B — rank-1 (viewer) UI matrix', () => {
   });
 
   for (const role of RANKS) {
-    it(`${role}: the nav has exactly the seven SCREENS entries`, async () => {
+    it(`${role}: the nav has exactly the eight SCREENS entries`, async () => {
       await mountAt(role);
       const nav = rtlScreen.getByRole('navigation');
-      for (const s of SEVEN) {
+      for (const s of EIGHT) {
         expect(within(nav).getByRole('button', { name: W.nav[s] })).toBeTruthy();
       }
-      // Mechanical ONE AUDIENCE assertion: exactly seven, not six, not eight —
+      // Mechanical ONE AUDIENCE assertion: exactly eight, not seven, not nine —
       // the brand span is not a button, so this counts nav-link buttons only.
       const buttons = within(nav).getAllByRole('button');
-      expect(buttons).toHaveLength(SEVEN.length);
+      expect(buttons).toHaveLength(EIGHT.length);
     });
   }
 
-  it('rank 1 (viewer): all seven screens navigate and mount without throwing', async () => {
+  it('rank 1 (viewer): all eight screens navigate and mount without throwing', async () => {
     await mountAt('viewer');
-    for (const s of SEVEN) {
+    for (const s of EIGHT) {
       navButton(W.nav[s]).click();
       // Each screen's own headline (W.nav[s] repeated as an <h1>) proves the
       // screen area actually swapped and did not throw into the error
@@ -444,6 +450,10 @@ describe('UX Phase 8 Brief B — rank-1 (viewer) UI matrix', () => {
   it('?s=health renders at rank 1 (owner decision, App.tsx:576)', async () => {
     window.history.replaceState(null, '', '/?s=health');
     renderApp({ role: 'viewer', routes: ALL_ROUTES });
-    await waitFor(() => expect(rtlScreen.getByText(W.health.title)).toBeTruthy());
+    // getByText(W.health.title) is ambiguous since 28 Sep 2026: 'Health' now
+    // also names the nav button (W.nav.health), not only the screen's own
+    // <h1> — same reason the "all eight screens navigate" test above scopes
+    // to getAllByText().length > 0 rather than a single getByText.
+    await waitFor(() => expect(rtlScreen.getByRole('heading', { level: 1, name: W.health.title })).toBeTruthy());
   });
 });

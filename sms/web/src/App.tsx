@@ -44,7 +44,9 @@ import './app.css';
 
 /* ------------------------------------------------------------------ route */
 
-type View = Screen | 'setup' | 'wall' | 'health';
+// 'health' is now one of Bar's own SCREENS (28 Sep 2026 — see ui/Bar.tsx),
+// so it comes in through `Screen` already; no longer spelled out separately.
+type View = Screen | 'setup' | 'wall';
 
 export interface Sheet {
   /** 'reason' (roadmap Phase 5): one day's rejects of one code, id `<day>|<type>|<tube>|<material>`.
@@ -125,7 +127,9 @@ export interface Route {
   productTab: ProductTab;
 }
 
-const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall', 'health'] as const;
+// 'health' no longer listed separately — SCREENS carries it (see the View
+// type note above).
+const VIEWS: readonly View[] = [...SCREENS, 'setup', 'wall'] as const;
 
 /**
  * The register export is requireRole(3) on the server. Offering it at rank 2

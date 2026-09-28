@@ -42,6 +42,9 @@ export const W = {
        see Bar.tsx's SCREENS note. */
     product: 'Product',
     report: 'Report',
+    /* Owner decision, 28 Sep 2026 (ui/Bar.tsx's SCREENS note): Health is now
+       the 8th nav item, after Report. */
+    health: 'Health',
   } as const,
   wall: 'Wall',
   setup: 'Setup',

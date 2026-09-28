@@ -20,7 +20,7 @@ import { fmtClockSec, fmtClock, fmtClockOn, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
 import { AccountSheet } from '../screens/Account';
 
-export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'sacks' | 'product' | 'report';
+export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'sacks' | 'product' | 'report' | 'health';
 
 /**
  * In time-window order, as the redesign laid them out. 'sacks' (roadmap
@@ -29,9 +29,17 @@ export type Screen = 'line' | 'readings' | 'weight' | 'rejects' | 'sacks' | 'pro
  * (UX Phase 6 Brief 1, 16 Sep 2026) sits after Sacks and before Report —
  * absorbing the old Product sheet into a real nav item with four tabs
  * (Running/Changeover/Catalogue/History, URL key `pt`) — and Report, which
- * prints the line's figures, stays last.
+ * prints the line's figures, stays last except for 'health' (owner decision,
+ * 28 Sep 2026), the 8th and final item. Health was previously reachable only
+ * through the strip's own "details" link (still kept — see Bar's HealthLine
+ * below); it answers a question of its own (is SMS itself healthy) rather
+ * than narrowing by time window, so it sits after Report rather than being
+ * squeezed into the time-window ordering the other seven follow. Every
+ * signed-in account may open it (rank 1) — ONE AUDIENCE, CLAUDE.md — the
+ * SAME rule that already applied to its route; this only adds a nav button,
+ * no new rank gate.
  */
-export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'sacks', 'product', 'report'] as const;
+export const SCREENS: readonly Screen[] = ['line', 'readings', 'weight', 'rejects', 'sacks', 'product', 'report', 'health'] as const;
 
 /**
  * What Readings should be narrowed to when a link elsewhere promises a
@@ -299,7 +307,11 @@ export function Bar({
   onOpenSync,
   onSignOut,
 }: {
-  screen: Screen | 'setup' | 'health';
+  // 'health' was a separate branch here before 28 Sep 2026 (reachable only
+  // via onOpenSync, not a SCREENS entry); now that it is the 8th SCREENS
+  // item, 'health' is already part of Screen and the extra branch would be
+  // a no-op duplicate — removed, not just left redundant.
+  screen: Screen | 'setup';
   lineName: string;
   /** The plant's clock, from /api/live. Never the browser's. */
   plantNowUtc: string | null;
