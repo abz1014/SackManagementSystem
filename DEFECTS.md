@@ -1328,3 +1328,162 @@ from `5d42cf5`). `npm run typecheck`, all five workspaces: clean.
 `COMMISSIONING-GAPS.md` §2, `PROJECT_STATUS.md` and `CLAUDE.md` each carried RT-016 as open (the
 last two as of a same-day, earlier doc-correction pass) and are corrected in place, in this
 file's own convention (old text kept, a dated note added), not rewritten.
+
+## Part 10 — 28 Sep 2026 commissioning audit
+
+Gate pass over commits `df02425..HEAD` (14 commits, listed by `git log --oneline df02425..HEAD`).
+`npm run typecheck` (all five workspaces): clean. `npx vitest run` from `sms/`: **2,400 passed / 4
+skipped**, two consecutive clean full runs (17:14:58 and 17:15:31 UTC, 232 files passed / 1
+skipped each time) — no flake observed this pass, though `DEFECTS.md` Part 8's ~1-in-74 flake is
+not disproven by two runs. `node --check scripts/pdas-e2e-local.mjs`: syntax OK. `npm run build`
+(all five workspaces): succeeds (`web`'s single >500 kB chunk warning is informational, not a
+build failure). No test or type failure was found in this pass, so no fix commits were needed;
+every SHA below was verified to exist and to touch the files named, by `git show --stat` and
+`git show --name-only`, before being cited.
+
+1. **Rejects headline rate denominator pooled every generation while the numerator was scoped to
+   one — MEDIUM/HIGH (a wrong on-screen KPI, not data loss).** `Rejects.tsx`'s
+   `q.generations.reduce(...)` summed `totalInspected` across every source generation the
+   `/api/reject-spc` query touched, while `rejectCount.n` was scoped server-side
+   (`rejectSpc.ts`'s `newestGenTotals`) to a single preferred generation. A period spanning both
+   the real September generation and the local `_SIM` sidecar diluted the printed rate toward
+   zero (dev copy, 1–28 Sep: 0.5% shown vs 4.5% on Line and the reports). Fix: `preferredGeneration()`
+   picks the one `generations[]` entry whose own totals match the top-level pair before summing.
+   Fix commit: `d1cec60`. Test: `web/src/screens/Rejects.rateDenominator.test.tsx` (proven red at
+   0.2% against the reverted code, green at 5.0% against the fix).
+
+2. **Readings/Sacks register and CSV export pooled every source generation into one total — HIGH
+   (register/report figures off by an order of magnitude).** `listEvents`/`exportEventsCsv`
+   (`register.ts`) pooled every generation present in a window into `total` even though each row
+   carried its own label: Readings showed 179,097 cones weighed against a real count of 19,792
+   (4,523 vs 901 inspection rejects); Sacks' register showed 8,130 against a headline of 842. Fix
+   (owner decision, 28 Sep 2026): `resolveGenerationScope` gained `opts.key` to resolve one
+   explicit data batch (default: the newest real generation) instead of pooling; `listEvents`/
+   `exportEventsCsv` now require a resolved scope, `total` is scoped to it, `generations` keeps
+   the full tally, and the CSV trailer states what was excluded; the report header
+   (`reports/header.ts`) and its `spansGenerations` flag, the simulator-only header case, and
+   `ReadingSheet`'s cones-since-sack count were brought onto the same scoped total. Fix commit:
+   `c15ca06`. Tests: `api/src/app.register.batch.test.ts`,
+   `api/src/services/generationScope.guard.test.ts`,
+   `api/src/services/generations.flagInvariance.test.ts`,
+   `api/src/services/generations.pass4.test.ts`, `api/src/services/register.batch.test.ts`,
+   `api/src/services/register.generations.test.ts`, `api/src/services/register.presence.test.ts`,
+   `api/src/services/register.state.test.ts`, `api/src/services/register.test.ts`,
+   `api/src/services/rejects.test.ts`, `web/src/hops.test.tsx`.
+
+3. **Raw source-generation/provenance labels shown verbatim on Health, System History and the
+   sheets — MEDIUM (developer jargon on an operator screen, and one case — System History's
+   provenance column — actively misleading).** `SyncHealthBlock` printed labels like "pack1_TP1U2
+   gen 4" straight from `sms.source_epoch.label`; `SystemHistoryBlock`'s provenance column trusted
+   the stored `provenance` value, which is wrong for the plant-simulator's generations (they carry
+   `provenance = 'ifl_copy'`, so a simulator batch could read "IFL copy" on screen); `ReadingSheet`/
+   `ReasonSheet` (via `generationWords.ts`) had the same raw-label problem. Fix: `operations.ts`
+   joins `generation_ordinal` and a `source_db`-derived simulator flag onto each sync row (never
+   from the recorded `provenance` column) and renders through the new `batchName()` helper;
+   `SystemHistoryBlock`'s provenance column now derives "Simulator" from `sourceDb`
+   (`words.ts`'s `provenanceLabel`) instead of the stored column; `ReadingSheet`/`ReasonSheet`
+   labels go through `batchName()` too. Fix commits: `d7e92e0` (Health/System History),
+   `c15ca06` (`ReadingSheet`/`ReasonSheet`, as part of the register batch-scoping pass above).
+   Tests: `api/src/services/operations.test.ts`, `web/src/generationQuiet.test.tsx`,
+   `web/src/missingField.fuzz.test.tsx`.
+
+4. **The raw `.env`-oriented PDAS disabled-reason string reached product screens verbatim — LOW
+   (developer jargon, not a data-correctness defect).** `resolvePdasWrite`'s `disabledReason`
+   (e.g. `"PDAS_WRITE_ENABLED is not true."`) is written for an engineer reading `.env`, but
+   reached the screen unmodified in three places: Product History's stored
+   `sms.product_change.message`, Changeover's plan/execute refusal, and Catalogue's write-status
+   note. Fix: `web/src/lib/pdasWords.ts`'s `pdasReasonForDisplay()` translates the four known raw
+   reasons to plain sentences (passes anything unrecognised through verbatim); applied at all
+   three render sites; `config.ts`'s raw strings are unchanged since API tests assert them
+   directly. Fix commit: `6f6abab`. Tests: `web/src/lib/pdasWords.test.ts`,
+   `web/src/screens/product/pdasDisabledReason.test.tsx`.
+
+5. **Report CSV/XLSX/PDF trailers said "Source generation" / "Excluded from other generation"
+   where the UI already said "data batch" for the same concept — LOW (wording inconsistency
+   across export formats).** Fix: `generationDisclosureLines` (`reports/common.ts`) now composes
+   "Data batch: ..." / "Excluded from another data batch: ..."; `header.ts`'s `generationLine`
+   (read verbatim by `PrintHead.tsx` for the PDF) inherits the fix; the simulator disclosure and
+   `DATA_TP1U2_SIM` name are unchanged. Fix commit: `8ac7906`. Test:
+   `api/src/services/reports/generationDisclosure.test.ts`,
+   `api/src/routes/reports.generation.test.ts`.
+
+6. **Weight chart's off-scale limit labels overflowed the SVG's right edge — LOW (visual
+   clipping, no data error).** "upper limit 2,000 g · off scale" / "lower limit 1,920 g · off
+   scale" ran 2–5px past the plot edge because `RefLine`'s default label position grows rightward
+   from `x2+8` with no reserved margin. Fix: pass the existing `labelInside` prop for the
+   off-scale branch only, right-anchoring the text at `x2` so it grows leftward and can never
+   exceed the viewBox. Fix commit: `7958639`. File touched: `web/src/screens/Weight.tsx` (no
+   dedicated new test file — covered by existing Weight rendering tests).
+
+7. **`machinesRunning`'s `findNewerElsewhere` could flag its own chosen generation as "newer
+   elsewhere" — MEDIUM (a false self-report could mask real cross-generation drift or trigger a
+   spurious "newer data exists" state).** `machinesRunning.ts` anchors on `sms.cone_event` alone,
+   but `findNewerElsewhere` unions cones AND rejects when checking for something newer than the
+   given anchor; a reject row in the SAME generation newer than the cone-only anchor could win
+   that `MAX()` and be reported as newer data existing outside the generation actually being
+   read. Fix: `findNewerElsewhere` takes an optional 5th `self` parameter (the chosen
+   generation's own `sourceDb`/ordinal) and excludes its own rows via an `OR`-ed "no epoch row at
+   all" clause — never `NOT IN`, matching the existing query-shape pin. All three callers
+   (`live.ts`'s `getLive`, `health.ts`'s `acquisitionHealth`, `machinesRunning.ts`'s
+   `getMachinesRunning`) now pass `scope.generation` as `self`. Fix commit: `009e9b0`. Test:
+   `api/src/services/live.findNewerElsewhereSelf.test.ts`.
+
+8. **No way to look at simulator data on the dev PC and have the app admit it, outside `?at=`
+   replay — addressed by design, not a defect.** `LIVE_ALLOW_SIMULATOR` (env flag, default
+   `false`) lets `live.ts`'s generation-scope policy prefer the simulator generation over an
+   older real one when explicitly enabled, gated to non-production hosts and an `_SIM`-suffixed
+   database name (the same invariants `scripts/simulate-plant.mjs` enforces on write). Commits:
+   `bbc8d06` (the config flag and its host/db-name guards), `d54173d` (wiring it into
+   `resolveGenerationScope`'s `preferReal` option and `live.ts`'s module-level policy). Tests:
+   `api/src/config.liveSimulator.test.ts`, `api/src/app.liveSimulator.test.ts`,
+   `api/src/services/generations.liveSimulator.test.ts`.
+
+9. **Health was reachable only through the strip's "details" link, not the top bar — LOW (owner
+   decision, not a bug).** Health is now the 8th `SCREENS` entry in `ui/Bar.tsx`, at rank 1 (ONE
+   AUDIENCE), after Report; its own internal admin-only sections keep the existing `rank >= 4`
+   gate. Fix commit: `f590f91`. Test: `web/src/rank.matrix.test.tsx` (nav count assertions updated
+   seven → eight).
+
+10. **No global notice when on-screen figures came from the plant simulator rather than IFL —
+    addressed by owner decision.** `GET /api/data-batch` (rank 1) resolves the source generation
+    for a chosen window independent of `LIVE_ALLOW_SIMULATOR`'s live-scope policy; a new
+    `SimulatorBanner` (`web/src/ui/SimulatorBanner.tsx`, wording in
+    `web/src/lib/simulatorWords.ts`) shows a period-scoped notice on
+    Line/Readings/Weight/Rejects/Sacks/Report and a live-scoped notice on Line/Health/Product >
+    Running; nothing on Setup or Product's other tabs; a failed `/api/data-batch` fetch never
+    claims "real" data. Wall's footer carries the short form. Fix commit: `3abc113`. Tests:
+    `api/src/routes/dataBatch.test.ts`, `web/src/ui/SimulatorBanner.test.tsx`,
+    `web/src/api.callers.test.ts` (allow-list entry, `deb1127`).
+
+11. **PDAS write routes and the echo-mismatch path lacked HTTP-level/unit coverage — test-only,
+    no production defect found.** New tests prove `POST /api/products`, `/:id/active`,
+    `/:id/limits` and `/api/changeover/execute` answer `503 DISABLED` (one `sms.product_change`
+    row each) while `PDAS_WRITE_ENABLED=false`, `403` at rank 1, `401` signed out, and `409
+    BLOCKED` for a changeover plan clashing with an existing blend+count+tube triple; a new test
+    proves an echo-back `MISMATCH` after a limits UPDATE raises the CRITICAL
+    `pdas_write_echo_mismatch` finding (previously only the check-read failing outright was
+    tested, not a successful read that disagrees). `scripts/pdas-e2e-local.mjs` gained six new
+    cases and a hard live pre-flight check; **not run this pass** (it needs a live SQL Server
+    connection — `node --check` syntax-verified only, per task scope). Commit message states
+    explicitly: no production code changed, no real defect found in `pdasWrite.ts`/
+    `changeover.ts` by these tests. Fix commit: `07fde6a`. Tests:
+    `api/src/routes/pdasWrite.http.test.ts`, `api/src/services/pdasWrite.echo.test.ts`.
+    **Note by design:** vendor error codes `-5002`/`-5003` (`AddTubeType`'s invalid-form/
+    invalid-weight refusals) are unreachable through our code — the app's own validation refuses
+    first with `IMPLAUSIBLE` before a connection ever opens (see `pdasWrite.echo.test.ts`'s
+    addTubeType-invalid-form/weight cases) — so those two vendor codes are asserted only in the
+    unreachable sense of "the mapping exists", never observed firing through the app's own path.
+
+12. **`sackStock.ts`'s `parsePlantLocal` accepted calendar-invalid movement timestamps and
+    silently rolled them over — HIGH, part of RT-016's three surfaces, already recorded in Part 9
+    above; cross-reference only.** `2026-02-30T10:00` silently became `2026-03-02T10:00` instead
+    of being refused. Fix commit: `60d397f`. Test: `api/src/services/sackStock.test.ts`. See Part
+    9 item 3 for the full account, including the companion query-string-parameter fix `5d42cf5`
+    (also RT-016, also already recorded in Part 9).
+
+**Nothing in this pass required a code or test fix.** All fourteen commits `df02425..HEAD` were
+inspected; the twelve items above account for every one with a production or test-behaviour
+effect (`e91d222`, a docs-only commit, and `740d473`, `c9e51f3`, which are pure plumbing already
+covered under items 2/8/10's commits, are not separately itemised). Suite and build were green on
+first attempt, both full runs identical (2,400/4), confirming no regression was introduced by
+`df02425..HEAD` beyond what each commit's own tests already covered.
