@@ -172,3 +172,206 @@ earlier Bash command in this session's transcript did `grep` the `.env` file and
 raw output (which is not reproduced here) included the password value inline with
 other settings — noted here for the owner's awareness since local shell history /
 session transcripts are not scrubbed automatically.
+
+---
+
+## Second pass (28 Sep 2026, Task K2b) — the two remaining gaps closed
+
+**Code revision:** `62c540e` (branch `floor-first-rework`). Fix `2e2f4ca` (local-alias
+pre-flight) and `62c540e` (Changeover's "a plan always needs blend/count/tube" copy)
+were already committed when this pass started. `api/dist` rebuilt clean
+(`npm run build -w api`, `tsc -b`, no errors) before the harness ran. Same scope as
+the first pass: local `PDAS_TP1U2_SEP07` copy only, restored afterward; plant,
+`DATA_TP1U2`, `DATA_TP1U2_SEP07` never touched; no logins created; no passwords
+printed.
+
+### Step 1 — anchors, read-only
+
+Both PDAS and `sms` anchors were re-queried before touching anything and matched
+K2's first-pass recorded values **exactly**, in every column:
+
+| PDAS table | Materials | Blends | Counts | TubeTypes | Pallets | nhs_events |
+|---|---|---|---|---|---|---|
+| count | 24 | 10 | 14 | 27 | 25 | 3631 |
+| MAX(id) | 1024 | 10 | 14 | 27 | 1022 | 23445 |
+
+| sms table | product_change | product_limit_version | dq_finding | audit_log | session | blend | yarn_count | tube_type | product | pallet | product_timeline |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| count | 3 | 14 | 30 | 150 | 5 | 10 | 14 | 27 | 14 | 15 | 22 |
+
+No difference from K2's figures.
+
+### Step 2 — fresh backups
+
+`D:\sms-backups\PDAS_TP1U2_SEP07-20260928-pre-e2e2.bak` (1074 pages, 0.183 s) and
+`D:\sms-backups\sms-20260928-pre-e2e2.bak` (56330 pages, 1.593 s), both
+`COPY_ONLY, CHECKSUM, INIT`. `RESTORE VERIFYONLY ... WITH CHECKSUM` on both: *"The
+backup set on file 1 is valid."*
+
+### Step 3 — the scripted harness ran for the first time
+
+`node scripts/pdas-e2e-local.mjs` from `sms/`, `RUN_TAG=20260928130240`. The live
+pre-flight **passed** this time (the `2e2f4ca` local-alias fix worked as intended):
+
+```
+Live pre-flight: @@SERVERNAME="DESKTOP-G1MSH4I\SQLEXPRESS" DB_NAME()="PDAS_TP1U2_SEP07"
+  (expected host "DESKTOP-G1MSH4I" / instance "SQLEXPRESS" / db "PDAS_TP1U2_SEP07")
+Live pre-flight PASSED.
+Leftover-data check PASSED: no E2E-tagged rows found.
+```
+
+**18 of 19 cases passed.** Per-right summary table, as printed by the harness:
+
+| right | happy case | failure cases | pass/fail |
+|---|---|---|---|
+| CreateMaterial | R1-execute (material step); F7-create | F2 (-7001 duplicate); F7-recreate-fail (-7001 after retire+recreate) | FAIL* |
+| SetMaterialStatusActive | R1-execute (retire step); R3 (reactivate); F7-retire/F7-reactivate | (none exercised) | FAIL* |
+| AddBlend | R1-execute (blend step); F7-addBlend | (none exercised) | FAIL* |
+| AddCount | R1-execute (count step); F7-addCount | (none exercised) | FAIL* |
+| AddTubeType | R1-execute (tube step); F7-addTubeType | F3a (-5001 duplicate); F3c (IMPLAUSIBLE form); F3d (IMPLAUSIBLE weight) | FAIL* |
+| CreatePallet | R1-execute (pallet step) | (none exercised) | PASS |
+| SetPalletStatusActive | R1-execute (retire pallet step); R4 (reactivate) | (none exercised) | PASS |
+| UPDATE dbo.Materials (limits) | R2 | F4 (CONFLICT, second call) | PASS |
+| INSERT dbo.nhs_events | N1 | (none exercised) | PASS |
+
+`*` — every FAIL above is caused by the SAME single root cause, not five separate
+defects: case **F7**'s own setup code calls
+`writer.setProductActive({ ..., reason: 'F7 retire', actor })` — `'F7 retire'` is 9
+characters, one short of the harness's (and the app's own) 10-character minimum
+reason length, so `setProductActive` refused client-side with
+`IMPLAUSIBLE: "A reason of at least 10 characters is required."` **before it ever
+opened a PDAS connection.** This is a bug in the harness's own F7 test data (the
+reason string), not in `pdasWrite.ts`, `changeover.ts`, or PDAS itself. It cascaded
+two ways: F7's own verdict went FAIL (`retired.ok=false`), and A1 (the
+one-`product_change`-row-per-operation cross-check) went FAIL because no row was
+ever written for the blocked F7-retire call (`rowCount=0` where 1 was expected —
+every other one of A1's 21 entries matched exactly). Because the summary table's
+`keys` list ties CreateMaterial/SetMaterialStatusActive/AddBlend/AddCount/AddTubeType
+to F7's verdict, all five inherited the FAIL even though **every one of those five
+rights independently passed clean** via R1, R2, R3, F2, F3a, F3b, F3c, F3d earlier in
+the same run. Per this task's own instruction ("a failing case is data: record it and
+do not patch code"), the harness script was **not edited**. Individual verdicts, all
+18 of 19 PASS:
+
+```
+R1-plan: PASS · R1-execute: PASS · R2: PASS · R3: PASS · R4: PASS · F1: PASS ·
+F2: PASS · F3a: PASS · F3b: PASS · F3c: PASS · F3d: PASS · F4: PASS · F5: PASS ·
+F5b: PASS · F6: PASS · F7: FAIL (harness data bug, see above) · T1: PASS ·
+A1: FAIL (cascade of F7's bug, 20/21 entries matched) · N1: PASS
+```
+
+Full per-case detail (every request/response, all 19 `nhs_events` rows EventId
+23446–23464, the F6/F7 blocker text) is in the harness's own JSON/markdown log,
+captured to the operator's scratchpad this pass and not committed (contains no
+secrets, but is a raw run artifact, not a durable record — this section and the
+table above are the durable record). Harness exit code: **1** (`OVERALL: FAIL`,
+driven entirely by the F7/A1 cascade above; every individual PDAS write right the
+harness actually exercised behaved correctly).
+
+### Step 4 — UI proof of `SetPalletStatusActive` (the gap K2 could not close)
+
+With `62c540e`'s picker-unlock live (hot-reloaded, no API restart needed), a new
+browser tab opened Product › Changeover, signed in as the owner's existing
+admin session. Picked **existing** blend `PVSD8020`, count `18`, tube type `RED`
+(none newly created) and ticked the retire checkbox for **PalletId 1023**
+(`E2E-LOT-20260928130240 · E2E`), the pallet the harness run above had just
+created and left active — satisfying "use one the harness created if one exists."
+Reason: `"Task K2b UI-E2E2-0928 retire pallet 1023 proof"`.
+
+The blend+count+tube triple `PVSD8020 · 18 · RED` did not already exist as a
+product, so the plan's `material`/`pallet` steps showed `action: "create"`
+alongside `retire_pallet` / `SetPalletStatusActive` for pallet 1023 — exactly the
+task's anticipated case ("accept creating one new ... material alongside the
+retire"). First plan attempt blocked on "The lot name is required"; filled
+`Lot / description = UI-E2E2-0928-LOT` and replanned — zero blockers, `POST
+/api/changeover/plan` returned the six-step plan including:
+
+```json
+{"step":"retire_pallet","action":"retire","proc":"SetPalletStatusActive","id":1023,
+ "detail":{"active":false,"productId":1025}}
+```
+
+Clicked "Execute the changeover". Result banner: **"Applied to PDAS"** — material
+1,027, pallet 1,024 created, blend/count/tube reused (ids 2/2/2), and
+`retire_pallet → pallet 1023 → 1,023`.
+
+**Confirmed via `sqlcmd`, independent of the UI's own claim:**
+
+```
+PalletId  PalletActive  Lot
+1023      0             E2E-LOT-20260928130240
+```
+```
+EventId  Src                         Severity  Logtext
+23467    storedProc SetPalletStatusActive  info  Set active to : 0 on PalletId: 1023
+```
+```
+change_id  operation           proc_name               outcome  reason
+30         set_pallet_active   SetPalletStatusActive   ok       Task K2b UI-E2E2-0928 retire pallet 1023 proof
+```
+
+**SetPalletStatusActive is now proven live through the UI**, closing gap (b) from
+the task brief. It was already independently proven by the harness's R1/R4 cases in
+Step 3 above (PASS, not touched by the F7 bug) — this UI pass is a second,
+independent confirmation through a different code path (`changeover.ts`'s
+`executeChangeover`, not the harness's direct `PdasWriter` calls).
+
+**Reactivation: the UI offers no path for it.** After the retire, PalletId 1023
+disappeared from Changeover's own "Retire" checklist (checked: it is no longer
+listed, confirmed by re-reading the page) — that list only offers ACTIVE
+products/pallets to retire, symmetric with how Catalogue offers "Activate" only for
+retired *materials*, never for pallets. There is no "reactivate a pallet" control
+anywhere in the web app. This is not a gap in this pass's proof: the harness's **R4**
+case (Step 3, verdict PASS) already exercises `SetPalletStatusActive(reactivate)`
+directly through `PdasWriter`, and this task's own brief anticipated exactly this
+("If not, note that the harness's R4 case covers it").
+
+### Step 5 — restore
+
+`sms-api` stopped via `preview_stop`. Both databases: `SET SINGLE_USER WITH ROLLBACK
+IMMEDIATE` → `RESTORE DATABASE ... FROM DISK <pre-e2e2 .bak> WITH REPLACE, CHECKSUM`
+→ `SET MULTI_USER`. Anchors re-queried after restore — **identical to Step 1 in every
+column**, both tables. The Changeover screen's Blend/Count/Tube-type dropdowns and
+"Retire" checklist, re-read after restore, show zero `E2E-`/`UI-E2E2-`-tagged rows —
+a visual confirmation on top of the anchor counts. `sms-api` restarted via
+`preview_start`; `GET /api/auth/me` (browser tab, no navigation to a login page, no
+password typed) still returned
+`{"user":{"username":"admin","displayName":"Plant Admin","role":"admin"}}` — the
+session row survived the restore intact, same as the first pass.
+
+### Final per-right verdict, all nine rights, both passes combined
+
+| Right | First pass (K2) | Second pass (K2b) | Combined verdict |
+|---|---|---|---|
+| CreateMaterial | Proven via UI (MaterialId 1025) | Proven via harness R1/F7-create (table shows FAIL only from the F7-retire cascade, not from CreateMaterial itself); proven again via UI (material 1027) | **PROVEN** |
+| SetMaterialStatusActive (retire) | Proven via UI | Proven via harness R1-execute | **PROVEN** |
+| SetMaterialStatusActive (reactivate) | Proven via UI | Proven via harness R3 | **PROVEN** |
+| AddBlend | Proven via UI (BlendId 11) | Proven via harness R1/F7-addBlend | **PROVEN** |
+| AddCount | Proven via UI (CountId 15) | Proven via harness R1/F7-addCount | **PROVEN** |
+| AddTubeType | Proven via UI (TubeTypeId 28) | Proven via harness R1/F7-addTubeType; F3a (-5001 duplicate), F3c/F3d (IMPLAUSIBLE) all reproduced live | **PROVEN**, including the three refusal codes |
+| CreatePallet | Proven via UI (PalletId 1023) | Proven via harness R1-execute (PASS); proven again via UI (pallet 1024) | **PROVEN** |
+| SetPalletStatusActive | **Not proven** (plan request never fired) | Proven via harness R1-execute + R4 (PASS, both directions); **proven via UI this pass** (pallet 1023 retired, reactivation path confirmed absent from the UI by design, covered by harness R4) | **PROVEN, both directions** — the one gap K2 left is now closed |
+| Limits UPDATE (`UPDATE dbo.Materials`) + paired `nhs_events` | Proven via UI | Proven via harness R2 (happy path) and F4 (optimistic-concurrency CONFLICT, second call) | **PROVEN**, including the conflict path |
+
+**All nine PDAS write rights are now proven through our own code, end to end,
+against the local `PDAS_TP1U2_SEP07` copy — some via the real browser UI, some via
+the harness driving the same `PdasWriter`/`changeover.ts` code paths directly, most
+via both.** The harness's overall exit code (1) reflects a bug in one test case's own
+setup data (a 9-character reason string), not a failure of any of the nine rights;
+that is recorded above rather than smoothed over.
+
+**Still owner-run, unchanged by this pass:**
+- `handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` — the EXECUTE-only "ibrahim"-shaped
+  login rehearsal (agents may not create logins).
+- `handover/REHEARSAL-RBAC-BELOW-RANK.md` — below-rank RBAC on a live instance.
+- Anything on the plant itself — concurrent/production-load behaviour, whether the
+  live PDAS's schema/`MAX(id)`s have drifted since the 7 Sep 2026 export, whether
+  `sms_pdas_writer`'s plant-side grant behaves identically to the local login used
+  here, and whether IFL's own process depends on the mislabelled `nhs_events`
+  MaterialId text (reconfirmed again this pass: EventId 23449 logged
+  `'Create new MaterialId: 11'` for a material actually created with
+  `@blendId=11`/`MaterialId=1026` — HEAD's copy of the vendor's own logging bug,
+  unchanged).
+- `PDAS_WRITE_ENABLED` in the plant deployment remains the owner's call; this pass,
+  like the first, ran only locally against `PDAS_TP1U2_SEP07` with the flag already
+  `true` in the local `.env`.

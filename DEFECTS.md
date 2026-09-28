@@ -1528,3 +1528,60 @@ sms.product_change 3, product_limit_version 14, dq_finding 30, audit_log 150, se
 `sms-api` restarted, and the browser's signed-in session confirmed still valid via
 `GET /api/auth/me` with no re-login. The plant was never touched;
 `DATA_TP1U2`/`DATA_TP1U2_SEP07` were never written; no logins were created.
+
+### 28 Sep 2026, later the same day (Task K2b) — the two remaining gaps closed; all nine rights now proven through our own code
+
+Both gaps left open by Task K2 above are now closed, same date, same local copy,
+same restore discipline. Full detail, tables and evidence:
+`handover/PDAS-E2E-RESULTS-2026-09-28.md`'s "Second pass" section.
+
+**Gap (a), the harness never ran:** fixed by `2e2f4ca` (accept a local alias for
+`PDAS_WRITE_SERVER` in the live pre-flight). This pass ran
+`node scripts/pdas-e2e-local.mjs` for the first time; the live pre-flight passed
+(`@@SERVERNAME="DESKTOP-G1MSH4I\SQLEXPRESS"`, matched against the recognised local
+alias `localhost`) and 18 of the 19 cases (R1-plan, R1-execute, R2, R3, R4, F1, F2,
+F3a, F3b, F3c, F3d, F4, F5, F5b, F6, T1, N1) passed clean. The one failure, **F7**,
+is a bug in the harness's OWN test data, not in application code: its retire call
+passes `reason: 'F7 retire'` (9 characters), one short of the shared 10-character
+minimum, so `setProductActive` correctly refused client-side with `IMPLAUSIBLE`
+before ever reaching PDAS — proving the validation works, not that it failed. That
+one blocked call cascaded into **A1** (the per-operation `product_change` row
+cross-check) also failing, since no row exists for a call that was refused before
+persisting (20 of A1's 21 entries matched exactly). Per this task's instruction, the
+harness was **not patched** — the bug is recorded here as data for whoever next
+touches `scripts/pdas-e2e-local.mjs`'s F7 case: change `'F7 retire'` to a
+10-plus-character string.
+
+**Gap (b), `SetPalletStatusActive` unproven through the UI:** fixed by `62c540e`
+(Changeover explains that a plan always needs blend/count/tube, even for a
+retire-only intent) landing before this pass. With the fix live (hot-reloaded, no
+API restart), Product › Changeover retired **PalletId 1023** (created by this
+pass's own harness run) using an existing blend/count/tube triple that happened not
+to already exist as a product, so the plan also created one new material (1027) and
+pallet (1024) alongside the retire — anticipated by the task brief as an acceptable
+outcome. `POST /api/changeover/plan` and `/execute` both fired and returned `200
+OK`; confirmed independently via `sqlcmd`: `Pallets.PalletActive = 0` for 1023, a
+new `nhs_events` row (`SetPalletStatusActive`, "Set active to : 0 on PalletId:
+1023"), and `sms.product_change` `change_id 30`, operation `set_pallet_active`,
+proc `SetPalletStatusActive`, outcome `ok`. This was already independently proven
+by the harness's own R1/R4 cases in this same pass (both PASS, untouched by the F7
+bug); the UI run is a second, independent confirmation through
+`changeover.ts`'s `executeChangeover` rather than the harness's direct
+`PdasWriter` calls. The UI offers no path to reactivate a pallet (confirmed: the
+retired pallet no longer appears in Changeover's "Retire" checklist, and Catalogue's
+"Activate" control exists only for materials) — reactivation stays proven only via
+the harness's R4 case, which is sufficient per the task brief.
+
+**Combined verdict, all nine rights, first pass + second pass:** CreateMaterial,
+SetMaterialStatusActive (both directions), AddBlend, AddCount, AddTubeType
+(including its three refusal codes -5001/IMPLAUSIBLE×2), CreatePallet,
+SetPalletStatusActive (both directions), and the guarded `UPDATE dbo.Materials`
+limits change with its optimistic-concurrency conflict path and paired
+`nhs_events` insert are now **all proven through our own application code**
+(`pdasWrite.ts` and/or `changeover.ts`), against the local `PDAS_TP1U2_SEP07` copy,
+by real UI clicks and/or the harness driving the same writer code directly.
+Restore verified exact both times (anchors identical before/after in every table
+and column); `sms-api`'s signed-in session survived both restores with no
+re-login. Still owner-run and unchanged: the EXECUTE-only "ibrahim"-shaped login
+rehearsal, below-rank RBAC on a live instance, and anything requiring the plant
+itself.

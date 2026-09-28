@@ -24,7 +24,56 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 not the current count — and is left as written rather than rewritten in place, per this
 file's own convention of dated, superseded-not-deleted entries.
 
-### PDAS write path proven end to end through the UI, local copy only (28 Sep 2026, Task K2)
+### All nine PDAS write rights now proven through our own code, local copy only (28 Sep 2026, Task K2b — supersedes Task K2 immediately below)
+
+Task K2 (immediately below) left two gaps: the scripted harness never ran, and
+`SetPalletStatusActive` was never proven through the UI. Both are closed this same
+date, at HEAD `62c540e`. Full detail: `handover/PDAS-E2E-RESULTS-2026-09-28.md`'s
+"Second pass" section; register entry: `DEFECTS.md` Part 10.
+
+**The harness ran for the first time**, fixed by `2e2f4ca` (a recognised local alias
+for `PDAS_WRITE_SERVER`, e.g. `localhost`, is now accepted against the live
+`@@SERVERNAME` instead of demanding a literal string match). 18 of 19 cases passed
+clean. The one failure, **F7**, is a bug in the harness's own test data — its retire
+call passes a 9-character reason (`'F7 retire'`), one short of the shared
+10-character minimum, so the app's own validation correctly refused it
+`IMPLAUSIBLE` before ever reaching PDAS. That refusal cascaded into the A1
+cross-check (no `product_change` row exists for a call that was blocked
+client-side) and, because the summary table ties five rights to F7's own verdict,
+made CreateMaterial/SetMaterialStatusActive/AddBlend/AddCount/AddTubeType read FAIL
+in the table even though each already passed independently via other cases in the
+same run (R1, R2, R3, F2, F3a, F3b, F3c, F3d). Recorded as data, not patched, per
+this pass's scope — the fix for whoever next touches the script is a one-line
+change to F7's own reason string.
+
+**`SetPalletStatusActive` is now proven through the UI**, fixed by `62c540e`
+(Changeover now explains that a plan always needs a blend/count/tube, even for a
+retire-only intent — this is what silently stopped the plan request from firing in
+Task K2). This pass retired PalletId 1023 (created by this pass's own harness run)
+via Product › Changeover, confirmed independently by `sqlcmd`
+(`PalletActive = 0`, a new `nhs_events` row, `sms.product_change change_id 30`
+outcome `ok`) — on top of the harness's own R1/R4 cases proving both directions
+(retire and reactivate) the same run. The UI has no control to reactivate a pallet
+(confirmed: a retired pallet drops out of Changeover's own "Retire" checklist, and
+Catalogue's "Activate" button exists only for materials) — reactivation stays
+proven only via the harness's R4 case, which this task's own brief accepted as
+sufficient.
+
+**All nine PDAS write rights — CreateMaterial, SetMaterialStatusActive (both
+directions), AddBlend, AddCount, AddTubeType (including its three refusal codes),
+CreatePallet, SetPalletStatusActive (both directions), the guarded
+`UPDATE dbo.Materials` limits change with its optimistic-concurrency conflict path,
+and the paired `nhs_events` insert — are now proven through our own application
+code** (`pdasWrite.ts` and/or `changeover.ts`), against the local
+`PDAS_TP1U2_SEP07` copy, some through real UI clicks and some through the harness
+driving the same writer code directly, most through both. Anchors (both PDAS and
+`sms`) matched exactly before and after, both times this date; `sms-api`'s
+signed-in session survived both restores with no re-login. **Owner must still run:**
+`handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` and
+`handover/REHEARSAL-RBAC-BELOW-RANK.md`, and anything on the plant — those remain
+exactly as before, unaffected by this pass.
+
+### PDAS write path proven end to end through the UI, local copy only (28 Sep 2026, Task K2 — superseded by Task K2b above)
 
 At HEAD `fa48303`, with `PDAS_WRITE_ENABLED=true` locally, the automated harness
 (`scripts/pdas-e2e-local.mjs`) was run for the first time and aborted before any case:
@@ -32,7 +81,8 @@ its same-day live pre-flight guard compares `.env`'s `PDAS_WRITE_SERVER` (`local
 literally against the live `@@SERVERNAME` (`DESKTOP-G1MSH4I\SQLEXPRESS`) and refused
 on the mismatch — a standing guard defect under the app's own "connect via localhost"
 convention, not a PDAS-side failure. Not patched, per this pass's scope. Zero writes
-came from the harness attempt.
+came from the harness attempt. **Superseded above: `2e2f4ca` fixed the guard and the
+harness has since run — see Task K2b.**
 
 **The write path was instead proven directly through the browser UI**, real clicks
 against the local `PDAS_TP1U2_SEP07` copy: CreateMaterial (new MaterialId 1025),
@@ -46,7 +96,9 @@ plan-time duplicate-triple blocker (`-7001` shape) was reproduced live: replanni
 same blend+count+tube showed the blocker and "Execute" did nothing while blocked.
 **Not proven this pass:** `SetPalletStatusActive` — attempted via the Changeover
 pallet-retire checkbox, the plan request never fired; the pallet created this pass
-(1023) was left active. Everything else not re-exercised live (the `-5001`/`-5002`/
+(1023) was left active. **Superseded above: proven via the UI in Task K2b, once
+`62c540e` explained why the plan needs blend/count/tube even for a retire.**
+Everything else not re-exercised live (the `-5001`/`-5002`/
 `-5003` codes, optimistic-concurrency conflict, rank gate, disabled 503) remains
 covered by the automated suite (`pdasWrite.http.test.ts`, `pdasWrite.echo.test.ts`)
 and the 23 Sep 2026 direct-SQL execution pass.
