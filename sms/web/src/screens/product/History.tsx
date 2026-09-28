@@ -37,6 +37,7 @@ import { useEffect, useState } from 'react';
 import { W } from '../../lib/words';
 import { Block, Empty, Failed, SkelLines } from '../../ui/bits';
 import { fmtAppInstant } from '../../lib/fmt';
+import { pdasReasonForDisplay } from '../../lib/pdasWords';
 import { getProductTimeline, getProductChanges, type TimelineEntry, type ProductChangeEntry } from '../../api';
 
 function errText(e: unknown): string {
@@ -190,7 +191,7 @@ function TrailBlock() {
                     </td>
                     <td>
                       {outcomeLabel(c.outcome)}
-                      {c.message && <div className="mut sm">{c.message}{c.pdasErrorCode != null ? ` (${c.pdasErrorCode})` : ''}</div>}
+                      {c.message && <div className="mut sm">{pdasReasonForDisplay(c.message)}{c.pdasErrorCode != null ? ` (${c.pdasErrorCode})` : ''}</div>}
                     </td>
                     <td>{c.changedByName ?? <span className="mut">—</span>}</td>
                     <td className="mut">{c.reason ?? '—'}</td>

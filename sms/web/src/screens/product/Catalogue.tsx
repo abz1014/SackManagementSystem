@@ -25,6 +25,7 @@ import { W } from '../../lib/words';
 import { Block, Failed, SkelLines } from '../../ui/bits';
 import { fmtG } from '../../lib/fmt';
 import { distinctProductLabels } from '../../lib/productLabel';
+import { pdasReasonForDisplay } from '../../lib/pdasWords';
 import { ProductLimitsBlock } from './ProductLimitsBlock';
 import {
   getProducts, getProductWriteStatus, getProductOptions, createProduct, setProductActive, updateProductLimits,
@@ -165,7 +166,7 @@ function PdasProducts({
       <p className="mut sm">{W.product.pdasNote}</p>
       {status && !status.canWrite && (
         <p className="mut sm" style={{ marginTop: 8 }}>
-          {status.enabled ? W.product.writeNeedsRank : W.product.writeUnavailable(status.reason ?? '—')}
+          {status.enabled ? W.product.writeNeedsRank : W.product.writeUnavailable(pdasReasonForDisplay(status.reason) ?? '—')}
         </p>
       )}
       <table style={{ marginTop: 10 }}>

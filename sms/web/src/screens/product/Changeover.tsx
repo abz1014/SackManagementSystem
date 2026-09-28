@@ -14,13 +14,21 @@
  * this account is rank >= 2 — otherwise it stays visibly present and
  * disabled, with the server's own `disabledReason` on screen beside the one
  * static line Brief 1 wrote for this (`W.product.changeover.executionDisabled`).
+ * FIX A (28 Sep 2026): `disabledReason` is a `.env`-reading sentence
+ * (`PDAS_WRITE_ENABLED is not true.` and three siblings — `api/src/config.ts`'s
+ * `resolvePdasWrite`), not writer for this screen. It is now passed through
+ * `lib/pdasWords.ts`'s `pdasReasonForDisplay()` before it renders, which
+ * substitutes plain words for the four known reasons and passes an
+ * unrecognised one through unchanged — still no hardcoded sentence invented
+ * client-side for a case this list does not know.
  *
  * NO OPTIMISTIC UI. A 200/207 response body is the only thing that may ever
  * say a write happened — there is no local "pretend" state and no toast
  * celebrating completion. A refusal (503 `DISABLED` — the normal, current state; 409
  * `BLOCKED` — the flag is on but the plan itself has a blocker) surfaces as
  * a thrown `ApiError`; its `status` distinguishes the two, its `message` is
- * the server's own `error` text, printed verbatim.
+ * the server's own `error` text — also run through `pdasReasonForDisplay()`
+ * before it renders, same reason as above.
  *
  * TUBE TYPE OFFERS A NEW NAME TOO, LIKE BLEND AND COUNT (changed 21 Sep
  * 2026 — see CLAUDE.md's dated section of the same date). Until then this
@@ -59,6 +67,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { W } from '../../lib/words';
 import { Block, Failed, SkelLines } from '../../ui/bits';
 import { fmtG, fmtInt } from '../../lib/fmt';
+import { pdasReasonForDisplay } from '../../lib/pdasWords';
 import {
   ApiError,
   getChangeoverRefs,
@@ -633,7 +642,7 @@ export function PlanReview({
       {!plan.writesEnabled && (
         <div style={{ marginTop: 14 }}>
           <p className="mut sm">{W.product.changeover.executionDisabled}</p>
-          {plan.disabledReason && <p className="mut sm">{plan.disabledReason}</p>}
+          {plan.disabledReason && <p className="mut sm">{pdasReasonForDisplay(plan.disabledReason)}</p>}
         </div>
       )}
       {plan.writesEnabled && !canWrite && (
@@ -648,7 +657,7 @@ export function PlanReview({
 
       {execError && (
         <p className={execError.status === 409 ? 'acc sm' : 'mut sm'} style={{ marginTop: 10 }}>
-          {execError.message}
+          {pdasReasonForDisplay(execError.message)}
         </p>
       )}
 
