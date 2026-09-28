@@ -1870,7 +1870,10 @@ export const W = {
       n === 1
         ? 'The kg column is short by one recorded movement that had no weight.'
         : `The kg column is short by ${n} recorded movements that had no weight.`,
-    /* The three facts, as one footnote under the ledger. */
+    /* Two facts, as one footnote under the ledger. A third — that stock is
+       for the line, not per machine — used to live here too; it now lives
+       next to the per-machine figure itself (Sacks.tsx), pulled from the
+       server's own machineLevel.reason, so it isn't repeated here. */
     ledgerCaveat:
       'Every sack weighed at the packing scale counts as a receipt into line stock; that reading of \u201creceipt\u201d, and whether the ledger is kept in sacks or kg, are not yet confirmed by IFL. ' +
       'A sack\u2019s time is when the plant wrote the reading, which can trail the weighing.',
