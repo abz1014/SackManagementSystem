@@ -78,6 +78,24 @@
  * beside it came from IFL's September generation, whose own median lag is
  * 616 s. Judging one generation's line state by another generation's
  * acquisition delay is the defect D-11 is about, one level down.
+ *
+ * A DEV-ONLY OPT-IN TO THE SIMULATOR, ADDED 28 Sep 2026 (Task T1)
+ * -----------------------------------------------------------------
+ * The rule above is unconditional for anything a viewer reads about a
+ * chosen PERIOD (reports, registers, charts) and stays that way. It is also
+ * the DEFAULT for the live "now" screens this file serves — but on this dev
+ * PC the frozen real September copy (generation 3, `DATA_TP1U2_SEP07`)
+ * coexists with the live plant simulator (generation 4, `DATA_TP1U2_SIM`),
+ * so `resolveLiveScope` always picks generation 3 and Line always says
+ * "cannot tell" about anything happening right now — there is nothing live
+ * to rehearse against. `setLiveScopeIncludesSimulator` below lets `app.ts`
+ * flip a module-level policy, OFF BY DEFAULT and gated at startup by
+ * `config.ts`'s `resolveLiveSimulator` (which refuses unless the source
+ * database is a `_SIM` one on a local server — never the plant), so that the
+ * live screens alone may poll generation 4 instead. Nothing else changes:
+ * `resolveGenerationScope`'s real-first rule is still the only rule for
+ * everything else, and even with the policy on, exactly one generation is
+ * still chosen — never a mix.
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
@@ -224,11 +242,44 @@ const lineIdentityCache = new TtlCache<{ lineName: string; lineShortName: string
  */
 const liveScopeCache = new TtlCache<GenerationScope>(CONFIG_CACHE_MS);
 
+/**
+ * DEV-ONLY POLICY (28 Sep 2026, Task T1): whether `resolveLiveScope` may
+ * choose the plant-simulator generation instead of always preferring the
+ * newest REAL one. Off by default, matching the owner's 23 Sep 2026
+ * decision exactly — `app.ts`'s createApp is the only place that flips this,
+ * and only after `config.ts`'s `resolveLiveSimulator` has verified
+ * LIVE_ALLOW_SIMULATOR was both requested and is safely local-only. A
+ * module-level flag, not a request-scoped one: `liveScopeCache` above is
+ * itself module-level and process-wide, and the live screens have no
+ * concept of "whose policy" — there is one process, one live scope.
+ */
+let liveScopeSimulatorPolicy = false;
+
+/**
+ * Flip the dev-only policy above. Called once, from the first line of
+ * `createApp` (app.ts), with `cfg.liveSimulator?.enabled === true` — never
+ * from a route handler. Clears `liveScopeCache` so the NEXT poll re-resolves
+ * under the new policy rather than serving a cached answer that was
+ * resolved under the old one; the cache key below is ALSO namespaced by the
+ * policy, so a stale entry from the other policy can never be served even if
+ * a caller forgot to invalidate — belt and suspenders, not either alone.
+ */
+export function setLiveScopeIncludesSimulator(on: boolean): void {
+  if (liveScopeSimulatorPolicy === on) return;
+  liveScopeSimulatorPolicy = on;
+  liveScopeCache.clear();
+}
+
+/** The dev-only policy's current value — for `index.ts`'s startup log and tests. */
+export function liveScopeIncludesSimulator(): boolean {
+  return liveScopeSimulatorPolicy;
+}
+
 export async function resolveLiveScope(pool: ConnectionPool, lineId: number): Promise<GenerationScope> {
-  const key = String(lineId);
+  const key = `${lineId}:${liveScopeSimulatorPolicy ? 'sim' : 'real'}`;
   const hit = liveScopeCache.get(key);
   if (hit) return hit;
-  const scope = await resolveGenerationScope(pool, lineId, {});
+  const scope = await resolveGenerationScope(pool, lineId, {}, undefined, { preferReal: !liveScopeSimulatorPolicy });
   liveScopeCache.set(key, scope);
   return scope;
 }

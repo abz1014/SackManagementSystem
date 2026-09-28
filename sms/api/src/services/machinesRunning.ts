@@ -345,8 +345,15 @@ export async function getMachinesRunning(
   // that this generation does not hold. Capped at the replay instant when one
   // is in force, so a replay does not advertise data from after the moment
   // being replayed.
+  //
+  // `self`: the anchor above is CONE-ONLY (rule 1, this file's header), but
+  // findNewerElsewhere unions cones AND rejects — without `self`, a reject
+  // in the SAME generation that is newer than the cone-only anchor used to
+  // report as "newer elsewhere" about the very generation already being
+  // read. See findNewerElsewhere's own doc comment (live.ts).
+  const self = scope.generation ? { sourceDb: scope.generation.sourceDb, ordinal: scope.generation.ordinal } : null;
   const newer = scope.spansGenerations
-    ? await findNewerElsewhere(pool, lineId, asOfMs, opts.asOfMs ?? Number.MAX_SAFE_INTEGER)
+    ? await findNewerElsewhere(pool, lineId, asOfMs, opts.asOfMs ?? Number.MAX_SAFE_INTEGER, self)
     : emptyNewer;
   return {
     asOfUtc: new Date(asOfMs).toISOString(),

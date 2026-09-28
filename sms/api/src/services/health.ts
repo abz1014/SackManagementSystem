@@ -309,9 +309,14 @@ export async function acquisitionHealth(pool: ConnectionPool, lineId: number): P
     .filter((n) => Number.isFinite(n) && n >= 0 && n <= MAX_REPORTABLE_LAG_SECONDS)
     .sort((a, b) => a - b);
   const ingestLagSeconds = samples.length ? samples[Math.floor(samples.length / 2)]! : null;
+  // `self`: exclude the chosen generation's own rows — this tip is a UNION
+  // of cones and rejects, so a same-generation reject newer than the
+  // cone-anchored tip elsewhere could otherwise self-report as "newer
+  // elsewhere" (see findNewerElsewhere's own doc comment, live.ts).
+  const self = scope.generation ? { sourceDb: scope.generation.sourceDb, ordinal: scope.generation.ordinal } : null;
   const newer =
     dataAsOfMs != null && scope.spansGenerations
-      ? await findNewerElsewhere(pool, lineId, dataAsOfMs, Number.MAX_SAFE_INTEGER)
+      ? await findNewerElsewhere(pool, lineId, dataAsOfMs, Number.MAX_SAFE_INTEGER, self)
       : null;
   return {
     kind: classifyHealth(dataAsOfMs, sync, ingestLagSeconds, false),
