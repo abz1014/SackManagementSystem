@@ -476,8 +476,10 @@ as retire candidates), so there is no path in the web app to undo a mistaken
 pallet retirement. This is a UI-completeness gap, not a write-path defect —
 `SetPalletStatusActive`'s reactivate direction is proven working via the harness's
 R4 case (this pass and both prior passes) and via `PdasWriter` directly; only the
-UI affordance is missing. Recorded as `DEFECTS.md` D-31 (severity Minor/Medium,
-owner: us, open).
+UI affordance is missing. Recorded as `DEFECTS.md` D-34 (severity Minor/Medium,
+owner: us — **fixed 28 Sep 2026, Task L1**: see `DEFECTS.md` D-34 for the fix.
+Numbered D-31 when this section was first written; renumbered because D-31
+and D-32 already name two other, earlier defects in that register.)
 
 ### Final status, all three passes combined
 

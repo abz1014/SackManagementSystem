@@ -682,6 +682,7 @@ worker has run against a database for a while — carried here so that follow-up
 | D-31 | MEDIUM | Changeover plan review threw on a plan without `blockers` (the PDAS write gate) | **fixed 25 Sep 2026**, `5b2b56a` — Execute disabled, safety checks named unreadable |
 | D-32 | LOW | Product › History sort threw on a row without `changedAt` | **fixed 25 Sep 2026**, `5b2b56a` |
 | D-33 | LOW | `sms/DEPLOY.md`'s wall-display example used `--role=operator`, refused by the CLI since migration 035 | **fixed 25 Sep 2026**, `39c2c37` |
+| D-34 | MEDIUM | UI had no control to reactivate a retired pallet — Catalogue's "Activate" was materials-only | **fixed 28 Sep 2026**, Task L1 — Catalogue's new "Pallets in PDAS" block, `POST /api/pallets/:id/active` — see Part 10 |
 | D-24 | MEDIUM | `pdasWrite.ts`'s post-commit echo-back check reads, run inside the same `try` as the write itself (Add*/CreatePallet/SetPalletActive), or entirely unguarded (`updateProductLimits`), misreported a committed write as failed when the check read itself failed | **fixed 24 Sep 2026**, `bdbb0eb` (B1/B2) |
 | D-25 | MEDIUM | `planChangeover` compared a requested new blend/count/tube name to existing rows by exact equality only, so a name that is a `LIKE`-pattern match for an existing row (T-SQL wildcard collision, e.g. `"R_D"` vs `"RED"`) planned clean and only failed mid-sequence against PDAS's own duplicate check | **fixed 24 Sep 2026**, `a9b85b5` (B4), new `api/src/services/likePattern.ts`; proven by F3b, `PDAS-EXECUTION-2026-09-24.md` | 
 | D-26 | MEDIUM | `changeover.ts`'s `resolveTube` compared candidate tube types by name only; `sms.tube_type` carried no `tube_form` column, so it could either silently reuse a wrong-form tube type PDAS would have accepted as new, or over-block a same-form name that only collided by `LIKE` pattern against a different form | **fixed 24 Sep 2026**, `d6a58d4` (migration `041_tube_type_form.sql` + `changeover.ts`/`pdasWrite.ts`'s `addTubeType` MERGE/`seedProducts.ts`); **proven live 24 Sep 2026** — the final re-run section of `PDAS-EXECUTION-2026-09-24.md`: `AddTubeType` writes `tube_form` into the mirror (TubeTypeId 28, `tube_form=2`, matches PDAS's own `TubeForm`), and a plan-only `resolveTube` check confirms same-name/same-form plans `reuse` while same-name/different-form plans `add` |
@@ -1618,8 +1619,13 @@ session (`GET /api/auth/me` via the app's own relative fetch in the existing
 browser tab) still returned `{"username":"admin","displayName":"Plant
 Admin","role":"admin"}` with no re-login.
 
-**D-31 (new). UI has no control to reactivate a retired pallet — Minor/Medium,
-owner: us, status: open.** Confirmed this pass (and already implied by K2b's own
+**D-34 (new; numbered D-31 when first written the same pass — renumbered
+28 Sep 2026, Task L1, because D-31 and D-32 both already name different,
+earlier defects in this same register: D-31 is the Changeover `PlanReview`
+crash at line 682/1223, D-32 is the Product › History sort crash at line
+683. D-34 is the first free number.). UI has no control to reactivate a
+retired pallet — Minor/Medium, owner: us, status: FIXED 28 Sep 2026, see
+below.** Confirmed this pass (and already implied by K2b's own
 note): Catalogue's "Activate" control exists only for materials — no equivalent
 appears for pallets. A pallet retired via Changeover's retire checklist drops off
 that same checklist once retired (it only lists active pallets to offer for
@@ -1632,3 +1638,25 @@ this project's own rules restrict, or a future screen change). Fix would be a
 small, symmetric addition: extend Catalogue's existing "Activate" affordance (or
 add an equivalent list) to retired pallets, mirroring what it already does for
 retired materials.
+
+**Fixed 28 Sep 2026, Task L1.** Catalogue › "Pallets in PDAS" — a new block
+between the products block and the SMS-local limits block
+(`web/src/screens/product/Catalogue.tsx`'s `PdasPallets`/`PalletActiveForm`)
+lists every mirrored pallet, active first, with Retire/Reactivate buttons
+gated the same way the materials table already is (`ProductWriteStatus
+.canWrite`). `POST /api/pallets/:id/active` (`api/src/app.ts`) mirrors POST
+/api/products/:id/active's gate (`requireRole(PDAS_WRITE_RANK)`), validation,
+audit-on-reject and error mapping exactly, and calls the existing
+`PdasWriter.setPalletActive` (already implemented, just never reachable from
+any route). `GET /api/pallets` (any signed-in user) and `web/src/api.ts`'s
+`getPallets`/`setPalletActive` complete the plumbing. Proven red-then-green:
+6 new HTTP-layer tests in `api/src/routes/pdasWrite.http.test.ts` (route
+existence, 503 disabled, 403/401, and an enabled-config pass with
+`PdasWriter.prototype.setPalletActive` spied covering the 200 success path,
+a too-short reason and a non-boolean `active`) and 3 new component tests in
+`web/src/screens/product/Catalogue.pallets.test.tsx` (list rendering,
+button labels/short-reason refusal/POST body, and the disabled state's
+plain words with no buttons) — all 9 failed before the change (404s) and
+pass after. No live PDAS call: `PdasWriter.prototype.setPalletActive` is
+mocked throughout; `PDAS_WRITE_ENABLED` and `sms/.env` were not touched.
+Full suite 2425 passed / 4 skipped, typecheck clean (`api`, `web`).

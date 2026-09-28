@@ -507,6 +507,16 @@ const EXEMPTIONS: Exemption[] = [
     reason: 'ProductLimitsBlock.tsx gates on canWriteLocal(status) = status.local.canWrite, a SEPARATE server-derived flag (api.ts:369-376); never a client rank literal.',
     dated: '2026-09-23',
   },
+  {
+    // Task L1 (28 Sep 2026): the pallet active/retire toggle mirrors POST
+    // /api/products/:id/active exactly, same status.canWrite gate, added to
+    // Catalogue.tsx's new PdasPallets block (DEFECTS.md D-34).
+    route: "POST /api/pallets/:id/active (retire/reactivate a pallet, Catalogue.tsx setPalletActive)",
+    routeFile: `${API_SRC}/app.ts`,
+    routeNeedle: "app.post('/api/pallets/:id/active'",
+    reason: 'PdasPallets in Catalogue.tsx gates on status.canWrite, the same server-derived ProductWriteStatus flag as product create/active/limits; no client rank literal exists to crosscheck.',
+    dated: '2026-09-28',
+  },
 ];
 
 /**

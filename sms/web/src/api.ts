@@ -394,6 +394,28 @@ export function updateProductLimits(productId: number, before: ProductFields, af
   return post(`/api/products/${productId}/limits`, { before, after, reason });
 }
 
+// ---- Pallets, mirrored from PDAS (roadmap Phase 6 Wave F; UI added Task L1, 28 Sep 2026) ----
+export interface PalletRow {
+  palletId: number;
+  productId: number;
+  productLabel: string | null;
+  packSchemaId: number | null;
+  packSchemaLabel: string | null;
+  lot: string | null;
+  active: boolean | null;
+  sackColour: string | null;
+  labelType: number | null;
+  steamProg: number | null;
+  routing: number | null;
+  pdasCreatedAt: string | null;
+}
+export function getPallets(): Promise<{ pallets: PalletRow[] }> {
+  return get('/api/pallets');
+}
+export function setPalletActive(palletId: number, active: boolean, reason: string): Promise<{ palletId: number; active: boolean; pallets: PalletRow[] }> {
+  return post(`/api/pallets/${palletId}/active`, { active, reason });
+}
+
 export interface ExcludedDay { date: string; rows: number; }
 export interface RangeData {
   minDate: string | null;

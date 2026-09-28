@@ -42,12 +42,22 @@ restore matched exactly; the owner's admin session survived the restore with no
 re-login. Full detail: `handover/PDAS-E2E-RESULTS-2026-09-28.md`'s "Third pass"
 section; register entry: `DEFECTS.md` Part 10.
 
-**New finding this pass, not present before:** the UI has no control to
-reactivate a retired pallet — Catalogue's "Activate" is materials-only, and a
-retired pallet drops out of Changeover's own retire checklist. `SetPalletStatusActive`'s
-reactivate direction itself is proven working (harness R4, both this pass and
-the two before it); only the UI affordance is missing. Recorded as `DEFECTS.md`
-D-31 (Minor/Medium, owner: us, open).
+**New finding this pass, not present before — fixed later the same day (28 Sep
+2026, Task L1):** the UI had no control to reactivate a retired pallet —
+Catalogue's "Activate" was materials-only, and a retired pallet dropped out of
+Changeover's own retire checklist. `SetPalletStatusActive`'s reactivate
+direction was already proven working (harness R4, both this pass and the two
+before it); only the UI affordance was missing. Recorded as `DEFECTS.md` D-34
+(numbered D-31 when first written; renumbered because D-31 and D-32 already
+named two other, earlier defects in that register) — Minor/Medium, owner: us,
+**fixed**: Catalogue › "Pallets in PDAS" now lists every mirrored pallet with
+Retire/Reactivate, gated the same way the materials table is
+(`web/src/screens/product/Catalogue.tsx`), over a new `POST
+/api/pallets/:id/active` that mirrors `POST /api/products/:id/active`'s gate,
+audit and error mapping exactly (`api/src/app.ts`), calling the existing
+(previously unreachable) `PdasWriter.setPalletActive`. Proven red-then-green
+with 9 new tests (6 API, 3 component); no live PDAS call — see `DEFECTS.md`
+D-34 for the full account.
 
 **All nine PDAS write rights remain PROVEN**, unchanged in substance from Task
 K2b below — this pass closes the harness's own last blocker rather than adding

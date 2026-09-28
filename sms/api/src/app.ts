@@ -27,6 +27,7 @@ import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
 import { PdasWriter } from './services/pdasWrite.js';
+import { listPallets } from './services/pallets.js';
 import { plantNowMs, plantOffsetMinutes } from './services/plantClock.js';
 import { getWeightStations } from './services/weightStations.js';
 import {
@@ -1688,6 +1689,45 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       res.json({ productId: r.productId, observedAfter: r.observedAfter, products: await listProducts(pool) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Pallets, mirrored from PDAS (roadmap Phase 6 Wave F; UI added Task
+  // L1, 28 Sep 2026 — see DEFECTS.md D-34, "no control to reactivate a
+  // retired pallet"). GET is open to any signed-in user, same as GET
+  // /api/products; the active/retire toggle mirrors POST
+  // /api/products/:id/active exactly — same gate, same audit shape, same
+  // error mapping — because the vendor's own SetPalletStatusActive works
+  // the same way SetMaterialStatusActive does.
+  app.get('/api/pallets', async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ pallets: await listPallets(pool) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/pallets/:id/active', requireRole(PDAS_WRITE_RANK), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = z.coerce.number().int().positive().safeParse(req.params.id);
+      const b = z.object({ active: z.boolean(), reason: writeReason }).safeParse(req.body);
+      if (!id.success || !b.success) {
+        // R-3 fix: see the matching comment on POST /api/products.
+        void recordAudit(pool, (req as AuthedRequest).user!.userId, 'pallet.set_active', 'pallet', req.params.id ?? null,
+          'Rejected: invalid request — palletId, active and a reason of at least 10 characters are required').catch((e) =>
+          console.error('audit write failed', e),
+        );
+        res.status(400).json({ error: 'palletId, active and a reason of at least 10 characters are required' });
+        return;
+      }
+      const r = await pdas.setPalletActive({ palletId: id.data, active: b.data.active, reason: b.data.reason, actor: actorOf(req) });
+      if (!r.ok) {
+        res.status(writeStatus(r.code)).json({ error: r.message, code: r.code, pdasErrorCode: r.pdasErrorCode ?? null });
+        return;
+      }
+      res.json({ palletId: r.palletId, active: r.active, pallets: await listPallets(pool) });
     } catch (err) {
       next(err);
     }

@@ -29,7 +29,8 @@ import { pdasReasonForDisplay } from '../../lib/pdasWords';
 import { ProductLimitsBlock } from './ProductLimitsBlock';
 import {
   getProducts, getProductWriteStatus, getProductOptions, createProduct, setProductActive, updateProductLimits,
-  type ProductOption, type ProductWriteStatus, type ProductOptions, type ProductFields,
+  getPallets, setPalletActive,
+  type ProductOption, type ProductWriteStatus, type ProductOptions, type ProductFields, type PalletRow,
 } from '../../api';
 
 function label(p: { description: string | null; lotCode: string | null; productId: number }): string {
@@ -59,6 +60,23 @@ export function CatalogueTab({
       .catch((e) => setError(String((e as Error).message ?? e)));
   }, [nonce]);
 
+  // Task L1 (28 Sep 2026): pallets are a separate mirror table from
+  // products, fetched and refreshed independently — same shape as the
+  // products fetch above, deliberately not folded into PdasProducts (see
+  // this component's own file header: keep the change to PdasProducts
+  // minimal so pdasDisabledReason.test.tsx's existing Catalogue test, which
+  // never registers `/api/pallets`, is unaffected).
+  const [pallets, setPallets] = useState<PalletRow[] | null>(null);
+  const [palletsError, setPalletsError] = useState<string | null>(null);
+  const [palletsNonce, setPalletsNonce] = useState(0);
+
+  useEffect(() => {
+    setPalletsError(null);
+    getPallets()
+      .then((r) => setPallets(r.pallets))
+      .catch((e) => setPalletsError(String((e as Error).message ?? e)));
+  }, [palletsNonce]);
+
   return (
     <>
       <Block label={W.product.catalogueTitle} note={W.product.catalogueNote}>
@@ -77,6 +95,16 @@ export function CatalogueTab({
             linkedId={productId}
             onChanged={() => setNonce((n) => n + 1)}
           />
+        )}
+      </Block>
+
+      <Block label={W.product.palletsTitle} note={W.product.palletsNote}>
+        {palletsError ? (
+          <Failed error={palletsError} onRetry={() => setPalletsNonce((n) => n + 1)} />
+        ) : !pallets ? (
+          <SkelLines n={5} short />
+        ) : (
+          <PdasPallets pallets={pallets} onChanged={() => setPalletsNonce((n) => n + 1)} />
         )}
       </Block>
 
@@ -368,6 +396,106 @@ function CreateForm({ products, onDone, onCancel }: { products: ProductOption[];
       <button type="submit" className="btn" disabled={busy || !opts || !!clash || blendId === '' || countId === '' || tubeTypeId === ''}>
         {W.product.newProductConfirm}
       </button>{' '}
+      <button type="button" className="btn" onClick={onCancel}>{W.product.cancel}</button>
+    </form>
+  );
+}
+
+/* ------------------------------------------------------------- pallets */
+
+/**
+ * Task L1 (28 Sep 2026) — "Pallets in PDAS", filling DEFECTS.md D-34 (the
+ * "no control to reactivate a retired pallet" finding from the 28 Sep
+ * PDAS e2e harness's third pass): before this, a pallet retired through
+ * Changeover's retire checklist had no way back into the app.
+ *
+ * Deliberately its own write-status fetch (`getProductWriteStatus` is the
+ * one endpoint both this block and the products block above need — see the
+ * file header on why it is duplicated rather than shared), so this
+ * component is independent of `PdasProducts` and can be added without
+ * touching it.
+ */
+function PdasPallets({ pallets, onChanged }: { pallets: PalletRow[]; onChanged: () => void }) {
+  const [status, setStatus] = useState<ProductWriteStatus | null>(null);
+  const [mode, setMode] = useState<{ palletId: number; active: boolean } | null>(null);
+
+  useEffect(() => {
+    getProductWriteStatus().then(setStatus).catch(() => setStatus({ enabled: false, reason: 'status unavailable', canWrite: false, local: { canWrite: false } }));
+  }, []);
+
+  const active = pallets.filter((p) => p.active !== false);
+  const retired = pallets.filter((p) => p.active === false);
+
+  return (
+    <>
+      {status && !status.canWrite && (
+        <p className="mut sm" style={{ marginTop: 8 }}>
+          {status.enabled ? W.product.writeNeedsRank : W.product.writeUnavailable(pdasReasonForDisplay(status.reason) ?? '—')}
+        </p>
+      )}
+      {pallets.length === 0 ? (
+        <p className="mut sm">{W.product.palletsNone}</p>
+      ) : (
+        <table style={{ marginTop: 10 }}>
+          <tbody>
+            {[...active, ...retired].map((p) => (
+              <tr key={p.palletId} className={p.active === false ? 'mut' : ''}>
+                <td className="n">{p.palletId}</td>
+                <td>{p.productLabel || `Product ${p.productId}`}</td>
+                <td>{p.packSchemaLabel ?? '—'}</td>
+                <td>{p.lot ?? '—'}</td>
+                <td>
+                  {p.sackColour ?? '—'}
+                  {p.active === false ? ` · ${W.product.retired}` : ''}
+                </td>
+                {status?.canWrite && (
+                  <td className="n">
+                    <button
+                      type="button"
+                      className="linkish"
+                      onClick={() => setMode({ palletId: p.palletId, active: p.active === false })}
+                    >
+                      {p.active === false ? W.product.palletReactivate : W.product.retire}
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {mode && (
+        <PalletActiveForm
+          palletId={mode.palletId}
+          active={mode.active}
+          onDone={() => { setMode(null); onChanged(); }}
+          onCancel={() => setMode(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/** A copy of the materials `ActiveForm` above, for a pallet instead of a product. */
+function PalletActiveForm({ palletId, active, onDone, onCancel }: { palletId: number; active: boolean; onDone: () => void; onCancel: () => void }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <form
+      style={{ marginTop: 14 }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (reason.trim().length < 10) { setErr(W.product.reasonTooShort); return; }
+        setBusy(true); setErr(null);
+        try { await setPalletActive(palletId, active, reason.trim()); onDone(); }
+        catch (x) { setErr(errText(x)); } finally { setBusy(false); }
+      }}
+    >
+      <p>{active ? W.product.palletReactivateNote(palletId) : W.product.palletRetireNote(palletId)}</p>
+      <label><span>{W.product.whyRequired}</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+      {err && <p className="acc sm">{err}</p>}
+      <button type="submit" className="btn" disabled={busy}>{active ? W.product.palletReactivate : W.product.retire}</button>{' '}
       <button type="button" className="btn" onClick={onCancel}>{W.product.cancel}</button>
     </form>
   );

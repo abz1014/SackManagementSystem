@@ -29,6 +29,7 @@ import argon2 from 'argon2';
 import { createApp } from '../app.js';
 import type { ApiConfig } from '../config.js';
 import { loadApiConfig } from '../config.js';
+import { PdasWriter } from '../services/pdasWrite.js';
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
 
@@ -96,7 +97,17 @@ class FakeDb {
     if (sql.includes('FROM sms.tube_type')) return rows([{ id: 3, name: 'PP Tube', w: 12, form: 2 }]);
     if (sql.includes('FROM sms.blend')) return rows([{ id: 1, name: 'PolyBlend' }]);
     if (sql.includes('FROM sms.yarn_count')) return rows([{ id: 2, name: '30s' }]);
-    if (sql.includes('FROM sms.pallet pl')) return rows([]);
+    // Task L1 (28 Sep 2026): pallet 1023, active, for the new pallet-active
+    // route tests — same column shape as pallets.ts's listPallets query.
+    // This also feeds the changeover mirror's own listPallets(pool) call
+    // (services/changeover.ts imports the same function), but the blocked-
+    // plan test below is blocked on the PRODUCT clash, not on pallet content,
+    // so a non-empty pallet row here changes nothing for it.
+    if (sql.includes('FROM sms.pallet pl')) {
+      return rows([
+        { pallet_id: 1023, product_id: 900, description: 'Existing clash product', lot_code: null, pack_schema_id: 1, ps_desc: 'Sack 3x4', lot: 'LOT1', active_flag: true, desc1: 'Blue', label_type: 1, steam_prog: 0, routing: 0, pdas_created_at: new Date('2026-09-20T00:00:00Z') },
+      ]);
+    }
     // Checked before the generic 'FROM sms.product' match, same ordering
     // reason as routes/changeover.test.ts (product_change vs product substring).
     if (sql.includes('FROM sms.product_change c')) return rows([]);
@@ -217,6 +228,7 @@ const REASON = 'HTTP fixture test, ticket 900';
 const PRODUCT_CREATE_BODY = { blendId: 1, countId: 2, tubeTypeId: 3, fields: PRODUCT_FIELDS, reason: REASON };
 const PRODUCT_ACTIVE_BODY = { active: false, reason: REASON };
 const PRODUCT_LIMITS_BODY = { before: PRODUCT_FIELDS, after: { ...PRODUCT_FIELDS, setpointG: 1965 }, reason: REASON };
+const PALLET_ACTIVE_BODY = { active: false, reason: REASON };
 const CHANGEOVER_BODY = {
   blend: { id: 1 },
   count: { id: 2 },
@@ -232,6 +244,9 @@ const ROUTES: { method: string; path: string; body: unknown }[] = [
   { method: 'POST', path: '/api/products/21/active', body: PRODUCT_ACTIVE_BODY },
   { method: 'POST', path: '/api/products/21/limits', body: PRODUCT_LIMITS_BODY },
   { method: 'POST', path: '/api/changeover/execute', body: CHANGEOVER_BODY },
+  // Task L1 (28 Sep 2026): the fifth PDAS write route, added to the same
+  // not-404 / disabled / rank-1 / signed-out sweep as the other four.
+  { method: 'POST', path: '/api/pallets/1023/active', body: PALLET_ACTIVE_BODY },
 ];
 
 describe('PDAS write routes — confirm the exact paths and methods this file assumes', () => {
@@ -318,5 +333,94 @@ describe('writes enabled but the changeover plan is blocked — 409 BLOCKED, the
     // written for a blocked plan — the route returns before
     // executeChangeover's own recordDisabledAttempt/recordChange path runs.
     expect(enabledDb.statements.some((s) => s.sql.includes('INSERT INTO sms.product_change'))).toBe(false);
+  });
+});
+
+/**
+ * Task L1 (28 Sep 2026) — POST /api/pallets/:id/active, mirroring the
+ * gate/audit/error-mapping shape POST /api/products/:id/active already has
+ * (app.ts). `PdasWriter.prototype.setPalletActive` is spied so this exercises
+ * only the route's own plumbing (RBAC, validation, error mapping, the
+ * refreshed list) — never a real PDAS call, and never the real writer pool
+ * (the enabled config here still points at 'nowhere'/port 1).
+ */
+describe('writes enabled — POST /api/pallets/:id/active with PdasWriter.setPalletActive spied', () => {
+  let enabledBase: string;
+  let enabledServer: Server;
+  let enabledDb: FakeDb;
+  const enabledCookies: Record<string, string> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let spy: any;
+
+  beforeAll(async () => {
+    spy = vi.spyOn(PdasWriter.prototype, 'setPalletActive').mockResolvedValue({ ok: true, palletId: 1023, active: true });
+    const built = await buildApp(enabledCfgViaLoadApiConfig());
+    enabledDb = built.db;
+    enabledServer = built.app.listen(0);
+    await new Promise<void>((resolve) => enabledServer.once('listening', resolve));
+    const addr = enabledServer.address();
+    if (addr == null || typeof addr === 'string') throw new Error('expected a network address');
+    enabledBase = `http://127.0.0.1:${addr.port}`;
+    for (const u of USERS) {
+      const res = await fetch(`${enabledBase}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u.username, password: PASSWORD }),
+      });
+      if (res.status !== 200) throw new Error(`fixture login failed for ${u.username}: ${res.status}`);
+      enabledCookies[u.username] = res.headers.get('set-cookie')!.split(';')[0]!;
+    }
+  });
+
+  afterAll(async () => {
+    spy.mockRestore();
+    await new Promise<void>((resolve) => enabledServer.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    spy.mockClear();
+    enabledDb.statements = [];
+  });
+
+  it('engineer POST /api/pallets/1023/active {active:true, reason} -> 200 with the refreshed list, spy called with the right args', async () => {
+    const res = await fetch(`${enabledBase}/api/pallets/1023/active`, {
+      method: 'POST',
+      headers: { Cookie: enabledCookies['engineer']!, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: true, reason: REASON }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json: any = await res.json().catch(() => null);
+    expect(res.status).toBe(200);
+    expect(json.palletId).toBe(1023);
+    expect(json.active).toBe(true);
+    expect(Array.isArray(json.pallets)).toBe(true);
+    expect(json.pallets.length).toBeGreaterThan(0);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const arg = spy.mock.calls[0]![0] as { palletId: number; active: boolean; reason: string; actor: { username: string } };
+    expect(arg.palletId).toBe(1023);
+    expect(arg.active).toBe(true);
+    expect(arg.reason).toBe(REASON);
+    expect(arg.actor.username).toBe('engineer');
+  });
+
+  it('a 9-character reason -> 400, the writer is never called, an audit row is inserted', async () => {
+    const res = await fetch(`${enabledBase}/api/pallets/1023/active`, {
+      method: 'POST',
+      headers: { Cookie: enabledCookies['engineer']!, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: true, reason: '123456789' }),
+    });
+    expect(res.status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+    expect(enabledDb.statements.some((s) => s.sql.includes('INSERT INTO sms.audit_log'))).toBe(true);
+  });
+
+  it('active as the string "false" -> 400, the writer is never called', async () => {
+    const res = await fetch(`${enabledBase}/api/pallets/1023/active`, {
+      method: 'POST',
+      headers: { Cookie: enabledCookies['engineer']!, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: 'false', reason: REASON }),
+    });
+    expect(res.status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

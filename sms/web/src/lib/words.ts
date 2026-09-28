@@ -249,7 +249,10 @@ export const W = {
     pdasNote:
       'These are written to PDAS through its own procedures, as the process engineer does by hand today. Nothing is sent to a machine.',
     writeUnavailable: (why: string) => `Changing products in PDAS is not available here: ${why}`,
-    writeNeedsRank: 'Changing products in PDAS needs a manager account.',
+    // Was "needs a manager account" — the actual gate is PDAS_WRITE_RANK = 2
+    // ('engineer' since migration 035's role rename), not rank 3 ('manager').
+    // Corrected 28 Sep 2026, Task L1.
+    writeNeedsRank: 'Changing products in PDAS needs an engineer account or higher.',
     changeLimits: 'Change weight limits',
     changeLimitsHeading: (label: string, blend: string, count: string, tube: string, id: number) =>
       `Change weight limits — ${label} · ${blend} · ${count} · ${tube} (product ${id})`,
@@ -310,6 +313,20 @@ export const W = {
     catalogueNote: 'Every product recorded in PDAS, its limits, and how to add, retire or re-limit one.',
     /* The `pr` deep link: which row this permalink pointed at. */
     catalogueLinkedNote: 'Linked from elsewhere in this system.',
+
+    /* ---- Pallets block, Catalogue tab (Task L1, 28 Sep 2026): fills D-31/
+       D-34 (DEFECTS.md Part 10) — retiring a pallet had no way back in the
+       UI. Reuses retire/whyRequired/cancel/reasonTooShort above; only the
+       reactivate-side words and the block's own title/note/empty state are
+       new. */
+    palletsTitle: 'Pallets in PDAS',
+    palletsNote:
+      'Pallets make a product selectable on the QCS panel. Only active pallets are offered on the machine. Nothing is sent to a machine from here.',
+    palletsNone: 'No pallets recorded yet.',
+    palletReactivate: 'Reactivate',
+    palletRetireNote: (id: number) =>
+      `Retiring pallet ${id} stops it being offered on the machine. It stays in PDAS, and you can bring it back later.`,
+    palletReactivateNote: (id: number) => `Make pallet ${id} selectable on the machine again.`,
 
     /* ---- Changeover tab (Brief 2 builds the screen; strings fixed here so
        Brief 2 never opens this file). Put machine N onto product X for this
