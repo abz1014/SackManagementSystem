@@ -77,11 +77,17 @@
  *       scalar count or figure on this screen for a stripped field to turn
  *       into a false zero the way `SpcData.count`/`RegisterPage.total` did.
  *       Recorded as "no defect shape found to fuzz", not as "not tried".
- *     - Health: not one of the seven top-level nav screens (`ui/Bar.tsx`'s
- *       `SCREENS` — line/readings/weight/rejects/sacks/product/report only;
- *       Health is reached through Setup, `rank >= 4`), so it is outside the
- *       7-screen denominator this coverage ratio is stated against, and is
- *       not attempted here.
+ *     - Health: STALE as of 28 Sep 2026 — corrected here rather than left to
+ *       mislead the next reader. This used to say Health was reached only
+ *       through Setup (`rank >= 4`) and so sat outside this file's screen
+ *       denominator. Since commit `f590f91` (nav: add Health as the 8th top
+ *       bar item) Health is `ui/Bar.tsx`'s `SCREENS`' 8th entry —
+ *       line/readings/weight/rejects/sacks/product/report/health — open to
+ *       every signed-in account at rank 1, the same as every other nav
+ *       screen; it is no longer Setup-gated. It remains UNATTEMPTED in this
+ *       file (the coverage ratio elsewhere in this header still counts seven
+ *       screens and was not re-derived this pass) — a real gap, now named
+ *       correctly rather than excused by a reason that no longer holds.
  *     - Within the screens this file DOES cover, only the fields that feed a
  *       HEADLINE or FIGURE TILE are fuzzed — not every field of
  *       `RegisterRow`/`SpcData`/`WeightStationsData`/`ConeWeightReportData`/

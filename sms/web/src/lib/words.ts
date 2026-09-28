@@ -1484,7 +1484,29 @@ export const W = {
          name alone is what "Registered by" asks; the "when" belongs to
          "First seen", not to a second, redundant cell. */
       registeredBy: (who: string) => who,
-      provenanceLabel: (p: string) => (p === 'ifl_copy' ? 'IFL copy' : p === 'ifl_live' ? 'IFL live' : p === 'simulator' ? 'Simulator' : p),
+      /**
+       * Health defect 4 (28 Sep 2026): this used to read `p` (the RECORDED
+       * `sms.source_epoch.provenance`) alone, so epochs 13-16 — the plant
+       * simulator's own rows, mislabelled `provenance: 'ifl_copy'` on
+       * purpose as a regression fixture (CLAUDE.md's 21 Sep 2026 section) —
+       * read "IFL copy" on this screen, the exact false claim
+       * `isSimulator()` and `generationWords.ts`'s `currentIsSimulator` exist
+       * to prevent everywhere else. `sourceDb` is now checked FIRST, against
+       * the same `/_SIM$/i` rule `generation.ts`'s `isSimulator` uses, and
+       * wins over a mislabelled `provenance` in either direction — a real
+       * `DATA_TP1U2_SEP07` row stays whatever `p` honestly says, a `_SIM`
+       * row always reads "Simulator" regardless of what `p` claims.
+       */
+      provenanceLabel: (p: string, sourceDb: string) =>
+        /_SIM$/i.test(sourceDb)
+          ? 'Simulator'
+          : p === 'ifl_copy'
+            ? 'IFL copy'
+            : p === 'ifl_live'
+              ? 'IFL live'
+              : p === 'simulator'
+                ? 'Simulator'
+                : p,
       /* "First seen" is this row's REGISTRATION instant (first_seen_utc
          defaults to SYSUTCDATETIME() on insert — the epoch's own PK
          constraint DF_se_first, migration 025:38), not the timestamp of the

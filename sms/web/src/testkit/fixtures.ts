@@ -169,6 +169,12 @@ export const OPERATIONS_FIXTURE: Envelope<OperationsData> = {
         watermark: 132551,
         epochId: 2,
         epochLabel: 'September copy — cones',
+        // Health defect 4 (28 Sep 2026): the raw label above is no longer
+        // rendered on screen — SyncHealthBlock now prints batchName(ordinal,
+        // simulator) instead. Kept here so a fixture built before that fix
+        // still exercises the same field the fixed code actually reads.
+        epochOrdinal: 3,
+        epochSimulator: false,
         rowsRead: 551,
         rowsWritten: 551,
         finishedAtUtc: '2026-09-07T12:00:00Z',

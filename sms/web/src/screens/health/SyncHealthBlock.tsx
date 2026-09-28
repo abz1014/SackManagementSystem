@@ -19,6 +19,7 @@ import { W } from '../../lib/words';
 import { Block, Details, Failed, SkelLines } from '../../ui/bits';
 import { fmtAppInstant, fmtClock, fmtSpan } from '../../lib/fmt';
 import { healthExcludedLine, healthGenerationLine } from '../../lib/generationWords';
+import { batchName } from '../../lib/batchName';
 import { noOpenEpochs } from '../../lib/syncHealth';
 import { adminGetSources, getOperations, getDqDestination, ApiError, type DqFinding } from '../../api';
 import { useResource } from '../setup/shared';
@@ -368,8 +369,18 @@ export function SyncHealthBlock({
                       </td>
                       {/* The watermark is IFL's own id and IFL restarts it (their
                           2026-08-05 rebuild). Without the generation beside it
-                          the number just jumps from 204,076 to 1 for no reason. */}
-                      <td>{s.epochLabel ?? W.sync.preEpochPass}</td>
+                          the number just jumps from 204,076 to 1 for no reason.
+                          Health defect 4 (28 Sep 2026): this used to print
+                          `s.epochLabel` verbatim — `sms.source_epoch.label`,
+                          the raw vendor table name plus an internal generation
+                          count ("pack1_TP1U2 gen 4") meant for debugging the
+                          sidecar, not for a plant manager. `batchName` reads
+                          the same two facts a reader actually needs. */}
+                      <td>
+                        {s.epochId == null
+                          ? W.sync.preEpochPass
+                          : batchName({ ordinal: s.epochOrdinal ?? null, simulator: s.epochSimulator ?? false })}
+                      </td>
                       <td className="n">{s.rowsWritten}</td>
                       <td className="n">
                         {s.watermarkFrom == null || s.watermark == null ? '—' : `${s.watermarkFrom} → ${s.watermark}`}

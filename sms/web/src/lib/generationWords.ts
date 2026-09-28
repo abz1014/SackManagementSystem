@@ -27,11 +27,22 @@
  * return null and the screen prints nothing rather than something vague.
  */
 import type { LiveGenerationNote } from '../api';
+import { batchName } from './batchName';
 
-/** The generation's own name, as a person should read it. */
+/**
+ * The generation's own name, as a person should read it — "IFL data batch
+ * 3", never `g.label` (Health defect 4, 28 Sep 2026): that field is
+ * `sms.source_epoch.label`, the raw vendor table name plus an internal
+ * generation count ("pack1_TP1U2 gen 4"), written for someone debugging the
+ * sidecar. This used to prefer `g.label`, then `g.sourceDb`, before falling
+ * back to `data batch ${g.ordinal}` — so `healthGenerationLine` and
+ * `machineGridGenerationLine`, both built on this function, printed the raw
+ * label on every real generation and only ever reached the plain fallback
+ * when the label was itself missing. `batchName` is now the ONLY path.
+ */
 export function generationName(g: LiveGenerationNote['generation']): string | null {
   if (!g) return null;
-  return g.label ?? g.sourceDb ?? `data batch ${g.ordinal}`;
+  return batchName({ ordinal: g.ordinal, simulator: g.simulator });
 }
 
 /**

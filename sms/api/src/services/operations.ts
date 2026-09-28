@@ -16,6 +16,20 @@ export interface SyncStatus {
   watermark: number | null;
   epochId: number | null;
   epochLabel: string | null;
+  /**
+   * The epoch's own generation number and simulator flag, joined from
+   * `sms.source_epoch` (Health defect 4, 28 Sep 2026) — so the screen can
+   * print `batchName({ordinal, simulator})` instead of `epochLabel` verbatim,
+   * which is the raw vendor table name plus an internal generation count
+   * ("pack1_TP1U2 gen 4") never meant for a reader who is not debugging the
+   * sidecar. `epochSimulator` mirrors `generation.ts`'s own `isSimulator`
+   * rule (source_db matching `/_SIM$/i`) rather than the row's own recorded
+   * `provenance`, which the plant simulator's rows carry mislabelled as
+   * `ifl_copy` (see CLAUDE.md's 21 Sep 2026 section). Null when `epochId` is
+   * null — a pass recorded before epoch tracking, nothing to join.
+   */
+  epochOrdinal: number | null;
+  epochSimulator: boolean;
   rowsRead: number;
   rowsWritten: number;
   finishedAtUtc: string | null;
@@ -184,6 +198,21 @@ export const CONNECT_HALT_PATTERN = '%source connection%';
 /** Outcomes that mean "this table is not syncing" — see store.ts's recordHaltedRun for the distinction. */
 const NOT_SYNCING = new Set(['halted', 'failed']);
 
+/**
+ * Mirrors `api/src/services/generation.ts`'s own (unexported) `isSimulator`
+ * predicate exactly: a generation is the plant simulator's when its
+ * `source_db` ends `_SIM`, never from `provenance` alone — the simulator's
+ * epochs on the dev sidecar are mislabelled `provenance: 'ifl_copy'` on
+ * purpose, as a regression fixture (CLAUDE.md's 21 Sep 2026 section). This is
+ * a DELIBERATE local copy, not an import: `generation.ts` does not export
+ * the predicate, and this pass owns `operations.ts` only, not `generation.ts`
+ * (concurrent-worker file ownership, this pass's own brief) — the same
+ * trade-off `rejectSpc.ts` already made for the same reason (see that file's
+ * header). Exporting `isSimulator` for direct reuse is future work, not this
+ * pass's to take.
+ */
+const isSimulator = (sourceDb: string | null): boolean => /_SIM$/i.test(sourceDb ?? '');
+
 export async function getOperations(pool: ConnectionPool, lineId: number): Promise<OperationsData> {
   // latest sync_run per target_table
   // LEFT JOIN, not INNER: source_epoch is NULL on every pass recorded before
@@ -195,6 +224,8 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
     watermark_to: number | null;
     source_epoch: number | null;
     epoch_label: string | null;
+    epoch_ordinal: number | null;
+    epoch_source_db: string | null;
     rows_read: number;
     rows_written: number;
     finished_at_utc: Date | null;
@@ -207,6 +238,7 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
       FROM sms.sync_run WHERE line_id=@line
     )
     SELECT l.target_table, l.outcome, l.watermark_from, l.watermark_to, l.source_epoch, ep.label AS epoch_label,
+           ep.generation_ordinal AS epoch_ordinal, ep.source_db AS epoch_source_db,
            l.rows_read, l.rows_written, l.finished_at_utc,
            DATEDIFF(SECOND, l.finished_at_utc, SYSUTCDATETIME()) AS age_seconds,
            l.started_at_utc, l.error_text
@@ -407,6 +439,8 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
       watermark: r.watermark_to == null ? null : Number(r.watermark_to),
       epochId: r.source_epoch == null ? null : Number(r.source_epoch),
       epochLabel: r.epoch_label,
+      epochOrdinal: r.epoch_ordinal == null ? null : Number(r.epoch_ordinal),
+      epochSimulator: isSimulator(r.epoch_source_db),
       rowsRead: r.rows_read,
       rowsWritten: r.rows_written,
       finishedAtUtc: r.finished_at_utc ? new Date(r.finished_at_utc).toISOString() : null,

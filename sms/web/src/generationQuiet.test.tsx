@@ -122,8 +122,11 @@ describe('the sentences themselves', () => {
   });
 
   it('the machine grid names its window’s generation, with and without a newer one', () => {
+    // Health defect 4 (28 Sep 2026): generationName now reads batchName(),
+    // never the raw `sms.source_epoch.label` ("September copy - cones") —
+    // GENERATION_FIXTURE is ordinal 3, not simulator, so "IFL data batch 3".
     expect(machineGridGenerationLine(GENERATION_FIXTURE, null)).toBe(
-      'Read from September copy - cones, one data batch.',
+      'Read from IFL data batch 3, one data batch.',
     );
     const s = machineGridGenerationLine(ENDED, '12:29 PM 22 Sep')!;
     expect(s).toContain('12:29 PM 22 Sep');
@@ -149,8 +152,11 @@ describe('Health — SyncHealthBlock states the generation it measured from', ()
   it('QUIET: names the generation, the rows left out, and that the PLANT has not stopped', async () => {
     installFakeFetch({ '/api/live': liveWith(ENDED), '/api/operations': OPERATIONS_FIXTURE });
     const { findByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
+    // Health defect 4 (28 Sep 2026): generationName now reads batchName(),
+    // never the raw `sms.source_epoch.label` — GENERATION_FIXTURE (via
+    // ENDED) is ordinal 3, not simulator, so "IFL data batch 3".
     await findByText(
-      'Freshness, the acquisition lag and the newest reading above are all measured from September copy - cones, one batch of recorded data.',
+      'Freshness, the acquisition lag and the newest reading above are all measured from IFL data batch 3, one batch of recorded data.',
     );
     await findByText(/284,520 readings on record belong to a different batch/);
     await findByText(/not that the plant has/);
@@ -161,7 +167,8 @@ describe('Health — SyncHealthBlock states the generation it measured from', ()
     // sentence there would be a false statement about their data.
     installFakeFetch({ '/api/live': liveWith(GENERATION_FIXTURE), '/api/operations': OPERATIONS_FIXTURE });
     const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
-    await findByText(/all measured from September copy - cones, one batch of recorded data\./);
+    // See the QUIET case above for why "IFL data batch 3" and not the raw label.
+    await findByText(/all measured from IFL data batch 3, one batch of recorded data\./);
     expect(queryByText(/belong to a different batch/)).toBeNull();
     expect(queryByText(/not that the plant has/)).toBeNull();
   });

@@ -185,3 +185,60 @@ describe('getOperations().source — derived from sync_run', () => {
     expect(Object.keys(data)).toContain('source');
   });
 });
+
+/**
+ * Health defect 4 (28 Sep 2026): `sync[].epochOrdinal`/`epochSimulator`,
+ * joined from `sms.source_epoch` — the pair `batchName()` needs so Health
+ * stops printing the raw `epoch_label` ("pack1_TP1U2 gen 4") verbatim. A
+ * bespoke fake pool, not `syncRunPool` above, because that helper's own
+ * "latest per table" query hardcodes `source_epoch: null, epoch_label: null`
+ * and carries no per-run epoch fields to answer this join from.
+ */
+function syncWithEpochPool(rows: { epoch_ordinal: number | null; epoch_source_db: string | null }[]): ConnectionPool {
+  const mk = () => {
+    const req = {
+      input: () => req,
+      query: async (sql: string) => {
+        if (sql.includes('PARTITION BY target_table')) {
+          return {
+            recordset: rows.map((r, i) => ({
+              target_table: `t${i}`, outcome: 'success', watermark_from: null, watermark_to: null,
+              source_epoch: 1, epoch_label: 'raw label, must not leak',
+              epoch_ordinal: r.epoch_ordinal, epoch_source_db: r.epoch_source_db,
+              rows_read: 0, rows_written: 0, finished_at_utc: null, age_seconds: null,
+              started_at_utc: new Date('2026-09-14T06:00:00Z'), error_text: null,
+            })),
+          };
+        }
+        return { recordset: [] };
+      },
+    };
+    return req;
+  };
+  return { request: mk } as unknown as ConnectionPool;
+}
+
+describe('getOperations().sync[].epochOrdinal/epochSimulator — the join batchName() reads', () => {
+  it('a real IFL generation: ordinal passes through, simulator is false', async () => {
+    const { sync } = await getOperations(syncWithEpochPool([{ epoch_ordinal: 3, epoch_source_db: 'DATA_TP1U2_SEP07' }]), 1);
+    expect(sync[0]!.epochOrdinal).toBe(3);
+    expect(sync[0]!.epochSimulator).toBe(false);
+  });
+
+  it('a simulator generation: derived from source_db, matching generation.ts\'s isSimulator rule — never from provenance', async () => {
+    const { sync } = await getOperations(syncWithEpochPool([{ epoch_ordinal: 4, epoch_source_db: 'DATA_TP1U2_SIM' }]), 1);
+    expect(sync[0]!.epochOrdinal).toBe(4);
+    expect(sync[0]!.epochSimulator).toBe(true);
+  });
+
+  it('case-insensitive _SIM suffix, mirroring isSimulator\'s /_SIM$/i', async () => {
+    const { sync } = await getOperations(syncWithEpochPool([{ epoch_ordinal: 5, epoch_source_db: 'data_tp1u2_sim' }]), 1);
+    expect(sync[0]!.epochSimulator).toBe(true);
+  });
+
+  it('no epoch to join (epochId null in effect: nothing came back from the join): ordinal null, simulator false', async () => {
+    const { sync } = await getOperations(syncWithEpochPool([{ epoch_ordinal: null, epoch_source_db: null }]), 1);
+    expect(sync[0]!.epochOrdinal).toBeNull();
+    expect(sync[0]!.epochSimulator).toBe(false);
+  });
+});

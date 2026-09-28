@@ -110,7 +110,7 @@ export function SystemHistoryBlock() {
                 <tr key={g.epochId}>
                   <td>{g.sourceTable}</td>
                   <td className="n">{g.generationOrdinal}</td>
-                  <td>{W.health.epochRegister.provenanceLabel(g.provenance)}</td>
+                  <td>{W.health.epochRegister.provenanceLabel(g.provenance, g.sourceDb)}</td>
                   <td>{fmtAppInstant(g.firstSeenUtc)}</td>
                   <td>{g.lastSeenUtc == null ? '—' : fmtAppInstant(g.lastSeenUtc)}</td>
                   <td className={g.closedUtc == null ? '' : 'mut'}>
