@@ -375,3 +375,118 @@ that is recorded above rather than smoothed over.
 - `PDAS_WRITE_ENABLED` in the plant deployment remains the owner's call; this pass,
   like the first, ran only locally against `PDAS_TP1U2_SEP07` with the flag already
   `true` in the local `.env`.
+
+---
+
+## Third pass (28 Sep 2026, Task K2c) — F7's reason string fixed; harness now 19/19
+
+**Code revision:** `57882f9` (branch `floor-first-rework`), on top of K2b's `62c540e`.
+Same scope as both prior passes: local `PDAS_TP1U2_SEP07` copy only, restored
+afterward; plant, `DATA_TP1U2`, `DATA_TP1U2_SEP07` never touched; no logins
+created; no passwords printed.
+
+### Fix
+
+K2b's own root-cause note said F7's `writer.setProductActive({ ..., reason: 'F7
+retire', actor })` call used a 9-character reason, one short of the app's
+10-character minimum, so `setProductActive` correctly refused it client-side with
+`IMPLAUSIBLE` before ever touching PDAS. `sms/scripts/pdas-e2e-local.mjs` line
+769's reason string is changed to `'F7 retire for recreate test'` (28 characters).
+A regex sweep of every `reason:` literal in the file (`'...'` and `` `...` `` forms)
+found no other string under 10 characters — F7's retire call was the only one.
+`node --check sms/scripts/pdas-e2e-local.mjs` passed. Committed as `57882f9`.
+
+### Step 1 — anchors, read-only
+
+Re-queried before touching anything; matched K2's and K2b's recorded values
+**exactly**, in every column:
+
+| PDAS table | Materials | Blends | Counts | TubeTypes | Pallets | nhs_events |
+|---|---|---|---|---|---|---|
+| count | 24 | 10 | 14 | 27 | 25 | 3631 |
+| MAX(id) | 1024 | 10 | 14 | 27 | 1022 | 23445 |
+
+| sms table | product_change | product_limit_version | dq_finding | audit_log | session | blend | yarn_count | tube_type | product | pallet | product_timeline |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| count | 3 | 14 | 30 | 150 | 5 | 10 | 14 | 27 | 14 | 15 | 22 |
+
+### Step 2 — fresh backups
+
+`D:\sms-backups\PDAS_TP1U2_SEP07-20260928-pre-e2e3.bak` (1074 pages, 0.163 s) and
+`D:\sms-backups\sms-20260928-pre-e2e3.bak` (56330 pages, 2.289 s), both
+`COPY_ONLY, CHECKSUM, INIT`. `RESTORE VERIFYONLY ... WITH CHECKSUM` on both: *"The
+backup set on file 1 is valid."*
+
+### Step 3 — the harness, full green
+
+`node scripts/pdas-e2e-local.mjs` from `sms/`, `RUN_TAG=20260928131637`.
+
+```
+Live pre-flight: @@SERVERNAME="DESKTOP-G1MSH4I\SQLEXPRESS" DB_NAME()="PDAS_TP1U2_SEP07"
+  (expected host "DESKTOP-G1MSH4I" / instance "SQLEXPRESS" / db "PDAS_TP1U2_SEP07")
+Live pre-flight PASSED.
+Leftover-data check PASSED: no E2E-tagged rows found.
+```
+
+**All 19 of 19 cases passed** (every `**VERDICT [...]: PASS**` line, in order):
+R1-plan, R1-execute, R2, R3, R4, F1, F2, F3a, F3b, F3c, F3d, F4, F5, F5b, F6,
+**F7** (`retired.ok=true recreate.ok=false code=-7001 noRowInserted=true
+reactivated.ok=true finalActive=true`), T1, **A1** (`entries=21 allOk=true`), N1
+(`newRows=20 coreNonNull=true severityKnown=true sameShape=true`).
+
+Per-right summary table, as printed by the harness:
+
+| right | happy case | failure cases | pass/fail |
+|---|---|---|---|
+| CreateMaterial | R1-execute (material step); F7-create | F2 (-7001 duplicate); F7-recreate-fail (-7001 after retire+recreate) | PASS |
+| SetMaterialStatusActive | R1-execute (retire step); R3 (reactivate); F7-retire/F7-reactivate | (none exercised) | PASS |
+| AddBlend | R1-execute (blend step); F7-addBlend | (none exercised) | PASS |
+| AddCount | R1-execute (count step); F7-addCount | (none exercised) | PASS |
+| AddTubeType | R1-execute (tube step); F7-addTubeType | F3a (-5001 duplicate); F3c/F3d (IMPLAUSIBLE form/weight) | PASS |
+| CreatePallet | R1-execute (pallet step) | (none exercised) | PASS |
+| SetPalletStatusActive | R1-execute (retire pallet step); R4 (reactivate) | (none exercised) | PASS |
+| UPDATE dbo.Materials (limits) | R2 | F4 (CONFLICT, second call) | PASS |
+| INSERT dbo.nhs_events | N1 | (none exercised) | PASS |
+
+**`OVERALL: PASS`. Exit code: 0.** 20 new `nhs_events` rows this run (EventId
+23446–23465), restored away below. The vendor's own `CreateMaterial` logging bug
+(logs `@blendId`, not the real `MaterialId`) reconfirmed again: EventId 23449
+`"Create new MaterialId: 11"` for a material created with `@blendId=11`.
+
+### Step 4 — restore
+
+`sms-api` stopped via `preview_stop`. Both databases: `ALTER DATABASE ... SET
+SINGLE_USER WITH ROLLBACK IMMEDIATE` → `RESTORE DATABASE ... FROM DISK <pre-e2e3
+.bak> WITH REPLACE, CHECKSUM` → `ALTER DATABASE ... SET MULTI_USER`. Anchors
+re-queried after restore — **identical to Step 1 in every column**, both tables.
+`sms-api` restarted via `preview_start`; a relative `fetch('/api/auth/me')` run
+from the existing browser tab (proxied through the Vite dev server; a
+cross-origin `fetch('http://localhost:4000/...')` from that tab failed with a
+generic `Failed to fetch`, consistent with the page's own fetch/CORS setup rather
+than any session loss) returned `{"user":{"username":"admin","displayName":"Plant
+Admin","role":"admin"}}` — the session row survived the restore intact, same as
+both prior passes, no re-login.
+
+### New finding this pass
+
+**The UI has no control to reactivate a retired pallet.** Catalogue's "Activate"
+control exists only for materials; a pallet retired via Changeover's own retire
+checklist drops out of that checklist once retired (it lists only active pallets
+as retire candidates), so there is no path in the web app to undo a mistaken
+pallet retirement. This is a UI-completeness gap, not a write-path defect —
+`SetPalletStatusActive`'s reactivate direction is proven working via the harness's
+R4 case (this pass and both prior passes) and via `PdasWriter` directly; only the
+UI affordance is missing. Recorded as `DEFECTS.md` D-31 (severity Minor/Medium,
+owner: us, open).
+
+### Final status, all three passes combined
+
+All nine PDAS write rights remain **PROVEN** (see the "Final per-right verdict"
+table in the Second pass section above — unchanged by this pass). This pass's own
+contribution: the automated harness itself, previously blocked first by a
+pre-flight server-name mismatch (K2) and then by a single 9-character test-data
+string (K2b), now runs clean end to end — **19/19, exit 0** — independently
+confirming all nine rights through the harness's own direct `PdasWriter` calls, on
+top of the UI proof K2/K2b already gave. Still owner-run and unchanged: the
+EXECUTE-only "ibrahim"-shaped login rehearsal, below-rank RBAC on a live instance,
+and anything requiring the plant itself.

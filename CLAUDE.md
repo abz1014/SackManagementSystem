@@ -24,7 +24,36 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 not the current count — and is left as written rather than rewritten in place, per this
 file's own convention of dated, superseded-not-deleted entries.
 
-### All nine PDAS write rights now proven through our own code, local copy only (28 Sep 2026, Task K2b — supersedes Task K2 immediately below)
+### Harness now 19/19, exit 0 (28 Sep 2026, Task K2c — supersedes the "18 of 19" figure in Task K2b immediately below)
+
+The one gap Task K2b left — F7's own retire call using a 9-character reason
+(`'F7 retire'`), one short of the app's 10-character minimum, refusing itself
+`IMPLAUSIBLE` before ever reaching PDAS and cascading into A1 — is fixed by
+commit `57882f9`: the string is now `'F7 retire for recreate test'`. A sweep of
+every `reason:` literal in `scripts/pdas-e2e-local.mjs` found no other string
+under 10 characters. `node --check` passed.
+
+Anchors matched K2/K2b exactly before this pass touched anything; fresh backups
+(`D:\sms-backups\{PDAS_TP1U2_SEP07,sms}-20260928-pre-e2e3.bak`) both verified.
+`node scripts/pdas-e2e-local.mjs` then ran with **all 19 of 19 cases PASS**
+(including F7 and A1, the two K2b's cascade had failed) and **all nine
+per-right summary rows PASS — `OVERALL: PASS`, exit code 0.** Anchors after
+restore matched exactly; the owner's admin session survived the restore with no
+re-login. Full detail: `handover/PDAS-E2E-RESULTS-2026-09-28.md`'s "Third pass"
+section; register entry: `DEFECTS.md` Part 10.
+
+**New finding this pass, not present before:** the UI has no control to
+reactivate a retired pallet — Catalogue's "Activate" is materials-only, and a
+retired pallet drops out of Changeover's own retire checklist. `SetPalletStatusActive`'s
+reactivate direction itself is proven working (harness R4, both this pass and
+the two before it); only the UI affordance is missing. Recorded as `DEFECTS.md`
+D-31 (Minor/Medium, owner: us, open).
+
+**All nine PDAS write rights remain PROVEN**, unchanged in substance from Task
+K2b below — this pass closes the harness's own last blocker rather than adding
+new proof of any right.
+
+### All nine PDAS write rights now proven through our own code, local copy only (28 Sep 2026, Task K2b — supersedes Task K2 immediately below; its "18 of 19"/F7-cascade figure is itself superseded by Task K2c above, which fixed F7's own test-data bug)
 
 Task K2 (immediately below) left two gaps: the scripted harness never ran, and
 `SetPalletStatusActive` was never proven through the UI. Both are closed this same

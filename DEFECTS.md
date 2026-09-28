@@ -1585,3 +1585,50 @@ and column); `sms-api`'s signed-in session survived both restores with no
 re-login. Still owner-run and unchanged: the EXECUTE-only "ibrahim"-shaped login
 rehearsal, below-rank RBAC on a live instance, and anything requiring the plant
 itself.
+
+### 28 Sep 2026, later the same day (Task K2c) — F7's reason string fixed; harness now 19/19
+
+The one open item from K2b — F7's own `'F7 retire'` (9 characters) refusing itself
+client-side — is fixed. Commit `57882f9` changes the string to
+`'F7 retire for recreate test'`; grepping every `reason:` literal in the harness
+file confirmed no other string was under the 10-character minimum. `node --check`
+passed.
+
+Anchors were re-queried before touching anything and matched K2/K2b's recorded
+values exactly (same table as those two passes — Materials 24/1024, Blends 10/10,
+Counts 14/14, TubeTypes 27/27, Pallets 25/1022, nhs_events 3631/23445;
+`sms.product_change` 3, `product_limit_version` 14, `dq_finding` 30, `audit_log`
+150, `session` 5, `blend` 10, `yarn_count` 14, `tube_type` 27, `product` 14,
+`pallet` 15, `product_timeline` 22). Fresh backups
+(`D:\sms-backups\{PDAS_TP1U2_SEP07,sms}-20260928-pre-e2e3.bak`, `COPY_ONLY,
+CHECKSUM, INIT`) both verified with `RESTORE VERIFYONLY ... WITH CHECKSUM`.
+
+`node scripts/pdas-e2e-local.mjs` from `sms/` then ran clean: live pre-flight
+PASSED, leftover-data check PASSED, **all 19 verdicts PASS** (R1-plan, R1-execute,
+R2, R3, R4, F1, F2, F3a, F3b, F3c, F3d, F4, F5, F5b, F6, **F7**, T1, **A1**, N1 —
+the two cases K2b's cascade had failed, F7 and A1, both now PASS), every one of the
+nine per-right summary rows PASS, **`OVERALL: PASS`, exit code 0**. Full detail:
+`handover/PDAS-E2E-RESULTS-2026-09-28.md`'s "Third pass" section.
+
+Restore: `sms-api` stopped, both databases `SET SINGLE_USER WITH ROLLBACK
+IMMEDIATE` → `RESTORE ... WITH REPLACE, CHECKSUM` from the pre-e2e3 backups →
+`SET MULTI_USER`. Anchors re-queried after restore: identical to the pre-run
+values in every column, both tables. `sms-api` restarted; the owner's admin
+session (`GET /api/auth/me` via the app's own relative fetch in the existing
+browser tab) still returned `{"username":"admin","displayName":"Plant
+Admin","role":"admin"}` with no re-login.
+
+**D-31 (new). UI has no control to reactivate a retired pallet — Minor/Medium,
+owner: us, status: open.** Confirmed this pass (and already implied by K2b's own
+note): Catalogue's "Activate" control exists only for materials — no equivalent
+appears for pallets. A pallet retired via Changeover's retire checklist drops off
+that same checklist once retired (it only lists active pallets to offer for
+retirement), so nothing in the web app can put it back. `SetPalletStatusActive`
+itself supports reactivation and is proven working both ways — via the harness's
+R4 case directly through `PdasWriter`, and (for retire only) via the UI in K2b —
+so this is a UI-completeness gap, not a defect in the write path itself. A pallet
+retired by mistake can currently only be undone outside the UI (direct SQL, which
+this project's own rules restrict, or a future screen change). Fix would be a
+small, symmetric addition: extend Catalogue's existing "Activate" affordance (or
+add an equivalent list) to retired pallets, mirroring what it already does for
+retired materials.
