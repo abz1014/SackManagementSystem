@@ -39,6 +39,7 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
    - `LINE_ID` (default `1`) → the line this worker and this API serve; every row is stamped with it. Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested. `LINE_NAME` is only the **seed** for that line's display name on a fresh database; afterwards the plant, unit and line names live in `sms.line` and are edited in **Setup › Line** (roadmap Phase 1, migration 028).
    - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
+   - **leave `LIVE_ALLOW_SIMULATOR` unset; never true at IFL** — a dev-only convenience that lets the live screens read `scripts/simulate-plant.mjs`'s `_SIM` database instead of the plant's; see `.env.example`'s own comment and *Rehearsing go-live with the plant simulator* below.
    - **PLANT_UTC_OFFSET_MINUTES=300** (UTC+5, this plant) — set this on every install. See below.
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
@@ -138,6 +139,116 @@ runs unchanged, so the rehearsal exercises the reader, the schema-fingerprint
 gate, the raw layer, the transform, the data-quality checks, the API and the
 screens. **Set `IFL_DB_NAME_DATA` back to `DATA_TP1U2` when you are done**, and
 rebuild the app database if you want the simulated rows out of it.
+
+#### Driving the live screens from the simulator
+
+Pointing the sync worker at `DATA_TP1U2_SIM` is not, on its own, enough to make
+Line/Wall/Health/the machine grid move: `generation.ts`'s `resolveGenerationScope`
+always prefers a REAL generation over a simulator one for every period-scoped
+read (reports, the register, reject charts — the owner's 23 Sep 2026 decision,
+unconditional), and the live "now" screens follow the same rule by default. On
+this development machine the real copy ends 7 Sep 2026, so with the worker
+pointed at `_SIM` alone the live screens go quiet the moment the simulator's
+rows are newer than the real copy's — which is immediately.
+
+`LIVE_ALLOW_SIMULATOR=true` (dev only; see `.env.example`'s own comment) is
+the second switch: it lets ONLY the live screens read whichever generation is
+newest, real or simulated, while every report/register/reject-chart read keeps
+preferring real data unconditionally. The API checks it at startup, not just
+on trust — both guards must hold or it silently stays off, never a crash:
+`IFL_DB_NAME_DATA` must end in `_SIM`, and `IFL_DB_SERVER` must be a local
+server name (`api/src/config.ts`'s `resolveLiveSimulator`). So the three
+settings for a live rehearsal are `IFL_DB_NAME_DATA=DATA_TP1U2_SIM`,
+`IFL_DB_SERVER` left as the local instance, and `LIVE_ALLOW_SIMULATOR=true` —
+all three, or the live screens stay on the real, ended copy.
+
+#### Starting and stopping the simulator and the sync worker
+
+Both are plain `node` processes, not Windows Services, on a development
+machine — start them with `Invoke-CimMethod` rather than a bare background
+job so they keep running after the PowerShell window that launched them
+closes. Each command below is guarded against starting a second copy: check
+first, and only start if nothing matching is already running.
+
+Simulator:
+
+```powershell
+$running = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -match 'simulate-plant\.mjs'
+if (-not $running) {
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = 'cmd.exe /d /c "node scripts\simulate-plant.mjs --live >> logs\sim.log 2>&1"'
+    CurrentDirectory = '<abs>\sms'
+  }
+}
+```
+
+Sync worker:
+
+```powershell
+$running = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -match 'sync-worker\\dist\\index\.js'
+if (-not $running) {
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = 'cmd.exe /d /c "node sync-worker\dist\index.js >> logs\sync-worker.log 2>&1"'
+    CurrentDirectory = '<abs>\sms'
+  }
+}
+```
+
+Stop both (matches either command line, so one line stops whichever of the two
+is running):
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object CommandLine -match 'simulate-plant\.mjs|sync-worker\\dist\\index\.js' |
+  ForEach-Object { Stop-Process -Id $_.ProcessId }
+```
+
+**Stop order: the sync worker first, then the simulator.** Stopping the
+simulator first leaves the worker polling a source that has gone quiet, which
+it tolerates (an empty pass is not a halt) — but stopping the worker first and
+leaving the simulator writing means every row it appends while unwatched still
+gets picked up on the worker's next pass once restarted, so nothing is lost
+either order. Sync-worker-first is still the rule because it is the one order
+that never has the worker read a source mid-write from a simulator process
+that is itself being torn down.
+
+**Resuming after a pause catches up, by design — no manual seeding.** The
+simulator remembers the production time of the last row it wrote
+(`sim.coneCursor`, seeded from `state.lastProdMs` on the process's first
+tick) and, on restart, generates everything between that cursor and now in
+one tick before returning to its normal cadence — cones stamped with each
+missed day's own production time, sacks stamped at their own weighing time
+plus the acquisition lag, never piled onto the restart instant (the 25 Sep
+2026 sack-timestamp defect this rule replaced: a ~3-day pause once wrote
+1,129 sacks at four timestamps inside 12 minutes). The sync worker does the
+same from its own side, independently: its watermark is in the app database,
+not in memory, so a paused worker resumes from exactly the source `id` it left
+off at, and a paused-then-resumed simulator is simply a source with a gap in
+its own insert times, which the worker reads on its next pass like any other
+catch-up.
+
+**Never run `--days` or `--reset` against a `DATA_TP1U2_SIM` database that
+already holds rows you want to keep.** `--reset` empties the sim tables
+outright; `--days=N` backfills N days of history assuming a fresh table and
+will duplicate or collide with rows already there. Both are for first-time
+setup only — see the commands above. Restarting `--live` (no flags but
+`--live` itself) is always the resume path.
+
+**Neither process survives a reboot.** This is a deliberate owner decision,
+not an oversight: no Windows Scheduled Task is configured to relaunch either
+one at logon or on boot, unlike the sync-worker and api NSSM *services* the
+production topology uses (`Windows Services (NSSM)`, below) — a rehearsal
+machine restarting silently pick up where a real go-live cutover would use
+Services for exactly that reason, and are left as plain processes here on
+purpose so a reboot visibly stops the rehearsal rather than quietly resuming
+it unattended.
+
+**When the rehearsal is done, remove `LIVE_ALLOW_SIMULATOR`** from `.env` (or
+set it back to unset/`false`) — it must never be `true` when `IFL_DB_NAME_DATA`
+points at the plant's real database, and leaving it set after `IFL_DB_NAME_DATA`
+is repointed for cutover is exactly the mistake the two startup guards
+(`resolveLiveSimulator`) exist to catch, but a removed setting cannot be
+misapplied at all.
 
 #### What the first rehearsal found, and why it could not have been found sooner
 
