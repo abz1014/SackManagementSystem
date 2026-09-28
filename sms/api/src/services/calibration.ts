@@ -173,6 +173,20 @@ export function longestContiguousRun(days: { date: string }[]): number {
   return best;
 }
 
+/**
+ * Chart overhaul wave 2 (Task TB1, 28 Sep 2026) — DELIBERATELY NOT GIVEN A
+ * `shiftRange` PARAMETER. `from`/`to` here are a WHOLE-DAY drift-detector
+ * window (weightStations.ts's own trailing window, or attention.ts's
+ * `trailing`), never a page period: every row is grouped by `shift_date`
+ * alone (`GROUP BY source_station, shift_date` below), the pattern rules
+ * (`nelsonViolations`, `splitEpochs`) need CONSECUTIVE CALENDAR DAYS to
+ * fire, and `consecutiveProductionDays` compares whole dates. A shift range
+ * narrows WITHIN a day, which this function has no unit finer than a day to
+ * apply it to. CLAUDE.md rule 3 and this task's own brief both name this
+ * class of window as one that "must NOT be narrowed; apply the range to the
+ * period part only" — see weightStations.ts's matching note on
+ * `getWeightStations`, the caller that shares this window.
+ */
 export async function getStationDrift(
   pool: ConnectionPool,
   lineId: number,

@@ -244,6 +244,18 @@ export function rejectRiseFinding(spc: RejectSpcData, kind: 'quality' | 'weight'
 
 /* ---------------------------------------------------------- the endpoint */
 
+/**
+ * Chart overhaul wave 2 (Task TB1, 28 Sep 2026). `trailing` is the fixed
+ * whole-day window rules 1 and 2 run over (this file's own header, THE
+ * DETECTORS DO NOT USE THE SELECTED PERIOD) and takes no `shiftRange` —
+ * narrowing it would misjudge a station or a reject rise on a slice too
+ * short for the pattern rules it feeds. `period` is `DayRange`
+ * (productAt.ts), which already carries an optional `shiftRange` (Task TB2)
+ * that `productDisagreement` below applies on its own — rule 3 is the one
+ * of the three that DOES honour the selected period, and it needed no
+ * change here: whatever shift range the caller puts on `period` flows
+ * straight through the existing `period` parameter.
+ */
 export async function getAttention(
   pool: ConnectionPool,
   lineId: number,

@@ -120,6 +120,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { bindConeFilters, bindRejectFilters, type RejectCodeFilter, type RejectFilters } from './rejects.js';
 import { epochWhere, type GenerationScope } from './generation.js';
+import type { ShiftRange } from '../shiftRange.js';
 
 export type RejectBucketSize = 'hour' | 'day';
 export type RejectTypeFilter = 'all' | 'quality' | 'weight';
@@ -155,6 +156,18 @@ export interface RejectSpcFilters {
    * 11.33%).
    */
   scope?: GenerationScope;
+  /**
+   * Chart overhaul wave 2 (Task TB1, 28 Sep 2026): an OPTIONAL shift-bounded
+   * refinement of `[from, to]` (shiftRange.ts). This trend is period-scoped
+   * throughout — there is no fixed trailing/detector window inside this
+   * file — so the range is ANDed into every one of the four population
+   * queries below (produced, rejects, allRejects, unmatched), alongside
+   * `from`/`to`, never replacing them. Absent, behaviour is byte-identical
+   * to before this task. `bucketSize`/episode-contiguity logic is untouched:
+   * a shift range only narrows WHICH rows are in scope, not how the buckets
+   * already in scope are grouped or judged for contiguity.
+   */
+  shiftRange?: ShiftRange;
 }
 
 export interface RejectBucket {
@@ -260,6 +273,16 @@ export async function getRejectSpc(
   const base: RejectFilters = {
     from, to, shift: filters.shift, tsTo: filters.tsTo, station: filters.station, product: filters.product,
     scope: filters.scope,
+    // Chart overhaul wave 2 (Task TB1, 28 Sep 2026): `RejectFilters.shiftRange`
+    // (rejects.ts, Task TB2) is bound by `bindRejectFilters`/`bindConeFilters`
+    // themselves, aliased exactly as every other column on the request those
+    // functions build — so putting it on `base` here, alongside `scope`,
+    // reaches all four population queries below (produced, rejects,
+    // allRejects, unmatched) through the SAME `{ ...base }`/`{ ...f }`
+    // spreads that already carry `scope` through this file, with no
+    // second, locally-duplicated AND clause. `from`/`to` stay bound exactly
+    // as before: shiftRange narrows inside them, never replaces them.
+    shiftRange: filters.shiftRange,
   };
   const numerator: RejectFilters = { ...base, code: filters.code };
   const numeratorIsNarrowed = rejectType !== 'all' || filters.code != null;

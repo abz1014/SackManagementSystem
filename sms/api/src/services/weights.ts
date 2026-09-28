@@ -13,6 +13,7 @@ import {
 } from './generation.js';
 import { getPlausibilityRuleAsOf, getWeightRuleAsOf, plantDayEndMs, plantDayStartMs, type RuleAsOfResult, type WeightRule } from './ruleAsOf.js';
 import { plantNowMs } from '@sms/shared';
+import { shiftOrd, shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 export type Basis = 'as_recorded' | 'gross' | 'net';
 
@@ -258,6 +259,14 @@ export async function getWeights(
   basis: Basis | undefined,
   from?: string,
   to?: string,
+  /**
+   * Chart overhaul wave 2 (Task TB1, 28 Sep 2026): an OPTIONAL shift-bounded
+   * refinement of `[from, to]` (shiftRange.ts). This whole function is
+   * period-scoped — there is no trailing/detector window here — so the
+   * range is ANDed into `dateWhere` alongside `from`/`to`, for both cone and
+   * sack tables. Absent, behaviour is byte-identical to before this task.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<WeightsData> {
   // RT24-04: as of the PERIOD END (`to`, else "now" for an unbounded call),
   // not whatever is configured today.
@@ -279,12 +288,33 @@ export async function getWeights(
   const coneEpoch = epochFragment(scope, 'cone_event');
   const sackEpoch = epochFragment(scope, 'sack_event');
 
+  // SHIFT RANGE (chart overhaul wave 2, Task TB1, 28 Sep 2026). Same
+  // multi-request shape as `coneEpoch`/`sackEpoch` just above: the fragment's
+  // SQL text is deterministic (fixed parameter names, `col`/`shift_code` are
+  // always unaliased here — neither query in this file joins another table
+  // under an alias), so it is computed once, folded into `dateWhere`, and the
+  // VALUES are bound per request via `bindShift`, called alongside `bind()`
+  // below. `shiftRangeClause` couples text-generation to binding (unlike
+  // `epochFragment`/`epochWhere`'s deliberate split), so the one-off
+  // `pool.request()` here is used only to extract that deterministic text;
+  // nothing is ever executed on it. `shiftRange` is undefined for every
+  // existing caller, so `shiftClauseSql` is null and this is a no-op —
+  // behaviour is byte-identical to before this task.
+  const shiftClauseSql = shiftRange ? shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, pool.request()) : null;
+  const bindShift = (r: mssql.Request) => {
+    if (!shiftRange) return;
+    r.input('srFrom', mssql.Date, shiftRange.from);
+    r.input('srFromOrd', mssql.Int, shiftOrd(shiftRange.fromShift));
+    r.input('srTo', mssql.Date, shiftRange.to);
+    r.input('srToOrd', mssql.Int, shiftOrd(shiftRange.toShift));
+  };
   const dateWhere = (table: 'cone' | 'sack', col = 'shift_date') => {
     const w: string[] = ['line_id=@line'];
     if (from) w.push(`${col} >= @from`);
     if (to) w.push(`${col} <= @to`);
     const e = table === 'cone' ? coneEpoch.sql : sackEpoch.sql;
     if (e) w.push(e);
+    if (shiftClauseSql) w.push(shiftClauseSql);
     return w.join(' AND ');
   };
   // --- cones (grams) / sacks (kg): the population is the ONE plausibility
@@ -313,6 +343,7 @@ export async function getWeights(
     r.input('coneAdj', mssql.Float, coneAdj);
     r.input('sackAdj', mssql.Float, sackAdj);
     for (const pr of [...coneEpoch.params, ...sackEpoch.params]) r.input(pr.name, mssql.Int, pr.id);
+    bindShift(r);
     return r;
   };
   /** A request with the cone population predicate bound; returns [request, predicate]. */

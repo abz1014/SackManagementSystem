@@ -384,6 +384,25 @@ export interface WeightStationsData {
 const sign = (n: number) => (n > 0 ? 1 : n < 0 ? -1 : 0);
 const round = (n: number, dp = 2) => Math.round(n * 10 ** dp) / 10 ** dp;
 
+/**
+ * Chart overhaul wave 2 (Task TB1, 28 Sep 2026) — DELIBERATELY NOT GIVEN A
+ * `shiftRange` PARAMETER. This function's own `from`/`to` are not a page
+ * period: `app.ts`'s `/api/weight-stations` route calls this with its
+ * TRAILING drift window (the route's own comment names it "its own trailing
+ * drift window", distinct from `periodFrom`/`periodTo`, which go to
+ * `productDisagreement` instead) — the fixed window the station pattern
+ * rules need CONSECUTIVE PRODUCTION DAYS to fire on (`MIN_DAYS_HELD`,
+ * `getStationDrift`/`splitEpochs` below). Every query inside this function
+ * that shares that window — `getStationDrift`, `rejectRatesByStation`,
+ * `stationMaterialCounts` — is therefore a detector window, exactly the
+ * class of window CLAUDE.md rule 3 and this task's own brief both single out
+ * as "must NOT be narrowed; apply the range to the period part only". There
+ * is no separate "period part" inside this file the way `attention.ts` keeps
+ * `trailing` and `period` apart — the reporting period lives outside this
+ * function entirely, on `productDisagreement`'s own `DayRange.shiftRange`
+ * (productAt.ts). Adding an unused `shiftRange` parameter here would invite
+ * a future caller to narrow the drift window by mistake, so none is added.
+ */
 export async function getWeightStations(
   pool: ConnectionPool,
   lineId: number,

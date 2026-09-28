@@ -47,6 +47,7 @@ import { epochFragment, resolveGenerationScope, type EventTable } from './genera
 import { nelsonViolations, type NelsonRuleId } from './nelson.js';
 import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
 import { resolvePeriodTarget } from './reports/common.js';
+import { shiftOrd, shiftRangeClause, type ShiftName, type ShiftRange } from '../shiftRange.js';
 
 export type SpcType = 'cone' | 'sack';
 
@@ -65,6 +66,23 @@ export interface Subgroup {
    *  3σ check misses entirely — see nelson.ts. Empty when the subgroup mean
    *  looks like ordinary process noise. */
   nelson: NelsonRuleId[];
+  /**
+   * Chart overhaul, wave 2 (Task TB1, 28 Sep 2026): the earliest and latest
+   * (shift_date, shift_code) pair inside this subgroup's bucket, ordered by
+   * the shift ordinal (`shiftRange.ts`'s `shiftOrd` — morning < evening <
+   * night) rather than by clock time, so the web can snap a brush drag to a
+   * whole shift. A bucket can span more than one shift (an hourly or daily
+   * bucket almost always does); these four fields name the FIRST and LAST
+   * shift actually represented in it, not the bucket's own start/end instant
+   * (`ts` above, already a bucket boundary). Present on every subgroup —
+   * `sms.cone_event`/`sms.sack_event` write `shift_date`/`shift_code` on
+   * every row (shiftRange.ts's file header), so there is no null case to
+   * carry here the way `generation` above has one.
+   */
+  firstShiftDate: string;
+  firstShiftCode: ShiftName;
+  lastShiftDate: string;
+  lastShiftCode: ShiftName;
 }
 
 export interface StationStat {
@@ -480,6 +498,16 @@ export async function getWeightSpc(
   shift: string | null = null,
   /** One station's stream (cone only): the Weight screen's selector (Phase 4). */
   station: number | null = null,
+  /**
+   * Chart overhaul, wave 2 (Task TB1, 28 Sep 2026): an OPTIONAL shift-bounded
+   * refinement of `[from, to]` (shiftRange.ts). This whole function is
+   * period-scoped — there is no fixed trailing/detector window here, unlike
+   * weightStations.ts's own `from`/`to` or the attention detectors — so the
+   * range is ANDed into the population filter alongside `from`/`to`, never
+   * replacing them (shiftRange.ts's own contract: "from/to still bound the
+   * dates"). Absent, behaviour is byte-identical to before this task.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<SpcData> {
   const table = type === 'cone' ? 'sms.cone_event' : 'sms.sack_event';
   const col = type === 'cone' ? 'weight_g' : 'weight_kg';
@@ -543,9 +571,30 @@ export async function getWeightSpc(
     for (const p of genFrag.params) r.input(p.name, mssql.Int, p.id);
   };
 
+  // SHIFT RANGE (chart overhaul wave 2, Task TB1, 28 Sep 2026). Same
+  // multi-request shape as `genFrag`/`bindGen` just above — the fragment's
+  // SQL text is deterministic (fixed parameter names, no values inlined), so
+  // it is computed once and folded into `base`, while the VALUES are bound
+  // per request via `bindShift`, exactly as `bindGen` re-binds `genFrag`'s
+  // params onto each request in turn. `shiftRangeClause` itself couples
+  // text-generation to binding (unlike `epochFragment`/`epochWhere`'s split),
+  // so the one-off `pool.request()` below is used only to extract that
+  // deterministic text; nothing is ever executed on it. `shiftRange` is
+  // undefined for every existing caller, so `shiftFrag` is null and this is
+  // a no-op — behaviour is byte-identical to before this task.
+  const shiftAlias = { date: 'shift_date', code: 'shift_code' };
+  const shiftFrag = shiftRange ? shiftRangeClause(shiftRange, shiftAlias, pool.request()) : null;
+  const bindShift = (r: SqlRequest) => {
+    if (!shiftRange) return;
+    r.input('srFrom', mssql.Date, shiftRange.from);
+    r.input('srFromOrd', mssql.Int, shiftOrd(shiftRange.fromShift));
+    r.input('srTo', mssql.Date, shiftRange.to);
+    r.input('srToOrd', mssql.Int, shiftOrd(shiftRange.toShift));
+  };
+
   // Everything but the plausibility predicate, which plausibleWhere binds per
   // request below (its parameters must be on the request that runs).
-  const base = base0 + (genFrag.sql ? ` AND ${genFrag.sql}` : '');
+  const base = base0 + (genFrag.sql ? ` AND ${genFrag.sql}` : '') + (shiftFrag ? ` AND ${shiftFrag}` : '');
   const whereOn = (r: SqlRequest) => `${base} AND ${plausibleWhere(r, col, plaus)}`;
 
   // 1. Overall summary — one pass, no row transfer. Drives the bucket sizing.
@@ -559,6 +608,7 @@ export async function getWeightSpc(
   if (shift) sumReq.input('shift', mssql.VarChar(10), shift);
   if (stationFilter) sumReq.input('station', mssql.Int, station);
   bindGen(sumReq);
+  bindShift(sumReq);
   const sumWhere = whereOn(sumReq);
   const sumRes = await sumReq
     .query<{
@@ -590,6 +640,7 @@ export async function getWeightSpc(
   if (shift) medReq.input('shift', mssql.VarChar(10), shift);
   if (stationFilter) medReq.input('station', mssql.Int, station);
   bindGen(medReq);
+  bindShift(medReq);
   const medWhere = whereOn(medReq);
   const medRes = await medReq.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(${col} AS float)) OVER () med
@@ -633,6 +684,7 @@ export async function getWeightSpc(
     if (shift) r.input('shift', mssql.VarChar(10), shift);
     if (stationFilter) r.input('station', mssql.Int, station);
     bindGen(r);
+    bindShift(r);
     whereOn(r);
     extra?.(r);
     return r;
@@ -644,12 +696,38 @@ export async function getWeightSpc(
     bucketMinutes >= 1440
       ? 'CAST(shift_date AS datetime2(3))'
       : `DATEADD(MINUTE, (DATEDIFF(MINUTE, 0, production_ts_utc) / @bucketMin) * @bucketMin, 0)`;
-  const sgRes = await req().query<{ b: Date; n: number; mean: number; s: number | null }>(
-    `SELECT ${bucketExpr} b, COUNT(*) n, AVG(CAST(${col} AS float)) mean, STDEV(CAST(${col} AS float)) s
+  // FIRST/LAST SHIFT IN THE GROUP (chart overhaul wave 2, Task TB1, 28 Sep
+  // 2026), so the web can snap a brush drag to a whole shift. A bucket can
+  // (and almost always does, at hourly or daily width) span more than one
+  // shift, so this is not the same thing as `ts` (the bucket's own start).
+  // Ordered by the SHIFT ordinal (shiftRange.ts's shiftOrd: morning=1,
+  // evening=2, night=3), not by shift_date alone, exactly as
+  // shiftRangeClause's own comparison does — a bucket cannot straddle two
+  // different generations' worth of shift_code values, so a single integer
+  // sort key (calendar day * 10 + ordinal) is a safe, monotonic proxy for
+  // chronological shift order and is cheap to MIN/MAX in one pass rather
+  // than needing a correlated subquery per bucket.
+  const shiftKeyExpr =
+    `(DATEDIFF(day, '2000-01-01', shift_date) * 10 + ` +
+    `(CASE shift_code WHEN 'morning' THEN 1 WHEN 'evening' THEN 2 WHEN 'night' THEN 3 ELSE 0 END))`;
+  const sgRes = await req().query<{
+    b: Date; n: number; mean: number; s: number | null; minShiftKey: number | null; maxShiftKey: number | null;
+  }>(
+    `SELECT ${bucketExpr} b, COUNT(*) n, AVG(CAST(${col} AS float)) mean, STDEV(CAST(${col} AS float)) s,
+            MIN(${shiftKeyExpr}) minShiftKey, MAX(${shiftKeyExpr}) maxShiftKey
      FROM ${table} WHERE ${where}
      GROUP BY ${bucketExpr} ORDER BY b`,
   );
   const rawSg = sgRes.recordset;
+  const SHIFT_KEY_EPOCH_MS = Date.parse('2000-01-01T00:00:00.000Z');
+  const SHIFT_ORD_NAME: Record<number, ShiftName> = { 1: 'morning', 2: 'evening', 3: 'night' };
+  /** Inverse of the SQL `shiftKeyExpr` above: decodes one (shift_date, shift_code) pair back out of the composite integer. */
+  function decodeShiftKey(key: number): { date: string; code: ShiftName } {
+    const days = Math.floor(key / 10);
+    const ord = key % 10;
+    const date = new Date(SHIFT_KEY_EPOCH_MS + days * 86_400_000).toISOString().slice(0, 10);
+    return { date, code: SHIFT_ORD_NAME[ord] ?? 'morning' };
+  }
 
   // pooled within-subgroup σ = √( Σ(n_i−1)s_i² / Σ(n_i−1) ) — the valid
   // short-term σ; interleaving doesn't corrupt it (constant station mix per bucket).
@@ -740,6 +818,12 @@ export async function getWeightSpc(
       sLcl = Math.max(0, stdevWithin * (1 - half));
       if (g.s != null) sViolates = g.s > sUcl || g.s < sLcl;
     }
+    // A group always has at least one row (COUNT(*) n >= 1 is how the row
+    // exists at all), so minShiftKey/maxShiftKey are never null in practice —
+    // `?? 0` only guards the type, decoding to 2000-01-01/morning, which
+    // would be visibly wrong rather than silently plausible if it ever fired.
+    const first = decodeShiftKey(g.minShiftKey ?? 0);
+    const last = decodeShiftKey(g.maxShiftKey ?? 0);
     return {
       ts: new Date(g.b).toISOString(),
       n: g.n,
@@ -752,6 +836,10 @@ export async function getWeightSpc(
       xViolates: xLimitsValid && (g.mean > xUcl || g.mean < xLcl),
       sViolates,
       nelson: [], // filled below — needs the whole series, not just this one subgroup
+      firstShiftDate: first.date,
+      firstShiftCode: first.code,
+      lastShiftDate: last.date,
+      lastShiftCode: last.code,
     };
   });
   const xbarOutOfControl = subgroups.filter((g) => g.xViolates).length;
