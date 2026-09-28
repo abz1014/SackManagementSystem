@@ -12,6 +12,11 @@
 > fifteen asks, ordered by what each unblocks — is the new
 > [`IFL-OPEN-QUESTIONS.md`](IFL-OPEN-QUESTIONS.md).
 
+**Commit-count note, added 28 Sep 2026:** `git rev-list --count origin/main..HEAD` measured
+**251** on this date. Every older "N commits ahead of origin/main" figure elsewhere in this
+file (85, 90 ["80" below], 179, ...) is a historical snapshot taken on the date its own
+passage states, left as written rather than rewritten in place.
+
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
@@ -247,12 +252,18 @@ without re-checking `DEFECTS.md` Part 4):** RT-014 (no response-size cap —
 **fixed 24 Sep 2026, `855045f`, see §2's dated entry above; do not read this
 line as current**),
 RT-016 (an invalid calendar date crashes the DB driver instead of being
-validated), RT-017 (MachineProduct's on-screen column clipping — distinct
-from CLAUDE.md's Phase 9, which only suppressed it in *print*), RT-018 (a
-retired product shown as the live target with no marker), RT-019/RT-020
+validated — **checked 28 Sep 2026: still open, no fix commit found**), RT-017
+(MachineProduct's on-screen column clipping — distinct
+from CLAUDE.md's Phase 9, which only suppressed it in *print* —
+**fixed 25 Sep 2026, `fb9fd9d`, see DEFECTS.md Part 8; do not read this line
+as current**), RT-018 (a
+retired product shown as the live target with no marker — **fixed 25 Sep
+2026, `c52a34d`, see DEFECTS.md Part 8; do not read this line as current**),
+RT-019/RT-020
 (Nelson rules and the days-to-limit projection's lack of a confidence
 interval — an owner decision pending, four options already put to them,
-`DEFECTS.md` D-10), RT-022/RT-031 (weight-basis/shift-rule time-versioning),
+`DEFECTS.md` D-10; **RT-020 itself fixed 25 Sep 2026, `b182297`, see
+DEFECTS.md Part 8 — RT-019 remains a pending owner decision**), RT-022/RT-031 (weight-basis/shift-rule time-versioning),
 RT-024 (`.env`'s PDAS comment still contradicts the flag it sits above —
 `DEFECTS.md` D-12), RT-025 (`shift_code` never recomputed), RT-026 (rank
 crosscheck covers ~6 of ~25–32 elevated-rank routes), RT-027 (misleading
