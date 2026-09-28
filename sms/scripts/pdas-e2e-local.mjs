@@ -62,10 +62,19 @@
  *          (os.hostname() + '\SQLEXPRESS', compared case-insensitively);
  *        - `DB_NAME()` is EXACTLY `PDAS_TP1U2_SEP07` — not merely
  *          `_SEP07`-suffixed, the live value itself;
- *        - `.env`'s own PDAS_WRITE_SERVER / PDAS_WRITE_DATABASE (when set)
- *          agree with what @@SERVERNAME / DB_NAME() just reported, so a
- *          stray override (PDAS_E2E_SERVER / PDAS_E2E_DATABASE) can never
- *          silently diverge from what `.env` itself says is configured.
+ *        - `.env`'s own PDAS_WRITE_SERVER, when set, is either a recognised
+ *          local alias (localhost/127.0.0.1/./((local))/::1) or this
+ *          machine's own hostname spelled out — NOT a literal string match
+ *          against the live `@@SERVERNAME`, which would refuse "localhost"
+ *          pointed at itself (fixed 28 Sep 2026; see
+ *          `scripts/pdas-e2e-guard.mjs`);
+ *        - `.env`'s own PDAS_WRITE_DATABASE, when set, agrees with what
+ *          `DB_NAME()` just reported, so a stray override (PDAS_E2E_SERVER /
+ *          PDAS_E2E_DATABASE) can never silently diverge from what `.env`
+ *          itself says is configured.
+ *      This whole check is a pure function, `checkPdasE2ePreflight` in
+ *      `scripts/pdas-e2e-guard.mjs`, unit tested at
+ *      `test/pdasE2eGuard.test.ts` without touching any database.
  *   3. A leftover-data check (new, Task P): if any row already carries this
  *      script's own tag pattern ('E2E-%', in Blends/Counts/TubeTypes/
  *      Materials.MaterialDesc1/Pallets.Lot), the run refuses — that means an
@@ -145,6 +154,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
+import { checkPdasE2ePreflight } from './pdas-e2e-guard.mjs';
 
 // ---------------------------------------------------------------------------
 // GUARD LAYER 1 — static, pre-connection. Refuses to run against anything
@@ -294,24 +304,26 @@ async function abort(reason) {
   const pre = await pdasRawPool.request().query('SELECT @@SERVERNAME AS srv, DB_NAME() AS db');
   const liveSrv = String(pre.recordset[0]?.srv ?? '');
   const liveDb = String(pre.recordset[0]?.db ?? '');
-  const expectedSrv = `${os.hostname()}\\SQLEXPRESS`;
-  console.log(`Live pre-flight: @@SERVERNAME="${liveSrv}" DB_NAME()="${liveDb}" (expected "${expectedSrv}" / "PDAS_TP1U2_SEP07")`);
+  const hostname = os.hostname();
+  console.log(`Live pre-flight: @@SERVERNAME="${liveSrv}" DB_NAME()="${liveDb}" (expected host "${hostname}" / instance "SQLEXPRESS" / db "PDAS_TP1U2_SEP07")`);
 
-  if (liveSrv.toLowerCase() !== expectedSrv.toLowerCase()) {
-    await abort(`@@SERVERNAME is "${liveSrv}", expected "${expectedSrv}" (this machine's hostname + \\SQLEXPRESS).`);
-  }
-  if (liveDb !== 'PDAS_TP1U2_SEP07') {
-    await abort(`DB_NAME() is "${liveDb}", expected EXACTLY "PDAS_TP1U2_SEP07".`);
-  }
-  if (baseEnv.PDAS_WRITE_SERVER && baseEnv.PDAS_WRITE_SERVER.trim() !== '') {
-    const envHost = baseEnv.PDAS_WRITE_SERVER.split('\\')[0].split(',')[0].trim().toLowerCase();
-    const liveHost = liveSrv.split('\\')[0].split(',')[0].trim().toLowerCase();
-    if (envHost !== liveHost) {
-      await abort(`.env's PDAS_WRITE_SERVER ("${baseEnv.PDAS_WRITE_SERVER}") does not match the live server ("${liveSrv}").`);
-    }
-  }
-  if (baseEnv.PDAS_WRITE_DATABASE && baseEnv.PDAS_WRITE_DATABASE.trim() !== '' && baseEnv.PDAS_WRITE_DATABASE.trim() !== liveDb) {
-    await abort(`.env's PDAS_WRITE_DATABASE ("${baseEnv.PDAS_WRITE_DATABASE}") does not match the live database ("${liveDb}").`);
+  // Delegated to scripts/pdas-e2e-guard.mjs (pure, unit tested at
+  // test/pdasE2eGuard.test.ts) — fixed 28 Sep 2026: this used to compare
+  // .env's PDAS_WRITE_SERVER ("localhost") literally against the live
+  // @@SERVERNAME host ("DESKTOP-G1MSH4I"), so it refused every valid local
+  // setup before any case ran. It now accepts a recognised local alias
+  // (localhost/127.0.0.1/./((local))/::1) OR this machine's own hostname,
+  // while still requiring the LIVE connection to be this exact machine's
+  // SQLEXPRESS instance and exactly PDAS_TP1U2_SEP07.
+  const verdict = checkPdasE2ePreflight({
+    liveSrv,
+    liveDb,
+    envServer: baseEnv.PDAS_WRITE_SERVER,
+    envDatabase: baseEnv.PDAS_WRITE_DATABASE,
+    hostname,
+  });
+  if (!verdict.ok) {
+    await abort(verdict.reason);
   }
   console.log('Live pre-flight PASSED.');
 }
