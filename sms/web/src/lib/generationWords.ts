@@ -31,7 +31,7 @@ import type { LiveGenerationNote } from '../api';
 /** The generation's own name, as a person should read it. */
 export function generationName(g: LiveGenerationNote['generation']): string | null {
   if (!g) return null;
-  return g.label ?? g.sourceDb ?? `data copy ${g.ordinal}`;
+  return g.label ?? g.sourceDb ?? `data batch ${g.ordinal}`;
 }
 
 /**
@@ -132,9 +132,9 @@ export function healthExcludedLine(n: LiveGenerationNote, newerClock: string | n
 export function machineGridGenerationLine(n: LiveGenerationNote, newerClock: string | null): string | null {
   const mine = generationName(n.generation);
   if (!mine) return null;
-  if (newerClock == null) return `Read from ${mine}, one data copy.`;
+  if (newerClock == null) return `Read from ${mine}, one data batch.`;
   return (
-    `Read from ${mine}, one data copy. Its readings end here; newer readings to ${newerClock} belong to ` +
-    `another data copy and would put two tables' machines in one grid, so they are not shown.`
+    `Read from ${mine}, one data batch. Its readings end here; newer readings to ${newerClock} belong to ` +
+    `another data batch and would put two tables' machines in one grid, so they are not shown.`
   );
 }

@@ -123,7 +123,7 @@ describe('the sentences themselves', () => {
 
   it('the machine grid names its window’s generation, with and without a newer one', () => {
     expect(machineGridGenerationLine(GENERATION_FIXTURE, null)).toBe(
-      'Read from September copy - cones, one data copy.',
+      'Read from September copy - cones, one data batch.',
     );
     const s = machineGridGenerationLine(ENDED, '12:29 PM 22 Sep')!;
     expect(s).toContain('12:29 PM 22 Sep');

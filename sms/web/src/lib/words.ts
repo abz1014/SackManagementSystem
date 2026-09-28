@@ -586,7 +586,7 @@ export const W = {
     prov: {
       sourceTable: 'Source table',
       sourceSystem: 'Source system',
-      generation: 'Generation',
+      generation: 'Data batch',
       sourceRow: 'Source row id',
       readAt: 'Read into this system',
       insertedAt: 'Written by the plant',
@@ -725,11 +725,12 @@ export const W = {
        them SILENTLY is the no-over-claiming rule read backwards, because the
        screen then implies the period is fully represented when it is not.
        Measured on the dev copy: a 21 Aug - 15 Sep window held 219,942
-       readings and the chart drew 55,058 of them. Deliberately says
-       "generation", never how a particular generation arose — the case this
-       has to read correctly for is IFL's own table rebuild. */
+       readings and the chart drew 55,058 of them. Says "data batch", the one
+       term this app now uses on screen for a physical table generation,
+       never how a particular batch arose — the case this has to read
+       correctly for is IFL's own table rebuild. */
     oneGeneration: (shown: string, excluded: string) =>
-      `This chart covers one generation of the source tables: ${shown} readings. Another ${excluded} readings in this period belong to a different generation — the tables were rebuilt and their numbering restarted — and are left out rather than mixed in, because the two are not one continuous record.`,
+      `This chart covers one data batch of the source tables: ${shown} readings. Another ${excluded} readings in this period belong to a different data batch — the tables were rebuilt and their numbering restarted — and are left out rather than mixed in, because the two are not one continuous record.`,
     /* One pair of limit lines, one version of the tolerance. */
     limitsChanged: (n: number) =>
       n === 1
