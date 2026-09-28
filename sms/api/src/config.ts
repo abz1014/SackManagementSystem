@@ -111,6 +111,21 @@ const schema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
   /**
+   * DEV ONLY, off by default: whether the live-scope rule (`resolveLiveScope`,
+   * live.ts) may pick the plant-simulator generation instead of always
+   * preferring the newest REAL one (the owner's 23 Sep 2026 decision — see
+   * live.ts's own file header). Added 28 Sep 2026 because the dev PC runs
+   * both the frozen real September copy AND the simulator at once, so Line
+   * always reads "cannot tell" there; requesting this flag does not by
+   * itself turn it on — `resolveLiveSimulator` below (config.ts) still
+   * requires the source database to be a `_SIM` one on a local server, so
+   * the flag can never do anything against a real plant connection.
+   */
+  liveAllowSimulator: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /**
    * Whether to believe X-Forwarded-For. Defaults FALSE, which is correct for the
    * current deployment (browsers hit the API directly on :4000).
    *
@@ -231,9 +246,18 @@ const schema = z.object({
    * guards below compare the writer's own settings against. This does not
    * widen "the API holds no IFL connection string" (line ~98): no pool is
    * ever opened with these, they are two strings held for comparison only.
+   *
+   * EXTENDED 28 Sep 2026: IFL_DB_NAME_DATA and IFL_DB_SERVER — the sync
+   * worker's own source database name and server (sync-worker/src/config.ts)
+   * — are read here for exactly the same reason and under the exact same
+   * rule: `resolveLiveSimulator` below compares them against a `_SIM` name
+   * and a local-server allowlist to decide whether LIVE_ALLOW_SIMULATOR may
+   * take effect. No pool is ever opened with either value.
    */
   iflDbNamePdas: z.string().optional(),
   iflDbUser: z.string().optional(),
+  iflDbNameData: z.string().optional(),
+  iflDbServer: z.string().optional(),
 });
 
 /** How the PDAS write path resolved at startup — and, if not, why. */
@@ -241,6 +265,18 @@ export interface PdasWriteConfig {
   enabled: boolean;
   db: DbConfig | null;
   /** Human-readable reason the path is unavailable; null when enabled. */
+  disabledReason: string | null;
+}
+
+/**
+ * How LIVE_ALLOW_SIMULATOR resolved at startup — and, if not enabled, why.
+ * See `resolveLiveSimulator` below for the two guards.
+ */
+export interface LiveSimulatorConfig {
+  /** Whether LIVE_ALLOW_SIMULATOR=true was asked for at all, regardless of outcome. */
+  requested: boolean;
+  enabled: boolean;
+  /** Human-readable reason the flag has no effect; null when enabled. */
   disabledReason: string | null;
 }
 
@@ -266,6 +302,13 @@ export interface ApiConfig {
   dbRequestTimeoutMs?: number;
   appDb: DbConfig;
   pdasWrite: PdasWriteConfig;
+  /**
+   * Optional on the type for the same reason as passwordMinLength above:
+   * hand-built ApiConfig fixtures elsewhere in the suite predate this field.
+   * `app.ts`'s createApp treats a missing value as "not enabled" (falls back
+   * to false) — see `setLiveScopeIncludesSimulator` at the top of createApp.
+   */
+  liveSimulator?: LiveSimulatorConfig;
 }
 
 /**
@@ -366,6 +409,65 @@ function resolvePdasWrite(
   };
 }
 
+/** A server name is "local" once any `\instance` suffix is stripped. */
+const LOCAL_SERVER_NAMES = new Set(['localhost', '127.0.0.1', '.', '(local)', '::1']);
+
+/** `TP1-PDAS\PDAS` → `TP1-PDAS`; `localhost\SQLEXPRESS` → `localhost`; a bare name is unchanged. */
+function stripInstance(server: string): string {
+  const i = server.indexOf('\\');
+  return i === -1 ? server : server.slice(0, i);
+}
+
+/**
+ * Resolve LIVE_ALLOW_SIMULATOR from its flag and the sync worker's own
+ * source-database settings (read, never connected to — see the schema
+ * comment above `iflDbNamePdas`). Never throws: modelled on
+ * `resolvePdasWrite` above, same shape, same reasoning — a flag that cannot
+ * take effect degrades to "off, and here is why" rather than failing
+ * startup, because this is a dev convenience, never something the plant
+ * deployment depends on.
+ *
+ * Two guards, both required:
+ *  - IFL_DB_NAME_DATA must end in `_SIM` (case-insensitive) — the same
+ *    invariant `scripts/simulate-plant.mjs` itself enforces on write
+ *    (CLAUDE.md, "Live rehearsal and the plant simulator": it refuses any
+ *    target whose name does not end in `_SIM`), so this guard can never be
+ *    satisfied by a real IFL database no matter how the flag is set.
+ *  - IFL_DB_SERVER, with any `\instance` suffix stripped, must be a local
+ *    server name — this flag is dev-only and must never do anything against
+ *    a server reached over the plant network.
+ * An unset LIVE_ALLOW_SIMULATOR (the default) never reaches either guard:
+ * `requested` is false and the flag is refused before either value is read.
+ */
+export function resolveLiveSimulator(
+  requested: boolean,
+  iflDbNameData: string | undefined,
+  iflDbServer: string | undefined,
+): LiveSimulatorConfig {
+  if (!requested) {
+    return { requested: false, enabled: false, disabledReason: 'LIVE_ALLOW_SIMULATOR is not true.' };
+  }
+  if (iflDbNameData == null || !/_SIM$/i.test(iflDbNameData)) {
+    return {
+      requested: true,
+      enabled: false,
+      disabledReason:
+        `IFL_DB_NAME_DATA (${JSON.stringify(iflDbNameData ?? null)}) does not end in _SIM. ` +
+        `LIVE_ALLOW_SIMULATOR only takes effect against a plant-simulator database.`,
+    };
+  }
+  if (iflDbServer == null || !LOCAL_SERVER_NAMES.has(stripInstance(iflDbServer).toLowerCase())) {
+    return {
+      requested: true,
+      enabled: false,
+      disabledReason:
+        `IFL_DB_SERVER (${JSON.stringify(iflDbServer ?? null)}) is not a local server. ` +
+        `LIVE_ALLOW_SIMULATOR is a development convenience and must never take effect over the plant network.`,
+    };
+  }
+  return { requested: true, enabled: true, disabledReason: null };
+}
+
 export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const parsed = schema.parse({
     port: env.API_PORT,
@@ -373,6 +475,7 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     cacheTtlSeconds: env.CACHE_TTL_SECONDS,
     lineName: env.LINE_NAME,
     liveAllowAsOf: env.LIVE_ALLOW_AS_OF,
+    liveAllowSimulator: env.LIVE_ALLOW_SIMULATOR,
     trustProxy: env.TRUST_PROXY,
     tlsCertPath: env.TLS_CERT_PATH,
     tlsKeyPath: env.TLS_KEY_PATH,
@@ -408,10 +511,15 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     // never used to open a connection. See the schema comment above.
     iflDbNamePdas: env.IFL_DB_NAME_PDAS,
     iflDbUser: env.IFL_DB_USER,
+    // Read for the two guards in resolveLiveSimulator only — same rule,
+    // never used to open a connection.
+    iflDbNameData: env.IFL_DB_NAME_DATA,
+    iflDbServer: env.IFL_DB_SERVER,
   });
-  const { pdasWriteEnabled, pdasWriteDb, iflDbNamePdas, iflDbUser, ...rest } = parsed;
+  const { pdasWriteEnabled, pdasWriteDb, iflDbNamePdas, iflDbUser, liveAllowSimulator, iflDbNameData, iflDbServer, ...rest } = parsed;
   return {
     ...rest,
     pdasWrite: resolvePdasWrite(pdasWriteEnabled, pdasWriteDb, { dbNamePdas: iflDbNamePdas, user: iflDbUser }),
+    liveSimulator: resolveLiveSimulator(liveAllowSimulator, iflDbNameData, iflDbServer),
   } as ApiConfig;
 }
