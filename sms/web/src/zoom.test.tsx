@@ -94,9 +94,12 @@ const HEALTH_FIXTURE: HealthReport = {
   service: { version: 'test', uptimeSeconds: 3600, startedAtUtc: '2026-09-07T00:00:00Z', pid: 1 },
   database: { ok: true, latencyMs: 4, sizeMb: 120, capMb: 10240, pctOfCap: 1.2 },
   acquisition: { kind: 'ok', ageSeconds: 42, cadenceSeconds: 60, halted: null, generation: LIVE_FIXTURE.data.lines[0]!.generation },
-  backup: { dir: 'C:\\backups', newestFile: 'sidecar.bak', newestAtUtc: '2026-09-07T03:00:00Z', ageDays: 0.5, warning: false },
+  backup: { dir: 'C:\\backups', newestFile: 'sidecar.bak', newestAtUtc: '2026-09-07T03:00:00Z', ageDays: 0.5, warning: false, verified: true, newestUnverified: false },
   degradedReason: null,
   pdasWrite: { enabled: false, canReadBack: null, missingSelect: [], missingExecute: [], unverifiedSinceStartup: [], lastVerifiedUtc: null },
+  disk: { appDataFreeMb: 5000, backupFreeMb: 5000 },
+  lastVerifyRunUtc: null,
+  workerLastPassUtc: '2026-09-07T03:00:00Z',
 };
 
 const RECONCILIATION_FIXTURE: Envelope<ReconciliationData> = {

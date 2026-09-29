@@ -54,7 +54,7 @@
  * warning threshold because the schedule is nightly: one missed night is a
  * blip, two is a stopped task.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, statfsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ConnectionPool } from 'mssql';
@@ -79,6 +79,16 @@ export const EXPRESS_CAP_MB = 10240;
 export const SIZE_WARN_PCT = 80;
 /** A backup older than this many days is a warning (the schedule is nightly). */
 export const BACKUP_WARN_DAYS = 2;
+/**
+ * Free disk space, MB, below which the probe degrades (W1-C, 29 Sep 2026,
+ * failure analysis F-36). Named rather than inline so the same number backs
+ * both the fold and the sentence that explains it. SQL Server Express can
+ * still be well under its 10 GB data-file cap while the VOLUME itself is
+ * nearly full — the log file, tempdb, other databases and this script's own
+ * backup files all share the same disk — so this is a second, independent
+ * check, not a restatement of EXPRESS_CAP_MB/SIZE_WARN_PCT above.
+ */
+export const FREE_DISK_WARN_MB = 2048;
 
 export type HealthStatus = 'ok' | 'degraded' | 'down';
 
@@ -123,11 +133,35 @@ export interface AcquisitionHealth {
 
 export interface BackupHealth {
   dir: string;
+  /**
+   * The file being REPORTED — not necessarily the physically newest .bak in
+   * the directory. When the newest one failed verification (see `verified`
+   * requirements in `backupHealth`'s own doc comment below), this steps back
+   * to the newest VERIFIED file instead, so the screen never states a
+   * restorability claim about a file that was never proven restorable.
+   */
   newestFile: string | null;
   newestAtUtc: string | null;
   ageDays: number | null;
-  /** True when there is no backup or the newest is older than BACKUP_WARN_DAYS. */
+  /** True when there is no verified backup, the newest is older than BACKUP_WARN_DAYS, or the newest .bak is unverified. */
   warning: boolean;
+  /** Whether `newestFile` itself carries a matching, size-consistent `.verified.json` marker. False only when nothing verified exists at all. */
+  verified: boolean;
+  /**
+   * True when the actual physically-newest `.bak` in the directory is NOT
+   * verified (no marker, a size mismatch, or an unreadable marker) — whether
+   * or not an older verified file was found to report instead. The screen's
+   * job is to say this plainly even when `newestFile` above is a fine, older
+   * backup: "the newest one isn't proven yet" is a fact worth stating on its
+   * own, not silently absorbed into the older file's own good numbers.
+   */
+  newestUnverified: boolean;
+}
+
+/** One host volume's free space, MB, or null when it could not be measured (e.g. `statfsSync` unsupported/denied — never fatal). */
+export interface DiskHealth {
+  appDataFreeMb: number | null;
+  backupFreeMb: number | null;
 }
 
 /**
@@ -159,6 +193,28 @@ export interface HealthReport {
   degradedReason: string | null;
   /** Only for a signed-in caller, or when no pdas dep was supplied at all; null otherwise. */
   pdasWrite: PdasWriteHealth | null;
+  /** Free disk space on the app-data and backup volumes. Redacted like backup/acquisition for an anonymous caller. */
+  disk: DiskHealth | null;
+  /**
+   * `sms.verify_run`'s newest `started_at_utc` — informational only, NEVER
+   * folded into `status` (see `foldStatus`'s own doc: this is the record of
+   * a MANUAL run someone chose to make, not a live check, so its absence or
+   * age says nothing about whether the system is healthy right now). Null
+   * when nothing has run, the table does not exist yet, or the caller is
+   * anonymous.
+   */
+  lastVerifyRunUtc: string | null;
+  /**
+   * The newest `sms.sync_run.finished_at_utc` for this line, REGARDLESS of
+   * `rows_written` — a heartbeat proving the worker process itself is still
+   * executing passes, kept deliberately separate from `acquisition.ageSeconds`
+   * (which answers "how stale is the DATA", not "is the recorder still
+   * checking in"). A worker that runs every 60 s and correctly finds zero new
+   * rows on a quiet line looks identical to a dead worker under the data-age
+   * figure alone; this tells them apart. Null when unauthenticated or no
+   * sync_run row exists yet.
+   */
+  workerLastPassUtc: string | null;
 }
 
 /* ------------------------------------------------------------ the service */
@@ -346,57 +402,232 @@ export async function dqBlockingFindings(pool: ConnectionPool): Promise<number> 
   return Number(r.recordset[0]?.n ?? 0);
 }
 
+/**
+ * `sms.sync_run`'s newest `finished_at_utc` for this line, regardless of
+ * `rows_written` — see HealthReport.workerLastPassUtc's own doc for why this
+ * is deliberately not folded into `status` or read from `acquisitionHealth`
+ * (which already reports data AGE, a different question). Defensive against
+ * an unmigrated database, same reasoning as dqBlockingFindings above.
+ */
+export async function workerLastPassUtc(pool: ConnectionPool, lineId: number): Promise<string | null> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ t: Date | null }>(`SELECT MAX(finished_at_utc) AS t FROM sms.sync_run WHERE line_id = @line`);
+  const t = r.recordset[0]?.t ?? null;
+  return t == null ? null : new Date(t).toISOString();
+}
+
+/**
+ * `sms.verify_run`'s newest `started_at_utc` for this line — informational
+ * only (HealthReport.lastVerifyRunUtc's own doc explains why it is never
+ * folded into `status`). Migration 039 is recent enough that a database
+ * built before it simply lacks the table; that must not fail the probe.
+ */
+export async function lastVerifyRunUtc(pool: ConnectionPool, lineId: number): Promise<string | null> {
+  const r = await pool
+    .request()
+    .input('line', mssql.Int, lineId)
+    .query<{ t: Date | null }>(`SELECT MAX(started_at_utc) AS t FROM sms.verify_run WHERE line_id = @line`);
+  const t = r.recordset[0]?.t ?? null;
+  return t == null ? null : new Date(t).toISOString();
+}
+
+/* ----------------------------------------------------------------- disk */
+
+/** The one fs call the disk check needs, injectable for tests. */
+export interface DiskFs {
+  /** Bytes available to a non-privileged caller and the block size, or null when the path cannot be statted (unsupported platform, permission, or a path that does not exist — never fatal). */
+  statfs(path: string): { availableBytes: number } | null;
+}
+const realDiskFs: DiskFs = {
+  statfs: (path) => {
+    try {
+      const s = statfsSync(path);
+      // `bavail` (available to an unprivileged user) rather than `bfree`
+      // (total free, including space reserved for root) — Node's Windows
+      // implementation reports the same figure GetDiskFreeSpaceEx does for
+      // the caller's own account, which is the number that actually bounds
+      // what this process could still write.
+      return { availableBytes: Number(s.bavail) * Number(s.bsize) };
+    } catch {
+      return null;
+    }
+  },
+};
+
+/** MB free on the volume holding `path`, or null when it could not be measured. Read-only, never fatal. */
+export function freeDiskMb(path: string, fs: DiskFs = realDiskFs): number | null {
+  const s = fs.statfs(path);
+  if (!s || !Number.isFinite(s.availableBytes)) return null;
+  return Math.round(s.availableBytes / (1024 * 1024));
+}
+
+/**
+ * Both volumes this process cares about: where the app itself runs from
+ * (a stand-in for "the app data/SQL Server volume" — this process has no
+ * config value naming the SQL Server data directory, which lives on the
+ * server, not necessarily on this host) and where backups land. Each is
+ * independent and each is best-effort: a null on one must never suppress
+ * the other, and neither throws.
+ */
+export function diskHealth(appDataDir: string, backupDir: string, fs: DiskFs = realDiskFs): DiskHealth {
+  return { appDataFreeMb: freeDiskMb(appDataDir, fs), backupFreeMb: freeDiskMb(backupDir, fs) };
+}
+
 /* --------------------------------------------------------------- backup */
 
-/** The two fs calls the backup check needs, injectable for tests. */
+/** The fs calls the backup check needs, injectable for tests. */
 export interface BackupFs {
   readdir(dir: string): string[];
   mtimeMs(path: string): number;
+  /** Current size in bytes of the file at `path`. Only called for files that already passed `readdir`/`mtimeMs`. */
+  size(path: string): number;
+  /** The marker's raw text, or null when it does not exist or cannot be read — never throws. */
+  readText(path: string): string | null;
 }
 const realFs: BackupFs = {
   readdir: (dir) => readdirSync(dir),
   mtimeMs: (p) => statSync(p).mtimeMs,
+  size: (p) => statSync(p).size,
+  readText: (p) => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch {
+      return null;
+    }
+  },
 };
 
 /**
- * Newest `*.bak` in the backup directory by mtime. Read-only; a missing or
- * unreadable directory is "no backup", which is the warning state, not an
- * error — the operator's question is whether a backup exists, and "the
- * folder is not there" answers it.
+ * Only a `.bak` this script itself could plausibly have written: `<name>-
+ * <8-digit date>-<6-digit time>.bak`, matching `backup-appdb.ps1`'s own
+ * `"$Db-$stamp.bak"` (`Get-Date -Format "yyyyMMdd-HHmmss"`). This is a
+ * pre-filter, not the trust boundary — see `backupHealth`'s own doc for why
+ * the `.verified.json` marker is what actually decides `verified`, not this
+ * pattern alone. It exists so a PDAS backup, a manual `sqlcmd` dump, or any
+ * other `.bak` a human drops in the same folder is never even considered,
+ * regardless of whether it happens to carry a marker.
+ */
+const OWN_BAK_NAME_RE = /^[A-Za-z0-9_]+-\d{8}-\d{6}\.bak$/i;
+
+/** The shape `backup-appdb.ps1` writes to `<file>.verified.json` on a successful `RESTORE VERIFYONLY`. */
+interface BackupMarker {
+  file: string;
+  sizeBytes: number;
+  verifiedUtc: string;
+  method: string;
+}
+
+function parseMarker(text: string | null): BackupMarker | null {
+  if (text == null) return null;
+  try {
+    const m = JSON.parse(text) as Partial<BackupMarker>;
+    return typeof m.sizeBytes === 'number' && Number.isFinite(m.sizeBytes) ? (m as BackupMarker) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Newest `*.bak` this script produced, in the backup directory, BY VERIFIED
+ * STATUS then by mtime — not by mtime alone.
+ *
+ * A `.bak` counts as verified only when it has a matching `<file>.verified.
+ * json` marker (written by `backup-appdb.ps1` right after `RESTORE
+ * VERIFYONLY` passes) AND that marker's `sizeBytes` still matches the file's
+ * CURRENT size on disk — a file truncated, replaced, or corrupted after the
+ * script ran no longer matches its own marker and stops counting as
+ * verified, exactly like one that was never verified at all. PDAS backups
+ * and anything not matching this script's own naming convention are ignored
+ * outright (see OWN_BAK_NAME_RE).
+ *
+ * When the physically newest `.bak` is NOT verified, the newest VERIFIED one
+ * is reported instead (`newestUnverified: true` says so explicitly) — the
+ * screen must never state a restorability claim about a file nobody has
+ * proven restorable. Read-only; a missing or unreadable directory, or a
+ * directory with no verified `.bak` in it at all, is the warning state, not
+ * a thrown error.
  */
 export function backupHealth(dir: string, fs: BackupFs = realFs, now = Date.now()): BackupHealth {
-  let newest: { name: string; mtimeMs: number } | null = null;
+  const entries: { name: string; mtimeMs: number; verified: boolean }[] = [];
   try {
     for (const name of fs.readdir(dir)) {
-      if (!/\.bak$/i.test(name)) continue;
+      if (!OWN_BAK_NAME_RE.test(name)) continue;
       let m: number;
       try {
         m = fs.mtimeMs(join(dir, name));
       } catch {
         continue;
       }
-      if (!newest || m > newest.mtimeMs) newest = { name, mtimeMs: m };
+      const marker = parseMarker(fs.readText(join(dir, `${name}.verified.json`)));
+      let verified = false;
+      if (marker) {
+        try {
+          verified = fs.size(join(dir, name)) === marker.sizeBytes;
+        } catch {
+          verified = false;
+        }
+      }
+      entries.push({ name, mtimeMs: m, verified });
     }
   } catch {
-    newest = null;
+    // missing/unreadable directory: fall through with zero entries, same as before
   }
-  if (!newest) return { dir, newestFile: null, newestAtUtc: null, ageDays: null, warning: true };
-  const ageDays = Math.max(0, (now - newest.mtimeMs) / 86_400_000);
+  entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  if (entries.length === 0) {
+    return { dir, newestFile: null, newestAtUtc: null, ageDays: null, warning: true, verified: false, newestUnverified: false };
+  }
+
+  const actualNewest = entries[0]!;
+  const newestUnverified = !actualNewest.verified;
+  const reported = actualNewest.verified ? actualNewest : (entries.find((e) => e.verified) ?? null);
+
+  if (!reported) {
+    // Nothing verified anywhere in the directory: report the physically
+    // newest file for context (so the screen can still say a NAME and AGE),
+    // but never claim it is trustworthy.
+    const ageDays = Math.max(0, (now - actualNewest.mtimeMs) / 86_400_000);
+    return {
+      dir,
+      newestFile: actualNewest.name,
+      newestAtUtc: new Date(actualNewest.mtimeMs).toISOString(),
+      ageDays: Math.round(ageDays * 10) / 10,
+      warning: true,
+      verified: false,
+      newestUnverified: true,
+    };
+  }
+
+  const ageDays = Math.max(0, (now - reported.mtimeMs) / 86_400_000);
   return {
     dir,
-    newestFile: newest.name,
-    newestAtUtc: new Date(newest.mtimeMs).toISOString(),
+    newestFile: reported.name,
+    newestAtUtc: new Date(reported.mtimeMs).toISOString(),
     ageDays: Math.round(ageDays * 10) / 10,
-    warning: ageDays > BACKUP_WARN_DAYS,
+    warning: ageDays > BACKUP_WARN_DAYS || newestUnverified,
+    verified: true,
+    newestUnverified,
   };
 }
 
 /* ---------------------------------------------------------------- fold */
 
 /**
- * Pure: the one word a monitor reads, from the five facts — see the module
+ * Pure: the one word a monitor reads, from the six facts — see the module
  * header for why DQ findings and backup age are folded in alongside the
- * original three (pool/size/acquisition).
+ * original three (pool/size/acquisition). `lowestFreeDiskMb` (W1-C, 29 Sep
+ * 2026, failure analysis F-36) is the sixth: optional and defaulted to
+ * `null` so every pre-existing positional call site keeps compiling and
+ * behaving exactly as before when it does not pass one. `null` means "could
+ * not be measured", never "fine" — but an unmeasurable disk must not itself
+ * degrade a system that has never claimed to measure it, so only a genuine
+ * number below FREE_DISK_WARN_MB counts.
+ *
+ * `lastVerifyRunUtc`/`workerLastPassUtc` (also W1-C) deliberately have NO
+ * parameter here at all: both are informational-only by design (see their
+ * own doc comments on HealthReport) and must never move `status`.
  */
 export function foldStatus(
   db: DbProbe,
@@ -404,6 +635,7 @@ export function foldStatus(
   degradedNow: boolean,
   dqBlockingCount: number,
   backupWarning: boolean,
+  lowestFreeDiskMb: number | null = null,
 ): HealthStatus {
   if (!db.ok) return 'down';
   if (degradedNow) return 'degraded';
@@ -411,6 +643,7 @@ export function foldStatus(
   if (acq && (acq.kind === 'stale' || acq.kind === 'late' || acq.halted.length > 0)) return 'degraded';
   if (dqBlockingCount > 0) return 'degraded';
   if (backupWarning) return 'degraded';
+  if (lowestFreeDiskMb != null && lowestFreeDiskMb < FREE_DISK_WARN_MB) return 'degraded';
   return 'ok';
 }
 
@@ -433,6 +666,7 @@ export function degradedReasons(
   dqBlockingCount: number,
   backupWarning: boolean,
   backupWarningText: string | null,
+  lowestFreeDiskMb: number | null = null,
 ): string | null {
   if (markedReason != null) return markedReason;
   const reasons: string[] = [];
@@ -454,6 +688,9 @@ export function degradedReasons(
   if (backupWarning) {
     reasons.push(backupWarningText != null ? `backup: ${backupWarningText}` : 'backup is missing or stale');
   }
+  if (lowestFreeDiskMb != null && lowestFreeDiskMb < FREE_DISK_WARN_MB) {
+    reasons.push(`low disk space: ${lowestFreeDiskMb} MB free (below ${FREE_DISK_WARN_MB} MB)`);
+  }
   return reasons.length > 0 ? reasons.join('; ') : null;
 }
 
@@ -462,6 +699,9 @@ export interface HealthDeps {
   acquisitionHealth: typeof acquisitionHealth;
   dqBlockingFindings: typeof dqBlockingFindings;
   backupHealth: (dir: string) => BackupHealth;
+  diskHealth: (appDataDir: string, backupDir: string) => DiskHealth;
+  workerLastPassUtc: typeof workerLastPassUtc;
+  lastVerifyRunUtc: typeof lastVerifyRunUtc;
   now: () => number;
 }
 const realDeps: HealthDeps = {
@@ -469,6 +709,9 @@ const realDeps: HealthDeps = {
   acquisitionHealth,
   dqBlockingFindings,
   backupHealth: (dir) => backupHealth(dir),
+  diskHealth: (appDataDir, backupDir) => diskHealth(appDataDir, backupDir),
+  workerLastPassUtc,
+  lastVerifyRunUtc,
   now: Date.now,
 };
 
@@ -497,13 +740,15 @@ export interface PdasHealthDeps {
  */
 export async function getHealth(
   pool: ConnectionPool,
-  opts: { lineId: number; backupDir: string; authenticated: boolean; pdas?: PdasHealthDeps },
+  opts: { lineId: number; backupDir: string; authenticated: boolean; appDataDir?: string; pdas?: PdasHealthDeps },
   deps: HealthDeps = realDeps,
 ): Promise<HealthReport> {
   const db = await deps.probeDatabase(pool);
   if (db.ok) clearDegraded();
   let acq: AcquisitionFacts | null = null;
   let dqBlocking = 0;
+  let workerLastPass: string | null = null;
+  let verifyRunLast: string | null = null;
   if (db.ok) {
     try {
       acq = await deps.acquisitionHealth(pool, opts.lineId);
@@ -515,18 +760,35 @@ export async function getHealth(
     } catch {
       dqBlocking = 0; // same reasoning: sms.dq_finding missing must not fail the probe
     }
+    try {
+      workerLastPass = await deps.workerLastPassUtc(pool, opts.lineId);
+    } catch {
+      workerLastPass = null; // an unmigrated sms.sync_run must not fail the probe
+    }
+    try {
+      verifyRunLast = await deps.lastVerifyRunUtc(pool, opts.lineId);
+    } catch {
+      verifyRunLast = null; // sms.verify_run (migration 039) may not exist yet; informational only anyway
+    }
   }
   const backup = deps.backupHealth(opts.backupDir);
+  // Local filesystem reads, like the backup check — always run regardless of
+  // db.ok, and each volume is independent (see diskHealth's own doc).
+  const disk = deps.diskHealth(opts.appDataDir ?? process.cwd(), opts.backupDir);
+  const diskFigures = [disk.appDataFreeMb, disk.backupFreeMb].filter((n): n is number => n != null);
+  const lowestFreeDiskMb = diskFigures.length > 0 ? Math.min(...diskFigures) : null;
   const markedReason = degradedReason();
-  const status = foldStatus(db, acq, markedReason != null, dqBlocking, backup.warning);
+  const status = foldStatus(db, acq, markedReason != null, dqBlocking, backup.warning, lowestFreeDiskMb);
   // RT24-12: degradedReason must name every signal that actually degraded
   // `status`, not just a pool error — see degradedReasons' own doc above.
   const backupWarningText = backup.warning
     ? backup.newestFile == null
       ? 'no backup found'
-      : `newest backup is ${backup.ageDays ?? '?'} day(s) old`
+      : backup.newestUnverified
+        ? 'newest backup not verified'
+        : `newest backup is ${backup.ageDays ?? '?'} day(s) old`
     : null;
-  const reason = degradedReasons(db, acq, markedReason, dqBlocking, backup.warning, backupWarningText);
+  const reason = degradedReasons(db, acq, markedReason, dqBlocking, backup.warning, backupWarningText, lowestFreeDiskMb);
   const pct = db.sizeMb == null ? null : Math.round((db.sizeMb / EXPRESS_CAP_MB) * 1000) / 10;
   const a = opts.authenticated;
 
@@ -576,5 +838,8 @@ export async function getHealth(
     backup: a ? backup : null,
     degradedReason: a ? reason : null,
     pdasWrite: a ? pdasWrite : null,
+    disk: a ? disk : null,
+    lastVerifyRunUtc: a ? verifyRunLast : null,
+    workerLastPassUtc: a ? workerLastPass : null,
   };
 }

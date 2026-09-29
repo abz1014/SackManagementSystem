@@ -19,6 +19,9 @@ const BASE_REPORT: HealthReport = {
   backup: null,
   degradedReason: null,
   pdasWrite: null,
+  disk: null,
+  lastVerifyRunUtc: null,
+  workerLastPassUtc: null,
 };
 
 describe('PdasWriteBlock', () => {

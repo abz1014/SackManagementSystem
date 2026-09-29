@@ -29,7 +29,11 @@ param(
   # matches the login DEPLOY.md's setup section actually creates for this.
   [string]$User   = "sms_backup",
   [string]$Pass,
-  [string]$OutDir = "C:\sms-backups"
+  [string]$OutDir = "C:\sms-backups",
+  # W1-C (29 Sep 2026): skip retention pruning for this run — used by a
+  # rehearsal or a manual out-of-band backup where the caller wants every
+  # file (and its .verified.json marker) left alone regardless of age.
+  [switch]$NoPrune
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,15 +90,56 @@ if (-not (Test-Path $file)) {
 # Verify what was just written, the same way the restore rehearsal does. A
 # backup that cannot pass this is not a backup; fail the run so a scheduled
 # task shows red rather than a green run over a file that will not restore.
+#
+# W1-C (29 Sep 2026, failure analysis F-15/F-13): a green sqlcmd exit here
+# used to be the whole story — nothing downstream (api/src/services/
+# health.ts's backupHealth) could tell a verified file from one that merely
+# exists, so a partially-corrupt backup that still passed Test-Path counted
+# as "the newest backup" on Health with no way to know it had never been
+# proven restorable. On success this now writes a ".verified.json" marker
+# beside the file; on failure it renames the file itself so it can never be
+# picked up as if it were good.
 sqlcmd -S $Server @auth -C -b -Q "RESTORE VERIFYONLY FROM DISK = N'$file' WITH CHECKSUM;"
 if ($LASTEXITCODE -ne 0) {
-  Write-Error "RESTORE VERIFYONLY WITH CHECKSUM failed on $file (sqlcmd exit $LASTEXITCODE) — the file was written but did not verify. Not deleting it; investigate before trusting any backup from this host."
+  $failedName = "$file.unverified"
+  Write-Warning "RESTORE VERIFYONLY WITH CHECKSUM failed on $file (sqlcmd exit $LASTEXITCODE) — the file was written but did not verify. Renaming it to $failedName so nothing downstream can mistake it for a good backup."
+  try {
+    Move-Item -LiteralPath $file -Destination $failedName -Force
+  } catch {
+    Write-Warning "Could not rename $file to $failedName : $_"
+  }
+  Write-Error "RESTORE VERIFYONLY WITH CHECKSUM failed on $file (sqlcmd exit $LASTEXITCODE) — the file was written but did not verify. Not trusting it; investigate before relying on any backup from this host."
   exit $LASTEXITCODE
 }
 
-# retention: keep 30 days
-Get-ChildItem $OutDir -Filter "$Db-*.bak" |
-  Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } |
-  Remove-Item -Force
+# The marker: what backupHealth (api/src/services/health.ts) reads to decide
+# a .bak file is trustworthy, not just present. sizeBytes is the file's size
+# AT THE MOMENT OF VERIFICATION — backupHealth re-reads the file's current
+# size and only counts the backup as verified when the two still match, so a
+# .bak silently truncated or replaced after this script ran is caught rather
+# than trusted on the strength of a marker that no longer describes the file
+# beside it.
+$fileInfo = Get-Item -LiteralPath $file
+$marker = [ordered]@{
+  file        = (Split-Path -Leaf $file)
+  sizeBytes   = $fileInfo.Length
+  verifiedUtc = (Get-Date).ToUniversalTime().ToString("o")
+  method      = "RESTORE VERIFYONLY WITH CHECKSUM"
+}
+($marker | ConvertTo-Json) | Set-Content -LiteralPath "$file.verified.json" -Encoding utf8
 
-Write-Host "backup written: $file"
+# retention: keep 30 days. The marker travels with its .bak — an orphaned
+# .verified.json for a file retention already removed would otherwise sit in
+# $OutDir forever, and worse, could in principle be misread against a LATER,
+# unrelated .bak that happened to reuse the same name.
+if (-not $NoPrune) {
+  Get-ChildItem $OutDir -Filter "$Db-*.bak" |
+    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } |
+    ForEach-Object {
+      $marker = "$($_.FullName).verified.json"
+      if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+      Remove-Item -LiteralPath $_.FullName -Force
+    }
+}
+
+Write-Host "backup written and verified: $file"

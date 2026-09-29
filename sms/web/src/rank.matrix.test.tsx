@@ -217,11 +217,15 @@ const HEALTH_FIXTURE: HealthReport = {
   service: { version: '1.0.0', uptimeSeconds: 3600, startedAtUtc: '2026-09-07T00:00:00Z', pid: 1234 },
   database: { ok: true, latencyMs: 4, sizeMb: 120, capMb: 10240, pctOfCap: 1.2 },
   acquisition: { kind: 'ok', ageSeconds: 42, cadenceSeconds: 60, halted: null, generation: GENERATION_FIXTURE },
-  backup: { dir: 'C:\\backups', newestFile: 'sidecar-20260907.bak', newestAtUtc: '2026-09-07T03:00:00Z', ageDays: 0.5, warning: false },
+  backup: { dir: 'C:\\backups', newestFile: 'sidecar-20260907.bak', newestAtUtc: '2026-09-07T03:00:00Z', ageDays: 0.5, warning: false, verified: true, newestUnverified: false },
   degradedReason: null,
   // RT24-05: this fixture predates the pdasWrite field; writes are off in
   // this fixture's world, same as everywhere else the matrix drives its fake API.
   pdasWrite: { enabled: false, canReadBack: null, missingSelect: [], missingExecute: [], unverifiedSinceStartup: [], lastVerifiedUtc: null },
+  // W1-C (29 Sep 2026): this fixture predates disk/verify-run/worker-heartbeat.
+  disk: { appDataFreeMb: 5000, backupFreeMb: 5000 },
+  lastVerifyRunUtc: null,
+  workerLastPassUtc: '2026-09-07T03:00:00Z',
 };
 
 const RECONCILIATION_FIXTURE: Envelope<ReconciliationData> = {

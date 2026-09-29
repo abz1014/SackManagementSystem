@@ -17,12 +17,13 @@
 import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { Block, Details, Failed, SkelFigures, SkelLines } from '../ui/bits';
-import { fmtAppInstant, fmtG, fmtInt, fmtSpan } from '../lib/fmt';
+import { fmtAppInstant, fmtClock, fmtG, fmtInt, fmtSpan } from '../lib/fmt';
 import { parsePeriodParams, resolvePeriod } from '../lib/period';
 import { getHealth, getReconciliation, type ConeState, type WeightAggregate } from '../api';
 import { SyncHealthBlock } from './health/SyncHealthBlock';
 import { SystemHistoryBlock } from './health/SystemHistoryBlock';
 import { PdasWriteBlock } from './health/PdasWriteBlock';
+import { anyDiskLow, fmtAppClock, FREE_DISK_WARN_MB, HW } from '../lib/healthWords';
 
 /**
  * The reconciliation figures for `Period` — a census of SMS's OWN canonical
@@ -141,6 +142,10 @@ export function HealthScreen({
 }) {
   const h = usePolling(() => getHealth(), 30_000, 'health');
   const r = h.data ?? null;
+  // W1-C (29 Sep 2026): the recorder-vs-reading sentence needs the newest
+  // reading's own (plant-clock) time beside workerLastPassUtc's (genuine
+  // app-UTC) time — the same `line` every other screen's strip already reads.
+  const { line } = useLive();
 
   return (
     <>
@@ -218,8 +223,70 @@ export function HealthScreen({
                 ? W.health.backupLast(fmtSpan(Math.round((r.backup.ageDays ?? 0) * 86_400)), r.backup.newestFile)
                 : W.health.backupNone}
             </p>
+            {/* W1-C (29 Sep 2026): a file existing is not the same fact as a
+                file PROVEN restorable — say which one this is. */}
+            {r.backup.newestFile != null && (
+              <p className={r.backup.verified ? 'mut sm' : 'acc sm'} style={{ marginTop: 6 }}>
+                {r.backup.verified ? HW.backup.verified : HW.backup.notVerified}
+              </p>
+            )}
+            {r.backup.newestUnverified && (
+              <p className="acc sm" style={{ marginTop: 6, maxWidth: '70ch' }}>{HW.backup.newestUnverified}</p>
+            )}
+            {r.backup.newestFile == null && r.backup.warning && (
+              <p className="acc sm" style={{ marginTop: 6 }}>{HW.backup.noneVerified}</p>
+            )}
             {r.backup.warning && <p className="acc sm" style={{ marginTop: 6, maxWidth: '70ch' }}>{W.health.backupWarn}</p>}
             <p className="mut sm" style={{ marginTop: 6 }}>{W.health.backupDir(r.backup.dir)}</p>
+          </>
+        )}
+      </Block>
+
+      <Block label={HW.disk.title}>
+        {h.error && !r ? (
+          <Failed error={h.error} onRetry={h.refresh} />
+        ) : !r ? (
+          <SkelLines n={2} short />
+        ) : r.disk == null ? (
+          <p className="mut">{HW.disk.appDataVolume(null)}</p>
+        ) : (
+          <>
+            <p className={r.disk.appDataFreeMb != null && r.disk.appDataFreeMb < FREE_DISK_WARN_MB ? 'acc' : ''}>
+              {HW.disk.appDataVolume(r.disk.appDataFreeMb)}
+            </p>
+            <p className={r.disk.backupFreeMb != null && r.disk.backupFreeMb < FREE_DISK_WARN_MB ? 'acc' : ''} style={{ marginTop: 6 }}>
+              {HW.disk.backupVolume(r.disk.backupFreeMb)}
+            </p>
+            {anyDiskLow(r.disk) && (
+              <p className="acc sm" style={{ marginTop: 6, maxWidth: '70ch' }}>
+                {HW.disk.low(Math.min(...[r.disk.appDataFreeMb, r.disk.backupFreeMb].filter((n): n is number => n != null)))}
+              </p>
+            )}
+          </>
+        )}
+      </Block>
+
+      <Block label={HW.verifyRun.title}>
+        {h.error && !r ? (
+          <Failed error={h.error} onRetry={h.refresh} />
+        ) : !r ? (
+          <SkelLines n={1} short />
+        ) : (
+          <>
+            <p>{r.lastVerifyRunUtc == null ? HW.verifyRun.none : HW.verifyRun.last(fmtAppInstant(r.lastVerifyRunUtc))}</p>
+            <p className="mut sm" style={{ marginTop: 6 }}>{HW.verifyRun.note}</p>
+            {/* The worker's own heartbeat, beside the newest reading's own
+                time — the pair that tells "the recorder stopped checking in"
+                apart from "the recorder is fine; the plant made nothing new".
+                Both sides read defensively: either time being unavailable
+                still lets the other print, never collapsing to a blank line. */}
+            <p className="mut sm" style={{ marginTop: 6 }}>
+              {r.workerLastPassUtc == null
+                ? HW.recorder.checkedInNever
+                : line?.dataAsOfUtc
+                  ? HW.recorder.both(fmtAppClock(r.workerLastPassUtc), fmtClock(line.dataAsOfUtc))
+                  : HW.recorder.checkedInAt(fmtAppClock(r.workerLastPassUtc))}
+            </p>
           </>
         )}
       </Block>
