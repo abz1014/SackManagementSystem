@@ -203,10 +203,10 @@ function PdasProducts({
             get column context; nothing changes on screen. */}
         <thead>
           <tr>
-            <th scope="col" className="sr-only">{W.product.colProduct}</th>
-            <th scope="col" className="sr-only">{W.product.colProductId}</th>
-            <th scope="col" className="sr-only">{W.product.colLimits}</th>
-            {status?.canWrite && <th scope="col" className="sr-only">{W.product.colActions}</th>}
+            <th scope="col" className="sr-only-th">{W.product.colProduct}</th>
+            <th scope="col" className="sr-only-th">{W.product.colProductId}</th>
+            <th scope="col" className="sr-only-th">{W.product.colLimits}</th>
+            {status?.canWrite && <th scope="col" className="sr-only-th">{W.product.colActions}</th>}
           </tr>
         </thead>
         <tbody>
@@ -566,12 +566,12 @@ function PdasPallets({ pallets, onChanged }: { pallets: PalletRow[]; onChanged: 
               readers still get column context; nothing changes on screen. */}
           <thead>
             <tr>
-              <th scope="col" className="sr-only">{W.product.colPalletId}</th>
-              <th scope="col" className="sr-only">{W.product.colProduct}</th>
-              <th scope="col" className="sr-only">{W.product.colPackSchema}</th>
-              <th scope="col" className="sr-only">{W.product.colLot}</th>
-              <th scope="col" className="sr-only">{W.product.colour}</th>
-              {status?.canWrite && <th scope="col" className="sr-only">{W.product.colActions}</th>}
+              <th scope="col" className="sr-only-th">{W.product.colPalletId}</th>
+              <th scope="col" className="sr-only-th">{W.product.colProduct}</th>
+              <th scope="col" className="sr-only-th">{W.product.colPackSchema}</th>
+              <th scope="col" className="sr-only-th">{W.product.colLot}</th>
+              <th scope="col" className="sr-only-th">{W.product.colour}</th>
+              {status?.canWrite && <th scope="col" className="sr-only-th">{W.product.colActions}</th>}
             </tr>
           </thead>
           <tbody>
