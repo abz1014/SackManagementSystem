@@ -567,7 +567,7 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
     expect(printed()).toMatch(/count 5 vs 5, id-sum 15 vs 16/);
   });
 
-  it('leaves an open epoch entirely unaffected: identical result with or without --source-db when there is no closed epoch', async () => {
+  it('an open epoch named by --epoch is verified against the live source; --source-db plays no part in it', async () => {
     world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
     world.ifl = iflPool([1, 2, 3]);
     let calls = 0;
@@ -577,11 +577,12 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
     };
     world.altIfl = fakePool([]); // never queried — would throw "no answer" if it were
 
-    expect(await verify(['--source-db=R17_SRC', '--epoch=1'])).toBe(0);
+    expect(await verify(['--source-db=R17_SRC', '--epoch=9'])).toBe(0);
     expect(printed()).toContain('create_date matches · fingerprint matches   OK');
     expect(printed()).not.toContain('STOP');
     // The alternate connection is opened (so a later closed epoch could use
-    // it) but never queried, because there is nothing closed to reconcile.
+    // it) but never queried — an OPEN epoch always compares against the live
+    // source, --source-db or not.
     expect(calls).toBe(1);
   });
 
@@ -644,10 +645,14 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
 
     expect(code).toBe(0);
     expect(printed()).not.toContain('STOP');
-    expect(printed()).toContain('not named by --epoch=1 — left archived, unchecked');
+    expect(printed()).toContain('not named by --epoch — skipped');
     // Only epoch 1's whole-table stats were asked of the alternate source —
     // epoch 2 never touched it, so it could not have produced a spurious STOP.
     expect(world.altIfl.calls).toHaveLength(1);
+    // The unrelated OPEN epoch (9) was not named either, so it never touched
+    // the live source — this is the R-17 fix's own scope, not just the
+    // closed-epoch one Task W2-D already covered.
+    expect(world.ifl.calls).toHaveLength(0);
   });
 
   it('--source-db without --epoch is a usage error, before any connection is opened', async () => {
@@ -672,5 +677,64 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
     await expect(verify(['--source-db=R17_SRC', '--epoch=0'])).rejects.toThrow(
       /--epoch must be a comma-separated list of positive integers/,
     );
+  });
+});
+
+/**
+ * R-17 live run (29 Sep 2026): even after Task W2-D scoped `--source-db` to
+ * the named CLOSED epoch(s), an OPEN epoch NOT named by `--epoch` was still
+ * reconciled against the LIVE source unconditionally — a table's live source
+ * drifts in a running system, so an operator running
+ * `--source-db=<archive> --epoch=1` to verify a backfill got exit 1 and
+ * STOPs that had nothing to do with the epoch they named. `--epoch` now
+ * scopes an ordinary run too: it means "verify ONLY these epochs", open or
+ * closed, whether or not `--source-db` is also given.
+ */
+describe('sms verify — R-17: --epoch scopes OPEN epochs too, not just what --source-db reconciles', () => {
+  it('--source-db plus --epoch=1 does not reconcile an unnamed, drifting OPEN epoch against the live source', async () => {
+    const DRIFTING_OPEN = { ...OPEN, epoch_id: 13 };
+    world.app = appPool({
+      epochs: [CLOSED, DRIFTING_OPEN],
+      raw: [
+        { epoch: 1, ids: [1, 2, 3, 4, 5] },
+        { epoch: 13, ids: [1, 2, 3] },
+      ],
+    });
+    // Drifted: if epoch 13 were compared against this, it would STOP (the
+    // live source no longer matches what raw holds for it).
+    world.ifl = iflPool([1, 2, 9]);
+    world.altIfl = iflPool([1, 2, 3, 4, 5]); // epoch 1's archive — matches
+    world.createPool = async () => world.altIfl;
+
+    const code = await verify(['--source-db=R17_SRC', '--epoch=1']);
+
+    expect(code).toBe(0);
+    expect(printed()).not.toContain('STOP');
+    expect(printed()).toMatch(/epoch 13\s+OPEN\s+not named by --epoch — skipped/);
+    // The live source was never asked about epoch 13 at all.
+    expect(world.ifl.calls).toHaveLength(0);
+  });
+
+  it('plain verify, without --epoch, is unchanged: every epoch — open or closed — is still verified', async () => {
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+
+    expect(await verify()).toBe(0);
+    expect(printed()).toContain('create_date matches · fingerprint matches   OK');
+    expect(printed()).not.toContain('skipped');
+    expect(world.ifl.calls).toHaveLength(1);
+  });
+
+  it('--epoch=13 alone, with no --source-db, verifies epoch 13 against the live source', async () => {
+    const NAMED_OPEN = { ...OPEN, epoch_id: 13 };
+    world.app = appPool({ epochs: [NAMED_OPEN], raw: [{ epoch: 13, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+
+    const code = await verify(['--epoch=13']);
+
+    expect(code).toBe(0);
+    expect(printed()).toContain('create_date matches · fingerprint matches   OK');
+    expect(printed()).not.toContain('skipped');
+    expect(world.ifl.calls).toHaveLength(1);
   });
 });

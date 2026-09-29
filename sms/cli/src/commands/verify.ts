@@ -76,27 +76,42 @@
  * a second connection — same server/port/credentials as the live source,
  * database swapped to the given name.
  *
- * `--epoch=<id>[,<id>…]` (Task W2-D, 29 Sep 2026 fix) is now REQUIRED
- * alongside `--source-db` and names exactly which CLOSED epoch(s) that
- * archive reconciles. Without it, the earlier version of this flag compared
- * EVERY closed epoch sharing a matching `source_table` against the one named
- * archive — but a table's raw layer holds several unrelated generations
- * side by side (July, a sim-tombstone, September, ...), all with the same
- * `source_table` text, and a single backfill fixture is only ever a superset
- * of ONE of them. Run against a real correctly-backfilled epoch 1-4, that
- * produced 12 spurious STOPs on epochs 5-16, which the archive was never
- * built to describe. `--source-db` alone (no `--epoch`) is now a usage
- * error, not a silent whole-table comparison. For every epoch id named that
- * belongs to THIS table and is CLOSED, its raw COUNT and id SUM are compared
- * against `SELECT COUNT(*), SUM(id) FROM [<sourceTable>]` on that database,
- * exactly as point 1 already does for the open epoch against the live source
- * (same `sourceStats` call, `range: null`, i.e. the whole table — a backfill
- * fixture's alternate database holds only the rows it was built to hold, not
- * a live table to window). A closed epoch NOT named by `--epoch` is left
- * exactly as before this flag existed: reported as archived, unchecked. OPEN
- * epochs are entirely unaffected by this flag: they keep comparing against
- * the live source as before. A connection failure to `--source-db` is one
- * STOP naming it, not a crash and not a silent skip.
+ * `--epoch=<id>[,<id>…]` (Task W2-D, 29 Sep 2026 fix; scope widened the same
+ * date by the R-17 live run) is REQUIRED alongside `--source-db`, and on its
+ * own scopes an ordinary run to only the epoch(s) named — open or closed.
+ * Without it, this run behaves exactly as if `--epoch` had never existed:
+ * every epoch of every table is verified, same as always.
+ *
+ * With `--epoch`, an epoch NOT in the list is skipped entirely — one line,
+ * "not named by --epoch — skipped" — and contributes no STOP, no matter
+ * what it would otherwise have shown: a closed epoch is left archived,
+ * unchecked (as it always was before `--source-db` existed); an OPEN epoch
+ * is left uncompared against the live source. This was tightened twice for
+ * the same underlying reason (a table's raw layer holds several unrelated
+ * generations side by side — July, a sim-tombstone, September, ... — and a
+ * fixture or a single operator intent only ever describes SOME of them):
+ * first (Task W2-D) so a backfill archive given via `--source-db` was not
+ * compared against every closed epoch sharing that table's name, which had
+ * produced 12 spurious STOPs on epochs 5-16 after a correct backfill of
+ * epochs 1-4; second (the R-17 live run, this date) because even with that
+ * fix in place, an OPEN epoch NOT named by `--epoch` was still reconciled
+ * against the LIVE source unconditionally — so an operator running
+ * `--source-db=<archive> --epoch=1` to verify a backfill got exit 1 and
+ * STOPs from a running system's own source drift on an open epoch they
+ * never named. `--epoch` now means what it says: verify ONLY the named
+ * epoch(s), nothing else.
+ *
+ * For a named CLOSED epoch, `--source-db` (if given) compares its raw COUNT
+ * and id SUM against `SELECT COUNT(*), SUM(id) FROM [<sourceTable>]` on the
+ * alternate database, exactly as point 1 does for an open epoch against the
+ * live source (same `sourceStats` call, `range: null`, i.e. the whole table
+ * — a backfill fixture's alternate database holds only the rows it was
+ * built to hold, not a live table to window). For a named OPEN epoch,
+ * verification is unchanged from point 1: compared against the live source
+ * (`ctx.ifl`), `--source-db` plays no part. `--source-db` alone (no
+ * `--epoch`) is a usage error, not a silent whole-table comparison. A
+ * connection failure to `--source-db` is one STOP naming it, not a crash and
+ * not a silent skip.
  */
 import mssql from 'mssql';
 import type { ConnectionPool } from 'mssql';
@@ -327,10 +342,15 @@ export interface VerifyArgs {
    *  of leaving them as "archived, unchecked". Null when not given — every
    *  closed epoch stays exactly as before. REQUIRES epochIds (see below). */
   sourceDb: string | null;
-  /** --epoch=<id>[,<id>…]: the CLOSED epoch id(s) --source-db reconciles.
-   *  Required whenever sourceDb is given — see the file header ("Task
-   *  W2-D fix") for why comparing every closed epoch of a table against one
-   *  named archive is wrong. Null when --epoch was not given at all. */
+  /** --epoch=<id>[,<id>…]: when given, verify ONLY these epoch id(s) — open
+   *  or closed — of every table; every other epoch is skipped, printing one
+   *  line and contributing no STOP. Required whenever sourceDb is given.
+   *  Null when --epoch was not given at all, which leaves every epoch of
+   *  every table verified exactly as before this flag existed. See the file
+   *  header ("Task W2-D fix" and the R-17 live-run fix immediately after
+   *  it) for why comparing an unnamed epoch — closed against one archive,
+   *  or open against the live, possibly drifting, source — is wrong when an
+   *  operator asked for a specific epoch. */
   epochIds: number[] | null;
 }
 
@@ -707,18 +727,33 @@ export async function verify(args: string[] = []): Promise<number> {
       for (const e of mine) {
         const raw = stats.get(e.epoch_id) ?? EMPTY;
 
+        // R-17 scope (Task W2-D fix, 29 Sep 2026): when --epoch is given, it
+        // names EVERY epoch this run touches, open or closed — not just which
+        // closed epoch(s) --source-db reconciles. Without this, `sms verify
+        // --source-db=<archive> --epoch=1` still reconciled every OPEN epoch
+        // of this table against the LIVE source, so an operator verifying a
+        // backfill got unrelated STOPs from a running system's own drift on
+        // an epoch they never named. An unnamed epoch is skipped entirely —
+        // no identity check, no id/weight comparison, no raw ⇄ canonical
+        // check — and contributes no STOP. Without --epoch (epochIds null),
+        // nothing here changes: every epoch is still verified.
+        if (epochIds !== null && !epochIds.includes(e.epoch_id)) {
+          console.log(
+            `  epoch ${String(e.epoch_id).padEnd(3)} ${(e.closed_utc === null ? 'OPEN' : 'closed').padEnd(7)} not named by --epoch — skipped`,
+          );
+          continue;
+        }
+
         if (e.closed_utc !== null) {
           // (d) The live source cannot corroborate a closed generation — but a
-          // NAMED alternate one (--source-db, a backfilled archive) can.
+          // NAMED alternate one (--source-db, a backfilled archive) can. Every
+          // epoch reaching this point is named by --epoch when --epoch was
+          // given (unnamed ones were skipped above), so wanting the
+          // --source-db check reduces to "was --source-db given at all".
           console.log(
             `  epoch ${String(e.epoch_id).padEnd(3)} closed  — archived — ${raw.n} rows, source generation no longer present`,
           );
-          const wantedForSourceDb = sourceDb !== null && epochIds !== null && epochIds.includes(e.epoch_id);
-          if (sourceDb && epochIds && !epochIds.includes(e.epoch_id)) {
-            console.log(
-              `${IND}source-db  not named by --epoch=${epochIds.join(',')} — left archived, unchecked (as before this flag)`,
-            );
-          }
+          const wantedForSourceDb = sourceDb !== null;
           if (wantedForSourceDb && altSourcePool) {
             try {
               const src = await sourceStats(altSourcePool, def, null);
