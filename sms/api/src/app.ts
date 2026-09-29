@@ -1178,10 +1178,25 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const bucket: RejectBucketSize = q.data.bucket ?? (q.data.from === q.data.to ? 'hour' : 'day');
+      // Perf fix (29 Sep 2026): this route had no cache at all — 570-730ms on
+      // EVERY call, unlike every sibling analytics route above (/api/spc,
+      // /api/weight-stations, /api/production), which all key `prodCache` on
+      // every parameter that can change the answer. Same idiom, same TTL
+      // (cfg.cacheTtlSeconds — see /api/live's comment on why a flat short
+      // TTL is the live-safety bound every one of these routes already
+      // accepts, not a special case for this one).
+      const key = `reject-spc:${q.data.from}:${q.data.to}:${bucket}:${q.data.rejectType}:${q.data.shift ?? 'all'}:${q.data.station ?? 'all'}:${q.data.product ?? 'all'}:${q.data.code ?? 'none'}:${q.data.tsTo ?? 'none'}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
       const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter, {
         shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult,
       });
-      res.json(await envelope(pool, cfg.lineId, data));
+      const env = await envelope(pool, cfg.lineId, data);
+      prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }
