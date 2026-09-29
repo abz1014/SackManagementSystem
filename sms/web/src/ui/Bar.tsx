@@ -329,6 +329,8 @@ export function Bar({
   onSetup,
   onOpenSync,
   onSignOut,
+  canGoBack,
+  onBack,
 }: {
   // 'health' was a separate branch here before 28 Sep 2026 (reachable only
   // via onOpenSync, not a SCREENS entry); now that it is the 8th SCREENS
@@ -348,6 +350,15 @@ export function Bar({
   onSetup: () => void;
   onOpenSync: () => void;
   onSignOut: () => void;
+  /**
+   * Chart overhaul, Task T8a (29 Sep 2026): true only when the current
+   * history entry was reached by a chart zoom (App.tsx's `ZoomApi.canGoBack`)
+   * — a page-level undo for the drag-select "set the whole page period"
+   * gesture, beside the period control rather than buried in whichever
+   * chart happened to start the zoom.
+   */
+  canGoBack: boolean;
+  onBack: () => void;
 }) {
   // 25 Sep 2026 (RT24-13 follow-up): was `=== 'stale' || === 'late'`, the same
   // fallthrough-to-fine shape as SyncHealthBlock.tsx's verdict — Health has
@@ -376,6 +387,16 @@ export function Bar({
         </nav>
 
         <PeriodControl value={period} onChange={onPeriod} plantNowUtc={plantNowUtc} />
+
+        {/* Task T8a (29 Sep 2026): undoes the most recent chart zoom
+            (`history.back()`), present only while there is one to undo —
+            the same "a control a role/state cannot use is absent" rule
+            EXPORT_RANK and the Setup gear already follow. */}
+        {canGoBack && (
+          <button type="button" className="btn" onClick={onBack}>
+            {W.chart.backToPreviousRange}
+          </button>
+        )}
 
         <div className="bar-right">
           <button type="button" className="btn" onClick={onWall}>

@@ -13,7 +13,7 @@
  * browser. The old app had seven date controls that disagreed with each other,
  * which is why nobody could say what period a number described.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
   getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, REPORT_TYPES, CONE_STATES,
   type AuthUser, type ReportType, type ConeState, type SpcType,
@@ -42,6 +42,65 @@ import { SacksScreen, type SackUnit } from './screens/Sacks';
 import { StockSheet } from './screens/StockSheet';
 import { LoginScreen } from './screens/Login';
 import './app.css';
+
+/* ------------------------------------------------------------------- zoom */
+
+/**
+ * Chart overhaul, Task T8a (29 Sep 2026): a chart's drag-select sets the
+ * WHOLE PAGE period (owner decision), snapped to shifts by the caller before
+ * it ever reaches here (see lib/period.ts's `snapToShifts`/`dayToShiftRange`,
+ * already wired into StationSheet's own daily-means chart by Task T7). This
+ * is the other half — the undo, and a way for a screen to trigger it without
+ * a prop drilled all the way through `Chrome`'s already-large render.
+ *
+ * Screens receive individual callbacks today (onNavigate, onOpenStation, the
+ * `onSelectPeriod` StationSheet already takes) rather than the raw `go()` —
+ * so `zoomTo`/`back` join that vocabulary as a small context instead of
+ * widening every screen's prop list for one capability several unrelated
+ * charts (Weight, Report, Line, Rejects — each owned by a different task)
+ * will want the same way. `useZoom()` follows `useLive()`'s own contract
+ * (lib/live.tsx): it throws outside the provider, so a screen that forgets to
+ * render inside `<App/>` fails loudly in development instead of quietly
+ * no-opping.
+ */
+export interface ZoomApi {
+  /** Push a new whole-page period, remembering the one being left in
+   *  `history.state.zoomFrom` so `back` (or the bar's own "Back to previous
+   *  range" control) can restore it. A zoom is always a PUSH — it is exactly
+   *  the kind of navigation a reader may want to undo with Back (see `go`'s
+   *  own push-vs-replace rule below), never a replace. */
+  zoomTo: (p: PeriodParams) => void;
+  /** Undo the most recent zoom: `history.back()`. Safe to call with nowhere
+   *  to go back to (it simply does nothing observable); callers should still
+   *  prefer `canGoBack` to decide whether to show a control at all — the same
+   *  check StationSheet's own per-chart back button already makes. */
+  back: () => void;
+  /** True only when the CURRENT history entry was reached by a zoom (its
+   *  `state.zoomFrom` is set) — panning (`{ replace: true }`) preserves
+   *  whatever this was before the pan, so it stays true while panning around
+   *  inside a zoomed-in range. */
+  canGoBack: boolean;
+}
+
+const ZoomContext = createContext<ZoomApi | null>(null);
+
+export function useZoom(): ZoomApi {
+  const ctx = useContext(ZoomContext);
+  if (!ctx) throw new Error('useZoom() must be called inside <App/>');
+  return ctx;
+}
+
+/** The one custom field this app ever pushes onto `history.state`. Read back
+ *  on mount and on every `popstate` so the bar's "Back to previous range"
+ *  control tracks Back/Forward navigation, not just the zoom that pushed it. */
+interface NavState {
+  zoomFrom?: PeriodParams;
+}
+
+function readZoomFrom(): PeriodParams | null {
+  if (typeof window === 'undefined') return null;
+  return (window.history.state as NavState | null)?.zoomFrom ?? null;
+}
 
 /* ------------------------------------------------------------------ route */
 
@@ -333,9 +392,17 @@ export function App() {
 
 function Session({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
   const [route, setRoute] = useState<Route>(() => parseRoute());
+  // Tracks history.state.zoomFrom — see readZoomFrom's own header. Kept as
+  // its own bit of state (not re-derived inside `go`'s body) so a plain
+  // Back/Forward through browser chrome, which never calls `go` at all,
+  // still updates the bar's control via the popstate listener below.
+  const [zoomFrom, setZoomFrom] = useState<PeriodParams | null>(() => readZoomFrom());
 
   useEffect(() => {
-    const onPop = () => setRoute(parseRoute());
+    const onPop = () => {
+      setRoute(parseRoute());
+      setZoomFrom(readZoomFrom());
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -347,23 +414,51 @@ function Session({ user, onSignOut }: { user: AuthUser; onSignOut: () => void })
   // fill the back button with nine stops nobody wants to revisit, so it
   // replaces. Everything below defaults to push; only the two pagers pass
   // `{ replace: true }`.
-  const go = useCallback((next: Partial<Route>, opts?: { replace?: boolean }) => {
+  //
+  // Chart overhaul, Task T8a (29 Sep 2026): `opts.state` carries
+  // `history.state` for the entry `go` writes. A PUSH with no explicit
+  // `state` gets `null` (a plain navigation, e.g. switching screens, starts
+  // clean — it must not inherit a zoom it has nothing to do with). A REPLACE
+  // with no explicit `state` keeps whatever `history.state` already held —
+  // panning inside a zoomed-in range must not silently drop the `zoomFrom`
+  // that got it there. `zoomTo` below is the one caller that ever passes
+  // `state` explicitly.
+  const go = useCallback((next: Partial<Route>, opts?: { replace?: boolean; state?: NavState | null }) => {
     setRoute((prev) => {
       const merged = { ...prev, ...next };
       const url = routeSearch(merged);
-      if (opts?.replace) window.history.replaceState(null, '', url);
-      else window.history.pushState(null, '', url);
+      if (opts?.replace) {
+        const state = opts.state !== undefined ? opts.state : (window.history.state as NavState | null);
+        window.history.replaceState(state, '', url);
+        setZoomFrom(state?.zoomFrom ?? null);
+      } else {
+        const state = opts?.state ?? null;
+        window.history.pushState(state, '', url);
+        setZoomFrom(state?.zoomFrom ?? null);
+      }
       return merged;
     });
+  }, []);
+
+  const zoomTo = useCallback((p: PeriodParams) => {
+    go({ period: p }, { state: { zoomFrom: route.period } });
+  }, [go, route.period]);
+
+  const back = useCallback(() => {
+    window.history.back();
   }, []);
 
   const signOut = useCallback(() => {
     void apiLogout().finally(onSignOut);
   }, [onSignOut]);
 
+  const zoomApi: ZoomApi = { zoomTo, back, canGoBack: zoomFrom != null };
+
   return (
     <LiveProvider asOf={route.at}>
-      <Chrome user={user} route={route} go={go} onSignOut={signOut} />
+      <ZoomContext.Provider value={zoomApi}>
+        <Chrome user={user} route={route} go={go} onSignOut={signOut} />
+      </ZoomContext.Provider>
     </LiveProvider>
   );
 }
@@ -378,7 +473,7 @@ function Chrome({
 }: {
   user: AuthUser;
   route: Route;
-  go: (next: Partial<Route>, opts?: { replace?: boolean }) => void;
+  go: (next: Partial<Route>, opts?: { replace?: boolean; state?: NavState | null }) => void;
   onSignOut: () => void;
 }) {
   const { line, loading, error } = useLive();
@@ -387,6 +482,9 @@ function Chrome({
   const plantNow = usePlantNow();
   const rank = ROLE_RANK[user.role] ?? 1;
   const health = assessHealth(line);
+  // Chart overhaul, Task T8a (29 Sep 2026): read from context rather than a
+  // prop — see the ZoomApi note above.
+  const { zoomTo, back: zoomBack, canGoBack } = useZoom();
 
   // Wall is the Line screen without the chrome, so it returns before the bar.
   // It gets its own boundary, with the 'wall' variant, rather than relying on
@@ -421,7 +519,7 @@ function Chrome({
     shiftStartUtc: line.shift.startUtc,
     plantNowUtc: line.plantNowUtc,
     dataAsOfUtc: line.dataAsOfUtc,
-  }, route.period.picked);
+  }, route.period.picked, route.period.range);
 
   // Remounts the screen-area boundary whenever the SCREEN changes, so
   // navigating away from a crash (via the Bar, still rendered OUTSIDE this
@@ -469,6 +567,8 @@ function Chrome({
         onSetup={() => go({ view: 'setup', sheet: null })}
         onOpenSync={() => go({ view: 'health', sheet: null })}
         onSignOut={onSignOut}
+        canGoBack={canGoBack}
+        onBack={zoomBack}
       />
 
       {/* The screen area, boundaried on its own (keyed so a navigation away
@@ -678,6 +778,12 @@ function Chrome({
             onSeeRejects={() => go({ view: 'rejects', station: Number(route.sheet!.id), sheet: null })}
             onSeeCalibrationReport={() => go({ view: 'report', reportType: 'calibration', station: Number(route.sheet!.id), sheet: null })}
             onSeeShiftReport={() => go({ view: 'report', reportType: 'machine-product', station: Number(route.sheet!.id), sheet: null })}
+            // Task T8a (29 Sep 2026): the daily-means chart's drag-select
+            // hands its shift-snapped whole-page period straight to the
+            // global zoom — see the ZoomApi note above. This is the
+            // "Task T8's, not this one's" wiring StationSheet's own header
+            // comment (screens/StationSheet.tsx) already anticipated.
+            onSelectPeriod={zoomTo}
           />
         )}
         {route.sheet?.kind === 'reason' && (

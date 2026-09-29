@@ -2335,6 +2335,12 @@ export const W = {
      so no chart adds its own ad hoc phrase for "station" or "above usual". */
   chart: {
     backToPreviousRange: 'Back to previous range',
+    /* Task T8a (29 Sep 2026): StationSheet's daily-means tooltip currently
+       pushes the bare string 'adjustment logged here' into its context list
+       (screens/StationSheet.tsx ~line 576) — reported here so that screen's
+       own owner can switch to this key; not edited by this task (out of its
+       three-file ownership). */
+    adjustmentLoggedHere: 'adjustment logged here',
     releaseToShow: (range: string) => `Release to show ${range}`,
     dragToSelectRange: 'Drag across the chart to choose a range',
     dragToResize: "Drag to change the chart's height",

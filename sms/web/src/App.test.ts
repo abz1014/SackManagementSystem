@@ -295,6 +295,41 @@ describe('the period and the replay instant survive alongside the new keys', () 
   });
 });
 
+describe('Range period — URL round-trip (chart overhaul, Task T8a, 29 Sep 2026)', () => {
+  it('p=range&from=<shiftRef>&to=<shiftRef> parses to a range period and round-trips through routeSearch', () => {
+    const r1 = withSearch('?s=weight&p=range&from=2026-09-02.morning&to=2026-09-03.night', () => parseRoute());
+    expect(r1.period).toEqual({
+      key: 'range',
+      range: {
+        from: { date: '2026-09-02', shift: 'morning' },
+        to: { date: '2026-09-03', shift: 'night' },
+      },
+    });
+    const url = routeSearch(r1);
+    expect(url).toContain('p=range');
+    expect(url).toContain('from=2026-09-02.morning');
+    expect(url).toContain('to=2026-09-03.night');
+    const r2 = withSearch(url, () => parseRoute());
+    expect(r2).toEqual(r1);
+  });
+
+  it('a malformed range (bad shift name, or from after to) falls back to the shift period rather than throwing', () => {
+    const r1 = withSearch('?s=weight&p=range&from=2026-09-02.midday&to=2026-09-03.night', () => parseRoute());
+    expect(r1.period).toEqual({ key: 'shift' });
+
+    const r2 = withSearch('?s=weight&p=range&from=2026-09-03.night&to=2026-09-02.morning', () => parseRoute());
+    expect(r2.period).toEqual({ key: 'shift' });
+  });
+
+  it('a range period coexists with the shared station/product fields through a full round trip', () => {
+    const r1 = withSearch('?s=report&p=range&from=2026-09-02.morning&to=2026-09-02.night&st=5', () => parseRoute());
+    expect(r1.period.key).toBe('range');
+    expect(r1.station).toBe(5);
+    const r2 = withSearch(routeSearch(r1), () => parseRoute());
+    expect(r2).toEqual(r1);
+  });
+});
+
 describe('Product — tab round-trip, and the deleted sheet\'s legacy bookmark', () => {
   it('pt round-trips and omits the running default', () => {
     const r1 = withSearch('?s=product&pt=catalogue&pr=21', () => parseRoute());
