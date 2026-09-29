@@ -13,13 +13,19 @@
  * a number the report already prints — no new statistic, so no new
  * KPI-DEFINITIONS.md row and no new IFL approval.
  */
-import { useState } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { W } from '../../lib/words';
 import { Empty } from '../../ui/bits';
 import {
-  Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine,
-  linePath, fittingTicks, tickIndices,
+  Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
+  linePath, fittingTicks, tickIndices, CategoryBars, type BarDatum,
 } from '../../ui/chart';
+import { ChartFrame, type ChartTip, type ChartTipRow } from '../../ui/ChartFrame';
+import {
+  gutterFor, textPx, bandHit, rowHit, nearestIndex, brushToIndices, placeGutterLabels,
+  type Rect, type GutterLabelIn,
+} from '../../ui/chartLayout';
+import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
 import { fmtDayLong, fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -135,72 +141,54 @@ export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[
 
 /* ------------------------------------------------------------- the chart */
 
-export function DayBars({ rows, label = W.report.conesPerDay }: { rows: ReportLine[]; label?: string }) {
-  const [box, width] = useChartWidth();
-  const [hover, setHover] = useState<number | null>(null);
-  const H = 240;
-  const L = 56;
-  const R = 8;
-  const T = 24;
-  const B = 30;
-
+/**
+ * Chart overhaul wave 3, Task T5 (29 Sep 2026): rebuilt on `CategoryBars`
+ * (`ui/chart.tsx`) rather than a hand-rolled `<svg>` — the tooltip, re-layout,
+ * drag-to-resize and (now optional) drag-to-select-sets-the-page-period all
+ * come from `ChartFrame` for free. `onSelect`, when given, turns on the
+ * brush: each bar is one production day, so a drag snaps to that day's
+ * `D.morning..D.night` shift span (`dayToShiftRange`) — never a partial day.
+ * Optional and defaulted to nothing so every existing caller (`Shift.tsx`,
+ * `Daily.tsx`) compiles and renders exactly as before.
+ */
+export function DayBars({
+  rows,
+  label = W.report.conesPerDay,
+  chartId = 'report-day-bars',
+  onSelect,
+}: {
+  rows: ReportLine[];
+  label?: string;
+  chartId?: string;
+  /** Wires the drag-to-select brush: fires with the whole-page period a drag
+   *  snapped to. Omitted (the default) draws the chart with no brush. */
+  onSelect?: (p: PeriodParams) => void;
+}) {
   const days = rows.filter((r) => r.group !== 'total');
   if (days.length === 0) return <Empty message={W.report.coverageNone('This period')} />;
 
   const max = Math.max(...days.map((d) => d.cones), 1);
-  const slot = (width - L - R) / days.length;
-  const bw = Math.max(4, slot * 0.62);
-  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
-  const cx = (i: number) => L + slot * i + slot / 2;
-
-  // A label under every bar only when they fit; otherwise the ends and the
-  // middles, anchored inward so no tick hangs off the plot.
-  const step = Math.max(1, Math.ceil(days.length / Math.max(2, Math.floor((width - L - R) / 90))));
-  const grid = [0.25, 0.5, 0.75].map((f) => Math.round((max * f) / 500) * 500).filter((v) => v > 0);
-
-  const h = hover != null ? days[hover] : null;
+  const min = Math.min(...days.map((d) => d.cones));
+  const data: BarDatum[] = days.map((d) => ({
+    key: d.group,
+    label: fmtDayShort(d.group),
+    value: d.cones,
+    detail: `${fmtDayLong(d.group)} · ${fmtInt(d.cones)} cones · ${fmtInt(d.sacks)} sacks`,
+  }));
+  const resting = `${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(min)} to ${fmtInt(max)} cones`;
+  const brush = onSelect
+    ? {
+        refs: days.map((d): [ShiftRef, ShiftRef] => {
+          const r = dayToShiftRange(d.group, d.group);
+          return [r.from, r.to];
+        }),
+        onSelect,
+      }
+    : undefined;
 
   return (
-    <div ref={box} className={days.length < 2 ? 'no-print' : undefined}>
-      <Readout
-        hovered={h ? `${fmtDayLong(h.group)} · ${fmtInt(h.cones)} cones · ${fmtInt(h.sacks)} sacks` : null}
-        resting={`${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(Math.min(...days.map((d) => d.cones)))} to ${fmtInt(max)} cones`}
-      />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={label}>
-        {[...new Set(grid)].map((v) => (
-          <g key={v}>
-            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
-            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{fmtInt(v)}</text>
-          </g>
-        ))}
-        {days.map((d, i) => (
-          <rect
-            key={d.group}
-            x={cx(i) - bw / 2}
-            y={y(d.cones)}
-            width={bw}
-            height={Math.max(0, H - B - y(d.cones))}
-            fill={hover === i ? 'var(--ink)' : 'var(--graphite)'}
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover(null)}
-          />
-        ))}
-        {days.map((d, i) =>
-          i % step === 0 || i === days.length - 1 ? (
-            <text
-              key={`t${d.group}`}
-              x={cx(i)}
-              y={H - 8}
-              fontSize="var(--fs-tick)"
-              fill="var(--muted)"
-              textAnchor={edgeAnchor(i, days.length)}
-            >
-              {fmtDayShort(d.group)}
-            </text>
-          ) : null,
-        )}
-        <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
-      </svg>
+    <div className={days.length < 2 ? 'no-print' : undefined}>
+      <CategoryBars data={data} ariaLabel={label} resting={resting} valueFmt={fmtInt} chartId={chartId} brush={brush} />
     </div>
   );
 }
@@ -362,51 +350,133 @@ function bucketTicks(lo: number, hi: number, size: number, plotW: number, minPx 
  * kind of unsupported assertion this app does not make. Both callers
  * already hold it: they print it in the block label beside the chart.
  */
-export function Histogram({ buckets, bucketSize, unit, label }: { buckets: HistBucket[]; bucketSize: number; unit: string; label: string }) {
-  const [box, width] = useChartWidth();
+/**
+ * Chart overhaul wave 3, Task T5 (29 Sep 2026): moved onto `ChartFrame` for
+ * a hover/tap tooltip (bin range, count, and — when the caller states where
+ * the product's limits sit — inside/outside them) and a left gutter sized to
+ * the y-max label rather than a fixed 48px (`gutterFor`, reused for the LEFT
+ * margin: it only ever computes "how wide does this text need", which does
+ * not care which side of the plot it sits on). No brush: a histogram's x
+ * axis is a weight, not a timeline, and there is no page-period to select
+ * from it.
+ */
+export function Histogram({
+  buckets, bucketSize, unit, label, limitLo, limitHi, chartId,
+}: {
+  buckets: HistBucket[];
+  bucketSize: number;
+  unit: string;
+  label: string;
+  /** The product's tolerance band, in the same unit as `buckets`. Either or
+   *  both may be omitted; the tooltip states inside/outside only when at
+   *  least one bound is known. Neither caller passes these yet — wiring a
+   *  screen's own limits through is left to whoever next touches that
+   *  screen, same as every other optional prop here. */
+  limitLo?: number;
+  limitHi?: number;
+  chartId?: string;
+}) {
   const H = 180;
-  const L = 48;
-  const R = 8;
   const T = 12;
   const B = 28;
   if (buckets.length === 0) return <Empty message={W.nothingHere} />;
   const view = histogramView(buckets, bucketSize);
   const size = bucketSize > 0 ? bucketSize : 1;
   const dp = bucketDecimals(size);
-  const plotW = Math.max(1, width - L - R);
   const max = Math.max(...view.drawn.map((b) => b.count), 1);
-  const x = linear([view.lo, view.hi], [L, width - R]);
-  // The natural width of one bucket on this axis. Floored at 2px, because a
-  // bar that renders as nothing is its own defect; when the floor bites, the
-  // bar is re-centred on its own interval so it still sits where its value is.
-  const slot = plotW / Math.max(1, (view.hi - view.lo) / size);
-  const bw = Math.max(2, slot * 0.9);
-  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
-  const ticks = bucketTicks(view.lo, view.hi, size, plotW);
   const fmtB = (v: number) => v.toFixed(dp);
   const clipped = view.below ?? view.above;
+
+  interface Layout { L: number; R: number; x: (v: number) => number; y: (v: number) => number; bw: number }
+  const layoutRef = useRef<Layout | null>(null);
+
+  const computeLayout = (width: number, fontPx: number): Layout => {
+    const maxGutter = gutterFor([fmtInt(max)], fontPx, Math.max(1, width * 0.4));
+    const L = Math.max(28, maxGutter === 'legend' ? 48 : maxGutter);
+    const R = 10;
+    const plotW = Math.max(1, width - L - R);
+    const x = linear([view.lo, view.hi], [L, width - R]);
+    const slot = plotW / Math.max(1, (view.hi - view.lo) / size);
+    const bw = Math.max(2, slot * 0.9);
+    const y = (v: number) => T + ((max - v) / max) * (H - T - B);
+    return { L, R, x, y, bw };
+  };
+
+  const hit = (px: number, py: number): number | null => {
+    const layout = layoutRef.current;
+    if (!layout || py < T || py > H - B) return null;
+    const xs = view.drawn.map((b) => layout.x(b.bucket + size / 2));
+    const i = nearestIndex(px, xs);
+    return i >= 0 && Math.abs(px - xs[i]!) <= layout.bw ? i : null;
+  };
+
+  const markRect = (i: number): Rect | null => {
+    const layout = layoutRef.current;
+    const b = view.drawn[i];
+    if (!layout || !b) return null;
+    const bx = layout.x(b.bucket + size / 2) - layout.bw / 2;
+    const by = layout.y(b.count);
+    return { x: bx, y: by, w: layout.bw, h: Math.max(0, H - B - by) };
+  };
+
+  const insideLabel = (mid: number): string => {
+    if (limitLo != null && mid < limitLo) return W.cone.state.low;
+    if (limitHi != null && mid > limitHi) return W.cone.state.high;
+    return W.cone.state.within;
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const b = view.drawn[i];
+    if (!b) return null;
+    const rows: ChartTipRow[] = [{ name: '', value: `${fmtInt(b.count)}` }];
+    const context: string[] = [];
+    if (limitLo != null || limitHi != null) context.push(insideLabel(b.bucket + size / 2));
+    return { heading: `${fmtB(b.bucket)}–${fmtB(b.bucket + size)}${unit}`, rows, context };
+  };
+
   return (
-    <div ref={box}>
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={label}>
-        {view.drawn.map((b) => (
-          <rect key={b.bucket} x={x(b.bucket + size / 2) - bw / 2} y={y(b.count)} width={bw} height={Math.max(0, H - B - y(b.count))} fill="var(--graphite)" />
-        ))}
-        {ticks.map((v, i) => (
-          <text key={`t${v}`} x={x(v)} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, ticks.length)}>
-            {fmtB(v)}{unit}
-          </text>
-        ))}
-        {/* The axis is cut here, and the sentence under the chart says by how
-            much. A mark alone would be decoration; the count is the fact. */}
-        {view.below && (
-          <text x={L - 2} y={H - B - 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end" aria-hidden="true">‹‹</text>
-        )}
-        {view.above && (
-          <text x={width - R + 2} y={H - B - 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="start" aria-hidden="true">››</text>
-        )}
-        <text x={L - 8} y={T + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{fmtInt(max)}</text>
-        <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
-      </svg>
+    <div>
+      <ChartFrame
+        chartId={chartId ?? label}
+        defaultH={H}
+        minH={H}
+        maxH={H}
+        ariaLabel={label}
+        resting={`${view.drawn.length} bins · up to ${fmtInt(max)}`}
+        hit={hit}
+        count={view.drawn.length}
+        tipFor={tipFor}
+        markRect={markRect}
+      >
+        {(fsize) => {
+          const layout = computeLayout(fsize.width, fsize.fontPx);
+          layoutRef.current = layout;
+          const { L, R, x, y, bw } = layout;
+          const ticks = bucketTicks(view.lo, view.hi, size, Math.max(1, fsize.width - L - R));
+          return (
+            <svg className="chart" viewBox={`0 0 ${fsize.width} ${H}`} height={H} role="img" aria-label={label}>
+              {view.drawn.map((b) => (
+                <rect key={b.bucket} x={x(b.bucket + size / 2) - bw / 2} y={y(b.count)} width={bw} height={Math.max(0, H - B - y(b.count))} fill="var(--graphite)" />
+              ))}
+              {ticks.map((v, i) => (
+                <text key={`t${v}`} x={x(v)} y={H - 8} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor={edgeAnchor(i, ticks.length)}>
+                  {fmtB(v)}{unit}
+                </text>
+              ))}
+              {/* The axis is cut here, and the sentence under the chart says by how
+                  much. A mark alone would be decoration; the count is the fact. */}
+              {view.below && (
+                <text x={L - 2} y={H - B - 4} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor="end" aria-hidden="true">‹‹</text>
+              )}
+              {view.above && (
+                <text x={fsize.width - R + 2} y={H - B - 4} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor="start" aria-hidden="true">››</text>
+              )}
+              <text x={L - 8} y={T + 4} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor="end">{fmtInt(max)}</text>
+              <line x1={L} x2={fsize.width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
+            </svg>
+          );
+        }}
+      </ChartFrame>
       {clipped && (
         <p className="mut sm" style={{ marginTop: 6 }}>
           {W.reports.histogramClipped(
@@ -455,6 +525,7 @@ export function RankBars({
   valueFmt = fmtInt,
   labelWidth = 168,
   rowHeight = 28,
+  chartId,
 }: {
   rows: RankRow[];
   ariaLabel: string;
@@ -470,12 +541,12 @@ export function RankBars({
    */
   labelWidth?: number;
   rowHeight?: number;
+  /** `ChartFrame`'s persisted-height key. Falls back to `ariaLabel`. */
+  chartId?: string;
 }) {
-  const [box, width] = useChartWidth();
   if (rows.length < MIN_MULTIROW) return null;
 
   const L = labelWidth; // label gutter
-  const R = 60; // value gutter
   const T = 6;
   const rowH = rowHeight;
   // 14px at the default 28px row, thicker (to 18) on a taller one.
@@ -483,33 +554,95 @@ export function RankBars({
   const H = T + rows.length * rowH + 6;
 
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
-  // Domain anchored at exactly 0 (not `niceDomain`'s padded lo) so every bar's
-  // length stays exactly proportional to its own value — a rank list is read
-  // by comparing bar lengths to each other, and any padding that shifts the
-  // zero point breaks that comparison.
-  const x = linear([0, max], [L, Math.max(L + 1, width - R)]);
+
+  interface Layout { R: number; x: (v: number) => number }
+  const layoutRef = useRef<Layout | null>(null);
+
+  const computeLayout = (width: number, fontPx: number): Layout => {
+    // The value gutter fits the widest formatted value on this render — a
+    // fixed 60px (the old figure) clips a five/six-digit count.
+    const widest = Math.max(...rows.map((r) => valueFmt(Math.abs(r.value)).length));
+    const R = Math.max(40, Math.ceil(textPx(widest, fontPx)) + 16);
+    // Domain anchored at exactly 0 (not `niceDomain`'s padded lo) so every
+    // bar's length stays exactly proportional to its own value — a rank list
+    // is read by comparing bar lengths to each other, and any padding that
+    // shifts the zero point breaks that comparison.
+    const x = linear([0, max], [L, Math.max(L + 1, width - R)]);
+    return { R, x };
+  };
+
+  // Truncates `text` with an ellipsis so it fits in `maxPx` at `fontPx` —
+  // the full name always stays in the tooltip via `tipFor` below.
+  const truncateLabel = (text: string, maxPx: number, fontPx: number): string => {
+    if (textPx(text.length, fontPx) <= maxPx) return text;
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (textPx(mid, fontPx) + textPx(1, fontPx) <= maxPx) lo = mid;
+      else hi = mid - 1;
+    }
+    return `${text.slice(0, Math.max(0, lo))}…`;
+  };
+
+  const hit = (px: number, py: number): number | null => rowHit(py, T, rowH, rows.length);
+
+  const markRect = (i: number): Rect | null => {
+    const layout = layoutRef.current;
+    const r = rows[i];
+    if (!layout || !r) return null;
+    const rowY = T + i * rowH;
+    const barY = rowY + (rowH - barH) / 2;
+    const bw = Math.max(0, layout.x(Math.abs(r.value)) - L);
+    return { x: L, y: barY, w: bw, h: barH };
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const r = rows[i];
+    if (!r) return null;
+    return { heading: r.label, rows: [{ name: '', value: valueFmt(r.value) }] };
+  };
 
   return (
-    <div ref={box}>
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
-        {rows.map((r, i) => {
-          const rowY = T + i * rowH;
-          const barY = rowY + (rowH - barH) / 2;
-          const bw = Math.max(0, x(Math.abs(r.value)) - L);
-          return (
-            <g key={r.key}>
-              <text x={0} y={barY + barH - 3} fontSize="var(--fs-small)" fill="var(--ink)">
-                {r.label}
-              </text>
-              <rect x={L} y={barY} width={bw} height={barH} fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'} />
-              <text x={x(Math.abs(r.value)) + 8} y={barY + barH - 3} fontSize="var(--fs-tick)" fill="var(--muted)">
-                {valueFmt(r.value)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
+    <ChartFrame
+      chartId={chartId ?? ariaLabel}
+      defaultH={H}
+      minH={H}
+      maxH={H}
+      ariaLabel={ariaLabel}
+      resting={`${rows.length} rows`}
+      hit={hit}
+      count={rows.length}
+      tipFor={tipFor}
+      markRect={markRect}
+    >
+      {(fsize) => {
+        const layout = computeLayout(fsize.width, fsize.fontPx);
+        layoutRef.current = layout;
+        const { x } = layout;
+        return (
+          <svg className="chart" viewBox={`0 0 ${fsize.width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
+            {rows.map((r, i) => {
+              const rowY = T + i * rowH;
+              const barY = rowY + (rowH - barH) / 2;
+              const bw = Math.max(0, x(Math.abs(r.value)) - L);
+              const label = truncateLabel(r.label, L - 8, fsize.fontPx);
+              return (
+                <g key={r.key}>
+                  <text x={0} y={barY + barH - 3} fontSize={fsize.fontPx} fill="var(--ink)">
+                    {label}
+                  </text>
+                  <rect x={L} y={barY} width={bw} height={barH} fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'} />
+                  <text x={x(Math.abs(r.value)) + 8} y={barY + barH - 3} fontSize={fsize.fontPx} fill="var(--muted)">
+                    {valueFmt(r.value)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        );
+      }}
+    </ChartFrame>
   );
 }
 
@@ -546,6 +679,10 @@ export function DeviationBars({
   valueFmt = fmtSignedG,
   height = 220,
   minHalfSpan,
+  chartId,
+  tip,
+  onActivate,
+  brush,
 }: {
   rows: DeviationRow[];
   ariaLabel: string;
@@ -568,13 +705,25 @@ export function DeviationBars({
   /** Label on the zero line itself — e.g. what "zero" means here (the line mean, a target). */
   zeroLabel?: string;
   valueFmt?: (v: number) => string;
+  /** `ChartFrame`'s persisted-height key. Falls back to `ariaLabel`. */
+  chartId?: string;
+  /** Per-bar tooltip, e.g. "Station 5 · 1,234 cones · 20 fewer than the row
+   *  median of 1,254". Falls back to the bar's own `title`/`label: value`. */
+  tip?: (i: number) => ChartTip | null;
+  /** Line opens the station sheet; omitted, a bar is inert beyond hover. */
+  onActivate?: (i: number) => void;
+  /**
+   * Drag-select sets the WHOLE PAGE period, ONLY when the caller states its
+   * rows ARE days (`refs`, one `[ShiftRef, ShiftRef]` pair per row) — never
+   * offered for a row of stations, which has no calendar position to drag
+   * across. Omitted (the default), the chart draws with no brush.
+   */
+  brush?: { refs: [ShiftRef, ShiftRef][]; onSelect: (p: PeriodParams) => void };
 }) {
-  const [box, width] = useChartWidth();
   if (rows.length < MIN_MULTIROW) return null;
 
   const H = height;
   const L = 48;
-  const R = 8;
   const T = 18;
   const B = 40;
 
@@ -584,74 +733,218 @@ export function DeviationBars({
   // `0` is always in the values handed to `niceDomain` so the zero axis is
   // never padded away, whichever side of it every row happens to sit.
   const [lo, hi] = niceDomain([...values, 0, ...withThreshold, ...floor], { pad: 0.15 });
+  const tickOf = (r: DeviationRow) => r.tick ?? r.label;
+
+  interface Layout {
+    R: number; y: (v: number) => number; slot: number; bw: number;
+    cx: (i: number) => number; zeroY: number; legend: boolean; step: number;
+  }
+  const layoutRef = useRef<Layout | null>(null);
+
+  const computeLayout = (width: number, fontPx: number): Layout => {
+    // The right margin comes from what the zero/threshold labels actually
+    // need (`gutterFor`), not a fixed 8px — that fixed figure is the
+    // screenshot defect this task exists to close: "row median" drawn over
+    // the bars because the chart reserved no room for it at all.
+    const gutterLabels = [zeroLabel, thresholdLabel].filter((s): s is string => !!s);
+    const gutter = gutterFor(gutterLabels, fontPx, Math.max(1, width - L - 8));
+    const legend = gutter === 'legend';
+    const R = legend ? 8 : gutter;
+    const y = linear([lo, hi], [H - B, T]);
+    const slot = (width - L - R) / rows.length;
+    const bw = Math.max(4, slot * 0.55);
+    const cx = (i: number) => L + slot * i + slot / 2;
+    const zeroY = y(0);
+    // Thin the x labels by how wide the WIDEST label actually is, not by a
+    // fixed 60px slot. With 23 day labels ("23 Sept") across a full-width
+    // chart the fixed figure kept every one of them and the last two
+    // overprinted each other (seen on Sacks, 23 Sep 2026).
+    const labelPx = Math.ceil(textPx(Math.max(...rows.map((r) => tickOf(r).length)), fontPx)) + 16;
+    const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / labelPx))));
+    return { R, y, slot, bw, cx, zeroY, legend, step };
+  };
+
+  const hit = (px: number, py: number): number | null => {
+    const layout = layoutRef.current;
+    if (!layout || py < T || py > H - B) return null;
+    return bandHit(px, L, layout.slot, rows.length);
+  };
+
+  const markRect = (i: number): Rect | null => {
+    const layout = layoutRef.current;
+    const r = rows[i];
+    if (!layout || !r) return null;
+    const barTop = Math.min(layout.zeroY, layout.y(r.value));
+    const h = Math.max(1, Math.abs(layout.y(r.value) - layout.zeroY));
+    return { x: layout.cx(i) - layout.bw / 2, y: barTop, w: layout.bw, h };
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const r = rows[i];
+    if (!r) return null;
+    const extra = tip?.(i);
+    if (extra) return extra;
+    return { heading: r.label, rows: [{ name: '', value: r.title ?? valueFmt(r.value) }] };
+  };
+
+  const brushProp = brush
+    ? {
+        xs: rows.map((_, i) => (layoutRef.current ?? computeLayout(1036, 13)).cx(i)),
+        onCommit: (i0: number, i1: number) => {
+          const pair0 = brush.refs[i0];
+          const pair1 = brush.refs[i1];
+          if (!pair0 || !pair1) return;
+          const snapped = snapToShifts(pair0[0], pair1[1]);
+          if (snapped) brush.onSelect(snapped);
+        },
+      }
+    : undefined;
+
+  return (
+    <ChartFrame
+      chartId={chartId ?? ariaLabel}
+      defaultH={H}
+      ariaLabel={ariaLabel}
+      resting={`${rows.length} rows`}
+      hit={hit}
+      count={rows.length}
+      tipFor={tipFor}
+      markRect={markRect}
+      onActivate={onActivate}
+      brush={brushProp}
+    >
+      {(fsize) => {
+        const layout = computeLayout(fsize.width, fsize.fontPx);
+        layoutRef.current = layout;
+        const { R, y, bw, cx, zeroY, legend, step } = layout;
+        const plotRight = fsize.width - R;
+        return (
+          <RefLineGutterProvider top={T} bottom={H - B} fontPx={fsize.fontPx}>
+            <svg className="chart" viewBox={`0 0 ${fsize.width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
+              {gridValues([lo, hi]).map((v) => (
+                <g key={v}>
+                  <line x1={L} x2={plotRight} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
+                  <text x={L - 8} y={y(v) + 4} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor="end">
+                    {valueFmt(v)}
+                  </text>
+                </g>
+              ))}
+              {threshold != null && !legend && (
+                <>
+                  <RefLine y={y(threshold)} x1={L} x2={plotRight} label={thresholdLabel} tone="muted" dashed placement="gutter" fontPx={fsize.fontPx} />
+                  <RefLine y={y(-threshold)} x1={L} x2={plotRight} tone="muted" dashed placement="gutter" fontPx={fsize.fontPx} />
+                </>
+              )}
+              {threshold != null && legend && (
+                <>
+                  <line x1={L} x2={plotRight} y1={y(threshold)} y2={y(threshold)} stroke="var(--grid)" strokeDasharray="3 3" />
+                  <line x1={L} x2={plotRight} y1={y(-threshold)} y2={y(-threshold)} stroke="var(--grid)" strokeDasharray="3 3" />
+                </>
+              )}
+              <RefLine y={zeroY} x1={L} x2={plotRight} label={legend ? undefined : zeroLabel} tone="ink" placement="gutter" fontPx={fsize.fontPx} />
+              {rows.map((r, i) => {
+                const barTop = Math.min(zeroY, y(r.value));
+                const h = Math.abs(y(r.value) - zeroY);
+                return (
+                  <rect
+                    key={r.key}
+                    x={cx(i) - bw / 2}
+                    y={barTop}
+                    width={bw}
+                    height={h}
+                    fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'}
+                  >
+                    <title>{r.title ?? `${r.label}: ${valueFmt(r.value)}`}</title>
+                  </rect>
+                );
+              })}
+              {/* Evenly thinned: every `step`-th label only. Forcing the last one in
+                  as well crammed it against its neighbour (Line, 25 Sep 2026). */}
+              {rows.map((r, i) =>
+                i % step === 0 ? (
+                  <text
+                    key={`t${r.key}`}
+                    x={cx(i)}
+                    y={H - B + 16}
+                    fontSize={fsize.fontPx}
+                    fill="var(--muted)"
+                    textAnchor={edgeAnchor(i, rows.length)}
+                  >
+                    {tickOf(r)}
+                  </text>
+                ) : null,
+              )}
+            </svg>
+            {legend && (zeroLabel || thresholdLabel) && (
+              <p className="mut sm" style={{ marginTop: 4 }}>
+                {[zeroLabel, thresholdLabel].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </RefLineGutterProvider>
+        );
+      }}
+    </ChartFrame>
+  );
+}
+
+/**
+ * The pure geometry `DeviationBars` itself uses for its right-margin gutter
+ * and its zero/threshold label placement — exported so a test can prove "the
+ * labels never land on a bar" without rendering the DOM, at any width. Not
+ * called by the component above (which recomputes the same thing against its
+ * own `fsize`), because `ChartFrame` supplies size only inside its render
+ * prop; this is the same three calls (`gutterFor`, `linear`/`niceDomain`,
+ * `placeGutterLabels`) a caller can run standalone with a chosen width.
+ */
+export function deviationBarsGeometry(
+  rows: DeviationRow[],
+  opts: {
+    width: number;
+    height?: number;
+    fontPx?: number;
+    threshold?: number;
+    thresholdLabel?: string;
+    zeroLabel?: string;
+    minHalfSpan?: number;
+    valueFmt?: (v: number) => string;
+  },
+): { bars: Rect[]; labels: { text: string; y: number; gutterX: number }[] } {
+  const { width, height = 220, fontPx = 12, threshold, thresholdLabel, zeroLabel, minHalfSpan } = opts;
+  const H = height;
+  const L = 48;
+  const T = 18;
+  const B = 40;
+  const values = rows.map((r) => r.value);
+  const withThreshold = threshold != null ? [threshold, -threshold] : [];
+  const floor = minHalfSpan != null ? [minHalfSpan, -minHalfSpan] : [];
+  const [lo, hi] = niceDomain([...values, 0, ...withThreshold, ...floor], { pad: 0.15 });
+  const gutterLabels = [zeroLabel, thresholdLabel].filter((s): s is string => !!s);
+  const gutter = gutterFor(gutterLabels, fontPx, Math.max(1, width - L - 8));
+  const legend = gutter === 'legend';
+  const R = legend ? 8 : gutter;
   const y = linear([lo, hi], [H - B, T]);
-  const slot = (width - L - R) / rows.length;
+  const slot = (width - L - R) / Math.max(1, rows.length);
   const bw = Math.max(4, slot * 0.55);
   const cx = (i: number) => L + slot * i + slot / 2;
   const zeroY = y(0);
-  // Thin the x labels by how wide the WIDEST label actually is, not by a
-  // fixed 60px slot. With 23 day labels ("23 Sept") across a full-width
-  // chart the fixed figure kept every one of them and the last two
-  // overprinted each other (seen on Sacks, 23 Sep 2026). Station labels are
-  // shorter than the old 60px assumption in the common case, so no existing
-  // caller loses a tick it was drawing before.
-  const tickOf = (r: DeviationRow) => r.tick ?? r.label;
-  const labelPx = Math.max(...rows.map((r) => tickOf(r).length)) * 7 + 16;
-  const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / labelPx))));
 
-  return (
-    <div ref={box}>
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
-        {gridValues([lo, hi]).map((v) => (
-          <g key={v}>
-            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
-            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">
-              {valueFmt(v)}
-            </text>
-          </g>
-        ))}
-        {threshold != null && (
-          <>
-            <RefLine y={y(threshold)} x1={L} x2={width - R} label={thresholdLabel} tone="muted" dashed labelInside />
-            <RefLine y={y(-threshold)} x1={L} x2={width - R} tone="muted" dashed />
-          </>
-        )}
-        <RefLine y={zeroY} x1={L} x2={width - R} label={zeroLabel} tone="ink" labelInside />
-        {rows.map((r, i) => {
-          const barTop = Math.min(zeroY, y(r.value));
-          const h = Math.abs(y(r.value) - zeroY);
-          return (
-            <rect
-              key={r.key}
-              x={cx(i) - bw / 2}
-              y={barTop}
-              width={bw}
-              height={h}
-              fill={r.flagged ? 'var(--acc-fill)' : 'var(--graphite)'}
-            >
-              <title>{r.title ?? `${r.label}: ${valueFmt(r.value)}`}</title>
-            </rect>
-          );
-        })}
-        {/* Evenly thinned: every `step`-th label only. Forcing the last one in
-            as well crammed it against its neighbour (Line, 25 Sep 2026). */}
-        {rows.map((r, i) =>
-          i % step === 0 ? (
-            <text
-              key={`t${r.key}`}
-              x={cx(i)}
-              y={H - B + 16}
-              fontSize="var(--fs-tick)"
-              fill="var(--muted)"
-              textAnchor={edgeAnchor(i, rows.length)}
-            >
-              {tickOf(r)}
-            </text>
-          ) : null,
-        )}
-      </svg>
-    </div>
-  );
+  const bars: Rect[] = rows.map((r, i) => {
+    const barTop = Math.min(zeroY, y(r.value));
+    const h = Math.max(1, Math.abs(y(r.value) - zeroY));
+    return { x: cx(i) - bw / 2, y: barTop, w: bw, h };
+  });
+
+  let labels: { text: string; y: number; gutterX: number }[] = [];
+  if (!legend) {
+    const gutterX = width - R + 8;
+    const items: GutterLabelIn[] = [];
+    if (zeroLabel) items.push({ y: zeroY, text: zeroLabel, prio: 1 });
+    if (threshold != null && thresholdLabel) items.push({ y: y(threshold), text: thresholdLabel, prio: 0 });
+    const outs = placeGutterLabels(items, { top: T, bottom: H - B, lineH: fontPx * 1.3 });
+    labels = outs.filter((o) => o.text !== '').map((o) => ({ text: o.text, y: o.y, gutterX }));
+  }
+
+  return { bars, labels };
 }
 
 /* ----------------------------------------------------------- reject trend */
@@ -704,6 +997,7 @@ export function RejectTrendChart({
   periodTo,
   labelFmt = fmtDayShort,
   ariaLabel = 'Reject rate over time',
+  onSelect,
 }: {
   quality: TrendBucket[];
   /** Null/omitted when the caller has no quality/weight split — one series is drawn. */
@@ -715,9 +1009,27 @@ export function RejectTrendChart({
   periodTo?: string;
   labelFmt?: (ts: string) => string;
   ariaLabel?: string;
+  /**
+   * Drag-select sets the WHOLE PAGE period, snapped to shift boundaries —
+   * each day is one point on this chart, so a drag spans `dayToShiftRange`
+   * for its first and last day. Omitted (the default), the chart draws with
+   * no brush, and every existing caller keeps its current behaviour.
+   *
+   * NOTE, stated honestly: this chart keeps its own pointer-driven drag
+   * rather than `ChartFrame`'s (chart overhaul wave 3, Task T5, 29 Sep
+   * 2026) — its existing hover contract (`rect.hit` elements a caller can
+   * `fireEvent.mouseEnter` on, and a plain `.readout` line, both asserted by
+   * `report.series.test.tsx`, a file this task does not own) predates
+   * `ChartFrame` and a full migration would break it. The brush below reuses
+   * `chartLayout.ts`'s own `brushToIndices` so the SNAPPING logic is the one
+   * piece shared with every other chart in this task.
+   */
+  onSelect?: (p: PeriodParams) => void;
 }) {
   const [box, width] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
+  const [dragPx, setDragPx] = useState<{ x0: number; x1: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const H = 250;
   const L = 44;
   const R = 130;
@@ -824,20 +1136,77 @@ export function RejectTrendChart({
   const ticks = tickIndices(series.length, fittingTicks(width - L - R, 11, 13, series.length, 4));
   const qName = singleName ?? W.rejects.quality;
 
+  // Tooltip content (chart overhaul, Task T5): the UCL beside each series'
+  // own rate, so the readout states not just the value but the bound it is
+  // judged against — "whether a point is above usual" is already `aboveUsual`
+  // below; this adds the number that makes it checkable.
+  const uclPart = (v: number | null): string => (v == null ? '' : ` · ${W.chart.ucl} ${v.toFixed(1)}%`);
+
+  // The two end labels ("Quality x%", "Weight y%") de-collide vertically via
+  // the same pure helper every other chart in this task uses, rather than
+  // being drawn at their literal y and left to overprint each other when the
+  // two rates land close together (the defect this task exists to close,
+  // here on the one chart still keeping its own hand-rolled layout — see the
+  // `onSelect` prop's doc comment for why).
+  const endItems: GutterLabelIn[] = [];
+  if (lastQIdx != null) endItems.push({ y: y(series[lastQIdx]!.q!), text: `${qName} ${series[lastQIdx]!.q!.toFixed(1)}%`, prio: 1 });
+  if (weight && lastWIdx != null) endItems.push({ y: y(series[lastWIdx]!.w!), text: `${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%`, prio: 0 });
+  const endLabels = placeGutterLabels(endItems, { top: T, bottom: H - B, lineH: 14 });
+  let endIdxCursor = 0;
+  const qEndLabel = lastQIdx != null ? endLabels[endIdxCursor++] ?? null : null;
+  const wEndLabel = weight && lastWIdx != null ? endLabels[endIdxCursor++] ?? null : null;
+
+  // Caption: the span the p-chart's OWN limits were worked out over — the
+  // whole series, not the (possibly narrower) shaded selected period.
+  const captionRange = series.length > 0 ? `${labelFmt(series[0]!.ts)} – ${labelFmt(series[series.length - 1]!.ts)}` : '';
+
+  const xs = series.map((_, i) => x(i));
+  const onSvgPointerDown = onSelect
+    ? (e: ReactPointerEvent<SVGSVGElement>) => {
+        const left = svgRef.current?.getBoundingClientRect().left ?? 0;
+        setDragPx({ x0: e.clientX - left, x1: e.clientX - left });
+      }
+    : undefined;
+  const onSvgPointerMove = onSelect
+    ? (e: ReactPointerEvent<SVGSVGElement>) => {
+        if (!dragPx) return;
+        const left = svgRef.current?.getBoundingClientRect().left ?? 0;
+        setDragPx({ x0: dragPx.x0, x1: e.clientX - left });
+      }
+    : undefined;
+  const onSvgPointerUp = onSelect
+    ? () => {
+        if (dragPx) {
+          const idx = brushToIndices(dragPx.x0, dragPx.x1, xs);
+          if (idx) {
+            const d0 = series[idx[0]]!.ts.slice(0, 10);
+            const d1 = series[idx[1]]!.ts.slice(0, 10);
+            const r0 = dayToShiftRange(d0, d0);
+            const r1 = dayToShiftRange(d1, d1);
+            const snapped = snapToShifts(r0.from, r1.to);
+            if (snapped) onSelect(snapped);
+          }
+        }
+        setDragPx(null);
+      }
+    : undefined;
+
   return (
     <div ref={box}>
       <Readout
         hovered={
           h
             ? weight
-              ? `${labelFmt(h.ts)} · ${W.rejects.quality} ${fmtRateOrGap(h.q)} · ${W.rejects.weightKind} ${fmtRateOrGap(h.w)} · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
-              : `${labelFmt(h.ts)} · ${qName} ${fmtRateOrGap(h.q)} · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+              ? `${labelFmt(h.ts)} · ${W.rejects.quality} ${fmtRateOrGap(h.q)}${uclPart(h.qUcl)} · ${W.rejects.weightKind} ${fmtRateOrGap(h.w)}${uclPart(h.wUcl)} · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
+              : `${labelFmt(h.ts)} · ${qName} ${fmtRateOrGap(h.q)}${uclPart(h.qUcl)} · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
             : null
         }
         resting={periodFrom != null ? `${series.length} days · the shaded band is the selected period` : `${series.length} days`}
       />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}
-           onMouseLeave={() => setHover(null)}>
+      <svg ref={svgRef} className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}
+           onMouseLeave={() => setHover(null)}
+           onPointerDown={onSvgPointerDown} onPointerMove={onSvgPointerMove}
+           onPointerUp={onSvgPointerUp} onPointerLeave={onSvgPointerUp}>
         {firstIn >= 0 && (
           <rect x={x(firstIn) - 4} y={T} width={Math.max(8, x(lastIn) - x(firstIn) + 8)} height={H - T - B} fill="var(--paper-2)" />
         )}
@@ -904,13 +1273,13 @@ export function RejectTrendChart({
         {/* Labelled on the mark, so the chart needs no legend — on the LAST
             day that actually has a value, not the last index: the newest
             bucket in the window may itself be the gap. */}
-        {lastQIdx != null && (
-          <text x={width - R + 10} y={y(series[lastQIdx]!.q!) + 4} fontSize="var(--fs-small)" fill="var(--ink)">
+        {lastQIdx != null && qEndLabel?.text && (
+          <text x={width - R + 10} y={qEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--ink)">
             {qName} {series[lastQIdx]!.q!.toFixed(1)}%
           </text>
         )}
-        {weight && lastWIdx != null && (
-          <text x={width - R + 10} y={y(series[lastWIdx]!.w!) + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
+        {weight && lastWIdx != null && wEndLabel?.text && (
+          <text x={width - R + 10} y={wEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
             {W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%
           </text>
         )}
@@ -924,7 +1293,22 @@ export function RejectTrendChart({
             {labelFmt(series[i]!.ts)}
           </text>
         ))}
+        {onSelect && dragPx && (
+          <rect
+            className="chart-brush"
+            aria-hidden="true"
+            x={Math.min(dragPx.x0, dragPx.x1)}
+            y={T}
+            width={Math.max(1, Math.abs(dragPx.x1 - dragPx.x0))}
+            height={H - T - B}
+            fill="var(--acc-fill)"
+            opacity={0.15}
+          />
+        )}
       </svg>
+      {captionRange && (
+        <p className="chart-frame-caption mut sm">{W.chart.limitsOverPeriod(captionRange)}</p>
+      )}
     </div>
   );
 }
