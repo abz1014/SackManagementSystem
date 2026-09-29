@@ -131,30 +131,75 @@ describe('simulator-only period (spansGenerations false, simulatorSource true) �
   // generationDisclosureLines(h) — printed NO disclosure at all, even though
   // buildHeader (header.ts) already computes `generationLine` for exactly
   // this case ("Data batch: … (plant simulator, synthetic data).").
-  function makeSimulatorHeader(): ReportHeader {
+  //
+  // Coordinator follow-up (29 Sep 2026): the first pass fell back to
+  // `h.sourceGeneration` verbatim, which can be the RAW vendor label (e.g.
+  // "pack1_TP1U2 gen 4") — it never states the data is simulated. Every
+  // variant below asserts the row contains BOTH "plant simulator" and
+  // "synthetic", and never contains the raw label on its own.
+  const RAW_LABEL = 'pack1_TP1U2 gen 4';
+
+  /** The realistic case: buildHeader already composed generationLine correctly. */
+  function makeSimulatorHeaderWithLine(): ReportHeader {
     const h = makeHeader('daily', false);
     h.simulatorSource = true;
-    h.sourceGeneration = 'DATA_TP1U2_SIM#1 (plant simulator, synthetic data)';
-    h.generationLine = 'Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data).';
+    h.sourceGeneration = `${RAW_LABEL} (plant simulator, synthetic data)`;
+    h.generationLine = `Data batch: ${RAW_LABEL} (plant simulator, synthetic data).`;
     return h;
   }
 
-  it('attributionRows carries a Data batch disclosure row naming the simulator', () => {
-    const rows = attributionRows(makeSimulatorHeader());
-    expect(rows.some(([k]) => k.startsWith('Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data)'))).toBe(true);
+  /** The fallback case: an older/hand-built header carries simulatorSource + a bare raw sourceGeneration but no generationLine at all. */
+  function makeSimulatorHeaderRawOnly(): ReportHeader {
+    const h = makeHeader('daily', false);
+    h.simulatorSource = true;
+    h.sourceGeneration = RAW_LABEL;
+    h.generationLine = undefined;
+    return h;
+  }
+
+  function expectPlainWordsDisclosure(rowText: string): void {
+    expect(rowText).toMatch(/plant simulator/i);
+    expect(rowText).toMatch(/synthetic/i);
+  }
+
+  describe.each([
+    ['generationLine present', makeSimulatorHeaderWithLine],
+    ['generationLine absent, raw sourceGeneration only (batchName fallback)', makeSimulatorHeaderRawOnly],
+  ] as const)('%s', (_label, make) => {
+    it('attributionRows carries a Data batch disclosure row naming the simulator in plain words', () => {
+      const rows = attributionRows(make());
+      const disclosureRow = rows.find(([k]) => k.startsWith('Data batch'));
+      expect(disclosureRow).toBeDefined();
+      expectPlainWordsDisclosure(disclosureRow![0]);
+    });
+
+    it('csvDocument trailing block carries the plain-words simulator disclosure', () => {
+      const doc = csvDocument(['a'], [[1]], make());
+      const sep = doc.indexOf('\n\n');
+      expect(sep).toBeGreaterThan(-1);
+      const trailing = doc.slice(sep + 2);
+      expect(trailing).toContain('Data batch');
+      expectPlainWordsDisclosure(trailing);
+    });
+
+    it('headerSheet (XLSX) carries the plain-words simulator disclosure row', () => {
+      const sheet = headerSheet(make());
+      const values = sheet.rows.map((r) => String(r.item ?? ''));
+      const disclosureRow = values.find((v) => v.startsWith('Data batch'));
+      expect(disclosureRow).toBeDefined();
+      expectPlainWordsDisclosure(disclosureRow!);
+    });
   });
 
-  it('csvDocument trailing block carries the simulator disclosure', () => {
-    const doc = csvDocument(['a'], [[1]], makeSimulatorHeader());
-    const sep = doc.indexOf('\n\n');
-    expect(sep).toBeGreaterThan(-1);
-    expect(doc.slice(sep + 2)).toContain('Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data)');
-  });
-
-  it('headerSheet (XLSX) carries the simulator disclosure row', () => {
-    const sheet = headerSheet(makeSimulatorHeader());
-    const values = sheet.rows.map((r) => String(r.item ?? ''));
-    expect(values.some((v) => v.startsWith('Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data)'))).toBe(true);
+  it('the fallback row never surfaces the bare raw label on its own', () => {
+    const rows = attributionRows(makeSimulatorHeaderRawOnly());
+    const disclosureRow = rows.find(([k]) => k.startsWith('Data batch'))![0];
+    // The raw label may legitimately appear WITHIN a plain-words sentence
+    // (batchName still names the batch), but the row must never be just the
+    // raw label with no simulator/synthetic qualifier — the whole point of
+    // this fix.
+    expect(disclosureRow).not.toBe(`Data batch: ${RAW_LABEL}`);
+    expectPlainWordsDisclosure(disclosureRow);
   });
 
   it('a plain single real batch (spansGenerations false, simulatorSource false/undefined) still produces no trailer', () => {

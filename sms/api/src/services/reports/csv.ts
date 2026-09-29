@@ -16,6 +16,7 @@
  * the period, who generated it and from which version.
  */
 import { generationDisclosureLines, type ReportHeader } from './common.js';
+import { batchName } from '../batchName.js';
 
 export type CsvCell = string | number | boolean | null | undefined;
 export type CsvRow = CsvCell[];
@@ -30,6 +31,37 @@ export function escapeCell(v: CsvCell | Date): string {
 export function toCsv(headers: readonly string[], rows: readonly CsvRow[]): string {
   const lines = rows.map((r) => r.map(escapeCell).join(','));
   return headers.length > 0 ? [headers.map(escapeCell).join(','), ...lines].join('\n') : lines.join('\n');
+}
+
+/**
+ * Coordinator follow-up (29 Sep 2026): the first pass of the simulator-only
+ * disclosure fell back to `h.sourceGeneration` verbatim, which can be the
+ * RAW vendor label (e.g. "pack1_TP1U2 gen 4") — it never says the data is
+ * simulated. The row must always read in plain words, so this reads
+ * `h.generationLine` (buildHeader/header.ts always composes it as
+ * "Data batch: … (plant simulator, synthetic data)." for a simulator
+ * source) when it already says so, and otherwise builds the same wording
+ * from `batchName()` (services/batchName.ts, the one place a generation is
+ * named in plain words — "Simulator data batch N", never the raw label)
+ * plus the explicit "(plant simulator, synthetic data)" qualifier — so the
+ * row can never surface a bare raw table/generation label.
+ */
+const SIMULATOR_PHRASE = /plant simulator/i;
+const SYNTHETIC_PHRASE = /synthetic/i;
+
+/** The trailing digits of a generation label/key, e.g. "pack1_TP1U2 gen 4" or "DATA_TP1U2_SIM#4" → 4; null when none. */
+function parseOrdinal(label: string | null): number | null {
+  const m = label?.match(/(\d+)(?!.*\d)/);
+  return m ? Number(m[1]) : null;
+}
+
+function simulatorDisclosureText(h: Pick<ReportHeader, 'generationLine' | 'sourceGeneration'>): string {
+  const line = h.generationLine?.trim();
+  if (line && SIMULATOR_PHRASE.test(line) && SYNTHETIC_PHRASE.test(line)) {
+    return line.replace(/\.\s*$/, '');
+  }
+  const name = batchName({ ordinal: parseOrdinal(h.sourceGeneration), simulator: true });
+  return `Data batch: ${name} (plant simulator, synthetic data)`;
 }
 
 /** The trailing attribution rows, in a fixed order a test can pin. */
@@ -63,11 +95,10 @@ export function attributionRows(h: ReportHeader): [string, string][] {
     // Re-audit fix (Major, 29 Sep 2026): a period entirely covered by the
     // plant simulator excludes nothing, so `spansGenerations` stays false
     // and `generationDisclosureLines` returns null above — but the source
-    // itself is still synthetic, and `buildHeader` (header.ts) already
-    // computes `sourceGeneration`/`generationLine` naming it for exactly
-    // this case. One trailing row states it, matching header.ts's own
-    // "Data batch: …" wording rather than inventing a second phrasing.
-    rows.push([`Data batch: ${h.sourceGeneration ?? 'unknown'}`, '']);
+    // itself is still synthetic, and the row must say so in plain words
+    // (never a raw vendor table/generation label) — see
+    // `simulatorDisclosureText` above.
+    rows.push([simulatorDisclosureText(h), '']);
   }
   return rows;
 }
