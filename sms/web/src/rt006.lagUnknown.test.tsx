@@ -132,14 +132,16 @@ describe('Line — RT-006: a null-measured lag never renders as "stopped"', () =
     // audit brief asked for.
     await findByText(W.state.unknown);
 
-    // The two-sided half: the ALARM sentence — "⟨line⟩ has been stopped for
-    // N min" (`W.state.stopped`, `Line.tsx`'s Headline `case 'stopped'`) —
-    // is unreachable from this state, even though a generic explanatory
-    // mention of the word "stopped" legitimately survives elsewhere on the
-    // page (the Details disclosure: "It reads as stopped once that gap
-    // exceeds …", present regardless of state). So this checks for the
-    // SPECIFIC phrase the headline would have printed, not the bare word.
-    expect(container.textContent ?? '').not.toMatch(/has been stopped for/i);
-    expect(queryByText(/has been stopped for/i)).toBeNull();
+    // The two-sided half: the ALARM sentence — "⟨line⟩ has had no readings
+    // for N min — the line, or the plant's data recorder, may have stopped"
+    // (`W.state.stopped`, reworded for F-04, `Line.tsx`'s Headline
+    // `case 'stopped'`) — is unreachable from this state, even though a
+    // generic explanatory mention of the word "stopped" legitimately
+    // survives elsewhere on the page (the Details disclosure: "It reads as
+    // stopped once that gap exceeds …", present regardless of state). So
+    // this checks for the SPECIFIC phrase the headline would have printed,
+    // not the bare word.
+    expect(container.textContent ?? '').not.toMatch(/may have stopped/i);
+    expect(queryByText(/may have stopped/i)).toBeNull();
   });
 });

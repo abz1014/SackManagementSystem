@@ -114,13 +114,20 @@ export const W = {
   /* ------------------------------------------------------------ line state */
   state: {
     running: 'is running',
-    stopped: (span: string) => `has been stopped for ${span}`,
-    /* UX Phase WS-B2 (23 Sep 2026): the SAME "stopped" fact as `stopped`
+    /* F-04 (FAILURE-ANALYSIS-2026-09-29.md, Task W2-C, 29 Sep 2026): from SQL
+       alone this cannot tell a stopped line from a stopped data recorder —
+       IFL's acquisition layer could stop while the line keeps running, and
+       this screen would still read "has been stopped for N min", a claim
+       the data cannot support. Reworded, per that finding's own suggested
+       fix, to name both possibilities rather than asserting the line
+       itself stopped. */
+    stopped: (span: string) => `has had no readings for ${span} — the line, or the plant's data recorder, may have stopped`,
+    /* UX Phase WS-B2 (23 Sep 2026): the SAME "no readings" fact as `stopped`
        above, for when `behindSeconds` itself is null — `fmtSpan(null ?? 0)`
        used to print a real-looking "0 s", claiming a duration the server
        never measured. Never used together with `stopped` on the same line;
        a caller picks one OR the other depending on whether it has a span. */
-    stoppedUnknownDuration: 'has been stopped — for how long is not known',
+    stoppedUnknownDuration: "has had no readings — the line, or the plant's data recorder, may have stopped, for how long is not known",
     idle: (since: string) => `has had no readings since ${since}`,
     unknown: 'Cannot tell whether the line is running',
     intoShift: (span: string, shift: string, from: string, to: string) =>
