@@ -521,6 +521,14 @@ interface BackupMarker {
 
 function parseMarker(text: string | null): BackupMarker | null {
   if (text == null) return null;
+  // Strip a leading UTF-8 BOM (U+FEFF). PowerShell 5.1's `Set-Content
+  // -Encoding utf8` (and older versions of backup-appdb.ps1) writes the
+  // marker with a BOM; JSON.parse rejects a leading BOM outright, which
+  // silently rejected every marker this script wrote and made
+  // backup.verified false forever. See backup-appdb.ps1's own marker-write
+  // step, which now writes BOM-less UTF-8 — this strip keeps old markers
+  // parseable too.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   try {
     const m = JSON.parse(text) as Partial<BackupMarker>;
     return typeof m.sizeBytes === 'number' && Number.isFinite(m.sizeBytes) ? (m as BackupMarker) : null;

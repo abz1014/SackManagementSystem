@@ -126,7 +126,13 @@ $marker = [ordered]@{
   verifiedUtc = (Get-Date).ToUniversalTime().ToString("o")
   method      = "RESTORE VERIFYONLY WITH CHECKSUM"
 }
-($marker | ConvertTo-Json) | Set-Content -LiteralPath "$file.verified.json" -Encoding utf8
+# Write without a BOM: Windows PowerShell 5.1's `Set-Content -Encoding utf8`
+# prepends a UTF-8 BOM (EF BB BF), which JSON.parse (api/src/services/
+# health.ts::parseMarker) rejects outright — every marker this script wrote
+# was silently unparseable and backup.verified stayed false forever.
+$markerJson = $marker | ConvertTo-Json
+$markerPath = "$file.verified.json"
+[System.IO.File]::WriteAllText($markerPath, $markerJson, (New-Object System.Text.UTF8Encoding $false))
 
 # retention: keep 30 days. The marker travels with its .bak — an orphaned
 # .verified.json for a file retention already removed would otherwise sit in

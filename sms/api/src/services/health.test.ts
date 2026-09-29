@@ -243,6 +243,35 @@ describe('backupHealth — verified backups only, ignoring anything this script 
     expect(h.newestFile).toBeNull();
     expect(h.warning).toBe(true);
   });
+
+  /* Red-first (this pass): Windows PowerShell 5.1's `Set-Content -Encoding
+     utf8` prepends a UTF-8 BOM (\uFEFF) to the marker file. JSON.parse
+     rejects a leading BOM outright, so every marker backup-appdb.ps1 wrote
+     was silently unparseable and backup.verified stayed false forever, even
+     though the file itself is otherwise well-formed. This must parse the
+     same as a BOM-less marker. */
+  it('accepts a marker written with a leading UTF-8 BOM, same as a BOM-less one', () => {
+    const bomFs: BackupFs = {
+      readdir: () => ['sms-20260915-020000.bak', 'sms-20260915-020000.bak.verified.json'],
+      mtimeMs: () => now - 10 * 3_600_000,
+      size: () => 200,
+      readText: (p) => {
+        if (!p.endsWith('.verified.json')) return null;
+        const marker = JSON.stringify({
+          file: 'sms-20260915-020000.bak',
+          sizeBytes: 200,
+          verifiedUtc: new Date(now - 10 * 3_600_000).toISOString(),
+          method: 'RESTORE VERIFYONLY WITH CHECKSUM',
+        });
+        return '\uFEFF' + marker; // the BOM PowerShell 5.1 prepends
+      },
+    };
+    const h = backupHealth('C:\\sms-backups', bomFs, now);
+    expect(h.newestFile).toBe('sms-20260915-020000.bak');
+    expect(h.verified).toBe(true);
+    expect(h.newestUnverified).toBe(false);
+    expect(h.warning).toBe(false);
+  });
 });
 
 describe('freeDiskMb / diskHealth — best-effort, never fatal', () => {
