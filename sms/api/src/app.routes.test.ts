@@ -419,6 +419,32 @@ describe('GET /api/weight-stations — `to` resolves `from` without asking for t
   });
 });
 
+describe('GET /api/weight-stations — periodFrom/periodTo range validation (re-audit fix, Major)', () => {
+  // Before the fix, only the trailing from/to were checked with
+  // validateRange (line ~797); an inverted periodFrom/periodTo silently fell
+  // through to a reset window and answered 200, unlike every sibling route
+  // (validateRange calls at ~1074/1142/1332) which refuse 400 "from must be
+  // <= to" for the same shape of input.
+  it('an inverted periodFrom/periodTo is refused 400, matching every sibling range route', async () => {
+    const r = await call(
+      'manager',
+      'GET',
+      '/api/weight-stations?to=2026-09-07&trailingDays=14&periodFrom=2026-09-10&periodTo=2026-09-01',
+    );
+    expect(r.status).toBe(400);
+    expect(r.json.error).toMatch(/from must be <= to/);
+  });
+
+  it('a valid (non-inverted) periodFrom/periodTo still answers 200', async () => {
+    const r = await call(
+      'manager',
+      'GET',
+      '/api/weight-stations?to=2026-09-07&trailingDays=14&periodFrom=2026-09-01&periodTo=2026-09-07',
+    );
+    expect(r.status).toBe(200);
+  });
+});
+
 describe('GET /api/dq-destination — rank 1, resolves a DQ finding subjectRef to its canonical row (UX Phase 7 Brief 2)', () => {
   it('cone_raw + a ref that resolves answers {type, id} at 200', async () => {
     const r = await call('manager', 'GET', '/api/dq-destination?table=cone_raw&ref=501');

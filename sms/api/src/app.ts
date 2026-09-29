@@ -801,6 +801,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const periodTo = q.data.periodTo ?? to;
       const periodFrom = q.data.periodFrom ?? periodTo;
+      // Re-audit fix (Major, 29 Sep 2026): only the trailing from/to were
+      // validated above; an inverted periodFrom/periodTo (e.g.
+      // periodFrom=2026-09-10&periodTo=2026-09-01) fell through to a
+      // silently reset window instead of the 400 every sibling range param
+      // gets (validateRange calls at ~1074/1142/1332).
+      const periodRangeErr = validateRange(periodFrom, periodTo);
+      if (periodRangeErr) {
+        res.status(400).json({ error: periodRangeErr });
+        return;
+      }
       const shiftRangeResult = decodeShiftRangeParam({
         from: periodFrom, to: periodTo, fromShift: q.data.periodFromShift, toShift: q.data.periodToShift,
       });
