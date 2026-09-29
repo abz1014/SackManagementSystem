@@ -18,7 +18,7 @@ import type { Period } from '../lib/period';
 import type { Envelope, SpcData, Subgroup, WeightStationsData } from '../api';
 import {
   WeightScreen, Sparkline, overTimeGutterLabels, distributionRefLabels,
-  DIST_REF_ROW_H, type DistRefLabelIn,
+  distRefRowHeight, type DistRefLabelIn,
 } from './Weight';
 import { rectsIntersect, textPx, type Rect } from '../ui/chartLayout';
 
@@ -160,6 +160,42 @@ async function waitForChart(container: HTMLElement): Promise<HTMLElement> {
   throw new Error('chart-frame-body never rendered');
 }
 
+describe('Weight Distribution — honours ChartFrame\'s resizable size.height (regression, 29 Sep 2026)', () => {
+  afterEach(() => {
+    try {
+      localStorage.removeItem('sms.chartH.weight-distribution');
+    } catch {
+      /* jsdom localStorage always available in this harness; defensive only */
+    }
+  });
+
+  it('draws the svg at the height dragged/persisted for this chart, not a hardcoded 250', async () => {
+    // ChartFrame/useChartSize persists a dragged height under this key
+    // (`sms.chartH.<chartId>`, `useChartSize.ts`) and reads it back on
+    // mount — the same mechanism `layout-tests/charts.spec.ts`'s
+    // ".chart-resize" test exercises against the OverTime chart in a real
+    // browser. Before this fix, `Distribution` never read `size.height` at
+    // all (`const H = 250` was a closed-over module constant), so the drag
+    // handle moved the CONTAINER while the drawing inside stayed pinned —
+    // this is that defect's regression test at the component level.
+    localStorage.setItem('sms.chartH.weight-distribution', '400');
+    installFakeFetch(routes());
+    const { container } = render(<WeightScreen {...baseProps({ mode: 'dist' })} />);
+    await waitForChart(container);
+    const svg = container.querySelector('.chart-frame svg')!;
+    expect(svg.getAttribute('height')).toBe('400');
+    expect(svg.getAttribute('viewBox')).toMatch(/ 400$/);
+  });
+
+  it('falls back to the 250 default when nothing is stored', async () => {
+    installFakeFetch(routes());
+    const { container } = render(<WeightScreen {...baseProps({ mode: 'dist' })} />);
+    await waitForChart(container);
+    const svg = container.querySelector('.chart-frame svg')!;
+    expect(svg.getAttribute('height')).toBe('250');
+  });
+});
+
 describe('Weight OverTime — tooltip content', () => {
   it('states the group\'s time span, mean with unit, n cones, vs target, and the limits in force', async () => {
     installFakeFetch(routes());
@@ -284,7 +320,8 @@ describe('distributionRefLabels — packRow without overlap at any chart width',
   function labelRect(l: { labelX: number; anchor: 'start' | 'middle' | 'end'; row: 0 | 1; text: string }, fontPx: number): Rect {
     const w = textPx(l.text.length, fontPx);
     const x0 = l.anchor === 'start' ? l.labelX : l.anchor === 'end' ? l.labelX - w : l.labelX - w / 2;
-    return { x: x0, y: l.row * DIST_REF_ROW_H, w, h: DIST_REF_ROW_H };
+    const rowH = distRefRowHeight(fontPx);
+    return { x: x0, y: l.row * rowH, w, h: rowH };
   }
 
   it.each([300, 900])('lower limit close to target, both far from upper limit, at width %d never overlap', (width) => {
@@ -310,6 +347,60 @@ describe('distributionRefLabels — packRow without overlap at any chart width',
       }
     }
   });
+});
+
+/**
+ * Regression, chart overhaul wave 3 Task T9 red-team (29 Sep 2026):
+ * `layout-tests/charts.spec.ts`'s "Weight: no chart text/mark overlap at
+ * 600x900"/"900x1000" caught "target 1,960 g" overlapping "upper limit
+ * 1,970 g" in a REAL browser render even though `distributionRefLabels`
+ * correctly moved one label to row 1. The cause was `Distribution`'s own row
+ * spacing (`DIST_REF_ROW_H`, a bare constant 13 — `BASE_FONT_PX` itself)
+ * being SMALLER than the real rendered height of 13px text (~16-18px,
+ * `fontPx * 1.4`): the two rows were spaced 13px apart while each label's
+ * own box was taller than that gap. The test above models a label's box
+ * height as the SAME `rowH` used to space rows — self-consistent, so it
+ * could never have caught this; it only asserts `packRow`'s horizontal
+ * de-collision. This test instead models the label's rendered box the way
+ * `overTimeGutterLabels`' own tests above do (`fontPx * 1.4`, independent of
+ * row spacing) at the row `y` `Weight.tsx`'s `Distribution` actually draws
+ * text at (`REF_TOP + distRefRowHeight(fontPx) * (row + 1)`), so a too-small
+ * `distRefRowHeight` would fail it exactly as the Playwright suite failed.
+ */
+describe('distributionRefLabels — row spacing matches the real rendered text height (regression)', () => {
+  const REF_TOP = 16;
+
+  function realLabelBox(
+    l: { labelX: number; anchor: 'start' | 'middle' | 'end'; row: 0 | 1; text: string },
+    fontPx: number,
+    rowH: number,
+  ): Rect {
+    const w = textPx(l.text.length, fontPx);
+    const x0 = l.anchor === 'start' ? l.labelX : l.anchor === 'end' ? l.labelX - w : l.labelX - w / 2;
+    const labelY = REF_TOP + rowH * (l.row + 1);
+    return { x: x0, y: labelY - fontPx * 0.7, w, h: fontPx * 1.4 };
+  }
+
+  it.each([600, 900])(
+    '"target 1,960 g" and "upper limit 1,970 g" never overlap at chart width %d',
+    (chartWidth) => {
+      // BASE_FONT_PX from useChartSize.ts — the unscaled default this
+      // screen renders at outside Wall mode, matching what the Playwright
+      // suite observed (`--ui-scale` unset).
+      const fontPx = 13;
+      const rowH = distRefRowHeight(fontPx);
+      // x positions close enough to force the same-row collision that made
+      // packRow move "upper limit" to row 1 in the first place — the exact
+      // shape the real chart hit at both 600 and 900px.
+      const items: DistRefLabelIn[] = [
+        { key: 'target', x: chartWidth * 0.42, text: 'target 1,960 g' },
+        { key: 'usl', x: chartWidth * 0.55, text: 'upper limit 1,970 g' },
+      ];
+      const out = distributionRefLabels(items, [8, chartWidth - 8], fontPx);
+      const boxes = out.map((l) => realLabelBox(l, fontPx, rowH));
+      expect(rectsIntersect(boxes[0]!, boxes[1]!)).toBe(false);
+    },
+  );
 });
 
 describe('Sparkline — hover tooltip', () => {

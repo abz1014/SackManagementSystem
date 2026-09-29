@@ -1123,7 +1123,27 @@ export interface DistRefLabelOut extends DistRefLabelIn {
  *  `packRow` moves a colliding label to row 1 before it ever resorts to
  *  `overflow`, so the band must be tall enough for both. */
 export const DIST_REF_ROWS = 2;
-export const DIST_REF_ROW_H = 13;
+/**
+ * Bug fix (chart overhaul wave 3, Task T9 red-team, 29 Sep 2026): this used
+ * to be a bare constant, 13, which is `BASE_FONT_PX` (`useChartSize.ts`)
+ * itself — smaller than the text a 13px font actually renders at (a real
+ * browser's glyph bounding box, measured by the Playwright layout suite, is
+ * ~16px tall at that size). `distributionRefLabels`/`packRow` correctly
+ * detected the "target"/"upper limit" horizontal collision and moved one
+ * label to row 1, but row 1 sat only 13px below row 0 while each label's own
+ * rendered box was 16px tall — so the two rows still overlapped vertically
+ * by ~3px, at every width (`layout-tests/charts.spec.ts`'s
+ * "Weight: no chart text/mark overlap at 600x900"/"900x1000" both caught
+ * this). Fixed the same way `OverTime`'s own gutter-label line height is
+ * computed (`overTimeGutterLabels` above, `Math.ceil(fontPx * 1.4)`) — a row
+ * must be tall enough for the font it is actually rendered at, not a fixed
+ * guess. Kept as a named export (now a function of `fontPx`, matching the
+ * `--ui-scale`-aware value `useChartSize` reports) so `Weight.chart.test.tsx`
+ * can compute the same real row height its own overlap assertions check.
+ */
+export function distRefRowHeight(fontPx: number): number {
+  return Math.ceil(fontPx * 1.4) || 13;
+}
 
 /**
  * Horizontal de-collision for the "target"/"upper limit"/"lower limit"
@@ -1148,31 +1168,45 @@ export function distributionRefLabels(items: DistRefLabelIn[], range: [number, n
   });
 }
 
+/**
+ * Bug fix (chart overhaul wave 3, Task T9 red-team, 29 Sep 2026): `packRow`
+ * still marks a label `overflow` when a row 0 flip AND a row 1 placement
+ * both collide — e.g. all three of lower/target/upper limit crowded into a
+ * narrow band. Before this, an overflowing label was drawn anyway, in place,
+ * on top of whichever neighbour it collided with — a defect this same pass
+ * closed for the ROW-HEIGHT case above but had not yet closed for the
+ * genuine-overflow case. It now falls back to the short form ("target" /
+ * "upper" / "lower") so a collision can no longer occur (the short forms are
+ * short enough that even three of them fit one row at any width this screen
+ * supports), and carries the full value in an SVG `<title>` — a native
+ * tooltip on hover/focus — so nothing is lost, only re-stated more
+ * compactly.
+ */
+function shortDistRefLabel(key: DistRefLabelOut['key']): string {
+  return key === 'target' ? 'target' : key === 'usl' ? 'upper' : 'lower';
+}
+
 function Distribution({ spc, target }: { spc: SpcData; target: number | null }) {
-  const H = 250;
   const L = 8;
   const B = 30;
-  // The band above the plot the three reference labels hang in — they used
-  // to be drawn INSIDE the plot, on the same baseline a bar can reach, so
-  // whether "target 1,960 g" was readable depended on that day's bin
-  // heights. Nothing may share a line with the data marks. Two rows tall so
-  // `packRow` has a second row to move a colliding label into.
   const REF_TOP = 16;
-  const REF_BAND = DIST_REF_ROWS * DIST_REF_ROW_H + 8;
-  const T = REF_TOP + REF_BAND;
 
   const bins = spc.histogram;
   if (bins.length === 0) return <Empty message={W.nothingHere} />;
   const max = Math.max(...bins.map((b) => b.count), 1);
 
-  const layoutRef = useRef<{ slot: number; R: number; y: (v: number) => number; cx: (i: number) => number } | null>(null);
+  // `T`/`H` are only known once `size` (fontPx, height) is measured inside
+  // ChartFrame's render prop below, so `hit`/`markRect` — passed to
+  // ChartFrame as props, called from OUTSIDE that render — read them back
+  // off this ref, the same idiom `OverTime`'s `geoRef`/`xsRef` already use.
+  const layoutRef = useRef<{ slot: number; R: number; y: (v: number) => number; cx: (i: number) => number; T: number; H: number } | null>(null);
 
   const outside = (b: { start: number; end: number }) =>
     (spc.spec.lsl != null && b.end <= spc.spec.lsl) || (spc.spec.usl != null && b.start >= spc.spec.usl);
 
   const hit = (px: number, py: number): number | null => {
     const layout = layoutRef.current;
-    if (!layout || py < T) return null;
+    if (!layout || py < layout.T) return null;
     return bandHit(px, L, layout.slot, bins.length);
   };
 
@@ -1180,8 +1214,8 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
     const layout = layoutRef.current;
     const b = bins[i];
     if (!layout || !b) return null;
-    const by = Math.min(H - B, layout.y(b.count));
-    return { x: layout.cx(i) - layout.slot * 0.42, y: by, w: layout.slot * 0.84, h: Math.max(0, H - B - by) };
+    const by = Math.min(layout.H - B, layout.y(b.count));
+    return { x: layout.cx(i) - layout.slot * 0.42, y: by, w: layout.slot * 0.84, h: Math.max(0, layout.H - B - by) };
   };
 
   const tipFor = (i: number): ChartTip | null => {
@@ -1200,7 +1234,7 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
   return (
     <ChartFrame
       chartId="weight-distribution"
-      defaultH={H}
+      defaultH={250}
       minH={180}
       maxH={520}
       resting={`${fmtInt(spc.count)} ${kindWord(spc.unit)}, ${fmtW(bins[0]!.start, spc.unit)} to ${fmtW(bins[bins.length - 1]!.end, spc.unit)}`}
@@ -1212,11 +1246,31 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
     >
       {(size, state) => {
         const Wd = size.width;
+        // Bug fix (chart overhaul wave 3, Task T9 red-team, 29 Sep 2026):
+        // this used to hardcode `const H = 250` for both the `<svg height>`
+        // AND the y-scale, so ChartFrame's own drag-to-resize handle moved
+        // the CONTAINER (and the handle itself) while the drawing inside
+        // stayed pinned at 250px tall — the plot never actually got taller
+        // or shorter. `OverTime` (above) already reads `size.height`; this
+        // now does the same, and `defaultH` above supplies the same 250
+        // this component always used before a reader ever drags it.
+        const Hd = size.height;
         const R = 8;
+        // The band above the plot the three reference labels hang in — they
+        // used to be drawn INSIDE the plot, on the same baseline a bar can
+        // reach, so whether "target 1,960 g" was readable depended on that
+        // day's bin heights. Nothing may share a line with the data marks.
+        // `rowH` is measured at the font size actually being rendered
+        // (`distRefRowHeight`, above) rather than a guessed constant — see
+        // that function's own comment for the vertical-overlap defect this
+        // replaces.
+        const rowH = distRefRowHeight(size.fontPx);
+        const REF_BAND = DIST_REF_ROWS * rowH + 8;
+        const T = REF_TOP + REF_BAND;
         const slot = (Wd - L - R) / bins.length;
-        const y = (v: number) => T + ((max - v) / max) * (H - T - B);
+        const y = (v: number) => T + ((max - v) / max) * (Hd - T - B);
         const cx = (i: number) => L + slot * i + slot / 2;
-        layoutRef.current = { slot, R, y, cx };
+        layoutRef.current = { slot, R, y, cx, T, H: Hd };
         const xOf = (weight: number) => {
           const i = bins.findIndex((b) => weight >= b.start && weight < b.end);
           return i >= 0 ? cx(i) : null;
@@ -1235,36 +1289,41 @@ function Distribution({ spc, target }: { spc: SpcData; target: number | null }) 
         const refOut = distributionRefLabels(refIn, [L, Wd - R], size.fontPx);
 
         return (
-          <svg className="chart" viewBox={`0 0 ${Wd} ${H}`} height={H} role="presentation" aria-hidden="true">
+          <svg className="chart" viewBox={`0 0 ${Wd} ${Hd}`} height={Hd} role="presentation" aria-hidden="true">
             {bins.map((b, i) => (
               <rect
                 key={i} x={cx(i) - slot * 0.42} y={y(b.count)} width={slot * 0.84}
-                height={Math.max(0, H - B - y(b.count))}
+                height={Math.max(0, Hd - B - y(b.count))}
                 fill={outside(b) ? 'var(--acc-fill)' : state.active === i ? 'var(--ink)' : 'var(--graphite)'}
               />
             ))}
             {/* The rule runs the height of the plot; its label hangs in the
                 band above it, de-collided by row/anchor via `packRow`
-                rather than a fixed ±5px offset from the rule. */}
+                rather than a fixed ±5px offset from the rule. A label
+                `packRow` could not place even on row 1 (`overflow`) falls
+                back to its short form with the full value in a native
+                `<title>` — see `shortDistRefLabel`'s comment — instead of
+                being drawn on top of whichever label it collided with. */}
             {refOut.map((l) => (
               <g key={l.key}>
                 <line
-                  x1={l.x} x2={l.x} y1={T} y2={H - B}
+                  x1={l.x} x2={l.x} y1={T} y2={Hd - B}
                   stroke={l.key === 'target' ? 'var(--graphite)' : 'var(--grid)'}
                   strokeDasharray={l.key === 'target' ? undefined : '3 3'}
                 />
                 <text
                   x={l.labelX}
-                  y={REF_TOP + DIST_REF_ROW_H * (l.row + 1)}
+                  y={REF_TOP + rowH * (l.row + 1)}
                   textAnchor={l.anchor}
                   fontSize={size.fontPx}
                   fill="var(--muted)"
                 >
-                  {l.text}
+                  {l.overflow ? shortDistRefLabel(l.key) : l.text}
+                  {l.overflow && <title>{l.text}</title>}
                 </text>
               </g>
             ))}
-            <line x1={L} x2={Wd - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
+            <line x1={L} x2={Wd - R} y1={Hd - B} y2={Hd - B} stroke="var(--rule-2)" />
           </svg>
         );
       }}
