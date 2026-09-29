@@ -13,19 +13,19 @@
  * a number the report already prints — no new statistic, so no new
  * KPI-DEFINITIONS.md row and no new IFL approval.
  */
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef } from 'react';
 import { W } from '../../lib/words';
 import { Empty } from '../../ui/bits';
 import {
-  Readout, useChartWidth, edgeAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
+  edgeAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
   linePath, fittingTicks, tickIndices, CategoryBars, type BarDatum,
 } from '../../ui/chart';
-import { ChartFrame, type ChartTip, type ChartTipRow } from '../../ui/ChartFrame';
+import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameBrush } from '../../ui/ChartFrame';
 import {
-  gutterFor, textPx, bandHit, rowHit, nearestIndex, brushToIndices, placeGutterLabels,
+  gutterFor, textPx, bandHit, rowHit, nearestIndex, placeGutterLabels,
   type Rect, type GutterLabelIn,
 } from '../../ui/chartLayout';
-import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
+import { dayToShiftRange, snapToShifts, describePeriod, type ShiftRef, type PeriodParams } from '../../lib/period';
 import { fmtDayLong, fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -988,6 +988,16 @@ export interface TrendBucket {
  * from its own n (`UCL_i = p̄ + 3·√(p̄(1−p̄)/n_i)`), which is the textbook
  * correct treatment for varying-n proportion data — a genuinely different,
  * sounder thing, not the same defect under a new name.
+ *
+ * Chart overhaul wave 3, Task T8b (29 Sep 2026): migrated onto `ChartFrame` —
+ * the floating tooltip, keyboard navigation, drag-to-resize handle and a
+ * shift-snapped brush this chart previously carried by hand
+ * (`report.series.test.tsx`'s old `rect.hit`/`.readout` assertions were the
+ * stated reason it was left off `ChartFrame` in `a9ee7e0`; that file's
+ * assertions are rewritten to test tooltip BEHAVIOUR instead, so the reason
+ * no longer holds). `hit` always resolves to the nearest day — every day
+ * stays hoverable/focusable even on a gap, exactly as the old full-height
+ * `rect.hit` per index did, so "no reading this day" is still reachable.
  */
 export function RejectTrendChart({
   quality,
@@ -1010,31 +1020,22 @@ export function RejectTrendChart({
   labelFmt?: (ts: string) => string;
   ariaLabel?: string;
   /**
-   * Drag-select sets the WHOLE PAGE period, snapped to shift boundaries —
+   * Drag-select (or Shift+Arrow, then `+`, on the keyboard — `ChartFrame`'s
+   * own brush path) sets the WHOLE PAGE period, snapped to shift boundaries —
    * each day is one point on this chart, so a drag spans `dayToShiftRange`
    * for its first and last day. Omitted (the default), the chart draws with
-   * no brush, and every existing caller keeps its current behaviour.
-   *
-   * NOTE, stated honestly: this chart keeps its own pointer-driven drag
-   * rather than `ChartFrame`'s (chart overhaul wave 3, Task T5, 29 Sep
-   * 2026) — its existing hover contract (`rect.hit` elements a caller can
-   * `fireEvent.mouseEnter` on, and a plain `.readout` line, both asserted by
-   * `report.series.test.tsx`, a file this task does not own) predates
-   * `ChartFrame` and a full migration would break it. The brush below reuses
-   * `chartLayout.ts`'s own `brushToIndices` so the SNAPPING logic is the one
-   * piece shared with every other chart in this task.
+   * no brush.
    */
   onSelect?: (p: PeriodParams) => void;
 }) {
-  const [box, width] = useChartWidth();
-  const [hover, setHover] = useState<number | null>(null);
-  const [dragPx, setDragPx] = useState<{ x0: number; x1: number } | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
   const H = 250;
   const L = 44;
   const R = 130;
   const T = 18;
   const B = 30;
+
+  interface Layout { width: number; height: number; x: (i: number) => number; y: (v: number) => number }
+  const layoutRef = useRef<Layout | null>(null);
 
   const days = quality;
   if (days.length === 0) return <Empty message={W.nothingHere} />;
@@ -1077,8 +1078,17 @@ export function RejectTrendChart({
   // removes from the plotted points themselves).
   const numericExtents = series.flatMap((s) => [s.q, s.w, s.qUcl, s.wUcl].filter((v): v is number => v != null));
   const max = Math.max(...numericExtents, 1);
-  const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
-  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
+
+  const computeLayout = (width: number, height: number): Layout => {
+    const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
+    const y = (v: number) => T + ((max - v) / max) * (height - T - B);
+    return { width, height, x, y };
+  };
+  // 1036 mirrors `useChartSize.ts`'s own fallback width, the same device
+  // `CategoryBars` uses so the very first brush.xs this component hands down
+  // agrees with what ChartFrame is about to paint before its first real
+  // measurement.
+  const fallbackLayout = () => computeLayout(1036, H);
 
   const inPeriod = (ts: string) => periodFrom != null && periodTo != null && ts.slice(0, 10) >= periodFrom && ts.slice(0, 10) <= periodTo;
   const firstIn = series.findIndex((s) => inPeriod(s.ts));
@@ -1105,7 +1115,7 @@ export function RejectTrendChart({
   for (let i = series.length - 1; i >= 0; i--) if (series[i]!.q != null) { lastQIdx = i; break; }
   let lastWIdx: number | null = null;
   for (let i = series.length - 1; i >= 0; i--) if (series[i]!.w != null) { lastWIdx = i; break; }
-  // Used only in the hover readout when the hovered day is a gap. Was a
+  // Used in the tooltip/readout when the hovered day is a gap. Was a
   // local-only string awaiting a `words.ts` home; `W.rejectsMore.noReadingThisDay`
   // (added 7055be1) is that home.
   const fmtRateOrGap = (v: number | null): string => (v == null ? W.rejectsMore.noReadingThisDay : `${v.toFixed(1)}%`);
@@ -1121,194 +1131,205 @@ export function RejectTrendChart({
     if (run && run[run.length - 1] === i - 1) run.push(i);
     else bandRuns.push([i]);
   }
-  const bandPath = (run: number[]) => {
-    const upper = run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) }));
-    const lower = [...run].reverse().map((i) => ({ x: x(i), y: y(series[i]!.qLcl ?? 0) }));
-    return `${linePath(upper)} L ${lower.map((p) => `${p.x} ${p.y}`).join(' L ')} Z`;
-  };
-  const wCeiling = series.map((s, i) => (s.wUcl == null ? null : { x: x(i), y: y(s.wUcl) }));
 
   const grid = [1, 2, 3, 4].filter((v) => v < max);
-  const h = hover != null ? series[hover] : null;
-  // How many day labels actually FIT. Four were hardcoded, which collided the
-  // moment this chart moved into a half-width column: "Wed 26 Aug" printed on
-  // top of "Sat 29 Aug".
-  const ticks = tickIndices(series.length, fittingTicks(width - L - R, 11, 13, series.length, 4));
   const qName = singleName ?? W.rejects.quality;
 
-  // Tooltip content (chart overhaul, Task T5): the UCL beside each series'
-  // own rate, so the readout states not just the value but the bound it is
-  // judged against — "whether a point is above usual" is already `aboveUsual`
-  // below; this adds the number that makes it checkable.
+  // Tooltip content: the UCL beside each series' own rate, so the tooltip/
+  // readout states not just the value but the bound it is judged against —
+  // "whether a point is above usual" is already `aboveUsual` below; this adds
+  // the number that makes it checkable.
   const uclPart = (v: number | null): string => (v == null ? '' : ` · ${W.chart.ucl} ${v.toFixed(1)}%`);
-
-  // The two end labels ("Quality x%", "Weight y%") de-collide vertically via
-  // the same pure helper every other chart in this task uses, rather than
-  // being drawn at their literal y and left to overprint each other when the
-  // two rates land close together (the defect this task exists to close,
-  // here on the one chart still keeping its own hand-rolled layout — see the
-  // `onSelect` prop's doc comment for why).
-  const endItems: GutterLabelIn[] = [];
-  if (lastQIdx != null) endItems.push({ y: y(series[lastQIdx]!.q!), text: `${qName} ${series[lastQIdx]!.q!.toFixed(1)}%`, prio: 1 });
-  if (weight && lastWIdx != null) endItems.push({ y: y(series[lastWIdx]!.w!), text: `${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%`, prio: 0 });
-  const endLabels = placeGutterLabels(endItems, { top: T, bottom: H - B, lineH: 14 });
-  let endIdxCursor = 0;
-  const qEndLabel = lastQIdx != null ? endLabels[endIdxCursor++] ?? null : null;
-  const wEndLabel = weight && lastWIdx != null ? endLabels[endIdxCursor++] ?? null : null;
 
   // Caption: the span the p-chart's OWN limits were worked out over — the
   // whole series, not the (possibly narrower) shaded selected period.
   const captionRange = series.length > 0 ? `${labelFmt(series[0]!.ts)} – ${labelFmt(series[series.length - 1]!.ts)}` : '';
 
-  const xs = series.map((_, i) => x(i));
-  const onSvgPointerDown = onSelect
-    ? (e: ReactPointerEvent<SVGSVGElement>) => {
-        const left = svgRef.current?.getBoundingClientRect().left ?? 0;
-        setDragPx({ x0: e.clientX - left, x1: e.clientX - left });
+  // `hit` always resolves to the NEAREST day, whether or not that day has a
+  // value — every column stays hoverable/focusable, matching the old
+  // full-height `rect.hit` per index (a gap day must still be reachable so
+  // its tooltip can state "no reading this day", never silently skipped).
+  const hit = (px: number, py: number): number | null => {
+    const layout = layoutRef.current ?? fallbackLayout();
+    if (py < T || py > layout.height - B) return null;
+    const xs = series.map((_, i) => layout.x(i));
+    return nearestIndex(px, xs);
+  };
+
+  const markRect = (i: number): Rect | null => {
+    const layout = layoutRef.current ?? fallbackLayout();
+    const s = series[i];
+    if (!s) return null;
+    const v = s.q ?? s.w;
+    const cy = v != null ? layout.y(v) : T + (layout.height - T - B) / 2;
+    return { x: layout.x(i) - 3, y: cy - 3, w: 6, h: 6 };
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const s = series[i];
+    if (!s) return null;
+    const rows: ChartTipRow[] = [
+      { name: qName, value: `${fmtRateOrGap(s.q)}${uclPart(s.qUcl)}`, mark: 'ink' },
+    ];
+    if (weight) rows.push({ name: W.rejects.weightKind, value: `${fmtRateOrGap(s.w)}${uclPart(s.wUcl)}`, mark: 'dashed' });
+    rows.push({ name: '', value: `${fmtInt(s.produced)} cones weighed` });
+    const context: string[] = [];
+    if (s.qOut || s.wOut) context.push(W.rejectsMore.aboveUsual);
+    return { heading: labelFmt(s.ts), rows, context };
+  };
+
+  const brushProp: ChartFrameBrush | undefined = onSelect
+    ? {
+        xs: series.map((_, i) => (layoutRef.current ?? fallbackLayout()).x(i)),
+        onCommit: (i0: number, i1: number) => {
+          const d0 = series[i0]!.ts.slice(0, 10);
+          const d1 = series[i1]!.ts.slice(0, 10);
+          const r0 = dayToShiftRange(d0, d0);
+          const r1 = dayToShiftRange(d1, d1);
+          const snapped = snapToShifts(r0.from, r1.to);
+          if (snapped) onSelect(snapped);
+        },
       }
     : undefined;
-  const onSvgPointerMove = onSelect
-    ? (e: ReactPointerEvent<SVGSVGElement>) => {
-        if (!dragPx) return;
-        const left = svgRef.current?.getBoundingClientRect().left ?? 0;
-        setDragPx({ x0: dragPx.x0, x1: e.clientX - left });
-      }
-    : undefined;
-  const onSvgPointerUp = onSelect
-    ? () => {
-        if (dragPx) {
-          const idx = brushToIndices(dragPx.x0, dragPx.x1, xs);
-          if (idx) {
-            const d0 = series[idx[0]]!.ts.slice(0, 10);
-            const d1 = series[idx[1]]!.ts.slice(0, 10);
-            const r0 = dayToShiftRange(d0, d0);
-            const r1 = dayToShiftRange(d1, d1);
-            const snapped = snapToShifts(r0.from, r1.to);
-            if (snapped) onSelect(snapped);
-          }
-        }
-        setDragPx(null);
+
+  const brushLabel = onSelect
+    ? (i0: number, i1: number): string => {
+        const d0 = series[i0]!.ts.slice(0, 10);
+        const d1 = series[i1]!.ts.slice(0, 10);
+        const r0 = dayToShiftRange(d0, d0);
+        const r1 = dayToShiftRange(d1, d1);
+        return describePeriod({
+          key: 'range', from: r0.from.date, to: r1.to.date, tsTo: '',
+          fromShift: r0.from, toShift: r1.to, live: false, days: 0,
+        });
       }
     : undefined;
 
   return (
-    <div ref={box}>
-      <Readout
-        hovered={
-          h
-            ? weight
-              ? `${labelFmt(h.ts)} · ${W.rejects.quality} ${fmtRateOrGap(h.q)}${uclPart(h.qUcl)} · ${W.rejects.weightKind} ${fmtRateOrGap(h.w)}${uclPart(h.wUcl)} · ${fmtInt(h.produced)} cones weighed${h.qOut || h.wOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
-              : `${labelFmt(h.ts)} · ${qName} ${fmtRateOrGap(h.q)}${uclPart(h.qUcl)} · ${fmtInt(h.produced)} cones weighed${h.qOut ? ` · ${W.rejectsMore.aboveUsual}` : ''}`
-            : null
-        }
-        resting={periodFrom != null ? `${series.length} days · the shaded band is the selected period` : `${series.length} days`}
-      />
-      <svg ref={svgRef} className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img" aria-label={ariaLabel}
-           onMouseLeave={() => setHover(null)}
-           onPointerDown={onSvgPointerDown} onPointerMove={onSvgPointerMove}
-           onPointerUp={onSvgPointerUp} onPointerLeave={onSvgPointerUp}>
-        {firstIn >= 0 && (
-          <rect x={x(firstIn) - 4} y={T} width={Math.max(8, x(lastIn) - x(firstIn) + 8)} height={H - T - B} fill="var(--paper-2)" />
-        )}
-        {grid.map((v) => (
-          <g key={v}>
-            <line x1={L} x2={width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
-            <text x={L - 8} y={y(v) + 4} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">{v}%</text>
-          </g>
-        ))}
-        {/* The usual range for the first series: filled, with its ceiling ruled. */}
-        {bandRuns.map((run) => (
-          <g key={run[0]}>
-            <path d={bandPath(run)} fill="var(--paper-3)" opacity={0.9} />
-            <path d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) })))} fill="none" stroke="var(--rule-2)" strokeWidth={1} />
-          </g>
-        ))}
-        {/* The weight series' ceiling, dashed like its line. */}
-        {weight && wCeiling.some((p) => p != null) && (
-          <path
-            d={linePath(wCeiling.filter((p): p is { x: number; y: number } => p != null))}
-            fill="none" stroke="var(--grid)" strokeWidth={1} strokeDasharray="2 3"
-          />
-        )}
-        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
-        {/* UX Phase WS-B2 (23 Sep 2026): one <path> per RUN of consecutive
-            days that actually have a value, not one path spanning the whole
-            series — a bucket with no valid rate (or, for weight, no
-            matching bucket at all) breaks the line instead of being bridged
-            through a fabricated 0%. A run of exactly one day still needs a
-            mark: a single moveto with no lineto paints nothing, so an
-            isolated real reading gets its own dot rather than vanishing. */}
-        {qRuns.map((run) =>
-          run.length === 1 ? (
-            <circle key={`ql${run[0]}`} cx={x(run[0]!)} cy={y(series[run[0]!]!.q!)} r={2.5} fill="var(--ink)" />
-          ) : (
-            <path
-              key={`ql${run[0]}`}
-              d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.q!) })))}
-              fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round"
-            />
-          ),
-        )}
-        {weight &&
-          wRuns.map((run) =>
-            run.length === 1 ? (
-              <circle key={`wl${run[0]}`} cx={x(run[0]!)} cy={y(series[run[0]!]!.w!)} r={2} fill="var(--graphite)" />
-            ) : (
+    <ChartFrame
+      chartId="reject-trend"
+      defaultH={H}
+      ariaLabel={ariaLabel}
+      resting={periodFrom != null ? `${series.length} days · the shaded band is the selected period` : `${series.length} days`}
+      caption={captionRange ? W.chart.limitsOverPeriod(captionRange) : undefined}
+      hit={hit}
+      count={series.length}
+      tipFor={tipFor}
+      markRect={markRect}
+      brush={brushProp}
+      brushLabel={brushLabel}
+    >
+      {(fsize) => {
+        const layout = computeLayout(fsize.width, fsize.height);
+        layoutRef.current = layout;
+        const { x, y } = layout;
+        const bandPath = (run: number[]) => {
+          const upper = run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) }));
+          const lower = [...run].reverse().map((i) => ({ x: x(i), y: y(series[i]!.qLcl ?? 0) }));
+          return `${linePath(upper)} L ${lower.map((p) => `${p.x} ${p.y}`).join(' L ')} Z`;
+        };
+        const wCeiling = series.map((s, i) => (s.wUcl == null ? null : { x: x(i), y: y(s.wUcl) }));
+        // How many day labels actually FIT. Four were hardcoded, which
+        // collided the moment this chart moved into a half-width column:
+        // "Wed 26 Aug" printed on top of "Sat 29 Aug".
+        const ticks = tickIndices(series.length, fittingTicks(fsize.width - L - R, 11, fsize.fontPx, series.length, 4));
+        // The two end labels ("Quality x%", "Weight y%") de-collide
+        // vertically via the same pure helper every other chart uses, rather
+        // than being drawn at their literal y and left to overprint each
+        // other when the two rates land close together.
+        const endItems: GutterLabelIn[] = [];
+        if (lastQIdx != null) endItems.push({ y: y(series[lastQIdx]!.q!), text: `${qName} ${series[lastQIdx]!.q!.toFixed(1)}%`, prio: 1 });
+        if (weight && lastWIdx != null) endItems.push({ y: y(series[lastWIdx]!.w!), text: `${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%`, prio: 0 });
+        const endLabels = placeGutterLabels(endItems, { top: T, bottom: fsize.height - B, lineH: 14 });
+        let endIdxCursor = 0;
+        const qEndLabel = lastQIdx != null ? endLabels[endIdxCursor++] ?? null : null;
+        const wEndLabel = weight && lastWIdx != null ? endLabels[endIdxCursor++] ?? null : null;
+
+        return (
+          <svg className="chart" viewBox={`0 0 ${fsize.width} ${fsize.height}`} height={fsize.height} role="img" aria-label={ariaLabel}>
+            {firstIn >= 0 && (
+              <rect x={x(firstIn) - 4} y={T} width={Math.max(8, x(lastIn) - x(firstIn) + 8)} height={fsize.height - T - B} fill="var(--paper-2)" />
+            )}
+            {grid.map((v) => (
+              <g key={v}>
+                <line x1={L} x2={fsize.width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
+                <text x={L - 8} y={y(v) + 4} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor="end">{v}%</text>
+              </g>
+            ))}
+            {/* The usual range for the first series: filled, with its ceiling ruled. */}
+            {bandRuns.map((run) => (
+              <g key={run[0]}>
+                <path d={bandPath(run)} fill="var(--paper-3)" opacity={0.9} />
+                <path d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) })))} fill="none" stroke="var(--rule-2)" strokeWidth={1} />
+              </g>
+            ))}
+            {/* The weight series' ceiling, dashed like its line. */}
+            {weight && wCeiling.some((p) => p != null) && (
               <path
-                key={`wl${run[0]}`}
-                d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.w!) })))}
-                fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round"
+                d={linePath(wCeiling.filter((p): p is { x: number; y: number } => p != null))}
+                fill="none" stroke="var(--grid)" strokeWidth={1} strokeDasharray="2 3"
               />
-            ),
-          )}
-        {/* Out-of-control days, in the mark Weight's control chart uses.
-            `s.qOut`/`s.wOut` can only be true where the bucket had a valid
-            rate (rejectSpc.ts sets `outOfControl` inside the same branch
-            that sets `rate`), but `s.q != null` is kept as an explicit guard
-            here rather than a non-null assertion, matching this pass's rule
-            of never asserting past a value this component cannot itself
-            verify. */}
-        {series.map((s, i) => (s.qOut && s.q != null ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
-        {weight && series.map((s, i) => (s.wOut && s.w != null ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
-        {/* Labelled on the mark, so the chart needs no legend — on the LAST
-            day that actually has a value, not the last index: the newest
-            bucket in the window may itself be the gap. */}
-        {lastQIdx != null && qEndLabel?.text && (
-          <text x={width - R + 10} y={qEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--ink)">
-            {qName} {series[lastQIdx]!.q!.toFixed(1)}%
-          </text>
-        )}
-        {weight && lastWIdx != null && wEndLabel?.text && (
-          <text x={width - R + 10} y={wEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
-            {W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%
-          </text>
-        )}
-        {series.map((_, i) => (
-          <rect key={i} className="hit" x={x(i) - (width - L - R) / Math.max(1, series.length) / 2} y={T}
-                width={(width - L - R) / Math.max(1, series.length)} height={H - T - B}
-                onMouseEnter={() => setHover(i)} />
-        ))}
-        {ticks.map((i) => (
-          <text key={`t${i}`} x={x(i)} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, series.length)}>
-            {labelFmt(series[i]!.ts)}
-          </text>
-        ))}
-        {onSelect && dragPx && (
-          <rect
-            className="chart-brush"
-            aria-hidden="true"
-            x={Math.min(dragPx.x0, dragPx.x1)}
-            y={T}
-            width={Math.max(1, Math.abs(dragPx.x1 - dragPx.x0))}
-            height={H - T - B}
-            fill="var(--acc-fill)"
-            opacity={0.15}
-          />
-        )}
-      </svg>
-      {captionRange && (
-        <p className="chart-frame-caption mut sm">{W.chart.limitsOverPeriod(captionRange)}</p>
-      )}
-    </div>
+            )}
+            {/* UX Phase WS-B2 (23 Sep 2026): one <path> per RUN of consecutive
+                days that actually have a value, not one path spanning the whole
+                series — a bucket with no valid rate (or, for weight, no
+                matching bucket at all) breaks the line instead of being bridged
+                through a fabricated 0%. A run of exactly one day still needs a
+                mark: a single moveto with no lineto paints nothing, so an
+                isolated real reading gets its own dot rather than vanishing. */}
+            {qRuns.map((run) =>
+              run.length === 1 ? (
+                <circle key={`ql${run[0]}`} cx={x(run[0]!)} cy={y(series[run[0]!]!.q!)} r={2.5} fill="var(--ink)" />
+              ) : (
+                <path
+                  key={`ql${run[0]}`}
+                  d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.q!) })))}
+                  fill="none" stroke="var(--ink)" strokeWidth={1.75} strokeLinejoin="round"
+                />
+              ),
+            )}
+            {weight &&
+              wRuns.map((run) =>
+                run.length === 1 ? (
+                  <circle key={`wl${run[0]}`} cx={x(run[0]!)} cy={y(series[run[0]!]!.w!)} r={2} fill="var(--graphite)" />
+                ) : (
+                  <path
+                    key={`wl${run[0]}`}
+                    d={linePath(run.map((i) => ({ x: x(i), y: y(series[i]!.w!) })))}
+                    fill="none" stroke="var(--graphite)" strokeWidth={1.5} strokeDasharray="4 3" strokeLinejoin="round"
+                  />
+                ),
+              )}
+            {/* Out-of-control days, in the mark Weight's control chart uses.
+                `s.qOut`/`s.wOut` can only be true where the bucket had a valid
+                rate (rejectSpc.ts sets `outOfControl` inside the same branch
+                that sets `rate`), but `s.q != null` is kept as an explicit guard
+                here rather than a non-null assertion, matching this pass's rule
+                of never asserting past a value this component cannot itself
+                verify. */}
+            {series.map((s, i) => (s.qOut && s.q != null ? <circle key={`q${i}`} cx={x(i)} cy={y(s.q)} r={4} fill="var(--acc-fill)" /> : null))}
+            {weight && series.map((s, i) => (s.wOut && s.w != null ? <circle key={`w${i}`} cx={x(i)} cy={y(s.w)} r={4} fill="var(--acc-fill)" /> : null))}
+            {/* Labelled on the mark, so the chart needs no legend — on the LAST
+                day that actually has a value, not the last index: the newest
+                bucket in the window may itself be the gap. */}
+            {lastQIdx != null && qEndLabel?.text && (
+              <text x={fsize.width - R + 10} y={qEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--ink)">
+                {qName} {series[lastQIdx]!.q!.toFixed(1)}%
+              </text>
+            )}
+            {weight && lastWIdx != null && wEndLabel?.text && (
+              <text x={fsize.width - R + 10} y={wEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
+                {W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%
+              </text>
+            )}
+            {ticks.map((i) => (
+              <text key={`t${i}`} x={x(i)} y={fsize.height - 8} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor={edgeAnchor(i, series.length)}>
+                {labelFmt(series[i]!.ts)}
+              </text>
+            ))}
+          </svg>
+        );
+      }}
+    </ChartFrame>
   );
 }

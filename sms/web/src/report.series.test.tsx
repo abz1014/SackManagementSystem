@@ -8,11 +8,25 @@
  * away (a day too thin for a valid limit BREAKS the band rather than being
  * bridged) is applied here to the line itself: a missing bucket must draw a
  * GAP, never a plotted zero.
+ *
+ * Chart overhaul wave 3, Task T8b (29 Sep 2026): `RejectTrendChart` moved
+ * onto `ChartFrame` (see shared.tsx's own header note on the function). The
+ * two assertions that previously drove the chart via `rect.hit` elements and
+ * `fireEvent.mouseEnter`, then read a plain `.readout` line, are rewritten
+ * below to drive it the way every other `ChartFrame` chart in this app is
+ * tested — keyboard focus (`ArrowRight`), then read the floating
+ * `.chart-tip` — and to assert BEHAVIOUR (what the tooltip/readout states)
+ * rather than which DOM elements happen to implement hover. Every other
+ * assertion here protects a real rule (gap-vs-zero, the p-chart band, the
+ * 14-day trailing window's selected-period shading) and is left exactly as
+ * it was: none of that depends on how hover is implemented.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent } from '@testing-library/react';
 import { render } from './testkit/render';
 import { RejectTrendChart, type TrendBucket } from './screens/report/shared';
+import { dayToShiftRange } from './lib/period';
+import type { PeriodParams } from './lib/period';
 
 function bucket(overrides: Partial<TrendBucket>): TrendBucket {
   return {
@@ -25,6 +39,12 @@ function bucket(overrides: Partial<TrendBucket>): TrendBucket {
     rejects: 10,
     ...overrides,
   };
+}
+
+/** ArrowRight from a chart's own body lands on index 0 first, index 1 on the
+ *  second press — `ChartFrame.tsx`'s own keyboard path. */
+function focusIndex(body: HTMLElement, n: number) {
+  for (let i = 0; i <= n; i++) fireEvent.keyDown(body, { key: 'ArrowRight' });
 }
 
 describe('RejectTrendChart — a missing bucket is a gap, not a zero', () => {
@@ -108,16 +128,100 @@ describe('RejectTrendChart — a missing bucket is a gap, not a zero', () => {
     expect(gridLabels.some((t) => t != null && /^[4-9]%$/.test(t))).toBe(true);
   });
 
-  it('hovering a day with no valid rate does not print "0.0%" as if it were a measured reading', () => {
+  it('focusing a day with no valid rate does not print "0.0%" as if it were a measured reading', () => {
     const quality: TrendBucket[] = [
       bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
       bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: null, ucl: null, lcl: null, produced: 4 }),
     ];
     const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" />);
-    const hitRects = container.querySelectorAll('svg.chart rect.hit');
-    expect(hitRects.length).toBe(2);
-    fireEvent.mouseEnter(hitRects[1]!);
-    const readout = container.querySelector('.readout') ?? container;
-    expect(readout.textContent ?? '').not.toContain('Quality 0.0%');
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    focusIndex(body, 1); // day 2, the gap
+    const tip = container.querySelector('.chart-tip')!;
+    expect(tip.textContent ?? '').not.toContain('0.0%');
+    expect(tip.textContent ?? '').toContain('no reading this day');
+  });
+});
+
+describe('RejectTrendChart — ChartFrame tooltip, reached via keyboard', () => {
+  it('a day with both series shows quality AND weight, each with its own UCL', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02, ucl: 0.05 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03, ucl: 0.06 }),
+    ];
+    const weight: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.01, ucl: 0.04 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.015, ucl: 0.045 }),
+    ];
+    const { container } = render(<RejectTrendChart quality={quality} weight={weight} />);
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    focusIndex(body, 1); // second day
+    const tip = container.querySelector('.chart-tip')!;
+    expect(tip.textContent).toContain('3.0%');
+    expect(tip.textContent).toContain('6.0%'); // quality UCL
+    expect(tip.textContent).toContain('1.5%');
+    expect(tip.textContent).toContain('4.5%'); // weight UCL
+    // Same facts must reach the aria-live readout, the screen-reader/wall
+    // path a floating tooltip cannot serve.
+    const readout = container.querySelector('.readout')!;
+    expect(readout.textContent).toContain('3.0%');
+    expect(readout.textContent).toContain('1.5%');
+  });
+
+  it('an out-of-control day states "above the usual range" in the tooltip context', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02, outOfControl: false }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.09, outOfControl: true }),
+    ];
+    const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" />);
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    focusIndex(body, 1);
+    const tip = container.querySelector('.chart-tip')!;
+    expect(tip.textContent).toContain('above the usual range');
+  });
+
+  it('the p-chart band and points still render after the ChartFrame migration', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02, ucl: 0.05, lcl: 0.0 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03, ucl: 0.06, lcl: 0.0, outOfControl: true }),
+    ];
+    const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" />);
+    const svg = container.querySelector('svg.chart')!;
+    // The band fill.
+    expect(svg.querySelector('path[fill="var(--paper-3)"]')).not.toBeNull();
+    // The out-of-control mark.
+    expect(svg.querySelector('circle[fill="var(--acc-fill)"]')).not.toBeNull();
+  });
+});
+
+describe('RejectTrendChart — brush sets the whole-page period, snapped to shifts', () => {
+  it('Shift+ArrowRight then "+" commits a PeriodParams spanning the two focused days', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03 }),
+      bucket({ bucketTs: '2026-09-03T00:00:00Z', rate: 0.025 }),
+    ];
+    const onSelect = vi.fn<(p: PeriodParams) => void>();
+    const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" onSelect={onSelect} />);
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // day 1
+    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // extend to day 2
+    fireEvent.keyDown(body, { key: '+' }); // commit
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    const p = onSelect.mock.calls[0]![0];
+    expect(p.key).toBe('range');
+    expect(p.range).toEqual(dayToShiftRange('2026-09-01', '2026-09-02'));
+  });
+
+  it('with no onSelect prop, the "+" key does nothing (no brush offered)', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03 }),
+    ];
+    const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" />);
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    fireEvent.keyDown(body, { key: 'ArrowRight' });
+    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true });
+    fireEvent.keyDown(body, { key: '+' });
+    expect(container.querySelector('.chart-brush-label')).toBeNull();
   });
 });
