@@ -571,6 +571,16 @@ export const W = {
     weight: 'Weight',
     status: 'Status',
     record: 'Record',
+    /* Re-audit fix (29 Sep 2026): the sheet's own top-level field showed
+       `source_row_id` under the same word ("Record") the Readings LIST uses
+       for `event_id` — the same word naming two different ids depending on
+       whether you were looking at the list or the sheet. The sheet field is
+       kept (it is not fully redundant with the provenance block's "Source
+       row id" line below: it renders whenever `source_row_id` is present,
+       the provenance block only when the fuller `provenance` object is —
+       see ReadingSheet.tsx's own note on that), just relabelled so it can
+       never be read as the same id the list column names. */
+    sourceRecord: 'Source record',
     /* The reject sheet. A quality reject's OWN row carries no weight column
        (reject_event has none); a weight reject's does. Neither has in_range.
        This used to say a quality reject "is pulled before the scale sees

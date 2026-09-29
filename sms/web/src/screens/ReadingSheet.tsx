@@ -239,8 +239,16 @@ function Body({
             <dd>{row.sack_num}</dd>
           </>
         )}
-        {/* Null on a reject: the source records no id for those rows. */}
-        <dt>{W.readings.record}</dt>
+        {/* Null on a reject: the source records no id for those rows.
+            Re-audit fix (29 Sep 2026): labelled "Source record", not
+            "Record" — the Readings LIST column already uses "Record" for
+            event_id, the canonical PK, and this field is source_row_id, a
+            different id. Kept alongside the provenance block's own "Source
+            row id" line rather than removed: this one renders whenever
+            source_row_id is present, the provenance block only when the
+            fuller provenance object is (see ProvenanceBlock's header note),
+            so the two are not fully redundant. */}
+        <dt>{W.readings.sourceRecord}</dt>
         <dd>{row.source_row_id == null ? '—' : String(row.source_row_id)}</dd>
         {p?.product && (
           <>
