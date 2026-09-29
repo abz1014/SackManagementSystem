@@ -1679,6 +1679,13 @@ leaves the app's own screen, carries nothing in its own bytes saying so. Confirm
 against the current `reports/csv.ts`/`reports/xlsx.ts` trailer logic before
 closing.
 
+**Fixed 29 Sep 2026, `ede3c64` and `ee0407e`.** `ede3c64` makes the CSV/XLSX
+trailer disclose the simulator when the export period does not span a
+generation boundary (the earlier logic only fired the disclosure on a
+multi-generation period); `ee0407e` stops that disclosure from ever surfacing
+a bare raw source-table/generation label to the reader. Both SHAs verified
+present via `git show --stat`.
+
 (b) **Major — a mouse click on a chart bar does not activate drill-down (Line
 station chart).** `ChartFrame`'s pointer/keyboard interaction (tooltip, brush,
 resize handle — `618662b`, `bc15088`) and the shift-range drag-select wiring
@@ -1689,12 +1696,21 @@ rebuild) was not confirmed to still fire a click handler distinct from the new
 brush/drag-select pointer handling this pass added. Needs a live click test
 against Line, not just a read of the diff.
 
+**Fixed 29 Sep 2026, `544dc67`.** A mouse/pen click on a chart mark now calls
+`onActivate` again, restoring the click-to-drill-down affordance alongside
+the new brush/drag-select handling. SHA verified present via `git show
+--stat`.
+
 (c) **Major — `/api/weight-stations` accepts an inverted `periodFrom`/
 `periodTo`.** No validation was found requiring `periodFrom <= periodTo` on this
 route; an inverted pair either returns an empty result set silently or is passed
 through to the query unvalidated (not confirmed which, this pass). Compare
 against how `/api/rejects`/`/api/reject-spc`'s existing range validation handles
 the same shape and apply the same guard.
+
+**Fixed 29 Sep 2026, `47da942`.** `/api/weight-stations` now rejects an
+inverted `periodFrom`/`periodTo` pair, matching the guard already used by
+`/api/rejects`/`/api/reject-spc`. SHA verified present via `git show --stat`.
 
 (d) **Major — the Report screen shows no batch/simulator disclosure on screen,
 print only.** The print header (`PrintHead.tsx`, Phase 9) and the CSV/XLSX/PDF
@@ -1703,17 +1719,31 @@ trailers carry the batch/simulator wording, but the on-screen Report view itself
 it. A viewer reading only the screen has no on-screen cue that a period is
 simulator-sourced or spans more than one data batch.
 
+**Fixed 29 Sep 2026, `8794985`.** The batch/simulator disclosure now renders
+on screen on the Report view itself, not only in print/export output. SHA
+verified present via `git show --stat`.
+
 (e) **Minor — the Sacks headline doesn't name the shift.** When the Sacks screen
 is scoped to a single shift, its headline states the figures but not which shift
 they belong to, unlike Rejects/Weight's own headlines.
+
+**Fixed 29 Sep 2026, `3a3700c`.** The Sacks headline now names the shift, not
+just the date, matching Rejects/Weight. SHA verified present via `git show
+--stat`.
 
 (f) **Minor — ReadingSheet "Record" label collision.** `ReadingSheet` reuses the
 word "Record" for two different things on the same panel (needs a diff read to
 pin the exact collision point — not resolved further this pass, flagged for the
 owner of `sms/web`'s `ReadingSheet` work in the concurrent wave).
 
+**Fixed 29 Sep 2026, `21e59db`.** The `source_row_id` field is relabelled
+"Source record", removing the collision with the panel's other use of
+"Record". SHA verified present via `git show --stat`.
+
 (g) **Minor — stale `PROJECT_STATUS.md`.** Closed by this same task: see the
 dated 29 Sep 2026 entry added to `PROJECT_STATUS.md` §2.
+
+**Fixed 29 Sep 2026, `d025042`.** SHA verified present via `git show --stat`.
 
 (h) **Minor — 5 undocumented env vars.** Closed by this same task:
 `API_DB_POOL_MAX`, `API_DB_POOL_MIN`, `API_DB_POOL_IDLE_TIMEOUT_MS`,
@@ -1723,9 +1753,18 @@ defaults 10/1/30000/30000, `index.ts` ~line 126) and `PDF_EDGE_PATH`
 their defaults, in `sms/.env.example`, and in a new "Advanced tuning" subsection
 of `sms/DEPLOY.md`.
 
+**Fixed 29 Sep 2026, `d025042`.** SHA verified present via `git show --stat`.
+
 (i) **Minor — `npm audit`: 3 moderate advisories via `express`, awaiting owner
 approval of the patch bump.** Not applied this pass (documentation-only scope,
 and a dependency bump is an owner call per this project's working rules).
+
+**Fixed 29 Sep 2026, `2176dc0`.** `npm audit fix` applied for the qs/
+body-parser/express moderate advisory chain. `npm audit --omit=dev` now
+reports 0 vulnerabilities (re-measured this pass). The separate dev-only
+vitest/vite major-version advisories are deliberately not applied — a major
+bump is out of scope for an audit fix and remains an owner call. SHA verified
+present via `git show --stat`.
 
 **Health "degraded" on the dev box — explained, by design, not a new defect.**
 The dev box currently shows `degraded` because of two things: 2 ERROR
@@ -1784,3 +1823,29 @@ data, id 153, not a simulator-inserted id). The fix recommendation above
 simulator hygiene, but it is not a live bug causing any finding on the dev box
 today, and is not being tracked as one. See `IFL-OPEN-QUESTIONS.md` for the new
 question this raises for IFL: what a recorded weight of exactly 0 means.
+
+**Playwright layout suite, findings fixed 29 Sep 2026.** Once
+`sms/layout-tests` (a real-browser Playwright layout suite, added this pass —
+`a407b27`) could actually render the chart screens in a real browser, it found
+five further layout defects beyond the (a)-(i) items above, all fixed the same
+day:
+
+- `RejectTrendChart` end labels overlapped the line at some widths because the
+  label's line-height was assumed rather than measured — fixed by reading the
+  actual measured `fontPx`, `811ad01`.
+- `CategoryBars`' x-axis ticks overprinted each other at narrower widths — the
+  tick count now thins against the real bar slot width, `6e5dbd9`.
+- `DeviationBars` kept its stale chart height after a `ChartFrame` resize
+  because it read a cached size rather than `ChartFrame`'s live
+  `size.height` — fixed to read the live value, `586e161`.
+- The Weight screen's Distribution chart had cramped row spacing and a
+  non-resizable height — both fixed, `642957a`.
+- The Weight brush-drag layout test had been skipped because its fixture
+  lacked real shift fields; the fixture now carries them and the test
+  un-skips, `8b0c5bb`.
+
+The suite itself: `a407b27` (`sms/layout-tests/charts.spec.ts` and related
+specs). Verified this pass: `npm run test:layout` — **77 passed, 13 skipped**
+(the skips are `SMS_TEST_USERNAME`-gated specs, not failures), against the
+running `:5173` dev server. All five SHAs above verified present via `git
+show --stat`.

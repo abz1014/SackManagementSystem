@@ -18,11 +18,49 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
-**Commit-count note, added 28 Sep 2026:** `git rev-list --count origin/main..HEAD` measured
-**251** on this date. Every older "N commits ahead of origin/main" figure below this line
-(85, 90, 95, 114, 179, ...) is historical — a count taken on the date its own section states,
-not the current count — and is left as written rather than rewritten in place, per this
-file's own convention of dated, superseded-not-deleted entries.
+**Commit-count note, added 28 Sep 2026, updated 29 Sep 2026 (final gate):**
+`git rev-list --count origin/main..HEAD` measured **251** on 28 Sep and
+**318** on 29 Sep. Every older "N commits ahead of origin/main" figure below
+this line (85, 90, 95, 114, 179, 251, ...) is historical — a count taken on
+the date its own section states, not the current count — and is left as
+written rather than rewritten in place, per this file's own convention of
+dated, superseded-not-deleted entries.
+
+### Chart overhaul, re-audit and fixes (28–29 Sep 2026)
+
+A shared `ChartFrame` now carries tooltips, keyboard interaction, drag-resize
+and drag-select across every chart screen; drag-select snaps to shift
+boundaries and sets the page's own period (URL `p=<range>`), with a top-bar
+"Back" control to undo a zoom. Every period-bearing route and report type now
+honours a shift range, not just a plain from/to. Polling is opt-in per screen
+("live-only"), so a fixed historical range no longer re-polls. Line's
+per-station bar chart keeps its click-to-drill-down alongside the new
+brush/drag handling. A real-browser Playwright layout suite
+(`sms/layout-tests`, `a407b27`) exists for the first time and this pass ran
+it clean: 77 passed, 13 skipped (the `SMS_TEST_USERNAME`-gated specs).
+
+**DEFECTS.md Part 11's re-audit** recorded 9 lettered findings (4 Major, 5
+Minor/docs) plus 5 further chart-layout defects the new Playwright suite
+caught — all 14 are now fixed, each with its own commit SHA in Part 11.
+Health's "degraded" state on the dev box is explained, not a new defect: 2
+real IFL zero-weight rows (`dq_finding` 92/96, genuine scale-fault/sentinel
+data, not simulator output) plus a 15-day-old backup. A new question for IFL
+follows from this (`IFL-OPEN-QUESTIONS.md` #16: what a recorded weight of
+exactly 0 means).
+
+`npm audit --omit=dev` is now 0 vulnerabilities (`2176dc0`); the dev-only
+vitest/vite major-version advisories are deliberately not applied.
+`LIVE_ALLOW_SIMULATOR` is a dev-only, gated flag, true only on this
+development PC — never at IFL.
+
+**Gate measured this pass:** typecheck clean (5 workspaces); `npx vitest run`
+twice, both **271 files passed / 1 skipped (272), 2770 tests passed / 4
+skipped** with no flake this run; `npm run build` clean; `npm run test:layout`
+77 passed / 13 skipped. Verified on the local dev copy + simulator only.
+
+**Still owner-run and IFL-blocked, unchanged by this pass:** the EXECUTE-only
+"ibrahim"-shaped login rehearsal, the below-rank RBAC rehearsal, anything on
+the plant, and every open item in `IFL-OPEN-QUESTIONS.md`.
 
 ### Harness now 19/19, exit 0 (28 Sep 2026, Task K2c — supersedes the "18 of 19" figure in Task K2b immediately below)
 
