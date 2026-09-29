@@ -172,10 +172,20 @@ export function productionBySpread(spread: 'day' | 'shift') {
 // `Promise<ProductAtData>` directly) — unlike almost everything else here.
 export const PRODUCT_AT = {
   at: '2026-09-07T16:41:00Z',
-  product: { productId: 12, label: '201-IH0-SD', source: 'row' },
+  // `effectiveFromUtc` added 29 Sep 2026 (a11y.tables.spec.ts): `ProductInForce`
+  // (api.ts) has it as a required `string`, not optional — Product › Running's
+  // `LineWideProduct` calls `fmtDayLong(data.product.effectiveFromUtc)`
+  // unconditionally, and a `charts.spec.ts` screen never exercised that path,
+  // so its absence here never crashed anything until Running did.
+  product: {
+    productId: 12, label: '201-IH0-SD', source: 'row',
+    setpointG: 1960, weightOffsetMinusG: 20, weightOffsetPlusG: 20,
+    effectiveFromUtc: '2026-08-05T00:00:00Z',
+  },
   productActive: true,
-  limits: { setpointG: 1960, offsetMinusG: 20, offsetPlusG: 20 },
+  limits: { setpointG: 1960, offsetMinusG: 20, offsetPlusG: 20, label: '1940 g – 1980 g' },
   neverRecorded: false,
+  attribution: 'row' as const,
   source: 'row',
   plausibility: { loG: 1500, hiG: 2100 },
 };
@@ -194,6 +204,33 @@ export const MACHINES_RUNNING = envelope({
   windowStartUtc: '2026-09-07T14:41:00Z',
   machines: [],
   materialsRunning: 0,
+  generation: GENERATION,
+});
+
+/** Non-empty variant of `MACHINES_RUNNING` (accessibility fix, 29 Sep 2026,
+ *  `a11y.tables.spec.ts`): Line's `MachinesBlock` and Product › Running's
+ *  `ByProduct` pivot both render `<Empty/>` — no table at all — on an empty
+ *  `machines` list, which is exactly the fixture above. One running machine
+ *  (feeds the "in force now" table, both screens) and one quiet machine
+ *  (feeds the "not running" table, Running only) populate every `<thead>`
+ *  those two components draw. */
+export const MACHINES_RUNNING_WITH_ROWS = envelope({
+  asOfUtc: '2026-09-07T16:41:00Z',
+  windowMs: 7_200_000,
+  windowStartUtc: '2026-09-07T14:41:00Z',
+  machines: [
+    {
+      station: 1, stationName: null, machineName: 'M1', materialId: 12, productName: '201-IH0-SD', productActive: true,
+      cones: 820, conesOnMaterial: 820, newestUtc: '2026-09-07T16:40:40Z', sinceUtc: '2026-09-07T14:41:00Z',
+      sinceIsWindowStart: true, quiet: false, lastSeenUtc: '2026-09-07T16:40:40Z', state: 'running',
+    },
+    {
+      station: 2, stationName: null, machineName: 'M2', materialId: null, productName: null, productActive: null,
+      cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null,
+      sinceIsWindowStart: false, quiet: true, lastSeenUtc: '2026-09-05T09:00:00Z', state: 'stale',
+    },
+  ],
+  materialsRunning: 1,
   generation: GENERATION,
 });
 
@@ -841,6 +878,97 @@ export async function mockReport(page: Page, kind: ReportKind) {
   await page.route('**/api/reports/header**', (route) => route.fulfill({ json: REPORT_HEADER_ONLY }));
   await page.route('**/api/calibration/adjustments**', (route) => route.fulfill({ json: CALIBRATION_ADJUSTMENTS }));
   if (kind === 'sack') await mockSacks(page);
+}
+
+// ---------------------------------------------------------------------
+// Product screens (accessibility fix, 29 Sep 2026, a11y.tables.spec.ts):
+// Running/Changeover/Catalogue's own table-header fixtures. Shapes copied
+// from `web/src/api.ts`'s own interfaces (`ChangeoverRefs`, `ChangeoverPlan`,
+// `ChangeoverOutcome`, `ProductWriteStatus`, `PalletRow`), the same
+// convention every fixture above this section follows.
+// ---------------------------------------------------------------------
+export const PRODUCT_WRITE_STATUS = {
+  enabled: true, reason: null, canWrite: true, local: { canWrite: true },
+};
+
+export const PALLETS = {
+  pallets: [
+    {
+      palletId: 101, productId: 12, productLabel: '201-IH0-SD', packSchemaId: 1, packSchemaLabel: 'Standard',
+      lot: 'L-2026-09', active: true, sackColour: 'White', labelType: 1, steamProg: 1, routing: 1,
+      pdasCreatedAt: '2026-08-05T00:00:00Z',
+    },
+  ],
+};
+
+export const CHANGEOVER_REFS = {
+  blends: [{ id: 1, name: 'Blend A' }],
+  counts: [{ id: 1, name: '20' }],
+  tubeTypes: [{ id: 1, name: 'std', tubeWeightG: 45, tubeForm: 1 }],
+  packSchemas: [{ packSchemaId: 1, description: 'Standard', conesPerLayer: 12, packTypeId: 1 }],
+  pallets: PALLETS.pallets,
+};
+
+/** `writesEnabled: true`/no blockers so `PlanReview`'s Execute button is
+ *  actually clickable — the test drives it to also populate the second,
+ *  outcome table (`colResult`). */
+export function changeoverPlan(): unknown {
+  return {
+    writesEnabled: true,
+    disabledReason: null,
+    steps: [
+      { step: 'blend', action: 'reuse', proc: null, label: 'Blend A', id: 1, detail: {} },
+      { step: 'material', action: 'create', proc: 'CreateMaterial', label: 'New material', id: null, detail: { blend: 1, count: 1, tube: 1 } },
+    ],
+    blockers: [],
+    warnings: [],
+    noRollback: 'This cannot be undone once executed.',
+    limits: { setpointG: 1960, offsetMinusG: 30, offsetPlusG: 30, label: '1930 g - 1990 g' },
+    reachesMachine: false,
+    operatorNote: 'Nothing is written to a machine.',
+  };
+}
+
+export function changeoverOutcome(): unknown {
+  return {
+    ok: true,
+    done: [
+      { step: 'blend', action: 'reuse', proc: null, label: 'Blend A', id: 1, detail: {}, resultId: 1 },
+      { step: 'material', action: 'create', proc: 'CreateMaterial', label: 'New material', id: null, detail: {}, resultId: 1025 },
+    ],
+    failed: null,
+    notDone: [],
+    materialId: 1025,
+    palletId: null,
+    noRollback: 'This cannot be undone once executed.',
+  };
+}
+
+export async function mockProductRunning(page: Page) {
+  await page.route('**/api/machines/running**', (route) => route.fulfill({ json: MACHINES_RUNNING_WITH_ROWS }));
+}
+
+export async function mockProductChangeover(page: Page) {
+  await page.route('**/api/changeover/refs**', (route) => route.fulfill({ json: CHANGEOVER_REFS }));
+  await page.route('**/api/changeover/plan**', (route) => route.fulfill({ json: changeoverPlan() }));
+  await page.route('**/api/changeover/execute**', (route) => route.fulfill({ json: changeoverOutcome() }));
+}
+
+export async function mockProductCatalogue(page: Page) {
+  await page.route('**/api/pallets**', (route) => {
+    if (route.request().method() !== 'GET') return route.fulfill({ json: {} });
+    return route.fulfill({ json: PALLETS });
+  });
+  await page.route('**/api/product-write/status**', (route) => route.fulfill({ json: PRODUCT_WRITE_STATUS }));
+  // ProductLimitsBlock (mounted un-collapsed on this tab) reads this raw
+  // (never Envelope-wrapped — api/src/routes/cone.ts's `res.json({ products:
+  // ... })`), unlike almost everything else this file mocks. Without a
+  // specific route it fell through to `mockCatchAll`'s `envelope({})`, whose
+  // `.products` is `undefined` — `res.data.products.length` then threw
+  // "Cannot read properties of undefined (reading 'length')" and took the
+  // WHOLE Catalogue screen down through the error boundary, including the
+  // PDAS products/pallets tables above it that this spec actually targets.
+  await page.route('**/api/products/limits/history**', (route) => route.fulfill({ json: { products: [] } }));
 }
 
 /** The station sheet is a `?sheet=station:N` overlay on TOP OF Line — the
