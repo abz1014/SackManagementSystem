@@ -29,6 +29,32 @@ class StubResizeObserver {
  */
 function stubScrollIntoView(): void {}
 
+/**
+ * jsdom has never implemented `window.matchMedia` (a longstanding, permanent
+ * jsdom limitation, not a version regression) — used by
+ * `ui/useChartSize.ts` to detect print media. Tooling-upgrade note (Vitest
+ * 5): earlier Vitest's `vi.spyOn` tolerated spying on an absent property;
+ * Vitest 5's stricter `vi.spyOn` throws `"can only spy on a function"` for
+ * that case, so a test that does `vi.spyOn(window, 'matchMedia')` (e.g.
+ * `ui/ChartFrame.test.tsx`) needs a real function present to spy on and
+ * override, not the property being absent. This stub is a no-op —
+ * `mockImplementation` in each test still supplies the actual return value —
+ * and is filled in only if the global is absent, same idiom as
+ * `ResizeObserver`/`scrollIntoView` above.
+ */
+function stubMatchMedia(query: string): MediaQueryList {
+  return {
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  } as MediaQueryList;
+}
+
 let installed = false;
 
 /** Idempotent — safe to call from every test file's setup without guarding. */
@@ -40,6 +66,9 @@ export function installDomStubs(): void {
   }
   if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = stubScrollIntoView;
+  }
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
+    (window as unknown as { matchMedia: typeof stubMatchMedia }).matchMedia = stubMatchMedia;
   }
 }
 
