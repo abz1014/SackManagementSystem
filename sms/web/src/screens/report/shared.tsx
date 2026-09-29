@@ -722,7 +722,6 @@ export function DeviationBars({
 }) {
   if (rows.length < MIN_MULTIROW) return null;
 
-  const H = height;
   const L = 48;
   const T = 18;
   const B = 40;
@@ -736,12 +735,19 @@ export function DeviationBars({
   const tickOf = (r: DeviationRow) => r.tick ?? r.label;
 
   interface Layout {
-    R: number; y: (v: number) => number; slot: number; bw: number;
+    H: number; R: number; y: (v: number) => number; slot: number; bw: number;
     cx: (i: number) => number; zeroY: number; legend: boolean; step: number;
   }
   const layoutRef = useRef<Layout | null>(null);
 
-  const computeLayout = (width: number, fontPx: number): Layout => {
+  // `h` is `ChartFrame`'s own current (possibly drag-resized) `size.height` —
+  // resize-defect fix (chart overhaul, wave 3): this used to close over the
+  // outer `height` PROP only, so `<svg height={H}>` below never changed even
+  // though the drag handle moved `size.height` — the handle visibly resized
+  // the chart-frame container while the SVG inside it stayed the original
+  // fixed size. `height` (the prop) now serves only as `ChartFrame`'s
+  // `defaultH`, the initial value before any drag.
+  const computeLayout = (width: number, fontPx: number, h: number): Layout => {
     // The right margin comes from what the zero/threshold labels actually
     // need (`gutterFor`), not a fixed 8px — that fixed figure is the
     // screenshot defect this task exists to close: "row median" drawn over
@@ -750,7 +756,7 @@ export function DeviationBars({
     const gutter = gutterFor(gutterLabels, fontPx, Math.max(1, width - L - 8));
     const legend = gutter === 'legend';
     const R = legend ? 8 : gutter;
-    const y = linear([lo, hi], [H - B, T]);
+    const y = linear([lo, hi], [h - B, T]);
     const slot = (width - L - R) / rows.length;
     const bw = Math.max(4, slot * 0.55);
     const cx = (i: number) => L + slot * i + slot / 2;
@@ -761,12 +767,12 @@ export function DeviationBars({
     // overprinted each other (seen on Sacks, 23 Sep 2026).
     const labelPx = Math.ceil(textPx(Math.max(...rows.map((r) => tickOf(r).length)), fontPx)) + 16;
     const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / labelPx))));
-    return { R, y, slot, bw, cx, zeroY, legend, step };
+    return { H: h, R, y, slot, bw, cx, zeroY, legend, step };
   };
 
   const hit = (px: number, py: number): number | null => {
     const layout = layoutRef.current;
-    if (!layout || py < T || py > H - B) return null;
+    if (!layout || py < T || py > layout.H - B) return null;
     return bandHit(px, L, layout.slot, rows.length);
   };
 
@@ -789,7 +795,7 @@ export function DeviationBars({
 
   const brushProp = brush
     ? {
-        xs: rows.map((_, i) => (layoutRef.current ?? computeLayout(1036, 13)).cx(i)),
+        xs: rows.map((_, i) => (layoutRef.current ?? computeLayout(1036, 13, height)).cx(i)),
         onCommit: (i0: number, i1: number) => {
           const pair0 = brush.refs[i0];
           const pair1 = brush.refs[i1];
@@ -803,7 +809,7 @@ export function DeviationBars({
   return (
     <ChartFrame
       chartId={chartId ?? ariaLabel}
-      defaultH={H}
+      defaultH={height}
       ariaLabel={ariaLabel}
       resting={`${rows.length} rows`}
       hit={hit}
@@ -814,7 +820,13 @@ export function DeviationBars({
       brush={brushProp}
     >
       {(fsize) => {
-        const layout = computeLayout(fsize.width, fsize.fontPx);
+        // `fsize.height` is `ChartFrame`'s live, possibly drag-resized
+        // height — reading it here (rather than the outer `height` prop) is
+        // the fix: before this, the drag handle changed `ChartFrame`'s own
+        // wrapper box but this component's `<svg>` stayed the original
+        // fixed size inside it.
+        const H = fsize.height;
+        const layout = computeLayout(fsize.width, fsize.fontPx, H);
         layoutRef.current = layout;
         const { R, y, bw, cx, zeroY, legend, step } = layout;
         const plotRight = fsize.width - R;

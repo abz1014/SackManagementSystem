@@ -6,6 +6,7 @@
  * a genuinely flagged row.
  */
 import { describe, expect, it } from 'vitest';
+import { fireEvent } from '@testing-library/react';
 import { render } from '../../testkit/render';
 import { DeviationBars, RankBars, type DeviationRow, type RankRow } from './shared';
 
@@ -131,5 +132,37 @@ describe('DeviationBars', () => {
     const svg = container.querySelector('svg')!;
     expect(svg.getAttribute('role')).toBe('img');
     expect(svg.getAttribute('aria-label')).toBe('Station bias from the line');
+  });
+
+  /**
+   * Resize defect fix (chart overhaul wave 3, `layout-tests/charts.spec.ts`'s
+   * resize case, 29 Sep 2026): `<svg height={H}>` used to bind to the fixed
+   * `height` PROP, never `ChartFrame`'s own live `size.height` — so dragging
+   * `.chart-resize` changed the wrapper `chart-frame-body` div's box (that
+   * part always worked) while the SVG drawn inside it stayed the original
+   * fixed size, i.e. the chart never actually got taller. The resize
+   * HANDLE's own keyboard control (`ArrowDown`/`ArrowUp`, `ChartFrame.tsx`'s
+   * `onHandleKeyDown`) drives the exact same `size.setHeight` path a pointer
+   * drag does, so this is a faithful, DOM-only reproduction of the drag —
+   * see `charts.spec.ts`'s own comment on why a real pointer drag needs a
+   * real browser.
+   */
+  it('resize: the handle changes the actual <svg height>, not just its container', () => {
+    const rows = deviationRows([5, -5, 2, 9, -9, 1]);
+    const { container } = render(<DeviationBars rows={rows} ariaLabel="Resizable deviation chart" height={220} />);
+    const svgBefore = container.querySelector('svg.chart')!;
+    const heightBefore = Number(svgBefore.getAttribute('height'));
+    expect(heightBefore).toBe(220);
+
+    const handle = container.querySelector('.chart-resize')!;
+    fireEvent.keyDown(handle, { key: 'ArrowDown' }); // +20px, ChartFrame's own RESIZE_STEP_PX
+
+    const svgAfter = container.querySelector('svg.chart')!;
+    const heightAfter = Number(svgAfter.getAttribute('height'));
+    expect(heightAfter).toBe(240);
+    // The viewBox's own height (the coordinate space bars/ticks are drawn
+    // in) must move with it — a height attribute changing alone with a
+    // stale viewBox would just rescale the drawing, not resize it.
+    expect(svgAfter.getAttribute('viewBox')!.split(' ')[3]).toBe('240');
   });
 });

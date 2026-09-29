@@ -60,7 +60,6 @@ const SCREENS: ScreenDef[] = [
 ];
 
 async function primeScreen(page: Page, def: ScreenDef) {
-  page.on('console', (msg) => { if (msg.text().includes('DEBUG_CATBARS')) console.log(msg.text()); });
   // Order matters: Playwright runs the LAST-registered matching route
   // first, so the catch-all must be installed BEFORE anything specific
   // (see mocks.ts's header on mockCatchAll).
@@ -315,6 +314,60 @@ test('Weight over-time chart: dragging .chart-resize changes height and persists
   await page.waitForTimeout(150);
   const storedValueAfterReload = await page.evaluate((k) => localStorage.getItem(k), storedKeys[0]);
   expect(storedValueAfterReload, 'persisted chart height did not survive a reload').toBe(storedValue);
+});
+
+/**
+ * Resize defect fix (chart overhaul wave 3, `report/shared.tsx`'s
+ * `DeviationBars`, 29 Sep 2026): `<svg height={H}>` used to bind to the
+ * FIXED `height` prop, never `ChartFrame`'s own live, drag-resized
+ * `size.height` — the drag handle moved the `.chart-frame-body` wrapper's
+ * own box (that part always worked, which is why the Weight test above,
+ * against a different chart type, passed even before this fix) while the
+ * `<svg>` drawn inside it silently stayed the original fixed size. Line's
+ * own station-deviation chart ("row median") is a `DeviationBars` — the
+ * same real chart the "row median never overlaps a bar" tests above target
+ * — so this reproduces the exact defect this task names: "the drag handle
+ * resizes the container but not the chart."
+ */
+test('Line station-deviation chart (DeviationBars): dragging .chart-resize changes the actual <svg height>', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await primeScreen(page, SCREENS[0]!); // Line
+
+  const frame = page.locator('.chart-frame').filter({ has: page.locator('svg[aria-label*="station" i], svg[aria-label*="median" i]') }).first();
+  await expect(frame).toBeVisible();
+  const handle = frame.locator('.chart-resize').first();
+  test.skip((await handle.count()) === 0, 'Line drew no .chart-resize handle on its station-deviation chart');
+
+  const svgBefore = frame.locator('svg').first();
+  const heightBefore = Number(await svgBefore.getAttribute('height'));
+  const viewBoxHeightBefore = Number((await svgBefore.getAttribute('viewBox'))!.split(' ')[3]);
+  expect(viewBoxHeightBefore, 'viewBox height did not match the svg height attribute before resizing').toBe(heightBefore);
+
+  const box = await handle.boundingBox();
+  test.skip(!box, '.chart-resize has no bounding box');
+  const startX = box!.x + box!.width / 2;
+  const startY = box!.y + box!.height / 2;
+  // PointerEvents dispatched directly on the LOCATOR itself (Playwright's
+  // own `dispatchEvent`, which reaches exactly this element — no need to
+  // re-find it via a global `document.querySelector`), not `page.mouse` —
+  // see the Weight resize test's own comment above for why a mouse-driven
+  // drag never reaches this handler in this harness's Edge channel.
+  await handle.dispatchEvent('pointerdown', { clientX: startX, clientY: startY, pointerId: 1, bubbles: true, cancelable: true });
+  await handle.dispatchEvent('pointermove', { clientX: startX, clientY: startY + 100, pointerId: 1, bubbles: true, cancelable: true });
+  await handle.dispatchEvent('pointerup', { clientX: startX, clientY: startY + 100, pointerId: 1, bubbles: true, cancelable: true });
+  await page.waitForTimeout(200);
+
+  const svgAfter = frame.locator('svg').first();
+  const heightAfter = Number(await svgAfter.getAttribute('height'));
+  const viewBoxHeightAfter = Number((await svgAfter.getAttribute('viewBox'))!.split(' ')[3]);
+  expect(heightAfter, 'DeviationBars <svg height> did not change after dragging .chart-resize — the container resized but the chart did not').not.toBe(heightBefore);
+  expect(viewBoxHeightAfter, 'viewBox height did not track the resized svg height').toBe(heightAfter);
+
+  // The wrapper box (what always worked) and the svg (what this fix adds)
+  // must agree — this is the assertion that would have failed before the
+  // fix, when the wrapper grew but the svg's own height attribute did not.
+  const wrapperHeightAfter = await frame.locator('.chart-frame-body').evaluate((el) => el.getBoundingClientRect().height);
+  expect(Math.abs(wrapperHeightAfter - heightAfter), 'the resized wrapper height and the svg height diverged').toBeLessThanOrEqual(2);
 });
 
 // ---------------------------------------------------------------------
