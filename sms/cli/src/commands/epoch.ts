@@ -3,6 +3,7 @@
  *
  *   sms epoch:list
  *   sms epoch:accept --all|--table=<t> --confirm --provenance=<ifl_live|ifl_copy|simulator> [--label="…"]
+ *                     [--i-know-this-is-a-new-generation]
  *   sms epoch:purge  --epoch=5,6,7,8 --confirm
  *   sms epoch:drop   --epoch=N --confirm
  *
@@ -10,10 +11,30 @@
  * worker does for itself. A `create_date` cannot distinguish "the vendor rebuilt
  * the table" from "IFL_DB_NAME_DATA points at the wrong database", and those need
  * opposite responses — so the worker halts and a human looks.
+ *
+ * Two guards stand between a REGISTER and actually writing (see the R-17
+ * chronology guard below, and `checkDataVintage`'s own doc comment further
+ * down): a source whose createdKey is older than what is open is refused
+ * outright, and — because a restored/rebuilt table's create_date says
+ * nothing about how old its DATA is — a source whose newest reading predates
+ * the open generation's oldest, or whose id range checksum-matches an
+ * existing CLOSED epoch, is refused too. `--i-know-this-is-a-new-generation`
+ * overrides only the second (data-vintage) guard, for the rare genuine case,
+ * and is always audited (`sms.audit_log`, action
+ * `epoch.accept.vintage_override`) when it changes a real registration's
+ * outcome.
  */
 import mssql from 'mssql';
-import { loadSourceTables, readSourceIdentity, openEpoch, withTransformLock } from '@sms/sync-worker';
-import { openContext, parseArgs, cliLog } from '../context.js';
+import {
+  loadSourceTables,
+  readSourceIdentity,
+  openEpoch,
+  withTransformLock,
+  assertSourceTableName,
+  julyDefFor,
+  overlapChecksum,
+} from '@sms/sync-worker';
+import { openContext, parseArgs, cliLog, type Ctx } from '../context.js';
 import { inFlightProblem, passesInFlight, requireBackupFlag } from '../guards.js';
 
 const asList = (v: unknown): string[] =>
@@ -124,6 +145,141 @@ function parseColumnList(raw: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * R-17 DATA-VINTAGE GUARD (29 Sep 2026, DEFECTS.md R-17 continued — found by
+ * the R-17 end-to-end run). The chronology guard above (`chronologyViolations`)
+ * trusts `sys.tables.create_date` (`createdKey`) — but a RESTORED or REBUILT
+ * archive gets TODAY's create_date no matter how old the data inside it
+ * actually is, so a July-vintage archive restored today sails past that
+ * check and gets registered as a genuine forward move, closing the real open
+ * generation in the process. Reproduced on scratch: exit 0, 0 stops from the
+ * createdKey check, epochs 13-16 closed, 17-20 registered — from data that
+ * was actually the July shape all along.
+ *
+ * This guard reads what the DATA itself says, keeping the createdKey check
+ * above as an additional (necessary but not sufficient) signal:
+ *
+ *   (a) the source's newest production timestamp vs. the OPEN epoch's own
+ *       OLDEST production timestamp (read from sms_raw for that generation),
+ *       with a documented 1-day tolerance for clock skew / a source that is
+ *       only partially caught up. A source entirely OLDER than what is
+ *       already open, even allowing that tolerance, cannot be a genuine
+ *       forward move.
+ *   (b) an overlap-checksum MATCH between the source's own id range and any
+ *       CLOSED epoch of the same table — reusing `overlapChecksum`
+ *       (sync-worker/src/backfill.ts), the exact proof `sms epoch:backfill`
+ *       already uses to decide an archive is provably a superset of what is
+ *       stored. A match means this "new" source IS that old, closed
+ *       generation — not a new one — read through the July column shape
+ *       (`julyDefFor`), since a restored/rebuilt old archive is the July
+ *       shape by definition (SCHEMA drift is what makes a generation new).
+ *
+ * Either failing refuses registration — exit 2, 0 writes — naming
+ * `sms epoch:backfill` as the correct path for genuinely old data.
+ * `--i-know-this-is-a-new-generation` overrides both checks for the rare
+ * genuine case (a new generation whose OWN data legitimately predates the
+ * one currently open) and is always audited when it changes the outcome of
+ * a real registration — never a silent bypass.
+ */
+export const VINTAGE_TOLERANCE_MS = 24 * 60 * 60 * 1000; // 1 day
+
+function prodColumn(def: { columns: { src: string }[] }): { src: string; raw: string } {
+  return def.columns.some((c) => c.src === 'ProductionDate')
+    ? { src: 'ProductionDate', raw: 'src_ProductionDate' }
+    : { src: 'Date', raw: 'src_Date' };
+}
+
+export interface VintageResult {
+  ok: boolean;
+  reason?: string;
+}
+
+export async function checkDataVintage(
+  ctx: Ctx,
+  def: RegisterPlan['def'],
+  openId: number,
+): Promise<VintageResult> {
+  assertSourceTableName(def.sourceTable, ctx.cfg.lineId, def.key);
+  const col = prodColumn(def);
+
+  // What the source reports right now.
+  const srcR = await ctx.ifl
+    .request()
+    .query<{ hiProd: unknown; hiId: unknown }>(
+      `SELECT MAX([${col.src}]) hiProd, MAX([id]) hiId FROM [${def.sourceTable}]`,
+    );
+  const srcRow = srcR.recordset[0];
+  const sourceMaxProd = srcRow?.hiProd ? new Date(srcRow.hiProd as string) : null;
+  const sourceMaxId = srcRow?.hiId == null ? null : Number(srcRow.hiId);
+
+  // (a) The open epoch's own earliest reading, from sms_raw — never from the
+  // live source, which by definition cannot describe the generation that is
+  // no longer open once this command runs.
+  const openR = await ctx.app
+    .request()
+    .input('line', mssql.Int, ctx.cfg.lineId)
+    .input('e', mssql.Int, openId)
+    .query<{ lo: unknown }>(
+      `SELECT MIN(${col.raw}) lo FROM ${def.rawTable} WHERE line_id = @line AND source_epoch = @e`,
+    );
+  const openMinProd = openR.recordset[0]?.lo ? new Date(openR.recordset[0]!.lo as string) : null;
+
+  if (sourceMaxProd !== null && openMinProd !== null) {
+    if (sourceMaxProd.getTime() < openMinProd.getTime() - VINTAGE_TOLERANCE_MS) {
+      return {
+        ok: false,
+        reason:
+          `this source's newest production reading (${sourceMaxProd.toISOString()}) is older than the ` +
+          `generation already open (epoch ${openId}, earliest reading ${openMinProd.toISOString()}), even ` +
+          `allowing a ${Math.round(VINTAGE_TOLERANCE_MS / 86_400_000)}-day tolerance. A genuine new generation ` +
+          `moves forward in time; this data does not.`,
+      };
+    }
+  }
+
+  // (b) Overlap-checksum against every CLOSED epoch of this table — the
+  // source's whole current id range, read through the July shape.
+  if (sourceMaxId !== null && sourceMaxId > 0) {
+    const closedR = await ctx.app
+      .request()
+      .input('line', mssql.Int, ctx.cfg.lineId)
+      .input('tbl', mssql.VarChar(64), def.sourceTable)
+      .query<{ epoch_id: number }>(
+        `SELECT epoch_id FROM sms.source_epoch
+          WHERE line_id = @line AND source_table = @tbl AND closed_utc IS NOT NULL`,
+      );
+    const julyDef = julyDefFor(def.sourceTable, def.key);
+    for (const c of closedR.recordset) {
+      let overlap;
+      try {
+        overlap = await overlapChecksum(ctx.ifl, ctx.app, julyDef, ctx.cfg.lineId, c.epoch_id, sourceMaxId);
+      } catch (err) {
+        // A shape this source cannot support (e.g. a genuinely different
+        // physical table under the same name) is not evidence it IS this
+        // closed generation — only a checksum MATCH is. Not this generation;
+        // try the next one.
+        cliLog.warn('epoch:accept data-vintage guard: overlap check failed for one closed epoch, skipping it', {
+          table: def.sourceTable,
+          closedEpoch: c.epoch_id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
+      if (overlap.match && overlap.checkedIds > 0) {
+        return {
+          ok: false,
+          reason:
+            `this source's ids checksum-match CLOSED epoch ${c.epoch_id} exactly over the ${overlap.checkedIds} ` +
+            `overlapping id(s) (source-agg ${overlap.sourceChecksum} = raw-agg ${overlap.rawChecksum}) — this IS ` +
+            `that old, closed generation, not a new one.`,
+        };
+      }
+    }
+  }
+
+  return { ok: true };
 }
 
 export async function epochAccept(argv: string[]): Promise<number> {
@@ -301,6 +457,40 @@ export async function epochAccept(argv: string[]): Promise<number> {
       return 2;
     }
 
+    // R-17 data-vintage guard — see checkDataVintage's own comment for why
+    // createdKey alone (checked just above) is not enough. Only meaningful
+    // where there IS an open generation to be older/the-same-as; a first-ever
+    // registration for a table has nothing to compare against.
+    const vintageOverride = args['i-know-this-is-a-new-generation'] === true;
+    if (!vintageOverride) {
+      for (const p of registers) {
+        if (p.openId === null) continue;
+        const vintage = await checkDataVintage(ctx, p.def, p.openId);
+        if (!vintage.ok) {
+          console.error(
+            `\nREFUSED: ${p.def.sourceTable} — ${vintage.reason}\n` +
+              `This looks like an OLD archive, not a new generation: a restored or rebuilt table gets TODAY's ` +
+              `create_date regardless of how old the data inside it is, so the createdKey check above cannot ` +
+              `catch this on its own — this guard reads the data itself instead.\n` +
+              `If this data genuinely continues an EXISTING closed generation (the usual case for data IFL ` +
+              `sends late), extend it instead:\n` +
+              `  sms epoch:backfill --table=${p.def.sourceTable} --epoch=<id> --source-db=<name> [--confirm]\n` +
+              `If this really IS a new generation whose own data legitimately predates the one currently open, ` +
+              `override explicitly — audited, never silent:\n` +
+              `  sms epoch:accept --table=${p.def.sourceTable} --confirm --provenance=<...> ` +
+              `--i-know-this-is-a-new-generation\n` +
+              `Nothing has been changed.`,
+          );
+          return 2;
+        }
+      }
+    } else if (registers.length > 0) {
+      console.log(
+        `\n⚠ --i-know-this-is-a-new-generation: the data-vintage guard was NOT run for ` +
+          `${registers.map((p) => p.def.sourceTable).join(', ')}. This will be recorded in sms.audit_log.`,
+      );
+    }
+
     if (registers.length > 0) {
       if (provenance === null) {
         console.error(
@@ -415,6 +605,34 @@ export async function epochAccept(argv: string[]): Promise<number> {
           );
         await tx.commit();
         console.log(`  registered epoch ${ins.recordset[0]!.id} for ${tableName}`);
+        // R-17: --i-know-this-is-a-new-generation bypasses the data-vintage
+        // guard above — audited on every register it actually affects, never
+        // a silent bypass. Best-effort, like every other audit_log write in
+        // this file: it must not fail a registration that already committed.
+        if (vintageOverride) {
+          try {
+            await ctx.app
+              .request()
+              .input('action', mssql.VarChar(40), 'epoch.accept.vintage_override')
+              .input('type', mssql.VarChar(40), 'source_epoch')
+              .input('target', mssql.NVarChar(64), String(ins.recordset[0]!.id))
+              .input(
+                'detail',
+                mssql.NVarChar(1000),
+                `by the CLI (sms epoch:accept --i-know-this-is-a-new-generation), no signed-in actor; ` +
+                  `${tableName} registered as epoch ${ins.recordset[0]!.id} with the R-17 data-vintage guard ` +
+                  `bypassed`,
+              )
+              .query(
+                `INSERT INTO sms.audit_log (actor_id, action, target_type, target_id, detail)
+                 VALUES (NULL, @action, @type, @target, @detail)`,
+              );
+          } catch (auditErr) {
+            cliLog.error('epoch:accept: failed to record vintage-override audit row (registration already committed)', {
+              error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
+          }
+        }
       } catch (err) {
         // The rollback gets its own try/catch, and it must never replace
         // `err` — a batch-aborting error can leave the transaction already

@@ -62,6 +62,25 @@ function fakePool() {
           }
           return { recordset: [{ id: world.nextEpochId }], rowsAffected: [1] };
         }
+        // R-17 data-vintage guard (checkDataVintage, epoch.ts). Defaults to
+        // "nothing to compare" (null/empty) so every test that does not care
+        // about vintage passes the guard trivially — see world.vintage.* for
+        // the knobs the R-17 tests below turn.
+        if (/SELECT MAX\(\[.*\]\) hiProd, MAX\(\[id\]\) hiId FROM \[/.test(sql)) {
+          return {
+            recordset: [{ hiProd: world.vintage.sourceMaxProd, hiId: world.vintage.sourceMaxId }],
+            rowsAffected: [1],
+          };
+        }
+        if (/SELECT MIN\(.*\) lo FROM sms_raw\./.test(sql)) {
+          return { recordset: [{ lo: world.vintage.openMinProd }], rowsAffected: [1] };
+        }
+        if (/SELECT epoch_id FROM sms\.source_epoch\s+WHERE line_id = @line AND source_table = @tbl AND closed_utc IS NOT NULL/.test(sql)) {
+          return { recordset: world.vintage.closedEpochs.map((e) => ({ epoch_id: e })), rowsAffected: [1] };
+        }
+        if (/^INSERT INTO sms\.audit_log/.test(sql.trim())) {
+          return { recordset: [], rowsAffected: [1] };
+        }
         return { recordset: [], rowsAffected: [1] };
       },
     };
@@ -115,14 +134,47 @@ const world = {
   nextOrdinal: 1,
   nextEpochId: 99,
   insertThrows: false,
+  // R-17 data-vintage guard (checkDataVintage) knobs. Defaults make the
+  // guard a no-op ("nothing to compare") so every pre-existing test keeps
+  // passing without knowing this guard exists.
+  vintage: {
+    sourceMaxProd: null as string | null,
+    sourceMaxId: null as number | null,
+    openMinProd: null as string | null,
+    closedEpochs: [] as number[],
+  },
+  // overlapChecksum (sync-worker/src/backfill.ts) is mocked as a directly
+  // controllable double — its own real SQL-shape behaviour is exercised by
+  // backfill.test.ts; here only checkDataVintage's USE of its result matters.
+  overlapChecksum: async (_ifl: unknown, _app: unknown, _def: unknown, _line: number, epochId: number) =>
+    world.overlapResultFor(epochId),
+  overlapResultFor: (_epochId: number) => ({ checkedIds: 0, sourceChecksum: 0, rawChecksum: 0, match: true, mode: 'full' as const }),
 };
 
-vi.mock('@sms/sync-worker', () => ({
-  loadSourceTables: async () => [{ sourceTable: 'pack1_TP1U2' }],
-  readSourceIdentity: async () => world.identity,
-  openEpoch: async () => world.openEpochRow,
-  withTransformLock: async (_c: unknown, fn: () => Promise<unknown>) => fn(),
-}));
+const FULL_DEF = {
+  key: 'cone' as const,
+  sourceTable: 'pack1_TP1U2',
+  rawTable: 'sms_raw.cone_raw',
+  systemCode: 'ifl_sql',
+  columns: [
+    { src: 'id', raw: 'src_id', type: 'int' },
+    { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
+    { src: 'MaterialId', raw: 'src_MaterialId', type: 'int' },
+  ],
+};
+
+vi.mock('@sms/sync-worker', async () => {
+  const real = await vi.importActual<typeof import('@sms/sync-worker')>('@sms/sync-worker');
+  return {
+    loadSourceTables: async () => [FULL_DEF],
+    readSourceIdentity: async () => world.identity,
+    openEpoch: async () => world.openEpochRow,
+    withTransformLock: async (_c: unknown, fn: () => Promise<unknown>) => fn(),
+    assertSourceTableName: real.assertSourceTableName,
+    julyDefFor: real.julyDefFor,
+    overlapChecksum: (...args: Parameters<typeof world.overlapChecksum>) => world.overlapChecksum(...args),
+  };
+});
 vi.mock('../context.js', async () => {
   const real = await vi.importActual<typeof import('../context.js')>('../context.js');
   return {
@@ -157,6 +209,8 @@ beforeEach(() => {
     fingerprint: 'fp-new',
     columnList: ['id', 'ProductionDate', 'MaterialId'],
   };
+  world.vintage = { sourceMaxProd: null, sourceMaxId: null, openMinProd: null, closedEpochs: [] };
+  world.overlapResultFor = () => ({ checkedIds: 0, sourceChecksum: 0, rawChecksum: 0, match: true, mode: 'full' });
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -459,6 +513,141 @@ describe('sms epoch:accept — chronology guard (R-17)', () => {
   it('with no open epoch at all, chronology cannot be violated — registers as a first registration', async () => {
     world.openEpochRow = null;
     world.identity = { ...world.identity, createdKey: '2020-01-01T00:00:00.000' }; // arbitrarily "old"
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(0);
+    expect(world.app.transactions).toHaveLength(1);
+    expect(world.app.transactions[0]!.committed).toBe(true);
+  });
+});
+
+/**
+ * R-17 DATA-VINTAGE GUARD (29 Sep 2026, DEFECTS.md R-17 continued — found by
+ * the R-17 end-to-end run). The createdKey chronology guard above only ever
+ * sees `sys.tables.create_date`, which a RESTORE or REBUILD resets to today
+ * regardless of how old the data inside the table actually is — reproduced
+ * on scratch: exit 0, 0 stops from the createdKey check alone, epochs 13-16
+ * closed, 17-20 registered from data that was really the July shape.
+ * `checkDataVintage` (epoch.ts) closes that gap by reading the DATA itself,
+ * exactly as world.vintage.* below configures it to answer.
+ */
+describe('sms epoch:accept — data-vintage guard (R-17 continued)', () => {
+  const OPEN_SEPTEMBER = {
+    epoch_id: 9,
+    source_server: 'SRV',
+    source_db: 'DATA_TP1U2',
+    source_created_key: '2026-08-05T18:54:50.000', // the September rebuild, already open
+    schema_fingerprint: 'fp-old',
+    label: 'September copy',
+  };
+  const TODAYS_CREATE_DATE = '2026-09-29T09:00:00.000'; // what a restore/rebuild reports TODAY, regardless of data age
+
+  it('a fresh create_date but JULY-vintage data → refused, exit 2, zero writes', async () => {
+    world.openEpochRow = OPEN_SEPTEMBER;
+    // createdKey is NEWER than the open epoch's — the chronology guard above
+    // (which trusts only create_date) would pass this cleanly.
+    world.identity = { ...world.identity, createdKey: TODAYS_CREATE_DATE };
+    // But the DATA is July-vintage: the open (September) generation's own
+    // earliest reading is 2026-08-05; this "new" source's newest reading is
+    // 2026-07-10 — entirely older, well past the 1-day tolerance.
+    world.vintage = {
+      sourceMaxProd: '2026-07-10T11:23:10.000',
+      sourceMaxId: 142511,
+      openMinProd: '2026-08-05T19:03:16.000',
+      closedEpochs: [],
+    };
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(2);
+    expect(world.app.transactions).toHaveLength(0);
+    const sqls = world.app.statements.map((s) => s.sql);
+    expect(sqls.some((q) => /^INSERT INTO sms\.source_epoch/.test(q.trim()))).toBe(false);
+    expect(sqls.some((q) => /UPDATE sms\.source_epoch SET closed_utc/.test(q))).toBe(false);
+    const printed = (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.flat().join(' ');
+    expect(printed).toMatch(/older than the generation already open/);
+    expect(printed).toMatch(/epoch:backfill/);
+    expect(printed).toMatch(/--i-know-this-is-a-new-generation/);
+  });
+
+  it('a genuine newer generation (later data, no id-range overlap with any closed epoch) → registers as before', async () => {
+    world.openEpochRow = OPEN_SEPTEMBER;
+    world.identity = { ...world.identity, createdKey: TODAYS_CREATE_DATE };
+    world.vintage = {
+      sourceMaxProd: '2026-09-20T00:00:00.000', // later than the open epoch's own earliest reading
+      sourceMaxId: 999,
+      openMinProd: '2026-08-05T19:03:16.000',
+      closedEpochs: [1, 2], // some closed epochs exist, but none checksum-match this source
+    };
+    world.overlapResultFor = () => ({ checkedIds: 50, sourceChecksum: 111, rawChecksum: 222, match: false, mode: 'full' });
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(0);
+    expect(world.app.transactions).toHaveLength(1);
+    expect(world.app.transactions[0]!.committed).toBe(true);
+  });
+
+  it('an id-range checksum MATCH against a closed epoch → refused even with newer-looking production dates', async () => {
+    world.openEpochRow = OPEN_SEPTEMBER;
+    world.identity = { ...world.identity, createdKey: TODAYS_CREATE_DATE };
+    world.vintage = {
+      sourceMaxProd: '2026-09-20T00:00:00.000', // would pass check (a) on its own
+      sourceMaxId: 5000,
+      openMinProd: '2026-08-05T19:03:16.000',
+      closedEpochs: [1],
+    };
+    // The source's id range checksum-matches closed epoch 1 exactly: this
+    // "new" source IS that old, already-closed generation.
+    world.overlapResultFor = (epochId) =>
+      epochId === 1
+        ? { checkedIds: 5000, sourceChecksum: 42, rawChecksum: 42, match: true, mode: 'full' }
+        : { checkedIds: 0, sourceChecksum: 0, rawChecksum: 0, match: true, mode: 'full' };
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(2);
+    expect(world.app.transactions).toHaveLength(0);
+    const printed = (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.flat().join(' ');
+    expect(printed).toMatch(/checksum-match CLOSED epoch 1/);
+  });
+
+  it('--i-know-this-is-a-new-generation overrides the guard and registers, with an audited row', async () => {
+    world.openEpochRow = OPEN_SEPTEMBER;
+    world.identity = { ...world.identity, createdKey: TODAYS_CREATE_DATE };
+    // Same fixture as the refused case above — would be refused without the override.
+    world.vintage = {
+      sourceMaxProd: '2026-07-10T11:23:10.000',
+      sourceMaxId: 142511,
+      openMinProd: '2026-08-05T19:03:16.000',
+      closedEpochs: [],
+    };
+
+    const code = await epochAccept([...CONFIRM, '--i-know-this-is-a-new-generation']);
+
+    expect(code).toBe(0);
+    expect(world.app.transactions).toHaveLength(1);
+    expect(world.app.transactions[0]!.committed).toBe(true);
+    // Audited outside the transaction, naming the override action and the
+    // registered epoch id — never a silent bypass.
+    const audit = world.app.statements.find((s) => /^INSERT INTO sms\.audit_log/.test(s.sql.trim()));
+    expect(audit).toBeDefined();
+    expect(audit!.inputs.get('action')).toBe('epoch.accept.vintage_override');
+    expect(String(audit!.inputs.get('detail'))).toMatch(/vintage guard bypassed/);
+  });
+
+  it('no open epoch at all: the vintage guard has nothing to compare against and is not consulted', async () => {
+    world.openEpochRow = null;
+    world.identity = { ...world.identity, createdKey: TODAYS_CREATE_DATE };
+    // Deliberately configured as if it WOULD fail the guard, to prove the
+    // guard is skipped entirely (p.openId === null) rather than coincidentally passing.
+    world.vintage = {
+      sourceMaxProd: '2020-01-01T00:00:00.000',
+      sourceMaxId: 1,
+      openMinProd: '2026-08-05T19:03:16.000',
+      closedEpochs: [],
+    };
 
     const code = await epochAccept(CONFIRM);
 
