@@ -89,6 +89,7 @@ import { getUnmatchedRejects } from './rejects.js';
 // and still used standalone by the finding-H2 regression test, so it keeps
 // resolving its own scope when no caller supplies one — see its own header.
 import { andEpoch, epochWhere, noteOf, resolveGenerationScope, type GenerationNote, type GenerationScope, type ScopeResolver } from './generation.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 
 /**
  * Group key for unmatched rejects that carry no station id. A literal that
@@ -385,23 +386,41 @@ const sign = (n: number) => (n > 0 ? 1 : n < 0 ? -1 : 0);
 const round = (n: number, dp = 2) => Math.round(n * 10 ** dp) / 10 ** dp;
 
 /**
- * Chart overhaul wave 2 (Task TB1, 28 Sep 2026) — DELIBERATELY NOT GIVEN A
- * `shiftRange` PARAMETER. This function's own `from`/`to` are not a page
- * period: `app.ts`'s `/api/weight-stations` route calls this with its
- * TRAILING drift window (the route's own comment names it "its own trailing
- * drift window", distinct from `periodFrom`/`periodTo`, which go to
- * `productDisagreement` instead) — the fixed window the station pattern
- * rules need CONSECUTIVE PRODUCTION DAYS to fire on (`MIN_DAYS_HELD`,
- * `getStationDrift`/`splitEpochs` below). Every query inside this function
- * that shares that window — `getStationDrift`, `rejectRatesByStation`,
- * `stationMaterialCounts` — is therefore a detector window, exactly the
- * class of window CLAUDE.md rule 3 and this task's own brief both single out
- * as "must NOT be narrowed; apply the range to the period part only". There
- * is no separate "period part" inside this file the way `attention.ts` keeps
- * `trailing` and `period` apart — the reporting period lives outside this
- * function entirely, on `productDisagreement`'s own `DayRange.shiftRange`
- * (productAt.ts). Adding an unused `shiftRange` parameter here would invite
- * a future caller to narrow the drift window by mistake, so none is added.
+ * Chart overhaul wave 2 (Task TB1, 28 Sep 2026; revised after coordinator
+ * review). This function's own `from`/`to` are the TRAILING drift window
+ * (`app.ts`'s `/api/weight-stations` route calls this with its own trailing
+ * window, its comment's exact words, distinct from `periodFrom`/`periodTo`)
+ * — the fixed window the station pattern rules need CONSECUTIVE PRODUCTION
+ * DAYS to fire on (`MIN_DAYS_HELD`, `getStationDrift`/`splitEpochs` below,
+ * `stationMaterialCounts` below it). That part takes NO `shiftRange` and
+ * stays exactly as first shipped in this task: narrowing it would misjudge
+ * the pattern rules, and it feeds `meanG`/`medianG`/`sdG`/`vsLineG`/
+ * `vsTargetG`/`targetBasis`, which the F4/F6 audits (this file's own header)
+ * hard-require to share ONE population — narrowing only some of them by
+ * shift would reopen exactly the "adjacent columns from two populations"
+ * defect those audits closed.
+ *
+ * The genuinely separable part is the optional `period` parameter below:
+ * `rejectRatesByStation`'s own reject-rate figures (`rejectRatePct` per
+ * station, `lineRejectRatePct`) are plain counts over a window with no such
+ * cross-column population contract — nothing else on the row is computed
+ * from them — so THAT window, and only that one, may differ from the
+ * trailing window and carry a `shiftRange`. Defaults to `{ from, to }`
+ * (the trailing window itself) when omitted, so every existing caller (this
+ * whole suite, every report builder) is byte-identical: the period and the
+ * trailing window coincide, and — see `periodIsTrailing` below — no second
+ * generation-scope resolve is even issued in that case, preserving
+ * WS-PERF4's "at most two resolves" invariant
+ * (`weightStationsScopeDedup.test.ts`).
+ *
+ * NOT extended to `stationMaterialCounts`: `targetBasis`/`materialsInWindow`
+ * feed `vsTargetG`, which is signed against `st.grandMean` — the TRAILING
+ * window's own mean (F4) — so narrowing only the material count's window
+ * would judge one station's target against materials it ran in a DIFFERENT
+ * window than the mean being judged, the same shape of defect F4 fixed.
+ * `app.ts` does not yet wire `periodFrom`/`periodTo`/`shiftRange` into this
+ * parameter — that is route wiring, out of this task's file ownership — but
+ * the capability now exists at the service layer for whoever does.
  */
 export async function getWeightStations(
   pool: ConnectionPool,
@@ -422,7 +441,25 @@ export async function getWeightStations(
    * scoped to one request.
    */
   resolveScope: ScopeResolver = (lid, window, tables) => resolveGenerationScope(pool, lid, window, tables),
+  /**
+   * Chart overhaul wave 2 (Task TB1, 28 Sep 2026): the reject-rate window —
+   * see this function's own file-header note just above for what this is
+   * and, just as importantly, what it deliberately is NOT (the drift/target
+   * window, which stays `from`/`to`, untouched). Defaults to `{ from, to }`.
+   */
+  period?: { from: string; to: string; shiftRange?: ShiftRange },
 ): Promise<WeightStationsData> {
+  const periodWindow = period ?? { from, to };
+  // No second resolve when the period coincides with the trailing window
+  // (every existing caller, since nobody yet wires a distinct `period` in) —
+  // preserves WS-PERF4's dedup guarantee exactly as before this parameter
+  // existed. `!periodWindow.shiftRange` matters too: a shiftRange narrows
+  // the POPULATION inside the same dates, not the dates themselves, so it
+  // does not change what generation is IN SCOPE — but resolving on the
+  // trailing scope's cached answer only when the dates AND shiftRange both
+  // match keeps this condition honest rather than silently reusing a scope
+  // that was never actually asked for the shift-narrowed window.
+  const periodIsTrailing = periodWindow.from === from && periodWindow.to === to && !periodWindow.shiftRange;
   // T3 (15 Sep 2026): bound the ledger fetch to `{ to }`, never `from`. This
   // used to call listCalibrationAdjustments with no window filter at all, so
   // TOP (500) ORDER BY adjusted_at_utc DESC returned the newest 500
@@ -512,6 +549,15 @@ export async function getWeightStations(
   // requesting the union up front rather than reusing across mismatched
   // requests.
   const scope = await resolveScope(lineId, { from, to }, ['cone_event', 'reject_event']);
+  // Chart overhaul wave 2 (Task TB1, 28 Sep 2026): `rejectRatesByStation`'s
+  // OWN window may now differ from the trailing window above — see this
+  // function's file-header note. Resolved separately ONLY when it actually
+  // differs (dates or shiftRange), so the WS-PERF4 dedup guarantee
+  // (`weightStationsScopeDedup.test.ts`) is untouched for every caller that
+  // does not pass `period` — which, as of this task, is every one of them.
+  const periodScope = periodIsTrailing
+    ? scope
+    : await resolveScope(lineId, { from: periodWindow.from, to: periodWindow.to }, ['cone_event', 'reject_event']);
 
   // stationMaterialCounts runs AFTER the pair above, not alongside them:
   // rejectRatesByStation issues three queries on this same pool in a fixed
@@ -525,10 +571,20 @@ export async function getWeightStations(
   // targetBasis 'line_product' — the same target those tests already expect.
   const [drift, rejectStats] = await Promise.all([
     getStationDrift(pool, lineId, from, to, plausibility, { restarts }),
-    rejectRatesByStation(pool, lineId, from, to, scope),
+    rejectRatesByStation(pool, lineId, periodWindow.from, periodWindow.to, periodScope, periodWindow.shiftRange),
   ]);
   const rejects = rejectStats.rates;
+  // stationMaterialCounts stays on the TRAILING window/scope — see this
+  // function's file-header note on why it is not extended to `period`.
   const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility, scope);
+  // NOTE: when `period` differs from the trailing window, this single field
+  // describes `rejectRatesByStation`'s (the period's) generation, not
+  // `stationMaterialCounts`'s (the trailing window's) — the WS-A1/WS-PERF4
+  // precedent of "one note describes both" (see `WeightStationsData
+  // .generationNote`'s own doc comment) held only because the two always
+  // shared one scope before this parameter existed. Flagged here rather
+  // than silently left to read as still-accurate; unchanged for every
+  // existing caller, since `period` is never supplied yet.
   const generationNote = rejectStats.generationNote;
 
   const active = drift.stations.filter((s) => s.n > 0);
@@ -819,6 +875,17 @@ export async function rejectRatesByStation(
    * `sack_event`.
    */
   scope?: GenerationScope,
+  /**
+   * Chart overhaul wave 2 (Task TB1, 28 Sep 2026): an OPTIONAL shift-bounded
+   * refinement of `[from, to]` (shiftRange.ts). Unlike `getStationDrift`,
+   * this function computes plain counts (cones, rejects, unmatched rejects)
+   * with no day-level pattern test and no cross-row population contract, so
+   * it is safe to narrow. ANDed alongside `from`/`to` on both the
+   * `cone_event`/`reject_event` queries below AND passed to
+   * `getUnmatchedRejects` (rejects.ts, Task TB2's `RejectFilters.shiftRange`).
+   * Absent, behaviour is byte-identical to before this task.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<{
   rates: Map<number, number>;
   totalCones: number;
@@ -830,8 +897,14 @@ export async function rejectRatesByStation(
   const resolvedScope = scope ?? (await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event', 'reject_event']));
 
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
-  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'cone_event', { prefix: 'wsc' });
-  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'reject_event', { prefix: 'wsr' });
+  // The shift-range clause's SQL is deterministic text (fixed parameter
+  // names), so it is generated once and folded into BOTH `coneWhere` and
+  // `rejWhere` below — they are two subqueries inside the SAME statement on
+  // the SAME request `req`, so the params it binds (`srFrom` etc.) need
+  // binding only once here, not once per subquery.
+  const shiftFrag = shiftRange ? ` AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, req)}` : '';
+  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'cone_event', { prefix: 'wsc' }) + shiftFrag;
+  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'reject_event', { prefix: 'wsr' }) + shiftFrag;
   const r = await req.query<{ st: number; cones: number; rejects: number }>(`
       WITH c AS (
         SELECT source_station AS st, COUNT(*) AS n
@@ -861,8 +934,9 @@ export async function rejectRatesByStation(
    * real data, which is exactly why this had gone unnoticed.
    */
   const totalsReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
-  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'cone_event', { prefix: 'wstc' });
-  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'reject_event', { prefix: 'wstr' });
+  const totalsShiftFrag = shiftRange ? ` AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, totalsReq)}` : '';
+  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'cone_event', { prefix: 'wstc' }) + totalsShiftFrag;
+  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'reject_event', { prefix: 'wstr' }) + totalsShiftFrag;
   const totals = await totalsReq.query<{ cones: number; rejects: number }>(`
       SELECT
         (SELECT COUNT(*) FROM sms.cone_event
@@ -892,7 +966,7 @@ export async function rejectRatesByStation(
   const unmatchedOf = await getUnmatchedRejects(
     pool,
     lineId,
-    { from, to, scope: resolvedScope },
+    { from, to, scope: resolvedScope, shiftRange },
     `ISNULL(CAST(re.source_station AS varchar(12)), '${NO_STATION}')`,
   );
   let totalUnmatchedRejects = 0;

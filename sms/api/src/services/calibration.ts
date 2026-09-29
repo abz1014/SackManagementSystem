@@ -634,6 +634,39 @@ export interface AdjustmentList {
   station: number | null;
 }
 
+/**
+ * Chart overhaul wave 2 (Task TB1, 28 Sep 2026) — CALIBRATION CHECK, per the
+ * coordinator's follow-up. This file exports exactly two query-issuing
+ * functions; neither gets a `shiftRange`, and the two reasons are DIFFERENT,
+ * not one reason repeated:
+ *
+ *  1. `getStationDrift` (above): a whole-day drift DETECTOR. Rows are
+ *     grouped `GROUP BY source_station, shift_date`, and the Nelson pattern
+ *     rules (`nelsonViolations`, `splitEpochs`) require CONSECUTIVE
+ *     CALENDAR DAYS to fire at all. A shift range narrows WITHIN a day; this
+ *     function has no unit finer than a day to apply one to. Matches
+ *     `weightStations.ts`'s own note on the window it shares with this
+ *     function.
+ *  2. `listCalibrationAdjustments`, immediately below — NOT a detector, but
+ *     STILL not period-scoped in the shift-range sense, for a structural
+ *     reason, not a policy one: `sms.calibration_adjustment` carries no
+ *     `shift_date`/`shift_code` columns at all (verified against
+ *     `db/migrations/*calibration_adjustment*.sql` — it is an app-written
+ *     LEDGER of individually-logged events, one row per manual adjustment,
+ *     filtered on `adjusted_at_utc`, a genuine-UTC instant, not a plant
+ *     production reading). `shiftRangeClause` (shiftRange.ts) is defined
+ *     over exactly those two columns and cannot bind to a table that has
+ *     neither. There is no "the period part" to split out of a single
+ *     instant per row the way there is out of a population of readings —
+ *     the closest analogue, `from`/`to` day bounds, already exist here
+ *     (`AdjustmentFilter.from`/`.to`, converted through the plant clock) and
+ *     narrowing a single instant by shift is not a meaningful operation:
+ *     an adjustment either falls in `[from, to]` or it does not, and a
+ *     shift range does not refine that any further than the day it already
+ *     names.
+ *
+ * VERDICT: no function in this file takes a `shiftRange`, and none should.
+ */
 export async function listCalibrationAdjustments(
   pool: ConnectionPool,
   lineId: number,
