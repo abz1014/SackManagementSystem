@@ -45,6 +45,23 @@ export function keepDataAcrossKeyChange(prevKey: string | null, nextKey: string)
   return prevKey === nextKey;
 }
 
+export interface UsePollingOptions {
+  /**
+   * When `false`, `fn` is still called once (on mount and on every `key`/
+   * `refresh()` change) but the result is never used to schedule a repeat —
+   * no `setTimeout`, no `visibilitychange` re-fetch. Defaults to `true`, so
+   * every existing 3-argument call site is unaffected.
+   *
+   * Built for periods that are not live (`period.live === false`, a past
+   * range or a past day): re-running the identical historic query every
+   * `intervalMs` wastes server load for an answer that cannot change. Screens
+   * opt in with `usePolling(fn, intervalMs, key, { enabled: period.live })` —
+   * when `period.live` later flips back to `true` (the viewer returns to a
+   * live period), polling resumes on the same cycle, from the same `key`.
+   */
+  enabled?: boolean;
+}
+
 /**
  * Poll `fn` every `intervalMs`, keyed so a change of `key` starts a fresh
  * cycle. On error the last good data is kept and `error` is set: a stale
@@ -57,8 +74,17 @@ export function keepDataAcrossKeyChange(prevKey: string | null, nextKey: string)
  * that fetch fails, the screen sees `data: null, error: <message>` and
  * renders its failure state instead of the old key's numbers under the new
  * heading.
+ *
+ * `opts.enabled` (default `true`) gates the REPEAT only, never the initial
+ * fetch — see `UsePollingOptions` above.
  */
-export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: string): PollState<T> {
+export function usePolling<T>(
+  fn: () => Promise<T>,
+  intervalMs: number,
+  key: string,
+  opts?: UsePollingOptions,
+): PollState<T> {
+  const enabled = opts?.enabled ?? true;
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,6 +107,7 @@ export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: str
     prevKeyRef.current = key;
 
     const schedule = () => {
+      if (!enabled) return; // not live: one fetch per key/refresh, no repeat
       timer = window.setTimeout(run, intervalMs);
     };
     const run = async () => {
@@ -112,6 +139,7 @@ export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: str
       }
     };
     const onVisible = () => {
+      if (!enabled) return; // not live: a tab regaining focus is not a reason to re-poll a fixed period
       if (document.visibilityState === 'visible') {
         window.clearTimeout(timer);
         void run();
@@ -125,7 +153,7 @@ export function usePolling<T>(fn: () => Promise<T>, intervalMs: number, key: str
       window.clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [intervalMs, key, tick]);
+  }, [intervalMs, key, tick, enabled]);
 
   return { data, error, loading, updatedAt, refresh };
 }

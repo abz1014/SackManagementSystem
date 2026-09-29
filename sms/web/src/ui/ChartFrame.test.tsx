@@ -6,6 +6,7 @@
  * `useChartSize` reaches for (`testkit/domStubs.ts`) — nothing here drives
  * a real resize, so the controllable stub is not needed either.
  */
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { ChartFrame, type ChartFrameProps, type ChartTip } from './ChartFrame';
@@ -242,6 +243,62 @@ describe('ChartFrame brush', () => {
     fireEvent.keyDown(body, { key: '+' });
 
     expect(onCommit).toHaveBeenCalledWith(0, 2);
+  });
+});
+
+describe('ChartFrame brush commit does not warn during render (FIX 1 regression)', () => {
+  /**
+   * Stands in for `App`'s `zoomTo`/`Session` — a PARENT component whose own
+   * setState runs off `ChartFrame`'s `onCommit`. Before the fix,
+   * `useChartBrush`'s `commitOrCancel` called `onCommit` from inside a
+   * `setBrush` functional updater, which React treats as render-phase work;
+   * calling a parent's setState from there is exactly what produces
+   * "Cannot update a component (`Session`) while rendering a different
+   * component (`ChartFrame`)".
+   */
+  function Harness(props: { brush: { xs: number[] } }) {
+    const [committed, setCommitted] = useState<[number, number] | null>(null);
+    return (
+      <div>
+        <p data-testid="committed">{committed ? `${committed[0]}-${committed[1]}` : 'none'}</p>
+        <ChartFrame
+          {...baseProps({
+            brush: {
+              xs: props.brush.xs,
+              onCommit: (i0, i1) => setCommitted([i0, i1]),
+            },
+          })}
+        />
+      </div>
+    );
+  }
+
+  it('a pointer-drag brush commit triggers no console.error warning', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { container, getByTestId } = render(<Harness brush={{ xs: XS }} />);
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 70);
+    firePointer(body, 'pointermove', 20);
+    firePointer(body, 'pointerup', 20);
+
+    expect(getByTestId('committed').textContent).toBe('1-3');
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("a keyboard (Shift+Arrow then '+') brush commit triggers no console.error warning", () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { container, getByTestId } = render(<Harness brush={{ xs: XS }} />);
+    const body = getBody(container);
+    body.focus();
+
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 0
+    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // anchor=0, active=1
+    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // active=2
+    fireEvent.keyDown(body, { key: '+' });
+
+    expect(getByTestId('committed').textContent).toBe('0-2');
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });
 

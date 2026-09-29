@@ -69,6 +69,18 @@ export function useChartBrush(opts: ChartBrushOptions): ChartBrush {
   const [active, setActive] = useState(false);
 
   const stateRef = useRef<BrushState>({ pointerId: null, startX: 0, pending: false, longPressTimer: null });
+  /**
+   * Mirrors `brush` state so `commitOrCancel` can read the current range
+   * WITHOUT calling `onCommit` from inside a `setBrush` updater function.
+   * Updater functions are treated by React as part of the render/reconcile
+   * pass (they may be invoked outside the triggering event, e.g. under
+   * Strict Mode double-invocation) — calling a prop that leads to a
+   * PARENT's setState from inside one produces "Cannot update a component
+   * while rendering a different component" even though the outer call
+   * originates from a real pointer/keyboard handler. Every `setBrush` call
+   * below is paired with a write to this ref so it never goes stale.
+   */
+  const brushRef = useRef<ChartBrushRange | null>(null);
 
   const clearTimer = useCallback(() => {
     const s = stateRef.current;
@@ -84,6 +96,7 @@ export function useChartBrush(opts: ChartBrushOptions): ChartBrush {
     stateRef.current.pointerId = null;
     stateRef.current.pending = false;
     setActive(false);
+    brushRef.current = null;
     setBrush(null);
   }, [clearTimer]);
 
@@ -95,6 +108,7 @@ export function useChartBrush(opts: ChartBrushOptions): ChartBrush {
       /* best-effort — a brush still works without capture, just less robustly under fast drags */
     }
     setActive(true);
+    brushRef.current = { x0: x, x1: x };
     setBrush({ x0: x, x1: x });
   }, []);
 
@@ -136,11 +150,22 @@ export function useChartBrush(opts: ChartBrushOptions): ChartBrush {
         if (Math.abs(x - s.startX) > TOUCH_MOVE_CANCEL_PX) reset();
         return;
       }
-      setBrush((prev) => (prev ? { x0: prev.x0, x1: x } : null));
+      setBrush((prev) => {
+        const next = prev ? { x0: prev.x0, x1: x } : null;
+        brushRef.current = next;
+        return next;
+      });
     },
     [reset],
   );
 
+  /**
+   * Reads the committed range off `brushRef` (not a `setBrush` updater) and
+   * calls `onCommit` here, in the plain body of a callback that is only ever
+   * invoked from a real pointer/keyboard handler — never from inside a state
+   * updater. See the comment on `brushRef` above for why that distinction
+   * matters.
+   */
   const commitOrCancel = useCallback(() => {
     const s = stateRef.current;
     if (s.pending) {
@@ -151,14 +176,14 @@ export function useChartBrush(opts: ChartBrushOptions): ChartBrush {
     clearTimer();
     s.pointerId = null;
     setActive(false);
-    setBrush((prev) => {
-      if (prev) {
-        const lo = Math.min(prev.x0, prev.x1);
-        const hi = Math.max(prev.x0, prev.x1);
-        if (hi - lo >= minPx) onCommit(lo, hi);
-      }
-      return null;
-    });
+    const prev = brushRef.current;
+    brushRef.current = null;
+    setBrush(null);
+    if (prev) {
+      const lo = Math.min(prev.x0, prev.x1);
+      const hi = Math.max(prev.x0, prev.x1);
+      if (hi - lo >= minPx) onCommit(lo, hi);
+    }
   }, [reset, clearTimer, minPx, onCommit]);
 
   const onPointerUp = useCallback(
