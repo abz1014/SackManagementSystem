@@ -54,11 +54,15 @@ import { renderReportPdf } from '../services/reports/pdf.js';
 import type { RouteContext } from './context.js';
 import { isoDate, isoTimestamp } from '../dates.js';
 import { EVENT_TABLES, noteOf, resolveGenerationScope } from '../services/generation.js';
+import { decodeShiftRangeParam, isShiftRangeError } from './shiftRangeParam.js';
+import type { ShiftRange } from '../shiftRange.js';
 
 const PDF_CONTENT_TYPE = 'application/pdf';
 
 const dateStr = isoDate.optional();
 const isoTs = isoTimestamp.optional();
+/** Same wire-form field as app.ts's shiftRefParam — see shiftRangeParam.ts's file header. */
+const shiftRefParam = z.string().max(40).optional();
 
 // Same cap as app.ts's analytics routes and the /api/report route
 // (MAX_RANGE_DAYS, config.ts).
@@ -75,6 +79,22 @@ const reportQuery = z.object({
   from: dateStr,
   to: dateStr,
   shift: z.enum(['morning', 'evening', 'night']).optional(),
+  // Chart overhaul wave 2, Task TC (28 Sep 2026): decoded below into a
+  // ShiftRange and passed to buildHeader (header.ts's own `shiftRange`
+  // field, Task TB2) so the header/CSV/XLSX/PDF attribution block and
+  // `periodLabel` say "2 Sep morning shift – 3 Sep night shift" instead of
+  // the plain calendar range. NOT YET threaded into the report BODY:
+  // `buildReport`'s dispatcher (services/reports/index.ts, TB2-owned) calls
+  // each report builder with a fixed 4-argument `Builder<T>` signature that
+  // has no shiftRange parameter, even though every individual builder
+  // (daily.ts, shift.ts, product.ts, sack.ts, reject.ts, machineProduct.ts,
+  // and coneWeight.ts/station.ts partially) already accepts one as an
+  // optional 5th argument. Widening that dispatcher is out of this route
+  // file's ownership; until it happens, a report's own figures still
+  // describe the whole `[from, to]` window regardless of fromShift/toShift,
+  // while the header/period label above already reflects the narrower ask.
+  fromShift: shiftRefParam,
+  toShift: shiftRefParam,
   product: z.coerce.number().int().positive().optional(),
   station: z.coerce.number().int().positive().optional(),
   /** Replay: the plant instant the header is stamped with (honoured only when the server allows replays). */
@@ -90,6 +110,8 @@ interface Parsed {
   resolved: ResolvedPeriod;
   filters: ReportFilters;
   atMs: number | null;
+  /** Chart overhaul wave 2, Task TC (28 Sep 2026) — see reportQuery's own comment on fromShift/toShift. */
+  shiftRange: ShiftRange | undefined;
 }
 
 export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): void {
@@ -136,6 +158,13 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     }
     const resolved = await resolveQuery(q.data, res);
     if (!resolved) return null;
+    const shiftRangeResult = decodeShiftRangeParam({
+      from: resolved.from, to: resolved.to, fromShift: q.data.fromShift, toShift: q.data.toShift,
+    });
+    if (isShiftRangeError(shiftRangeResult)) {
+      res.status(400).json({ error: shiftRangeResult.error });
+      return null;
+    }
     const allowed = FILTERS_BY_TYPE[raw];
     const filters: ReportFilters = {};
     for (const name of ['shift', 'product', 'station'] as const) {
@@ -151,7 +180,7 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
       (filters as Record<string, unknown>)[name] = v;
     }
     const atMs = q.data.at && cfg.liveAllowAsOf ? new Date(q.data.at).getTime() : null;
-    return { type: raw, resolved, filters, atMs };
+    return { type: raw, resolved, filters, atMs, shiftRange: shiftRangeResult };
   }
 
   async function resolveQuery(q: ReportQuery, res: Response): Promise<ResolvedPeriod | null> {
@@ -189,6 +218,7 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
       lineNameFallback: cfg.lineName,
       plantNowMsOverride: p.atMs,
       reportData,
+      shiftRange: p.shiftRange,
     });
   }
 
@@ -203,6 +233,10 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
           to: dateStr,
           at: isoTs,
           type: z.string().optional(),
+          // Chart overhaul wave 2, Task TC (28 Sep 2026): the Readings/Sacks
+          // print header's own period label, same decode as reportQuery.
+          fromShift: shiftRefParam,
+          toShift: shiftRefParam,
           // Task B (28 Sep 2026): same batch grammar as the register's own
           // `?batch=` — 'auto' (default), a GenerationTally.key, or
           // `epoch:<id>`. See app.ts's registerQuery for the shared regex.
@@ -217,6 +251,11 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
       const day = new Date(atMs ?? plantNowMs()).toISOString().slice(0, 10);
       const from = q.data.from ?? day;
       const to = q.data.to ?? q.data.from ?? day;
+      const shiftRangeResult = decodeShiftRangeParam({ from, to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       // The register spans all three event tables (cone/sack/reject), so its
       // own header resolves the batch across every one of them — the same
       // window `production.ts`/Line would scope, widened to cover a Sacks
@@ -231,6 +270,7 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
         lineNameFallback: cfg.lineName,
         plantNowMsOverride: atMs,
         generationNote: noteOf(scope),
+        shiftRange: shiftRangeResult,
       });
       res.json({ header: { ...header, reportType: q.data.type ? header.reportType : 'register', title: q.data.type ? header.title : 'Register' } });
     } catch (err) {

@@ -36,6 +36,7 @@ import {
   getStockLedger, insertMovement, listMovements, productExists, validateMovement,
 } from '../services/sackStock.js';
 import { isoDate, isoTimestamp } from '../dates.js';
+import { decodeShiftRangeParam, isShiftRangeError } from './shiftRangeParam.js';
 
 /** Same cap as app.ts's validateRange and routes/rejects.ts (MAX_RANGE_DAYS, config.ts): 366 days, 400 otherwise. */
 function rangeError(from: string, to: string): string | null {
@@ -45,6 +46,9 @@ function rangeError(from: string, to: string): string | null {
   return null;
 }
 
+/** Same wire-form field as app.ts's shiftRefParam — see shiftRangeParam.ts's file header. */
+const shiftRefParam = z.string().max(40).optional();
+
 const periodQuery = z.object({
   from: isoDate,
   to: isoDate,
@@ -52,8 +56,17 @@ const periodQuery = z.object({
   tsTo: isoTimestamp.optional(),
 });
 
+// Chart overhaul wave 2, Task TC (28 Sep 2026): fromShift/toShift only on
+// `summaryQuery` — `getSackSummary`'s own `SackSummaryQuery` is the one
+// sacks.ts function with a `shiftRange` field so far. `/api/sacks/stock`
+// (getStockLedger) and `/api/sacks/movements` (listMovements), both in
+// services/sackStock.ts, have no such field yet — their own `periodQuery`
+// stays as it was; a caller sending fromShift/toShift there is not refused
+// (zod strips unknown keys by default), it is simply not yet honoured.
 const summaryQuery = periodQuery.extend({
   shift: z.enum(['morning', 'evening', 'night']).optional(),
+  fromShift: shiftRefParam,
+  toShift: shiftRefParam,
 });
 
 /** Parse + range-check a period query, answering 400 itself when it cannot. */
@@ -78,7 +91,12 @@ export function mountSacksRoutes(ctx: RouteContext): void {
     try {
       const q = period(summaryQuery, req, res);
       if (!q) return;
-      const data = await getSackSummary(pool, cfg.lineId, q);
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.from, to: q.to, fromShift: q.fromShift, toShift: q.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
+      const data = await getSackSummary(pool, cfg.lineId, { ...q, shiftRange: shiftRangeResult });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);

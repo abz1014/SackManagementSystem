@@ -22,9 +22,12 @@ import { getReconciliation } from '../services/reconcile.js';
 import { getMachinesRunning } from '../services/machinesRunning.js';
 import { getShiftCheck } from '../services/shiftCheck.js';
 import { isoDate, isoTimestamp } from '../dates.js';
+import { decodeShiftRangeParam, isShiftRangeError } from './shiftRangeParam.js';
 
 const dateStr = isoDate;
 const isoTs = isoTimestamp.optional();
+/** Same wire-form field as app.ts's shiftRefParam — see shiftRangeParam.ts's file header. */
+const shiftRefParam = z.string().max(40).optional();
 
 // Same cap as app.ts's analytics routes (MAX_RANGE_DAYS, config.ts): a
 // period query over years would scan without bound once the record is
@@ -102,6 +105,11 @@ export function mountConeRoutes({ app, pool, cfg }: RouteContext): void {
     from: dateStr,
     to: dateStr,
     shift: z.enum(['morning', 'evening', 'night']).optional(),
+    // Chart overhaul wave 2, Task TC (28 Sep 2026): getReconciliation's own
+    // shiftRange param (Task TB2) is period-scoped throughout — there is no
+    // trailing/detector window in this route, unlike weightStations.ts.
+    fromShift: shiftRefParam,
+    toShift: shiftRefParam,
   });
 
   // UX Phase 6 Brief 4 (16 Sep 2026): was requireRole(3) — wrong under the
@@ -121,7 +129,12 @@ export function mountConeRoutes({ app, pool, cfg }: RouteContext): void {
         res.status(400).json({ error: bad });
         return;
       }
-      const data = await getReconciliation(pool, cfg.lineId, q.data.from, q.data.to, q.data.shift ?? null);
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
+      const data = await getReconciliation(pool, cfg.lineId, q.data.from, q.data.to, q.data.shift ?? null, undefined, shiftRangeResult);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);

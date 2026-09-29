@@ -70,6 +70,8 @@ import { mountSacksRoutes } from './routes/sacks.js';
 import { mountChangeoverRoutes } from './routes/changeover.js';
 import { isoDate, isoTimestamp } from './dates.js';
 import { responseCap } from './middleware/responseCap.js';
+import { decodeShiftRangeParam, isShiftRangeError } from './routes/shiftRangeParam.js';
+import { ShiftNameSchema } from './shiftRange.js';
 
 const dateStr = isoDate.optional();
 
@@ -102,10 +104,23 @@ export function cappedNewestDay(newest: string, tsTo: string | null | undefined)
   return tsToDay < newest ? tsToDay : newest;
 }
 
+/**
+ * Chart overhaul wave 2, Task TC (28 Sep 2026): `fromShift`/`toShift`, the
+ * encoded `"YYYY-MM-DD.shift"` form (`web/src/lib/period.ts`'s
+ * `encodeShiftRef`) — shared by every period-scoped query schema below.
+ * `shiftRangeParam.ts`'s `decodeShiftRangeParam` does the real parsing
+ * (format, pairing, date-agreement-with-from/to, ordering); the zod shape
+ * here only admits the field as an optional string so a malformed value
+ * reaches that decoder's own error message rather than zod's generic one.
+ */
+const shiftRefParam = z.string().max(40).optional();
+
 const productionQuery = z.object({
   from: dateStr,
   to: dateStr,
   shift: z.enum(['morning', 'evening', 'night']).optional(),
+  fromShift: shiftRefParam,
+  toShift: shiftRefParam,
   station: z.coerce.number().int().positive().optional(),
   product: z.coerce.number().int().positive().optional(),
   // Caps the window at an INSTANT so a replay (?at=) shows only what existed
@@ -553,6 +568,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     from: dateStr,
     to: dateStr,
     shift: z.enum(['morning', 'evening', 'night']).optional(),
+    // Chart overhaul wave 2, Task TC (28 Sep 2026): the SELECTED period only
+    // (`period`, below) — never the fixed trailing window rules 1/2 use.
+    // attention.ts's own file header (THE DETECTORS DO NOT USE THE SELECTED
+    // PERIOD) and `getAttention`'s doc comment say so explicitly: `DayRange`
+    // (productAt.ts) already carries an optional `shiftRange`.
+    fromShift: shiftRefParam,
+    toShift: shiftRefParam,
     trailingDays: z.coerce.number().int().min(1).max(90).default(14),
     // Defect fix (16 Sep 2026): every other analytical endpoint takes an
     // explicit upper bound (/api/production, /api/reject-spc, /api/rejects);
@@ -580,12 +602,17 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: bad });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from, to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const trailingTo = cappedNewest;
       const trailingFrom = new Date(new Date(`${trailingTo}T12:00:00Z`).getTime() - (q.data.trailingDays - 1) * 86_400_000)
         .toISOString()
         .slice(0, 10);
 
-      const key = `attention:${from}:${to}:${q.data.shift ?? 'all'}:${trailingFrom}:${trailingTo}${q.data.tsTo ? `:${q.data.tsTo}` : ''}`;
+      const key = `attention:${from}:${to}:${q.data.shift ?? 'all'}:${trailingFrom}:${trailingTo}${q.data.tsTo ? `:${q.data.tsTo}` : ''}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
       const cached = prodCache.get(key);
       if (cached) {
         res.setHeader('X-Cache', 'HIT').json(cached);
@@ -595,7 +622,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         pool,
         cfg.lineId,
         { from: trailingFrom, to: trailingTo },
-        { from, to, shift: q.data.shift ?? null, tsTo: q.data.tsTo ?? null },
+        { from, to, shift: q.data.shift ?? null, tsTo: q.data.tsTo ?? null, shiftRange: shiftRangeResult },
       );
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
@@ -738,6 +765,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     periodFrom: dateStr,
     periodTo: dateStr,
     shift: z.enum(['morning', 'evening', 'night']).optional(),
+    // Chart overhaul wave 2, Task TC (28 Sep 2026): the web sends
+    // periodFromShift/periodToShift (web/src/api.ts's getWeightStations) —
+    // the SELECTED period's own shift-precise bound, never the trailing
+    // detector window's `from`/`to` (weightStations.ts's own comment on
+    // `getWeightStations`: a shiftRange parameter there would invite a
+    // future caller to narrow the drift window by mistake, so none exists).
+    // This flows only into `productDisagreement`'s `DayRange.shiftRange`.
+    periodFromShift: shiftRefParam,
+    periodToShift: shiftRefParam,
     trailingDays: z.coerce.number().int().min(1).max(90).default(14),
   });
   app.get('/api/weight-stations', async (req: Request, res: Response, next: NextFunction) => {
@@ -765,8 +801,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const periodTo = q.data.periodTo ?? to;
       const periodFrom = q.data.periodFrom ?? periodTo;
+      const shiftRangeResult = decodeShiftRangeParam({
+        from: periodFrom, to: periodTo, fromShift: q.data.periodFromShift, toShift: q.data.periodToShift,
+      });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
 
-      const key = `wstations:${from}:${to}:${periodFrom}:${periodTo}:${q.data.shift ?? 'all'}`;
+      const key = `wstations:${from}:${to}:${periodFrom}:${periodTo}:${q.data.shift ?? 'all'}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
       const cached = prodCache.get(key);
       if (cached) {
         res.setHeader('X-Cache', 'HIT').json(cached);
@@ -788,13 +831,19 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // only; never stored anywhere it could outlive it — see
       // generation.ts's createScopeCache for why that matters.
       const resolveScope = createScopeCache(pool);
+      // Chart overhaul wave 2, Task TC (28 Sep 2026): getWeightStations' new
+      // 6th arg (TB1, a2cea3f) — the reject-rate window, distinct from the
+      // `from`/`to` trailing drift window passed positionally above.
+      // getWeightStations itself compares this against `{from, to}` to
+      // decide whether WS-PERF4's scope-cache dedup still applies, so it is
+      // safe to always pass it explicitly rather than omit it when equal.
       const [stations, disagreement] = await Promise.all([
-        getWeightStations(pool, cfg.lineId, from, to, resolveScope),
+        getWeightStations(pool, cfg.lineId, from, to, resolveScope, { from: periodFrom, to: periodTo, shiftRange: shiftRangeResult }),
         productDisagreement(
           pool,
           cfg.lineId,
           timeline,
-          { from: periodFrom, to: periodTo, shift: q.data.shift ?? null },
+          { from: periodFrom, to: periodTo, shift: q.data.shift ?? null, shiftRange: shiftRangeResult },
           catalogue,
           resolveScope,
         ),
@@ -938,6 +987,15 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'from must be <= to' });
         return;
       }
+      // Chart overhaul wave 2, Task TC (28 Sep 2026): production.ts's
+      // ProductionParams already carries an optional `shiftRange`
+      // (Task TB2) — decode the wire form and AND it in alongside from/to.
+      const { fromShift, toShift, ...rest } = parsed.data;
+      const shiftRangeResult = decodeShiftRangeParam({ from: rest.from, to: rest.to, fromShift, toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const key = JSON.stringify(parsed.data);
       const cached = prodCache.get(key);
       if (cached) {
@@ -945,10 +1003,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const data = await getProduction(pool, cfg.lineId, {
-        ...parsed.data,
-        groupBy: parsed.data.groupBy as GroupBy,
+        ...rest,
+        groupBy: rest.groupBy as GroupBy,
         // Cones per classification state, always (roadmap Phase 4, 14 Sep 2026).
         withStates: true,
+        shiftRange: shiftRangeResult,
       });
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
@@ -990,6 +1049,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           usl: z.coerce.number().optional(),
           lsl: z.coerce.number().optional(),
           shift: z.enum(['morning', 'evening', 'night']).optional(),
+          fromShift: shiftRefParam,
+          toShift: shiftRefParam,
           /** One station's stream (cone only; roadmap Phase 4, 14 Sep 2026). */
           station: z.coerce.number().int().positive().optional(),
         })
@@ -1015,6 +1076,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       // Cache keyed on every parameter that can change the answer (the same
       // idiom as /api/weight-stations above). This is the heaviest read in
       // the app — a full-range chart on ~535 KB of readings took 1.6-2.0 s
@@ -1022,7 +1088,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // the raw inputs, not on anything spc.ts derives, so a service change
       // to the limit model can never be served under a stale computation
       // shape for the same inputs.
-      const key = `spc:${q.data.type}:${q.data.from}:${q.data.to}:${q.data.productId ?? 'none'}:${q.data.usl ?? 'none'}:${q.data.lsl ?? 'none'}:${q.data.shift ?? 'all'}:${q.data.station ?? 'all'}`;
+      const key = `spc:${q.data.type}:${q.data.from}:${q.data.to}:${q.data.productId ?? 'none'}:${q.data.usl ?? 'none'}:${q.data.lsl ?? 'none'}:${q.data.shift ?? 'all'}:${q.data.station ?? 'all'}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
       const cached = prodCache.get(key);
       if (cached) {
         res.setHeader('X-Cache', 'HIT').json(cached);
@@ -1035,7 +1101,10 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       const plausibility = (await getPlausibilityRuleAsOf(
         pool, cfg.lineId, plantDayEndMs(q.data.to), plantDayStartMs(q.data.from),
       )).rule;
-      const data = await getWeightSpc(pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility, q.data.shift ?? null, q.data.station ?? null);
+      const data = await getWeightSpc(
+        pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility,
+        q.data.shift ?? null, q.data.station ?? null, shiftRangeResult,
+      );
       const env = await envelope(pool, cfg.lineId, data);
       prodCache.set(key, env);
       res.setHeader('X-Cache', 'MISS').json(env);
@@ -1058,6 +1127,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           // product and code are the drilldown dimensions. `code` is
           // `weight` or `<tube>-<material>` (rejects.ts parseCodeParam).
           shift: z.enum(['morning', 'evening', 'night']).optional(),
+          fromShift: shiftRefParam,
+          toShift: shiftRefParam,
           tsTo: isoTimestamp.optional(),
           station: z.coerce.number().int().positive().optional(),
           product: z.coerce.number().int().positive().optional(),
@@ -1073,6 +1144,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const code = q.data.code == null ? undefined : parseCodeParam(q.data.code);
       if (code === null) {
         res.status(400).json({ error: 'invalid code — expected weight or <tube>-<material>' });
@@ -1080,7 +1156,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const bucket: RejectBucketSize = q.data.bucket ?? (q.data.from === q.data.to ? 'hour' : 'day');
       const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter, {
-        shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code,
+        shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult,
       });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
@@ -1095,6 +1171,13 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     from: dateStr,
     to: dateStr,
     shift: z.enum(['morning', 'evening', 'night']).optional(),
+    // Chart overhaul wave 2, Task TC (28 Sep 2026): register.ts's
+    // `RegisterFilters.shiftRange` resolves into `tsFrom`/`tsTo` internally
+    // (`withShiftRangeEdges`, called by `listEvents`/`exportEventsCsv`
+    // themselves) — it only FILLS IN a bound the caller left open, never
+    // overrides an explicit `tsFrom`/`tsTo` the caller already sent.
+    fromShift: shiftRefParam,
+    toShift: shiftRefParam,
     station: z.coerce.number().int().positive().optional(),
     inRange: z.enum(['true', 'false']).optional(),
     rejectType: z.enum(['quality', 'weight']).optional(),
@@ -1159,9 +1242,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid page/pageSize' });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.from, to: q.to, fromShift: q.fromShift, toShift: q.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const { classification, states } = await registerClassification(q);
       const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
-      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states }, scope);
+      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states, shiftRange: shiftRangeResult }, scope);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -1178,9 +1266,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'invalid query' });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.from, to: q.to, fromShift: q.fromShift, toShift: q.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const { classification, states } = await registerClassification(q);
       const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
-      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, classification, states }, scope);
+      const { csv, truncated } = await exportEventsCsv(pool, cfg.lineId, q.type as EventType, { ...q, classification, states, shiftRange: shiftRangeResult }, scope);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${q.type}-events.csv"`);
       if (truncated) res.setHeader('X-Export-Truncated', 'true');
@@ -1223,6 +1316,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         from: dateStr,
         to: dateStr,
         shift: z.enum(['morning', 'evening', 'night']).optional(),
+        fromShift: shiftRefParam,
+        toShift: shiftRefParam,
         tsTo: isoTimestamp.optional(),
         station: z.coerce.number().int().positive().optional(),
         product: z.coerce.number().int().positive().optional(),
@@ -1239,12 +1334,17 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: rangeErr });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const code = q.data.code == null ? undefined : parseCodeParam(q.data.code);
       if (code === null) {
         res.status(400).json({ error: 'invalid code — expected weight or <tube>-<material>' });
         return;
       }
-      const data = await getRejectPareto(pool, cfg.lineId, { ...q.data, code });
+      const data = await getRejectPareto(pool, cfg.lineId, { ...q.data, code, shiftRange: shiftRangeResult });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);
@@ -1312,13 +1412,21 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // and must fall back to what Setup has on file, not a hardcoded literal
       // that silently ignored a `net` basis the moment one was configured.
       const q = z
-        .object({ from: dateStr, to: dateStr, basis: z.enum(['as_recorded', 'gross', 'net']).optional() })
+        .object({
+          from: dateStr, to: dateStr, basis: z.enum(['as_recorded', 'gross', 'net']).optional(),
+          fromShift: shiftRefParam, toShift: shiftRefParam,
+        })
         .safeParse(req.query);
       if (!q.success) {
         res.status(400).json({ error: 'invalid query' });
         return;
       }
-      const data = await getWeights(pool, cfg.lineId, q.data.basis as Basis | undefined, q.data.from, q.data.to);
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
+      const data = await getWeights(pool, cfg.lineId, q.data.basis as Basis | undefined, q.data.from, q.data.to, shiftRangeResult);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);

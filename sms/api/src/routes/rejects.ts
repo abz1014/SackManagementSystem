@@ -22,6 +22,7 @@ import { envelope } from '../envelope.js';
 import { MAX_RANGE_DAYS } from '../config.js';
 import { getRejectsByDayCode, listRejectsOfDayCode, parseCodeParam, type RejectFilters } from '../services/rejects.js';
 import { isoDate, isoTimestamp } from '../dates.js';
+import { decodeShiftRangeParam, isShiftRangeError } from './shiftRangeParam.js';
 
 /**
  * Same cap as app.ts's validateRange (MAX_RANGE_DAYS, config.ts: 366 days,
@@ -34,6 +35,9 @@ function rangeError(from: string, to: string): string | null {
   if (days > MAX_RANGE_DAYS) return `range too large — max ${MAX_RANGE_DAYS} days, requested ${days}`;
   return null;
 }
+
+/** Same wire-form field as app.ts's shiftRefParam — see shiftRangeParam.ts's file header. */
+const shiftRefParam = z.string().max(40).optional();
 
 const filterSchema = {
   shift: z.enum(['morning', 'evening', 'night']).optional(),
@@ -48,6 +52,12 @@ const byDayCodeQuery = z.object({
   from: isoDate,
   to: isoDate,
   ...filterSchema,
+  // Chart overhaul wave 2, Task TC (28 Sep 2026): getRejectsByDayCode takes
+  // RejectFilters, which already carries shiftRange (Task TB2). NOT on
+  // `reasonQuery` below — that route is already scoped to one `day`, so a
+  // shift range would only duplicate its own `shift` filter.
+  fromShift: shiftRefParam,
+  toShift: shiftRefParam,
 });
 
 const reasonQuery = z.object({
@@ -79,12 +89,17 @@ export function mountRejectsRoutes(ctx: RouteContext): void {
         res.status(400).json({ error: rangeErr });
         return;
       }
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
       const code = q.data.code == null ? undefined : parseCodeParam(q.data.code);
       if (code === null) {
         res.status(400).json({ error: 'invalid code — expected weight or <tube>-<material>' });
         return;
       }
-      const f: RejectFilters = { ...q.data, code };
+      const f: RejectFilters = { ...q.data, code, shiftRange: shiftRangeResult };
       const data = await getRejectsByDayCode(pool, cfg.lineId, f);
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
