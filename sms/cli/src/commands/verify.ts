@@ -66,6 +66,24 @@
  * rule) and the acquisition lag is ~18 minutes, so a row from the last minutes
  * of the window may not have arrived yet — a boundary mismatch there is not
  * necessarily a real one; the output says so and names the window it used.
+ *
+ * `--source-db=<name>` (R-17, 29 Sep 2026) reconciles a CLOSED, backfilled
+ * epoch against a NAMED alternate source database instead of the live one —
+ * the case point 2 above says the source "cannot corroborate": once
+ * `sms epoch:backfill` has loaded a historic archive (e.g. the July shape,
+ * `JULY_TABLE_SHAPES`) into an already-closed epoch, there IS a source to
+ * check it against, just not the one `ctx.cfg.iflData` points at. This opens
+ * a second connection — same server/port/credentials as the live source,
+ * database swapped to the given name — and, for every CLOSED epoch of every
+ * table, compares that epoch's raw COUNT and id SUM against
+ * `SELECT COUNT(*), SUM(id) FROM [<sourceTable>]` on that database, exactly
+ * as point 1 already does for the open epoch against the live source (same
+ * `sourceStats` call, `range: null`, i.e. the whole table — a backfill
+ * fixture's alternate database holds only the rows it was built to hold, not
+ * a live table to window). OPEN epochs are entirely unaffected by this flag:
+ * they keep comparing against the live source as before. A connection
+ * failure to `--source-db` is one STOP naming it, not a crash and not a
+ * silent skip.
  */
 import mssql from 'mssql';
 import type { ConnectionPool } from 'mssql';
@@ -73,6 +91,7 @@ import {
   loadSourceTables,
   readSourceIdentity,
   assertSourceTableName,
+  createPool,
   TABLE_SHAPES,
   type IflTableDef,
   type SourceIdentity,
@@ -290,9 +309,14 @@ export interface VerifyArgs {
    *  day ends — so a same-day window is `[from, from+1day)`. */
   from: Date | null;
   to: Date | null;
+  /** --source-db=<name>: reconcile CLOSED/backfilled epochs against this
+   *  alternate database (same server/credentials as the live source) instead
+   *  of leaving them as "archived, unchecked". Null when not given — every
+   *  closed epoch stays exactly as before. */
+  sourceDb: string | null;
 }
 
-/** `sms verify [--weights] [--from=YYYY-MM-DD --to=YYYY-MM-DD]` */
+/** `sms verify [--weights] [--from=YYYY-MM-DD --to=YYYY-MM-DD] [--source-db=<name>]` */
 export function parseVerifyArgs(args: string[]): VerifyArgs {
   const opts = parseArgs(args);
   const day = (key: 'from' | 'to'): Date | null => {
@@ -316,7 +340,12 @@ export function parseVerifyArgs(args: string[]): VerifyArgs {
   if (from !== null && to !== null && from >= to) {
     throw new Error(`--from must be on or before --to (got --from after --to).`);
   }
-  return { weights: args.includes('--weights'), from, to };
+  const sourceDbRaw = opts['source-db'];
+  if (sourceDbRaw !== undefined && (typeof sourceDbRaw !== 'string' || sourceDbRaw.length === 0)) {
+    throw new Error(`--source-db must be given a database name, e.g. --source-db=R17_SRC`);
+  }
+  const sourceDb = typeof sourceDbRaw === 'string' ? sourceDbRaw : null;
+  return { weights: args.includes('--weights'), from, to, sourceDb };
 }
 
 async function sourceStats(ifl: ConnectionPool, def: TableDef, range: Range | null): Promise<IdStats> {
@@ -527,13 +556,14 @@ async function recordVerifyRun(
 
 export async function verify(args: string[] = []): Promise<number> {
   const startedAtUtc = new Date();
-  const { weights, from, to } = parseVerifyArgs(args);
+  const { weights, from, to, sourceDb } = parseVerifyArgs(args);
   const range: Range | null = from && to ? { from, to } : null;
   const ctx = await openContext({ needIfl: true });
   const line = ctx.cfg.lineId;
   let stops = 0;
   let gapsChecked = 0;
   let weightMismatches = 0;
+  let altSourcePool: ConnectionPool | null = null;
   const stop = (msg: string): void => {
     stops++;
     console.log(msg);
@@ -556,6 +586,17 @@ export async function verify(args: string[] = []): Promise<number> {
         `           arrived yet; a boundary mismatch there is not necessarily real. Re-run after the next`,
       );
       console.log(`           sync pass before treating it as one.`);
+    }
+    if (sourceDb) {
+      console.log(`  source-db ${ctx.cfg.iflData.server}/${sourceDb}   (reconciles CLOSED/backfilled epochs only)`);
+      try {
+        altSourcePool = await createPool({ ...ctx.cfg.iflData, database: sourceDb });
+      } catch (err) {
+        stop(
+          `  source-db  cannot connect to ${ctx.cfg.iflData.server}/${sourceDb}: ` +
+            `${err instanceof Error ? err.message : String(err)}   STOP`,
+        );
+      }
     }
 
     // The tables this line reads are configuration (sms.source_table, roadmap
@@ -624,10 +665,36 @@ export async function verify(args: string[] = []): Promise<number> {
         const raw = stats.get(e.epoch_id) ?? EMPTY;
 
         if (e.closed_utc !== null) {
-          // (d) The source cannot corroborate a closed generation.
+          // (d) The live source cannot corroborate a closed generation — but a
+          // NAMED alternate one (--source-db, a backfilled archive) can.
           console.log(
             `  epoch ${String(e.epoch_id).padEnd(3)} closed  — archived — ${raw.n} rows, source generation no longer present`,
           );
+          if (sourceDb && altSourcePool) {
+            try {
+              const src = await sourceStats(altSourcePool, def, null);
+              const same = src.n === raw.n && src.sum === raw.sum;
+              console.log(`${IND}source-db  ${sourceDb}/${def.sourceTable}`);
+              console.log(
+                `${IND}${''.padEnd(9)}${'count'.padStart(12)}${'min'.padStart(12)}${'max'.padStart(12)}${'sum'.padStart(12)}`,
+              );
+              console.log(`${IND}source   ${fmtN(src.n)}${fmtN(src.lo)}${fmtN(src.hi)}${fmtN(src.sum)}`);
+              if (same) {
+                console.log(`${IND}raw      ${fmtN(raw.n)}${fmtN(raw.lo)}${fmtN(raw.hi)}${fmtN(raw.sum)}   OK`);
+              } else {
+                stop(
+                  `${IND}raw      ${fmtN(raw.n)}${fmtN(raw.lo)}${fmtN(raw.hi)}${fmtN(raw.sum)}   STOP\n` +
+                    `${IND}→ epoch ${e.epoch_id} (${def.sourceTable}) does not reconcile against --source-db=${sourceDb}:\n` +
+                    `${IND}  count ${raw.n} vs ${src.n}, id-sum ${raw.sum ?? '–'} vs ${src.sum ?? '–'}.`,
+                );
+              }
+            } catch (err) {
+              stop(
+                `${IND}source-db  cannot read ${sourceDb}/${def.sourceTable}: ` +
+                  `${err instanceof Error ? err.message : String(err)}   STOP`,
+              );
+            }
+          }
         } else {
           // (c) The open generation against the live source.
           console.log(
@@ -794,6 +861,15 @@ export async function verify(args: string[] = []): Promise<number> {
     });
     return 1;
   } finally {
+    if (altSourcePool) {
+      try {
+        await altSourcePool.close();
+      } catch (err) {
+        cliLog.error('verify: failed to close --source-db connection (exit code is unaffected)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     await ctx.close();
   }
 }

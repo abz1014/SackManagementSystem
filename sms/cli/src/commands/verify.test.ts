@@ -37,6 +37,7 @@ vi.mock('@sms/sync-worker', async () => {
     readSourceIdentity: () => world.identity(),
     assertSourceTableName: real.assertSourceTableName,
     TABLE_SHAPES: real.TABLE_SHAPES,
+    createPool: (...a: unknown[]) => world.createPool(...a),
   };
 });
 
@@ -113,7 +114,7 @@ function fakePool(routes: Route[]): Pool {
       return { recordset: hit[1] };
     },
   };
-  return { request: () => req, calls } as unknown as Pool;
+  return { request: () => req, calls, close: async () => {} } as unknown as Pool;
 }
 
 function appPool(opts: {
@@ -146,8 +147,16 @@ const iflPool = (ids: number[]): Pool => fakePool([[/FROM \[pack1_TP1U2\]/, [sta
 const world = {
   app: undefined as unknown as Pool,
   ifl: undefined as unknown as Pool,
+  altIfl: undefined as unknown as Pool,
   identity: async () => IDENTITY_OF_OPEN,
   tables: async () => TABLES,
+  // --source-db: `createPool` is only ever called when the flag is given, to
+  // open the alternate connection. Left throwing by default so a test that
+  // forgets to pass --source-db (and so never calls it) cannot accidentally
+  // pass because some earlier test's fixture leaked through.
+  createPool: async (..._a: unknown[]): Promise<Pool> => {
+    throw new Error('world.createPool was not configured by this test');
+  },
 };
 
 const { verify } = await import('./verify.js');
@@ -160,6 +169,9 @@ beforeEach(() => {
   });
   world.identity = async () => IDENTITY_OF_OPEN;
   world.tables = async () => TABLES;
+  world.createPool = async () => {
+    throw new Error('world.createPool was not configured by this test');
+  };
 });
 afterEach(() => vi.restoreAllMocks());
 const printed = () => out.join('\n');
@@ -499,5 +511,94 @@ describe('verify — the identifiers it interpolates are checked where they are 
     world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
     world.ifl = iflPool([1, 2, 3]);
     expect(await verify()).toBe(0);
+  });
+});
+
+/**
+ * `--source-db=<name>` (R-17, 29 Sep 2026, Task W2-D): reconciles a CLOSED,
+ * backfilled epoch against a NAMED alternate database instead of leaving it
+ * as "archived, unchecked" — the live source (`world.ifl`) genuinely cannot
+ * corroborate a closed generation, but a backfill archive can. `createPool`
+ * is mocked to hand back a second fake pool (`world.altIfl`) so these tests
+ * can assert exactly what it was and was not asked.
+ */
+describe('sms verify — --source-db reconciles a closed/backfilled epoch', () => {
+  it('passes a closed epoch that matches the alternate source on count and id-sum, alongside a clean open one', async () => {
+    world.app = appPool({
+      epochs: [CLOSED, OPEN],
+      raw: [
+        { epoch: 1, ids: [1, 2, 3, 4, 5] },
+        { epoch: 9, ids: [1, 2, 3] },
+      ],
+    });
+    world.ifl = iflPool([1, 2, 3]); // the OPEN epoch's live source
+    world.altIfl = iflPool([1, 2, 3, 4, 5]); // CLOSED epoch's backfill archive: same count, same sum
+    world.createPool = async () => world.altIfl;
+
+    expect(await verify(['--source-db=R17_SRC'])).toBe(0);
+    expect(printed()).toContain('source-db  R17_SRC/pack1_TP1U2');
+    expect(printed()).toMatch(/raw\s+5.*OK/);
+    expect(printed()).not.toContain('STOP');
+    // Exactly one query against the alternate pool — the closed epoch's
+    // whole-table stats. The open epoch never touches it.
+    expect(world.altIfl.calls).toHaveLength(1);
+  });
+
+  it('STOPs with a clear message when the closed epoch does not reconcile against --source-db', async () => {
+    world.app = appPool({ epochs: [CLOSED, OPEN], raw: [{ epoch: 1, ids: [1, 2, 3, 4, 5] }, { epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    // Alternate source has the same count but a different id-sum (6 vs 5 wrong id).
+    world.altIfl = iflPool([1, 2, 3, 4, 6]);
+    world.createPool = async () => world.altIfl;
+
+    const code = await verify(['--source-db=R17_SRC']);
+    expect(code).not.toBe(0);
+    expect(printed()).toContain('does not reconcile against --source-db=R17_SRC');
+    expect(printed()).toMatch(/count 5 vs 5, id-sum 15 vs 16/);
+  });
+
+  it('leaves an open epoch entirely unaffected: identical result with or without --source-db when there is no closed epoch', async () => {
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    let calls = 0;
+    world.createPool = async () => {
+      calls++;
+      return world.altIfl;
+    };
+    world.altIfl = fakePool([]); // never queried — would throw "no answer" if it were
+
+    expect(await verify(['--source-db=R17_SRC'])).toBe(0);
+    expect(printed()).toContain('create_date matches · fingerprint matches   OK');
+    expect(printed()).not.toContain('STOP');
+    // The alternate connection is opened (so a later closed epoch could use
+    // it) but never queried, because there is nothing closed to reconcile.
+    expect(calls).toBe(1);
+  });
+
+  it('STOPs, naming the database, when the alternate source cannot be reached — closed epoch stays unreconciled, not silently skipped', async () => {
+    world.app = appPool({ epochs: [CLOSED, OPEN], raw: [{ epoch: 1, ids: [1, 2, 3] }, { epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    world.createPool = async () => {
+      throw new Error('login failed for R17_SRC');
+    };
+
+    const code = await verify(['--source-db=R17_SRC']);
+    expect(code).not.toBe(0);
+    expect(printed()).toContain('cannot connect to');
+    expect(printed()).toContain('R17_SRC');
+    expect(printed()).toContain('login failed for R17_SRC');
+  });
+
+  it('rejects a bare --source-db with no database name before opening any connection', async () => {
+    world.app = appPool({ epochs: [OPEN], raw: [{ epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    let called = false;
+    world.createPool = async () => {
+      called = true;
+      throw new Error('should not be called');
+    };
+
+    await expect(verify(['--source-db'])).rejects.toThrow(/--source-db must be given a database name/);
+    expect(called).toBe(false);
   });
 });

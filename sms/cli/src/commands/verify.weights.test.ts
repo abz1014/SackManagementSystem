@@ -131,8 +131,8 @@ describe('sameWeights', () => {
 
 describe('parseVerifyArgs', () => {
   it('recognises --weights', () => {
-    expect(parseVerifyArgs(['--weights'])).toEqual({ weights: true, from: null, to: null });
-    expect(parseVerifyArgs([])).toEqual({ weights: false, from: null, to: null });
+    expect(parseVerifyArgs(['--weights'])).toEqual({ weights: true, from: null, to: null, sourceDb: null });
+    expect(parseVerifyArgs([])).toEqual({ weights: false, from: null, to: null, sourceDb: null });
   });
 
   it('parses --from/--to as a production-day window, EXCLUSIVE on the far end', () => {
@@ -160,5 +160,15 @@ describe('parseVerifyArgs', () => {
   it('rejects a malformed date rather than silently misreading it', () => {
     expect(() => parseVerifyArgs(['--from=09/08/2026', '--to=2026-09-14'])).toThrow(/YYYY-MM-DD/);
     expect(() => parseVerifyArgs(['--from=2026-09-08', '--to=next tuesday'])).toThrow(/YYYY-MM-DD/);
+  });
+
+  it('recognises --source-db=<name>', () => {
+    expect(parseVerifyArgs(['--source-db=R17_SRC']).sourceDb).toBe('R17_SRC');
+    expect(parseVerifyArgs([]).sourceDb).toBeNull();
+  });
+
+  it('rejects a bare --source-db or an empty name', () => {
+    expect(() => parseVerifyArgs(['--source-db'])).toThrow(/--source-db must be given a database name/);
+    expect(() => parseVerifyArgs(['--source-db='])).toThrow(/--source-db must be given a database name/);
   });
 });
