@@ -1195,7 +1195,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult,
       });
       const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
+      // Same RT-014 interaction as /api/events below: never cache a payload
+      // the response-cap middleware would go on to refuse — an over-cap
+      // response must be re-derived on every request, not served from a
+      // stale cache entry for the rest of the TTL.
+      if (largestKnownArray(env) <= MAX_RESPONSE_ROWS) prodCache.set(key, env);
       res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
