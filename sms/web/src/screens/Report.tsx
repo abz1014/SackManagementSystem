@@ -42,7 +42,7 @@ import {
 } from '../api';
 import { distinctProductLabels } from '../lib/productLabel';
 import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_MIN_RANK } from './report/model';
-import { PrintHead, generatedLine } from './report/PrintHead';
+import { PrintHead, GenerationDisclosure, generatedLine } from './report/PrintHead';
 import { ExecSummary, PrintNotes } from './report/PrintDoc';
 import { fmtDayShort } from './report/shared';
 import { DailySection } from './report/Daily';
@@ -129,6 +129,7 @@ export function ReportScreen({
           <div>
             <p className="q no-print">{W.reports.question[type]}</p>
             <h1 className="wide">{headline(type, data, period)}</h1>
+            <GenerationDisclosure header={header} />
           </div>
           <div className="head-actions">
             {/* Print and Export sit at the TOP of the screen. A control the

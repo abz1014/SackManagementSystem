@@ -29,6 +29,40 @@ export function generatedLine(h: ReportHeader): string {
   return `${W.reports.generated} ${fmtPlantInstant(h.generatedAtPlantUtc)} ${W.reports.generatedBy} ${h.generatedBy} · ${W.reports.version} ${h.smsVersion}`;
 }
 
+/**
+ * The batch/simulator disclosure sentence — same rule as the print header's
+ * own `(header.spansGenerations || header.simulatorSource)` gate (Task B, 28
+ * Sep 2026): fires when the period spans two IFL batches OR the source itself
+ * is the simulator, never for a single real batch. Shared so the on-screen
+ * line (`GenerationDisclosure` below, re-audit fix, 29 Sep 2026) and the
+ * printed one (`PrintHead`) always say the identical sentence.
+ */
+export function generationDisclosureText(h: ReportHeader): string | null {
+  if (!h.spansGenerations && !h.simulatorSource) return null;
+  return (
+    h.generationLine ??
+    `Data batch: ${h.sourceGeneration ?? 'unknown'}. Excluded from another batch: ` +
+      `${h.otherGenerationExcluded?.count ?? 0} readings` +
+      `${h.otherGenerationExcluded?.percent != null ? ` (${h.otherGenerationExcluded.percent}%)` : ''}.`
+  );
+}
+
+/**
+ * Re-audit fix (29 Sep 2026): the batch/simulator disclosure used to exist
+ * ONLY inside `.print-head`, which is `display: none` on screen (app.css) —
+ * so a report spanning two IFL batches, or built entirely from the plant
+ * simulator, stated that fact nowhere a reader would ever see it before
+ * printing. This renders the same sentence `generationDisclosureText`
+ * produces, once, near the report headline. `no-print` keeps it from
+ * doubling up with `PrintHead`'s own copy on the printed page.
+ */
+export function GenerationDisclosure({ header }: { header: ReportHeader | null }) {
+  if (!header) return null;
+  const text = generationDisclosureText(header);
+  if (!text) return null;
+  return <p className="mut sm no-print" style={{ marginTop: 4 }}>{text}</p>;
+}
+
 /** "5 September 2026" or "5 – 7 September 2026" style period for the cover band. */
 function periodText(from: string, to: string): string {
   const f = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
@@ -72,12 +106,8 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
           simulator excludes nothing (spansGenerations stays false), so
           spansGenerations alone used to leave a simulator-only page with no
           disclosure at all. */}
-      {(header.spansGenerations || header.simulatorSource) && (
-        <div className="ph-foot mut">
-          {header.generationLine ?? `Data batch: ${header.sourceGeneration ?? 'unknown'}. Excluded from another batch: ` +
-            `${header.otherGenerationExcluded?.count ?? 0} readings` +
-            `${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}.`}
-        </div>
+      {generationDisclosureText(header) && (
+        <div className="ph-foot mut">{generationDisclosureText(header)}</div>
       )}
     </div>
   );
