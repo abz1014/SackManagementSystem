@@ -198,17 +198,44 @@ function PdasProducts({
         </p>
       )}
       <table style={{ marginTop: 10 }}>
+        {/* No visible header row in this design (matches the pallets table
+            and the rest of this screen) — sr-only so screen readers still
+            get column context; nothing changes on screen. */}
+        <thead>
+          <tr>
+            <th scope="col" className="sr-only">{W.product.colProduct}</th>
+            <th scope="col" className="sr-only">{W.product.colProductId}</th>
+            <th scope="col" className="sr-only">{W.product.colLimits}</th>
+            {status?.canWrite && <th scope="col" className="sr-only">{W.product.colActions}</th>}
+          </tr>
+        </thead>
         <tbody>
           {[...active, ...retired].map((p) => {
             const f = fieldsOf(p);
             const linked = linkedId === p.productId;
+            // The row's own colour cascade, reproduced explicitly for the
+            // <th> below: the default `th` rule sets its OWN color, which
+            // would otherwise override the `tr.mut`/`tr.acc` color a plain
+            // <td> would have inherited (`.acc` is declared after `.mut` in
+            // app.css, so a linked+retired row shows the accent, matching
+            // the class order every other cell in this row still relies on).
+            const rowColor = linked ? 'var(--acc)' : p.activeFlag === false ? 'var(--muted)' : 'var(--ink)';
             return (
               <tr
                 key={p.productId}
                 ref={linked ? linkedRef : undefined}
                 className={[p.activeFlag === false ? 'mut' : '', linked ? 'acc' : ''].filter(Boolean).join(' ')}
               >
-                <td>{labels.get(p.productId) ?? label(p)}{p.activeFlag === false ? ` · ${W.product.retired}` : ''}</td>
+                <th
+                  scope="row"
+                  style={{
+                    fontWeight: 400, fontSize: 'var(--fs-body)', color: rowColor,
+                    padding: '9px 12px 9px 0', borderBottom: '1px solid var(--rule)',
+                    verticalAlign: 'top', textAlign: 'left', whiteSpace: 'normal',
+                  }}
+                >
+                  {labels.get(p.productId) ?? label(p)}{p.activeFlag === false ? ` · ${W.product.retired}` : ''}
+                </th>
                 <td className="n">{p.productId}</td>
                 <td>{f ? `${fmtG(f.setpointG)} · ${rangeLabel(f)}` : '—'}</td>
                 {status?.canWrite && (
@@ -535,10 +562,32 @@ function PdasPallets({ pallets, onChanged }: { pallets: PalletRow[]; onChanged: 
         <p className="mut sm">{W.product.palletsNone}</p>
       ) : (
         <table style={{ marginTop: 10 }}>
+          {/* No visible header row in this design — sr-only so screen
+              readers still get column context; nothing changes on screen. */}
+          <thead>
+            <tr>
+              <th scope="col" className="sr-only">{W.product.colPalletId}</th>
+              <th scope="col" className="sr-only">{W.product.colProduct}</th>
+              <th scope="col" className="sr-only">{W.product.colPackSchema}</th>
+              <th scope="col" className="sr-only">{W.product.colLot}</th>
+              <th scope="col" className="sr-only">{W.product.colour}</th>
+              {status?.canWrite && <th scope="col" className="sr-only">{W.product.colActions}</th>}
+            </tr>
+          </thead>
           <tbody>
             {[...active, ...retired].map((p) => (
               <tr key={p.palletId} className={p.active === false ? 'mut' : ''}>
-                <td className="n">{p.palletId}</td>
+                <th
+                  scope="row"
+                  className="n"
+                  style={{
+                    fontWeight: 400, fontSize: 'var(--fs-body)',
+                    color: p.active === false ? 'var(--muted)' : 'var(--ink)',
+                    borderBottom: '1px solid var(--rule)', verticalAlign: 'top',
+                  }}
+                >
+                  {p.palletId}
+                </th>
                 <td>{p.productLabel || `Product ${p.productId}`}</td>
                 <td>{p.packSchemaLabel ?? '—'}</td>
                 <td>{p.lot ?? '—'}</td>

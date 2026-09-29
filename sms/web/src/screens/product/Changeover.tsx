@@ -548,7 +548,16 @@ function StepRow({ step }: { step: ChangeoverPlanStep }) {
   const d = detailLine(step.detail);
   return (
     <tr>
-      <td className="mut" style={{ width: '10em' }}>{step.step}</td>
+      <th
+        scope="row"
+        className="mut"
+        style={{
+          width: '10em', fontWeight: 400, fontSize: 'var(--fs-body)',
+          borderBottom: '1px solid var(--rule)', verticalAlign: 'top', textAlign: 'left', whiteSpace: 'normal',
+        }}
+      >
+        {step.step}
+      </th>
       <td>
         {step.label}
         {step.proc && <span className="mut sm"> · {step.proc}</span>}
@@ -605,6 +614,15 @@ export function PlanReview({
   return (
     <Block label={W.product.changeover.planTitle}>
       <table>
+        {/* No visible header row in this design — sr-only so screen readers
+            still get column context; nothing changes on screen. */}
+        <thead>
+          <tr>
+            <th scope="col" className="sr-only">{W.product.changeover.step}</th>
+            <th scope="col" className="sr-only">{W.product.changeover.colDescription}</th>
+            <th scope="col" className="sr-only">{W.product.changeover.colAction}</th>
+          </tr>
+        </thead>
         <tbody>
           {plan.steps.map((s, i) => (
             <StepRow key={i} step={s} />
@@ -693,10 +711,28 @@ function OutcomeView({ outcome }: { outcome: ChangeoverOutcome }) {
       )}
       {outcome.done.length > 0 && (
         <table style={{ marginTop: 8 }}>
+          {/* No visible header row in this design — sr-only so screen
+              readers still get column context; nothing changes on screen. */}
+          <thead>
+            <tr>
+              <th scope="col" className="sr-only">{W.product.changeover.step}</th>
+              <th scope="col" className="sr-only">{W.product.changeover.colDescription}</th>
+              <th scope="col" className="sr-only">{W.product.changeover.colResult}</th>
+            </tr>
+          </thead>
           <tbody>
             {outcome.done.map((s, i) => (
               <tr key={i}>
-                <td className="mut" style={{ width: '10em' }}>{s.step}</td>
+                <th
+                  scope="row"
+                  className="mut"
+                  style={{
+                    width: '10em', fontWeight: 400, fontSize: 'var(--fs-body)',
+                    borderBottom: '1px solid var(--rule)', verticalAlign: 'top', textAlign: 'left', whiteSpace: 'normal',
+                  }}
+                >
+                  {s.step}
+                </th>
                 <td>{s.label}</td>
                 <td className="n">{fmtInt(s.resultId)}</td>
               </tr>

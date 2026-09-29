@@ -1025,10 +1025,27 @@ function MachinesBlock({
   return (
     <>
       <table>
+        {/* No visible header row in this design — sr-only so screen readers
+            still get column context; nothing changes on screen. */}
+        <thead>
+          <tr>
+            <th scope="col" className="sr-only">{W.cone.colStation}</th>
+            <th scope="col" className="sr-only">{W.cone.colActivity}</th>
+          </tr>
+        </thead>
         <tbody>
           {data.machines.map((m) => (
             <tr key={m.station} className="click" onClick={() => onOpen(m.station)} onKeyDown={rowKeys(() => onOpen(m.station))} tabIndex={0}>
-              <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>{stationLabel(nameOf.get(m.station), m.station)}</td>
+              <th
+                scope="row"
+                className="mut"
+                style={{
+                  width: '9em', whiteSpace: 'nowrap', fontWeight: 400, fontSize: 'var(--fs-body)',
+                  borderBottom: '1px solid var(--rule)', verticalAlign: 'top', textAlign: 'left',
+                }}
+              >
+                {stationLabel(nameOf.get(m.station), m.station)}
+              </th>
               <td>
                 {m.quiet ? (
                   <span className="mut">{machineStateText(m, data.asOfUtc!)}</span>
@@ -1343,10 +1360,27 @@ function LastReadings({
   if (rows.length === 0) return <Empty message={W.nothingHere} />;
   return (
     <table>
+      {/* No visible header row in this design — sr-only so screen readers
+          still get column context; nothing changes on screen. */}
+      <thead>
+        <tr>
+          <th scope="col" className="sr-only">{W.cone.colRecord}</th>
+          <th scope="col" className="sr-only">{W.cone.colDetails}</th>
+        </tr>
+      </thead>
       <tbody>
         {rows.map((r) => (
           <tr key={r.label} className="click" onClick={() => onOpen(r.type, r.id)}>
-            <td className="mut" style={{ width: '9em' }}>{r.label}</td>
+            <th
+              scope="row"
+              className="mut"
+              style={{
+                width: '9em', fontWeight: 400, fontSize: 'var(--fs-body)',
+                borderBottom: '1px solid var(--rule)', verticalAlign: 'top', textAlign: 'left', whiteSpace: 'normal',
+              }}
+            >
+              {r.label}
+            </th>
             <td>
               {r.text}
               <Chevron />

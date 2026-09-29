@@ -359,6 +359,17 @@ export const W = {
     /* The `pr` deep link: which row this permalink pointed at. */
     catalogueLinkedNote: 'Linked from elsewhere in this system.',
 
+    /* Column headers, Catalogue's two PDAS tables (accessibility fix,
+       29 Sep 2026) — both tables had no <thead>/<th>. Visually unchanged:
+       Catalogue keeps this design's headerless look via an sr-only row. */
+    colProduct: 'Product',
+    colProductId: 'Product ID',
+    colLimits: 'Limits',
+    colActions: 'Actions',
+    colPalletId: 'Pallet ID',
+    colPackSchema: 'Pack schema',
+    colLot: 'Lot',
+
     /* ---- Pallets block, Catalogue tab (Task L1, 28 Sep 2026): fills D-31/
        D-34 (DEFECTS.md Part 10) — retiring a pallet had no way back in the
        UI. Reuses retire/whyRequired/cancel/reasonTooShort above; only the
@@ -387,6 +398,12 @@ export const W = {
       executionDisabled: 'Executing a changeover here is switched off until a full test of this feature has been run and passed on this computer. The plan below can still be checked.',
       planTitle: 'What this changeover would do',
       step: 'Step',
+      /* Column headers, the plan-steps and outcome tables (accessibility
+         fix, 29 Sep 2026) — neither had a <thead>/<th>. Visually unchanged:
+         both stay headerless-looking via an sr-only row. */
+      colDescription: 'Description',
+      colAction: 'Action',
+      colResult: 'Result ID',
       blockers: 'Blockers',
       blockersNote: 'These stop the changeover; it cannot run until each is resolved.',
       warnings: 'Warnings',
@@ -1711,6 +1728,14 @@ export const W = {
     colState: 'State',
     colProduct: 'Product',
     noProductOnRow: '—',
+    /* Column headers for the machine tables on Line and Product › Running
+       (accessibility fix, 29 Sep 2026): those tables had no <thead>/<th> at
+       all, so screen-reader users got no column context. The tables' own
+       look is unchanged — see each screen's own sr-only header row. */
+    colStation: 'Station',
+    colActivity: 'Activity',
+    colRecord: 'Record',
+    colDetails: 'Details',
     /* The sheet's headline, one sentence for each state. `by` is
        "12 g under the lower limit" from the server's signed distance. */
     withinOf: (limits: string) => `Within the product's limits, ${limits}.`,

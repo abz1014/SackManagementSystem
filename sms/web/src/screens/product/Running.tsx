@@ -339,6 +339,15 @@ function ByProduct({
           </p>
           {retired && <p className="mut sm" style={{ marginTop: 2 }}>{W.retiredProduct.stillRunning}</p>}
           <table style={{ marginTop: 6 }}>
+            {/* No visible header row in this design — sr-only so screen
+                readers still get column context; nothing changes on screen. */}
+            <thead>
+              <tr>
+                <th scope="col" className="sr-only">{W.cone.colStation}</th>
+                <th scope="col" className="sr-only">{W.cone.colActivity}</th>
+                <th scope="col" className="sr-only">{W.nav.readings}</th>
+              </tr>
+            </thead>
             <tbody>
               {g.machines.map((m) => (
                 <tr
@@ -348,9 +357,16 @@ function ByProduct({
                   onClick={() => onOpenStation(m.station)}
                   onKeyDown={rowKeys(() => onOpenStation(m.station))}
                 >
-                  <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>
+                  <th
+                    scope="row"
+                    className="mut"
+                    style={{
+                      width: '9em', whiteSpace: 'nowrap', fontWeight: 400, fontSize: 'var(--fs-body)',
+                      borderBottom: '1px solid var(--rule)', verticalAlign: 'top', textAlign: 'left',
+                    }}
+                  >
                     {stationLabel(nameOf.get(m.station), m.station)}
-                  </td>
+                  </th>
                   <td>
                     <span className="mut">
                       {m.sinceIsWindowStart || m.sinceUtc == null ? W.cone.sinceAtLeast : W.cone.since(fmtClock(m.sinceUtc))}
@@ -409,6 +425,14 @@ function ByProduct({
         <div style={{ marginTop: 14 }}>
           <p className="mut sm">{W.machineState.notRunning}</p>
           <table style={{ marginTop: 6 }}>
+            {/* No visible header row in this design — sr-only so screen
+                readers still get column context; nothing changes on screen. */}
+            <thead>
+              <tr>
+                <th scope="col" className="sr-only">{W.cone.colStation}</th>
+                <th scope="col" className="sr-only">{W.cone.colState}</th>
+              </tr>
+            </thead>
             <tbody>
               {data.filter((m) => m.quiet).map((m) => (
                 <tr
@@ -418,9 +442,16 @@ function ByProduct({
                   onClick={() => onOpenStation(m.station)}
                   onKeyDown={rowKeys(() => onOpenStation(m.station))}
                 >
-                  <td className="mut" style={{ width: '9em', whiteSpace: 'nowrap' }}>
+                  <th
+                    scope="row"
+                    className="mut"
+                    style={{
+                      width: '9em', whiteSpace: 'nowrap', fontWeight: 400, fontSize: 'var(--fs-body)',
+                      borderBottom: '1px solid var(--rule)', verticalAlign: 'top', textAlign: 'left',
+                    }}
+                  >
                     {stationLabel(nameOf.get(m.station), m.station)}
-                  </td>
+                  </th>
                   <td>
                     <span className="mut">{machineStateText(m, asOfUtc)}</span>
                     <Chevron />
