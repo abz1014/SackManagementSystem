@@ -1660,3 +1660,98 @@ plain words with no buttons) — all 9 failed before the change (404s) and
 pass after. No live PDAS call: `PdasWriter.prototype.setPalletActive` is
 mocked throughout; `PDAS_WRITE_ENABLED` and `sms/.env` were not touched.
 Full suite 2425 passed / 4 skipped, typecheck clean (`api`, `web`).
+
+## Part 11 — 29 Sep 2026 re-audit
+
+Documentation-sync pass, run concurrently with an active fix wave on `sms/api`'s
+report exports and `app.ts`, `sms/web`'s ChartFrame/Sacks/ReadingSheet/Report/
+words.ts, and `sms/layout-tests` — the findings below are recorded as **open**,
+each with a severity; fix commits are landing in those concurrent passes and will
+be added here by the orchestrator once SHAs exist. None of the SHAs in this Part
+was written by this pass — this pass is documentation only, per its own scope.
+
+(a) **Major — report CSV/XLSX carry no simulator disclosure for a simulator-only
+period.** The global "simulated data" banner (`3abc113`, Task D) and the
+CSV/XLSX/PDF trailer wording (`8ac7906`, "data batch") both exist, but neither
+was verified this pass to fire specifically for a report **export** whose whole
+period is simulator-sourced — the concern is that a downloaded file, once it
+leaves the app's own screen, carries nothing in its own bytes saying so. Confirm
+against the current `reports/csv.ts`/`reports/xlsx.ts` trailer logic before
+closing.
+
+(b) **Major — a mouse click on a chart bar does not activate drill-down (Line
+station chart).** `ChartFrame`'s pointer/keyboard interaction (tooltip, brush,
+resize handle — `618662b`, `bc15088`) and the shift-range drag-select wiring
+(`496ef44`, `741fbd2`) landed across the chart-overhaul commits listed in
+`PROJECT_STATUS.md`'s 29 Sep entry, but Line's own per-station bar chart's
+click-to-drill-down (a pre-existing affordance, not part of the ChartFrame
+rebuild) was not confirmed to still fire a click handler distinct from the new
+brush/drag-select pointer handling this pass added. Needs a live click test
+against Line, not just a read of the diff.
+
+(c) **Major — `/api/weight-stations` accepts an inverted `periodFrom`/
+`periodTo`.** No validation was found requiring `periodFrom <= periodTo` on this
+route; an inverted pair either returns an empty result set silently or is passed
+through to the query unvalidated (not confirmed which, this pass). Compare
+against how `/api/rejects`/`/api/reject-spc`'s existing range validation handles
+the same shape and apply the same guard.
+
+(d) **Major — the Report screen shows no batch/simulator disclosure on screen,
+print only.** The print header (`PrintHead.tsx`, Phase 9) and the CSV/XLSX/PDF
+trailers carry the batch/simulator wording, but the on-screen Report view itself
+— what a viewer sees before ever printing or exporting — does not visibly repeat
+it. A viewer reading only the screen has no on-screen cue that a period is
+simulator-sourced or spans more than one data batch.
+
+(e) **Minor — the Sacks headline doesn't name the shift.** When the Sacks screen
+is scoped to a single shift, its headline states the figures but not which shift
+they belong to, unlike Rejects/Weight's own headlines.
+
+(f) **Minor — ReadingSheet "Record" label collision.** `ReadingSheet` reuses the
+word "Record" for two different things on the same panel (needs a diff read to
+pin the exact collision point — not resolved further this pass, flagged for the
+owner of `sms/web`'s `ReadingSheet` work in the concurrent wave).
+
+(g) **Minor — stale `PROJECT_STATUS.md`.** Closed by this same task: see the
+dated 29 Sep 2026 entry added to `PROJECT_STATUS.md` §2.
+
+(h) **Minor — 5 undocumented env vars.** Closed by this same task:
+`API_DB_POOL_MAX`, `API_DB_POOL_MIN`, `API_DB_POOL_IDLE_TIMEOUT_MS`,
+`API_DB_REQUEST_TIMEOUT_MS` (`sms/api/src/config.ts` ~lines 487-491,
+defaults 10/1/30000/30000, `index.ts` ~line 126) and `PDF_EDGE_PATH`
+(`sms/api/src/services/reports/edge.ts`) are now documented, commented out with
+their defaults, in `sms/.env.example`, and in a new "Advanced tuning" subsection
+of `sms/DEPLOY.md`.
+
+(i) **Minor — `npm audit`: 3 moderate advisories via `express`, awaiting owner
+approval of the patch bump.** Not applied this pass (documentation-only scope,
+and a dependency bump is an owner call per this project's working rules).
+
+**Health "degraded" on the dev box — explained, by design, not a new defect.**
+The dev box currently shows `degraded` because of two things that are both
+expected on a dev copy: 2 ERROR `nonpositive_weight` DQ findings present in the
+simulator-generated data, and a 15-day-old backup. Neither indicates a code
+defect in the health/DQ machinery itself.
+
+**Simulator-generated `nonpositive_weight` findings — checked against
+`sms/scripts/simulate-plant.mjs` this pass; recorded as a simulator bug, not
+expected behaviour.** The reject-weight branch (`generateBatch`, ~line 296-303)
+draws `w = rand() < 0.7 ? gauss(2055, 55) : gauss(1890, 45)` and then writes
+`Weight: round2(Math.max(0, w))`. The `Math.max(0, w)` clamp exists because the
+author anticipated `gauss()` could in principle return a non-positive value (its
+Box-Muller implementation, ~line 162-166, clamps its own `u` input to a `1e-9`
+floor specifically to keep `-2*log(u)` finite, i.e. unbounded in the tail) — but
+the app's own DQ check (`sync-worker/src/transform/dq.ts`'s `nonpositive_weight`,
+ERROR severity) fires on `weight <= 0`, so clamping a would-be-negative draw to
+exactly **0** does not avoid that DQ error, it just re-triggers the identical
+check by a different route. The cone-weight branch (~line 306, `CONE_WEIGHT_SD =
+8.5`, tight enough that a non-positive draw is not practically reachable) carries
+no such clamp, which is consistent with the reject branch's wider spread (`sd`
+45-55) being the one case the author judged needed a guard — the guard just
+clamps to the wrong floor. **Fix recommendation, not applied this pass (out of
+this task's scope — documentation only):** clamp to a small positive floor (e.g.
+`Math.max(1, w)` or resample) instead of `0`, so the simulator's own guard
+against an unrealistic draw doesn't manufacture the exact DQ condition it exists
+to avoid. The RNG is seeded deterministically (`rng(20260902)`), so this
+reproduces identically on every run of the same seed — it is not a rare,
+non-reproducible flake.

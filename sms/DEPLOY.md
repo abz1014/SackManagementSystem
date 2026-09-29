@@ -40,7 +40,7 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - `LINE_ID` (default `1`) → the line this worker and this API serve; every row is stamped with it. Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested. `LINE_NAME` is only the **seed** for that line's display name on a fresh database; afterwards the plant, unit and line names live in `sms.line` and are edited in **Setup › Line** (roadmap Phase 1, migration 028).
    - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
    - **leave `LIVE_ALLOW_SIMULATOR` unset; never true at IFL** — a dev-only convenience that lets the live screens read `scripts/simulate-plant.mjs`'s `_SIM` database instead of the plant's; see `.env.example`'s own comment and *Rehearsing go-live with the plant simulator* below.
-   - **PLANT_UTC_OFFSET_MINUTES=300** (UTC+5, this plant) — set this on every install. See below.
+   - **PLANT_UTC_OFFSET_MINUTES=300** (UTC+5, this plant) — **required on every install; do not leave it commented out or unset.** See below for what silently breaks if it's skipped. (Restated here 29 Sep 2026 — DEFECTS.md Part 11 h — because it is easy to miss as just one more line in a long list; nothing in the code refuses to start without it.)
 
 ### ⚠️ `COOKIE_SECURE` — the one setting that fails silently
 
@@ -782,6 +782,35 @@ total.
   and lineage, and is the safer thing to trim first) or move off Express to a
   licensed SQL Server edition, which removes the cap entirely. Neither is
   needed today — this is a plan to revisit, not an action to take now.
+
+### Advanced tuning (added 29 Sep 2026 — five env vars the code already reads but this file never documented; see `DEFECTS.md` Part 11 h)
+
+All five are commented out in `.env.example`; leave them that way unless an
+install actually needs the non-default value. None is required.
+
+- **`API_DB_POOL_MAX`** (default **10**), **`API_DB_POOL_MIN`** (default **1**),
+  **`API_DB_POOL_IDLE_TIMEOUT_MS`** (default **30000**) — size the API's own
+  `mssql` connection pool (`api/src/config.ts`'s `apiPoolOptions`/
+  `DEFAULT_DB_POOL_MAX`). This pool is sized for N concurrent interactive
+  readers and is deliberately separate from the sync worker's own pool
+  defaults (`sync-worker/src/config.ts`'s `SYNC_POOL_DEFAULT`: 5 connections,
+  a 10-minute request timeout — sized for one single-threaded batch pass, not
+  a web API). Raise `API_DB_POOL_MAX` if `/api/health` or slow-endpoint logs
+  show pool exhaustion under real concurrent use; there is no other signal
+  that tells you to touch these on a fresh install.
+- **`API_DB_REQUEST_TIMEOUT_MS`** (default **30000**) — the per-query timeout
+  on that same pool. Raise it only if a specific report or query is legitimately
+  slow (large date range, cold cache) and is timing out rather than actually
+  hanging; lowering it tightens how fast a stuck query gets killed.
+- **`PDF_EDGE_PATH`** (no default) — overrides the automatic Microsoft Edge
+  probe `api/src/services/reports/edge.ts` runs at API startup for the PDF
+  report renderer's one hard dependency (`ProgramFiles(x86)` →
+  `ProgramFiles` → `LOCALAPPDATA`, in that order — the three real Windows
+  install locations). Only set this if Edge lives somewhere none of those
+  three cover, or to pin one copy on a machine with more than one. An
+  explicit wrong path fails loudly (PDF export disabled, reason stated) rather
+  than silently falling back to the auto-probe — see `edge.ts`'s own header
+  comment and `edge.test.ts`.
 
 ---
 

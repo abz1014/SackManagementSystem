@@ -22,6 +22,19 @@ or labelled superseded, not deleted, so the file shows its own history.
   new finding the same day (RT24-05, `DEFECTS.md` Part 6) means the write path's own
   verification cannot detect a real PDAS mismatch under the plant's anticipated
   EXECUTE-only role and must be fixed before that role is ever used → ours + IFL #3
+  **Superseded further, 28 Sep 2026 (Task K2c, `DEFECTS.md` Part 10):** the scripted
+  local harness (`scripts/pdas-e2e-local.mjs`) now runs clean end to end — all 19 of 19
+  cases PASS, all nine per-right summary rows PASS, `OVERALL: PASS`, exit code 0 — proving
+  all nine PDAS write rights through the app's own code against `PDAS_TP1U2_SEP07`, with
+  fresh verified backups taken before and restored (anchors matched exactly) after. D-34
+  (Catalogue had no pallet-reactivate control) was found and fixed the same day,
+  `801dc58`. **Still owner-run, unchanged:** the EXECUTE-only "ibrahim"-shaped login
+  rehearsal (`handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md`), the below-rank RBAC rehearsal
+  (`handover/REHEARSAL-RBAC-BELOW-RANK.md`), and anything requiring the plant itself —
+  agents may not create logins, so these two kits remain the owner's own to run. RT24-05
+  (the write path's echo-back verification cannot detect a real mismatch under an
+  EXECUTE-only role) is unchanged by this pass and still gates enabling
+  `PDAS_WRITE_ENABLED` against the plant → ours + IFL #3
 - Windows service (NSSM) never installed or exercised on any machine → ours
 - Nightly backup scheduled only on paper, never run unattended → ours
 - ~114 commits ahead of `origin/floor-first-rework` (last pushed 16 Sep), ~179 ahead of `origin/main` — never seen by CI → ours
@@ -128,6 +141,22 @@ or labelled superseded, not deleted, so the file shows its own history.
   downgrades to a WARNING instead of the intended CRITICAL (RT24-05) — must be fixed before
   `PDAS_WRITE_ENABLED` is ever set true against that role, even though the write mechanics
   themselves are now locally proven (§1 above).
+- **Added 29 Sep 2026 — chart overhaul (20 commits, `870bdd9`…`741fbd2`, see
+  `PROJECT_STATUS.md`'s 29 Sep entry).** `ChartFrame` (tooltip, keyboard interaction,
+  drag-resize, drag-select-to-zoom snapped to shift boundaries), the top-bar "Back to
+  previous range" undo control, and shift-range period filtering threaded through every
+  period route and report type (`shiftRange.ts`, `TC`/`TB1`/`TB2` commits) all pass the
+  suite (vitest, jsdom-only) and typecheck, but — same caveat as every other UX-programme
+  claim in this project — **jsdom computes no layout**, so drag-resize and drag-select are
+  exercised as simulated pointer-event sequences, not as an observed mouse drag against a
+  laid-out SVG. The real-browser layout harness (`sms/layout-tests/`, Playwright) gained
+  two new spec files this same window (`charts.spec.ts`, `_debug2.spec.ts`, both currently
+  untracked in git status) but neither had been confirmed run-and-green as of this
+  documentation pass. This pass also found three MAJOR-severity issues in the concurrently
+  landing chart/report code, not yet fixed as of this writing — see `DEFECTS.md` Part 11
+  (b) a chart-bar click not activating Line's drill-down, (c) `/api/weight-stations`
+  accepting an inverted `periodFrom`/`periodTo`, and (d) the Report screen showing no
+  on-screen (only print) batch/simulator disclosure.
 
 ## Honesty block
 - Nothing above has run against real plant data — every figure comes from a local dev sidecar with a deliberately contaminated (simulator-overlapping) generation.
