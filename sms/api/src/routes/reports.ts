@@ -53,7 +53,7 @@ import { locateEdge } from '../services/reports/edge.js';
 import { renderReportPdf } from '../services/reports/pdf.js';
 import type { RouteContext } from './context.js';
 import { isoDate, isoTimestamp } from '../dates.js';
-import { EVENT_TABLES, noteOf, resolveGenerationScope } from '../services/generation.js';
+import { EVENT_TABLES, epochFragment, noteOf, resolveGenerationScope } from '../services/generation.js';
 import { decodeShiftRangeParam, isShiftRangeError } from './shiftRangeParam.js';
 import type { ShiftRange } from '../shiftRange.js';
 
@@ -117,12 +117,34 @@ interface Parsed {
 export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): void {
   const cache = new TtlCache<AnyReportData>(cfg.cacheTtlSeconds * 1000);
 
-  /** The newest production day — the anchor a bare request resolves against (app.ts does the same). */
+  /**
+   * The newest production day — the anchor a bare request resolves against
+   * (app.ts does the same, via its own `coneGenerationFilter`/
+   * `resolveLiveScope`).
+   *
+   * Fix (Task W2-C, 29 Sep 2026): this used to run unscoped, pooling every
+   * source generation's `shift_date`s together. On the dev sidecar, whose
+   * plant-simulator generation is newer than IFL's own real one, that made a
+   * bare `/api/reports/:type` request anchor on a day the simulator wrote —
+   * a day no real report should default to. Scoped now through
+   * `resolveGenerationScope` with no window (the whole history) and its
+   * default `preferReal: true`, the same "newest generation, preferring
+   * real" rule every period-scoped report/service query already uses
+   * (`report.ts`, `register.ts`, `production.ts`, etc. — see
+   * `generation.ts`'s file header). Left deliberately DIFFERENT from
+   * `live.ts`'s `resolveLiveScope`, whose `preferReal: false` opt-out is
+   * named there as "LIVE SCOPE ONLY, DEV ONLY" for the ten-second-refresh
+   * floor screens — a report's default anchor is not that screen and keeps
+   * the unconditional real-first rule.
+   */
   async function newestProductionDay(): Promise<string> {
-    const r = await pool
-      .request()
-      .input('line', mssql.Int, cfg.lineId)
-      .query<{ d: string | null }>('SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line');
+    const scope = await resolveGenerationScope(pool, cfg.lineId, {}, ['cone_event']);
+    const f = epochFragment(scope, 'cone_event');
+    const req = pool.request().input('line', mssql.Int, cfg.lineId);
+    for (const p of f.params) req.input(p.name, mssql.Int, p.id);
+    const r = await req.query<{ d: string | null }>(
+      `SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line${f.sql ? ` AND ${f.sql}` : ''}`,
+    );
     return r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
   }
 
