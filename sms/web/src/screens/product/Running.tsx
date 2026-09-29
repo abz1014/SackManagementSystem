@@ -343,9 +343,9 @@ function ByProduct({
                 readers still get column context; nothing changes on screen. */}
             <thead>
               <tr>
-                <th scope="col" className="sr-only">{W.cone.colStation}</th>
-                <th scope="col" className="sr-only">{W.cone.colActivity}</th>
-                <th scope="col" className="sr-only">{W.nav.readings}</th>
+                <th scope="col" className="sr-only-th">{W.cone.colStation}</th>
+                <th scope="col" className="sr-only-th">{W.cone.colActivity}</th>
+                <th scope="col" className="sr-only-th">{W.nav.readings}</th>
               </tr>
             </thead>
             <tbody>
@@ -429,8 +429,8 @@ function ByProduct({
                 readers still get column context; nothing changes on screen. */}
             <thead>
               <tr>
-                <th scope="col" className="sr-only">{W.cone.colStation}</th>
-                <th scope="col" className="sr-only">{W.cone.colState}</th>
+                <th scope="col" className="sr-only-th">{W.cone.colStation}</th>
+                <th scope="col" className="sr-only-th">{W.cone.colState}</th>
               </tr>
             </thead>
             <tbody>
