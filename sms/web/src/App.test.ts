@@ -12,7 +12,7 @@
  * `URLSearchParams` would.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseRoute, resolveWeightMode, routeSearch, type Route } from './App';
+import { parseRoute, resolveWeightMode, routeSearch, zoomIsNoop, type Route } from './App';
 
 function withSearch<T>(search: string, fn: () => T): T {
   (globalThis as unknown as { window: unknown }).window = { location: { search } };
@@ -360,5 +360,36 @@ describe('Product — tab round-trip, and the deleted sheet\'s legacy bookmark',
     expect(r.productTab).toBe('running');
     // The redirect itself never appears in a freshly-written URL.
     expect(routeSearch(r)).toBe('?s=product&p=shift');
+  });
+});
+
+// owner 29 Sep 2026: zoomTo(p) must not push a new history entry when `p`
+// describes the period already on screen (e.g. re-clicking the same chart
+// bar). zoomIsNoop is the pure decision zoomTo makes before calling `go`;
+// tested directly here rather than through a rendered <App/>, the same way
+// parseRoute/routeSearch are tested above.
+describe('zoomIsNoop — clicking the period already shown is a no-op', () => {
+  it('true for two identical "shift" periods', () => {
+    expect(zoomIsNoop({ key: 'shift' }, { key: 'shift' })).toBe(true);
+  });
+
+  it('false for two different keys', () => {
+    expect(zoomIsNoop({ key: 'today' }, { key: 'shift' })).toBe(false);
+  });
+
+  it('true for two "range" periods with identical from/to shift refs', () => {
+    const range = { from: { date: '2026-09-25', shift: 'morning' as const }, to: { date: '2026-09-25', shift: 'night' as const } };
+    expect(zoomIsNoop({ key: 'range', range }, { key: 'range', range: { ...range } })).toBe(true);
+  });
+
+  it('false for two "range" periods with different bounds', () => {
+    const a = { key: 'range' as const, range: { from: { date: '2026-09-25', shift: 'morning' as const }, to: { date: '2026-09-25', shift: 'night' as const } } };
+    const b = { key: 'range' as const, range: { from: { date: '2026-09-25', shift: 'morning' as const }, to: { date: '2026-09-26', shift: 'night' as const } } };
+    expect(zoomIsNoop(a, b)).toBe(false);
+  });
+
+  it('true for two "pick" periods with identical from/to', () => {
+    const picked = { from: '2026-09-20', to: '2026-09-25' };
+    expect(zoomIsNoop({ key: 'pick', picked }, { key: 'pick', picked: { ...picked } })).toBe(true);
   });
 });

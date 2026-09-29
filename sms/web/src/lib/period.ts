@@ -271,16 +271,32 @@ function shortDate(date: string): string {
 /**
  * The period, in the plain words a reader (not a developer) can act on:
  *
- *   "2 Sep morning shift – 3 Sep night shift"  — a 'range' spanning more than one shift
- *   "2 Sep, evening shift"                     — exactly one shift (key 'shift', or a
- *                                                 'range' that snapped to a single shift)
- *   "2 Sep"                                    — a single whole day (today/yesterday/a
- *                                                 one-day pick)
- *   "2 Sep – 9 Sep"                             — any other multi-day span (week/month/pick)
+ *   "2 Sep, evening shift"                     — exactly one shift: key 'shift', or a
+ *                                                 'range' whose from/to are the same
+ *                                                 shift on the same date
+ *   "2 Sep"                                     — a single whole day: today/yesterday/a
+ *                                                 one-day pick, or a 'range' that runs
+ *                                                 the same date's morning shift through
+ *                                                 its own night shift
+ *   "2 Sep – 3 Sep"                             — a multi-day span: week/month/pick, or
+ *                                                 a 'range' that runs morning..night
+ *                                                 across more than one date
+ *   "2 Sep morning shift – 3 Sep night shift"  — any other 'range' (partial shifts at
+ *                                                 either end)
+ *
+ * (owner 29 Sep: collapse — the range branch used to print the last form
+ * unconditionally, so a same-shift or whole-day range never collapsed to the
+ * shorter phrasing the other period kinds already use.)
  */
 export function describePeriod(p: Period): string {
-  if (p.key === 'range' && p.fromShift && p.toShift && !p.shift) {
-    return `${shortDate(p.fromShift.date)} ${SHIFT_LABEL[p.fromShift.shift]} shift – ${shortDate(p.toShift.date)} ${SHIFT_LABEL[p.toShift.shift]} shift`;
+  if (p.key === 'range' && p.fromShift && p.toShift) {
+    const { fromShift: from, toShift: to } = p;
+    const sameDate = from.date === to.date;
+    if (sameDate && from.shift === to.shift) return `${shortDate(from.date)}, ${SHIFT_LABEL[from.shift]} shift`;
+    if (from.shift === 'morning' && to.shift === 'night') {
+      return sameDate ? shortDate(from.date) : `${shortDate(from.date)} – ${shortDate(to.date)}`;
+    }
+    return `${shortDate(from.date)} ${SHIFT_LABEL[from.shift]} shift – ${shortDate(to.date)} ${SHIFT_LABEL[to.shift]} shift`;
   }
   if (p.shift) return `${shortDate(p.from)}, ${SHIFT_LABEL[p.shift]} shift`;
   if (p.from === p.to) return shortDate(p.from);
@@ -451,4 +467,29 @@ export function writePeriodParams(sp: URLSearchParams, p: PeriodParams): void {
     sp.set('from', enc.from);
     sp.set('to', enc.to);
   }
+}
+
+/**
+ * True when two PeriodParams describe the same period — same key, and for
+ * 'pick'/'range' the same bounds too. Used to skip a no-op zoom: clicking a
+ * chart region that already matches the period on screen should not push a
+ * new history entry (owner 29 Sep 2026).
+ */
+export function samePeriodParams(a: PeriodParams, b: PeriodParams): boolean {
+  if (a.key !== b.key) return false;
+  if (a.key === 'pick') {
+    return a.picked?.from === b.picked?.from && a.picked?.to === b.picked?.to;
+  }
+  if (a.key === 'range') {
+    const ar = a.range;
+    const br = b.range;
+    if (!ar || !br) return ar === br;
+    return (
+      ar.from.date === br.from.date &&
+      ar.from.shift === br.from.shift &&
+      ar.to.date === br.to.date &&
+      ar.to.shift === br.to.shift
+    );
+  }
+  return true;
 }

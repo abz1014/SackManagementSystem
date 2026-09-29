@@ -20,7 +20,7 @@ import {
 } from './api';
 import { LiveProvider, readAsOf, useLive, usePlantNow } from './lib/live';
 import { assessHealth } from './lib/health';
-import { parsePeriodParams, resolvePeriod, writePeriodParams, type PeriodParams, type ShiftCode } from './lib/period';
+import { parsePeriodParams, resolvePeriod, samePeriodParams, writePeriodParams, type PeriodParams, type ShiftCode } from './lib/period';
 import { W } from './lib/words';
 import { Bar, SCREENS, PRODUCT_TABS, type Screen, type ReadingsFilter, type ProductTab } from './ui/Bar';
 import { Loading } from './ui/bits';
@@ -83,6 +83,12 @@ export interface ZoomApi {
 }
 
 const ZoomContext = createContext<ZoomApi | null>(null);
+
+/** True when zoomTo(p) targeting the period already on screen should do
+ *  nothing — no history push, no re-render of the zoomFrom trail. */
+export function zoomIsNoop(next: PeriodParams, current: PeriodParams): boolean {
+  return samePeriodParams(next, current);
+}
 
 export function useZoom(): ZoomApi {
   const ctx = useContext(ZoomContext);
@@ -440,7 +446,13 @@ function Session({ user, onSignOut }: { user: AuthUser; onSignOut: () => void })
     });
   }, []);
 
+  // owner 29 Sep 2026: clicking the period already shown (e.g. re-clicking
+  // the same chart bar) must not push a fresh history entry — samePeriodParams
+  // makes that a no-op instead of a dead Back stop. zoomIsNoop is the pure
+  // decision, pulled out and exported so it can be tested without rendering
+  // <App/>, the same way parseRoute/routeSearch are tested above.
   const zoomTo = useCallback((p: PeriodParams) => {
+    if (zoomIsNoop(p, route.period)) return;
     go({ period: p }, { state: { zoomFrom: route.period } });
   }, [go, route.period]);
 

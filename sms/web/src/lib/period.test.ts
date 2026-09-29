@@ -344,10 +344,32 @@ describe('dayToShiftRange', () => {
 });
 
 describe('describePeriod', () => {
-  it('a range spanning more than one shift', () => {
+  // owner 29 Sep: collapse — a 'range' used to print "morning shift – ...
+  // night shift" unconditionally, even when it named a single shift or a
+  // whole day/multi-day span the other period kinds already say more simply.
+
+  it('a range with a partial shift at either end keeps the full phrasing', () => {
+    const range = { from: { date: '2026-09-02', shift: 'evening' } as ShiftRef, to: { date: '2026-09-03', shift: 'night' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(describePeriod(p)).toBe('2 Sep evening shift – 3 Sep night shift');
+  });
+
+  it('a range whose from and to are the same shift on the same date collapses to one shift', () => {
+    const range = { from: { date: '2026-09-25', shift: 'night' } as ShiftRef, to: { date: '2026-09-25', shift: 'night' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(describePeriod(p)).toBe('25 Sep, night shift');
+  });
+
+  it('a range running one date\'s morning shift through its own night shift collapses to that day', () => {
+    const range = { from: { date: '2026-09-25', shift: 'morning' } as ShiftRef, to: { date: '2026-09-25', shift: 'night' } as ShiftRef };
+    const p = resolvePeriod('range', anchor, undefined, range);
+    expect(describePeriod(p)).toBe('25 Sep');
+  });
+
+  it('a range running morning through night across more than one date collapses to a day span', () => {
     const range = { from: { date: '2026-09-02', shift: 'morning' } as ShiftRef, to: { date: '2026-09-03', shift: 'night' } as ShiftRef };
     const p = resolvePeriod('range', anchor, undefined, range);
-    expect(describePeriod(p)).toBe('2 Sep morning shift – 3 Sep night shift');
+    expect(describePeriod(p)).toBe('2 Sep – 3 Sep');
   });
 
   it('exactly one shift, via key "shift"', () => {
