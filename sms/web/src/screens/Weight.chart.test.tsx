@@ -1,13 +1,14 @@
 /**
- * Chart overhaul, wave 3, Task T6 (29 Sep 2026). Covers only what T6 changed
- * in `Weight.tsx`: the OverTime chart's `ChartFrame` tooltip and de-collided
- * gutter labels (`overTimeGutterLabels`), its drag-to-select brush handing a
- * shift-snapped `PeriodParams` built from the API's own `firstShiftDate` /
- * `firstShiftCode` / `lastShiftDate` / `lastShiftCode` subgroup fields
- * (962a18b) to `onSelectPeriod`, the Distribution chart's `packRow`-based
- * reference labels (`distributionRefLabels`), and the Sparkline's new hover
- * tooltip. Everything else about the screen (the headline, the figures, the
- * station table) is unchanged and covered by `Weight.test.tsx`.
+ * Chart overhaul, wave 3, Task T6 (29 Sep 2026; click-to-zoom rewrite, Task
+ * W2, same date). Covers only what T6 changed in `Weight.tsx`: the OverTime
+ * chart's `ChartFrame` tooltip and de-collided gutter labels
+ * (`overTimeGutterLabels`), a click on a point zooming to a shift-snapped
+ * `PeriodParams` built from the API's own `firstShiftDate` / `firstShiftCode`
+ * / `lastShiftDate` / `lastShiftCode` subgroup fields (962a18b) via
+ * `onSelectPeriod`, the Distribution chart's `packRow`-based reference labels
+ * (`distributionRefLabels`), and the Sparkline's new hover tooltip.
+ * Everything else about the screen (the headline, the figures, the station
+ * table) is unchanged and covered by `Weight.test.tsx`.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
@@ -80,8 +81,8 @@ const WEIGHT_STATIONS_OK: Envelope<WeightStationsData> = {
 };
 
 /** Two subgroups: an ordinary morning one, and one that straddles the
- *  evening→night shift boundary — the "night-straddling group" the brief
- *  asks the brush test to cover. */
+ *  evening→night shift boundary — the "night-straddling group" the
+ *  click-to-zoom tests below exercise. */
 const SUBGROUPS: Subgroup[] = [
   {
     ts: '2026-09-07T06:00:00.000Z', n: 40, mean: 1949, s: 2, xUcl: 1960, xLcl: 1940,
@@ -229,8 +230,46 @@ describe('Weight OverTime — tooltip content', () => {
   });
 });
 
-describe('Weight OverTime — brush selects a shift-snapped period from the API\'s own subgroup fields', () => {
-  it('a drag across both groups snaps from the first group\'s FIRST shift to the straddling group\'s LAST shift (night)', async () => {
+describe('Weight OverTime — click-to-zoom to a shift-snapped period from the API\'s own subgroup fields', () => {
+  it('Enter on the first (ordinary morning) group zooms to that single shift', async () => {
+    const onSelectPeriod = vi.fn();
+    installFakeFetch(routes());
+    const { container } = render(<WeightScreen {...baseProps({ onSelectPeriod })} />);
+    const body = await waitForChart(container);
+    body.focus();
+
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // group 0: firstShift/lastShift both 'morning'
+    fireEvent.keyDown(body, { key: 'Enter' });
+
+    expect(onSelectPeriod).toHaveBeenCalledTimes(1);
+    const params = onSelectPeriod.mock.calls[0]![0];
+    expect(params.key).toBe('range');
+    expect(params.range.from).toEqual({ date: '2026-09-07', shift: 'morning' });
+    expect(params.range.to).toEqual({ date: '2026-09-07', shift: 'morning' });
+  });
+
+  it('a real mouse click (not a drag) on the straddling group zooms from its FIRST shift to its LAST shift (night)', async () => {
+    const onSelectPeriod = vi.fn();
+    installFakeFetch(routes());
+    const { container } = render(<WeightScreen {...baseProps({ onSelectPeriod })} />);
+    const body = await waitForChart(container);
+    body.focus();
+
+    // Two ArrowRights: 0 -> 1, landing on the straddling group whose own
+    // firstShiftCode is 'evening' and lastShiftCode is 'night' — proving the
+    // zoom reads BOTH ends off that one subgroup, not just its first.
+    fireEvent.keyDown(body, { key: 'ArrowRight' });
+    fireEvent.keyDown(body, { key: 'ArrowRight' });
+    fireEvent.keyDown(body, { key: 'Enter' });
+
+    expect(onSelectPeriod).toHaveBeenCalledTimes(1);
+    const params = onSelectPeriod.mock.calls[0]![0];
+    expect(params.key).toBe('range');
+    expect(params.range.from).toEqual({ date: '2026-09-07', shift: 'evening' });
+    expect(params.range.to).toEqual({ date: '2026-09-07', shift: 'night' });
+  });
+
+  it('a drag past the click threshold does not zoom', async () => {
     const onSelectPeriod = vi.fn();
     installFakeFetch(routes());
     const { container } = render(<WeightScreen {...baseProps({ onSelectPeriod })} />);
@@ -239,32 +278,23 @@ describe('Weight OverTime — brush selects a shift-snapped period from the API\
     const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
     Object.defineProperty(down, 'pointerId', { value: 1 });
     Object.defineProperty(down, 'pointerType', { value: 'mouse' });
-    const move = new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
-    Object.defineProperty(move, 'pointerId', { value: 1 });
-    Object.defineProperty(move, 'pointerType', { value: 'mouse' });
     const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
     Object.defineProperty(up, 'pointerId', { value: 1 });
     Object.defineProperty(up, 'pointerType', { value: 'mouse' });
 
     act(() => body.dispatchEvent(down));
-    act(() => body.dispatchEvent(move));
     act(() => body.dispatchEvent(up));
 
-    expect(onSelectPeriod).toHaveBeenCalledTimes(1);
-    const params = onSelectPeriod.mock.calls[0]![0];
-    expect(params.key).toBe('range');
-    // The straddling group's own LAST shift is 'night', not its first
-    // ('evening') — proving the brush reads lastShiftCode, not firstShiftCode,
-    // off the LAST selected subgroup.
-    expect(params.range.from).toEqual({ date: '2026-09-07', shift: 'morning' });
-    expect(params.range.to).toEqual({ date: '2026-09-07', shift: 'night' });
+    expect(onSelectPeriod).not.toHaveBeenCalled();
   });
 
-  it('renders no brush affordance when onSelectPeriod is not wired', async () => {
+  it('does not offer to zoom (no can-activate class) when onSelectPeriod is not wired', async () => {
     installFakeFetch(routes());
     const { container } = render(<WeightScreen {...baseProps()} />);
     const body = await waitForChart(container);
-    expect(body.getAttribute('title')).toBeNull();
+    body.focus();
+    fireEvent.keyDown(body, { key: 'ArrowRight' });
+    expect(body.className).not.toContain('can-activate');
   });
 });
 

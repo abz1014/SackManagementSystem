@@ -671,7 +671,7 @@ function OutputSpread({
 }: {
   rows: ProductionRow[];
   spread: 'day' | 'shift';
-  /** For the 'shift' spread's own brush refs — each row's shift belongs to
+  /** For the 'shift' spread's own zoom refs — each row's shift belongs to
    *  the single production day the period names. */
   period: Period;
   onSelectPeriod?: (p: PeriodParams) => void;
@@ -699,7 +699,11 @@ function OutputSpread({
     key: r.group,
     label: spread === 'day' ? fmtDayShort(r.group) : (W.shiftName[r.group as 'morning'] ?? r.group),
     value: r.cones,
-    detail: `${spread === 'day' ? fmtDayLong(r.group) : (W.shiftName[r.group as 'morning'] ?? r.group)} · ${fmtInt(r.cones)} ${W.fig.cones} · ${fmtInt(r.rejectedCones)} ${W.fig.rejected} · ${fmtInt(r.sacks ?? 0)} ${W.fig.sacks}`,
+    // Task W2 (29 Sep 2026): no leading label here any more — `d.label` (the
+    // heading `ChartFrame`'s readout/tooltip already states) used to be
+    // repeated as the detail's own first clause ("2 Sep · 2,052 cones ·
+    // ..."), printing the day/shift twice in one readout line.
+    detail: `${fmtInt(r.cones)} ${W.fig.cones} · ${fmtInt(r.rejectedCones)} ${W.fig.rejected} · ${fmtInt(r.sacks ?? 0)} ${W.fig.sacks}`,
   }));
   const total = real.reduce((n, r) => n + r.cones, 0);
   const best = real.reduce((a, b) => (b.cones > a.cones ? b : a), real[0]!);
@@ -707,7 +711,7 @@ function OutputSpread({
   // bars are a single shift of the ONE production day this period names
   // (period.days === 1 whenever spread === 'shift' — see the caller's own
   // `spread` choice above).
-  const brush = onSelectPeriod
+  const zoom = onSelectPeriod
     ? {
         refs: real.map((r): [ShiftRef, ShiftRef] => {
           if (spread === 'day') {
@@ -727,7 +731,7 @@ function OutputSpread({
       ariaLabel={spread === 'day' ? W.conesPerDayAria : W.conesPerShiftAria}
       valueFmt={fmtInt}
       chartId={`line-cones-per-${spread}`}
-      brush={brush}
+      zoom={zoom}
       resting={W.conesResting(
         real.length,
         spread,

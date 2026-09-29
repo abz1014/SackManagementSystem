@@ -155,7 +155,7 @@ describe('Line — clicking a bar on the station-deviation chart opens that stat
     expect(onOpenStation).toHaveBeenCalledWith(2);
   });
 
-  it('a drag across the chart (a real brush-sized movement) does NOT call onOpenStation', async () => {
+  it('a drag across the chart (past the click-vs-drag threshold) does NOT call onOpenStation', async () => {
     installFakeFetch({ ...BASE_ROUTES, '/api/production': productionRouter() });
     const onOpenStation = vi.fn();
 
@@ -178,10 +178,10 @@ describe('Line — clicking a bar on the station-deviation chart opens that stat
     const cx = x + w / 2;
     const cy = y + h / 2;
 
-    // StationCompare offers no brush (stations have no calendar position to
-    // drag across — see DeviationBars' own `brush` prop doc), so this is a
-    // plain large pointer movement, not an actual committed brush — exactly
-    // the case FIX 1's own brief calls out: "must not fire after a drag".
+    // StationCompare offers no zoom (stations have no calendar position to
+    // zoom to — see DeviationBars' own `zoom` prop doc), so this is just a
+    // plain pointer movement past the click-vs-drag threshold — exactly the
+    // case FIX 1's own brief calls out: "must not fire after a drag".
     firePointer(chartBody, 'pointerdown', cx, cy);
     firePointer(chartBody, 'pointerup', cx + 200, cy);
 

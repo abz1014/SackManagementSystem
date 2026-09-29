@@ -371,22 +371,74 @@ test('Line station-deviation chart (DeviationBars): dragging .chart-resize chang
 });
 
 // ---------------------------------------------------------------------
-// 6) Brush on the Weight over-time chart -> URL p=range&from=...&to=...,
-//    top bar shows the range, requests carry fromShift/toShift, "Back to
-//    previous range" appears, browser back restores the previous URL.
+// 6) Click-to-zoom (chart overhaul wave 4, Task W1/W2, 29 Sep 2026 —
+//    replaces the drag-to-select brush this section used to test): a click
+//    on a chart mark -> URL p=range&from=...&to=... with from===to (a
+//    single shift, since one click has no second endpoint any more), top
+//    bar shows the shift in plain words, requests carry fromShift/toShift,
+//    "Back to previous range" appears, no .chart-brush element exists
+//    anywhere, browser back restores the previous URL.
 // ---------------------------------------------------------------------
-test('Weight over-time chart: brush drag zooms to a shift range', async ({ page }) => {
+test('Line: clicking the night shift bar zooms to that one shift', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  // `p=today` resolves to a single-day period, so Line's own OutputSpread
+  // groups by SHIFT (`period.days >= 2 ? 'day' : 'shift'`, Line.tsx) — three
+  // bars, morning/evening/night, in that order (`productionBySpread('shift')`
+  // in mocks.ts).
+  await primeScreen(page, SCREENS[0]!); // Line
+  const urlBefore = page.url();
+
+  const frame = page.locator('.chart-frame').filter({ has: page.locator('svg[aria-label="Cones weighed per shift"]') }).first();
+  test.skip((await frame.count()) === 0, 'Line drew no per-shift chart (period did not resolve to a single day)');
+  const bars = frame.locator('svg rect');
+  test.skip((await bars.count()) < 3, 'Line per-shift chart drew fewer than 3 bars');
+  const nightBar = bars.nth(2); // morning, evening, night
+
+  const requests: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/') && (r.url().includes('fromShift') || r.url().includes('toShift'))) requests.push(r.url());
+  });
+
+  await nightBar.click();
+  await page.waitForTimeout(300);
+
+  const url = new URL(page.url());
+  expect(url.searchParams.get('p'), `click did not produce p=range; URL: ${page.url()}`).toBe('range');
+  const from = url.searchParams.get('from') ?? '';
+  const to = url.searchParams.get('to') ?? '';
+  expect(from, 'from= is not the clicked night shift').toMatch(/\.night$/);
+  expect(to, 'to= is not the clicked night shift').toMatch(/\.night$/);
+  expect(from, 'from and to must be the SAME shift — a click has no second endpoint').toBe(to);
+
+  const rangeBtn = page.getByRole('button', { name: /night shift/i, pressed: true });
+  await expect(rangeBtn, 'top-bar period button did not show the clicked shift in plain words').toBeVisible({ timeout: 3000 });
+
+  console.log(`[zoom] requests carrying fromShift/toShift: ${requests.length}`);
+  expect(requests.length, 'no request after the click carried fromShift/toShift').toBeGreaterThan(0);
+
+  expect(await page.locator('.chart-brush').count(), 'a .chart-brush element still exists somewhere on the page').toBe(0);
+
+  const backControl = page.getByText(/back to previous range/i);
+  await expect(backControl, '"Back to previous range" control did not appear after zooming').toBeVisible({ timeout: 3000 });
+
+  await page.goBack();
+  await page.waitForTimeout(200);
+  expect(page.url(), 'browser back did not restore the pre-zoom URL').toBe(urlBefore);
+});
+
+test('Weight over-time chart: clicking a point zooms to its shift', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   // `&wm=time` forces the over-time chart (see the resize test's comment
   // above for why `p=today` alone resolves to the distribution chart,
-  // which offers no brush at all).
+  // which offers no zoomable point at all).
   await primeScreen(page, { ...SCREENS[1]!, url: SCREENS[1]!.url + '&wm=time' });
   const urlBefore = page.url();
 
   const frame = page.locator('.chart-frame').filter({ has: page.locator('svg[aria-label*="weight" i], svg[aria-label*="time" i]') }).first();
   const target = (await frame.count()) > 0 ? frame : page.locator('.chart-frame').first();
   const body = target.locator('.chart-frame-body');
-  test.skip((await body.count()) === 0, 'Weight drew no chart body to brush over');
+  test.skip((await body.count()) === 0, 'Weight drew no chart body to click');
+  await body.scrollIntoViewIfNeeded();
   const box = await body.boundingBox();
   test.skip(!box, 'chart body has no bounding box');
 
@@ -395,92 +447,53 @@ test('Weight over-time chart: brush drag zooms to a shift range', async ({ page 
     if (r.url().includes('/api/') && (r.url().includes('fromShift') || r.url().includes('toShift'))) requests.push(r.url());
   });
 
-  // See the resize test's comment: PointerEvents dispatched directly, not
-  // `page.mouse`, because a mouse-driven drag never reached this handler in
-  // this harness's Edge channel even though the identical sequence as real
-  // PointerEvents does.
-  //
-  // Root-cause note (chart overhaul wave 3, Task T9 red-team, 29 Sep 2026):
-  // this test used to skip itself here because `p` never became `range`.
-  // Two separate causes, both confirmed by driving the real, signed-in app
-  // against live simulator data in a browser (never against this mock):
-  //  1) `support/mocks.ts`'s `spc()` fixture omitted every subgroup's
-  //     `firstShiftDate`/`firstShiftCode`/`lastShiftDate`/`lastShiftCode` —
-  //     fields the real `/api/spc` always populates (`api/src/services/
-  //     spc.ts`'s `decodeShiftKey` comment: "never null in practice").
-  //     `Weight.tsx`'s `subgroupShiftRange` returns null, and `commitBrush`
-  //     silently no-ops, whenever any of the four is missing — CORRECT
-  //     behaviour for a genuinely old API response, but this fixture wasn't
-  //     one; it was just incomplete. Fixed in `mocks.ts` (now included).
-  //  2) Separately, `useChartBrush`'s `beginActive` calls
-  //     `target.setPointerCapture?.(pointerId)` on pointerdown, and firing
-  //     the whole down/move/move/up sequence in one synchronous burst (as
-  //     this test always has) raced that capture on real production code
-  //     too — reproduced against the live app: the identical burst
-  //     committed NOTHING, while the identical sequence with a short delay
-  //     between each dispatched event committed correctly every time. A real
-  //     mouse drag is never a zero-time burst (the OS delivers move events
-  //     spaced by its own sampling interval), so this is a synthetic-event
-  //     artifact of this harness, the same category the comment above
-  //     already documents for `page.mouse` vs raw `PointerEvent`s — not an
-  //     app defect. Small `waitForTimeout`s between dispatches below sidestep
-  //     it, exercising the same real handlers a real drag would reach.
-  const y = box!.y + box!.height / 2;
-  const x0 = box!.x + box!.width * 0.2;
-  const xMid = box!.x + box!.width * 0.45;
-  const x1 = box!.x + box!.width * 0.7;
-  const dispatchPointer = (type: string, x: number) =>
-    page.evaluate(
-      ({ type, x, y }) => {
-        const el = document.querySelector('.chart-frame-body') as HTMLElement | null;
-        el?.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, bubbles: true, cancelable: true }));
-      },
-      { type, x, y },
-    );
-  await dispatchPointer('pointerdown', x0);
-  await page.waitForTimeout(60);
-  await dispatchPointer('pointermove', xMid);
-  await page.waitForTimeout(60);
-  await dispatchPointer('pointermove', x1);
-  await page.waitForTimeout(60);
-  await dispatchPointer('pointerup', x1);
-  await page.waitForTimeout(400);
+  // A plain click — pointerdown/pointerup at the SAME point — near the left
+  // edge of the plot band, which `hit()` resolves to the nearest subgroup
+  // (`Weight.tsx`'s `OverTime`, `nearestIndex`). `locator.click` with a
+  // `position` (rather than `page.mouse.click` at raw viewport coordinates)
+  // scrolls the element into view first — the chart sits below the fold at
+  // 1366x900, so raw coordinates from a stale `boundingBox()` landed outside
+  // the visible viewport and the click silently missed everything.
+  await body.click({ position: { x: box!.width * 0.3, y: box!.height / 2 } });
+  await page.waitForTimeout(300);
 
   const url = new URL(page.url());
-  expect(url.searchParams.get('p'), `brush drag did not produce p=range; URL: ${page.url()}`).toBe('range');
+  expect(url.searchParams.get('p'), `click did not produce p=range; URL: ${page.url()}`).toBe('range');
   const from = url.searchParams.get('from') ?? '';
   const to = url.searchParams.get('to') ?? '';
   expect(from, 'from= param missing a shift suffix').toMatch(/\.(morning|evening|night)/);
   expect(to, 'to= param missing a shift suffix').toMatch(/\.(morning|evening|night)/);
 
   await page.waitForTimeout(300);
-  console.log(`[brush] requests carrying fromShift/toShift: ${requests.length}`);
-  expect(requests.length, 'no request after the brush carried fromShift/toShift').toBeGreaterThan(0);
+  console.log(`[zoom] requests carrying fromShift/toShift: ${requests.length}`);
+  expect(requests.length, 'no request after the click carried fromShift/toShift').toBeGreaterThan(0);
+
+  expect(await page.locator('.chart-brush').count(), 'a .chart-brush element still exists somewhere on the page').toBe(0);
 
   const backControl = page.getByText(/back to previous range/i);
   await expect(backControl, '"Back to previous range" control did not appear after zooming').toBeVisible({ timeout: 3000 });
 
   await page.goBack();
   await page.waitForTimeout(200);
-  expect(page.url(), 'browser back did not restore the pre-brush URL').toBe(urlBefore);
+  expect(page.url(), 'browser back did not restore the pre-zoom URL').toBe(urlBefore);
 });
 
 // ---------------------------------------------------------------------
-// 7) Print emulation: no .chart-tip/.chart-resize/.chart-brush visible;
+// 7) Print emulation: no .chart-tip/.chart-resize visible;
 //    charts fixed width; Report pages landscape.
 // ---------------------------------------------------------------------
 test('Print emulation: Weight hides interactive chart chrome under print media', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await primeScreen(page, SCREENS[1]!); // Weight
 
-  // Establish a tip/resize/brush are at least present in screen media first,
+  // Establish a tip/resize control is at least present in screen media first,
   // so "not visible in print" is a real transition, not "never existed".
   await expect(page.locator('.chart-resize').first()).toBeVisible();
 
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(150);
 
-  for (const sel of ['.chart-tip', '.chart-resize', '.chart-brush']) {
+  for (const sel of ['.chart-tip', '.chart-resize']) {
     const count = await page.locator(sel).count();
     for (let i = 0; i < count; i++) {
       const visible = await page.locator(sel).nth(i).isVisible();
@@ -503,7 +516,7 @@ test('Print emulation: Report screen prints landscape (role=group aria-label=Rep
   await page.emulateMedia({ media: 'print' });
   await page.waitForTimeout(150);
 
-  for (const sel of ['.chart-tip', '.chart-resize', '.chart-brush']) {
+  for (const sel of ['.chart-tip', '.chart-resize']) {
     const count = await page.locator(sel).count();
     for (let i = 0; i < count; i++) {
       expect(await page.locator(sel).nth(i).isVisible(), `${sel} #${i} visible under print media on Report`).toBe(false);

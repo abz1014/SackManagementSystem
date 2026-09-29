@@ -1,12 +1,13 @@
 /**
- * Chart overhaul, wave 3, Task T7 (29 Sep 2026). Covers only what T7 changed
- * in `StationSheet.tsx`'s `DailyMeans` chart: a tooltip on every day (not
- * just flagged ones, and it now includes vs-line/vs-target/cones), keyboard
- * navigation through `ChartFrame`, the drag-to-select brush handing a
- * shift-snapped `PeriodParams` to `onSelectPeriod`, and de-collided gutter
- * labels when the target and the line mean coincide. Everything else about
- * the sheet (the KV block, the flagged-days table, the adjustment ledger,
- * the log form) is unchanged and untested here.
+ * Chart overhaul, wave 3, Task T7 (29 Sep 2026; click-to-zoom rewrite, Task
+ * W2, same date). Covers only what T7 changed in `StationSheet.tsx`'s
+ * `DailyMeans` chart: a tooltip on every day (not just flagged ones, and it
+ * now includes vs-line/vs-target/cones), keyboard navigation through
+ * `ChartFrame`, a click on a day zooming to that day's own shift-snapped
+ * `PeriodParams` via `onSelectPeriod`, and de-collided gutter labels when
+ * the target and the line mean coincide. Everything else about the sheet
+ * (the KV block, the flagged-days table, the adjustment ledger, the log
+ * form) is unchanged and untested here.
  *
  * `canAdjust: false` throughout: `LogForm` calls `usePlantNow()`, which
  * throws outside `<LiveProvider>` — not needed for anything this file
@@ -174,41 +175,72 @@ describe('StationSheet DailyMeans — keyboard navigation', () => {
   });
 });
 
-describe('StationSheet DailyMeans — brush selects a shift-snapped period', () => {
-  it('a drag across two days calls onSelectPeriod with the day-snapped range', async () => {
+describe('StationSheet DailyMeans — click-to-zoom to a shift-snapped period', () => {
+  it('Enter on the keyboard-active day (25 Aug) zooms to that day, morning..night', async () => {
+    const onSelectPeriod = vi.fn();
+    const { container } = renderSheet({ onSelectPeriod });
+    const body = await waitForChart(container);
+    body.focus();
+
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // lands on day 0: 25 Aug
+    fireEvent.keyDown(body, { key: 'Enter' });
+
+    expect(onSelectPeriod).toHaveBeenCalledTimes(1);
+    const params = onSelectPeriod.mock.calls[0]![0];
+    expect(params.key).toBe('range');
+    expect(params.range.from).toEqual({ date: '2026-08-25', shift: 'morning' });
+    expect(params.range.to).toEqual({ date: '2026-08-25', shift: 'night' });
+  });
+
+  it('a real mouse click (not a drag) on a point zooms the same way', async () => {
     const onSelectPeriod = vi.fn();
     const { container } = renderSheet({ onSelectPeriod });
     const body = await waitForChart(container);
 
     // Fallback chart width in jsdom (no real ResizeObserver firing) is
     // useChartSize's DEFAULT_FALLBACK_W, 1036px; 4 days spread across
-    // [L, width-R]. A drag from the first day's x to the last day's x
-    // selects the whole window.
+    // [L, width-R] — clientX 0 lands nearest the first day, 25 Aug.
     const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
     Object.defineProperty(down, 'pointerId', { value: 1 });
     Object.defineProperty(down, 'pointerType', { value: 'mouse' });
-    const move = new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
-    Object.defineProperty(move, 'pointerId', { value: 1 });
-    Object.defineProperty(move, 'pointerType', { value: 'mouse' });
-    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
+    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
     Object.defineProperty(up, 'pointerId', { value: 1 });
     Object.defineProperty(up, 'pointerType', { value: 'mouse' });
 
     act(() => body.dispatchEvent(down));
-    act(() => body.dispatchEvent(move));
     act(() => body.dispatchEvent(up));
 
     expect(onSelectPeriod).toHaveBeenCalledTimes(1);
     const params = onSelectPeriod.mock.calls[0]![0];
     expect(params.key).toBe('range');
     expect(params.range.from).toEqual({ date: '2026-08-25', shift: 'morning' });
-    expect(params.range.to).toEqual({ date: '2026-08-28', shift: 'night' });
+    expect(params.range.to).toEqual({ date: '2026-08-25', shift: 'night' });
   });
 
-  it('does not render a brush affordance when onSelectPeriod is not wired', async () => {
+  it('a drag past the click threshold does not zoom', async () => {
+    const onSelectPeriod = vi.fn();
+    const { container } = renderSheet({ onSelectPeriod });
+    const body = await waitForChart(container);
+
+    const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
+    Object.defineProperty(down, 'pointerId', { value: 1 });
+    Object.defineProperty(down, 'pointerType', { value: 'mouse' });
+    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
+    Object.defineProperty(up, 'pointerId', { value: 1 });
+    Object.defineProperty(up, 'pointerType', { value: 'mouse' });
+
+    act(() => body.dispatchEvent(down));
+    act(() => body.dispatchEvent(up));
+
+    expect(onSelectPeriod).not.toHaveBeenCalled();
+  });
+
+  it('does not offer to zoom (no can-activate class) when onSelectPeriod is not wired', async () => {
     const { container } = renderSheet();
     const body = await waitForChart(container);
-    expect(body.getAttribute('title')).toBeNull();
+    body.focus();
+    fireEvent.keyDown(body, { key: 'ArrowRight' });
+    expect(body.className).not.toContain('can-activate');
   });
 });
 

@@ -20,12 +20,12 @@ import {
   edgeAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
   linePath, fittingTicks, tickIndices, CategoryBars, type BarDatum,
 } from '../../ui/chart';
-import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameBrush } from '../../ui/ChartFrame';
+import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../../ui/ChartFrame';
 import {
   gutterFor, textPx, bandHit, rowHit, nearestIndex, placeGutterLabels,
   type Rect, type GutterLabelIn,
 } from '../../ui/chartLayout';
-import { dayToShiftRange, snapToShifts, describePeriod, type ShiftRef, type PeriodParams } from '../../lib/period';
+import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
 import { fmtDayLong, fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -144,12 +144,13 @@ export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[
 /**
  * Chart overhaul wave 3, Task T5 (29 Sep 2026): rebuilt on `CategoryBars`
  * (`ui/chart.tsx`) rather than a hand-rolled `<svg>` — the tooltip, re-layout,
- * drag-to-resize and (now optional) drag-to-select-sets-the-page-period all
- * come from `ChartFrame` for free. `onSelect`, when given, turns on the
- * brush: each bar is one production day, so a drag snaps to that day's
+ * drag-to-resize and (now optional) click-to-zoom-sets-the-page-period all
+ * come from `ChartFrame` for free. `onSelect`, when given, turns on zoom:
+ * each bar is one production day, so a click snaps to that day's
  * `D.morning..D.night` shift span (`dayToShiftRange`) — never a partial day.
  * Optional and defaulted to nothing so every existing caller (`Shift.tsx`,
- * `Daily.tsx`) compiles and renders exactly as before.
+ * `Daily.tsx`) compiles and renders exactly as before. (Task W2, 29 Sep 2026:
+ * drag-to-select removed everywhere; see `ChartFrame.tsx`'s own header.)
  */
 export function DayBars({
   rows,
@@ -160,8 +161,8 @@ export function DayBars({
   rows: ReportLine[];
   label?: string;
   chartId?: string;
-  /** Wires the drag-to-select brush: fires with the whole-page period a drag
-   *  snapped to. Omitted (the default) draws the chart with no brush. */
+  /** Wires click-to-zoom: fires with the whole-page period a click on a day
+   *  bar snapped to. Omitted (the default) draws the chart with no zoom. */
   onSelect?: (p: PeriodParams) => void;
 }) {
   const days = rows.filter((r) => r.group !== 'total');
@@ -176,7 +177,7 @@ export function DayBars({
     detail: `${fmtDayLong(d.group)} · ${fmtInt(d.cones)} cones · ${fmtInt(d.sacks)} sacks`,
   }));
   const resting = `${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(min)} to ${fmtInt(max)} cones`;
-  const brush = onSelect
+  const zoom = onSelect
     ? {
         refs: days.map((d): [ShiftRef, ShiftRef] => {
           const r = dayToShiftRange(d.group, d.group);
@@ -188,7 +189,7 @@ export function DayBars({
 
   return (
     <div className={days.length < 2 ? 'no-print' : undefined}>
-      <CategoryBars data={data} ariaLabel={label} resting={resting} valueFmt={fmtInt} chartId={chartId} brush={brush} />
+      <CategoryBars data={data} ariaLabel={label} resting={resting} valueFmt={fmtInt} chartId={chartId} zoom={zoom} />
     </div>
   );
 }
@@ -356,8 +357,8 @@ function bucketTicks(lo: number, hi: number, size: number, plotW: number, minPx 
  * the product's limits sit — inside/outside them) and a left gutter sized to
  * the y-max label rather than a fixed 48px (`gutterFor`, reused for the LEFT
  * margin: it only ever computes "how wide does this text need", which does
- * not care which side of the plot it sits on). No brush: a histogram's x
- * axis is a weight, not a timeline, and there is no page-period to select
+ * not care which side of the plot it sits on). No zoom: a histogram's x
+ * axis is a weight, not a timeline, and there is no page-period to zoom to
  * from it.
  */
 export function Histogram({
@@ -682,7 +683,7 @@ export function DeviationBars({
   chartId,
   tip,
   onActivate,
-  brush,
+  zoom,
 }: {
   rows: DeviationRow[];
   ariaLabel: string;
@@ -710,15 +711,20 @@ export function DeviationBars({
   /** Per-bar tooltip, e.g. "Station 5 · 1,234 cones · 20 fewer than the row
    *  median of 1,254". Falls back to the bar's own `title`/`label: value`. */
   tip?: (i: number) => ChartTip | null;
-  /** Line opens the station sheet; omitted, a bar is inert beyond hover. */
+  /** Line opens the station sheet; omitted, a bar is inert beyond hover.
+   *  Wins over `zoom` when both are given (`ChartFrame`'s own precedence) —
+   *  station mode passes this, never `zoom`, so a station bar always opens
+   *  its sheet rather than zooming the page to a period it has none of. */
   onActivate?: (i: number) => void;
   /**
-   * Drag-select sets the WHOLE PAGE period, ONLY when the caller states its
+   * Click-to-zoom sets the WHOLE PAGE period, ONLY when the caller states its
    * rows ARE days (`refs`, one `[ShiftRef, ShiftRef]` pair per row) — never
-   * offered for a row of stations, which has no calendar position to drag
-   * across. Omitted (the default), the chart draws with no brush.
+   * offered for a row of stations, which has no calendar position to zoom
+   * to. Omitted (the default), the chart draws with no zoom. Task W2 (29 Sep
+   * 2026): renamed from `brush` — a click on a day bar now zooms directly,
+   * there is no drag left to commit.
    */
-  brush?: { refs: [ShiftRef, ShiftRef][]; onSelect: (p: PeriodParams) => void };
+  zoom?: { refs: [ShiftRef, ShiftRef][]; onSelect: (p: PeriodParams) => void };
 }) {
   if (rows.length < MIN_MULTIROW) return null;
 
@@ -793,16 +799,14 @@ export function DeviationBars({
     return { heading: r.label, rows: [{ name: '', value: r.title ?? valueFmt(r.value) }] };
   };
 
-  const brushProp = brush
+  const zoomProp: ChartFrameZoom | undefined = zoom
     ? {
-        xs: rows.map((_, i) => (layoutRef.current ?? computeLayout(1036, 13, height)).cx(i)),
-        onCommit: (i0: number, i1: number) => {
-          const pair0 = brush.refs[i0];
-          const pair1 = brush.refs[i1];
-          if (!pair0 || !pair1) return;
-          const snapped = snapToShifts(pair0[0], pair1[1]);
-          if (snapped) brush.onSelect(snapped);
+        periodFor: (i: number): PeriodParams | null => {
+          const pair = zoom.refs[i];
+          if (!pair) return null;
+          return snapToShifts(pair[0], pair[1]);
         },
+        onZoom: zoom.onSelect,
       }
     : undefined;
 
@@ -817,7 +821,7 @@ export function DeviationBars({
       tipFor={tipFor}
       markRect={markRect}
       onActivate={onActivate}
-      brush={brushProp}
+      zoom={zoomProp}
     >
       {(fsize) => {
         // `fsize.height` is `ChartFrame`'s live, possibly drag-resized
@@ -1002,14 +1006,17 @@ export interface TrendBucket {
  * sounder thing, not the same defect under a new name.
  *
  * Chart overhaul wave 3, Task T8b (29 Sep 2026): migrated onto `ChartFrame` —
- * the floating tooltip, keyboard navigation, drag-to-resize handle and a
- * shift-snapped brush this chart previously carried by hand
+ * the floating tooltip, keyboard navigation and drag-to-resize handle this
+ * chart previously carried by hand
  * (`report.series.test.tsx`'s old `rect.hit`/`.readout` assertions were the
  * stated reason it was left off `ChartFrame` in `a9ee7e0`; that file's
  * assertions are rewritten to test tooltip BEHAVIOUR instead, so the reason
  * no longer holds). `hit` always resolves to the nearest day — every day
  * stays hoverable/focusable even on a gap, exactly as the old full-height
  * `rect.hit` per index did, so "no reading this day" is still reachable.
+ * Task W2 (29 Sep 2026): the drag-to-select brush this chart carried is
+ * replaced by click-to-zoom — a click (or Enter) on a point zooms the whole
+ * page to that point's own day.
  */
 export function RejectTrendChart({
   quality,
@@ -1032,11 +1039,9 @@ export function RejectTrendChart({
   labelFmt?: (ts: string) => string;
   ariaLabel?: string;
   /**
-   * Drag-select (or Shift+Arrow, then `+`, on the keyboard — `ChartFrame`'s
-   * own brush path) sets the WHOLE PAGE period, snapped to shift boundaries —
-   * each day is one point on this chart, so a drag spans `dayToShiftRange`
-   * for its first and last day. Omitted (the default), the chart draws with
-   * no brush.
+   * A click (or Enter on the keyboard-active point) sets the WHOLE PAGE
+   * period, snapped to that point's own day (`dayToShiftRange`). Omitted
+   * (the default), the chart draws with no zoom.
    */
   onSelect?: (p: PeriodParams) => void;
 }) {
@@ -1097,9 +1102,8 @@ export function RejectTrendChart({
     return { width, height, x, y };
   };
   // 1036 mirrors `useChartSize.ts`'s own fallback width, the same device
-  // `CategoryBars` uses so the very first brush.xs this component hands down
-  // agrees with what ChartFrame is about to paint before its first real
-  // measurement.
+  // `CategoryBars` uses so `hit`/`markRect`, called before `ChartFrame`'s
+  // first real measurement, agree with what it is about to paint.
   const fallbackLayout = () => computeLayout(1036, H);
 
   const inPeriod = (ts: string) => periodFrom != null && periodTo != null && ts.slice(0, 10) >= periodFrom && ts.slice(0, 10) <= periodTo;
@@ -1190,30 +1194,20 @@ export function RejectTrendChart({
     return { heading: labelFmt(s.ts), rows, context };
   };
 
-  const brushProp: ChartFrameBrush | undefined = onSelect
+  // Task W2 (29 Sep 2026): a click on a point zooms the whole page to that
+  // point's own day (`dayToShiftRange`) — there is no second endpoint to
+  // commit, so `zoomHint`/`ChartFrame`'s own hint copy replaces the old
+  // `brushLabel`, which existed only to describe a drag's two ends.
+  const zoomProp: ChartFrameZoom | undefined = onSelect
     ? {
-        xs: series.map((_, i) => (layoutRef.current ?? fallbackLayout()).x(i)),
-        onCommit: (i0: number, i1: number) => {
-          const d0 = series[i0]!.ts.slice(0, 10);
-          const d1 = series[i1]!.ts.slice(0, 10);
-          const r0 = dayToShiftRange(d0, d0);
-          const r1 = dayToShiftRange(d1, d1);
-          const snapped = snapToShifts(r0.from, r1.to);
-          if (snapped) onSelect(snapped);
+        periodFor: (i: number): PeriodParams | null => {
+          const s = series[i];
+          if (!s) return null;
+          const d = s.ts.slice(0, 10);
+          const r = dayToShiftRange(d, d);
+          return snapToShifts(r.from, r.to);
         },
-      }
-    : undefined;
-
-  const brushLabel = onSelect
-    ? (i0: number, i1: number): string => {
-        const d0 = series[i0]!.ts.slice(0, 10);
-        const d1 = series[i1]!.ts.slice(0, 10);
-        const r0 = dayToShiftRange(d0, d0);
-        const r1 = dayToShiftRange(d1, d1);
-        return describePeriod({
-          key: 'range', from: r0.from.date, to: r1.to.date, tsTo: '',
-          fromShift: r0.from, toShift: r1.to, live: false, days: 0,
-        });
+        onZoom: onSelect,
       }
     : undefined;
 
@@ -1228,8 +1222,7 @@ export function RejectTrendChart({
       count={series.length}
       tipFor={tipFor}
       markRect={markRect}
-      brush={brushProp}
-      brushLabel={brushLabel}
+      zoom={zoomProp}
     >
       {(fsize) => {
         const layout = computeLayout(fsize.width, fsize.height);

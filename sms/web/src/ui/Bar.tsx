@@ -71,9 +71,10 @@ function GearIcon() {
 }
 
 /**
- * The 'range' period button's own label: `describePeriod`'s shift-span
- * wording ("2 Sep morning shift – 3 Sep night shift") once a chart drag-
- * select has actually set one, else the plain fallback word. `describePeriod`
+ * The 'range' period button's own label: `describePeriod`'s collapsed
+ * wording ("25 Sep, night shift" / "25 Sep" / "2 Sep – 3 Sep") once a chart
+ * click-to-zoom (Task W1/W2, 29 Sep 2026 — there is no drag-select any more)
+ * has actually set one, else the plain fallback word. `describePeriod`
  * takes a full `Period` (it also wants `tsTo`/`live`/`days` for its OTHER
  * branches), but the range branch it takes here reads only
  * `fromShift`/`toShift`, so the rest of the object is filled with harmless

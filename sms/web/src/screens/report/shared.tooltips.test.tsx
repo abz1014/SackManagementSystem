@@ -4,7 +4,7 @@
  * `DeviationBars`) now carries, reached via keyboard (ArrowRight) so it does
  * not depend on pointer support in the test DOM. `RejectTrendChart` is not
  * covered here — it was migrated onto `ChartFrame` separately (commit
- * `ceecc55`), and its own tooltip and brush behaviour are covered by
+ * `ceecc55`), and its own tooltip and click-to-zoom behaviour are covered by
  * `report.series.test.tsx` instead, which this task does not own.
  */
 import { describe, expect, it } from 'vitest';

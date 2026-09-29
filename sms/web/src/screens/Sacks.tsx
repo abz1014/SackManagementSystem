@@ -116,8 +116,8 @@ export function SacksScreen({
   onOpenReading: (type: RegisterType, id: string | number) => void;
   /** The stock sheet for one production day. */
   onOpenDay: (day: string) => void;
-  /** Chart overhaul, Task T8b (29 Sep 2026): drag-select on the per-day
-   *  weighed chart or the per-day avg-weight-vs-period chart snaps the WHOLE
+  /** Chart overhaul, Task T8b/W2 (29 Sep 2026): a click on the per-day
+   *  weighed chart or the per-day avg-weight-vs-period chart zooms the WHOLE
    *  PAGE period to shift boundaries — the same `onSelectPeriod?` contract
    *  `StationSheet`/`Weight` already take. Optional so this compiles and
    *  renders unchanged until App.tsx wires it. */
@@ -316,14 +316,17 @@ function SackWeighedChart({ days, onSelectPeriod }: { days: LedgerDay[]; onSelec
     key: d.day,
     label: fmtDayShort(d.day),
     value: d.weighed.sacks,
-    detail: `${fmtDayLong(d.day)} · ${fmtInt(d.weighed.sacks)} ${W.sacks.figSacks} · ${fmtInt(finiteOrNull(Math.round(d.weighed.kg)))} ${W.sacks.figKg}`,
+    // Task W2 (29 Sep 2026): no leading label — `d.label`/the day is already
+    // the tooltip heading `ChartFrame` states; repeating `fmtDayLong` here
+    // printed the day twice in one readout line.
+    detail: `${fmtInt(d.weighed.sacks)} ${W.sacks.figSacks} · ${fmtInt(finiteOrNull(Math.round(d.weighed.kg)))} ${W.sacks.figKg}`,
   }));
   const total = days.reduce((sum, d) => sum + d.weighed.sacks, 0);
   const busiest = days.reduce((best, d) => (d.weighed.sacks > best.weighed.sacks ? d : best), days[0]!);
-  // Chart overhaul T8b: one bar is one production day, so a drag snaps to
+  // Chart overhaul T8b/W2: one bar is one production day, so a click zooms to
   // that day's whole D.morning..D.night span — the same idiom
   // `report/shared.tsx`'s `DayBars` already uses for the identical shape.
-  const brush = onSelectPeriod
+  const zoom = onSelectPeriod
     ? {
         refs: days.map((d): [ShiftRef, ShiftRef] => {
           const r = dayToShiftRange(d.day, d.day);
@@ -339,7 +342,7 @@ function SackWeighedChart({ days, onSelectPeriod }: { days: LedgerDay[]; onSelec
       ariaLabel={W.sacks.weighedPerDayAria}
       valueFmt={fmtInt}
       chartId="sacks-weighed-per-day"
-      brush={brush}
+      zoom={zoom}
       resting={W.sacks.weighedResting(
         days.length,
         fmtInt(total),
@@ -378,7 +381,7 @@ function AvgWeightPerDay({ report, onSelectPeriod }: { report: SackReportData; o
     value: Number(((r.avgSackKg as number) - mean).toFixed(3)),
   }));
   const worst = rows.reduce((a, b) => (Math.abs(b.value) > Math.abs(a.value) ? b : a), rows[0]!);
-  const brush = onSelectPeriod
+  const zoom = onSelectPeriod
     ? {
         refs: days.map((r): [ShiftRef, ShiftRef] => {
           const rg = dayToShiftRange(r.group, r.group);
@@ -397,7 +400,7 @@ function AvgWeightPerDay({ report, onSelectPeriod }: { report: SackReportData; o
         valueFmt={(v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtKg(Math.abs(v))}`}
         height={260}
         chartId="sacks-avg-weight-per-day"
-        brush={brush}
+        zoom={zoom}
         /* 0.1 kg either side — about 0.2% of a 47 kg sack, and set by
            measurement rather than taste. At ±0.5 kg (the first value tried)
            the real day-to-day movement drew as an invisible hairline, which

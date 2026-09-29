@@ -34,11 +34,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Details, Empty, SkelLines } from '../ui/bits';
 import { linePath } from '../ui/chart';
-import { ChartFrame, type ChartTip, type ChartTipRow } from '../ui/ChartFrame';
+import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../ui/ChartFrame';
 import { placeGutterLabels, nearestIndex, type Rect } from '../ui/chartLayout';
 import { W } from '../lib/words';
 import {
-  TRAILING_DAYS, dayToShiftRange, snapToShifts, describePeriod,
+  TRAILING_DAYS, dayToShiftRange, snapToShifts,
   type PeriodParams,
 } from '../lib/period';
 import { fmtClock, fmtG, fmtInt } from '../lib/fmt';
@@ -92,16 +92,16 @@ export function StationSheet({
   onSeeShiftReport: () => void;
   /**
    * Chart overhaul, wave 3, Task T7 (29 Sep 2026): the daily-means chart's
-   * drag-select produces a shift-snapped whole-page period
+   * click-to-zoom produces a shift-snapped whole-page period
    * (`dayToShiftRange` + `snapToShifts`) and hands it here rather than
    * applying it itself — StationSheet has no reach into the page's own
    * period state. Optional because no caller wires it yet: App.tsx opens
    * this sheet with no period setter passed in (see the `go({ sheet: ... })`
    * calls around StationSheet in App.tsx). Wiring `onSelectPeriod={(p) =>
    * go({ period: p })}` there — the same shape Bar's own `onPeriod` already
-   * uses at App.tsx:467 — is Task T8's, not this one's. Until then the brush
-   * still shows the drag and the "Release to show …" label; it just has
-   * nothing to commit to, so it is not rendered at all (see DailyMeans).
+   * uses at App.tsx:467 — is Task T8's, not this one's. Until then a day
+   * mark simply has nothing to zoom to, so it is not rendered as
+   * activatable at all (see DailyMeans).
    */
   onSelectPeriod?: (p: PeriodParams) => void;
 }) {
@@ -498,11 +498,11 @@ const short = (d: string) =>
  * Chart overhaul, wave 3, Task T7 (29 Sep 2026): rebuilt on `ChartFrame` —
  * real width via `useChartSize` (`ChartFrame`'s own, `chartId`
  * 'station-daily'), a tooltip on every day (not just flagged ones), de-
- * collided gutter labels, and a drag-select that snaps to shifts and offers
- * the whole-page period to `onSelectPeriod`. Print is unchanged: `ChartFrame`
- * already renders a fixed width with no tooltip/handle/brush while
- * `size.print` is true, which is `useChartSize`'s own doing, not this
- * component's.
+ * collided gutter labels, and (Task W2, 29 Sep 2026) a click on a day that
+ * snaps to shifts and offers the whole-page period to `onSelectPeriod`.
+ * Print is unchanged: `ChartFrame` already renders a fixed width with no
+ * tooltip/handle/zoom cursor while `size.print` is true, which is
+ * `useChartSize`'s own doing, not this component's.
  */
 function DailyMeans({
   row,
@@ -528,12 +528,11 @@ function DailyMeans({
 
   /* geoRef/xsRef hold the CURRENT pixel geometry, kept fresh by `children`
      below on every ChartFrame render (including ones this component did not
-     itself cause, e.g. a resize). `hit`/`markRect` read geoRef.current at
-     call time, always after the render that set it, so they never see stale
-     geometry. `xsRef` is a stable array MUTATED in place (never reassigned)
-     because `brush.xs` is captured by value in the `brush` prop object at
-     THIS component's own last render; only in-place mutation stays visible
-     to ChartFrame's internal callbacks without this component re-rendering. */
+     itself cause, e.g. a resize). `hit`/`markRect` read geoRef.current/
+     xsRef.current at call time, always after the render that set them, so
+     they never see stale geometry. `xsRef` is mutated in place (never
+     reassigned) purely so `hit`'s own closure — captured once per
+     `ChartFrame` render — keeps seeing live pixel positions. */
   const geoRef = useRef<{ x: (i: number) => number; y: (v: number) => number } | null>(null);
   const xsRef = useRef<number[]>([]);
 
@@ -577,27 +576,20 @@ function DailyMeans({
     return { heading: short(d.date), rows, context: context.length > 0 ? context : undefined };
   };
 
-  const rangeLabel = (i0: number, i1: number): string => {
-    const d0 = days[i0]?.date;
-    const d1 = days[i1]?.date;
-    if (!d0 || !d1) return '';
-    const { from, to } = dayToShiftRange(d0, d1);
-    const sameShift = from.date === to.date && from.shift === to.shift;
-    return describePeriod({
-      key: 'range', from: from.date, to: to.date, tsTo: '', live: false, days: 1,
-      fromShift: from, toShift: to, shift: sameShift ? from.shift : undefined,
-    });
-  };
-
-  const commitBrush = (i0: number, i1: number) => {
-    if (!onSelectPeriod) return;
-    const d0 = days[i0]?.date;
-    const d1 = days[i1]?.date;
-    if (!d0 || !d1) return;
-    const { from, to } = dayToShiftRange(d0, d1);
-    const params = snapToShifts(from, to);
-    if (params) onSelectPeriod(params);
-  };
+  // Task W2 (29 Sep 2026): a click on a day zooms the whole page to that
+  // day's own D.morning..D.night span — one point, one day, so there is no
+  // second endpoint to snap a drag between any more.
+  const zoomProp: ChartFrameZoom | undefined = onSelectPeriod
+    ? {
+        periodFor: (i: number): PeriodParams | null => {
+          const d = days[i]?.date;
+          if (!d) return null;
+          const { from, to } = dayToShiftRange(d, d);
+          return snapToShifts(from, to);
+        },
+        onZoom: onSelectPeriod,
+      }
+    : undefined;
 
   // history.back() only when there is somewhere to go back TO (a prior
   // zoom pushed a state entry) — ChartFrame's own onBack contract.
@@ -616,8 +608,7 @@ function DailyMeans({
       count={days.length}
       tipFor={tipFor}
       markRect={markRect}
-      brush={onSelectPeriod ? { onCommit: commitBrush, xs: xsRef.current } : undefined}
-      brushLabel={rangeLabel}
+      zoom={zoomProp}
       onBack={onBack}
     >
       {(size) => {

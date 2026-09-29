@@ -36,7 +36,7 @@ import {
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
 import { edgeAnchor, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
-import { ChartFrame, type ChartTip, type ChartTipRow } from '../ui/ChartFrame';
+import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../ui/ChartFrame';
 import { placeGutterLabels, placeTip, packRow, textPx, bandHit, nearestIndex, type Rect } from '../ui/chartLayout';
 import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
@@ -101,8 +101,9 @@ export function WeightScreen({
   onOpenStation: (station: number) => void;
   onSeeOutside: () => void;
   /**
-   * Chart overhaul wave 3, Task T6 (29 Sep 2026). Drag-select on the OverTime
-   * chart snaps the WHOLE PAGE period to shift boundaries
+   * Chart overhaul wave 3, Task T6 (29 Sep 2026; click-to-zoom, Task W2, same
+   * date). A click on the OverTime chart snaps the WHOLE PAGE period to
+   * shift boundaries
    * (`lib/period.ts`'s `snapToShifts`) and hands the result here, the same
    * `onSelectPeriod?` contract `StationSheet.tsx`'s `DailyMeans` already
    * uses. **Not yet wired in `App.tsx`** — that file belongs to Task T8a
@@ -915,9 +916,13 @@ function subgroupSpan(p: Subgroup, bucketMinutes: number, multiDay: boolean): st
   return `${tickLabel(p.ts, multiDay)} – ${tickLabel(endIso, multiDay)}`;
 }
 
-/** The brush's shift-ref pair for a subgroup range, or null when the API
+/** The shift-ref pair a subgroup range zooms to, or null when the API
  *  response predates the shift fields (962a18b) — a caller must then not
- *  offer the brush at all rather than snap against undefined dates. */
+ *  offer that subgroup as zoomable at all rather than snap against
+ *  undefined dates. Called with `i0 === i1` for a single clicked point
+ *  (Task W2, 29 Sep 2026) since there is no second endpoint any more, but
+ *  takes a range so the same helper still works for the on-chart selection
+ *  a point's own subgroup itself spans. */
 function subgroupShiftRange(g: Subgroup[], i0: number, i1: number): { from: ShiftRef; to: ShiftRef } | null {
   const p0 = g[i0];
   const p1 = g[i1];
@@ -965,9 +970,7 @@ function OverTime({
   // Kept fresh by `children` below on every ChartFrame render (a resize
   // included); `hit`/`markRect` read `.current` at call time, always after
   // the render that set it — same idiom as `StationSheet.tsx`'s
-  // `DailyMeans`. `xsRef` is mutated in place, never reassigned, because the
-  // `brush` prop object below captures it by reference at THIS component's
-  // own last render.
+  // `DailyMeans`.
   const geoRef = useRef<{ x: (i: number) => number; y: (v: number) => number } | null>(null);
   const xsRef = useRef<number[]>([]);
 
@@ -1005,24 +1008,21 @@ function OverTime({
     return { heading: subgroupSpan(p, spc.bucketMinutes, multiDay), rows, context: context.length > 0 ? context : undefined };
   };
 
-  const commitBrush = (i0: number, i1: number) => {
-    if (!onSelectPeriod) return;
-    const range = subgroupShiftRange(g, i0, i1);
-    if (!range) return;
-    const params = snapToShifts(range.from, range.to);
-    if (params) onSelectPeriod(params);
-  };
-
-  const brushLabel = (i0: number, i1: number): string => {
-    const range = subgroupShiftRange(g, i0, i1);
-    if (!range) return '';
-    const { from, to } = range;
-    const sameShift = from.date === to.date && from.shift === to.shift;
-    return describePeriod({
-      key: 'range', from: from.date, to: to.date, tsTo: '', live: false, days: 1,
-      fromShift: from, toShift: to, shift: sameShift ? from.shift : undefined,
-    });
-  };
+  // Task W2 (29 Sep 2026): a click on a point zooms the whole page to that
+  // subgroup's own shift span. `subgroupShiftRange(g, i, i)` returns null
+  // when the response predates the shift fields — that point then has
+  // nothing to zoom to, matching `ChartFrameZoom.periodFor`'s own contract
+  // (null = not activatable, no cursor, no hint).
+  const zoomProp: ChartFrameZoom | undefined = onSelectPeriod
+    ? {
+        periodFor: (i: number): PeriodParams | null => {
+          const range = subgroupShiftRange(g, i, i);
+          if (!range) return null;
+          return snapToShifts(range.from, range.to);
+        },
+        onZoom: onSelectPeriod,
+      }
+    : undefined;
 
   return (
     <ChartFrame
@@ -1037,8 +1037,7 @@ function OverTime({
       count={g.length}
       tipFor={tipFor}
       markRect={markRect}
-      brush={onSelectPeriod ? { onCommit: commitBrush, xs: xsRef.current } : undefined}
-      brushLabel={onSelectPeriod ? brushLabel : undefined}
+      zoom={zoomProp}
     >
       {(size, state) => {
         const Wd = size.width;

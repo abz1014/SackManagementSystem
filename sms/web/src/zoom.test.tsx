@@ -1,15 +1,16 @@
 /**
- * Chart overhaul, Task T8a (29 Sep 2026) — the zoom/back mechanics App.tsx
- * and ui/Bar.tsx now own:
+ * Chart overhaul, Task T8a (29 Sep 2026; click-to-zoom rewrite, Task W2, same
+ * date) — the zoom/back mechanics App.tsx and ui/Bar.tsx now own:
  *
- *  - a chart drag-select's shift-snapped whole-page period reaching the URL
- *    through `zoomTo` (App.tsx's `ZoomContext`, wired into StationSheet's
+ *  - a chart click-to-zoom's shift-snapped whole-page period reaching the
+ *    URL through `zoomTo` (App.tsx's `ZoomContext`, wired into StationSheet's
  *    own `onSelectPeriod` prop — the one built-in call site this task had to
  *    connect; StationSheet.tsx's own header explicitly left this to "Task
  *    T8", see screens/StationSheet.tsx);
- *  - the bar's period button showing the range in plain words
- *    (`describePeriod`) once one is set, active/pressed like any other
- *    period choice;
+ *  - the bar's period button showing the period in plain, COLLAPSED words
+ *    (`describePeriod`, collapsed by the owner 29 Sep 2026 — see
+ *    `lib/period.ts`) once one is set, active/pressed like any other period
+ *    choice;
  *  - the "Back to previous range" control in the bar, present only while
  *    `history.state.zoomFrom` is set, and `history.back()` (both via that
  *    control and via real Back/Forward navigation) restoring the period that
@@ -20,10 +21,12 @@
  *    one existing `{ replace: true }` call site, Readings' own pager.
  *
  * Drives the real `<App/>` against a fake fetch, the same idiom `hops.
- * test.tsx` and `rank.matrix.test.tsx` use. The brush-drag sequence against
+ * test.tsx` and `rank.matrix.test.tsx` use. The click sequence against
  * StationSheet's daily-means chart is the same one `StationSheet.test.tsx`
  * already exercises in isolation — this file proves the OTHER end of that
- * wiring, the part living in App.tsx/Bar.tsx.
+ * wiring, the part living in App.tsx/Bar.tsx. There is no drag any more
+ * (Task W1/W2, 29 Sep 2026: drag-to-select is removed everywhere), so this
+ * proves a single click zooms to that one day, not a multi-day span.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen as rtlScreen, waitFor } from '@testing-library/react';
@@ -124,10 +127,9 @@ const SYSTEM_HISTORY_FIXTURE: Envelope<SystemHistoryData> = {
 /** Routes every screen this file touches needs (Health, the station sheet,
  *  Readings) — an unregistered path throws loudly (fetchRouter's own rule),
  *  so a missing entry here fails the test, not silently. Health, not Line:
- *  Line.tsx's StationCompare/DeviationBars currently throws
- *  (`brush is not defined`, report/shared.tsx) under a concurrent chart-
- *  overhaul task's in-progress edit — unrelated to this task, and Health is
- *  an equally stable screen to mount the station sheet over. */
+ *  kept as the mount point from the original task rather than switched to
+ *  Line now that Line.tsx's own `brush`-shaped defect is long gone — no
+ *  reason to touch an otherwise-unrelated route list. */
 const ROUTES: Routes = {
   '/api/stations': STATIONS_FIXTURE,
   '/api/weight-stations': WEIGHT_STATIONS_FIXTURE,
@@ -165,30 +167,26 @@ async function waitForChartBody(): Promise<HTMLElement> {
   throw new Error('chart-frame-body never rendered');
 }
 
-/** The exact brush-drag pointer sequence `StationSheet.test.tsx` uses: a
- *  drag from x=0 to a far-right x, which (at the DEFAULT_FALLBACK_W jsdom
- *  falls back to, no real ResizeObserver firing) spans this fixture's four
- *  days end to end. */
-function fireBrushDrag(body: HTMLElement) {
+/** The exact click sequence `StationSheet.test.tsx` uses: a pointerdown/
+ *  pointerup at the SAME point (no drag), x=0 — `hit()`'s nearest-index
+ *  match (no y bound in `DailyMeans`) lands this on the first day, 25 Aug,
+ *  which zooms to that one day's own D.morning..D.night span. */
+function fireChartClick(body: HTMLElement) {
   const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
   Object.defineProperty(down, 'pointerId', { value: 1 });
   Object.defineProperty(down, 'pointerType', { value: 'mouse' });
-  const move = new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
-  Object.defineProperty(move, 'pointerId', { value: 1 });
-  Object.defineProperty(move, 'pointerType', { value: 'mouse' });
-  const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
+  const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
   Object.defineProperty(up, 'pointerId', { value: 1 });
   Object.defineProperty(up, 'pointerType', { value: 'mouse' });
 
   act(() => body.dispatchEvent(down));
-  act(() => body.dispatchEvent(move));
   act(() => body.dispatchEvent(up));
 }
 
 /* ------------------------------------------------------------------ tests */
 
 describe('Task T8a — a chart zoom, the bar\'s control, and history.back()', () => {
-  it('a drag-select on the station sheet pushes a range period, the bar shows it and offers the undo, and history.back() restores the previous period', async () => {
+  it('a click on the station sheet\'s first day pushes that day\'s period, the bar shows it collapsed and offers the undo, and history.back() restores the previous period', async () => {
     boot(urlFor({ s: 'health', sheet: 'station:7' }));
 
     await waitFor(() => expect(rtlScreen.getByRole('navigation')).toBeTruthy());
@@ -198,23 +196,25 @@ describe('Task T8a — a chart zoom, the bar\'s control, and history.back()', ()
     expect(rtlScreen.getByRole('button', { name: W.period.range, pressed: false })).toBeTruthy();
 
     const chartBody = await waitForChartBody();
-    fireBrushDrag(chartBody);
+    fireChartClick(chartBody);
 
     await waitFor(() => {
       expect(new URLSearchParams(window.location.search).get('p')).toBe('range');
     });
+    // One day, D.morning..D.night — a click zooms to the day it landed on,
+    // not a multi-day span (there is no second endpoint any more).
     expect(window.location.search).toContain('from=2026-08-25.morning');
-    expect(window.location.search).toContain('to=2026-08-28.night');
+    expect(window.location.search).toContain('to=2026-08-25.night');
 
     // history.state now remembers the period being left — the default shift
     // period, since neither ?p= nor sheet/view carried anything else here.
     expect((window.history.state as { zoomFrom?: { key: string } } | null)?.zoomFrom).toEqual({ key: 'shift' });
 
-    // The bar's period button now shows the range in plain words, pressed —
-    // the same button, not a second control.
-    const rangeBtn = await waitFor(() =>
-      rtlScreen.getByRole('button', { name: /25 Aug morning shift.+28 Aug night shift/, pressed: true }),
-    );
+    // The bar's period button now shows the COLLAPSED wording (owner 29 Sep
+    // 2026, `describePeriod`) for a whole single day — "25 Aug", not the
+    // longer "25 Aug morning shift – 25 Aug night shift" the un-collapsed
+    // form would have printed — pressed, same button, not a second control.
+    const rangeBtn = await waitFor(() => rtlScreen.getByRole('button', { name: '25 Aug', pressed: true }));
     expect(rangeBtn).toBeTruthy();
 
     // ...and the undo is now offered.
@@ -237,7 +237,7 @@ describe('Task T8a — a chart zoom, the bar\'s control, and history.back()', ()
     boot(urlFor({ s: 'health', sheet: 'station:7' }));
     await waitFor(() => expect(rtlScreen.getByRole('navigation')).toBeTruthy());
 
-    fireBrushDrag(await waitForChartBody());
+    fireChartClick(await waitForChartBody());
     await waitFor(() => expect(rtlScreen.getByRole('button', { name: W.chart.backToPreviousRange })).toBeTruthy());
 
     fireEvent.click(rtlScreen.getByRole('button', { name: W.nav.readings }));

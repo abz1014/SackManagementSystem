@@ -193,8 +193,8 @@ describe('RejectTrendChart — ChartFrame tooltip, reached via keyboard', () => 
   });
 });
 
-describe('RejectTrendChart — brush sets the whole-page period, snapped to shifts', () => {
-  it('Shift+ArrowRight then "+" commits a PeriodParams spanning the two focused days', () => {
+describe('RejectTrendChart — click-to-zoom sets the whole-page period, snapped to shifts', () => {
+  it('Enter on the keyboard-active day commits a PeriodParams spanning that one day', () => {
     const quality: TrendBucket[] = [
       bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
       bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03 }),
@@ -203,16 +203,59 @@ describe('RejectTrendChart — brush sets the whole-page period, snapped to shif
     const onSelect = vi.fn<(p: PeriodParams) => void>();
     const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" onSelect={onSelect} />);
     const body = container.querySelector('.chart-frame-body') as HTMLElement;
-    fireEvent.keyDown(body, { key: 'ArrowRight' }); // day 1
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // extend to day 2
-    fireEvent.keyDown(body, { key: '+' }); // commit
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // day 1, 1 Sep
+    fireEvent.keyDown(body, { key: 'Enter' });
     expect(onSelect).toHaveBeenCalledTimes(1);
     const p = onSelect.mock.calls[0]![0];
     expect(p.key).toBe('range');
-    expect(p.range).toEqual(dayToShiftRange('2026-09-01', '2026-09-02'));
+    expect(p.range).toEqual(dayToShiftRange('2026-09-01', '2026-09-01'));
   });
 
-  it('with no onSelect prop, the "+" key does nothing (no brush offered)', () => {
+  it('a real mouse click (not a drag) on a point zooms the same way', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03 }),
+    ];
+    const onSelect = vi.fn<(p: PeriodParams) => void>();
+    const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" onSelect={onSelect} />);
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    // `hit()` always resolves to the NEAREST day by x, so a click at the
+    // wrapper's own left edge lands on day 1 without needing the real mark
+    // geometry — clientY 50 just needs to sit inside the plot band (T..H-B).
+    const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 50, button: 0 });
+    Object.defineProperty(down, 'pointerId', { value: 1 });
+    Object.defineProperty(down, 'pointerType', { value: 'mouse' });
+    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 0, clientY: 50, button: 0 });
+    Object.defineProperty(up, 'pointerId', { value: 1 });
+    Object.defineProperty(up, 'pointerType', { value: 'mouse' });
+    body.dispatchEvent(down);
+    body.dispatchEvent(up);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    const p = onSelect.mock.calls[0]![0];
+    expect(p.key).toBe('range');
+    expect(p.range).toEqual(dayToShiftRange('2026-09-01', '2026-09-01'));
+  });
+
+  it('a drag past the click threshold does not zoom', () => {
+    const quality: TrendBucket[] = [
+      bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
+      bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03 }),
+    ];
+    const onSelect = vi.fn<(p: PeriodParams) => void>();
+    const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" onSelect={onSelect} />);
+    const body = container.querySelector('.chart-frame-body') as HTMLElement;
+    const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 });
+    Object.defineProperty(down, 'pointerId', { value: 1 });
+    Object.defineProperty(down, 'pointerType', { value: 'mouse' });
+    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 5000, clientY: 0, button: 0 });
+    Object.defineProperty(up, 'pointerId', { value: 1 });
+    Object.defineProperty(up, 'pointerType', { value: 'mouse' });
+    body.dispatchEvent(down);
+    body.dispatchEvent(up);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('with no onSelect prop, Enter does nothing (no zoom offered)', () => {
     const quality: TrendBucket[] = [
       bucket({ bucketTs: '2026-09-01T00:00:00Z', rate: 0.02 }),
       bucket({ bucketTs: '2026-09-02T00:00:00Z', rate: 0.03 }),
@@ -220,8 +263,7 @@ describe('RejectTrendChart — brush sets the whole-page period, snapped to shif
     const { container } = render(<RejectTrendChart quality={quality} singleName="Quality" />);
     const body = container.querySelector('.chart-frame-body') as HTMLElement;
     fireEvent.keyDown(body, { key: 'ArrowRight' });
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true });
-    fireEvent.keyDown(body, { key: '+' });
-    expect(container.querySelector('.chart-brush-label')).toBeNull();
+    fireEvent.keyDown(body, { key: 'Enter' });
+    expect(body.className).not.toContain('can-activate');
   });
 });
