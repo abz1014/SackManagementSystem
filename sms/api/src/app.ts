@@ -1784,7 +1784,9 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.post('/api/products/:id/limits', requireRole(PDAS_WRITE_RANK), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = z.coerce.number().int().positive().safeParse(req.params.id);
-      const b = z.object({ before: productFields, after: productFields, reason: writeReason }).safeParse(req.body);
+      // Task W1-D: largeChangeConfirmed is optional and defaults to false —
+      // an absent field must never silently mean "confirmed".
+      const b = z.object({ before: productFields, after: productFields, reason: writeReason, largeChangeConfirmed: z.boolean().optional() }).safeParse(req.body);
       if (!id.success || !b.success) {
         // R-3 fix: see the matching comment on POST /api/products.
         void recordAudit(pool, (req as AuthedRequest).user!.userId, 'product.set_limits', 'product', req.params.id ?? null,
@@ -1800,6 +1802,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         after: b.data.after,
         bounds: await setpointBounds(),
         reason: b.data.reason,
+        largeChangeConfirmed: b.data.largeChangeConfirmed ?? false,
         actor: actorOf(req),
       });
       if (!r.ok) {

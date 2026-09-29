@@ -250,17 +250,61 @@ function PdasProducts({
   );
 }
 
-/** Action A — in place; keeps the MaterialId. */
+/** Signed "+5 g" / "-5 g"; 0 prints "+0 g", never a bare "0 g" that could read as "no change" ambiguously. */
+function signedG(n: number): string {
+  const r = Math.round(n);
+  return `${r >= 0 ? '+' : ''}${r.toLocaleString('en-US')} g`;
+}
+
+/** Signed "+0.25" / "-0.25", two decimal places, no '%' — the word function appends that. */
+function signedPct(n: number): string {
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
+}
+
+/**
+ * Task W1-D (failure analysis F-26/F-27/F-31): the SAME large-change
+ * thresholds `PdasWriter.limitChangeBound` enforces server-side
+ * (pdasWrite.ts), mirrored here only to decide whether THIS FORM shows the
+ * large-change checkbox and reason hint before submitting — a UI
+ * convenience, not the actual gate. The server re-checks unconditionally
+ * against its own (possibly env-overridden) bounds and is the only thing
+ * that can refuse the write; a client/server mismatch here means at most an
+ * unnecessary checkbox or a 400 the operator did not expect, never a bound
+ * that goes unenforced.
+ */
+const LARGE_CHANGE_SETPOINT_PCT = 3;
+const LARGE_CHANGE_OFFSET_G = 20;
+const LARGE_CHANGE_REASON_MIN = 20;
+
+/** Action A — in place; keeps the MaterialId. Two steps: review, then a separate write click — one click must never write. */
 function LimitsForm({ product, onDone, onCancel }: { product: ProductOption; onDone: () => void; onCancel: () => void }) {
   const before = fieldsOf(product)!;
   const [sp, setSp] = useState(String(before.setpointG));
   const [om, setOm] = useState(String(before.offsetMinusG));
   const [op, setOp] = useState(String(before.offsetPlusG));
   const [reason, setReason] = useState('');
+  const [step, setStep] = useState<'edit' | 'confirm'>('edit');
+  const [largeChangeChecked, setLargeChangeChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const after: ProductFields = { ...before, setpointG: Number(sp), offsetMinusG: Number(om), offsetPlusG: Number(op) };
   const valid = Number.isFinite(after.setpointG) && Number.isFinite(after.offsetMinusG) && Number.isFinite(after.offsetPlusG);
+
+  const setpointDeltaG = valid ? after.setpointG - before.setpointG : 0;
+  const setpointPct = valid && before.setpointG !== 0 ? (setpointDeltaG / before.setpointG) * 100 : 0;
+  const offsetMinusDeltaG = valid ? after.offsetMinusG - before.offsetMinusG : 0;
+  const offsetPlusDeltaG = valid ? after.offsetPlusG - before.offsetPlusG : 0;
+  const isLargeChange =
+    valid &&
+    (Math.abs(setpointPct) > LARGE_CHANGE_SETPOINT_PCT ||
+      Math.abs(offsetMinusDeltaG) > LARGE_CHANGE_OFFSET_G ||
+      Math.abs(offsetPlusDeltaG) > LARGE_CHANGE_OFFSET_G);
+  const reasonLongEnoughForLargeChange = reason.trim().length >= LARGE_CHANGE_REASON_MIN;
+  // The confirm button on step 2: an ordinary change needs only the usual
+  // 10-char reason (checked server-side and, redundantly, again just before
+  // the request below); a large change ALSO needs the checkbox ticked and a
+  // 20-char reason.
+  const canWrite = !busy && (!isLargeChange || (largeChangeChecked && reasonLongEnoughForLargeChange));
 
   return (
     <form
@@ -268,29 +312,83 @@ function LimitsForm({ product, onDone, onCancel }: { product: ProductOption; onD
       onSubmit={async (e) => {
         e.preventDefault();
         if (reason.trim().length < 10) { setErr(W.product.reasonTooShort); return; }
+        if (step === 'edit') {
+          // Step 1 -> 2 only. This submit NEVER writes — see the button's own
+          // label change below (Review the change / Change the limits).
+          setErr(null);
+          setStep('confirm');
+          return;
+        }
+        // Step 2: the actual write. Re-checked here, not just via `disabled`,
+        // in case component state and the disabled attribute ever drift.
+        if (isLargeChange && !(largeChangeChecked && reasonLongEnoughForLargeChange)) {
+          setErr(W.product.largeChangeReasonHint);
+          return;
+        }
         setBusy(true); setErr(null);
-        try { await updateProductLimits(product.productId, before, after, reason.trim()); onDone(); }
+        try { await updateProductLimits(product.productId, before, after, reason.trim(), isLargeChange && largeChangeChecked); onDone(); }
         catch (x) { setErr(errText(x)); } finally { setBusy(false); }
       }}
     >
       <div style={{ fontSize: 'var(--fs-qual)' }}>
         {W.product.changeLimitsHeading(label(product), product.blend ?? '—', product.countText ?? '—', product.tubeType ?? '—', product.productId)}
       </div>
-      <p>
-        {W.product.targetTo(fmtG(before.setpointG), fmtG(after.setpointG || before.setpointG))}
-        {' · '}
-        {W.product.rangeTo(rangeLabel(before), valid ? rangeLabel(after) : '—')}
-      </p>
-      <p className="mut sm">{W.product.changeLimitsNote}</p>
-      <p className="mut sm">{W.product.changeLimitsKeepsNumber(product.productId)}</p>
-      <p className="mut sm">{W.product.changeLimitsPropagation}</p>
-      <label><span>{W.product.setpointG}</span><input type="number" step="1" value={sp} onChange={(e) => setSp(e.target.value)} /></label>
-      <label><span>{W.product.offsetMinusG}</span><input type="number" step="1" min="0" value={om} onChange={(e) => setOm(e.target.value)} /></label>
-      <label><span>{W.product.offsetPlusG}</span><input type="number" step="1" min="0" value={op} onChange={(e) => setOp(e.target.value)} /></label>
-      <label><span>{W.product.whyRequired}</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-      {err && <p className="acc sm">{err}</p>}
-      <button type="submit" className="btn" disabled={busy || !valid}>{W.product.changeLimitsConfirm}</button>{' '}
-      <button type="button" className="btn" onClick={onCancel}>{W.product.cancel}</button>
+      <p className="mut sm">{step === 'edit' ? W.product.changeLimitsReviewStep : W.product.changeLimitsWriteStep}</p>
+      {step === 'edit' ? (
+        <>
+          <p>
+            {W.product.targetTo(fmtG(before.setpointG), fmtG(after.setpointG || before.setpointG))}
+            {' · '}
+            {W.product.rangeTo(rangeLabel(before), valid ? rangeLabel(after) : '—')}
+          </p>
+          <p className="mut sm">{W.product.changeLimitsNote}</p>
+          <p className="mut sm">{W.product.changeLimitsKeepsNumber(product.productId)}</p>
+          <p className="mut sm">{W.product.changeLimitsPropagation}</p>
+          <label><span>{W.product.setpointG}</span><input type="number" step="1" value={sp} onChange={(e) => setSp(e.target.value)} /></label>
+          <label><span>{W.product.offsetMinusG}</span><input type="number" step="1" min="0" value={om} onChange={(e) => setOm(e.target.value)} /></label>
+          <label><span>{W.product.offsetPlusG}</span><input type="number" step="1" min="0" value={op} onChange={(e) => setOp(e.target.value)} /></label>
+          <label><span>{W.product.whyRequired}</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          {err && <p className="acc sm">{err}</p>}
+          <button type="submit" className="btn" disabled={!valid}>{W.product.changeLimitsReviewNext}</button>{' '}
+          <button type="button" className="btn" onClick={onCancel}>{W.product.cancel}</button>
+        </>
+      ) : (
+        <>
+          <p>
+            {W.product.changeLimitsDelta(
+              W.product.changeLimitsDeltaTarget, fmtG(before.setpointG), fmtG(after.setpointG),
+              signedG(setpointDeltaG), signedPct(setpointPct),
+            )}
+          </p>
+          <p>
+            {W.product.changeLimitsDelta(
+              W.product.changeLimitsDeltaBelow, fmtG(before.offsetMinusG), fmtG(after.offsetMinusG),
+              signedG(offsetMinusDeltaG), null,
+            )}
+          </p>
+          <p>
+            {W.product.changeLimitsDelta(
+              W.product.changeLimitsDeltaAbove, fmtG(before.offsetPlusG), fmtG(after.offsetPlusG),
+              signedG(offsetPlusDeltaG), null,
+            )}
+          </p>
+          {isLargeChange && (
+            <div className="acc sm" style={{ marginTop: 8 }}>
+              <p>{W.product.largeChangeHeading}</p>
+              <label>
+                <input type="checkbox" checked={largeChangeChecked} onChange={(e) => setLargeChangeChecked(e.target.checked)} />{' '}
+                {W.product.largeChangeCheckbox}
+              </label>
+              <p className="mut sm">{W.product.largeChangeReasonHint}</p>
+            </div>
+          )}
+          <label><span>{W.product.whyRequired}</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          {err && <p className="acc sm">{err}</p>}
+          <button type="submit" className="btn" disabled={!canWrite}>{W.product.changeLimitsConfirm}</button>{' '}
+          <button type="button" className="btn" onClick={() => setStep('edit')}>{W.product.changeLimitsBack}</button>{' '}
+          <button type="button" className="btn" onClick={onCancel}>{W.product.cancel}</button>
+        </>
+      )}
     </form>
   );
 }

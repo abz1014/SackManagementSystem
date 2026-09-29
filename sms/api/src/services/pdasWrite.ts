@@ -279,6 +279,18 @@ export interface SetpointBounds {
 
 const MIN_REASON_CHARS = 10;
 
+/**
+ * Task W1-D (29 Sep 2026, failure analysis F-26/F-27/F-31): the large-change
+ * guard's own defaults, mirroring config.ts's zod defaults exactly — used
+ * whenever a PdasWriteConfig omits either bound (every hand-built fixture in
+ * the test suite that predates this task, and any future one that does not
+ * care about this guard).
+ */
+const DEFAULT_MAX_SETPOINT_CHANGE_PCT = 3;
+const DEFAULT_MAX_OFFSET_CHANGE_G = 20;
+/** The reason required to push a large change through, longer than the ordinary MIN_REASON_CHARS. */
+const MIN_LARGE_CHANGE_REASON_CHARS = 20;
+
 /** Words for the vendor's error codes, so the operator is not shown "-7001". */
 function explainPdasError(proc: string, code: number, raw: string | null): string {
   switch (code) {
@@ -523,6 +535,63 @@ export class PdasWriter {
       : `A reason of at least ${MIN_REASON_CHARS} characters is required.`;
   }
 
+  /**
+   * Task W1-D (failure analysis F-26/F-27/F-31): a limits edit is IMPLAUSIBLE
+   * on its own terms even when it passes `plausibility` above — a setpoint
+   * that moves 40% in one edit, or an offset that jumps 300 g, is far more
+   * likely a typo (a missing digit, a decimal point in the wrong place) than
+   * a deliberate process change, and PDAS keeps no history to catch it after
+   * the fact (see the file header: `Materials.Timestamp` is not touched on
+   * UPDATE, no trigger records old values). Bounded on the CURRENT value
+   * (`before`), never on the plausible cone range `plausibility` checks.
+   *
+   * Returns null when the change is within bounds. Otherwise returns a plain
+   * message naming the change and the limit it exceeds — always, whether or
+   * not the caller went on to confirm it — so `updateProductLimits` can both
+   * refuse (no confirmation) and describe what it is about to write anyway
+   * (confirmed): the confirmation does not need a second, differently-worded
+   * explanation of the same fact.
+   */
+  private static limitChangeBound(before: ProductFields, after: ProductFields, cfg: PdasWriteConfig): string | null {
+    const maxPct = cfg.maxSetpointChangePct ?? DEFAULT_MAX_SETPOINT_CHANGE_PCT;
+    const maxOffsetG = cfg.maxOffsetChangeG ?? DEFAULT_MAX_OFFSET_CHANGE_G;
+    const signed = (n: number): string => (n >= 0 ? `+${n}` : `${n}`);
+
+    const violations: string[] = [];
+
+    const setpointDeltaG = after.setpointG - before.setpointG;
+    // before.setpointG is a real weight by the time this runs (plausibility()
+    // already refused anything <= 0 on `after`; `before` is always a value
+    // this app itself wrote earlier), but guard the division anyway rather
+    // than ever produce Infinity/NaN in a message shown to an operator.
+    const setpointPct = before.setpointG !== 0 ? (Math.abs(setpointDeltaG) / before.setpointG) * 100 : 100;
+    if (setpointPct > maxPct) {
+      violations.push(
+        `the target would move from ${before.setpointG} g to ${after.setpointG} g ` +
+          `(${signed(setpointDeltaG)} g, ${signed(Number(setpointPct.toFixed(2)))} %), more than the ${maxPct}% limit`,
+      );
+    }
+
+    const offsetMinusDeltaG = after.offsetMinusG - before.offsetMinusG;
+    if (Math.abs(offsetMinusDeltaG) > maxOffsetG) {
+      violations.push(
+        `the lower offset would move from ${before.offsetMinusG} g to ${after.offsetMinusG} g ` +
+          `(${signed(offsetMinusDeltaG)} g), more than the ${maxOffsetG} g limit`,
+      );
+    }
+
+    const offsetPlusDeltaG = after.offsetPlusG - before.offsetPlusG;
+    if (Math.abs(offsetPlusDeltaG) > maxOffsetG) {
+      violations.push(
+        `the upper offset would move from ${before.offsetPlusG} g to ${after.offsetPlusG} g ` +
+          `(${signed(offsetPlusDeltaG)} g), more than the ${maxOffsetG} g limit`,
+      );
+    }
+
+    if (violations.length === 0) return null;
+    return `This is a large change: ${violations.join('; ')}.`;
+  }
+
   // ---------------------------------------------------------------- create
 
   async createProduct(p: {
@@ -708,14 +777,25 @@ export class PdasWriter {
 
   // --------------------------------------------------------- change limits
 
-  /** Read the six operator-visible fields of one material, inside `req`'s scope. */
-  private static async readFields(req: mssql.Request, productId: number): Promise<ProductFields | null> {
+  /**
+   * Read the six operator-visible fields of one material, inside `req`'s
+   * scope. `forUpdate` (task W1-D) adds `WITH (UPDLOCK, HOLDLOCK)`: the
+   * optimistic-concurrency check-read inside `updateProductLimits`'s
+   * transaction takes it, so a second writer reading the same row between
+   * this SELECT and the UPDATE below blocks on this transaction's lock
+   * rather than racing it — HOLDLOCK holds the lock through the transaction
+   * (not just the statement), UPDLOCK avoids the lock-conversion deadlock a
+   * plain shared-lock read would risk against another UPDLOCK reader. The
+   * post-commit echo-back read (outside any transaction) never passes it —
+   * there is nothing left to protect once the UPDATE has already committed.
+   */
+  private static async readFields(req: mssql.Request, productId: number, opts: { forUpdate?: boolean } = {}): Promise<ProductFields | null> {
     const r = await req.input('id', mssql.Int, productId).query<{
       sp: number; om: number; op: number; d1: string | null; d2: string | null; a: boolean;
     }>(
       `SELECT MaterialSetpointWeight sp, MaterialWeightOffsetMinus om, MaterialWeightOffsetPlus op,
               MaterialDesc1 d1, MaterialDesc2 d2, MaterialActive a
-         FROM dbo.Materials WHERE MaterialId = @id`,
+         FROM dbo.Materials ${opts.forUpdate ? 'WITH (UPDLOCK, HOLDLOCK)' : ''} WHERE MaterialId = @id`,
     );
     const x = r.recordset[0];
     if (!x) return null;
@@ -748,6 +828,14 @@ export class PdasWriter {
     bounds: SetpointBounds;
     reason: string;
     actor: Actor;
+    /**
+     * Task W1-D: the operator has seen `limitChangeBound`'s own message
+     * (the review step, Catalogue.tsx) and ticked the large-change checkbox.
+     * Confirmation alone is not enough — `p.reason` must also be at least
+     * MIN_LARGE_CHANGE_REASON_CHARS long, checked below, independent of the
+     * ordinary MIN_REASON_CHARS check above.
+     */
+    largeChangeConfirmed?: boolean;
   }): Promise<LimitsResult> {
     const base = {
       productId: p.productId, operation: 'update_limits' as const, before: p.before, after: p.after,
@@ -770,6 +858,24 @@ export class PdasWriter {
       return { ok: false, code: 'IMPLAUSIBLE', message: bad };
     }
 
+    // Task W1-D large-change guard: bounded on the CURRENT (before) value,
+    // separate from — and checked after — the plausible-cone-range check
+    // above. A large change may still proceed, but only with an explicit
+    // confirmation AND a reason at least twice the ordinary minimum.
+    const largeChangeMessage = PdasWriter.limitChangeBound(p.before, p.after, this.cfg);
+    let isLargeChange = false;
+    if (largeChangeMessage) {
+      const confirmed = p.largeChangeConfirmed === true && p.reason.trim().length >= MIN_LARGE_CHANGE_REASON_CHARS;
+      if (!confirmed) {
+        const message =
+          `${largeChangeMessage} Tick the large-change confirmation and give a reason of at least ` +
+          `${MIN_LARGE_CHANGE_REASON_CHARS} characters to proceed.`;
+        await this.recordChange({ ...base, observedAfter: null, outcome: 'implausible', pdasErrorCode: null, message, effectiveFrom: null });
+        return { ok: false, code: 'IMPLAUSIBLE', message };
+      }
+      isLargeChange = true;
+    }
+
     let pool: ConnectionPool;
     try {
       pool = await this.pool();
@@ -786,7 +892,8 @@ export class PdasWriter {
       await new mssql.Request(tx).query('SET XACT_ABORT ON');
 
       // Optimistic concurrency: the row must still be what the operator saw.
-      const current = await PdasWriter.readFields(new mssql.Request(tx), p.productId);
+      // Task W1-D: WITH (UPDLOCK, HOLDLOCK) — see readFields' own comment.
+      const current = await PdasWriter.readFields(new mssql.Request(tx), p.productId, { forUpdate: true });
       if (!current) {
         await tx.rollback();
         const message = `PDAS has no product ${p.productId}.`;
@@ -901,9 +1008,13 @@ export class PdasWriter {
         : echoOk ? null : 'echo-back differs from request — CRITICAL finding raised',
       effectiveFrom: committedAt,
     });
+    // Task W1-D: a confirmed large change is audited under its own action
+    // name — never silently indistinguishable from an ordinary limits edit —
+    // so the audit log (Setup › Audit) can be filtered to exactly the writes
+    // that needed the large-change confirmation.
     await recordAudit(
-      this.appPool, p.actor.userId, 'product.limits', 'product', p.productId,
-      `Product ${p.productId}: ${p.before.setpointG} ± ${p.before.offsetMinusG}/${p.before.offsetPlusG} g → ` +
+      this.appPool, p.actor.userId, isLargeChange ? 'product.limits_large_change' : 'product.limits', 'product', p.productId,
+      `${isLargeChange ? 'LARGE CHANGE — ' : ''}Product ${p.productId}: ${p.before.setpointG} ± ${p.before.offsetMinusG}/${p.before.offsetPlusG} g → ` +
         `${p.after.setpointG} ± ${p.after.offsetMinusG}/${p.after.offsetPlusG} g — ${p.reason}`,
     );
     return { ok: true, productId: p.productId, observedAfter: mirrorFields };

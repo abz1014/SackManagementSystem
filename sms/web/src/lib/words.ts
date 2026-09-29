@@ -267,10 +267,43 @@ export const W = {
       'This changes the limits the scale uses from now on. Readings already recorded keep the limits that were in force when they were weighed.',
     changeLimitsKeepsNumber: (id: number) =>
       `Product ${id} keeps its number, so past and future readings stay under the same product. If this is really a different yarn, create a new product instead.`,
-    /* Pending IFL's answer on propagation (§6.2 q1). Not optional. */
-    changeLimitsPropagation: 'The scale picks up the new limits when the product is next selected on the machine.',
+    /**
+     * Task W1-D (29 Sep 2026): this used to assert a specific propagation
+     * mechanism ("the scale picks up the new limits when the product is next
+     * selected on the machine") as settled fact. That claim traces to the
+     * file header of pdasWrite.ts, which itself only reports IFL's 15 Sep
+     * 2026 verbal answer that the QCS panel reads a material's setpoint and
+     * offsets at selection time — never independently confirmed against the
+     * machine, and not the same thing as a written, checkable guarantee. An
+     * operator reading this screen has no way to tell "confirmed" from
+     * "reported secondhand" from the words alone, and a wrong propagation
+     * claim on the one screen that changes a live setpoint is exactly the
+     * kind of overclaim CLAUDE.md's "NO OVER-CLAIMING" rule exists to
+     * prevent. State only what is actually established: nothing, yet.
+     */
+    changeLimitsPropagation: 'IFL has not yet confirmed when the scale picks up new limits — check on the machine.',
     whyRequired: 'Why is this changing? (required)',
     changeLimitsConfirm: 'Change the limits',
+    /* ---- Task W1-D (29 Sep 2026): the two-step review/confirm form ---- */
+    changeLimitsReviewStep: 'Step 1 of 2 — Review the change',
+    changeLimitsWriteStep: 'Step 2 of 2 — Write to PDAS',
+    changeLimitsReviewNext: 'Review the change',
+    changeLimitsBack: 'Back',
+    /**
+     * e.g. changeLimitsDelta('target', '1,965 g', '1,970 g', '+5 g', '+0.25')
+     * -> "target 1,965 g → 1,970 g (+5 g, +0.25 %)". `from`/`to`/`delta` are
+     * already unit-suffixed by the caller (fmtG); `deltaPct` is a plain
+     * signed number — this function appends the ' %' itself — and is null
+     * for the two offset rows, which have no percent figure.
+     */
+    changeLimitsDelta: (label: string, from: string, to: string, delta: string, deltaPct: string | null) =>
+      `${label} ${from} → ${to} (${delta}${deltaPct != null ? `, ${deltaPct} %` : ''})`,
+    changeLimitsDeltaTarget: 'target',
+    changeLimitsDeltaBelow: 'below target',
+    changeLimitsDeltaAbove: 'above target',
+    largeChangeHeading: 'This is a large change',
+    largeChangeCheckbox: 'I have checked this large change',
+    largeChangeReasonHint: 'A large change needs a reason of at least 20 characters.',
     newProduct: 'Create a new product',
     newProductNote: 'A new product gets a new number. Readings from now on are recorded against it; nothing already recorded moves.',
     newProductTriple: (blend: string, count: string, tube: string, id: number) =>

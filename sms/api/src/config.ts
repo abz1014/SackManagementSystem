@@ -229,6 +229,24 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  /**
+   * Task W1-D (29 Sep 2026, failure analysis F-26/F-27/F-31): the guard on
+   * PdasWriter.updateProductLimits — a setpoint may move at most this many
+   * PERCENT from its current value, and either offset may move at most
+   * PDAS_LIMIT_MAX_OFFSET_CHANGE_G grams, before the write is refused as
+   * IMPLAUSIBLE. Applies regardless of PDAS_WRITE_ENABLED (it is a property
+   * of the change itself, not of whether the path is switched on), so it is
+   * validated unconditionally here rather than folded into pdasWriteDb.
+   * Defaults (3%, 20 g) are the developer's own judgement call — IFL has not
+   * stated a plausibility policy for an in-place limits edit — and are
+   * env-overridable so the owner can tighten or loosen them without a
+   * rebuild. A request that exceeds either bound is not refused outright: it
+   * may proceed with `largeChangeConfirmed: true` and a reason of at least
+   * 20 characters (PdasWriter's own MIN_LARGE_CHANGE_REASON_CHARS), and is
+   * then audited as a large_change, never silently allowed through.
+   */
+  pdasLimitMaxSetpointChangePct: z.coerce.number().positive().default(3),
+  pdasLimitMaxOffsetChangeG: z.coerce.number().positive().default(20),
   pdasWriteDb: z
     .object({
       server: z.string().min(1).optional(),
@@ -266,6 +284,16 @@ export interface PdasWriteConfig {
   db: DbConfig | null;
   /** Human-readable reason the path is unavailable; null when enabled. */
   disabledReason: string | null;
+  /**
+   * Task W1-D: the large-change guard's own bounds, carried on this config
+   * regardless of `enabled` — the guard is a property of the change, not of
+   * whether the write path is switched on. Optional so every hand-built
+   * PdasWriteConfig fixture across the test suite that predates this task
+   * keeps compiling; PdasWriter falls back to the same defaults
+   * (3% / 20 g) when either is missing.
+   */
+  maxSetpointChangePct?: number;
+  maxOffsetChangeG?: number;
 }
 
 /**
@@ -360,9 +388,10 @@ function resolvePdasWrite(
     trustServerCertificate: boolean;
   },
   ifl: { dbNamePdas?: string; user?: string } = {},
+  limits: { maxSetpointChangePct: number; maxOffsetChangeG: number } = { maxSetpointChangePct: 3, maxOffsetChangeG: 20 },
 ): PdasWriteConfig {
   if (!enabled) {
-    return { enabled: false, db: null, disabledReason: 'PDAS_WRITE_ENABLED is not true.' };
+    return { enabled: false, db: null, disabledReason: 'PDAS_WRITE_ENABLED is not true.', ...limits };
   }
   const missing = (['server', 'port', 'database', 'user', 'password'] as const).filter((k) => db[k] == null);
   if (missing.length > 0) {
@@ -372,6 +401,7 @@ function resolvePdasWrite(
       disabledReason:
         `PDAS_WRITE_ENABLED is true but PDAS_WRITE_${missing.map((k) => k.toUpperCase()).join(' / PDAS_WRITE_')} ` +
         `is not set. The write login must be provisioned separately from the read-only sync login.`,
+      ...limits,
     };
   }
   // Same default the sync worker itself falls back to (sync-worker/src/config.ts).
@@ -383,6 +413,7 @@ function resolvePdasWrite(
       disabledReason:
         `PDAS_WRITE_DATABASE (${JSON.stringify(db.database)}) does not match IFL_DB_NAME_PDAS ` +
         `(${JSON.stringify(iflDbNamePdas)}). The writer must point at the same database the sync worker reads.`,
+      ...limits,
     };
   }
   if (ifl.user != null && db.user === ifl.user) {
@@ -392,6 +423,7 @@ function resolvePdasWrite(
       disabledReason:
         `PDAS_WRITE_USER is the same login as IFL_DB_USER (${JSON.stringify(db.user)}). ` +
         `The read-only sync login must never be the writer.`,
+      ...limits,
     };
   }
   return {
@@ -406,6 +438,7 @@ function resolvePdasWrite(
       trustServerCertificate: db.trustServerCertificate,
     },
     disabledReason: null,
+    ...limits,
   };
 }
 
@@ -498,6 +531,8 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       trustServerCertificate: env.APP_DB_TRUST_SERVER_CERTIFICATE,
     },
     pdasWriteEnabled: env.PDAS_WRITE_ENABLED,
+    pdasLimitMaxSetpointChangePct: env.PDAS_LIMIT_MAX_SETPOINT_CHANGE_PCT,
+    pdasLimitMaxOffsetChangeG: env.PDAS_LIMIT_MAX_OFFSET_CHANGE_G,
     pdasWriteDb: {
       server: env.PDAS_WRITE_SERVER,
       port: env.PDAS_WRITE_PORT,
@@ -516,10 +551,18 @@ export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     iflDbNameData: env.IFL_DB_NAME_DATA,
     iflDbServer: env.IFL_DB_SERVER,
   });
-  const { pdasWriteEnabled, pdasWriteDb, iflDbNamePdas, iflDbUser, liveAllowSimulator, iflDbNameData, iflDbServer, ...rest } = parsed;
+  const {
+    pdasWriteEnabled, pdasWriteDb, pdasLimitMaxSetpointChangePct, pdasLimitMaxOffsetChangeG,
+    iflDbNamePdas, iflDbUser, liveAllowSimulator, iflDbNameData, iflDbServer, ...rest
+  } = parsed;
   return {
     ...rest,
-    pdasWrite: resolvePdasWrite(pdasWriteEnabled, pdasWriteDb, { dbNamePdas: iflDbNamePdas, user: iflDbUser }),
+    pdasWrite: resolvePdasWrite(
+      pdasWriteEnabled,
+      pdasWriteDb,
+      { dbNamePdas: iflDbNamePdas, user: iflDbUser },
+      { maxSetpointChangePct: pdasLimitMaxSetpointChangePct, maxOffsetChangeG: pdasLimitMaxOffsetChangeG },
+    ),
     liveSimulator: resolveLiveSimulator(liveAllowSimulator, iflDbNameData, iflDbServer),
   } as ApiConfig;
 }

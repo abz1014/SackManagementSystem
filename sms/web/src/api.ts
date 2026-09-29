@@ -395,8 +395,16 @@ export function createProduct(p: {
 export function setProductActive(productId: number, active: boolean, reason: string): Promise<{ productId: number; active: boolean; products: ProductOption[] }> {
   return post(`/api/products/${productId}/active`, { active, reason });
 }
-export function updateProductLimits(productId: number, before: ProductFields, after: ProductFields, reason: string): Promise<{ productId: number; observedAfter: ProductFields; products: ProductOption[] }> {
-  return post(`/api/products/${productId}/limits`, { before, after, reason });
+export function updateProductLimits(
+  productId: number,
+  before: ProductFields,
+  after: ProductFields,
+  reason: string,
+  // Task W1-D: the large-change confirmation checkbox (Catalogue.tsx's
+  // two-step limits form); omitted (or false) for an ordinary change.
+  largeChangeConfirmed?: boolean,
+): Promise<{ productId: number; observedAfter: ProductFields; products: ProductOption[] }> {
+  return post(`/api/products/${productId}/limits`, { before, after, reason, largeChangeConfirmed });
 }
 
 // ---- Pallets, mirrored from PDAS (roadmap Phase 6 Wave F; UI added Task L1, 28 Sep 2026) ----
@@ -1738,7 +1746,17 @@ export interface HealthReport {
      *  anonymous caller, like the rest of this block. */
     generation: LiveGenerationNote | null;
   };
-  backup: { dir: string; newestFile: string | null; newestAtUtc: string | null; ageDays: number | null; warning: boolean } | null;
+  backup: {
+    dir: string;
+    newestFile: string | null;
+    newestAtUtc: string | null;
+    ageDays: number | null;
+    warning: boolean;
+    /** Whether `newestFile` carries a matching, size-consistent verification marker written by scripts/backup-appdb.ps1. */
+    verified: boolean;
+    /** True when the physically-newest .bak in the directory failed verification and an older verified one was reported instead (or, if nothing verified exists, when the newest itself is unverified). */
+    newestUnverified: boolean;
+  } | null;
   degradedReason: string | null;
   /**
    * RT24-05: whether the PDAS write login can read back what it just wrote.
@@ -1757,6 +1775,12 @@ export interface HealthReport {
     unverifiedSinceStartup: string[];
     lastVerifiedUtc: string | null;
   } | null;
+  /** Free disk space, MB, on the app-data and backup volumes. Null for an anonymous caller. */
+  disk: { appDataFreeMb: number | null; backupFreeMb: number | null } | null;
+  /** `sms.verify_run`'s newest `started_at_utc` — informational only, never folded into `status`. Null when nothing has run, the table predates migration 039, or the caller is anonymous. */
+  lastVerifyRunUtc: string | null;
+  /** The sync worker's own heartbeat — newest `sms.sync_run.finished_at_utc`, regardless of rows written. Distinct from `acquisition.ageSeconds`, which measures DATA age, not whether the recorder is still checking in. Null when anonymous or no pass has run yet. */
+  workerLastPassUtc: string | null;
 }
 /** Unauthenticated on the server; the browser always has its cookie, so the full report comes back. */
 export function getHealth(): Promise<HealthReport> {
