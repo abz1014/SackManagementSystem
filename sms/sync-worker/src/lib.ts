@@ -25,6 +25,7 @@ export { runFullSync, type FullSyncResult } from './pipeline.js';
 export {
   DEFAULT_IFL_TABLES,
   TABLE_SHAPES,
+  JULY_TABLE_SHAPES,
   TABLE_KINDS,
   rawShortName,
   type IflTableDef,
@@ -49,3 +50,22 @@ export {
 } from './epoch.js';
 export { acquireTransformLock, withTransformLock, type TransformLock } from './lock.js';
 export { clearPersistentFailure, raisePersistentFailure, PERSISTENT_SYNC_FAILURE } from './housekeeping.js';
+// R-17: a safe tail backfill of historic rows into an already-CLOSED source
+// generation (DEFECTS.md R-17). See backfill.ts's own header for the full
+// account of what this deliberately does and does not do.
+export {
+  ALL_ZERO_FINGERPRINT,
+  julyDefFor,
+  getEpochById,
+  siblingEpochs,
+  assertBackfillableEpoch,
+  assertJulyShape,
+  overlapChecksum,
+  planTableBackfill,
+  executeTableBackfill,
+  shortRawTable,
+  type BackfillEpochRow,
+  type OverlapResult,
+  type TableBackfillPlan,
+  type TableBackfillOutcome,
+} from './backfill.js';

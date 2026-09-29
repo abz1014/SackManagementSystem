@@ -141,6 +141,97 @@ export const TABLE_SHAPES: Record<TableKind, TableShape> = {
   },
 };
 
+/**
+ * The JULY shape (R-17, 29 Sep 2026) — what `pack1_TP1U2`/`sack1_TP1U2`/
+ * `rejectQCS1_TP1U2`/`rejectWeight1_TP1U2` looked like BEFORE IFL's
+ * 2026-08-05 rebuild: `Source` (not yet renamed `MachineNo`), and no
+ * `MaterialId` column at all. The July sample already sitting on this
+ * machine (source_epoch 1-4, generation_ordinal 1, seeded closed by
+ * scripts/seed-dev-epochs.sql) was read through this exact shape; the
+ * 10 Jul - 5 Aug archive IFL has not yet sent is the SAME physical
+ * generation's tail and must be read through it too — never through
+ * `TABLE_SHAPES`, which is the September shape and would silently misread a
+ * renamed/absent column.
+ *
+ * ADDITIVE ONLY. `TABLE_SHAPES` above is what every live pass and `sms
+ * rebuild` read through — the July shape is NOT supported there and the
+ * comment at the top of this file is right that carrying both in the LIVE
+ * reader would mean it could no longer tell a schema change from a
+ * misconfiguration. This export exists for exactly one narrow, deliberate
+ * caller: `sync-worker/src/backfill.ts` / `sms epoch:backfill`, which loads a
+ * historic archive into an already-CLOSED epoch and nothing else. It must
+ * never be wired into `runner.ts`, `runTransform.ts`, or `loadSourceTables`.
+ *
+ * The raw column names are identical to `TABLE_SHAPES` (`src_MachineNo`,
+ * `src_MaterialId`, ...) — only the SOURCE side differs — so a July row and a
+ * September row land in the same `sms_raw.*` table, verbatim, exactly as the
+ * raw layer's own contract promises. `MaterialId` has no column to omit here:
+ * it is simply absent from `columns`, so `persistRaw`'s typed bulk load never
+ * supplies a value for `src_MaterialId` and the column keeps its NULL default
+ * — honestly reflecting "this row predates product attribution", the same
+ * fact every other pre-August row already carries.
+ */
+export const JULY_TABLE_SHAPES: Record<TableKind, TableShape> = {
+  cone: {
+    rawTable: 'sms_raw.cone_raw',
+    columns: [
+      idCol,
+      { src: 'Date', raw: 'src_Date', type: 'datetime' },
+      { src: 'Shift', raw: 'src_Shift', type: 'varchar' },
+      { src: 'Area', raw: 'src_Area', type: 'varchar' },
+      { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
+      { src: 'HangerNum', raw: 'src_HangerNum', type: 'int' },
+      { src: 'Source', raw: 'src_MachineNo', type: 'int' },
+      { src: 'Lifter', raw: 'src_Lifter', type: 'int' },
+      { src: 'Weight', raw: 'src_Weight', type: 'decimal' },
+      { src: 'inRange', raw: 'src_inRange', type: 'bit' },
+      // no MaterialId column in the July source — src_MaterialId is left NULL.
+    ],
+  },
+  sack: {
+    rawTable: 'sms_raw.sack_raw',
+    columns: [
+      idCol,
+      { src: 'Date', raw: 'src_Date', type: 'datetime' },
+      { src: 'Shift', raw: 'src_Shift', type: 'varchar' },
+      { src: 'Area', raw: 'src_Area', type: 'varchar' },
+      { src: 'SackNum', raw: 'src_SackNum', type: 'int' },
+      { src: 'Weight', raw: 'src_Weight', type: 'decimal' },
+      { src: 'inRange', raw: 'src_inRange', type: 'bit' },
+      // sack1_TP1U2 never carried Source/MachineNo, July or September.
+    ],
+  },
+  reject_qcs: {
+    rawTable: 'sms_raw.reject_qcs_raw',
+    columns: [
+      idCol,
+      { src: 'Date', raw: 'src_Date', type: 'datetime' },
+      { src: 'Shift', raw: 'src_Shift', type: 'varchar' },
+      { src: 'Area', raw: 'src_Area', type: 'varchar' },
+      { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
+      { src: 'HangerNum', raw: 'src_HangerNum', type: 'int' },
+      { src: 'Source', raw: 'src_MachineNo', type: 'int' },
+      { src: 'Lifter', raw: 'src_Lifter', type: 'int' },
+      { src: 'TubeInspectResult', raw: 'src_TubeInspectResult', type: 'int' },
+      { src: 'MaterialInspectResult', raw: 'src_MaterialInspectResult', type: 'int' },
+    ],
+  },
+  reject_weight: {
+    rawTable: 'sms_raw.reject_weight_raw',
+    columns: [
+      idCol,
+      { src: 'Date', raw: 'src_Date', type: 'datetime' },
+      { src: 'Shift', raw: 'src_Shift', type: 'varchar' },
+      { src: 'Area', raw: 'src_Area', type: 'varchar' },
+      { src: 'ProductionDate', raw: 'src_ProductionDate', type: 'datetime' },
+      { src: 'HangerNum', raw: 'src_HangerNum', type: 'int' },
+      { src: 'Source', raw: 'src_MachineNo', type: 'int' },
+      { src: 'Lifter', raw: 'src_Lifter', type: 'int' },
+      { src: 'Weight', raw: 'src_Weight', type: 'decimal' },
+    ],
+  },
+};
+
 /** `sms_raw.cone_raw` → `cone_raw`: the form sync_run.target_table and dq_finding.subject_table use. */
 export const rawShortName = (rawTable: string): string => rawTable.replace('sms_raw.', '');
 

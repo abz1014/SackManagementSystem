@@ -6,6 +6,7 @@ import { sync } from './commands/sync.js';
 import { rebuild } from './commands/rebuild.js';
 import { cutover } from './commands/cutover.js';
 import { epochList, epochAccept, epochPurge, epochDrop } from './commands/epoch.js';
+import { epochBackfill } from './commands/backfill.js';
 import { userCreate, userPassword } from './commands/user.js';
 import { retention } from './commands/retention.js';
 import { cliLog } from './context.js';
@@ -53,6 +54,11 @@ function help(): void {
   sms epoch:purge --epoch=N[,M] --confirm --backup=<path.bak>
                                     delete an epoch's rows, keep the tombstone (same gates as cutover)
   sms epoch:drop --epoch=N --confirm        remove an epoch row that has no rows
+  sms epoch:backfill --table=<t>|--all --epoch=<id> --source-db=<name> [--confirm] [--sampled]
+                                    R-17: tail-insert an older archive's rows into an already-CLOSED
+                                    epoch (e.g. the 10 Jul - 5 Aug gap once IFL sends it, into the
+                                    July epochs). Refuses an open/unknown epoch, the September column
+                                    shape, or any overlap checksum mismatch — 0 writes on any refusal.
 `);
 }
 
@@ -86,6 +92,9 @@ async function main(): Promise<void> {
       break;
     case 'epoch:drop':
       code = await epochDrop(rest);
+      break;
+    case 'epoch:backfill':
+      code = await epochBackfill(rest);
       break;
     case 'user:create':
       code = await userCreate(rest);

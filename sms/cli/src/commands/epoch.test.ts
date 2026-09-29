@@ -401,3 +401,69 @@ describe('sms epoch:drop — parameterised, never a literal id', () => {
     }
   });
 });
+
+/**
+ * R-17 chronology guard (29 Sep 2026, DEFECTS.md R-17). epoch:accept's
+ * "different identity" path used to register ANY generation whose identity
+ * differs from what is open, with no check on which one is chronologically
+ * newer. An archive whose own create_date PREDATES the generation already
+ * open (the 10 Jul - 5 Aug gap, arriving after the September rebuild is
+ * already registered) must be refused here and pointed at
+ * `sms epoch:backfill` instead — never registered as if it were a forward
+ * move, which is the only thing generation_ordinal's MAX(...)+1 assignment
+ * and every "newest ordinal wins" reader (api/src/services/generation.ts)
+ * assume it always is.
+ */
+describe('sms epoch:accept — chronology guard (R-17)', () => {
+  it('refuses a source whose createdKey is OLDER than the open epoch\'s, exit 2, zero writes', async () => {
+    world.openEpochRow = {
+      epoch_id: 9,
+      source_server: 'SRV',
+      source_db: 'DATA_TP1U2',
+      source_created_key: '2026-08-05T18:54:50.000', // the September rebuild, already open
+      schema_fingerprint: 'fp-old',
+      label: 'September copy',
+    };
+    // The archive now being pointed at reports an OLDER create_date — the July generation.
+    world.identity = { ...world.identity, createdKey: '2026-06-19T11:53:05.787Z' };
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(2);
+    expect(world.app.transactions).toHaveLength(0);
+    const sqls = world.app.statements.map((s) => s.sql);
+    expect(sqls.some((q) => /^INSERT INTO sms\.source_epoch/.test(q.trim()))).toBe(false);
+    expect(sqls.some((q) => /UPDATE sms\.source_epoch SET closed_utc/.test(q))).toBe(false);
+    const printed = (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.flat().join(' ');
+    expect(printed).toMatch(/epoch:backfill/);
+  });
+
+  it('a source NEWER than the open epoch still registers normally (the guard is one-directional)', async () => {
+    world.openEpochRow = {
+      epoch_id: 9,
+      source_server: 'SRV',
+      source_db: 'DATA_TP1U2',
+      source_created_key: '2026-06-19T11:53:05.787Z', // an older generation still open
+      schema_fingerprint: 'fp-old',
+      label: 'July copy',
+    };
+    world.identity = { ...world.identity, createdKey: '2026-08-05T18:54:50.000' }; // newer — the rebuild
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(0);
+    expect(world.app.transactions).toHaveLength(1);
+    expect(world.app.transactions[0]!.committed).toBe(true);
+  });
+
+  it('with no open epoch at all, chronology cannot be violated — registers as a first registration', async () => {
+    world.openEpochRow = null;
+    world.identity = { ...world.identity, createdKey: '2020-01-01T00:00:00.000' }; // arbitrarily "old"
+
+    const code = await epochAccept(CONFIRM);
+
+    expect(code).toBe(0);
+    expect(world.app.transactions).toHaveLength(1);
+    expect(world.app.transactions[0]!.committed).toBe(true);
+  });
+});

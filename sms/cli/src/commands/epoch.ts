@@ -103,6 +103,8 @@ interface RegisterPlan {
   def: Awaited<ReturnType<typeof loadSourceTables>>[number];
   now: Awaited<ReturnType<typeof readSourceIdentity>>;
   openId: number | null;
+  /** The open epoch's own source_created_key, for the chronology guard below — null with no open epoch. */
+  openCreatedKey: string | null;
   ordinal: number;
 }
 interface UpdatePlan {
@@ -248,6 +250,7 @@ export async function epochAccept(argv: string[]): Promise<number> {
         def,
         now,
         openId: open?.epoch_id ?? null,
+        openCreatedKey: open?.source_created_key ?? null,
         ordinal: Number(ord.recordset[0]?.n ?? 1),
       });
     }
@@ -261,6 +264,43 @@ export async function epochAccept(argv: string[]): Promise<number> {
     // see the `provenance` declaration above for the row that proves why.
     // Checked here, before the --confirm gate, so a dry run says so too.
     const registers = plan.filter((p): p is RegisterPlan => p.kind === 'register');
+
+    // R-17 chronology guard (29 Sep 2026). epoch:accept's "different identity"
+    // path is for a generation moving FORWARD in time — the vendor rebuilding
+    // the table again, or a repoint to a newer copy. Its `generation_ordinal`
+    // is `MAX(...)+1` (unconditionally, above), and everything downstream that
+    // reads ordinal (api/src/services/generation.ts's "newest ordinal wins"
+    // scoping, the report/summary generation pickers) assumes a HIGHER ordinal
+    // is a LATER generation. An archive whose own create_date is OLDER than
+    // the generation already open — the 10 Jul - 5 Aug gap arriving after the
+    // September rebuild is already registered, say — is not that: it is more
+    // of a generation that already has a row, and belongs at the TAIL of the
+    // matching CLOSED epoch (sms epoch:backfill), never as a new row that
+    // would either wedge the ordinal ordering or (worse) close the open
+    // generation to make room for something older than it. createdKey is
+    // compared as text on purpose — see readSourceIdentity's own doc comment
+    // — so this is a plain string compare, not a date parse.
+    const chronologyViolations = registers.filter(
+      (p) => p.openCreatedKey !== null && p.now.createdKey < p.openCreatedKey,
+    );
+    if (chronologyViolations.length > 0) {
+      const first = chronologyViolations[0]!;
+      console.error(
+        `\nREFUSED: ${chronologyViolations.map((p) => p.def.sourceTable).join(', ')} would register a generation ` +
+          `OLDER than the one already open (source now reports created ${first.now.createdKey}; open epoch ` +
+          `${first.openId} was created ${first.openCreatedKey}).\n` +
+          `epoch:accept only ever moves a table's open generation FORWARD in time — generation_ordinal is assigned ` +
+          `MAX(...)+1 and read everywhere as "newest ordinal is the latest generation" (api/src/services/` +
+          `generation.ts). Registering something older would either wedge that ordering or close a newer open ` +
+          `generation to make room for an older one, neither of which this command may do silently.\n` +
+          `If this archive's ids continue an EXISTING closed generation (the usual case for data IFL sends late), ` +
+          `extend it instead:\n` +
+          `  sms epoch:backfill --table=<table> --epoch=<id> --source-db=<name> [--confirm]\n` +
+          `Nothing has been changed.`,
+      );
+      return 2;
+    }
+
     if (registers.length > 0) {
       if (provenance === null) {
         console.error(
