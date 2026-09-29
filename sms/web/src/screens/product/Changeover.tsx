@@ -618,9 +618,9 @@ export function PlanReview({
             still get column context; nothing changes on screen. */}
         <thead>
           <tr>
-            <th scope="col" className="sr-only">{W.product.changeover.step}</th>
-            <th scope="col" className="sr-only">{W.product.changeover.colDescription}</th>
-            <th scope="col" className="sr-only">{W.product.changeover.colAction}</th>
+            <th scope="col" className="sr-only-th">{W.product.changeover.step}</th>
+            <th scope="col" className="sr-only-th">{W.product.changeover.colDescription}</th>
+            <th scope="col" className="sr-only-th">{W.product.changeover.colAction}</th>
           </tr>
         </thead>
         <tbody>
@@ -715,9 +715,9 @@ function OutcomeView({ outcome }: { outcome: ChangeoverOutcome }) {
               readers still get column context; nothing changes on screen. */}
           <thead>
             <tr>
-              <th scope="col" className="sr-only">{W.product.changeover.step}</th>
-              <th scope="col" className="sr-only">{W.product.changeover.colDescription}</th>
-              <th scope="col" className="sr-only">{W.product.changeover.colResult}</th>
+              <th scope="col" className="sr-only-th">{W.product.changeover.step}</th>
+              <th scope="col" className="sr-only-th">{W.product.changeover.colDescription}</th>
+              <th scope="col" className="sr-only-th">{W.product.changeover.colResult}</th>
             </tr>
           </thead>
           <tbody>
