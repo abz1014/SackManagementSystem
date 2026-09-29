@@ -27,19 +27,21 @@
  *  - THE DRIFT WINDOW IS FIXED. Fourteen production days, whatever the period
  *    is set to, and the table says so.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { TRAILING_DAYS, type Period } from '../lib/period';
+import { TRAILING_DAYS, describePeriod, snapToShifts, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, rowKeys, Toggle,
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
-import { Readout, useChartWidth, edgeAnchor, RefLine, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
+import { edgeAnchor, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
+import { ChartFrame, type ChartTip, type ChartTipRow } from '../ui/ChartFrame';
+import { placeGutterLabels, placeTip, packRow, textPx, bandHit, nearestIndex, type Rect } from '../ui/chartLayout';
 import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
-  type SpcData, type SpcType, type StationRow, type WeightStationRow, type WeightStationsData,
+  type SpcData, type SpcType, type StationRow, type Subgroup, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
 /** Roadmap Phase 2b (16 Sep 2026): the chart toggle, in the URL as `wm`. */
@@ -69,6 +71,7 @@ export function WeightScreen({
   onChartStationChange,
   onOpenStation,
   onSeeOutside,
+  onSelectPeriod,
 }: {
   period: Period;
   mode: WeightMode;
@@ -97,6 +100,18 @@ export function WeightScreen({
   onChartStationChange: (v: number | null) => void;
   onOpenStation: (station: number) => void;
   onSeeOutside: () => void;
+  /**
+   * Chart overhaul wave 3, Task T6 (29 Sep 2026). Drag-select on the OverTime
+   * chart snaps the WHOLE PAGE period to shift boundaries
+   * (`lib/period.ts`'s `snapToShifts`) and hands the result here, the same
+   * `onSelectPeriod?` contract `StationSheet.tsx`'s `DailyMeans` already
+   * uses. **Not yet wired in `App.tsx`** — that file belongs to Task T8a
+   * today; wiring it there is `go({ period: p })`, the same setter
+   * `StationSheet`'s own (currently unwired) `onSelectPeriod` would use.
+   * Optional so every existing caller keeps compiling unchanged until T8
+   * wires it.
+   */
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
 
   const st = usePolling(
@@ -406,7 +421,13 @@ export function WeightScreen({
           // UX Phase 7 Brief 5: `d` can be null on a station-data failure
           // while the chart itself (`s`) is fine — the target/limit lines
           // are simply omitted rather than the whole chart being withheld.
-          <OverTime spc={s} target={chartType === 'cone' ? (d?.targetG ?? null) : null} multiDay={period.from !== period.to} />
+          <OverTime
+            spc={s}
+            target={chartType === 'cone' ? (d?.targetG ?? null) : null}
+            multiDay={period.from !== period.to}
+            periodLabel={describePeriod(period)}
+            onSelectPeriod={onSelectPeriod}
+          />
         ) : (
           <Distribution spc={s} target={chartType === 'cone' ? (d?.targetG ?? null) : null} />
         )}
@@ -781,6 +802,15 @@ function kindWord(unit: 'g' | 'kg'): string {
   return unit === 'kg' ? W.readings.sacks.toLowerCase() : W.readings.cones.toLowerCase();
 }
 
+/** A signed weight difference, unit-aware — the OverTime tooltip's own "vs
+ *  target" row. Same "no −0 g" rule as `StationTable`'s local `signed()`:
+ *  a rounded zero must read as no difference, not as a very slightly
+ *  negative measurement. */
+function signedW(v: number, unit: 'g' | 'kg'): string {
+  if (Math.round(v) === 0) return fmtW(Math.abs(v), unit);
+  return `${v > 0 ? '+' : '−'}${fmtW(Math.abs(v), unit)}`;
+}
+
 /**
  * Axis labels carry the day as soon as the window spans more than one.
  *
@@ -794,220 +824,437 @@ function tickLabel(ts: string, multiDay: boolean): string {
   return `${d.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' })} ${time}`;
 }
 
-function OverTime({ spc, target, multiDay }: { spc: SpcData; target: number | null; multiDay: boolean }) {
-  const [box, width] = useChartWidth();
-  const [hover, setHover] = useState<number | null>(null);
+/**
+ * De-collided USL/target/LSL gutter labels for `OverTime` (chart overhaul
+ * wave 3, Task T6, 29 Sep 2026) — exported for its own geometry test. A
+ * limit inside `[lo, hi]` gets a real reference LINE at its own value; one
+ * off-scale (above `hi` or below `lo`) pins its line to the plot's own edge
+ * instead of widening the domain, exactly the 22/28 Sep behaviour this
+ * replaces. The one thing that changes: every label — on-scale AND
+ * off-scale alike — now goes through ONE `placeGutterLabels` pass
+ * (`chartLayout.ts`), so two labels that would land on the same baseline
+ * (either two in-range values within a line height of each other, or two
+ * pinned to the same edge) are pushed apart instead of overprinting. The
+ * old code handled only the second case, with a pair of per-edge counters;
+ * this handles both with the one mechanism `report/shared.tsx`'s
+ * `DeviationBars` already trusts. `lineY` (where the reference line itself
+ * is drawn) is never displaced — only `labelY` (where its text sits) moves;
+ * a leader tick is drawn between the two whenever they differ, so a moved
+ * label still reads as belonging to its own line.
+ */
+export interface OverTimeGutterLabel {
+  kind: 'usl' | 'target' | 'lsl';
+  lineY: number;
+  labelY: number;
+  text: string;
+  tone: 'ink' | 'muted';
+  displaced: boolean;
+}
+
+export function overTimeGutterLabels(
+  spec: { usl: number | null; lsl: number | null },
+  target: number | null,
+  domain: [number, number],
+  top: number,
+  bottom: number,
+  fontPx: number,
+  unit: 'g' | 'kg',
+): OverTimeGutterLabel[] {
+  const [lo, hi] = domain;
+  const span = hi - lo || 1;
+  const yAt = (v: number) => top + ((hi - v) / span) * (bottom - top);
+
+  type Item = { kind: OverTimeGutterLabel['kind']; y: number; text: string; tone: 'ink' | 'muted'; prio: number };
+  const items: Item[] = [];
+  const push = (kind: Item['kind'], value: number | null, label: string, tone: 'ink' | 'muted', prio: number) => {
+    if (value == null) return;
+    if (value >= lo && value <= hi) {
+      items.push({ kind, y: yAt(value), text: label, tone, prio });
+      return;
+    }
+    const atTop = value > hi;
+    const arrow = atTop ? '↑' : '↓';
+    items.push({ kind, y: atTop ? top : bottom, text: `${arrow} ${label} · off scale`, tone, prio });
+  };
+  // Target survives a squeeze first (prio 2): it is the one line every other
+  // figure on this screen is stated against.
+  push('usl', spec.usl, `upper limit ${fmtW(spec.usl, unit)}`, 'muted', 1);
+  push('target', target, `target ${fmtG(target)}`, 'ink', 2);
+  push('lsl', spec.lsl, `lower limit ${fmtW(spec.lsl, unit)}`, 'muted', 1);
+  if (items.length === 0) return [];
+
+  const lineH = Math.ceil(fontPx * 1.4) || 18;
+  const placed = placeGutterLabels(items, { top, bottom, lineH });
+  return placed.map((p, i) => ({
+    kind: items[i]!.kind,
+    lineY: items[i]!.y,
+    labelY: p.y,
+    text: p.text,
+    tone: items[i]!.tone,
+    displaced: p.displaced,
+  }));
+}
+
+function subgroupSpan(p: Subgroup, bucketMinutes: number, multiDay: boolean): string {
+  const startMs = new Date(p.ts).getTime();
+  const endIso = Number.isFinite(startMs) ? new Date(startMs + bucketMinutes * 60_000).toISOString() : p.ts;
+  return `${tickLabel(p.ts, multiDay)} – ${tickLabel(endIso, multiDay)}`;
+}
+
+/** The brush's shift-ref pair for a subgroup range, or null when the API
+ *  response predates the shift fields (962a18b) — a caller must then not
+ *  offer the brush at all rather than snap against undefined dates. */
+function subgroupShiftRange(g: Subgroup[], i0: number, i1: number): { from: ShiftRef; to: ShiftRef } | null {
+  const p0 = g[i0];
+  const p1 = g[i1];
+  if (!p0 || !p1 || !p0.firstShiftDate || !p0.firstShiftCode || !p1.lastShiftDate || !p1.lastShiftCode) return null;
+  return { from: { date: p0.firstShiftDate, shift: p0.firstShiftCode }, to: { date: p1.lastShiftDate, shift: p1.lastShiftCode } };
+}
+
+function OverTime({
+  spc,
+  target,
+  multiDay,
+  periodLabel,
+  onSelectPeriod,
+}: {
+  spc: SpcData;
+  target: number | null;
+  multiDay: boolean;
+  /** `describePeriod(period)` — the WHOLE PAGE period, for the caption
+   *  (`W.chart.limitsOverPeriod`), not just this chart's own data span. */
+  periodLabel: string;
+  onSelectPeriod?: (p: PeriodParams) => void;
+}) {
   const H = 250;
   const L = 8;
-  const R = 150;
   const T = 16;
   const B = 30;
 
   const g = spc.subgroups;
   const values = g.map((x) => x.mean);
-  // UX defect fix (22 Sep 2026): the y-domain used to fold the spec limits
-  // (target/USL/LSL) into `niceDomain` alongside the data. The limits sit
-  // ±40 g from target while the subgroup means span about 7 g, so the limits
-  // set the scale and the data collapsed to a measured 3.2 px inside a 204 px
-  // plot — 1.6% of the chart's height. The domain now comes from the data
-  // alone; a limit outside it is drawn as an edge annotation below, not
-  // folded into the range that decides how tall the real signal stands.
+  // UX defect fix (22 Sep 2026, kept through the ChartFrame rebuild): the
+  // y-domain comes from the data alone, never folding in the spec limits —
+  // see `overTimeGutterLabels` above for how an off-scale limit is drawn
+  // instead.
   const [lo, hi] = niceDomain(values, { pad: 0.15 });
-  const x = (i: number) => L + (i / Math.max(1, g.length - 1)) * (width - L - R);
-  const y = (v: number) => T + ((hi - v) / (hi - lo)) * (H - T - B);
-
-  // A limit inside [lo, hi] draws inline, at its own value. One off-scale
-  // (above `hi` or below `lo`) pins to the plot's own edge instead of being
-  // let to widen the domain — the reader still sees the limit exists and
-  // which side it sits on, never a distorted chart. When more than one mark
-  // lands off the SAME edge (target and the upper limit both above `hi` is
-  // routine once the domain hugs a ~7 g run of subgroup means — caught live:
-  // both printed "off scale" on the identical line and the two labels
-  // overlapped into unreadable text), each additional one stacks a further
-  // 13px in from that edge so the labels never share a baseline.
-  let offTop = 0;
-  let offBottom = 0;
-  const limitLine = (value: number | null, label: string, tone: 'ink' | 'muted' = 'muted') => {
-    if (value == null) return null;
-    const dashed = tone !== 'ink';
-    if (value >= lo && value <= hi) {
-      return <RefLine y={y(value)} x1={L} x2={width - R} label={label} tone={tone} dashed={dashed} />;
-    }
-    const atTop = value > hi;
-    const arrow = atTop ? '↑' : '↓';
-    const yy = atTop ? T + offTop++ * 13 : H - B - offBottom++ * 13;
-    // 28 Sep 2026: the default (non-`labelInside`) RefLine label starts at
-    // `x2 + 8` and grows RIGHTWARD with no reserved room beyond it — fine for
-    // the in-range labels above, which are short ("upper limit 2,000 g") and
-    // fit inside the R=150 gutter. The off-scale label appends the arrow and
-    // "· off scale", which was long enough to run 2-5px past the SVG's own
-    // right edge (measured at common chart widths). `labelInside` is the
-    // SAME prop RefLine already offers DeviationBars for an identical
-    // problem (see chart.tsx's own doc comment) — text-anchor end, growing
-    // LEFTWARD from `x2`, so it can never exceed the viewBox's right edge
-    // regardless of label length. The wording is unchanged.
-    return (
-      <RefLine y={yy} x1={L} x2={width - R} label={`${arrow} ${label} · off scale`} tone={tone} dashed={dashed} labelInside />
-    );
-  };
-
-  // Width-aware for the same reason as Rejects: a multi-day window labels
-  // ticks "2 Sept 06:00", which is twice as wide as a bare time.
-  const ticks = tickIndices(g.length, fittingTicks(width - L - R, multiDay ? 13 : 6, 13, g.length, 4));
-  const h = hover != null ? g[hover] : null;
 
   const avgN = spc.count / Math.max(1, g.length);
-  // Formerly a modelled "noise floor" — σ_within/√n, the movement a subgroup
-  // of this size carries "by chance alone". Removed 23 Sep 2026 (Weight
-  // brief item 3, reacting to the same D-1 finding DEFECTS.md already made
-  // for the suppressed violation marks above): on real plant data the
-  // subgroup MEANS range 1937.3–1962.1 g, an SD about three times that
-  // theoretical figure, so the sentence told a reader watching ±10 g swings
-  // that they were looking at chance noise of ±2 g — the over-claim moved
-  // from the suppressed dots into this sentence. A drawn band was already
-  // investigated and rejected (see the file this chart lives under, ragged
-  // per-subgroup n swings it 4.5x across one shift); this states the one
-  // thing that needs no model at all — the actual range the group means in
-  // THIS period have covered — instead of an assumption the data contradicts.
   const groupLo = values.length > 0 ? Math.min(...values) : null;
   const groupHi = values.length > 0 ? Math.max(...values) : null;
+  const resting = `${g.length} groups of about ${fmtInt(Math.round(avgN))} ${kindWord(spc.unit)}${
+    groupLo != null && groupHi != null && groupHi > groupLo
+      ? ` · ${W.weight.spanNote(fmtW(groupLo, spc.unit), fmtW(groupHi, spc.unit))}`
+      : ''
+  }`;
+
+  // Kept fresh by `children` below on every ChartFrame render (a resize
+  // included); `hit`/`markRect` read `.current` at call time, always after
+  // the render that set it — same idiom as `StationSheet.tsx`'s
+  // `DailyMeans`. `xsRef` is mutated in place, never reassigned, because the
+  // `brush` prop object below captures it by reference at THIS component's
+  // own last render.
+  const geoRef = useRef<{ x: (i: number) => number; y: (v: number) => number } | null>(null);
+  const xsRef = useRef<number[]>([]);
+
+  const hit = (px: number, py: number): number | null => {
+    if (py < T || xsRef.current.length === 0) return null;
+    return nearestIndex(px, xsRef.current);
+  };
+
+  const markRect = (i: number): Rect | null => {
+    const geo = geoRef.current;
+    const p = g[i];
+    if (!geo || !p) return null;
+    return { x: geo.x(i) - 4, y: geo.y(p.mean) - 4, w: 8, h: 8 };
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const p = g[i];
+    if (!p) return null;
+    const rows: ChartTipRow[] = [
+      { name: W.reports.colMean, value: `${fmtW(p.mean, spc.unit)} (${fmtInt(p.n)} ${kindWord(spc.unit)})`, mark: 'ink' },
+    ];
+    // Only when a target is in force — the file header's own rule: the
+    // headline does not state a difference until the basis is confirmed,
+    // and this tooltip must not say more than the figures above it do.
+    if (target != null) rows.push({ name: W.chart.vsTarget, value: signedW(p.mean - target, spc.unit) });
+    const context: string[] = [];
+    const limits: string[] = [];
+    if (spc.spec.usl != null) limits.push(`upper limit ${fmtW(spc.spec.usl, spc.unit)}`);
+    if (spc.spec.lsl != null) limits.push(`lower limit ${fmtW(spc.spec.lsl, spc.unit)}`);
+    if (limits.length > 0) context.push(limits.join(' · '));
+    // DEFECTS.md D-10: rule 1 only, under the same `xLimits.valid` gate the
+    // dot itself is drawn under — the tooltip and the mark can never
+    // disagree about whether the band exists.
+    if (spc.xLimits.valid && p.xViolates) context.push(W.calibration.patternOn(NELSON_RULE_LABEL[1]));
+    return { heading: subgroupSpan(p, spc.bucketMinutes, multiDay), rows, context: context.length > 0 ? context : undefined };
+  };
+
+  const commitBrush = (i0: number, i1: number) => {
+    if (!onSelectPeriod) return;
+    const range = subgroupShiftRange(g, i0, i1);
+    if (!range) return;
+    const params = snapToShifts(range.from, range.to);
+    if (params) onSelectPeriod(params);
+  };
+
+  const brushLabel = (i0: number, i1: number): string => {
+    const range = subgroupShiftRange(g, i0, i1);
+    if (!range) return '';
+    const { from, to } = range;
+    const sameShift = from.date === to.date && from.shift === to.shift;
+    return describePeriod({
+      key: 'range', from: from.date, to: to.date, tsTo: '', live: false, days: 1,
+      fromShift: from, toShift: to, shift: sameShift ? from.shift : undefined,
+    });
+  };
 
   return (
-    <div ref={box}>
-      <Readout
-        hovered={
-          h
-            // DEFECTS.md D-10, restored 23 Sep 2026: the hover names rule 1
-            // again, and ONLY rule 1 — under the same `xLimits.valid` gate as
-            // the dot, so the readout and the mark can never disagree about
-            // whether the band exists. h.nelson (rules 2-8) is still not
-            // read here; see the dot-rendering note below for the measured
-            // flag rates that keep it off.
-            ? `${tickLabel(h.ts, multiDay)} · ${fmtW(h.mean, spc.unit)}, the average of ${fmtInt(h.n)} ${kindWord(spc.unit)}${
-                spc.xLimits.valid && h.xViolates ? ` · ${W.calibration.patternOn(NELSON_RULE_LABEL[1])}` : ''
-              }`
-            : null
-        }
-        resting={`${g.length} groups of about ${fmtInt(Math.round(avgN))} ${kindWord(spc.unit)}${
-          groupLo != null && groupHi != null && groupHi > groupLo
-            ? ` · ${W.weight.spanNote(fmtW(groupLo, spc.unit), fmtW(groupHi, spc.unit))}`
-            : ''
-        }`}
-      />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img"
-           aria-label={spc.unit === 'kg' ? 'Average sack weight over time' : 'Average cone weight over time'}
-           onMouseLeave={() => setHover(null)}>
-        {limitLine(spc.spec.usl, `upper limit ${fmtW(spc.spec.usl, spc.unit)}`)}
-        {limitLine(target, `target ${fmtG(target)}`, 'ink')}
-        {limitLine(spc.spec.lsl, `lower limit ${fmtW(spc.spec.lsl, spc.unit)}`)}
-        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} stroke="var(--rule-2)" />}
-        <path d={linePath(g.map((p, i) => ({ x: x(i), y: y(p.mean) })))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
-        {/* DEFECTS.md D-10, restored 23 Sep 2026 — RULE 1 ONLY.
-            `p.xViolates` is now judged against spc.ts's I-MR band on the
-            group averages (X̿ ± 2.66·MR̄, time-contiguous same-generation
-            pairs), which replaced the σ_within/√n band that produced the
-            16-38% flag rates the 22 Sep suppression reacted to.
-            GATED ON `spc.xLimits.valid`, NOT merely on the field being
-            present: below 3 contiguous pairs the server marks the band
-            invalid and forces every `xViolates` false, and a screen must not
-            draw marks from a band it was told is untrustworthy — checking
-            `valid` explicitly means this stays true even if that forcing is
-            ever relaxed server-side.
-            The Nelson dots (p.nelson, rules 2-8) stay SUPPRESSED although
-            they now share the corrected sigma: measured 23 Sep 2026 on the
-            two real source generations they still flag 37.6-54.8% of groups
-            (mostly rules 2 and 6 — the signature of a slowly wandering level
-            read by rules written for independent samples), and a mark on two
-            groups in five is not a finding. W.weight.patternsWithheld says
-            so on screen rather than letting the absence read as "none". */}
-        {spc.xLimits.valid &&
-          g.map((p, i) => (p.xViolates ? <circle key={`v${i}`} cx={x(i)} cy={y(p.mean)} r={4} fill="var(--acc-fill)" /> : null))}
-        {g.map((_, i) => (
-          <rect key={`h${i}`} className="hit" x={x(i) - (width - L - R) / Math.max(1, g.length) / 2}
-                y={T} width={(width - L - R) / Math.max(1, g.length)} height={H - T - B}
-                onMouseEnter={() => setHover(i)} />
-        ))}
-        {ticks.map((i) => (
-          <text key={`t${i}`} x={x(i)} y={H - 8} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor={edgeAnchor(i, g.length)}>
-            {tickLabel(g[i]!.ts, multiDay)}
-          </text>
-        ))}
-      </svg>
-    </div>
+    <ChartFrame
+      chartId="weight-overtime"
+      defaultH={H}
+      minH={180}
+      maxH={520}
+      resting={resting}
+      caption={W.chart.limitsOverPeriod(periodLabel)}
+      ariaLabel={spc.unit === 'kg' ? 'Average sack weight over time' : 'Average cone weight over time'}
+      hit={hit}
+      count={g.length}
+      tipFor={tipFor}
+      markRect={markRect}
+      brush={onSelectPeriod ? { onCommit: commitBrush, xs: xsRef.current } : undefined}
+      brushLabel={onSelectPeriod ? brushLabel : undefined}
+    >
+      {(size, state) => {
+        const Wd = size.width;
+        const Hd = size.height;
+        const b0 = Hd - B;
+        // Gutter labels computed BEFORE the right margin they need, exactly
+        // as `StationSheet.tsx`'s `DailyMeans` does: their text does not
+        // depend on the margin's own width, only the margin's width depends
+        // on the widest of them.
+        const labels = overTimeGutterLabels(spc.spec, target, [lo, hi], T, b0, size.fontPx, spc.unit);
+        const widest = labels.reduce((m, l) => Math.max(m, l.text.length), 0);
+        const R = widest > 0 ? Math.min(Math.max(60, Math.ceil(textPx(widest, size.fontPx)) + 16), Wd * 0.3) : 8;
+
+        const x = (i: number) => L + (i / Math.max(1, g.length - 1)) * (Wd - L - R);
+        const y = (v: number) => T + ((hi - v) / (hi - lo || 1)) * (b0 - T);
+        geoRef.current = { x, y };
+        xsRef.current.length = 0;
+        xsRef.current.push(...g.map((_, i) => x(i)));
+
+        // Width-aware for the same reason as Rejects: a multi-day window
+        // labels ticks "2 Sept 06:00", twice as wide as a bare time.
+        const ticks = tickIndices(g.length, fittingTicks(Wd - L - R, multiDay ? 13 : 6, size.fontPx, g.length, 4));
+
+        return (
+          <svg className="chart" viewBox={`0 0 ${Wd} ${Hd}`} height={Hd} role="presentation" aria-hidden="true">
+            {labels.map((l) => (
+              <g key={l.kind}>
+                <line
+                  x1={L} x2={Wd - R} y1={l.lineY} y2={l.lineY}
+                  stroke={l.tone === 'ink' ? 'var(--graphite)' : 'var(--grid)'}
+                  strokeDasharray={l.tone === 'ink' ? undefined : '3 3'}
+                />
+                {l.displaced && <line x1={Wd - R} y1={l.lineY} x2={Wd - R + 6} y2={l.labelY} stroke="var(--grid)" />}
+                <text
+                  x={Wd - R + 8} y={l.labelY + size.fontPx * 0.35} fontSize={size.fontPx}
+                  fill={l.tone === 'ink' ? 'var(--graphite)' : 'var(--muted)'}
+                >
+                  {l.text}
+                </text>
+              </g>
+            ))}
+            <path d={linePath(g.map((p, i) => ({ x: x(i), y: y(p.mean) })))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
+            {/* DEFECTS.md D-10, restored 23 Sep 2026 — RULE 1 ONLY. See the
+                original comment history in git blame for the full account of
+                why rules 2-8 (`p.nelson`) stay withheld (37.6-54.8% flag
+                rate on real generations) while rule 1 (`xViolates`, judged
+                against spc.ts's own I-MR band) does not. */}
+            {spc.xLimits.valid &&
+              g.map((p, i) => (
+                p.xViolates ? (
+                  <circle key={`v${i}`} cx={x(i)} cy={y(p.mean)} r={4} fill={state.active === i ? 'var(--acc)' : 'var(--acc-fill)'} />
+                ) : null
+              ))}
+            {ticks.map((i) => (
+              <text key={`t${i}`} x={x(i)} y={Hd - 8} fontSize={size.fontPx} fill="var(--muted)" textAnchor={edgeAnchor(i, g.length)}>
+                {tickLabel(g[i]!.ts, multiDay)}
+              </text>
+            ))}
+          </svg>
+        );
+      }}
+    </ChartFrame>
   );
 }
 
+/** One reference label above the Distribution plot, before de-collision. */
+export interface DistRefLabelIn {
+  key: 'lsl' | 'target' | 'usl';
+  x: number;
+  text: string;
+}
+
+/** After `packRow` (chartLayout.ts): where to draw it, and which row. */
+export interface DistRefLabelOut extends DistRefLabelIn {
+  labelX: number;
+  anchor: 'start' | 'middle' | 'end';
+  row: 0 | 1;
+  overflow: boolean;
+}
+
+/** How many rows of reference labels the band above the plot reserves —
+ *  `packRow` moves a colliding label to row 1 before it ever resorts to
+ *  `overflow`, so the band must be tall enough for both. */
+export const DIST_REF_ROWS = 2;
+export const DIST_REF_ROW_H = 13;
+
 /**
- * The band above the plot that the three reference labels hang in.
- *
- * They used to be drawn INSIDE the plot, on the same baseline a bar can reach,
- * so whether "target 1,960 g" was readable depended on that day's bin heights.
- * Nothing may share a line with the data marks.
+ * Horizontal de-collision for the "target"/"upper limit"/"lower limit"
+ * labels hanging in the band above the Distribution plot (chart overhaul
+ * wave 3, Task T6, 29 Sep 2026). They used to be drawn at a hardcoded ±5px
+ * offset from their own rule with no check for whether that put them on top
+ * of a NEIGHBOURING label — routine when USL/target/LSL sit within a couple
+ * of bins of each other. `packRow` (`chartLayout.ts`) flips a label's own
+ * anchor first, then moves it to a second row, then marks it `overflow`
+ * (still drawn, in place, on row 1) only if both fail — never drawn on top
+ * of another label. Exported for its own geometry test at more than one
+ * chart width.
  */
-const REF_BAND = 22;
+export function distributionRefLabels(items: DistRefLabelIn[], range: [number, number], fontPx: number): DistRefLabelOut[] {
+  const packed = packRow(
+    items.map((it) => ({ x: it.x, w: Math.ceil(textPx(it.text.length, fontPx)), anchor: 'middle' as const, text: it.text })),
+    range,
+  );
+  return items.map((it, i) => {
+    const p = packed[i]!;
+    return { ...it, labelX: p.x, anchor: p.anchor, row: p.row, overflow: p.overflow };
+  });
+}
 
 function Distribution({ spc, target }: { spc: SpcData; target: number | null }) {
-  const [box, width] = useChartWidth();
-  const [hover, setHover] = useState<number | null>(null);
   const H = 250;
   const L = 8;
-  const R = 150;
-  const T = 16 + REF_BAND;
   const B = 30;
+  // The band above the plot the three reference labels hang in — they used
+  // to be drawn INSIDE the plot, on the same baseline a bar can reach, so
+  // whether "target 1,960 g" was readable depended on that day's bin
+  // heights. Nothing may share a line with the data marks. Two rows tall so
+  // `packRow` has a second row to move a colliding label into.
+  const REF_TOP = 16;
+  const REF_BAND = DIST_REF_ROWS * DIST_REF_ROW_H + 8;
+  const T = REF_TOP + REF_BAND;
 
   const bins = spc.histogram;
   if (bins.length === 0) return <Empty message={W.nothingHere} />;
   const max = Math.max(...bins.map((b) => b.count), 1);
-  const slot = (width - L - R) / bins.length;
-  const y = (v: number) => T + ((max - v) / max) * (H - T - B);
-  const cx = (i: number) => L + slot * i + slot / 2;
-  const xOf = (weight: number) => {
-    const i = bins.findIndex((b) => weight >= b.start && weight < b.end);
-    return i >= 0 ? cx(i) : null;
-  };
+
+  const layoutRef = useRef<{ slot: number; R: number; y: (v: number) => number; cx: (i: number) => number } | null>(null);
+
   const outside = (b: { start: number; end: number }) =>
     (spc.spec.lsl != null && b.end <= spc.spec.lsl) || (spc.spec.usl != null && b.start >= spc.spec.usl);
 
-  const h = hover != null ? bins[hover] : null;
+  const hit = (px: number, py: number): number | null => {
+    const layout = layoutRef.current;
+    if (!layout || py < T) return null;
+    return bandHit(px, L, layout.slot, bins.length);
+  };
+
+  const markRect = (i: number): Rect | null => {
+    const layout = layoutRef.current;
+    const b = bins[i];
+    if (!layout || !b) return null;
+    const by = Math.min(H - B, layout.y(b.count));
+    return { x: layout.cx(i) - layout.slot * 0.42, y: by, w: layout.slot * 0.84, h: Math.max(0, H - B - by) };
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const b = bins[i];
+    if (!b) return null;
+    const rows: ChartTipRow[] = [
+      { name: '', value: `${fmtInt(b.count)} ${kindWord(spc.unit)}`, mark: outside(b) ? 'acc' : 'graphite' },
+    ];
+    return {
+      heading: `${fmtW(b.start, spc.unit)} to ${fmtW(b.end, spc.unit)}`,
+      rows,
+      context: [outside(b) ? 'outside the product’s limits' : 'inside the product’s limits'],
+    };
+  };
 
   return (
-    <div ref={box}>
-      <Readout
-        hovered={h ? `${fmtW(h.start, spc.unit)} to ${fmtW(h.end, spc.unit)} · ${fmtInt(h.count)} ${kindWord(spc.unit)}` : null}
-        resting={`${fmtInt(spc.count)} ${kindWord(spc.unit)}, ${fmtW(bins[0]!.start, spc.unit)} to ${fmtW(bins[bins.length - 1]!.end, spc.unit)}`}
-      />
-      <svg className="chart" viewBox={`0 0 ${width} ${H}`} height={H} role="img"
-           aria-label={spc.unit === 'kg' ? 'Sack weight distribution' : 'Cone weight distribution'}
-           onMouseLeave={() => setHover(null)}>
-        {bins.map((b, i) => (
-          <rect key={i} x={cx(i) - slot * 0.42} y={y(b.count)} width={slot * 0.84}
+    <ChartFrame
+      chartId="weight-distribution"
+      defaultH={H}
+      minH={180}
+      maxH={520}
+      resting={`${fmtInt(spc.count)} ${kindWord(spc.unit)}, ${fmtW(bins[0]!.start, spc.unit)} to ${fmtW(bins[bins.length - 1]!.end, spc.unit)}`}
+      ariaLabel={spc.unit === 'kg' ? 'Sack weight distribution' : 'Cone weight distribution'}
+      hit={hit}
+      count={bins.length}
+      tipFor={tipFor}
+      markRect={markRect}
+    >
+      {(size, state) => {
+        const Wd = size.width;
+        const R = 8;
+        const slot = (Wd - L - R) / bins.length;
+        const y = (v: number) => T + ((max - v) / max) * (H - T - B);
+        const cx = (i: number) => L + slot * i + slot / 2;
+        layoutRef.current = { slot, R, y, cx };
+        const xOf = (weight: number) => {
+          const i = bins.findIndex((b) => weight >= b.start && weight < b.end);
+          return i >= 0 ? cx(i) : null;
+        };
+
+        const refIn: DistRefLabelIn[] = [];
+        if (spc.spec.lsl != null && xOf(spc.spec.lsl) != null) {
+          refIn.push({ key: 'lsl', x: xOf(spc.spec.lsl)!, text: `lower limit ${fmtW(spc.spec.lsl, spc.unit)}` });
+        }
+        if (target != null && xOf(target) != null) {
+          refIn.push({ key: 'target', x: xOf(target)!, text: `target ${fmtG(target)}` });
+        }
+        if (spc.spec.usl != null && xOf(spc.spec.usl) != null) {
+          refIn.push({ key: 'usl', x: xOf(spc.spec.usl)!, text: `upper limit ${fmtW(spc.spec.usl, spc.unit)}` });
+        }
+        const refOut = distributionRefLabels(refIn, [L, Wd - R], size.fontPx);
+
+        return (
+          <svg className="chart" viewBox={`0 0 ${Wd} ${H}`} height={H} role="presentation" aria-hidden="true">
+            {bins.map((b, i) => (
+              <rect
+                key={i} x={cx(i) - slot * 0.42} y={y(b.count)} width={slot * 0.84}
                 height={Math.max(0, H - B - y(b.count))}
-                fill={outside(b) ? 'var(--acc-fill)' : hover === i ? 'var(--ink)' : 'var(--graphite)'}
-                onMouseEnter={() => setHover(i)} />
-        ))}
-        {/* The rule runs the height of the plot; its label hangs in the band
-            ABOVE it. The lower limit reads back toward its own rule so it
-            cannot collide with the target label beside it. */}
-        {[['lower limit', spc.spec.lsl], ['target', target], ['upper limit', spc.spec.usl]].map(([label, v]) =>
-          typeof v === 'number' && xOf(v) != null ? (
-            <g key={String(label)}>
-              <line x1={xOf(v)!} x2={xOf(v)!} y1={T} y2={H - B} stroke={label === 'target' ? 'var(--graphite)' : 'var(--grid)'}
-                    strokeDasharray={label === 'target' ? undefined : '3 3'} />
-              <text
-                x={label === 'lower limit' ? xOf(v)! - 5 : xOf(v)! + 5}
-                y={T - 8}
-                textAnchor={label === 'lower limit' ? 'end' : 'start'}
-                fontSize="var(--fs-tick)"
-                fill="var(--muted)"
-              >
-                {label} {label === 'target' ? fmtG(v) : fmtW(v, spc.unit)}
-              </text>
-            </g>
-          ) : null,
-        )}
-        <line x1={L} x2={width - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
-      </svg>
-    </div>
+                fill={outside(b) ? 'var(--acc-fill)' : state.active === i ? 'var(--ink)' : 'var(--graphite)'}
+              />
+            ))}
+            {/* The rule runs the height of the plot; its label hangs in the
+                band above it, de-collided by row/anchor via `packRow`
+                rather than a fixed ±5px offset from the rule. */}
+            {refOut.map((l) => (
+              <g key={l.key}>
+                <line
+                  x1={l.x} x2={l.x} y1={T} y2={H - B}
+                  stroke={l.key === 'target' ? 'var(--graphite)' : 'var(--grid)'}
+                  strokeDasharray={l.key === 'target' ? undefined : '3 3'}
+                />
+                <text
+                  x={l.labelX}
+                  y={REF_TOP + DIST_REF_ROW_H * (l.row + 1)}
+                  textAnchor={l.anchor}
+                  fontSize={size.fontPx}
+                  fill="var(--muted)"
+                >
+                  {l.text}
+                </text>
+              </g>
+            ))}
+            <line x1={L} x2={Wd - R} y1={H - B} y2={H - B} stroke="var(--rule-2)" />
+          </svg>
+        );
+      }}
+    </ChartFrame>
   );
 }
 
@@ -1044,6 +1291,25 @@ export function sparklineDomain(rows: WeightStationRow[], lineMeanG: number | nu
   return niceDomain(vals, { pad: 0.15 });
 }
 
+/** "12 Sep", for the Sparkline tooltip only — day and short month, matching
+ *  `StationSheet.tsx`'s own `short()` (not exported from there, so a small
+ *  local copy rather than an import that would couple two unrelated files). */
+function shortSparkDate(date: string): string {
+  return new Date(`${date.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+}
+
+/**
+ * Chart overhaul wave 3, Task T6 (29 Sep 2026): a hover tooltip only — "day ·
+ * mean g" — added to the existing hand-drawn SVG. Deliberately NOT rebuilt on
+ * `ChartFrame`: the owner's own brief for this chart is "no resize and no
+ * brush", and `ChartFrame` always renders a resize handle outside print,
+ * which this 96×28 table cell has no room for and no use of (fourteen of
+ * these render per screen; fourteen resize handles would be its own defect).
+ * The tooltip box reuses `.chart-tip`'s existing CSS classes (`app.css`,
+ * already shipped for `ChartFrame`'s own tooltip) rather than adding new
+ * rules, and `chartLayout.ts`'s `placeTip` so it never overlaps the marks
+ * it describes even in this small a frame.
+ */
 export function Sparkline({
   days,
   domain,
@@ -1053,35 +1319,66 @@ export function Sparkline({
   domain: [number, number];
   lineMeanG: number | null;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   if (days.length < SPARK_MIN_DAYS) return <span className="mut">{'—'}</span>;
   const [lo, hi] = domain;
   const y = linear([lo, hi], [SPARK_H - 3, 3]);
   const x = (i: number) => (days.length > 1 ? (i / (days.length - 1)) * SPARK_W : SPARK_W / 2);
   const first = days[0]!;
   const last = days[days.length - 1]!;
+  const h = hover != null ? days[hover] : null;
+  const slot = SPARK_W / Math.max(1, days.length);
+  const tipSize = { w: 108, h: 22 };
+  const tipPos = h ? placeTip({ x: x(hover!), y: y(h.mean) }, tipSize, { w: SPARK_W, h: SPARK_H }) : null;
+
   return (
-    <svg
-      className="spark"
-      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
-      width={SPARK_W}
-      height={SPARK_H}
-      role="img"
-      aria-label={`Daily average over ${days.length} days: ${fmtG(first.mean)} to ${fmtG(last.mean)}`}
-    >
-      {lineMeanG != null && lineMeanG >= lo && lineMeanG <= hi && (
-        <line x1={0} x2={SPARK_W} y1={y(lineMeanG)} y2={y(lineMeanG)} stroke="var(--grid)" strokeWidth={1} />
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <svg
+        className="spark"
+        viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+        width={SPARK_W}
+        height={SPARK_H}
+        role="img"
+        aria-label={`Daily average over ${days.length} days: ${fmtG(first.mean)} to ${fmtG(last.mean)}`}
+        onMouseLeave={() => setHover(null)}
+      >
+        {lineMeanG != null && lineMeanG >= lo && lineMeanG <= hi && (
+          <line x1={0} x2={SPARK_W} y1={y(lineMeanG)} y2={y(lineMeanG)} stroke="var(--grid)" strokeWidth={1} />
+        )}
+        <path
+          d={linePath(days.map((d, i) => ({ x: x(i), y: y(d.mean) })))}
+          fill="none"
+          stroke="var(--graphite)"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+        {days.map((d, i) =>
+          d.nelson.length > 0 ? <circle key={i} cx={x(i)} cy={y(d.mean)} r={2} fill="var(--acc-fill)" /> : null,
+        )}
+        {days.map((_, i) => (
+          <rect
+            key={`h${i}`}
+            className="hit"
+            x={x(i) - slot / 2}
+            y={0}
+            width={slot}
+            height={SPARK_H}
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
+          />
+        ))}
+      </svg>
+      {h && tipPos && (
+        <div
+          className="chart-tip"
+          role="presentation"
+          aria-hidden="true"
+          style={{ position: 'absolute', left: tipPos.x, top: tipPos.y, width: tipSize.w, pointerEvents: 'none', zIndex: 1 }}
+        >
+          <p className="chart-tip-h">{`${shortSparkDate(h.date)} · ${fmtG(h.mean)}`}</p>
+        </div>
       )}
-      <path
-        d={linePath(days.map((d, i) => ({ x: x(i), y: y(d.mean) })))}
-        fill="none"
-        stroke="var(--graphite)"
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-      />
-      {days.map((d, i) =>
-        d.nelson.length > 0 ? <circle key={i} cx={x(i)} cy={y(d.mean)} r={2} fill="var(--acc-fill)" /> : null,
-      )}
-    </svg>
+    </span>
   );
 }
 

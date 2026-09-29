@@ -843,6 +843,21 @@ export interface Subgroup {
   xViolates: boolean;
   sViolates: boolean;
   nelson: NelsonRuleId[];
+  /**
+   * Chart overhaul wave 3, Task T6 (29 Sep 2026, commit 962a18b on the API
+   * side): the shift(s) this subgroup's readings fall in, so a chart drag
+   * across subgroups can snap the WHOLE PAGE period to shift boundaries
+   * (`lib/period.ts`'s `snapToShifts`) without re-deriving it from `ts` and
+   * `bucketMinutes`. A subgroup straddling a shift boundary carries its
+   * first and last shift separately; `snapToShifts(first-of-selection,
+   * last-of-selection)` already widens outward across both. Optional only
+   * because this file cannot assume every caller's fixture/mock data has
+   * been updated for it in the same pass — the API always sends it.
+   */
+  firstShiftDate?: string;
+  firstShiftCode?: 'morning' | 'evening' | 'night';
+  lastShiftDate?: string;
+  lastShiftCode?: 'morning' | 'evening' | 'night';
 }
 export interface StationStat {
   station: number;
