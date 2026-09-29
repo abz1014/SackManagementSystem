@@ -2340,9 +2340,15 @@ export const W = {
   } as const,
 
   /* Chart overhaul, wave 2, Task T3 (28 Sep 2026): the shared ChartFrame's
-     own copy — the tooltip, the resize handle and the drag-select brush.
-     Every string a later chart task's tooltip context needs lives here too,
-     so no chart adds its own ad hoc phrase for "station" or "above usual". */
+     own copy — the tooltip and the resize handle. Every string a later chart
+     task's tooltip context needs lives here too, so no chart adds its own ad
+     hoc phrase for "station" or "above usual".
+
+     Wave 4, Task W1 (29 Sep 2026, click-to-zoom): drag-to-select is gone —
+     clicking a day/shift mark zooms the page to it, so `releaseToShow` and
+     `dragToSelectRange` (the brush's own copy) are retired in favour of the
+     three `clickToShow*` hints below, shown in ChartFrame's tooltip on a mark
+     that can be zoomed to. */
   chart: {
     backToPreviousRange: 'Back to previous range',
     /* Task T8a (29 Sep 2026): StationSheet's daily-means tooltip currently
@@ -2351,8 +2357,9 @@ export const W = {
        own owner can switch to this key; not edited by this task (out of its
        three-file ownership). */
     adjustmentLoggedHere: 'adjustment logged here',
-    releaseToShow: (range: string) => `Release to show ${range}`,
-    dragToSelectRange: 'Drag across the chart to choose a range',
+    clickToShowShift: 'Click to show this shift',
+    clickToShowDay: 'Click to show this day',
+    clickToShowRange: 'Click to show these shifts',
     dragToResize: "Drag to change the chart's height",
     limitsOverPeriod: (range: string) => `Limits are worked out over the period shown: ${range}`,
     vsRowMedian: 'vs row median',

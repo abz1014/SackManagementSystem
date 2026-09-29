@@ -846,20 +846,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .chart .hit { fill: transparent; cursor: crosshair; }
 
 /* ---- ChartFrame (chart overhaul, wave 2, Task T3, 28 Sep 2026) ---------- */
-/* The shared frame every chart mounts inside: a resizable, re-layouting
-   plot area plus a floating tooltip, a drag-select brush and a drag handle
-   — all owned by `web/src/ui/ChartFrame.tsx`, never by an individual chart.
-   RULE 3's old text in `chart.tsx` ("never a floating tooltip") is
-   superseded for anything built on this frame — see that file's header
-   comment (not edited here) and `ChartFrame.tsx`'s own header for the
-   replacement text. */
+/* The shared frame every chart mounts inside: a resizable, re-layouting plot
+   area plus a floating tooltip and a drag handle — all owned by
+   `web/src/ui/ChartFrame.tsx`, never by an individual chart. RULE 3's old
+   text in `chart.tsx` ("never a floating tooltip") is superseded for
+   anything built on this frame — see that file's header comment (not edited
+   here) and `ChartFrame.tsx`'s own header for the replacement text.
+   (Wave 4, Task W1, 29 Sep 2026: the drag-select brush this frame used to
+   draw here is REMOVED — click-to-zoom, `.can-activate` above, replaced
+   it.) */
 .chart-frame { position: relative; }
 .chart-frame-body {
   position: relative; width: 100%; overflow: visible;
-  /* A touch drag starts scrolling the page unless it is a deliberate,
-     held-still brush attempt (`useChartBrush`'s own long-press gate) —
-     `pan-y` lets vertical scroll through immediately and leaves horizontal
-     motion to the brush. */
+  /* A touch drag still scrolls the page (there is no touch-drag gesture of
+     ChartFrame's own left to fight it for — a tap pins/activates, it does
+     not drag), so this stays `pan-y` rather than disabling touch scroll. */
   touch-action: pan-y;
 }
 .chart-frame-body:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -895,19 +896,13 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .chart-tip-ctx { margin: 6px 0 0; color: var(--muted); }
 .chart-tip-hint { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--rule); color: var(--acc); }
 
-/* The live brush selection, and its "Release to show …" label. The brush
-   itself sets the WHOLE PAGE period on commit (owner decision) — this box
-   is only the in-progress visual, never a persisted selection. */
-.chart-brush {
-  z-index: 4; background: var(--acc-pale); border-left: 1px solid var(--acc); border-right: 1px solid var(--acc);
-  pointer-events: none;
-}
-.chart-brush-label {
-  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-  z-index: 6; padding: 4px 10px; border-radius: var(--radius);
-  background: var(--ink); color: #fff; font-size: var(--fs-tick); white-space: nowrap;
-  pointer-events: none;
-}
+/* Click-to-zoom (chart overhaul wave 4, Task W1, 29 Sep 2026 — replaces the
+   drag-to-select brush this app used to draw here; `.chart-brush`/
+   `.chart-brush-label` are gone along with it). A mark ChartFrame's own
+   `activate` would fire for (onActivate, or zoom resolving a period) gets a
+   pointer cursor so the click affordance is visible before the tooltip's own
+   hint text ever renders. */
+.chart-frame-body.can-activate { cursor: pointer; }
 
 /* The resize handle: a thin strip along the bottom edge. `role="separator"`
    plus `aria-valuenow` (the height in px) makes the drag a first-class
@@ -1222,12 +1217,12 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
 
 @media print {
   .bar, .strip, .replay, .no-print, .scrim, .sheet, .wall, .toggle { display: none !important; } /* [PHASE 9 PRINT P5] .toggle added */
-  /* [CHART T3, 28 Sep 2026] Owner decision: print gets no tooltip, no drag
-     handle, no brush — fixed width, default height. `print.chart.guard.
-     test.ts` reads this rule off disk and fails if any of the three
-     classes is missing, the way `print.landscape.guard.test.ts` already
-     guards the Report aria-label coupling above. */
-  .chart-tip, .chart-resize, .chart-brush, .chart-brush-label { display: none !important; }
+  /* [CHART T3, 28 Sep 2026; brush removed wave 4/T1, 29 Sep 2026] Owner
+     decision: print gets no tooltip, no drag handle — fixed width, default
+     height. `print.chart.guard.test.ts` reads this rule off disk and fails
+     if either class is missing, the way `print.landscape.guard.test.ts`
+     already guards the Report aria-label coupling above. */
+  .chart-tip, .chart-resize { display: none !important; }
   body { font-size: 11pt; }
   .page { max-width: none; padding: 0; }
   .band { border-top: 0; }

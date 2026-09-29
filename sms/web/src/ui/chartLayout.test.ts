@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   bandHit,
-  brushToIndices,
   gutterFor,
   nearestIndex,
   packRow,
@@ -235,27 +234,3 @@ describe('placeTip', () => {
   });
 });
 
-describe('brushToIndices', () => {
-  const xs = [0, 10, 20, 30, 40, 50];
-
-  it('is order-independent', () => {
-    expect(brushToIndices(10, 30, xs)).toEqual(brushToIndices(30, 10, xs));
-    expect(brushToIndices(10, 30, xs)).toEqual([1, 3]);
-  });
-
-  it('returns null for an empty span (no point covered)', () => {
-    expect(brushToIndices(12, 18, xs)).toBeNull();
-  });
-
-  it('returns null for an empty xs array', () => {
-    expect(brushToIndices(0, 10, [])).toBeNull();
-  });
-
-  it('covers a single point as a single-index range', () => {
-    expect(brushToIndices(9, 11, xs)).toEqual([1, 1]);
-  });
-
-  it('covers the whole domain', () => {
-    expect(brushToIndices(-100, 1000, xs)).toEqual([0, 5]);
-  });
-});

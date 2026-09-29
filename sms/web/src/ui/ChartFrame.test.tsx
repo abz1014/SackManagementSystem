@@ -6,11 +6,12 @@
  * `useChartSize` reaches for (`testkit/domStubs.ts`) — nothing here drives
  * a real resize, so the controllable stub is not needed either.
  */
-import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { ChartFrame, type ChartFrameProps, type ChartTip } from './ChartFrame';
 import { installDomStubs } from '../testkit/domStubs';
+import { W } from '../lib/words';
+import type { PeriodParams } from '../lib/period';
 
 installDomStubs();
 
@@ -24,25 +25,14 @@ afterEach(() => {
  * jsdom in this project's pinned versions does not construct a real
  * `PointerEvent` from `fireEvent.pointerDown(el, {clientX, pointerId, ...})`
  * — every property comes through `undefined` (verified directly against
- * this repo's jsdom before writing this helper). `useChartBrush.test.tsx`
- * sidesteps this by calling the hook's handlers with plain object literals;
- * `ChartFrame` does not expose its handlers, so this dispatches a real
- * `MouseEvent` under the `pointer*` event names instead — `clientX`/
- * `button` DO come through a `MouseEvent` correctly (also verified), and
- * `pointerId`/`pointerType` land `undefined` on both sides of every
- * `e.pointerId !== s.pointerId` comparison the brush hook makes, which
- * holds (`undefined !== undefined` is `false`) exactly as a real single
- * mouse pointer would.
- *
- * `pointerId` is the one property that must NOT be left `undefined`:
- * `useChartBrush`'s own move/up handlers gate on
- * `s.pointerId == null || e.pointerId !== s.pointerId` — with a real
- * pointer, `s.pointerId` is captured on down and compared on every move/up;
- * left `undefined` on both sides, the loose `== null` check reads that as
- * "no pointer captured" and drops every move/up silently (verified: this
- * was the first cut of this helper, and it produced exactly that silent
- * drop). `MouseEventInit` has no `pointerId` field, so it is defined
- * directly on the constructed event before dispatch.
+ * this repo's jsdom before writing this helper). `ChartFrame` does not
+ * expose its handlers, so this dispatches a real `MouseEvent` under the
+ * `pointer*` event names instead — `clientX`/`button` DO come through a
+ * `MouseEvent` correctly (also verified). `MouseEventInit` has no
+ * `pointerId` field, so it is defined directly on the constructed event
+ * before dispatch (ChartFrame's own touch-vs-mouse branching reads
+ * `e.pointerType`, and `pointerId` distinguishes concurrent pointers in the
+ * real DOM, so both are set explicitly rather than left `undefined`).
  */
 function firePointer(el: Element, type: 'pointerdown' | 'pointermove' | 'pointerup', clientX: number, clientY = 0) {
   const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY, button: 0 });
@@ -157,6 +147,31 @@ describe('ChartFrame keyboard navigation', () => {
   });
 });
 
+describe('ChartFrame readout stays resting, hover goes to .sr-only', () => {
+  it('the resting sentence is always visible; the hovered text lives in a .sr-only span, mentioning the label once', () => {
+    const { container } = render(<ChartFrame {...baseProps({ resting: 'resting sentence' })} />);
+    const body = getBody(container);
+    body.focus();
+
+    const readout = container.querySelector('.readout')!;
+    // At rest: only the resting sentence, no sr-only span yet.
+    expect(readout.querySelector('.dim')?.textContent).toBe('resting sentence');
+    expect(readout.querySelector('.sr-only')).toBeNull();
+
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 0, tipFor(0) fires
+
+    // The resting sentence is still visibly there (not replaced)...
+    expect(readout.querySelector('.dim')?.textContent).toBe('resting sentence');
+    // ...and the hovered text is in the sr-only span, mentioning "Point 0" once.
+    const sr = readout.querySelector('.sr-only');
+    expect(sr).toBeTruthy();
+    const heading = 'Point 0';
+    const occurrences = sr!.textContent!.split(heading).length - 1;
+    expect(occurrences).toBe(1);
+    expect(sr!.textContent).toContain('value 0');
+  });
+});
+
 describe('ChartFrame tooltip', () => {
   it('renders the Tip (heading, rows, context) when a point is active', () => {
     const { container } = render(<ChartFrame {...baseProps()} />);
@@ -193,112 +208,95 @@ describe('ChartFrame tooltip', () => {
   });
 });
 
-describe('ChartFrame brush', () => {
-  it('a mouse drag commits sorted indices via the brush prop', () => {
-    const onCommit = vi.fn();
-    const { container } = render(
-      <ChartFrame {...baseProps({ brush: { onCommit, xs: XS } })} />,
-    );
-    const body = getBody(container);
-
-    firePointer(body, 'pointerdown', 70);
-    firePointer(body, 'pointermove', 20);
-    firePointer(body, 'pointerup', 20);
-
-    expect(onCommit).toHaveBeenCalledTimes(1);
-    // drag ran right-to-left (70 -> 20), pixel span [20,70]: commits sorted
-    // low index first. XS[0]=10 is OUTSIDE that span; XS[1]=30..XS[3]=70 are in it.
-    const [i0, i1] = onCommit.mock.calls[0]!;
-    expect(i0).toBeLessThanOrEqual(i1);
-    expect(i0).toBe(1);
-    expect(i1).toBe(3);
-  });
-
-  it("keyboard '+' commits the brush over the current active point", () => {
-    const onCommit = vi.fn();
-    const { container } = render(
-      <ChartFrame {...baseProps({ brush: { onCommit, xs: XS } })} />,
-    );
-    const body = getBody(container);
-    body.focus();
-
-    fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 0
-    fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 1
-    fireEvent.keyDown(body, { key: '+' });
-
-    expect(onCommit).toHaveBeenCalledWith(1, 1);
-  });
-
-  it("keyboard shift+arrow extends the range, and '+' commits it", () => {
-    const onCommit = vi.fn();
-    const { container } = render(
-      <ChartFrame {...baseProps({ brush: { onCommit, xs: XS } })} />,
-    );
-    const body = getBody(container);
-    body.focus();
-
-    fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 0
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // anchor=0, active=1
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // active=2
-    fireEvent.keyDown(body, { key: '+' });
-
-    expect(onCommit).toHaveBeenCalledWith(0, 2);
-  });
-});
-
-describe('ChartFrame brush commit does not warn during render (FIX 1 regression)', () => {
-  /**
-   * Stands in for `App`'s `zoomTo`/`Session` — a PARENT component whose own
-   * setState runs off `ChartFrame`'s `onCommit`. Before the fix,
-   * `useChartBrush`'s `commitOrCancel` called `onCommit` from inside a
-   * `setBrush` functional updater, which React treats as render-phase work;
-   * calling a parent's setState from there is exactly what produces
-   * "Cannot update a component (`Session`) while rendering a different
-   * component (`ChartFrame`)".
-   */
-  function Harness(props: { brush: { xs: number[] } }) {
-    const [committed, setCommitted] = useState<[number, number] | null>(null);
-    return (
-      <div>
-        <p data-testid="committed">{committed ? `${committed[0]}-${committed[1]}` : 'none'}</p>
-        <ChartFrame
-          {...baseProps({
-            brush: {
-              xs: props.brush.xs,
-              onCommit: (i0, i1) => setCommitted([i0, i1]),
-            },
-          })}
-        />
-      </div>
-    );
+describe('ChartFrame click-to-zoom (chart overhaul wave 4, Task W1, 29 Sep 2026 — replaces the drag-to-select brush)', () => {
+  /** Indices 0-3 zoom to a whole day (`periodFor` returns a same-date
+   *  morning..night range); index 4 (XS[4]=90) has nothing to zoom to,
+   *  the "bins and products do nothing" case from the owner's brief. */
+  function periodForIndex(i: number): PeriodParams | null {
+    if (i >= 4) return null;
+    const date = `2026-09-0${i + 1}`;
+    return { key: 'range', range: { from: { date, shift: 'morning' }, to: { date, shift: 'night' } } };
   }
 
-  it('a pointer-drag brush commit triggers no console.error warning', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { container, getByTestId } = render(<Harness brush={{ xs: XS }} />);
+  it('a click on a mark zooms: onZoom is called with periodFor(i)', () => {
+    const onZoom = vi.fn();
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: periodForIndex, onZoom } })} />,
+    );
     const body = getBody(container);
 
-    firePointer(body, 'pointerdown', 70);
-    firePointer(body, 'pointermove', 20);
-    firePointer(body, 'pointerup', 20);
+    // XS[2] = 50 — a plain click, no movement between down and up.
+    firePointer(body, 'pointerdown', 50);
+    firePointer(body, 'pointerup', 50);
 
-    expect(getByTestId('committed').textContent).toBe('1-3');
-    expect(errorSpy).not.toHaveBeenCalled();
+    expect(onZoom).toHaveBeenCalledTimes(1);
+    expect(onZoom).toHaveBeenCalledWith(periodForIndex(2));
   });
 
-  it("a keyboard (Shift+Arrow then '+') brush commit triggers no console.error warning", () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { container, getByTestId } = render(<Harness brush={{ xs: XS }} />);
+  it('a drag over 6px does not zoom', () => {
+    const onZoom = vi.fn();
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: periodForIndex, onZoom } })} />,
+    );
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 50);
+    firePointer(body, 'pointerup', 60); // 10px — a real drag
+
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+
+  it('Enter zooms the keyboard-active mark', () => {
+    const onZoom = vi.fn();
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: periodForIndex, onZoom } })} />,
+    );
     const body = getBody(container);
     body.focus();
 
     fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 0
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // anchor=0, active=1
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // active=2
-    fireEvent.keyDown(body, { key: '+' });
+    fireEvent.keyDown(body, { key: 'Enter' });
 
-    expect(getByTestId('committed').textContent).toBe('0-2');
-    expect(errorSpy).not.toHaveBeenCalled();
+    expect(onZoom).toHaveBeenCalledWith(periodForIndex(0));
+  });
+
+  it('a mark whose periodFor returns null (bins/products) does not zoom on click', () => {
+    const onZoom = vi.fn();
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: periodForIndex, onZoom } })} />,
+    );
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 90); // XS[4] — periodForIndex(4) is null
+    firePointer(body, 'pointerup', 90);
+
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+
+  it('onActivate wins over zoom when both are supplied', () => {
+    const onActivate = vi.fn();
+    const onZoom = vi.fn();
+    const { container } = render(
+      <ChartFrame {...baseProps({ onActivate, zoom: { periodFor: periodForIndex, onZoom } })} />,
+    );
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 50);
+    firePointer(body, 'pointerup', 50);
+
+    expect(onActivate).toHaveBeenCalledWith(2);
+    expect(onZoom).not.toHaveBeenCalled();
+  });
+
+  it('never renders a .chart-brush element', () => {
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: periodForIndex, onZoom: vi.fn() } })} />,
+    );
+    const body = getBody(container);
+    firePointer(body, 'pointerdown', 20);
+    firePointer(body, 'pointermove', 80);
+    firePointer(body, 'pointerup', 80);
+    expect(container.querySelector('.chart-brush')).toBeNull();
   });
 });
 
@@ -314,22 +312,6 @@ describe('ChartFrame mouse click activation (re-audit FIX 1, 29 Sep 2026)', () =
 
     expect(onActivate).toHaveBeenCalledTimes(1);
     expect(onActivate).toHaveBeenCalledWith(2);
-  });
-
-  it('a drag-brush does NOT call onActivate', () => {
-    const onActivate = vi.fn();
-    const onCommit = vi.fn();
-    const { container } = render(
-      <ChartFrame {...baseProps({ onActivate, brush: { onCommit, xs: XS } })} />,
-    );
-    const body = getBody(container);
-
-    firePointer(body, 'pointerdown', 70);
-    firePointer(body, 'pointermove', 20);
-    firePointer(body, 'pointerup', 20);
-
-    expect(onCommit).toHaveBeenCalledTimes(1); // the brush itself still commits
-    expect(onActivate).not.toHaveBeenCalled();
   });
 
   it('no onActivate supplied: a click does not throw and does nothing special', () => {
@@ -353,17 +335,29 @@ describe('ChartFrame mouse click activation (re-audit FIX 1, 29 Sep 2026)', () =
     expect(onActivate).toHaveBeenCalledWith(2);
   });
 
-  it('a movement at/above the threshold, even with no brush configured, does not activate', () => {
+  it('a movement at/above the threshold does not activate', () => {
     const onActivate = vi.fn();
-    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />); // no brush prop at all
+    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />);
     const body = getBody(container);
 
     firePointer(body, 'pointerdown', 50);
-    firePointer(body, 'pointerup', 60); // 10px — a real drag, no brush to catch it
+    firePointer(body, 'pointerup', 60); // 10px — a real drag
 
     expect(onActivate).not.toHaveBeenCalled();
   });
 });
+
+/** Simulates a single touch tap (pointerdown then pointerup) at `x` on `body`. */
+function touchTap(body: HTMLElement, x: number) {
+  const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: x, clientY: 0, button: 0 });
+  Object.defineProperty(down, 'pointerId', { value: 1, configurable: true });
+  Object.defineProperty(down, 'pointerType', { value: 'touch', configurable: true });
+  act(() => body.dispatchEvent(down));
+  const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: x, clientY: 0, button: 0 });
+  Object.defineProperty(up, 'pointerId', { value: 1, configurable: true });
+  Object.defineProperty(up, 'pointerType', { value: 'touch', configurable: true });
+  act(() => body.dispatchEvent(up));
+}
 
 describe('ChartFrame touch tap-then-activate', () => {
   it('first tap pins the mark (tooltip), second tap on the SAME pinned mark calls onActivate', () => {
@@ -371,23 +365,40 @@ describe('ChartFrame touch tap-then-activate', () => {
     const { container } = render(<ChartFrame {...baseProps({ onActivate })} />);
     const body = getBody(container);
 
-    const tap = (x: number) => {
-      const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: x, clientY: 0, button: 0 });
-      Object.defineProperty(down, 'pointerId', { value: 1, configurable: true });
-      Object.defineProperty(down, 'pointerType', { value: 'touch', configurable: true });
-      act(() => body.dispatchEvent(down));
-      const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: x, clientY: 0, button: 0 });
-      Object.defineProperty(up, 'pointerId', { value: 1, configurable: true });
-      Object.defineProperty(up, 'pointerType', { value: 'touch', configurable: true });
-      act(() => body.dispatchEvent(up));
-    };
-
-    tap(50); // first tap: pins point 2, no activation
+    touchTap(body, 50); // first tap: pins point 2, no activation
     expect(onActivate).not.toHaveBeenCalled();
     expect(container.querySelector('.chart-tip')?.textContent).toContain('Point 2');
 
-    tap(50); // second tap on the same pinned mark: activates
+    touchTap(body, 50); // second tap on the same pinned mark: activates
     expect(onActivate).toHaveBeenCalledWith(2);
+  });
+
+  it('a tap on a DIFFERENT mark moves the pin instead of activating', () => {
+    const onActivate = vi.fn();
+    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />);
+    const body = getBody(container);
+
+    touchTap(body, 50); // pins point 2
+    expect(container.querySelector('.chart-tip')?.textContent).toContain('Point 2');
+
+    touchTap(body, 30); // a different mark (point 1): moves the pin, no activation
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(container.querySelector('.chart-tip')?.textContent).toContain('Point 1');
+  });
+
+  it('with zoom instead of onActivate: first tap pins, second tap on the same pin zooms', () => {
+    const onZoom = vi.fn();
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'morning' }, to: { date: '2026-09-01', shift: 'night' } } };
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: () => period, onZoom } })} />,
+    );
+    const body = getBody(container);
+
+    touchTap(body, 50);
+    expect(onZoom).not.toHaveBeenCalled();
+
+    touchTap(body, 50);
+    expect(onZoom).toHaveBeenCalledWith(period);
   });
 });
 
@@ -457,7 +468,7 @@ describe('ChartFrame print classes', () => {
     expect(container.querySelector('.chart-frame-body')).toBeTruthy();
   });
 
-  it('does not render the resize handle, tooltip or brush while printing', () => {
+  it('does not render the resize handle or tooltip while printing, and a click does not zoom', () => {
     vi.spyOn(window, 'matchMedia').mockImplementation(
       (query: string) =>
         ({
@@ -467,17 +478,92 @@ describe('ChartFrame print classes', () => {
           removeEventListener: () => {},
         }) as unknown as MediaQueryList,
     );
-    const onCommit = vi.fn();
+    const onZoom = vi.fn();
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'morning' }, to: { date: '2026-09-01', shift: 'night' } } };
     const { container } = render(
-      <ChartFrame {...baseProps({ brush: { onCommit, xs: XS } })} />,
+      <ChartFrame {...baseProps({ zoom: { periodFor: () => period, onZoom } })} />,
     );
 
     expect(container.querySelector('.chart-resize')).toBeNull();
 
     const body = getBody(container);
     firePointer(body, 'pointerdown', 20);
-    firePointer(body, 'pointermove', 80);
-    firePointer(body, 'pointerup', 80);
-    expect(onCommit).not.toHaveBeenCalled();
+    firePointer(body, 'pointerup', 20);
+    expect(onZoom).not.toHaveBeenCalled();
+    expect(container.querySelector('.chart-tip')).toBeNull();
+  });
+});
+
+describe('ChartFrame zoom tooltip hint', () => {
+  function tipForNoHint(i: number): ChartTip | null {
+    return { heading: `Point ${i}`, rows: [{ name: 'value', value: String(i * 10) }] };
+  }
+
+  function focusAndHover(container: HTMLElement) {
+    const body = getBody(container);
+    body.focus();
+    fireEvent.keyDown(body, { key: 'ArrowRight' }); // active = 0
+  }
+
+  it('same shift (from === to) -> "Click to show this shift"', () => {
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'morning' }, to: { date: '2026-09-01', shift: 'morning' } } };
+    const { container } = render(
+      <ChartFrame {...baseProps({ tipFor: tipForNoHint, zoom: { periodFor: () => period, onZoom: vi.fn() } })} />,
+    );
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')?.textContent).toBe(W.chart.clickToShowShift);
+  });
+
+  it('same date, morning..night -> "Click to show this day"', () => {
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'morning' }, to: { date: '2026-09-01', shift: 'night' } } };
+    const { container } = render(
+      <ChartFrame {...baseProps({ tipFor: tipForNoHint, zoom: { periodFor: () => period, onZoom: vi.fn() } })} />,
+    );
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')?.textContent).toBe(W.chart.clickToShowDay);
+  });
+
+  it('anything else -> "Click to show these shifts"', () => {
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'evening' }, to: { date: '2026-09-02', shift: 'morning' } } };
+    const { container } = render(
+      <ChartFrame {...baseProps({ tipFor: tipForNoHint, zoom: { periodFor: () => period, onZoom: vi.fn() } })} />,
+    );
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')?.textContent).toBe(W.chart.clickToShowRange);
+  });
+
+  it("zoom's own hint(i) overrides the built-in copy", () => {
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'morning' }, to: { date: '2026-09-01', shift: 'morning' } } };
+    const { container } = render(
+      <ChartFrame
+        {...baseProps({ tipFor: tipForNoHint, zoom: { periodFor: () => period, onZoom: vi.fn(), hint: () => 'Custom hint' } })}
+      />,
+    );
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')?.textContent).toBe('Custom hint');
+  });
+
+  it("the tip's own hint (from tipFor) takes priority over the zoom-based hint", () => {
+    // baseProps' default tipFor always supplies hint: 'Open station 1'.
+    const period: PeriodParams = { key: 'range', range: { from: { date: '2026-09-01', shift: 'morning' }, to: { date: '2026-09-01', shift: 'morning' } } };
+    const { container } = render(
+      <ChartFrame {...baseProps({ zoom: { periodFor: () => period, onZoom: vi.fn() } })} />,
+    );
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')?.textContent).toBe('Open station 1');
+  });
+
+  it('no hint when periodFor returns null (bins/products) and no onActivate', () => {
+    const { container } = render(
+      <ChartFrame {...baseProps({ tipFor: tipForNoHint, zoom: { periodFor: () => null, onZoom: vi.fn() } })} />,
+    );
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')).toBeNull();
+  });
+
+  it('no hint without zoom or onActivate at all', () => {
+    const { container } = render(<ChartFrame {...baseProps({ tipFor: tipForNoHint })} />);
+    focusAndHover(container);
+    expect(container.querySelector('.chart-tip-hint')).toBeNull();
   });
 });

@@ -352,26 +352,3 @@ export function placeTip(
   return { x, y };
 }
 
-/* ------------------------------------------------------------------- brush */
-
-/**
- * The inclusive `[i0, i1]` index range of `xs` (ascending, pixel positions)
- * spanned by a drag from `px0` to `px1`, order-independent. `null` when the
- * span covers fewer than 1 point (an empty `xs`, or a span containing no
- * point at all).
- */
-export function brushToIndices(px0: number, px1: number, xs: number[]): [number, number] | null {
-  if (xs.length === 0) return null;
-  const lo = Math.min(px0, px1);
-  const hi = Math.max(px0, px1);
-  let i0 = -1;
-  let i1 = -1;
-  for (let i = 0; i < xs.length; i++) {
-    if (xs[i]! >= lo && xs[i]! <= hi) {
-      if (i0 === -1) i0 = i;
-      i1 = i;
-    }
-  }
-  if (i0 === -1) return null;
-  return [i0, i1];
-}

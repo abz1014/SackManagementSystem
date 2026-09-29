@@ -4,11 +4,9 @@
  * existing readout line (`./chart`'s `Readout` — still the aria-live and
  * screen-reader path), a floating tooltip that is positioned so it never
  * covers the hovered mark (`chartLayout.ts`'s `placeTip`), keyboard
- * navigation, a drag-to-select brush that sets the WHOLE PAGE period
- * (`useChartBrush` + `brushToIndices` — the snapping to shift boundaries is
- * done by the caller, not here), and touch-tap pinning.
+ * navigation, and touch-tap pinning.
  *
- * RULE 3 REPLACEMENT (owner decision, this task). `chart.tsx`'s own header
+ * RULE 3 REPLACEMENT (owner decision, wave 2). `chart.tsx`'s own header
  * still reads "the hover readout is a line of text above the chart, never a
  * floating tooltip" — that predates this task and does not apply to any
  * chart built on ChartFrame. `chart.tsx` is not owned by this task and is
@@ -22,31 +20,42 @@
  *   three), so every value the tooltip states is stated in the readout too,
  *   in words rather than a floating box.
  *
+ * CLICK-TO-ZOOM (owner decision, wave 4, Task W1, 29 Sep 2026): drag-to-
+ * select is REMOVED from every chart in this app. `useChartBrush.ts` is
+ * deleted outright, along with `brushToIndices` (`chartLayout.ts`) and every
+ * brush-shaped prop this file used to carry (`brush`, `brushLabel`,
+ * `ChartFrameBrush`, `ChartFrameState.brush`). In its place: clicking a day
+ * or shift mark zooms the whole page to that day/shift; Enter does the same
+ * for the keyboard-active mark; on touch, a first tap pins the tooltip and a
+ * second tap on the SAME pinned mark zooms. `zoom` is index-based
+ * (`periodFor(i)`), not pixel-based — there is no drag geometry left to
+ * reason about. Station bars keep using `onActivate` to open the station
+ * sheet; a caller passing BOTH `onActivate` and `zoom` gets `onActivate` —
+ * see `activate` below.
+ *
  * DESIGN: ChartFrame does not know how a caller draws its marks. `children`
  * renders the actual SVG (axes, bars, points) and its memo key is the SIZE
- * only (`width/height/fontPx/print`) — never `active` or `brush` — so a
- * pointer move re-renders the tooltip/brush overlay only, never the chart
- * underneath it (the brief's own requirement). Every piece of interactive
- * feedback — the tooltip, the live brush rectangle, the resize handle — is
- * drawn by ChartFrame ITSELF as an absolutely-positioned overlay on top of
- * whatever `children` returned, in the same wrapper-relative pixel frame
- * `hit(x,y)` and `brush.xs` are already given in, so the overlay never has
- * to reach into `children`'s own internal coordinate system (a chart drawn
- * as an SVG with its own viewBox scale, for instance).
+ * only (`width/height/fontPx/print`) — never `active` — so a pointer move
+ * re-renders the tooltip overlay only, never the chart underneath it (the
+ * brief's own requirement). Every piece of interactive feedback — the
+ * tooltip, the resize handle — is drawn by ChartFrame ITSELF as an
+ * absolutely-positioned overlay on top of whatever `children` returned, in
+ * the same wrapper-relative pixel frame `hit(x,y)` is already given in, so
+ * the overlay never has to reach into `children`'s own internal coordinate
+ * system (a chart drawn as an SVG with its own viewBox scale, for instance).
  *
- * `state.active`/`state.brush` ARE still passed to `children` (a caller may
- * want to render a coarse default, e.g. an initial emphasis), but because
- * they sit outside the memo's dependency array, `children` only ever sees
- * the value current AT THE LAST SIZE CHANGE — never a live one. That is
- * deliberate, not a bug: it is what keeps a hover from re-running whatever
- * `children` does.
+ * `state.active` IS still passed to `children` (a caller may want to render
+ * a coarse default, e.g. an initial emphasis), but because it sits outside
+ * the memo's dependency array, `children` only ever sees the value current
+ * AT THE LAST SIZE CHANGE — never a live one. That is deliberate, not a bug:
+ * it is what keeps a hover from re-running whatever `children` does.
  */
 import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Readout } from './chart';
 import { useChartSize } from './useChartSize';
-import { useChartBrush } from './useChartBrush';
-import { placeTip, brushToIndices, type Rect } from './chartLayout';
+import { placeTip, type Rect } from './chartLayout';
 import { W } from '../lib/words';
+import type { PeriodParams } from '../lib/period';
 
 export interface ChartTipRow {
   name: string;
@@ -58,20 +67,28 @@ export interface ChartTip {
   heading: string;
   rows: ChartTipRow[];
   context?: string[];
-  /** Shown only when `onActivate` is supplied — "Open station 7", etc. */
+  /** Shown only when the mark can be activated (`onActivate` or `zoom`
+   *  resolving a period for it) — "Open station 7", etc. Takes precedence
+   *  over `zoom`'s own `hint`/the built-in `zoomHint` fallback. */
   hint?: string;
 }
 
-export interface ChartFrameBrush {
-  onCommit: (i0: number, i1: number) => void;
-  /** Ascending, wrapper-relative pixel x of every data point — the same
-   *  frame `hit(x, y)` reads. */
-  xs: number[];
+/**
+ * Click-to-zoom (chart overhaul wave 4, Task W1): a mark that, when
+ * activated, sets the WHOLE PAGE's period rather than opening a detail
+ * sheet. `periodFor` returning null means that particular mark has nothing
+ * to zoom to (e.g. a bin/product bar) — such a mark is not activatable and
+ * gets no pointer cursor, no hint, no click/Enter/tap behaviour.
+ */
+export interface ChartFrameZoom {
+  periodFor: (i: number) => PeriodParams | null;
+  onZoom: (p: PeriodParams) => void;
+  /** Overrides the built-in `zoomHint` copy for a specific mark. */
+  hint?: (i: number) => string;
 }
 
 export interface ChartFrameState {
   active: number | null;
-  brush: { i0: number; i1: number } | null;
 }
 
 export interface ChartFrameSize {
@@ -99,10 +116,12 @@ export interface ChartFrameProps {
    *  anchors the tooltip for keyboard/touch, where there is no pointer
    *  position to anchor on. */
   markRect?: (i: number) => Rect | null;
+  /** Opens a per-mark detail (a station sheet, say). Wins over `zoom` when
+   *  both are given — see `activate` below. */
   onActivate?: (i: number) => void;
-  brush?: ChartFrameBrush;
-  /** Formats the live "Release to show …" label while dragging. */
-  brushLabel?: (i0: number, i1: number) => string;
+  /** Zooms the whole page to the period a mark represents. Ignored when
+   *  `onActivate` is also given. */
+  zoom?: ChartFrameZoom;
   onBack?: () => void;
   children: (size: ChartFrameSize, state: ChartFrameState) => ReactNode;
 }
@@ -112,8 +131,7 @@ const TIP_ROW_H_PX = 18;
 const TIP_PAD_PX = 24;
 const RESIZE_STEP_PX = 20;
 /** A pointer released within this many px of where it went down is a click,
- *  not a drag — mirrors `useChartBrush`'s own `DEFAULT_MIN_PX` (6), the
- *  distance a brush itself requires before it commits a range. */
+ *  not a drag. */
 const CLICK_MAX_MOVE_PX = 6;
 
 /**
@@ -128,6 +146,23 @@ function estimateTipSize(tip: ChartTip): { w: number; h: number } {
   if (tip.context && tip.context.length > 0) h += tip.context.length * 14 + 6;
   if (tip.hint) h += 18;
   return { w: TIP_WIDTH_PX, h };
+}
+
+/**
+ * The built-in hint copy for a zoomable mark, used when neither the tip
+ * itself (`ChartTip.hint`) nor the zoom config (`ChartFrameZoom.hint`)
+ * supplies one. `p` is whatever `zoom.periodFor(i)` returned for the active
+ * mark — always a 'range' period with `range` set, in practice, since that
+ * is the only shape `snapToShifts` ever produces, but this reads the fields
+ * defensively rather than assuming the caller only ever uses that helper.
+ */
+export function zoomHint(p: PeriodParams | null): string {
+  const range = p?.range;
+  if (!range) return W.chart.clickToShowRange;
+  const { from, to } = range;
+  if (from.date === to.date && from.shift === to.shift) return W.chart.clickToShowShift;
+  if (from.date === to.date && from.shift === 'morning' && to.shift === 'night') return W.chart.clickToShowDay;
+  return W.chart.clickToShowRange;
 }
 
 export function ChartFrame(props: ChartFrameProps) {
@@ -145,8 +180,7 @@ export function ChartFrame(props: ChartFrameProps) {
     tipFor,
     markRect,
     onActivate,
-    brush,
-    brushLabel,
+    zoom,
     onBack,
     children,
   } = props;
@@ -156,21 +190,22 @@ export function ChartFrame(props: ChartFrameProps) {
 
   const [active, setActive] = useState<number | null>(null);
   const [pinned, setPinned] = useState(false);
-  const [kbAnchor, setKbAnchor] = useState<number | null>(null);
   const lastPointerRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef<{ y: number; h: number } | null>(null);
   const [resizing, setResizing] = useState(false);
-  /* FIX 1 (re-audit, 29 Sep 2026): a mouse/pen click never reached
-   * `onActivate` — only the Enter key did, and touch had its own tap path.
-   * `chartBrush.active` cannot tell a plain click apart from a drag here:
-   * for mouse/pen `useChartBrush.beginActive` sets it true on pointerDOWN,
-   * before any movement, so a genuine zero-movement click would already
-   * read as "was brushing". This ref instead tracks the pointer's OWN down
-   * position, independent of whether a `brush` prop exists at all, so
-   * click-activation works on a chart with no brush (StationCompare) and is
-   * correctly suppressed on a chart WITH one once the drag clears the same
-   * `minPx` distance `useChartBrush`'s own default uses. */
+  /* The pointer's OWN down position, so a click can be told apart from a
+   * drag on any chart, brush or no brush (there is no brush any more, but
+   * the distinction still matters: a chart pan/selection elsewhere on the
+   * page must not itself count as a click on the mark underneath). */
   const clickStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  /* CLICK-TO-ZOOM: `onActivate` wins when both are supplied — a caller
+   * offering a detail sheet (station bars) never has that silently
+   * replaced by a page-wide zoom. */
+  const activate = onActivate ?? (zoom ? (i: number) => {
+    const p = zoom.periodFor(i);
+    if (p) zoom.onZoom(p);
+  } : undefined);
 
   const wrapperPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -179,45 +214,27 @@ export function ChartFrame(props: ChartFrameProps) {
     return { x: e.clientX - left, y: e.clientY - top };
   }, []);
 
-  const commitBrushPixels = useCallback(
-    (px0: number, px1: number) => {
-      if (!brush) return;
-      const idx = brushToIndices(px0, px1, brush.xs);
-      if (idx) brush.onCommit(idx[0], idx[1]);
-    },
-    [brush],
-  );
-
-  const chartBrush = useChartBrush({
-    enabled: !!brush && !size.print,
-    onCommit: commitBrushPixels,
-  });
-
   const onWrapperPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      chartBrush.bind.onPointerDown(e);
       if (e.pointerType !== 'touch') clickStartRef.current = wrapperPoint(e);
     },
-    [chartBrush.bind, wrapperPoint],
+    [wrapperPoint],
   );
 
   const onWrapperPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      chartBrush.bind.onPointerMove(e);
       if (size.print) return;
       if (e.pointerType === 'touch') return; // touch pins on tap, it does not hover
       const p = wrapperPoint(e);
       lastPointerRef.current = p;
       setActive(hit(p.x, p.y));
     },
-    [chartBrush.bind, hit, size.print, wrapperPoint],
+    [hit, size.print, wrapperPoint],
   );
 
   const onWrapperPointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      const wasBrushing = chartBrush.active;
-      chartBrush.bind.onPointerUp(e);
-      if (e.pointerType === 'touch' && !wasBrushing) {
+      if (e.pointerType === 'touch') {
         const p = wrapperPoint(e);
         const i = hit(p.x, p.y);
         if (i == null) {
@@ -227,39 +244,23 @@ export function ChartFrame(props: ChartFrameProps) {
           // Owner's touch policy: tap shows the tooltip, a SECOND tap on the
           // SAME already-pinned mark activates it — mirrors the mouse click
           // path below without changing the first-tap behaviour.
-          onActivate?.(i);
+          activate?.(i);
         } else {
           setPinned(true);
           setActive(i);
         }
-      } else if (e.pointerType !== 'touch' && !size.print && onActivate) {
-        // FIX 1 (re-audit, 29 Sep 2026): mouse/pen click activation.
-        // Deliberately NOT gated on `wasBrushing`/`chartBrush.active` — for
-        // mouse/pen, `useChartBrush.beginActive` sets `active` true on
-        // pointerDOWN itself, before any movement, so a genuine zero-
-        // movement click would always read as "was brushing" and this would
-        // never fire. Gated on the pointer's OWN measured movement instead,
-        // so it works whether or not a `brush` prop exists, and is
-        // correctly suppressed once a real drag (>= CLICK_MAX_MOVE_PX,
-        // matching `useChartBrush`'s own minPx) has happened.
+      } else if (!size.print && activate) {
         const down = clickStartRef.current;
         const p = wrapperPoint(e);
         const moved = down ? Math.hypot(p.x - down.x, p.y - down.y) : Infinity;
         if (moved < CLICK_MAX_MOVE_PX) {
           const i = hit(p.x, p.y);
-          if (i != null) onActivate(i);
+          if (i != null) activate(i);
         }
       }
       if (e.pointerType !== 'touch') clickStartRef.current = null;
     },
-    [active, chartBrush.active, chartBrush.bind, hit, onActivate, pinned, size.print, wrapperPoint],
-  );
-
-  const onWrapperPointerCancel = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      chartBrush.bind.onPointerCancel(e);
-    },
-    [chartBrush.bind],
+    [active, activate, hit, pinned, size.print, wrapperPoint],
   );
 
   const onWrapperPointerLeave = useCallback(() => {
@@ -284,47 +285,29 @@ export function ChartFrame(props: ChartFrameProps) {
         case 'ArrowRight': {
           e.preventDefault();
           const dir = e.key === 'ArrowLeft' ? -1 : 1;
-          const anchorBase = active;
           setActive((a) => {
             const cur = a ?? (dir < 0 ? count : -1);
             return clampIndex(cur + dir);
           });
           setPinned(true);
-          if (e.shiftKey && brush) {
-            setKbAnchor((anchor) => anchor ?? anchorBase ?? 0);
-          } else {
-            setKbAnchor(null);
-          }
           break;
         }
         case 'Home':
           e.preventDefault();
           setActive(0);
           setPinned(true);
-          setKbAnchor(null);
           break;
         case 'End':
           e.preventDefault();
           setActive(count - 1);
           setPinned(true);
-          setKbAnchor(null);
           break;
         case 'Escape':
           setActive(null);
           setPinned(false);
-          setKbAnchor(null);
           break;
         case 'Enter':
-          if (active != null) onActivate?.(active);
-          break;
-        case '+':
-        case '=':
-          if (brush && active != null) {
-            const i0 = Math.min(kbAnchor ?? active, active);
-            const i1 = Math.max(kbAnchor ?? active, active);
-            brush.onCommit(i0, i1);
-            setKbAnchor(null);
-          }
+          if (active != null) activate?.(active);
           break;
         case '-':
         case '_':
@@ -334,7 +317,7 @@ export function ChartFrame(props: ChartFrameProps) {
           break;
       }
     },
-    [active, brush, clampIndex, count, kbAnchor, onActivate, onBack, size.print],
+    [active, activate, clampIndex, count, onBack, size.print],
   );
 
   /* The resize handle. Drag: pointer capture + a delta from the pointer's
@@ -393,13 +376,10 @@ export function ChartFrame(props: ChartFrameProps) {
   );
 
   const frameSize: ChartFrameSize = { width: size.width, height: size.height, fontPx: size.fontPx, print: size.print };
-  const frameState: ChartFrameState = {
-    active,
-    brush: kbAnchor != null && active != null ? { i0: Math.min(kbAnchor, active), i1: Math.max(kbAnchor, active) } : null,
-  };
+  const frameState: ChartFrameState = { active };
 
-  // See the header comment: intentionally NOT keyed on active/brush/state, so
-  // a hover or keyboard move re-renders the overlay only, never `children`.
+  // See the header comment: intentionally NOT keyed on active/state, so a
+  // hover or keyboard move re-renders the overlay only, never `children`.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const child = useMemo(
     () => children(frameSize, frameState),
@@ -414,13 +394,18 @@ export function ChartFrame(props: ChartFrameProps) {
     ? placeTip(anchor, tipSize, { w: size.width, h: size.height }, markBox ?? undefined)
     : { x: 0, y: 0 };
 
-  const liveBrush = chartBrush.brush;
-  const liveIdx = liveBrush && brush ? brushToIndices(liveBrush.x0, liveBrush.x1, brush.xs) : null;
-  const liveLabel = liveIdx && brushLabel ? brushLabel(liveIdx[0], liveIdx[1]) : liveIdx ? `${liveIdx[0]}–${liveIdx[1]}` : '';
+  // The period the active mark would zoom to, if any — computed once here
+  // rather than inside the JSX below, since both the cursor class and the
+  // tooltip hint need it.
+  const activePeriod = zoom && active != null ? zoom.periodFor(active) : null;
+  const canActivateActive = active != null && (!!onActivate || (!!zoom && activePeriod != null));
+  const hintText = canActivateActive
+    ? (tip?.hint ?? (zoom ? zoom.hint?.(active as number) ?? zoomHint(activePeriod) : undefined))
+    : undefined;
 
   const hoveredReadout = tip
     ? tip.rows.length > 0
-      ? `${tip.heading} · ${tip.rows.map((r) => `${r.name} ${r.value}`).join(', ')}`
+      ? `${tip.heading} · ${tip.rows.map((r) => (r.name ? `${r.name} ${r.value}` : r.value)).join(' · ')}`
       : tip.heading
     : null;
 
@@ -430,40 +415,19 @@ export function ChartFrame(props: ChartFrameProps) {
       <Readout hovered={hoveredReadout} resting={resting ?? caption ?? ''} />
       <div
         ref={wrapRef}
-        className={`chart-frame-body${resizing ? ' resizing' : ''}`}
+        className={`chart-frame-body${resizing ? ' resizing' : ''}${canActivateActive ? ' can-activate' : ''}`}
         style={{ position: 'relative', height: size.height, touchAction: 'pan-y' }}
         tabIndex={size.print ? -1 : 0}
         role="img"
         aria-label={ariaLabel ?? (typeof title === 'string' ? title : undefined)}
-        title={brush ? W.chart.dragToSelectRange : undefined}
         onPointerDown={onWrapperPointerDown}
         onPointerMove={onWrapperPointerMove}
         onPointerUp={onWrapperPointerUp}
-        onPointerCancel={onWrapperPointerCancel}
         onPointerLeave={onWrapperPointerLeave}
         onDoubleClick={onWrapperDoubleClick}
         onKeyDown={onWrapperKeyDown}
       >
         {child}
-
-        {!size.print && brush && liveBrush && (
-          <div
-            className="chart-brush"
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              top: 0,
-              height: size.height,
-              left: Math.min(liveBrush.x0, liveBrush.x1),
-              width: Math.max(1, Math.abs(liveBrush.x1 - liveBrush.x0)),
-            }}
-          />
-        )}
-        {!size.print && brush && chartBrush.active && (
-          <div className="chart-brush-label" role="status" aria-live="polite">
-            {W.chart.releaseToShow(liveLabel)}
-          </div>
-        )}
 
         {!size.print && tip && (
           <div
@@ -484,7 +448,7 @@ export function ChartFrame(props: ChartFrameProps) {
             {tip.context && tip.context.length > 0 && (
               <p className="chart-tip-ctx">{tip.context.join(' · ')}</p>
             )}
-            {tip.hint && onActivate && <p className="chart-tip-hint">{tip.hint}</p>}
+            {hintText && <p className="chart-tip-hint">{hintText}</p>}
           </div>
         )}
 

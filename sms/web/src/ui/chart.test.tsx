@@ -187,35 +187,53 @@ describe('CategoryBars tooltip', () => {
     const { container } = renderBars();
     expect(container.querySelector('.readout')?.textContent).toBe('resting text');
   });
+
+  it('strips a leading "<label> · " from the detail string, and drops any row whose value equals the heading', () => {
+    const { container } = renderBars({
+      data: [{ key: 'd1', label: '1 Sep', value: 10, detail: '1 Sep · 10 cones' }],
+      tip: (i) => (i === 0 ? { heading: 'ignored', rows: [{ name: '', value: '1 Sep' }, { name: 'Rejects', value: '2' }] } : null),
+    });
+    const body = frameBody(container);
+    body.focus();
+    fireEvent.keyDown(body, { key: 'ArrowRight' });
+
+    const text = tip(container).textContent!;
+    expect(text).toContain('10 cones');
+    // No duplicated heading text anywhere in the tooltip.
+    expect(text).not.toMatch(/1 Sep.*1 Sep/);
+    const rowValues = Array.from(tip(container).querySelectorAll('li b')).map((el) => el.textContent);
+    expect(rowValues).not.toContain('1 Sep');
+    expect(rowValues).toContain('2');
+  });
 });
 
-describe('CategoryBars brush', () => {
-  it('commits a snapped PeriodParams via keyboard (Shift+ArrowRight, then +)', () => {
-    const refs: [ShiftRef, ShiftRef][] = [
-      [{ date: '2026-09-01', shift: 'morning' }, { date: '2026-09-01', shift: 'night' }],
-      [{ date: '2026-09-02', shift: 'morning' }, { date: '2026-09-02', shift: 'night' }],
-      [{ date: '2026-09-03', shift: 'morning' }, { date: '2026-09-03', shift: 'night' }],
-    ];
+describe('CategoryBars zoom (chart overhaul wave 4, Task W1, 29 Sep 2026 — replaces the drag-to-select brush)', () => {
+  const REFS: [ShiftRef, ShiftRef][] = [
+    [{ date: '2026-09-01', shift: 'morning' }, { date: '2026-09-01', shift: 'night' }],
+    [{ date: '2026-09-02', shift: 'morning' }, { date: '2026-09-02', shift: 'night' }],
+    [{ date: '2026-09-03', shift: 'morning' }, { date: '2026-09-03', shift: 'night' }],
+  ];
+
+  it("a click (Enter, on the keyboard-active bar) zooms to that bar's own shift-snapped period", () => {
     const onSelect = vi.fn();
-    const { container } = renderBars({ brush: { refs, onSelect } });
+    const { container } = renderBars({ zoom: { refs: REFS, onSelect } });
 
     const body = frameBody(container);
     body.focus();
     fireEvent.keyDown(body, { key: 'ArrowRight' }); // active 0
-    fireEvent.keyDown(body, { key: 'ArrowRight', shiftKey: true }); // active 1, anchor 0
-    fireEvent.keyDown(body, { key: '+' }); // commit [0,1]
+    fireEvent.keyDown(body, { key: 'Enter' });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith({
       key: 'range',
       range: {
         from: { date: '2026-09-01', shift: 'morning' },
-        to: { date: '2026-09-02', shift: 'night' },
+        to: { date: '2026-09-01', shift: 'night' },
       },
     });
   });
 
-  it('does not render a brush affordance when no brush prop is given', () => {
+  it('does not render a brush affordance when no zoom prop is given', () => {
     const { container } = renderBars();
     expect(container.querySelector('.chart-brush')).toBeNull();
   });

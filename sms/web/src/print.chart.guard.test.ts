@@ -1,7 +1,9 @@
 /**
- * Guard for the chart overhaul's print rule (Task T3, 28 Sep 2026): the
- * owner decision is that print gets no tooltip, no resize handle and no
- * brush — fixed width, default height, exactly `useChartSize.ts`'s own
+ * Guard for the chart overhaul's print rule (Task T3, 28 Sep 2026; the
+ * brush itself was removed in wave 4, Task W1, 29 Sep 2026 — click-to-zoom
+ * replaced drag-to-select, so there is no `.chart-brush` left to guard): the
+ * owner decision is that print gets no tooltip and no resize handle —
+ * fixed width, default height, exactly `useChartSize.ts`'s own
  * `print` branch already gives it. `ChartFrame.tsx` also skips rendering
  * these elements in React when `size.print` is true, but that is a
  * behavioural belt; this is the CSS suspenders — if a future edit ever
@@ -19,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 const WEB_SRC = fileURLToPath(new URL('.', import.meta.url));
 const APP_CSS = `${WEB_SRC}app.css`;
 
-const CHART_PRINT_CLASSES = ['.chart-tip', '.chart-resize', '.chart-brush'];
+const CHART_PRINT_CLASSES = ['.chart-tip', '.chart-resize'];
 
 describe('chart overlay classes are hidden under @media print', () => {
   const cssSrc = readFileSync(APP_CSS, 'utf8');

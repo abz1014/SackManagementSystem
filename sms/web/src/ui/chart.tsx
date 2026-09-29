@@ -38,10 +38,10 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameBrush } from './ChartFrame';
+import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from './ChartFrame';
 import { placeGutterLabels, bandHit, textPx, type GutterLabelIn, type GutterLabelOut, type Rect } from './chartLayout';
 import { useChartWidthFromSize } from './useChartSize';
-import { describePeriod, snapToShifts, type PeriodParams, type ShiftRef } from '../lib/period';
+import { snapToShifts, type PeriodParams, type ShiftRef } from '../lib/period';
 
 /* ------------------------------------------------------------------ sizing */
 
@@ -101,7 +101,8 @@ export function edgeAnchor(i: number, len: number): 'start' | 'middle' | 'end' {
 export function Readout({ hovered, resting }: { hovered: ReactNode; resting: ReactNode }) {
   return (
     <div className="readout" aria-live="polite">
-      {hovered ?? <span className="dim">{resting}</span>}
+      <span className="dim">{resting}</span>
+      {hovered != null && <span className="sr-only">{hovered}</span>}
     </div>
   );
 }
@@ -441,15 +442,14 @@ export interface BarDatum {
  *
  * SIZING NOTE, stated honestly rather than glossed over: `ChartFrame` owns
  * its own width/height measurement internally (`useChartSize`) and only
- * hands it to the `hit`/`tipFor`/`markRect`/`brush.xs` callbacks THIS
- * component supplies, not the other way round — so this component cannot
- * know the true measured width before ChartFrame's own first render. The
- * bars themselves are drawn correctly from the very first paint (the
- * `children` render function gets the live `size` argument directly). Only
- * `hit`/`markRect` (via `layoutRef`, updated every render) and `brush.xs`
- * (recomputed from that same ref on each of THIS component's own renders)
- * can lag the true width by up to one paint after a resize, self-correcting
- * on this component's next render (a data refresh, in practice, arrives well
+ * hands it to the `hit`/`tipFor`/`markRect` callbacks THIS component
+ * supplies, not the other way round — so this component cannot know the
+ * true measured width before ChartFrame's own first render. The bars
+ * themselves are drawn correctly from the very first paint (the `children`
+ * render function gets the live `size` argument directly). Only
+ * `hit`/`markRect` (via `layoutRef`, updated every render) can lag the true
+ * width by up to one paint after a resize, self-correcting on this
+ * component's next render (a data refresh, in practice, arrives well
  * under a minute later on every screen that uses this).
  */
 export function CategoryBars({
@@ -462,7 +462,7 @@ export function CategoryBars({
   chartId,
   tip,
   onActivate,
-  brush,
+  zoom,
   onBack,
 }: {
   data: BarDatum[];
@@ -479,12 +479,14 @@ export function CategoryBars({
   tip?: (i: number) => ChartTip | null;
   onActivate?: (i: number) => void;
   /**
-   * Drag-select (or Shift+Arrow, then `+`, on the keyboard) sets the WHOLE
-   * PAGE's period, snapped to shift boundaries — one `ShiftRef` pair per
-   * bar, `[first, last]` of the shifts that bar covers: a day bar is
-   * `D.morning..D.night`, a shift bar is `[that shift, that shift]`.
+   * Clicking a bar (or Enter on the keyboard-active one, or a second tap on
+   * touch) sets the WHOLE PAGE's period, snapped to shift boundaries — one
+   * `ShiftRef` pair per bar, `[first, last]` of the shifts that bar covers:
+   * a day bar is `D.morning..D.night`, a shift bar is `[that shift, that
+   * shift]`. Ignored when `onActivate` is also given (see `ChartFrame`'s own
+   * `activate` precedence).
    */
-  brush?: { refs: [ShiftRef, ShiftRef][]; onSelect: (p: PeriodParams) => void };
+  zoom?: { refs: [ShiftRef, ShiftRef][]; onSelect: (p: PeriodParams) => void };
   onBack?: () => void;
 }) {
   interface Layout {
@@ -554,41 +556,29 @@ export function CategoryBars({
       const d = data[i];
       if (!d) return null;
       const extra = tip?.(i);
-      const valueRow: ChartTipRow = {
-        name: '',
-        value: typeof d.detail === 'string' ? d.detail : valueFmt(d.value),
-      };
-      const rows: ChartTipRow[] = [valueRow, ...(extra?.rows ?? [])];
+      // Strip a leading "<label> · " from the caller's detail string — the
+      // readout already states the label once as the heading, and a value
+      // row repeating it produced the "Night · Night · …" defect this task
+      // closes (ChartFrame's own readout, not this tooltip, but the same
+      // string feeds both).
+      const prefix = `${d.label} · `;
+      let detailStr = typeof d.detail === 'string' ? d.detail : valueFmt(d.value);
+      if (detailStr.startsWith(prefix)) detailStr = detailStr.slice(prefix.length);
+      const valueRow: ChartTipRow = { name: '', value: detailStr };
+      const rows: ChartTipRow[] = [valueRow, ...(extra?.rows ?? [])].filter((r) => r.value !== d.label);
       return { heading: d.label, rows, context: extra?.context, hint: extra?.hint };
     },
     [data, tip, valueFmt],
   );
 
-  // 1036 mirrors `useChartSize.ts`'s own `DEFAULT_FALLBACK_W` — the width
-  // ChartFrame itself assumes before its first real measurement, so the
-  // very first brush.xs this component hands down agrees with the bars
-  // ChartFrame is about to paint at that same fallback width.
-  const fallbackLayout = useCallback(() => computeLayout(1036, height), [computeLayout, height]);
-
-  const brushProp: ChartFrameBrush | undefined = brush
+  const zoomProp: ChartFrameZoom | undefined = zoom
     ? {
-        xs: data.map((_, i) => (layoutRef.current ?? fallbackLayout()).cx(i)),
-        onCommit: (i0: number, i1: number) => {
-          const pair0 = brush.refs[i0];
-          const pair1 = brush.refs[i1];
-          if (!pair0 || !pair1) return;
-          const snapped = snapToShifts(pair0[0], pair1[1]);
-          if (snapped) brush.onSelect(snapped);
+        periodFor: (i: number): PeriodParams | null => {
+          const pair = zoom.refs[i];
+          if (!pair) return null;
+          return snapToShifts(pair[0], pair[1]);
         },
-      }
-    : undefined;
-
-  const brushLabel = brush
-    ? (i0: number, i1: number): string => {
-        const pair0 = brush.refs[i0];
-        const pair1 = brush.refs[i1];
-        if (!pair0 || !pair1) return '';
-        return describeShiftRange(pair0[0], pair1[1]);
+        onZoom: zoom.onSelect,
       }
     : undefined;
 
@@ -605,8 +595,7 @@ export function CategoryBars({
       tipFor={tipFor}
       markRect={markRect}
       onActivate={onActivate}
-      brush={brushProp}
-      brushLabel={brush ? brushLabel : undefined}
+      zoom={zoomProp}
       onBack={onBack}
     >
       {(size, state) => {
@@ -703,24 +692,6 @@ export function CategoryBars({
       }}
     </ChartFrame>
   );
-}
-
-/** "2 Sep morning shift – 3 Sep night shift" — the brush's own live label,
- *  via `lib/period.ts`'s `describePeriod`, which needs a full `Period`; the
- *  range branch it takes here reads only `fromShift`/`toShift`, so the rest
- *  of the object is harmless placeholders (mirrors `ui/Bar.tsx`'s own
- *  `rangeButtonLabel`, built for the same reason). */
-function describeShiftRange(from: ShiftRef, to: ShiftRef): string {
-  return describePeriod({
-    key: 'range',
-    from: from.date,
-    to: to.date,
-    tsTo: '',
-    fromShift: from,
-    toShift: to,
-    live: false,
-    days: 0,
-  });
 }
 
 /* ------------------------------------------------------------ empty state */
