@@ -521,6 +521,16 @@ describe('verify — the identifiers it interpolates are checked where they are 
  * corroborate a closed generation, but a backfill archive can. `createPool`
  * is mocked to hand back a second fake pool (`world.altIfl`) so these tests
  * can assert exactly what it was and was not asked.
+ *
+ * `--epoch=<id>[,<id>…]` is now REQUIRED alongside `--source-db` (fixed
+ * 29 Sep 2026, after the R-17 end-to-end run found the un-scoped version
+ * compared EVERY closed epoch sharing a source table against one archive —
+ * 12 spurious STOPs on epochs 5-16 after a correct backfill of 1-4, since
+ * the raw layer holds several unrelated generations under the same
+ * `source_table` text (July, a sim-tombstone, September, ...) and one
+ * archive is only ever a superset of ONE of them). Every fixture below that
+ * exercises the reconciliation itself now names the closed epoch(s) it
+ * means with --epoch.
  */
 describe('sms verify — --source-db reconciles a closed/backfilled epoch', () => {
   it('passes a closed epoch that matches the alternate source on count and id-sum, alongside a clean open one', async () => {
@@ -535,7 +545,7 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
     world.altIfl = iflPool([1, 2, 3, 4, 5]); // CLOSED epoch's backfill archive: same count, same sum
     world.createPool = async () => world.altIfl;
 
-    expect(await verify(['--source-db=R17_SRC'])).toBe(0);
+    expect(await verify(['--source-db=R17_SRC', '--epoch=1'])).toBe(0);
     expect(printed()).toContain('source-db  R17_SRC/pack1_TP1U2');
     expect(printed()).toMatch(/raw\s+5.*OK/);
     expect(printed()).not.toContain('STOP');
@@ -551,7 +561,7 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
     world.altIfl = iflPool([1, 2, 3, 4, 6]);
     world.createPool = async () => world.altIfl;
 
-    const code = await verify(['--source-db=R17_SRC']);
+    const code = await verify(['--source-db=R17_SRC', '--epoch=1']);
     expect(code).not.toBe(0);
     expect(printed()).toContain('does not reconcile against --source-db=R17_SRC');
     expect(printed()).toMatch(/count 5 vs 5, id-sum 15 vs 16/);
@@ -567,7 +577,7 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
     };
     world.altIfl = fakePool([]); // never queried — would throw "no answer" if it were
 
-    expect(await verify(['--source-db=R17_SRC'])).toBe(0);
+    expect(await verify(['--source-db=R17_SRC', '--epoch=1'])).toBe(0);
     expect(printed()).toContain('create_date matches · fingerprint matches   OK');
     expect(printed()).not.toContain('STOP');
     // The alternate connection is opened (so a later closed epoch could use
@@ -582,7 +592,7 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
       throw new Error('login failed for R17_SRC');
     };
 
-    const code = await verify(['--source-db=R17_SRC']);
+    const code = await verify(['--source-db=R17_SRC', '--epoch=1']);
     expect(code).not.toBe(0);
     expect(printed()).toContain('cannot connect to');
     expect(printed()).toContain('R17_SRC');
@@ -600,5 +610,67 @@ describe('sms verify — --source-db reconciles a closed/backfilled epoch', () =
 
     await expect(verify(['--source-db'])).rejects.toThrow(/--source-db must be given a database name/);
     expect(called).toBe(false);
+  });
+
+  /**
+   * The bug the R-17 end-to-end run actually found (29 Sep 2026): a table's
+   * raw layer can hold MANY closed epochs sharing the same `source_table`
+   * text (here: epoch 1, a correctly-backfilled July generation, PLUS epoch
+   * 2, an unrelated closed generation --source-db was never built to
+   * describe). Reconciling every closed epoch against one named archive
+   * produced spurious STOPs on the ones it doesn't cover; --epoch scopes the
+   * reconciliation to only the epoch(s) named.
+   */
+  it('--epoch scopes --source-db to the named closed epoch(s) only — an unrelated closed epoch is left archived, not spuriously STOPped', async () => {
+    const OTHER_CLOSED = {
+      ...CLOSED,
+      epoch_id: 2,
+      source_created_key: '2026-09-20T00:00:00.000Z',
+      label: 'sim tombstone',
+    };
+    world.app = appPool({
+      epochs: [CLOSED, OTHER_CLOSED, OPEN],
+      raw: [
+        { epoch: 1, ids: [1, 2, 3, 4, 5] }, // backfilled correctly — matches the archive
+        { epoch: 2, ids: [100, 200] }, // unrelated generation — would NOT match the archive
+        { epoch: 9, ids: [1, 2, 3] },
+      ],
+    });
+    world.ifl = iflPool([1, 2, 3]);
+    world.altIfl = iflPool([1, 2, 3, 4, 5]); // the archive only ever describes epoch 1
+    world.createPool = async () => world.altIfl;
+
+    const code = await verify(['--source-db=R17_SRC', '--epoch=1']);
+
+    expect(code).toBe(0);
+    expect(printed()).not.toContain('STOP');
+    expect(printed()).toContain('not named by --epoch=1 — left archived, unchecked');
+    // Only epoch 1's whole-table stats were asked of the alternate source —
+    // epoch 2 never touched it, so it could not have produced a spurious STOP.
+    expect(world.altIfl.calls).toHaveLength(1);
+  });
+
+  it('--source-db without --epoch is a usage error, before any connection is opened', async () => {
+    world.app = appPool({ epochs: [CLOSED, OPEN], raw: [{ epoch: 1, ids: [1, 2, 3] }, { epoch: 9, ids: [1, 2, 3] }] });
+    world.ifl = iflPool([1, 2, 3]);
+    let called = false;
+    world.createPool = async () => {
+      called = true;
+      throw new Error('should not be called');
+    };
+
+    await expect(verify(['--source-db=R17_SRC'])).rejects.toThrow(
+      /--source-db requires --epoch=<id>\[,<id>,\.\.\.\]/,
+    );
+    expect(called).toBe(false);
+  });
+
+  it('--epoch rejects a non-integer or non-positive id', async () => {
+    await expect(verify(['--source-db=R17_SRC', '--epoch=abc'])).rejects.toThrow(
+      /--epoch must be a comma-separated list of positive integers/,
+    );
+    await expect(verify(['--source-db=R17_SRC', '--epoch=0'])).rejects.toThrow(
+      /--epoch must be a comma-separated list of positive integers/,
+    );
   });
 });

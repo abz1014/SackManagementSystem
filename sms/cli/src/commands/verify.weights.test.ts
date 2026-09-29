@@ -131,8 +131,8 @@ describe('sameWeights', () => {
 
 describe('parseVerifyArgs', () => {
   it('recognises --weights', () => {
-    expect(parseVerifyArgs(['--weights'])).toEqual({ weights: true, from: null, to: null, sourceDb: null });
-    expect(parseVerifyArgs([])).toEqual({ weights: false, from: null, to: null, sourceDb: null });
+    expect(parseVerifyArgs(['--weights'])).toEqual({ weights: true, from: null, to: null, sourceDb: null, epochIds: null });
+    expect(parseVerifyArgs([])).toEqual({ weights: false, from: null, to: null, sourceDb: null, epochIds: null });
   });
 
   it('parses --from/--to as a production-day window, EXCLUSIVE on the far end', () => {
@@ -162,13 +162,40 @@ describe('parseVerifyArgs', () => {
     expect(() => parseVerifyArgs(['--from=2026-09-08', '--to=next tuesday'])).toThrow(/YYYY-MM-DD/);
   });
 
-  it('recognises --source-db=<name>', () => {
-    expect(parseVerifyArgs(['--source-db=R17_SRC']).sourceDb).toBe('R17_SRC');
+  it('recognises --source-db=<name> alongside the required --epoch', () => {
+    const args = parseVerifyArgs(['--source-db=R17_SRC', '--epoch=1,2,3,4']);
+    expect(args.sourceDb).toBe('R17_SRC');
+    expect(args.epochIds).toEqual([1, 2, 3, 4]);
     expect(parseVerifyArgs([]).sourceDb).toBeNull();
+    expect(parseVerifyArgs([]).epochIds).toBeNull();
   });
 
   it('rejects a bare --source-db or an empty name', () => {
     expect(() => parseVerifyArgs(['--source-db'])).toThrow(/--source-db must be given a database name/);
     expect(() => parseVerifyArgs(['--source-db='])).toThrow(/--source-db must be given a database name/);
+  });
+
+  // Bug found by the R-17 end-to-end run (29 Sep 2026): --source-db used to
+  // apply to EVERY closed epoch sharing a source table, producing 12
+  // spurious STOPs on epochs 5-16 after a correct backfill of 1-4. --epoch
+  // is now required so an operator states exactly which generation(s) the
+  // named archive reconciles.
+  it('--source-db without --epoch is a usage error', () => {
+    expect(() => parseVerifyArgs(['--source-db=R17_SRC'])).toThrow(/--source-db requires --epoch/);
+  });
+
+  it('--epoch alone (no --source-db) is accepted — it only matters paired with --source-db', () => {
+    expect(parseVerifyArgs(['--epoch=1,2']).epochIds).toEqual([1, 2]);
+  });
+
+  it('--epoch rejects a non-integer, zero, or negative id', () => {
+    expect(() => parseVerifyArgs(['--source-db=x', '--epoch=abc'])).toThrow(/positive integers/);
+    expect(() => parseVerifyArgs(['--source-db=x', '--epoch=0'])).toThrow(/positive integers/);
+    expect(() => parseVerifyArgs(['--source-db=x', '--epoch=-1'])).toThrow(/positive integers/);
+    expect(() => parseVerifyArgs(['--source-db=x', '--epoch='])).toThrow(/positive integers/);
+  });
+
+  it('--epoch parses a comma-separated list, trimming whitespace', () => {
+    expect(parseVerifyArgs(['--source-db=x', '--epoch=1, 2 ,3,4']).epochIds).toEqual([1, 2, 3, 4]);
   });
 });

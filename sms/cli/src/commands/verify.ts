@@ -74,16 +74,29 @@
  * `JULY_TABLE_SHAPES`) into an already-closed epoch, there IS a source to
  * check it against, just not the one `ctx.cfg.iflData` points at. This opens
  * a second connection — same server/port/credentials as the live source,
- * database swapped to the given name — and, for every CLOSED epoch of every
- * table, compares that epoch's raw COUNT and id SUM against
- * `SELECT COUNT(*), SUM(id) FROM [<sourceTable>]` on that database, exactly
- * as point 1 already does for the open epoch against the live source (same
- * `sourceStats` call, `range: null`, i.e. the whole table — a backfill
+ * database swapped to the given name.
+ *
+ * `--epoch=<id>[,<id>…]` (Task W2-D, 29 Sep 2026 fix) is now REQUIRED
+ * alongside `--source-db` and names exactly which CLOSED epoch(s) that
+ * archive reconciles. Without it, the earlier version of this flag compared
+ * EVERY closed epoch sharing a matching `source_table` against the one named
+ * archive — but a table's raw layer holds several unrelated generations
+ * side by side (July, a sim-tombstone, September, ...), all with the same
+ * `source_table` text, and a single backfill fixture is only ever a superset
+ * of ONE of them. Run against a real correctly-backfilled epoch 1-4, that
+ * produced 12 spurious STOPs on epochs 5-16, which the archive was never
+ * built to describe. `--source-db` alone (no `--epoch`) is now a usage
+ * error, not a silent whole-table comparison. For every epoch id named that
+ * belongs to THIS table and is CLOSED, its raw COUNT and id SUM are compared
+ * against `SELECT COUNT(*), SUM(id) FROM [<sourceTable>]` on that database,
+ * exactly as point 1 already does for the open epoch against the live source
+ * (same `sourceStats` call, `range: null`, i.e. the whole table — a backfill
  * fixture's alternate database holds only the rows it was built to hold, not
- * a live table to window). OPEN epochs are entirely unaffected by this flag:
- * they keep comparing against the live source as before. A connection
- * failure to `--source-db` is one STOP naming it, not a crash and not a
- * silent skip.
+ * a live table to window). A closed epoch NOT named by `--epoch` is left
+ * exactly as before this flag existed: reported as archived, unchecked. OPEN
+ * epochs are entirely unaffected by this flag: they keep comparing against
+ * the live source as before. A connection failure to `--source-db` is one
+ * STOP naming it, not a crash and not a silent skip.
  */
 import mssql from 'mssql';
 import type { ConnectionPool } from 'mssql';
@@ -312,11 +325,16 @@ export interface VerifyArgs {
   /** --source-db=<name>: reconcile CLOSED/backfilled epochs against this
    *  alternate database (same server/credentials as the live source) instead
    *  of leaving them as "archived, unchecked". Null when not given — every
-   *  closed epoch stays exactly as before. */
+   *  closed epoch stays exactly as before. REQUIRES epochIds (see below). */
   sourceDb: string | null;
+  /** --epoch=<id>[,<id>…]: the CLOSED epoch id(s) --source-db reconciles.
+   *  Required whenever sourceDb is given — see the file header ("Task
+   *  W2-D fix") for why comparing every closed epoch of a table against one
+   *  named archive is wrong. Null when --epoch was not given at all. */
+  epochIds: number[] | null;
 }
 
-/** `sms verify [--weights] [--from=YYYY-MM-DD --to=YYYY-MM-DD] [--source-db=<name>]` */
+/** `sms verify [--weights] [--from=YYYY-MM-DD --to=YYYY-MM-DD] [--source-db=<name> --epoch=<id>[,<id>…]]` */
 export function parseVerifyArgs(args: string[]): VerifyArgs {
   const opts = parseArgs(args);
   const day = (key: 'from' | 'to'): Date | null => {
@@ -345,7 +363,30 @@ export function parseVerifyArgs(args: string[]): VerifyArgs {
     throw new Error(`--source-db must be given a database name, e.g. --source-db=R17_SRC`);
   }
   const sourceDb = typeof sourceDbRaw === 'string' ? sourceDbRaw : null;
-  return { weights: args.includes('--weights'), from, to, sourceDb };
+
+  const epochRaw = opts['epoch'];
+  let epochIds: number[] | null = null;
+  if (epochRaw !== undefined) {
+    const ids =
+      typeof epochRaw === 'string'
+        ? epochRaw.split(',').map((s) => s.trim()).filter(Boolean).map(Number)
+        : [];
+    if (ids.length === 0 || ids.some((n) => !Number.isInteger(n) || n <= 0)) {
+      throw new Error(`--epoch must be a comma-separated list of positive integers, e.g. --epoch=1,2,3,4`);
+    }
+    epochIds = ids;
+  }
+  if (sourceDb !== null && epochIds === null) {
+    throw new Error(
+      `--source-db requires --epoch=<id>[,<id>,...] naming which CLOSED epoch(s) it reconciles. Without it, ` +
+        `every closed epoch sharing that source table would be compared against the same archive — a table's ` +
+        `raw layer can hold several unrelated generations with the same source table name (e.g. a July copy, a ` +
+        `simulator tombstone, a September rebuild), and one backfill archive is only ever a superset of ONE of ` +
+        `them; comparing it against the others produces spurious STOPs. 'sms epoch:list' shows the epoch ids. ` +
+        `Example: --source-db=${sourceDb} --epoch=1,2,3,4`,
+    );
+  }
+  return { weights: args.includes('--weights'), from, to, sourceDb, epochIds };
 }
 
 async function sourceStats(ifl: ConnectionPool, def: TableDef, range: Range | null): Promise<IdStats> {
@@ -556,7 +597,7 @@ async function recordVerifyRun(
 
 export async function verify(args: string[] = []): Promise<number> {
   const startedAtUtc = new Date();
-  const { weights, from, to, sourceDb } = parseVerifyArgs(args);
+  const { weights, from, to, sourceDb, epochIds } = parseVerifyArgs(args);
   const range: Range | null = from && to ? { from, to } : null;
   const ctx = await openContext({ needIfl: true });
   const line = ctx.cfg.lineId;
@@ -588,7 +629,9 @@ export async function verify(args: string[] = []): Promise<number> {
       console.log(`           sync pass before treating it as one.`);
     }
     if (sourceDb) {
-      console.log(`  source-db ${ctx.cfg.iflData.server}/${sourceDb}   (reconciles CLOSED/backfilled epochs only)`);
+      console.log(
+        `  source-db ${ctx.cfg.iflData.server}/${sourceDb}   (reconciles CLOSED epoch(s) ${epochIds!.join(',')} only)`,
+      );
       try {
         altSourcePool = await createPool({ ...ctx.cfg.iflData, database: sourceDb });
       } catch (err) {
@@ -670,7 +713,13 @@ export async function verify(args: string[] = []): Promise<number> {
           console.log(
             `  epoch ${String(e.epoch_id).padEnd(3)} closed  — archived — ${raw.n} rows, source generation no longer present`,
           );
-          if (sourceDb && altSourcePool) {
+          const wantedForSourceDb = sourceDb !== null && epochIds !== null && epochIds.includes(e.epoch_id);
+          if (sourceDb && epochIds && !epochIds.includes(e.epoch_id)) {
+            console.log(
+              `${IND}source-db  not named by --epoch=${epochIds.join(',')} — left archived, unchecked (as before this flag)`,
+            );
+          }
+          if (wantedForSourceDb && altSourcePool) {
             try {
               const src = await sourceStats(altSourcePool, def, null);
               const same = src.n === raw.n && src.sum === raw.sum;
