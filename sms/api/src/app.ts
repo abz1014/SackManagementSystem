@@ -997,6 +997,18 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: 'from must be <= to' });
         return;
       }
+      // RT-028 (Task W2-C, 29 Sep 2026): this route had no MAX_RANGE_DAYS
+      // check at all, unlike every sibling analytics route (validateRange
+      // already gates /api/calibration, /api/spc, the register, etc.) — an
+      // unbounded from/to here let a caller ask getProduction to scan and
+      // group an arbitrarily large date range with no server-side cap.
+      if (parsed.data.from && parsed.data.to) {
+        const rangeErr = validateRange(parsed.data.from, parsed.data.to);
+        if (rangeErr) {
+          res.status(400).json({ error: rangeErr });
+          return;
+        }
+      }
       // Chart overhaul wave 2, Task TC (28 Sep 2026): production.ts's
       // ProductionParams already carries an optional `shiftRange`
       // (Task TB2) — decode the wire form and AND it in alongside from/to.
@@ -1430,6 +1442,16 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       if (!q.success) {
         res.status(400).json({ error: 'invalid query' });
         return;
+      }
+      // RT-028 (Task W2-C, 29 Sep 2026): this route had no MAX_RANGE_DAYS
+      // check at all, unlike its sibling analytics routes — see the same
+      // fix on /api/production above.
+      if (q.data.from && q.data.to) {
+        const rangeErr = validateRange(q.data.from, q.data.to);
+        if (rangeErr) {
+          res.status(400).json({ error: rangeErr });
+          return;
+        }
       }
       const shiftRangeResult = decodeShiftRangeParam({ from: q.data.from, to: q.data.to, fromShift: q.data.fromShift, toShift: q.data.toShift });
       if (isShiftRangeError(shiftRangeResult)) {
