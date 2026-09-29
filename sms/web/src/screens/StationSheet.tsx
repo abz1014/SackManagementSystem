@@ -30,12 +30,17 @@
  * day. Every comparison and every plant-time shown here now goes through
  * lib/plantClock.ts with the offset the API reports.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Details, Empty, SkelLines } from '../ui/bits';
 import { linePath } from '../ui/chart';
+import { ChartFrame, type ChartTip, type ChartTipRow } from '../ui/ChartFrame';
+import { placeGutterLabels, nearestIndex, type Rect } from '../ui/chartLayout';
 import { W } from '../lib/words';
-import { TRAILING_DAYS } from '../lib/period';
+import {
+  TRAILING_DAYS, dayToShiftRange, snapToShifts, describePeriod,
+  type PeriodParams,
+} from '../lib/period';
 import { fmtClock, fmtG, fmtInt } from '../lib/fmt';
 import { usePlantNow } from '../lib/live';
 import { dayEndsAtOrAfter, fromPlantLocal, plantLocalValue } from '../lib/plantClock';
@@ -46,6 +51,14 @@ import {
   type StationRow, type WeightStationRow, type WeightStationsData,
 } from '../api';
 
+/** Shared by the KV block (Body) and the daily-means tooltip (DailyMeans) —
+ *  lifted out of Body so both can format a signed gram figure the same way. */
+function signedG(v: number | null): string {
+  if (v == null) return '—';
+  const g = fmtG(Math.abs(v));
+  return Math.round(v) === 0 ? g : `${v > 0 ? '+' : '−'}${g}`;
+}
+
 export function StationSheet({
   station,
   canAdjust,
@@ -55,6 +68,7 @@ export function StationSheet({
   onSeeRejects,
   onSeeCalibrationReport,
   onSeeShiftReport,
+  onSelectPeriod,
 }: {
   station: number;
   canAdjust: boolean;
@@ -76,6 +90,20 @@ export function StationSheet({
   onSeeRejects: () => void;
   onSeeCalibrationReport: () => void;
   onSeeShiftReport: () => void;
+  /**
+   * Chart overhaul, wave 3, Task T7 (29 Sep 2026): the daily-means chart's
+   * drag-select produces a shift-snapped whole-page period
+   * (`dayToShiftRange` + `snapToShifts`) and hands it here rather than
+   * applying it itself — StationSheet has no reach into the page's own
+   * period state. Optional because no caller wires it yet: App.tsx opens
+   * this sheet with no period setter passed in (see the `go({ sheet: ... })`
+   * calls around StationSheet in App.tsx). Wiring `onSelectPeriod={(p) =>
+   * go({ period: p })}` there — the same shape Bar's own `onPeriod` already
+   * uses at App.tsx:467 — is Task T8's, not this one's. Until then the brush
+   * still shows the drag and the "Release to show …" label; it just has
+   * nothing to commit to, so it is not rendered at all (see DailyMeans).
+   */
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const [data, setData] = useState<WeightStationsData | null>(null);
   const [names, setNames] = useState<StationRow[]>([]);
@@ -142,6 +170,7 @@ export function StationSheet({
           onSeeRejects={onSeeRejects}
           onSeeCalibrationReport={onSeeCalibrationReport}
           onSeeShiftReport={onSeeShiftReport}
+          onSelectPeriod={onSelectPeriod}
         />
       )}
     </Sheet>
@@ -172,6 +201,7 @@ function Body({
   onSeeRejects,
   onSeeCalibrationReport,
   onSeeShiftReport,
+  onSelectPeriod,
 }: {
   row: WeightStationRow;
   data: WeightStationsData;
@@ -183,12 +213,9 @@ function Body({
   onSeeRejects: () => void;
   onSeeCalibrationReport: () => void;
   onSeeShiftReport: () => void;
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
-  const signed = (v: number | null) => {
-    if (v == null) return '—';
-    const g = fmtG(Math.abs(v));
-    return Math.round(v) === 0 ? g : `${v > 0 ? '+' : '−'}${g}`;
-  };
+  const signed = signedG;
   const offset = log.plantOffsetMinutes;
   const flaggedDays = row.days.filter((d) => d.nelson.length > 0);
   const cannot = (data.rules ?? []).filter((r) => r.minPoints > row.longestRun).map((r) => r.id);
@@ -246,7 +273,7 @@ function Body({
       <p className="h2" style={{ marginTop: 26, marginBottom: 10 }}>
         {W.judgedOver(data.days)}
       </p>
-      <DailyMeans row={row} data={data} log={log.adjustments} offsetMinutes={offset} />
+      <DailyMeans row={row} data={data} log={log.adjustments} offsetMinutes={offset} onSelectPeriod={onSelectPeriod} />
 
       {/* Which day, which rule — the pattern named rather than "non-random". */}
       <p className="h2" style={{ marginTop: 22, marginBottom: 8 }}>{W.calibration.flaggedDays}</p>
@@ -401,40 +428,96 @@ function beforeAfter(a: CalibrationAdjustment): string {
 
 /* ------------------------------------------------------- the daily means */
 
+type DailyMeanDay = { date: string; n: number; mean: number; nelson: number[] };
+
+/** One de-collided "target"/"line" gutter label — exported so the layout can
+ *  be checked (no intersecting boxes) without mounting the chart. Shares the
+ *  same y-domain the chart itself uses (`dailyMeansYScale`), so a label's `y`
+ *  here always matches where its reference line is actually drawn. */
+export interface StationGutterLabel {
+  kind: 'target' | 'line';
+  y: number;
+  text: string;
+  displaced: boolean;
+}
+
+/** The y-domain both the plotted line/marks and the gutter labels share:
+ *  every day's mean plus the target/line marks, padded 25%. */
+function dailyMeansYScale(
+  days: DailyMeanDay[],
+  targetG: number | null,
+  lineMeanG: number | null,
+  top: number,
+  bottom: number,
+): (v: number) => number {
+  const marks = [lineMeanG, targetG].filter((v): v is number => v != null);
+  const vals = days.map((d) => d.mean);
+  const lo = Math.min(...vals, ...marks);
+  const hi = Math.max(...vals, ...marks);
+  const pad = (hi - lo || 1) * 0.25;
+  return (v: number) => top + ((hi + pad - v) / (hi - lo + 2 * pad)) * (bottom - top);
+}
+
+/**
+ * "target 1950" and "line 1932" used to be drawn at their own natural y and
+ * nothing else — when the target and the line mean are close, the two
+ * printed on top of each other. `placeGutterLabels` (chartLayout.ts) now
+ * pushes the lower-priority one (the line, `prio: 0` — the target, `prio: 1`,
+ * is the actionable figure and survives a squeeze first) off its natural y;
+ * `displaced` tells the caller to draw a leader tick back to where the label
+ * would otherwise have sat, so a moved label still reads as belonging to its
+ * own line.
+ */
+export function stationGutterLabels(
+  days: DailyMeanDay[],
+  targetG: number | null,
+  lineMeanG: number | null,
+  top: number,
+  bottom: number,
+  fontPx: number,
+): StationGutterLabel[] {
+  const y = dailyMeansYScale(days, targetG, lineMeanG, top, bottom);
+  const items: { kind: 'target' | 'line'; y: number; text: string; prio: number }[] = [];
+  if (targetG != null) items.push({ kind: 'target', y: y(targetG), text: `target ${fmtInt(Math.round(targetG))}`, prio: 1 });
+  if (lineMeanG != null) items.push({ kind: 'line', y: y(lineMeanG), text: `line ${fmtInt(Math.round(lineMeanG))}`, prio: 0 });
+  if (items.length === 0) return [];
+  const lineH = Math.ceil(fontPx * 1.4) || 18;
+  const placed = placeGutterLabels(items, { top, bottom, lineH });
+  return placed.map((p, i) => ({ kind: items[i]!.kind, y: p.y, text: p.text, displaced: p.displaced }));
+}
+
+const short = (d: string) =>
+  new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+
 /**
  * The station's daily mean against the line and the target, with the days that
  * fired a pattern marked and any adjustment drawn as a tick. Days before the
  * most recent adjustment are grey: they describe a scale that no longer
  * exists.
+ *
+ * Chart overhaul, wave 3, Task T7 (29 Sep 2026): rebuilt on `ChartFrame` —
+ * real width via `useChartSize` (`ChartFrame`'s own, `chartId`
+ * 'station-daily'), a tooltip on every day (not just flagged ones), de-
+ * collided gutter labels, and a drag-select that snaps to shifts and offers
+ * the whole-page period to `onSelectPeriod`. Print is unchanged: `ChartFrame`
+ * already renders a fixed width with no tooltip/handle/brush while
+ * `size.print` is true, which is `useChartSize`'s own doing, not this
+ * component's.
  */
 function DailyMeans({
   row,
   data,
   log,
   offsetMinutes,
+  onSelectPeriod,
 }: {
   row: WeightStationRow;
   data: WeightStationsData;
   log: CalibrationAdjustment[];
   offsetMinutes: number;
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const days = row.days;
-  if (days.length < 2) return <Empty message={W.nothingHere} />;
-
-  const W_ = 396;
-  const H = 150;
-  const L = 4;
-  const R = 92;
-  const T = 14;
-  const B = 26;
-
-  const marks = [data.lineMeanG, data.targetG].filter((v): v is number => v != null);
-  const vals = days.map((d) => d.mean);
-  const lo = Math.min(...vals, ...marks);
-  const hi = Math.max(...vals, ...marks);
-  const pad = (hi - lo || 1) * 0.25;
-  const y = (v: number) => T + ((hi + pad - v) / (hi - lo + 2 * pad)) * (H - T - B);
-  const x = (i: number) => L + (i / (days.length - 1)) * (W_ - L - R);
 
   // The newest adjustment (this station's or line-wide), placed on the
   // production day whose END is at or after it — the server's own rule, on
@@ -443,60 +526,166 @@ function DailyMeans({
   const lastAdj = log.length ? log.map((a) => a.adjustedAtUtc).sort().slice(-1)[0]! : null;
   const adjIndex = lastAdj ? days.findIndex((d) => dayEndsAtOrAfter(d.date, lastAdj, offsetMinutes)) : -1;
 
-  const before = adjIndex > 0 ? days.slice(0, adjIndex + 1) : [];
-  const after = adjIndex > 0 ? days.slice(adjIndex) : days;
-  const pts = (arr: typeof days, off: number) => arr.map((d, i) => ({ x: x(off + i), y: y(d.mean) }));
+  /* geoRef/xsRef hold the CURRENT pixel geometry, kept fresh by `children`
+     below on every ChartFrame render (including ones this component did not
+     itself cause, e.g. a resize). `hit`/`markRect` read geoRef.current at
+     call time, always after the render that set it, so they never see stale
+     geometry. `xsRef` is a stable array MUTATED in place (never reassigned)
+     because `brush.xs` is captured by value in the `brush` prop object at
+     THIS component's own last render; only in-place mutation stays visible
+     to ChartFrame's internal callbacks without this component re-rendering. */
+  const geoRef = useRef<{ x: (i: number) => number; y: (v: number) => number } | null>(null);
+  const xsRef = useRef<number[]>([]);
+
+  if (days.length < 2) return <Empty message={W.nothingHere} />;
+
+  const L = 4;
+  const T = 14;
+  const B = 26;
+
+  const hit = (px: number): number | null => {
+    if (xsRef.current.length === 0) return null;
+    return nearestIndex(px, xsRef.current);
+  };
+
+  const markRect = (i: number): Rect | null => {
+    const geo = geoRef.current;
+    const d = days[i];
+    if (!geo || !d) return null;
+    const cx = geo.x(i);
+    const cy = geo.y(d.mean);
+    return { x: cx - 4, y: cy - 4, w: 8, h: 8 };
+  };
+
+  const tipFor = (i: number): ChartTip | null => {
+    const d = days[i];
+    if (!d) return null;
+    const vsLine = data.lineMeanG != null ? d.mean - data.lineMeanG : null;
+    const vsTarget = data.targetG != null ? d.mean - data.targetG : null;
+    const flagged = d.nelson.length > 0;
+    const rows: ChartTipRow[] = [
+      { name: W.reports.colMean, value: fmtG(d.mean), mark: flagged ? 'acc' : 'ink' },
+    ];
+    if (vsLine != null) rows.push({ name: W.weight.colVsLine, value: signedG(vsLine), mark: 'dashed' });
+    if (vsTarget != null) rows.push({ name: W.weight.colVsTarget, value: signedG(vsTarget), mark: 'graphite' });
+    rows.push({ name: W.readings.cones, value: fmtInt(d.n) });
+    const context: string[] = [];
+    if (flagged) context.push(d.nelson.map((id) => ruleLabel(id, data.rules ?? [])).join(' · '));
+    // The on-chart "adjusted" text used to sit inside the plot, over the
+    // line — moved here instead, never drawn over a mark again.
+    if (i === adjIndex) context.push('adjustment logged here');
+    return { heading: short(d.date), rows, context: context.length > 0 ? context : undefined };
+  };
+
+  const rangeLabel = (i0: number, i1: number): string => {
+    const d0 = days[i0]?.date;
+    const d1 = days[i1]?.date;
+    if (!d0 || !d1) return '';
+    const { from, to } = dayToShiftRange(d0, d1);
+    const sameShift = from.date === to.date && from.shift === to.shift;
+    return describePeriod({
+      key: 'range', from: from.date, to: to.date, tsTo: '', live: false, days: 1,
+      fromShift: from, toShift: to, shift: sameShift ? from.shift : undefined,
+    });
+  };
+
+  const commitBrush = (i0: number, i1: number) => {
+    if (!onSelectPeriod) return;
+    const d0 = days[i0]?.date;
+    const d1 = days[i1]?.date;
+    if (!d0 || !d1) return;
+    const { from, to } = dayToShiftRange(d0, d1);
+    const params = snapToShifts(from, to);
+    if (params) onSelectPeriod(params);
+  };
+
+  // history.back() only when there is somewhere to go back TO (a prior
+  // zoom pushed a state entry) — ChartFrame's own onBack contract.
+  const zoomFrom =
+    typeof window !== 'undefined' && window.history?.state && (window.history.state as { zoomFrom?: unknown }).zoomFrom;
+  const onBack = zoomFrom ? () => window.history.back() : undefined;
 
   return (
-    <svg className="chart" viewBox={`0 0 ${W_} ${H}`} height={H} role="img" aria-label={`Daily average for station ${row.station}`}>
-      {data.targetG != null && (
-        <>
-          <line x1={L} x2={W_ - R} y1={y(data.targetG)} y2={y(data.targetG)} stroke="var(--graphite)" />
-          <text x={W_ - R + 8} y={y(data.targetG) + 4} fontSize="var(--fs-tick)" fill="var(--graphite)">
-            target {fmtInt(Math.round(data.targetG))}
-          </text>
-        </>
-      )}
-      {data.lineMeanG != null && (
-        <>
-          <line x1={L} x2={W_ - R} y1={y(data.lineMeanG)} y2={y(data.lineMeanG)} stroke="var(--grid)" strokeDasharray="3 3" />
-          <text x={W_ - R + 8} y={y(data.lineMeanG) + 4} fontSize="var(--fs-tick)" fill="var(--muted)">
-            line {fmtInt(Math.round(data.lineMeanG))}
-          </text>
-        </>
-      )}
+    <ChartFrame
+      chartId="station-daily"
+      defaultH={150}
+      minH={120}
+      maxH={320}
+      ariaLabel={`Daily average for station ${row.station}`}
+      hit={hit}
+      count={days.length}
+      tipFor={tipFor}
+      markRect={markRect}
+      brush={onSelectPeriod ? { onCommit: commitBrush, xs: xsRef.current } : undefined}
+      brushLabel={rangeLabel}
+      onBack={onBack}
+    >
+      {(size) => {
+        const W_ = size.width;
+        const H = size.height;
+        const labels = stationGutterLabels(days, data.targetG, data.lineMeanG, T, H - B, size.fontPx);
+        const widestLabel = labels.reduce((m, l) => Math.max(m, l.text.length), 0);
+        const R = widestLabel > 0 ? Math.min(Math.max(60, widestLabel * size.fontPx * 0.6 + 16), W_ * 0.3) : 8;
 
-      {/* Before the adjustment, greyed: a different scale. */}
-      {before.length > 1 && <path d={linePath(pts(before, 0))} fill="none" stroke="var(--grid)" strokeWidth={2} />}
-      <path d={linePath(pts(after, adjIndex > 0 ? adjIndex : 0))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
+        const y = dailyMeansYScale(days, data.targetG, data.lineMeanG, T, H - B);
+        const x = (i: number) => L + (i / (days.length - 1)) * (W_ - L - R);
+        geoRef.current = { x, y };
+        const xs = days.map((_, i) => x(i));
+        xsRef.current.length = 0;
+        xsRef.current.push(...xs);
 
-      {days.map((d, i) =>
-        d.nelson.length > 0 ? (
-          <circle key={i} cx={x(i)} cy={y(d.mean)} r={3.5} fill="var(--acc-fill)">
-            <title>{`${short(d.date)} · ${fmtG(d.mean)} · ${d.nelson.map((id) => ruleLabel(id, data.rules ?? [])).join(' · ')}`}</title>
-          </circle>
-        ) : null,
-      )}
+        const before = adjIndex > 0 ? days.slice(0, adjIndex + 1) : [];
+        const after = adjIndex > 0 ? days.slice(adjIndex) : days;
+        const pts = (arr: typeof days, off: number) => arr.map((d, i) => ({ x: x(off + i), y: y(d.mean) }));
 
-      {adjIndex > 0 && (
-        <>
-          <line x1={x(adjIndex)} x2={x(adjIndex)} y1={H - B - 12} y2={H - B} stroke="var(--acc)" strokeWidth={2} />
-          <text x={x(adjIndex)} y={H - B - 16} fontSize="var(--fs-tick)" fill="var(--acc)" textAnchor="middle">
-            adjusted
-          </text>
-        </>
-      )}
+        return (
+          <svg className="chart" width={W_} height={H} role="presentation" aria-hidden="true">
+            {labels.map((l) => {
+              const naturalY = l.kind === 'target' ? y(data.targetG!) : y(data.lineMeanG!);
+              const color = l.kind === 'target' ? 'var(--graphite)' : 'var(--muted)';
+              return (
+                <g key={l.kind}>
+                  <line
+                    x1={L} x2={W_ - R} y1={naturalY} y2={naturalY}
+                    stroke={l.kind === 'target' ? 'var(--graphite)' : 'var(--grid)'}
+                    strokeDasharray={l.kind === 'line' ? '3 3' : undefined}
+                  />
+                  {l.displaced && (
+                    <line x1={W_ - R} y1={naturalY} x2={W_ - R + 4} y2={l.y} stroke="var(--grid)" />
+                  )}
+                  <text x={W_ - R + 8} y={l.y + 4} fontSize="var(--fs-tick)" fill={color}>
+                    {l.text}
+                  </text>
+                </g>
+              );
+            })}
 
-      <text x={L} y={H - 6} fontSize="var(--fs-tick)" fill="var(--muted)">{short(days[0]!.date)}</text>
-      <text x={W_ - R} y={H - 6} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">
-        {short(days[days.length - 1]!.date)}
-      </text>
-    </svg>
+            {/* Before the adjustment, greyed: a different scale. */}
+            {before.length > 1 && <path d={linePath(pts(before, 0))} fill="none" stroke="var(--grid)" strokeWidth={2} />}
+            <path d={linePath(pts(after, adjIndex > 0 ? adjIndex : 0))} fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinejoin="round" />
+
+            {days.map((d, i) =>
+              d.nelson.length > 0 ? (
+                <circle key={i} cx={x(i)} cy={y(d.mean)} r={3.5} fill="var(--acc-fill)">
+                  <title>{`${short(d.date)} · ${fmtG(d.mean)} · ${d.nelson.map((id) => ruleLabel(id, data.rules ?? [])).join(' · ')}`}</title>
+                </circle>
+              ) : null,
+            )}
+
+            {adjIndex > 0 && (
+              <line x1={x(adjIndex)} x2={x(adjIndex)} y1={H - B - 12} y2={H - B} stroke="var(--acc)" strokeWidth={2} />
+            )}
+
+            <text x={L} y={H - 6} fontSize="var(--fs-tick)" fill="var(--muted)">{short(days[0]!.date)}</text>
+            <text x={W_ - R} y={H - 6} fontSize="var(--fs-tick)" fill="var(--muted)" textAnchor="end">
+              {short(days[days.length - 1]!.date)}
+            </text>
+          </svg>
+        );
+      }}
+    </ChartFrame>
   );
 }
-
-const short = (d: string) =>
-  new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 
 /* --------------------------------------------------------- log an adjustment */
 
