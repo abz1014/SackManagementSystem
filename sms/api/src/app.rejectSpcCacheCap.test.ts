@@ -9,27 +9,15 @@
  * the exact envelope shape the guard is written to recognise
  * (`{ data: { rows: [...] }, metadata }`).
  *
- * Why not prove it by driving an oversized `/api/reject-spc` response
- * through the real HTTP route, the way `app.rt24.test.ts` proves the row cap
- * for `/api/events`: `getRejectSpc`'s own envelope (`services/rejectSpc.ts`)
- * carries its buckets under `data.buckets`, never `data.rows` — the one
- * shape `largestKnownArray` (`middleware/responseCap.ts`) recognises besides
- * a bare top-level array, `.rows`, or `.data` itself as an array (see that
- * file's own header: "a small, explicit set of shapes", written for
- * register.ts's `RegisterPage.rows`). So today, an oversized `/api/reject-spc`
- * payload is not one `largestKnownArray` can see — this mirrored guard is
- * therefore currently a no-op for THIS route's actual payload shape, exactly
- * as inert as it would be for any other non-`rows`-shaped envelope. That is
- * a pre-existing gap in `largestKnownArray`'s own shape list, not something
- * this fix introduces or can close (`middleware/responseCap.ts` and
- * `services/rejectSpc.ts` are both outside this fix's owned files —
- * `api/src/app.ts`'s `/api/reject-spc` cache `.set()` line only). What this
- * fix DOES guarantee, and what this file proves: the same predicate that
- * already protects /api/events now runs, byte-identical, on
- * /api/reject-spc's own envelope before every cache write, so the day that
- * envelope's shape grows a `rows`/`data`-array field (or `largestKnownArray`
- * itself learns to look at `.data.buckets`), the guard is already wired in
- * and needs no further change here.
+ * **Update, same day:** when this file was first written, `largestKnownArray`
+ * only recognised a small, explicit set of envelope shapes (a bare top-level
+ * array, `.rows`, `.data` as an array, or `.data.rows`) and so could not see
+ * `/api/reject-spc`'s real payload shape, `data.buckets` — this guard was a
+ * documented no-op for this route. `middleware/responseCap.ts`'s
+ * `largestKnownArray` now walks the body for the largest array anywhere
+ * (bounded to depth 4), which does see `data.buckets`, so the gap this file
+ * used to document is closed — see the third test below, updated to assert
+ * the fixed behaviour rather than document the old gap.
  */
 import { describe, it, expect } from 'vitest';
 import { largestKnownArray } from './middleware/responseCap.js';
@@ -56,7 +44,7 @@ describe('/api/reject-spc cache guard (mirrors /api/events, app.ts)', () => {
     expect(wouldCache(env)).toBe(true);
   });
 
-  it("WOULD cache today's real reject-spc envelope shape (data.buckets, not data.rows) even when buckets is huge — documents the pre-existing largestKnownArray gap named above, not a regression from this fix", () => {
+  it("would NOT cache today's real reject-spc envelope shape (data.buckets, not data.rows) when buckets is huge — largestKnownArray's bounded walk now sees it", () => {
     const env = {
       data: {
         bucketSize: 'day',
@@ -67,11 +55,8 @@ describe('/api/reject-spc cache guard (mirrors /api/events, app.ts)', () => {
       },
       metadata: {},
     };
-    // largestKnownArray only looks at a bare top-level array, `.rows`,
-    // `.data` (as an array), or `.data.rows` — never `.data.buckets` — so
-    // this huge, realistically-shaped payload is invisible to it.
-    expect(largestKnownArray(env)).toBe(0);
-    expect(wouldCache(env)).toBe(true);
+    expect(largestKnownArray(env)).toBe(MAX_RESPONSE_ROWS + 1);
+    expect(wouldCache(env)).toBe(false);
   });
 
   it('would NOT cache a bare top-level array over the cap (the shape a differently-built envelope could still take)', () => {

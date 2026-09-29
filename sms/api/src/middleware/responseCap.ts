@@ -9,17 +9,23 @@
  * to remember to apply it.
  *
  * Two caps, checked in this order:
- *  (a) ROW CAP. `countRows` looks for the largest array in the handful of
- *      envelope shapes this app actually uses — a bare top-level array, or
- *      `.rows` / `.data` / `.data.rows` — and refuses with
- *      `{ error: 'result too large', limit, hint }` when it exceeds
- *      `maxRows`. This is deliberately a small, explicit set of shapes, not a
- *      recursive walk of the whole body: a recursive scan would also catch
- *      unrelated small arrays (`filters`, `codes`) nested arbitrarily deep and
- *      risk false positives on a legitimately large but harmless nested list;
- *      the shapes here are exactly where this app's row-listing/report
- *      services put their row data (register.ts's RegisterPage.rows,
- *      an envelope's own `.data`).
+ *  (a) ROW CAP. `largestKnownArray` walks the body (objects and arrays only,
+ *      bounded to depth 4) and returns the length of the LARGEST array found
+ *      anywhere, refusing with `{ error: 'result too large', limit, hint }`
+ *      when it exceeds `maxRows`. This used to check only a small, explicit
+ *      set of shapes (a bare top-level array, or `.rows` / `.data` /
+ *      `.data.rows`) — found (29 Sep 2026) to miss envelopes that carry their
+ *      rows under another key, e.g. /api/reject-spc's `data.buckets`: the row
+ *      cap never refused them and the cache guards that call
+ *      `largestKnownArray` before caching were inert for that shape, leaving
+ *      only the byte cap as protection. The bounded walk closes that gap. The
+ *      depth cap (4) keeps this a cheap, terminating scan rather than an
+ *      unbounded recursive walk of the whole body; every real row-array in
+ *      this app's response shapes sits within that depth, and the small
+ *      nested arrays it now also sees (`stations`, `machines`, `products`,
+ *      `codes`, `filters`) are bounded by counts of physical things (stations,
+ *      machines, products) — at most dozens, nowhere near `maxRows` — so they
+ *      do not risk a false 413.
  *  (b) BYTE CAP. Independent backstop: even a response this middleware's row
  *      check waves through (e.g. one enormous non-array payload, or many
  *      moderately-sized rows with heavy per-row fields) is refused if its
@@ -46,23 +52,25 @@ export interface ResponseCapOptions {
 }
 
 /**
- * The largest array found at one of this app's known envelope shapes. Pure,
- * exported for the test. Returns 0 (never refuses) for a body with no array
- * in any of those shapes.
+ * The length of the largest array found anywhere in the body, walking
+ * objects and arrays only, bounded to depth 4 (the body itself is depth 0).
+ * Pure, exported for the test. Returns 0 (never refuses) for a body with no
+ * array at all within that depth.
  */
 export function largestKnownArray(body: unknown): number {
-  if (body == null || typeof body !== 'object') return Array.isArray(body) ? body.length : 0;
   let max = 0;
-  const consider = (v: unknown): void => {
-    if (Array.isArray(v) && v.length > max) max = v.length;
+  const walk = (v: unknown, depth: number): void => {
+    if (v == null || typeof v !== 'object') return;
+    if (Array.isArray(v)) {
+      if (v.length > max) max = v.length;
+      if (depth >= 4) return;
+      for (const item of v) walk(item, depth + 1);
+      return;
+    }
+    if (depth >= 4) return;
+    for (const val of Object.values(v as Record<string, unknown>)) walk(val, depth + 1);
   };
-  const b = body as Record<string, unknown>;
-  consider(b);
-  consider(b.rows);
-  consider(b.data);
-  if (b.data != null && typeof b.data === 'object' && !Array.isArray(b.data)) {
-    consider((b.data as Record<string, unknown>).rows);
-  }
+  walk(body, 0);
   return max;
 }
 

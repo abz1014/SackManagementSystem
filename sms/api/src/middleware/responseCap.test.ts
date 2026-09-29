@@ -29,6 +29,29 @@ describe('largestKnownArray', () => {
     expect(largestKnownArray(undefined)).toBe(0);
     expect(largestKnownArray('x')).toBe(0);
   });
+
+  // 29 Sep 2026: an envelope's rows can live under a key other than
+  // `.rows`/`.data`/`.data.rows` — e.g. /api/reject-spc's `data.buckets` —
+  // and the old fixed-shape check never saw them.
+  it('finds an array under an arbitrary key, not just the known envelope shapes', () => {
+    expect(largestKnownArray({ data: { buckets: new Array(7).fill(0), episodes: [] } })).toBe(7);
+  });
+
+  it('counts a nested array at depth 3', () => {
+    // depth 0: body: { a }, depth 1: a: { b }, depth 2: b: { c }, depth 3: c: [...]
+    expect(largestKnownArray({ a: { b: { c: new Array(9).fill(0) } } })).toBe(9);
+  });
+
+  it('ignores an array past depth 4 (bounded walk)', () => {
+    // depth 0..4: a,b,c,d wrap an object; the array itself would land at
+    // depth 5, past the walk's bound, so it must not be seen.
+    const deep = { a: { b: { c: { d: { e: new Array(20).fill(0) } } } } };
+    expect(largestKnownArray(deep)).toBe(0);
+  });
+
+  it('returns the length of the LARGEST array anywhere, not the first found', () => {
+    expect(largestKnownArray({ small: [1, 2], data: { big: new Array(15).fill(0) } })).toBe(15);
+  });
 });
 
 function fakeReqRes() {
