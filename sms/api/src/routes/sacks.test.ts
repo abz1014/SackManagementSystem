@@ -207,6 +207,45 @@ describe('the period reads', () => {
   });
 });
 
+/**
+ * Chart overhaul wave 2, Task TD (29 Sep 2026) — gap 3, over the real route:
+ * `/api/sacks/movements` now honours `fromShift`/`toShift` (services/
+ * sackStock.ts's `listMovements`); `/api/sacks/stock` deliberately does not
+ * (it is a running-balance snapshot, not a period listing).
+ */
+describe('Task TD (29 Sep 2026) — /api/sacks/movements honours a shift range; /api/sacks/stock does not', () => {
+  it('fromShift/toShift bind occurred_at_plant BETWEEN the shift edges into the movements query', async () => {
+    // fromShift/toShift's own dates must match from/to exactly — the same
+    // "fromShift date does not match from" rule decodeShiftRangeParam
+    // enforces for every route it wires into (shiftRangeParam.ts).
+    const r = await call('viewer', 'GET', '/api/sacks/movements?from=2026-09-02&to=2026-09-02&fromShift=2026-09-02.evening&toShift=2026-09-02.evening');
+    expect(r.status).toBe(200);
+    const q = db.statements.find((s) => s.sql.includes('sms.sack_stock_movement m') && s.sql.includes('SELECT'))!;
+    expect(q.sql).toMatch(/AND m\.occurred_at_plant BETWEEN @srFromTs AND @srToTs/);
+    // 06:00/14:00/22:00 (the fake db's own sms.shift_rule row): evening is 14:00-22:00.
+    expect((q.inputs.get('srFromTs') as Date).toISOString()).toBe('2026-09-02T14:00:00.000Z');
+    expect((q.inputs.get('srToTs') as Date).toISOString()).toBe('2026-09-02T22:00:00.000Z');
+  });
+
+  it('with no fromShift/toShift, the movements query binds no instant window — unchanged', async () => {
+    const r = await call('viewer', 'GET', '/api/sacks/movements?from=2026-09-01&to=2026-09-07');
+    expect(r.status).toBe(200);
+    const q = db.statements.find((s) => s.sql.includes('sms.sack_stock_movement m') && s.sql.includes('SELECT'))!;
+    expect(q.sql).not.toMatch(/occurred_at_plant BETWEEN/);
+  });
+
+  it('a mismatched fromShift date is refused 400, the same shape decodeShiftRangeParam already gives other routes', async () => {
+    const r = await call('viewer', 'GET', '/api/sacks/movements?from=2026-09-01&to=2026-09-07&fromShift=2026-09-03.evening&toShift=2026-09-02.evening');
+    expect(r.status).toBe(400);
+  });
+
+  it('/api/sacks/stock ignores fromShift/toShift (a snapshot, not a range narrowing) — no instant window bound, still 200', async () => {
+    const r = await call('viewer', 'GET', '/api/sacks/stock?from=2026-09-01&to=2026-09-03&fromShift=2026-09-02.evening&toShift=2026-09-02.evening');
+    expect(r.status).toBe(200);
+    expect(db.statements.some((s) => s.inputs.has('srFromTs'))).toBe(false);
+  });
+});
+
 describe('POST /api/sacks/movements', () => {
   it('refuses a negative quantity on anything but an adjustment, and a zero', async () => {
     const neg = await call('manager', 'POST', '/api/sacks/movements', { ...MOVE, quantitySacks: -5 });

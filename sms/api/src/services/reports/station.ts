@@ -87,11 +87,16 @@ export async function getStationReport(
   resolved: ResolvedPeriod,
   _filters: ReportFilters,
   /**
-   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): not yet threaded into
-   * `getWeightStations` (weightStations.ts, TB1-owned) — `ws.rows[].mean/
-   * vsLine/...` still describe the whole `[from, to]` window until that file
-   * takes the same parameter. `prod` and the per-station state counts below
-   * are scoped now.
+   * Chart overhaul wave 2 (Task TD, 29 Sep 2026): now threaded into
+   * `getWeightStations` (weightStations.ts, TB1-owned) via its own optional
+   * `period` parameter — see that function's file header for exactly what
+   * this does and does not narrow. It narrows ONLY `rejectRatePct`/
+   * `lineRejectRatePct` (the reject-rate window); `meanG`/`vsLineG`/
+   * `vsTargetG`/`daysHeld`/`flagged` still describe the full TRAILING
+   * `[from, to]` window, deliberately — weightStations.ts's own F4/F6
+   * population contract forbids narrowing those by shift while the drift
+   * detector needs consecutive production days. `prod` and the per-station
+   * state counts below are scoped as before this task.
    */
   shiftRange?: ShiftRange,
 ): Promise<StationReportData> {
@@ -102,7 +107,7 @@ export async function getStationReport(
   // below, without threading a scope through either signature. One extra
   // round trip, accepted per the remediation brief.
   const [ws, prod, ctx, scope, catalogue] = await Promise.all([
-    getWeightStations(pool, lineId, from, to),
+    getWeightStations(pool, lineId, from, to, undefined, { from, to, shiftRange }),
     getProduction(pool, lineId, { from, to, groupBy: 'station', shiftRange }),
     loadStateContext(pool, lineId),
     resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),

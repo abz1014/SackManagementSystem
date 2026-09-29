@@ -556,7 +556,11 @@ describe('station report', () => {
   it('takes bias, flags and reject rates from the one station table and counts from production', async () => {
     const { pool, calls } = fakePool((sql) => (sql.includes('GROUP BY source_station') ? [{ st: 7, state: 'within', n: 510 }, { st: 7, state: 'rejected', n: 10 }, { st: 3, state: 'within', n: 480 }] : []));
     const d = await getStationReport(pool, 1, PERIOD, {});
-    expect(getWeightStations).toHaveBeenCalledWith(expect.anything(), 1, PERIOD.from, PERIOD.to);
+    // Task TD (29 Sep 2026): the report now threads its own (absent, here)
+    // shiftRange into getWeightStations's `period` argument — see
+    // station.ts's own comment on why this narrows ONLY the reject-rate
+    // window, never the trailing mean/vsLine/vsTarget population.
+    expect(getWeightStations).toHaveBeenCalledWith(expect.anything(), 1, PERIOD.from, PERIOD.to, undefined, { from: PERIOD.from, to: PERIOD.to, shiftRange: undefined });
     expect(getProduction).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ groupBy: 'station' }));
     expect(d.rows.map((r) => r.station)).toEqual([3, 7]);
     expect(d.rows[1]).toMatchObject({ station: 7, cones: 520, rejectedAtInspection: 11, meanG: 1958.2, vsLineG: 1.1, vsTargetG: -1.8, flagged: true, rejectRatePct: 2.1, states: { within: 510, rejected: 10 } });
@@ -595,6 +599,18 @@ describe('station report', () => {
     const t = stationCsv(d);
     expect(t.rows.find((r) => r[t.headers.indexOf('row_kind')] === 'summary')).toBeUndefined();
   });
+  // Task TD (29 Sep 2026): a REAL shift range, threaded verbatim into
+  // getWeightStations's `period` argument (never into its trailing `from`/
+  // `to` positional arguments — those stay the report's own PERIOD.from/to,
+  // unchanged, per that function's own population contract) and into
+  // getProduction's `shiftRange`.
+  it('a shift range threads into getWeightStations’ period argument and into getProduction, not into the trailing window', async () => {
+    const { pool } = fakePool((sql) => (sql.includes('GROUP BY source_station') ? [] : []));
+    const sr = { from: '2026-09-01', fromShift: 'evening' as const, to: '2026-09-03', toShift: 'morning' as const };
+    await getStationReport(pool, 1, PERIOD, {}, sr);
+    expect(getWeightStations).toHaveBeenCalledWith(expect.anything(), 1, PERIOD.from, PERIOD.to, undefined, { from: PERIOD.from, to: PERIOD.to, shiftRange: sr });
+    expect(getProduction).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ groupBy: 'station', shiftRange: sr }));
+  });
 });
 
 describe('reject report', () => {
@@ -620,7 +636,8 @@ describe('cone weight report', () => {
     const d = await getConeWeightReport(pool, 1, PERIOD, {});
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — the report
     // must let getWeights resolve the basis Setup has on file, never assume one.
-    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to);
+    // Task TD (29 Sep 2026): shiftRange (absent, here) now threads through as the 6th argument.
+    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to, undefined);
     expect(d).toMatchObject({ basis: 'as_recorded', cones: 1000, weighed: 996, implausible: 4, meanG: 1957.1, medianG: 1957.5, medianSource: 'report_query', sdG: 12.3, bucketSizeG: 20, states: STATES });
     expect(d.byStation.map((s) => s.station)).toEqual([7, 3]);
     const med = calls.find((c) => c.sql.includes('PERCENTILE_CONT'))!;
@@ -641,6 +658,24 @@ describe('cone weight report', () => {
   });
   it('medianConeWeight returns null on an empty period', async () => {
     expect(await medianConeWeight(fakePool().pool, 1, PERIOD.from, PERIOD.to, { loG: 1500, hiG: 2100 })).toBeNull();
+  });
+  // Task TD (29 Sep 2026): a real shift range threads into getWeights (its
+  // own 6th argument) and into getWeightStations' `period` argument, exactly
+  // as station.ts's own equivalent test pins; and into medianConeWeight's
+  // own fallback query, binding the same srFrom/srFromOrd/srTo/srToOrd
+  // shiftRangeClause produces, so a shift-narrowed mean never sits beside a
+  // median computed over the unnarrowed whole day.
+  it('a shift range threads into getWeights, getWeightStations’ period argument, and the fallback median query', async () => {
+    const { pool, calls } = fakePool((sql) => (sql.includes('PERCENTILE_CONT') ? [{ med: 1957.5 }] : []));
+    const sr = { from: '2026-09-01', fromShift: 'evening' as const, to: '2026-09-03', toShift: 'morning' as const };
+    await getConeWeightReport(pool, 1, PERIOD, {}, sr);
+    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to, sr);
+    expect(getWeightStations).toHaveBeenCalledWith(expect.anything(), 1, PERIOD.from, PERIOD.to, undefined, { from: PERIOD.from, to: PERIOD.to, shiftRange: sr });
+    const med = calls.find((c) => c.sql.includes('PERCENTILE_CONT'))!;
+    expect(med.params.get('srFrom')).toBe('2026-09-01');
+    expect(med.params.get('srFromOrd')).toBe(2); // evening
+    expect(med.params.get('srTo')).toBe('2026-09-03');
+    expect(med.params.get('srToOrd')).toBe(1); // morning
   });
   it('H8 (15 Sep 2026): reports whatever basis getWeights resolves, never a hardcoded literal', async () => {
     vi.mocked(getWeights).mockResolvedValueOnce({ ...fakeWeights(), basis: 'net' } as never);

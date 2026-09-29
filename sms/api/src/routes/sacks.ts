@@ -63,8 +63,21 @@ const periodQuery = z.object({
 // services/sackStock.ts, have no such field yet — their own `periodQuery`
 // stays as it was; a caller sending fromShift/toShift there is not refused
 // (zod strips unknown keys by default), it is simply not yet honoured.
+//
+// Task TD (29 Sep 2026): `/api/sacks/movements` now DOES honour it — see
+// `movementsQuery` below and `listMovements`'s own `shiftRange` parameter
+// (services/sackStock.ts). `/api/sacks/stock` deliberately stays as it was:
+// it is a running-balance SNAPSHOT as of `to`, not a period-scoped listing,
+// so "the 3 shifts before 2 Sep evening" has no meaning for it the way it
+// does for a listing of individual movements.
 const summaryQuery = periodQuery.extend({
   shift: z.enum(['morning', 'evening', 'night']).optional(),
+  fromShift: shiftRefParam,
+  toShift: shiftRefParam,
+});
+
+/** Task TD (29 Sep 2026): `/api/sacks/movements`'s own shift-range fields, same wire shape as `summaryQuery`. */
+const movementsQuery = periodQuery.extend({
   fromShift: shiftRefParam,
   toShift: shiftRefParam,
 });
@@ -119,9 +132,14 @@ export function mountSacksRoutes(ctx: RouteContext): void {
 
   app.get('/api/sacks/movements', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const q = period(periodQuery, req, res);
+      const q = period(movementsQuery, req, res);
       if (!q) return;
-      const data = await listMovements(pool, cfg.lineId, { from: q.from, to: q.to, product: q.product });
+      const shiftRangeResult = decodeShiftRangeParam({ from: q.from, to: q.to, fromShift: q.fromShift, toShift: q.toShift });
+      if (isShiftRangeError(shiftRangeResult)) {
+        res.status(400).json({ error: shiftRangeResult.error });
+        return;
+      }
+      const data = await listMovements(pool, cfg.lineId, { from: q.from, to: q.to, product: q.product, shiftRange: shiftRangeResult });
       res.json(await envelope(pool, cfg.lineId, data));
     } catch (err) {
       next(err);

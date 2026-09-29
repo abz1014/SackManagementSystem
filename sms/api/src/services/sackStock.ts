@@ -82,9 +82,10 @@ import mssql from 'mssql';
 import { z } from 'zod';
 import { plantNowMs } from '@sms/shared';
 import { auditedWrite } from './audit.js';
-import { shiftWindowAt, type LiveShiftRule } from './live.js';
+import { loadShiftRule, shiftWindowAt, type LiveShiftRule } from './live.js';
 import { resolveGenerationScope, epochFragment, epochWhere, noteOf, type GenerationNote } from './generation.js';
 import { getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
+import { shiftRangeEdgesUtc, type ShiftRange } from '../shiftRange.js';
 
 export const MOVEMENT_TYPES = ['opening', 'receipt', 'issue', 'consumption', 'adjustment'] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
@@ -630,17 +631,45 @@ const MOVEMENT_FROM = `sms.sack_stock_movement m
   LEFT JOIN sms.product p ON p.product_id = m.material_id
   LEFT JOIN sms.app_user u ON u.user_id = m.recorded_by`;
 
+/**
+ * Chart overhaul wave 2 (Task TD, 29 Sep 2026): `q.shiftRange`, an OPTIONAL
+ * further narrowing of `[from, to]`. `sack_stock_movement` carries no
+ * `shift_code` column (migration 033 — only `occurred_at_plant`, an instant,
+ * and `production_day`, the calendar-day axis), so this cannot be an
+ * `shiftRangeClause` AND like `weights.ts`/`production.ts` use on
+ * `(shift_date, shift_code)` — it is bound as an instant window instead, the
+ * same idiom `register.ts`'s `withShiftRangeEdges` already uses for exactly
+ * this shape of column: `shiftRangeEdgesUtc(shiftRange, rule.boundaries)`
+ * against the line's shift rule in force, then `m.occurred_at_plant BETWEEN`
+ * those two instants.
+ *
+ * `occurred_at_plant` is the PLANT wall clock labelled UTC — the same
+ * "production convention" `shift_date`/`production_ts_utc_ms` use (this
+ * file's own header, TWO CLOCKS) — and `shiftRangeEdgesUtc` returns edges in
+ * that SAME convention (its own file header), so the two compare directly;
+ * no `plantClock` conversion is needed or correct here (that conversion is
+ * only for a genuine-UTC column being compared against a production-
+ * convention range, which this column is not).
+ */
 export async function listMovements(
   pool: ConnectionPool,
   lineId: number,
-  q: { from: string; to: string; product?: number },
+  q: { from: string; to: string; product?: number; shiftRange?: ShiftRange },
 ): Promise<MovementsPage> {
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, q.from).input('to', mssql.Date, q.to);
   if (q.product != null) req.input('product', mssql.Int, q.product);
+  let shiftClause = '';
+  if (q.shiftRange) {
+    const rule = await loadShiftRule(pool, lineId);
+    const edges = shiftRangeEdgesUtc(q.shiftRange, rule.boundaries);
+    req.input('srFromTs', mssql.DateTime2(3), new Date(edges.fromMs));
+    req.input('srToTs', mssql.DateTime2(3), new Date(edges.toMs));
+    shiftClause = ' AND m.occurred_at_plant BETWEEN @srFromTs AND @srToTs';
+  }
   const productClause = q.product != null ? ' AND m.material_id = @product' : '';
   const rows = await req.query<MovementRow>(
     `SELECT ${MOVEMENT_COLS} FROM ${MOVEMENT_FROM}
-      WHERE m.line_id = @line AND m.production_day BETWEEN @from AND @to${productClause}
+      WHERE m.line_id = @line AND m.production_day BETWEEN @from AND @to${productClause}${shiftClause}
       ORDER BY m.occurred_at_plant DESC, m.movement_id DESC`,
   );
   // The same generation the ledger's receipts come from: this per-day weighed

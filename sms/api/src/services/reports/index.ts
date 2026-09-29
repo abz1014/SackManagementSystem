@@ -5,6 +5,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import type { ResolvedPeriod } from '../report.js';
+import type { ShiftRange } from '../../shiftRange.js';
 import type { ReportFilters, ReportType } from './common.js';
 import type { CsvTable } from './csv.js';
 import { getDailyReport, dailyCsv, type DailyReportData } from './daily.js';
@@ -33,11 +34,23 @@ export interface ReportDataByType {
 
 export type AnyReportData = ReportDataByType[ReportType];
 
+/**
+ * Chart overhaul wave 2 (Task TD, 29 Sep 2026): widened with an optional 5th
+ * `shiftRange` argument — every individual builder (daily/shift/product/
+ * station/reject/cone-weight/sack/machine-product/management-summary)
+ * already accepts one; `calibration` alone does not (there is no calibration
+ * period to range — a2cea3f), which stays a valid `Builder<'calibration'>`
+ * because a function accepting fewer parameters than a type declares is
+ * still assignable to it. Previously fixed at 4 arguments, so `buildReport`
+ * below could never pass the shiftRange every builder was already wired to
+ * accept from routes/reports.ts's own `Parsed.shiftRange` (Task TC).
+ */
 type Builder<T extends ReportType> = (
   pool: ConnectionPool,
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  shiftRange?: ShiftRange,
 ) => Promise<ReportDataByType[T]>;
 
 const BUILDERS: { [T in ReportType]: Builder<T> } = {
@@ -72,8 +85,10 @@ export function buildReport<T extends ReportType>(
   type: T,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
+  /** Chart overhaul wave 2 (Task TD, 29 Sep 2026): threaded to the builder verbatim. */
+  shiftRange?: ShiftRange,
 ): Promise<ReportDataByType[T]> {
-  return BUILDERS[type](pool, lineId, resolved, filters);
+  return BUILDERS[type](pool, lineId, resolved, filters, shiftRange);
 }
 
 export function reportCsv<T extends ReportType>(type: T, data: ReportDataByType[T]): CsvTable {

@@ -36,7 +36,7 @@ import { loadProductCatalogue } from '../productLimits.js';
 import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
-import type { ShiftRange } from '../../shiftRange.js';
+import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
 
 export interface ConeWeightReportData {
   period: ResolvedPeriod;
@@ -133,10 +133,22 @@ export async function medianConeWeight(
   to: string,
   window: { loG: number; hiG: number },
   scope: GenerationScope = UNSCOPED,
+  /**
+   * Chart overhaul wave 2 (Task TD, 29 Sep 2026): optional, so this stays
+   * the same fallback query for every existing caller (undefined here is a
+   * no-op). Narrowing it matters only on the rare path where the weights
+   * service reports no median of its own (`serviceMedian == null` in
+   * `getConeWeightReport`) and this report falls back to its own query —
+   * without it, a shift-narrowed mean (from `getWeights`) could sit beside a
+   * median computed over the WHOLE day, two different populations under one
+   * heading.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<number | null> {
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const plaus = plausibleWhere(req, 'weight_g', window);
-  const where = andEpoch(`line_id = @line AND shift_date BETWEEN @from AND @to AND ${plaus}`, req, scope, 'cone_event');
+  const shiftFrag = shiftRange ? ` AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, req)}` : '';
+  const where = andEpoch(`line_id = @line AND shift_date BETWEEN @from AND @to AND ${plaus}${shiftFrag}`, req, scope, 'cone_event');
   const r = await req.query<{ med: number | null }>(
     `SELECT TOP 1 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(weight_g AS float)) OVER () AS med
        FROM sms.cone_event
@@ -151,10 +163,13 @@ export async function getConeWeightReport(
   resolved: ResolvedPeriod,
   _filters: ReportFilters,
   /**
-   * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): not yet threaded into
-   * `getWeights`/`getWeightStations` (weights.ts/weightStations.ts,
-   * TB1-owned) — `w`/`stations` below still describe the whole `[from, to]`
-   * window until those files take the same parameter. `prod` is scoped now.
+   * Chart overhaul wave 2 (Task TD, 29 Sep 2026): now threaded into
+   * `getWeights` (weights.ts, TB1-owned) — `w`'s mean/median/SD/histogram
+   * all narrow to the shift range, byte-identical when absent. Also threaded
+   * into `getWeightStations`'s optional `period` parameter, same as
+   * station.ts, though this report does not currently surface the figure
+   * (`rejectRatePct`) that parameter narrows — see that call's own comment.
+   * `prod` was scoped before this task.
    */
   shiftRange?: ShiftRange,
 ): Promise<ConeWeightReportData> {
@@ -163,9 +178,15 @@ export async function getConeWeightReport(
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
     // resolves that to the basis Setup has on file (weights.ts's loadWeightRule),
     // the same row every other basis-aware figure in the app reads.
-    getWeights(pool, lineId, undefined, from, to),
+    getWeights(pool, lineId, undefined, from, to, shiftRange),
     getProduction(pool, lineId, { from, to, groupBy: 'none', withStates: true, shiftRange }),
-    getWeightStations(pool, lineId, from, to),
+    // station.ts's own call carries the full reasoning for this 5th
+    // argument: it narrows only weightStations.ts's reject-rate window, not
+    // the trailing mean/vsLine/vsTarget population this report's `stations`
+    // (byStation, lineMeanG) reads from — those still describe the whole
+    // `[from, to]` window, unchanged by this task, per that file's own F4/F6
+    // population contract.
+    getWeightStations(pool, lineId, from, to, undefined, { from, to, shiftRange }),
     getPlausibilityRule(pool, lineId),
     // F6 (23 Sep 2026): the versioned limits history, read HERE rather than
     // taken on trust from getWeightStations, which resolves the same version
@@ -199,7 +220,7 @@ export async function getConeWeightReport(
   // Verification 25 Sep 2026: the scope is now always resolved — the
   // products-ran query below and the printed generation line both need it.
   const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
-  const medianG = serviceMedian != null ? serviceMedian : await medianConeWeight(pool, lineId, from, to, window, scope ?? UNSCOPED);
+  const medianG = serviceMedian != null ? serviceMedian : await medianConeWeight(pool, lineId, from, to, window, scope ?? UNSCOPED, shiftRange);
   // W8: name the products that RAN (from each cone's own material_id), not
   // the app's "current product" setting. Falls back to the old line-wide
   // resolution only when no reading carried a product (pre-MaterialId data).

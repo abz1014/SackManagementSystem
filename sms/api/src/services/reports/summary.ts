@@ -32,6 +32,7 @@ import { getWeightStations } from '../weightStations.js';
 import { loadProductCatalogue } from '../productLimits.js';
 import { delta, pct, priorPeriod, round, type DayRange, type Delta, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
+import { shiftOrd, type ShiftName, type ShiftRange } from '../../shiftRange.js';
 
 export type KpiUnit = 'cones' | 'sacks' | 'kg' | 'g' | '%' | 'days' | 'stations' | 'seconds' | 'stops' | 'readings';
 export type BetterWhen = 'higher' | 'lower' | 'neither';
@@ -232,18 +233,86 @@ function attributionDiffers(cur: number | null, prior: number | null): boolean {
   return Math.abs(cur - prior) > ATTRIBUTION_MATERIAL_THRESHOLD;
 }
 
-async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange): Promise<PeriodFigures> {
+/* ---------------------------------------------------- shift-range priors */
+
+/**
+ * Chart overhaul wave 2 (Task TD, 29 Sep 2026). Owner decision: when the
+ * page period is a shift-bounded range, the comparison period is NOT the
+ * calendar-day `priorPeriod` above (equal CALENDAR days) — it is the same
+ * NUMBER OF SHIFTS immediately before the range starts. E.g. 3 shifts from
+ * 2 Sep evening (2 Sep evening, 2 Sep night, 3 Sep morning) compares against
+ * the 3 shifts immediately before 2 Sep evening (2 Sep morning, 1 Sep night,
+ * 1 Sep evening) — never "the 3 calendar days before 2 Sep", which would
+ * pull in shifts the current range does not itself cover an equal count of.
+ *
+ * Implementation: every shift on every production day gets one integer
+ * index — `dayIndex(date) * 3 + shiftOrd(shift)` (morning=1, evening=2,
+ * night=3, the same ordinal `shiftRangeClause` sorts by) — so "how many
+ * shifts does this range span" and "step back N shifts" are both plain
+ * integer arithmetic, immune to calendar-month/DST edge cases (every date is
+ * parsed at a fixed UTC noon, exactly `common.ts`'s own `parseDay`/`isoDay`
+ * idiom, so no offset can move a day boundary here). A night shift is
+ * indexed under the shift_date it STARTS on (ord 3 on ITS OWN day), matching
+ * `shiftRangeClause`'s own column comparison — crossing midnight inside a
+ * night shift never changes which index it gets.
+ */
+const DAY_MS = 86_400_000;
+// Midnight UTC, not common.ts's own noon idiom: `T00:00:00.000Z` divides
+// EXACTLY by DAY_MS (shiftRange.ts's own `dayStartMs` uses the identical
+// instant), so `parseShiftDay`/`isoShiftDay` round-trip with no rounding
+// step at all — a noon-based instant divided by DAY_MS lands on a half
+// integer and would need `Math.round`, which is one edge case away from a
+// silent off-by-one day (caught by this task's own tests during writing).
+const parseShiftDay = (s: string): number => new Date(`${s}T00:00:00.000Z`).getTime() / DAY_MS;
+const isoShiftDay = (dayIndex: number): string => new Date(dayIndex * DAY_MS).toISOString().slice(0, 10);
+const SHIFT_NAMES_BY_ORD: readonly ShiftName[] = ['morning', 'evening', 'night'];
+
+/** One integer per shift, increasing in time order — see the block comment above. */
+function shiftIndex(date: string, shift: ShiftName): number {
+  return parseShiftDay(date) * 3 + shiftOrd(shift);
+}
+
+/** Inverse of `shiftIndex`: the `{ date, shift }` a given index names. */
+function shiftRefAt(index: number): { date: string; shift: ShiftName } {
+  const dayIndex = Math.floor((index - 1) / 3);
+  const ord = index - dayIndex * 3; // 1..3
+  return { date: isoShiftDay(dayIndex), shift: SHIFT_NAMES_BY_ORD[ord - 1]! };
+}
+
+/**
+ * The shift range of EQUAL SHIFT COUNT immediately before `range`, ending at
+ * the shift immediately before `range.from`/`range.fromShift`. A same-shift
+ * range (`from === to && fromShift === toShift`, one shift) compares against
+ * exactly the one shift before it — the same "equal length" rule
+ * `priorPeriod` applies to calendar days, applied to shifts instead.
+ */
+export function priorShiftRange(range: ShiftRange): ShiftRange {
+  const fromIdx = shiftIndex(range.from, range.fromShift);
+  const toIdx = shiftIndex(range.to, range.toShift);
+  const count = toIdx - fromIdx + 1;
+  const priorToIdx = fromIdx - 1;
+  const priorFromIdx = priorToIdx - count + 1;
+  const start = shiftRefAt(priorFromIdx);
+  const end = shiftRefAt(priorToIdx);
+  return { from: start.date, fromShift: start.shift, to: end.date, toShift: end.shift };
+}
+
+async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange, shiftRange?: ShiftRange): Promise<PeriodFigures> {
   const resolved: ResolvedPeriod = { period: 'custom', from: range.from, to: range.to };
   const [report, weights, stations, scaleRejected, byProduct] = await Promise.all([
-    getReport(pool, lineId, resolved),
+    getReport(pool, lineId, resolved, null, shiftRange),
     // H8 (15 Sep 2026): `undefined`, not a hardcoded 'as_recorded' — getWeights
     // resolves that to the basis Setup has on file, like every other reader.
-    getWeights(pool, lineId, undefined, range.from, range.to),
+    getWeights(pool, lineId, undefined, range.from, range.to, shiftRange),
+    // Deliberately NOT shift-narrowed — see station.ts/coneWeight.ts's own
+    // comments on this same call: the trailing `[from, to]` window feeds
+    // `stations_flagged`'s drift detection, which needs consecutive
+    // production days regardless of which shifts within them are asked for.
     getWeightStations(pool, lineId, range.from, range.to),
-    countEvents(pool, lineId, 'cone', { from: range.from, to: range.to, inRange: false }),
+    countEvents(pool, lineId, 'cone', { from: range.from, to: range.to, inRange: false, shiftRange }),
     // U5 (16 Sep 2026): raw product-id + cones for the product-mix comparison
     // below; labelled once in getManagementSummary, not per period.
-    getProduction(pool, lineId, { from: range.from, to: range.to, groupBy: 'product' }),
+    getProduction(pool, lineId, { from: range.from, to: range.to, groupBy: 'product', shiftRange }),
   ]);
   const t = report.totals;
   const empty = report.coverage.daysWithData === 0;
@@ -293,11 +362,23 @@ export async function getManagementSummary(
   lineId: number,
   resolved: ResolvedPeriod,
   _filters: ReportFilters,
+  /**
+   * Chart overhaul wave 2 (Task TD, 29 Sep 2026). When given, both halves of
+   * the comparison change: the CURRENT period's own queries narrow to the
+   * shift range (via `figuresFor`'s threading), and the PRIOR period is
+   * `priorShiftRange(shiftRange)` — equal SHIFT count, not equal calendar
+   * days — rather than `priorPeriod`'s calendar-day rule. `prior` (the
+   * `DayRange` on the response) is set to that shift range's own calendar
+   * span either way, so every existing reader of `prior.from`/`prior.to`
+   * (the CSV, the printed caption) needs no change.
+   */
+  shiftRange?: ShiftRange,
 ): Promise<ManagementSummaryData> {
-  const prior = priorPeriod(resolved.from, resolved.to);
+  const priorRange = shiftRange ? priorShiftRange(shiftRange) : undefined;
+  const prior = priorRange ? { from: priorRange.from, to: priorRange.to } : priorPeriod(resolved.from, resolved.to);
   const [cur, prev, catalogue] = await Promise.all([
-    figuresFor(pool, lineId, { from: resolved.from, to: resolved.to }),
-    figuresFor(pool, lineId, prior),
+    figuresFor(pool, lineId, { from: resolved.from, to: resolved.to }, shiftRange),
+    figuresFor(pool, lineId, prior, priorRange),
     loadProductCatalogue(pool),
   ]);
   // A count-shaped KPI's delta is only presented as a trend when the two

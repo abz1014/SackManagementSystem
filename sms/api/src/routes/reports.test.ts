@@ -274,6 +274,61 @@ describe('GET /api/reports/:type', () => {
   });
 });
 
+/**
+ * Chart overhaul wave 2, Task TD (29 Sep 2026). Before this task,
+ * `routes/reports.ts` already decoded `fromShift`/`toShift` into a
+ * `ShiftRange` (Task TC, c84dd25/ee73f47) and passed it to `buildHeader` —
+ * so the printed period LABEL already read "2 Sep morning shift – 3 Sep
+ * night shift" — but `services/reports/index.ts`'s `buildReport` dispatcher
+ * called every builder with a fixed 4-argument signature, so the shift
+ * range never reached a single report's own BODY query, on any type. This
+ * is the true end-to-end proof, over the real route and the real per-type
+ * SQL (not a mocked service): a shift-range request binds the same
+ * `srFrom`/`srFromOrd`/`srTo`/`srToOrd` parameters `shiftRangeClause`
+ * (shiftRange.ts) always uses, into at least one of the report's OWN body
+ * queries. `calibration` is excluded deliberately — it has no shiftRange
+ * parameter at all (a2cea3f's own decision: there is no calibration period
+ * to range), so it is proved separately, as a negative case, below.
+ */
+describe('Task TD (29 Sep 2026) — a shift range narrows the report BODY, not just the header', () => {
+  const RANGE_QS = `${Q}&fromShift=2026-09-01.morning&toShift=2026-09-07.night`;
+  const rangedTypes = REPORT_TYPES.filter((t) => t !== 'calibration');
+
+  it.each(rangedTypes)('GET /api/reports/%s with fromShift/toShift binds the shift-range params into a body query', async (t) => {
+    const role = t === 'management-summary' ? 'manager' : 'viewer';
+    const r = await get(`/api/reports/${t}?${RANGE_QS}`, role);
+    expect(r.status).toBe(200);
+    // The header always carries the plain-words period label regardless —
+    // pinned already by header.shiftRange.test.ts — so the real proof this
+    // task adds is that the BODY's own query bound the same shift-range
+    // parameters, not merely that the request was accepted.
+    expect(r.json.data.header.periodLabel).toMatch(/morning shift.*night shift/);
+    expect(db.statements.some((s) => s.inputs.has('srFrom') && s.inputs.has('srFromOrd'))).toBe(true);
+  });
+
+  it('calibration has no shiftRange parameter to thread — the request still succeeds, plainly with no shift-range SQL bound', async () => {
+    const r = await get(`/api/reports/calibration?${RANGE_QS}`, 'viewer');
+    expect(r.status).toBe(200);
+    expect(db.statements.some((s) => s.inputs.has('srFrom'))).toBe(false);
+  });
+
+  it('the export route threads the same shift range into the body (CSV reflects the narrowed period, not the plain calendar one)', async () => {
+    const r = await get(`/api/reports/daily/export?${RANGE_QS}`);
+    expect(r.status).toBe(200);
+    expect(db.statements.some((s) => s.inputs.has('srFrom'))).toBe(true);
+  });
+
+  it('with no fromShift/toShift, no report type binds a shift-range parameter — behaviour is unchanged', async () => {
+    for (const t of rangedTypes) {
+      db.statements = [];
+      const role = t === 'management-summary' ? 'manager' : 'viewer';
+      const r = await get(`/api/reports/${t}?${Q}`, role);
+      expect(r.status, t).toBe(200);
+      expect(db.statements.some((s) => s.inputs.has('srFrom')), t).toBe(false);
+    }
+  });
+});
+
 describe('GET /api/reports/header', () => {
   it('is the print header on its own, for the register', async () => {
     const r = await get(`/api/reports/header?${Q}`, 'viewer');

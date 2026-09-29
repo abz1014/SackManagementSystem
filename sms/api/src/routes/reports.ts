@@ -283,13 +283,19 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
   // way for every caller (JSON, PDF's own filename header, CSV/XLSX) so a
   // PDF export doesn't force a second, uncached fetch of the same report.
   function reportKey(p: Parsed): string {
-    return `reports:${p.type}:${JSON.stringify(p.resolved)}:${JSON.stringify(p.filters)}`;
+    // Chart overhaul wave 2 (Task TD, 29 Sep 2026): the shiftRange is now
+    // part of what a report BODY describes (buildReport threads it through —
+    // see services/reports/index.ts), so it must be part of the cache key
+    // too. Before this, a shift-narrowed request and its plain calendar-day
+    // sibling shared one cache entry keyed only on `resolved`/`filters`,
+    // so whichever was fetched first silently answered the other.
+    return `reports:${p.type}:${JSON.stringify(p.resolved)}:${JSON.stringify(p.filters)}:${JSON.stringify(p.shiftRange ?? null)}`;
   }
   async function reportDataFor(p: Parsed): Promise<AnyReportData> {
     const key = reportKey(p);
     let data = cache.get(key);
     if (data == null) {
-      data = await buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters);
+      data = await buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters, p.shiftRange);
       cache.set(key, data);
     }
     return data;
