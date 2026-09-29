@@ -57,7 +57,18 @@ export function attributionRows(h: ReportHeader): [string, string][] {
   // everything else here (never a comment header — CLAUDE.md's "Open
   // question 4"), added only when there is something to disclose.
   const disclosure = generationDisclosureLines(h);
-  if (disclosure) rows.push([disclosure[0], ''], [disclosure[1], '']);
+  if (disclosure) {
+    rows.push([disclosure[0], ''], [disclosure[1], '']);
+  } else if (h.simulatorSource) {
+    // Re-audit fix (Major, 29 Sep 2026): a period entirely covered by the
+    // plant simulator excludes nothing, so `spansGenerations` stays false
+    // and `generationDisclosureLines` returns null above — but the source
+    // itself is still synthetic, and `buildHeader` (header.ts) already
+    // computes `sourceGeneration`/`generationLine` naming it for exactly
+    // this case. One trailing row states it, matching header.ts's own
+    // "Data batch: …" wording rather than inventing a second phrasing.
+    rows.push([`Data batch: ${h.sourceGeneration ?? 'unknown'}`, '']);
+  }
   return rows;
 }
 

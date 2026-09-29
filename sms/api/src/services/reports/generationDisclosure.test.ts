@@ -124,6 +124,47 @@ describe.each(REPORT_TYPES)('generation disclosure — %s', (type) => {
   });
 });
 
+describe('simulator-only period (spansGenerations false, simulatorSource true) — re-audit fix', () => {
+  // Re-audit finding (Major): a period entirely covered by the plant
+  // simulator excludes nothing, so `spansGenerations` stays false and the
+  // old attributionRows()/headerSheet() — which only ever called
+  // generationDisclosureLines(h) — printed NO disclosure at all, even though
+  // buildHeader (header.ts) already computes `generationLine` for exactly
+  // this case ("Data batch: … (plant simulator, synthetic data).").
+  function makeSimulatorHeader(): ReportHeader {
+    const h = makeHeader('daily', false);
+    h.simulatorSource = true;
+    h.sourceGeneration = 'DATA_TP1U2_SIM#1 (plant simulator, synthetic data)';
+    h.generationLine = 'Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data).';
+    return h;
+  }
+
+  it('attributionRows carries a Data batch disclosure row naming the simulator', () => {
+    const rows = attributionRows(makeSimulatorHeader());
+    expect(rows.some(([k]) => k.startsWith('Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data)'))).toBe(true);
+  });
+
+  it('csvDocument trailing block carries the simulator disclosure', () => {
+    const doc = csvDocument(['a'], [[1]], makeSimulatorHeader());
+    const sep = doc.indexOf('\n\n');
+    expect(sep).toBeGreaterThan(-1);
+    expect(doc.slice(sep + 2)).toContain('Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data)');
+  });
+
+  it('headerSheet (XLSX) carries the simulator disclosure row', () => {
+    const sheet = headerSheet(makeSimulatorHeader());
+    const values = sheet.rows.map((r) => String(r.item ?? ''));
+    expect(values.some((v) => v.startsWith('Data batch: DATA_TP1U2_SIM#1 (plant simulator, synthetic data)'))).toBe(true);
+  });
+
+  it('a plain single real batch (spansGenerations false, simulatorSource false/undefined) still produces no trailer', () => {
+    const header = makeHeader('daily', false);
+    const rows = attributionRows(header);
+    expect(rows).toHaveLength(NON_SPANNING_TRAILING_ROW_COUNT);
+    expect(rows.some(([k]) => k.includes('Data batch'))).toBe(false);
+  });
+});
+
 describe('generationDisclosureLines — edge cases', () => {
   it('omits the percent parenthetical when percent is unknown, rather than fabricating one', () => {
     const header = makeHeader('daily', true);
