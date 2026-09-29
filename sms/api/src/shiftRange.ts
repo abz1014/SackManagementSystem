@@ -46,6 +46,7 @@ import {
   DEFAULT_SHIFT_BOUNDARIES,
 } from '@sms/shared';
 import { isoDate } from './dates.js';
+import { ruleAsOf, type RuleVersion, type ShiftRuleValue } from './services/ruleAsOf.js';
 
 /** Re-exported under the name this task's frozen shape uses. Same three values as `ShiftCode`. */
 export type ShiftName = ShiftCode;
@@ -306,4 +307,58 @@ export function shiftRangeEdgesUtc(range: ShiftRange, rule: ShiftBoundaries = DE
   const toMs = toBase + (toEnd.nextDay ? DAY_MS : 0) + toEnd.minutes * 60_000;
 
   return { fromMs, toMs };
+}
+
+// ------------------------------------------------------------- edges, as of
+
+/**
+ * Task W1-B (29 Sep 2026): `shiftRangeEdgesUtc` above takes ONE
+ * `ShiftBoundaries` and applies it to both edges — correct only when
+ * `sms.shift_rule` never changed across the range. This is the
+ * history-aware sibling: given the FULL version history
+ * (`ruleAsOf.ts`'s `loadShiftRuleHistory`, sorted newest-first — the same
+ * shape `ruleAsOf`/`ruleChangesWithin` already expect), the FROM edge is
+ * resolved under the rule in force at the from shift, and the TO edge under
+ * the rule in force at the to shift, independently.
+ *
+ * ANCHOR, not the exact shift instant. Which rule governs a shift's own
+ * start is, in principle, circular — the boundaries decide the instant, and
+ * the instant decides which boundaries apply. This resolves it the same way
+ * `sms.shift_rule` is actually edited (Setup writes a fresh dated row, never
+ * a mid-shift patch): each edge's rule is looked up at that edge's own
+ * plant-clock DAY START (`dayStartMs`), not at the boundary-dependent shift
+ * instant itself. For every real `effective_from` this app can produce —
+ * date-granular, never inside a shift — day-start and shift-start anchor to
+ * the same version. `history` must already be on the PRODUCTION convention
+ * (see file header TWO CLOCKS — `loadShiftRuleHistory` converts
+ * `effective_from` through `toPlantMs` at load, exactly like this file's own
+ * `ruleAsOf.ts` siblings), so no further conversion happens here.
+ *
+ * `ruleChanged` is true when the FROM and TO edges resolved to two
+ * different rule versions — boundaries OR `nightBelongsTo` — so a caller
+ * (register.ts, downtime.ts, sackStock.ts) can disclose that more than one
+ * shift-rule regime applies across the range, the same disclosure idiom
+ * `ruleChangedInPeriod` already gives plausibility/weight readers.
+ */
+export function shiftRangeEdgesUtcAsOf(
+  range: ShiftRange,
+  history: readonly RuleVersion<ShiftRuleValue>[],
+): ShiftRangeEdges & { ruleChanged: boolean } {
+  const fromAnchorMs = dayStartMs(range.from);
+  const toAnchorMs = dayStartMs(range.to);
+
+  const fromRule = ruleAsOf(history, fromAnchorMs);
+  const toRule = ruleAsOf(history, toAnchorMs);
+
+  const fromMs = fromAnchorMs + shiftStartMinutes(range.fromShift, fromRule.boundaries) * 60_000;
+  const toEnd = shiftEndMinutes(range.toShift, toRule.boundaries);
+  const toMs = toAnchorMs + (toEnd.nextDay ? DAY_MS : 0) + toEnd.minutes * 60_000;
+
+  const ruleChanged =
+    fromRule.boundaries.morningStart !== toRule.boundaries.morningStart ||
+    fromRule.boundaries.eveningStart !== toRule.boundaries.eveningStart ||
+    fromRule.boundaries.nightStart !== toRule.boundaries.nightStart ||
+    fromRule.nightBelongsTo !== toRule.nightBelongsTo;
+
+  return { fromMs, toMs, ruleChanged };
 }

@@ -1,14 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { shiftBoundariesFrom, DEFAULT_SHIFT_BOUNDARIES } from '@sms/shared';
+import { shiftBoundariesFrom, DEFAULT_SHIFT_BOUNDARIES, type ShiftBoundaries } from '@sms/shared';
 import {
   shiftOrd,
   shiftRangeQuery,
   parseShiftRange,
   shiftRangeClause,
   shiftRangeEdgesUtc,
+  shiftRangeEdgesUtcAsOf,
   type ShiftRange,
   type ShiftRangeSqlRequest,
 } from './shiftRange.js';
+import type { RuleVersion } from './services/ruleAsOf.js';
+import type { ShiftRuleValue } from './services/ruleAsOf.js';
+import { toPlantMs } from './services/plantClock.js';
 
 // ----------------------------------------------------------------- shiftOrd
 
@@ -306,5 +310,108 @@ describe('shiftRangeEdgesUtc', () => {
     expect(afterEdges.fromMs - Date.parse('2026-09-05T00:00:00.000Z')).not.toBe(
       beforeEdges.fromMs - Date.parse('2026-09-01T00:00:00.000Z'),
     );
+  });
+});
+
+// --------------------------------------------------- shiftRangeEdgesUtcAsOf
+
+describe('shiftRangeEdgesUtcAsOf', () => {
+  const OLD_BOUNDARIES: ShiftBoundaries = DEFAULT_SHIFT_BOUNDARIES; // 06/14/22
+  const NEW_BOUNDARIES: ShiftBoundaries = shiftBoundariesFrom('07:00', '15:00', '23:00')!;
+
+  const v = (effectiveFromMs: number, boundaries: ShiftBoundaries, nightBelongsTo: 'start_day' | 'calendar_day' = 'start_day'): RuleVersion<ShiftRuleValue> => ({
+    effectiveFromMs,
+    value: { boundaries, nightBelongsTo },
+  });
+
+  // Rule changes at 2026-09-03T00:00:00Z ("date X"), newest-first as every
+  // loader in ruleAsOf.ts returns history (ORDER BY effective_from DESC).
+  const CHANGE_AT_X = Date.parse('2026-09-03T00:00:00.000Z');
+  const historySpanningX: RuleVersion<ShiftRuleValue>[] = [
+    v(CHANGE_AT_X, NEW_BOUNDARIES),
+    v(Date.parse('2026-08-01T00:00:00.000Z'), OLD_BOUNDARIES),
+  ];
+
+  it('a range spanning the change: the from edge uses the OLD boundaries, the to edge uses the NEW ones', () => {
+    const range: ShiftRange = { from: '2026-09-02', fromShift: 'morning', to: '2026-09-03', toShift: 'morning' };
+    const { fromMs, toMs, ruleChanged } = shiftRangeEdgesUtcAsOf(range, historySpanningX);
+    // Old regime (06/14/22): morning starts 06:00 on the 2nd.
+    expect(new Date(fromMs).toISOString()).toBe('2026-09-02T06:00:00.000Z');
+    // New regime (07/15/23), in force from the 3rd: morning ENDS (evening
+    // starts) at 15:00 on the 3rd.
+    expect(new Date(toMs).toISOString()).toBe('2026-09-03T15:00:00.000Z');
+    expect(ruleChanged).toBe(true);
+  });
+
+  it('a single-version history gives the same result as plain shiftRangeEdgesUtc with that one rule', () => {
+    const oneVersion: RuleVersion<ShiftRuleValue>[] = [v(-Infinity, OLD_BOUNDARIES)];
+    const range: ShiftRange = { from: '2026-09-02', fromShift: 'morning', to: '2026-09-03', toShift: 'night' };
+    const asOf = shiftRangeEdgesUtcAsOf(range, oneVersion);
+    const plain = shiftRangeEdgesUtc(range, OLD_BOUNDARIES);
+    expect(asOf.fromMs).toBe(plain.fromMs);
+    expect(asOf.toMs).toBe(plain.toMs);
+    expect(asOf.ruleChanged).toBe(false);
+  });
+
+  it('a future-dated version is ignored — the range before it still uses the earlier rule on both edges', () => {
+    const historyWithFuture: RuleVersion<ShiftRuleValue>[] = [
+      v(Date.parse('2099-01-01T00:00:00.000Z'), NEW_BOUNDARIES), // far future, never in force yet
+      v(Date.parse('2026-08-01T00:00:00.000Z'), OLD_BOUNDARIES),
+    ];
+    const range: ShiftRange = { from: '2026-09-02', fromShift: 'morning', to: '2026-09-03', toShift: 'night' };
+    const { fromMs, toMs, ruleChanged } = shiftRangeEdgesUtcAsOf(range, historyWithFuture);
+    const plain = shiftRangeEdgesUtc(range, OLD_BOUNDARIES);
+    expect(fromMs).toBe(plain.fromMs);
+    expect(toMs).toBe(plain.toMs);
+    expect(ruleChanged).toBe(false);
+  });
+
+  it('a nightBelongsTo change at an edge is reported as ruleChanged even when the boundaries themselves are identical', () => {
+    const historyNightBelongsToChange: RuleVersion<ShiftRuleValue>[] = [
+      v(CHANGE_AT_X, OLD_BOUNDARIES, 'calendar_day'),
+      v(Date.parse('2026-08-01T00:00:00.000Z'), OLD_BOUNDARIES, 'start_day'),
+    ];
+    const range: ShiftRange = { from: '2026-09-02', fromShift: 'night', to: '2026-09-03', toShift: 'night' };
+    const { ruleChanged, fromMs, toMs } = shiftRangeEdgesUtcAsOf(range, historyNightBelongsToChange);
+    // Boundaries are identical on both sides, so the instants match plain shiftRangeEdgesUtc...
+    const plain = shiftRangeEdgesUtc(range, OLD_BOUNDARIES);
+    expect(fromMs).toBe(plain.fromMs);
+    expect(toMs).toBe(plain.toMs);
+    // ...but the regime itself changed (nightBelongsTo), so the caller is told.
+    expect(ruleChanged).toBe(true);
+  });
+
+  it('TWO CLOCKS: this function itself takes an already plant-converted history and never re-converts it', () => {
+    // shiftRangeEdgesUtcAsOf is pure — it trusts `history.effectiveFromMs`
+    // to already be on the production convention (the file header's TWO
+    // CLOCKS note). The conversion itself (`effective_from`, genuine UTC ->
+    // toPlantMs) is the DB LOADER's job (ruleAsOf.ts's
+    // loadShiftRuleHistory), proven host-independently against a fake pool
+    // in ruleAsOf.shiftRule.test.ts. What this function must get right is
+    // narrower and IS pinned here: an effectiveFromMs built via toPlantMs
+    // from a genuine-UTC instant is compared on equal footing with a
+    // hand-built production-convention instant — neither side is re-shifted
+    // a second time.
+    const rawUtc = '2026-09-03T02:00:00.000Z';
+    const convertedMs = toPlantMs(rawUtc); // production-convention instant, whatever this host's offset is
+    const historyConverted: RuleVersion<ShiftRuleValue>[] = [
+      v(convertedMs, NEW_BOUNDARIES),
+      v(-Infinity, OLD_BOUNDARIES),
+    ];
+    // Anchor the range on the converted instant's own day (production
+    // convention) so the assertion is self-consistent on any host offset,
+    // never a hardcoded ISO string derived from an assumed +5h plant.
+    const day = new Date(convertedMs).toISOString().slice(0, 10);
+    const dayStartMs = Date.parse(`${day}T00:00:00.000Z`);
+    const range: ShiftRange = { from: day, fromShift: 'morning', to: day, toShift: 'morning' };
+
+    const { fromMs } = shiftRangeEdgesUtcAsOf(range, historyConverted);
+    // ruleAsOf resolves the newest version at-or-before the anchor. Whether
+    // that is the new or old rule depends only on where convertedMs falls
+    // relative to dayStartMs — derived here the same way shiftRangeEdgesUtcAsOf
+    // itself derives it (ruleAsOf against dayStartMs), so this is a genuine
+    // pin on which value flows through, not a guess.
+    const expectedBoundaries = convertedMs <= dayStartMs ? NEW_BOUNDARIES : OLD_BOUNDARIES;
+    expect(fromMs).toBe(dayStartMs + expectedBoundaries.morningStart * 60_000);
   });
 });

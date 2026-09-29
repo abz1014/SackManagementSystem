@@ -82,10 +82,10 @@ import mssql from 'mssql';
 import { z } from 'zod';
 import { plantNowMs } from '@sms/shared';
 import { auditedWrite } from './audit.js';
-import { loadShiftRule, shiftWindowAt, type LiveShiftRule } from './live.js';
+import { shiftWindowAt, type LiveShiftRule } from './live.js';
 import { resolveGenerationScope, epochFragment, epochWhere, noteOf, type GenerationNote } from './generation.js';
-import { getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
-import { shiftRangeEdgesUtc, type ShiftRange } from '../shiftRange.js';
+import { getWeightRuleAsOf, loadShiftRuleHistory, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
+import { shiftRangeEdgesUtcAsOf, type ShiftRange } from '../shiftRange.js';
 
 export const MOVEMENT_TYPES = ['opening', 'receipt', 'issue', 'consumption', 'adjustment'] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
@@ -639,17 +639,23 @@ const MOVEMENT_FROM = `sms.sack_stock_movement m
  * `shiftRangeClause` AND like `weights.ts`/`production.ts` use on
  * `(shift_date, shift_code)` — it is bound as an instant window instead, the
  * same idiom `register.ts`'s `withShiftRangeEdges` already uses for exactly
- * this shape of column: `shiftRangeEdgesUtc(shiftRange, rule.boundaries)`
- * against the line's shift rule in force, then `m.occurred_at_plant BETWEEN`
+ * this shape of column: `shiftRangeEdgesUtcAsOf(shiftRange, history)`
+ * against the line's shift-rule HISTORY, then `m.occurred_at_plant BETWEEN`
  * those two instants.
+ *
+ * Task W1-B (29 Sep 2026): was `loadShiftRule`'s single "in force right
+ * now" row plus `shiftRangeEdgesUtc`; now each edge is resolved under the
+ * rule in force at its own end (`ruleAsOf.ts`'s `loadShiftRuleHistory`), so
+ * a movements window spanning a Setup edit to `sms.shift_rule` no longer
+ * judges the OLD side of the change by today's boundaries.
  *
  * `occurred_at_plant` is the PLANT wall clock labelled UTC — the same
  * "production convention" `shift_date`/`production_ts_utc_ms` use (this
- * file's own header, TWO CLOCKS) — and `shiftRangeEdgesUtc` returns edges in
- * that SAME convention (its own file header), so the two compare directly;
- * no `plantClock` conversion is needed or correct here (that conversion is
- * only for a genuine-UTC column being compared against a production-
- * convention range, which this column is not).
+ * file's own header, TWO CLOCKS) — and `shiftRangeEdgesUtcAsOf` returns
+ * edges in that SAME convention (its own file header), so the two compare
+ * directly; no `plantClock` conversion is needed or correct here (that
+ * conversion is only for a genuine-UTC column being compared against a
+ * production-convention range, which this column is not).
  */
 export async function listMovements(
   pool: ConnectionPool,
@@ -660,8 +666,8 @@ export async function listMovements(
   if (q.product != null) req.input('product', mssql.Int, q.product);
   let shiftClause = '';
   if (q.shiftRange) {
-    const rule = await loadShiftRule(pool, lineId);
-    const edges = shiftRangeEdgesUtc(q.shiftRange, rule.boundaries);
+    const history = await loadShiftRuleHistory(pool, lineId);
+    const edges = shiftRangeEdgesUtcAsOf(q.shiftRange, history);
     req.input('srFromTs', mssql.DateTime2(3), new Date(edges.fromMs));
     req.input('srToTs', mssql.DateTime2(3), new Date(edges.toMs));
     shiftClause = ' AND m.occurred_at_plant BETWEEN @srFromTs AND @srToTs';

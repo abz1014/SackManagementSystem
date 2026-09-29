@@ -40,6 +40,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { DEFAULT_SHIFT_BOUNDARIES, parseShiftTime, type NightBelongsTo, type ShiftBoundaries } from '@sms/shared';
 import { toPlantMs } from './plantClock.js';
 
 export interface RuleVersion<T> {
@@ -192,4 +193,57 @@ export async function getWeightRuleAsOf(
     ruleChangedInPeriod: fromPlantMs != null ? ruleChangesWithin(history, fromPlantMs, atPlantMs) : false,
     versionCount: history.length,
   };
+}
+
+// ---------------------------------------------------------------- shift_rule
+
+/**
+ * Task W1-B (29 Sep 2026): the third versioned rule table, alongside
+ * plausibility and weight above. `sms.shift_rule` already had ONE reader for
+ * "in force right now" — `live.ts`'s `loadShiftRule`, bounded by
+ * `effective_from <= SYSUTCDATETIME()` so a future-dated row cannot be read
+ * as current (RT24-04) — but no history loader for "in force as of a given
+ * shift", which `shiftRangeEdgesUtcAsOf` (shiftRange.ts) needs to judge a
+ * shift-bounded RANGE's two edges under whichever rule was in force at each
+ * end, not today's mirror.
+ *
+ * Parsed the same way `live.ts:410`'s `loadShiftRule` parses a single row —
+ * `CONVERT(..., 108)` to 'HH:MM', `parseShiftTime`, and the same
+ * ms<es<ns validity guard, falling back to `DEFAULT_SHIFT_BOUNDARIES` for
+ * any row that fails it — so a caller comparing "now" (`loadShiftRule`)
+ * against "as of" (this loader) never sees a row parsed two different ways.
+ */
+export interface ShiftRuleValue {
+  boundaries: ShiftBoundaries;
+  nightBelongsTo: NightBelongsTo;
+}
+
+/** Same lower-bound fallback `sync-worker/src/transform/ruleHistory.ts`'s `loadShiftRuleHistory` uses when a line has no row at all. */
+const SHIFT_RULE_FALLBACK: RuleVersion<ShiftRuleValue> = {
+  effectiveFromMs: -Infinity,
+  value: { boundaries: DEFAULT_SHIFT_BOUNDARIES, nightBelongsTo: 'start_day' },
+};
+
+export async function loadShiftRuleHistory(pool: ConnectionPool, lineId: number): Promise<RuleVersion<ShiftRuleValue>[]> {
+  const r = await pool.request().input('line', mssql.Int, lineId).query<{
+    ms: string | null; es: string | null; ns: string | null; night_belongs_to: string | null; effective_from: Date;
+  }>(
+    `SELECT CONVERT(varchar(5), morning_start, 108) AS ms, CONVERT(varchar(5), evening_start, 108) AS es,
+            CONVERT(varchar(5), night_start, 108) AS ns, night_belongs_to, effective_from
+       FROM sms.shift_rule WHERE line_id=@line ORDER BY effective_from DESC`,
+  );
+  if (r.recordset.length === 0) return [SHIFT_RULE_FALLBACK];
+  return r.recordset.map((row) => {
+    const ms = row.ms == null ? null : parseShiftTime(row.ms);
+    const es = row.es == null ? null : parseShiftTime(row.es);
+    const ns = row.ns == null ? null : parseShiftTime(row.ns);
+    const boundaries: ShiftBoundaries =
+      ms != null && es != null && ns != null && ms < es && es < ns
+        ? { morningStart: ms, eveningStart: es, nightStart: ns }
+        : DEFAULT_SHIFT_BOUNDARIES;
+    return {
+      effectiveFromMs: toPlantMs(row.effective_from),
+      value: { boundaries, nightBelongsTo: row.night_belongs_to === 'calendar_day' ? 'calendar_day' : 'start_day' },
+    };
+  });
 }

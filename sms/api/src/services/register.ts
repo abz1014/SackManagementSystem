@@ -36,8 +36,8 @@ import type { ConeState } from '@sms/shared';
 import { bindStateCase, type StateContext } from './coneState.js';
 import { andEpoch, noteOf, resolveGenerationScope, UNSCOPED, type EventTable, type GenerationNote, type GenerationScope } from './generation.js';
 import { generationDisclosureLines, type ReportHeader } from './reports/common.js';
-import { shiftRangeEdgesUtc, type ShiftRange } from '../shiftRange.js';
-import { loadShiftRule } from './live.js';
+import { shiftRangeEdgesUtcAsOf, type ShiftRange } from '../shiftRange.js';
+import { loadShiftRuleHistory } from './ruleAsOf.js';
 
 export type EventType = 'cone' | 'sack' | 'reject';
 export type SortField = 'time' | 'weight';
@@ -91,12 +91,19 @@ export interface RegisterFilters {
 
 /**
  * Resolves `f.shiftRange` (if given) into `tsFrom`/`tsTo` on the PRODUCTION
- * convention, via `shiftRangeEdgesUtc` and the line's shift rule in force
- * (`loadShiftRule` — the same source live.ts reads), and merges them with
- * any `tsFrom`/`tsTo` the caller already supplied. The caller's own values
- * win where present — they are the deep-link window, always the tighter,
- * more specific ask — so the shift-range edges only FILL IN a bound the
- * caller left open, never override one it set.
+ * convention, via `shiftRangeEdgesUtcAsOf` and the line's shift-rule
+ * HISTORY (`loadShiftRuleHistory`, ruleAsOf.ts), and merges them with any
+ * `tsFrom`/`tsTo` the caller already supplied. The caller's own values win
+ * where present — they are the deep-link window, always the tighter, more
+ * specific ask — so the shift-range edges only FILL IN a bound the caller
+ * left open, never override one it set.
+ *
+ * Task W1-B (29 Sep 2026): was `loadShiftRule`'s single "in force right
+ * now" row plus `shiftRangeEdgesUtc` — correct only when the shift rule
+ * never changed between the range's two ends. Now each edge is resolved
+ * under the rule in force AT ITS OWN END, so a register window spanning a
+ * Setup edit to `sms.shift_rule` no longer judges the OLD side of the
+ * change by today's boundaries.
  *
  * A no-op, returning `f` unchanged, when `f.shiftRange` is absent — every
  * existing caller (no shift range) keeps its exact prior behaviour and
@@ -112,8 +119,8 @@ export async function withShiftRangeEdges(
   f: RegisterFilters,
 ): Promise<RegisterFilters> {
   if (!f.shiftRange) return f;
-  const rule = await loadShiftRule(pool, lineId);
-  const edges = shiftRangeEdgesUtc(f.shiftRange, rule.boundaries);
+  const history = await loadShiftRuleHistory(pool, lineId);
+  const edges = shiftRangeEdgesUtcAsOf(f.shiftRange, history);
   return {
     ...f,
     tsFrom: f.tsFrom ?? new Date(edges.fromMs).toISOString(),

@@ -14,24 +14,28 @@
  * `production_day` (the calendar-day axis) — so this cannot be a
  * `shiftRangeClause` AND on `(shift_date, shift_code)` the way
  * weights.ts/production.ts narrow their queries; it is an edges-based
- * window instead, `shiftRangeEdgesUtc(shiftRange, rule.boundaries)`
- * compared directly against `occurred_at_plant` — no `plantClock`
- * conversion, because both sides are already on the production convention.
+ * window instead, `shiftRangeEdgesUtcAsOf(shiftRange, history)` compared
+ * directly against `occurred_at_plant` — no `plantClock` conversion,
+ * because both sides are already on the production convention.
  *
  * `/api/sacks/stock` (getStockLedger) is deliberately NOT touched — it is a
  * running-balance SNAPSHOT as of `to`, which a shift range has no meaning
  * for.
+ *
+ * Task W1-B (29 Sep 2026): `listMovements` now resolves the shift-rule
+ * HISTORY (`ruleAsOf.ts`'s `loadShiftRuleHistory`), not `live.ts`'s single
+ * "in force right now" row — so this file's mock moved with it.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import type { ShiftRange } from '../shiftRange.js';
 
-vi.mock('./live.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./live.js')>();
-  return { ...actual, loadShiftRule: vi.fn() };
+vi.mock('./ruleAsOf.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./ruleAsOf.js')>();
+  return { ...actual, loadShiftRuleHistory: vi.fn() };
 });
 
-import { loadShiftRule } from './live.js';
+import { loadShiftRuleHistory } from './ruleAsOf.js';
 import { listMovements } from './sackStock.js';
 
 interface Stmt { sql: string; inputs: Map<string, unknown> }
@@ -62,9 +66,13 @@ function recordingPool(responses: unknown[][] = []) {
 }
 
 const BOUNDARIES = { morningStart: 360, eveningStart: 840, nightStart: 1320 }; // 06:00 / 14:00 / 22:00
+// Single-version history — every anchor resolves to this one row, matching
+// the old loadShiftRule-mocked behaviour exactly (see ruleAsOf.test.ts's
+// "single-version history" parity guarantee).
+const HISTORY = [{ effectiveFromMs: -Infinity, value: { boundaries: BOUNDARIES, nightBelongsTo: 'start_day' as const } }];
 
 beforeEach(() => {
-  vi.mocked(loadShiftRule).mockReset().mockResolvedValue({ boundaries: BOUNDARIES, nightBelongsTo: 'start_day' });
+  vi.mocked(loadShiftRuleHistory).mockReset().mockResolvedValue(HISTORY);
 });
 
 describe('listMovements — with no shiftRange, behaviour is unchanged', () => {
@@ -75,7 +83,7 @@ describe('listMovements — with no shiftRange, behaviour is unchanged', () => {
     expect(listQuery.inputs.has('srFromTs')).toBe(false);
     expect(listQuery.inputs.has('srToTs')).toBe(false);
     expect(listQuery.sql).not.toMatch(/occurred_at_plant BETWEEN/);
-    expect(loadShiftRule).not.toHaveBeenCalled();
+    expect(loadShiftRuleHistory).not.toHaveBeenCalled();
   });
 });
 
@@ -85,7 +93,7 @@ describe('listMovements — a shiftRange narrows the movements list by instant, 
     const shiftRange: ShiftRange = { from: '2026-09-02', fromShift: 'evening', to: '2026-09-02', toShift: 'evening' };
     await listMovements(pool, 1, { from: '2026-09-01', to: '2026-09-07', shiftRange });
 
-    expect(loadShiftRule).toHaveBeenCalledWith(pool, 1);
+    expect(loadShiftRuleHistory).toHaveBeenCalledWith(pool, 1);
     const listQuery = statements.find((s) => s.sql.includes('sms.sack_stock_movement m'))!;
     expect(listQuery.sql).toMatch(/AND m\.occurred_at_plant BETWEEN @srFromTs AND @srToTs/);
 

@@ -7,20 +7,35 @@
  * `shiftRange.ts`'s file header calls out). Both edges must be on the
  * PRODUCTION convention: the plant wall clock labelled UTC, the same
  * convention `production_ts_utc` is stored in — no plantClock conversion.
+ *
+ * Task W1-B (29 Sep 2026): `withShiftRangeEdges` now resolves the shift-rule
+ * HISTORY (`ruleAsOf.ts`'s `loadShiftRuleHistory`), not `live.ts`'s single
+ * "in force right now" row — so this file's mock moved with it. A
+ * single-version history answers every anchor with that one version,
+ * matching the old mocked behaviour exactly.
  */
 import { describe, expect, it, vi } from 'vitest';
 import type { ConnectionPool } from 'mssql';
 import { withShiftRangeEdges, type RegisterFilters } from './register.js';
 import type { ShiftRange } from '../shiftRange.js';
 
-vi.mock('./live.js', () => ({
-  loadShiftRule: vi.fn(async () => ({
-    boundaries: { morningStart: 6 * 60, eveningStart: 14 * 60, nightStart: 22 * 60 },
-    nightBelongsTo: 'start_day',
-  })),
-}));
+vi.mock('./ruleAsOf.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./ruleAsOf.js')>();
+  return {
+    ...actual,
+    loadShiftRuleHistory: vi.fn(async () => [
+      {
+        effectiveFromMs: -Infinity,
+        value: {
+          boundaries: { morningStart: 6 * 60, eveningStart: 14 * 60, nightStart: 22 * 60 },
+          nightBelongsTo: 'start_day',
+        },
+      },
+    ]),
+  };
+});
 
-const pool = {} as ConnectionPool; // never touched directly; loadShiftRule is mocked
+const pool = {} as ConnectionPool; // never touched directly; loadShiftRuleHistory is mocked
 
 const RANGE: ShiftRange = { from: '2026-09-02', fromShift: 'morning', to: '2026-09-03', toShift: 'night' };
 

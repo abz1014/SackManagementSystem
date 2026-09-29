@@ -38,8 +38,8 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { epochFragment, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
-import { loadShiftRule } from './live.js';
-import { shiftRangeEdgesUtc, type ShiftRange } from '../shiftRange.js';
+import { shiftRangeEdgesUtcAsOf, type ShiftRange } from '../shiftRange.js';
+import { loadShiftRuleHistory } from './ruleAsOf.js';
 
 export interface Stoppage {
   startTs: string;
@@ -137,9 +137,14 @@ export async function getStoppagePatterns(
    * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): clips the returned ribbon
    * to the shift boundaries — see `clipStoppagesToEdges`'s own doc for why
    * this is an edge-instant clip, not a `shiftRangeClause` predicate. The
-   * shift rule in force is loaded here (mirrors live.ts's own
-   * `loadShiftRule` call site) rather than threaded in, so this stays a
-   * drop-in optional parameter for every existing caller.
+   * shift rule HISTORY is loaded here rather than threaded in, so this
+   * stays a drop-in optional parameter for every existing caller.
+   *
+   * Task W1-B (29 Sep 2026): now resolved through `shiftRangeEdgesUtcAsOf`
+   * against the full `sms.shift_rule` history (`ruleAsOf.ts`'s
+   * `loadShiftRuleHistory`), not `loadShiftRule`'s "in force right now"
+   * single row — a ribbon over a range that straddles a shift-rule edit no
+   * longer clips the OLD side of the change under TODAY's boundaries.
    */
   shiftRange?: ShiftRange,
 ): Promise<StoppagePatternData> {
@@ -187,7 +192,7 @@ export async function getStoppagePatterns(
     durationSeconds: g.gap_s,
   }));
   const clipped = shiftRange
-    ? clipStoppagesToEdges(stoppages, shiftRangeEdgesUtc(shiftRange, (await loadShiftRule(pool, lineId)).boundaries))
+    ? clipStoppagesToEdges(stoppages, shiftRangeEdgesUtcAsOf(shiftRange, await loadShiftRuleHistory(pool, lineId)))
     : stoppages;
 
   return {
