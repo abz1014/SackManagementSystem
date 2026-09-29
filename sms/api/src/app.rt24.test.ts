@@ -181,6 +181,14 @@ describe('RT24-12 — /api/health degradedReason (integration; pure-fold cases i
 });
 
 describe('RT-014 — response cap wired into the real app', () => {
+  // Perf fix (29 Sep 2026): /api/events now caches on the full query
+  // (app.ts, prodCache — see app.eventsCache.test.ts), so each case below
+  // must use a query the OTHER cases never touch — otherwise a later case
+  // would hit an earlier case's cached (differently-sized) response instead
+  // of re-querying the fake pool's `db.huge` for itself, which is exactly
+  // the collision this file's shared FakeDb/server would otherwise produce.
+  // `page` is part of the cache key (registerQuery) and free to vary here
+  // without changing what each case actually exercises.
   it('an ordinary /api/events page is unaffected', async () => {
     db.huge = 0;
     const r = await get('/api/events?type=cone&page=1&pageSize=50');
@@ -189,7 +197,7 @@ describe('RT-014 — response cap wired into the real app', () => {
 
   it('a recordset larger than MAX_RESPONSE_ROWS is refused with 413, not served', async () => {
     db.huge = MAX_RESPONSE_ROWS + 1;
-    const r = await get('/api/events?type=cone&page=1&pageSize=50');
+    const r = await get('/api/events?type=cone&page=2&pageSize=50');
     expect(r.status).toBe(413);
     expect(r.json).toMatchObject({ error: 'result too large', limit: MAX_RESPONSE_ROWS });
     db.huge = 0;
@@ -197,7 +205,7 @@ describe('RT-014 — response cap wired into the real app', () => {
 
   it('exactly MAX_RESPONSE_ROWS is not refused', async () => {
     db.huge = MAX_RESPONSE_ROWS;
-    const r = await get('/api/events?type=cone&page=1&pageSize=50');
+    const r = await get('/api/events?type=cone&page=3&pageSize=50');
     expect(r.status).toBe(200);
     db.huge = 0;
   });

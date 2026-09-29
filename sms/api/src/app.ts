@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { z } from 'zod';
-import { MAX_RANGE_DAYS, MAX_SPC_RANGE_DAYS, type ApiConfig } from './config.js';
+import { MAX_RANGE_DAYS, MAX_SPC_RANGE_DAYS, MAX_RESPONSE_ROWS, type ApiConfig } from './config.js';
 import { envelope, type Envelope } from './envelope.js';
 import { getOperations, resolveDqDestination, isDqDestinationTable, type DqDestinationTable } from './services/operations.js';
 import { getSystemHistory } from './services/systemHistory.js';
@@ -70,7 +70,7 @@ import { mountSacksRoutes } from './routes/sacks.js';
 import { mountChangeoverRoutes } from './routes/changeover.js';
 import { mountDqAckRoutes } from './routes/dqAck.js';
 import { isoDate, isoTimestamp } from './dates.js';
-import { responseCap } from './middleware/responseCap.js';
+import { responseCap, largestKnownArray } from './middleware/responseCap.js';
 import { decodeShiftRangeParam, isShiftRangeError } from './routes/shiftRangeParam.js';
 import { ShiftNameSchema } from './shiftRange.js';
 
@@ -1285,10 +1285,33 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.status(400).json({ error: shiftRangeResult.error });
         return;
       }
+      // Perf fix (29 Sep 2026): 1.5-1.8s on EVERY call (pageSize 500 over 30
+      // days), unlike every other analytics route, which all key `prodCache`
+      // on every parameter that can change the answer — the register was the
+      // one list route with no cache at all. Keyed on the FULL parsed query
+      // (registerQuery's every field, exactly as /api/production keys on
+      // `JSON.stringify(parsed.data)` above) plus the page/pageSize and the
+      // decoded shift range, so a different page, a different `batch`, or a
+      // different filter is never served another request's rows. The EXPORT
+      // route below (`/api/events/export`) deliberately does NOT share this
+      // cache or any cache — it streams the full CSV/audit path, not a page.
+      const key = `events:${JSON.stringify(q)}:${JSON.stringify(pageQ.data)}:${JSON.stringify(shiftRangeResult ?? null)}`;
+      const cached = prodCache.get(key);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT').json(cached);
+        return;
+      }
       const { classification, states } = await registerClassification(q);
       const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
       const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states, shiftRange: shiftRangeResult }, scope);
-      res.json(await envelope(pool, cfg.lineId, data));
+      const env = await envelope(pool, cfg.lineId, data);
+      // RT-014 interaction: never cache a page the response-cap middleware
+      // (responseCap.ts, wired globally below) would go on to refuse — a
+      // 413 must be re-derived from a fresh query on every request, the same
+      // guarantee it had before this route was cached, not served once and
+      // then repeated from a stale cache entry for the rest of the TTL.
+      if (largestKnownArray(env) <= MAX_RESPONSE_ROWS) prodCache.set(key, env);
+      res.setHeader('X-Cache', 'MISS').json(env);
     } catch (err) {
       next(err);
     }
