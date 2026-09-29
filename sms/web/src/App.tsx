@@ -611,6 +611,7 @@ function Chrome({
               // than a sheet.
               onOpenProduct={() => go({ view: 'product', sheet: null })}
               canWrite={rank >= ENGINEER_RANK}
+              onSelectPeriod={zoomTo}
             />
           )}
 
@@ -653,6 +654,7 @@ function Chrome({
               onProductChange={(v) => go({ product: v })}
               onOpenStation={(n) => go({ sheet: { kind: 'station', id: String(n) } })}
               onOpenCode={(c) => go({ view: 'rejects', rejectsCode: c })}
+              onSelectPeriod={zoomTo}
             />
           )}
 
@@ -675,6 +677,7 @@ function Chrome({
                 view: 'readings', readingsFilter: 'outsideLimits',
                 readingsListing: 'cones', readingsStates: [], readingsPage: 1,
               })}
+              onSelectPeriod={zoomTo}
             />
           )}
 
@@ -694,6 +697,7 @@ function Chrome({
               onSeeStations={() => go({ view: 'weight' })}
               onOpenReason={(r) => go({ sheet: { kind: 'reason', id: reasonIdOf({ ...r, rejectType: r.rejectType as 'quality' | 'weight' }) } })}
               canName={rank >= ENGINEER_RANK}
+              onSelectPeriod={zoomTo}
             />
           )}
 
@@ -710,6 +714,7 @@ function Chrome({
               canRecord={rank >= ENGINEER_RANK}
               onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })}
               onOpenDay={(day) => go({ sheet: { kind: 'stock', id: day } })}
+              onSelectPeriod={zoomTo}
             />
           )}
 

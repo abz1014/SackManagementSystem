@@ -43,7 +43,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { distinctProductLabels, productLabel } from '../lib/productLabel';
 import { W } from '../lib/words';
-import { trailingWindow, daysWithReadings, type Period } from '../lib/period';
+import { periodQuery, trailingWindow, daysWithReadings, type Period, type PeriodParams } from '../lib/period';
 import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, Toolbar, rowKeys } from '../ui/bits';
 import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
 import { vitalFew } from '../lib/pareto';
@@ -129,6 +129,7 @@ export function RejectsScreen({
   onSeeStations,
   onOpenReason,
   canName,
+  onSelectPeriod,
 }: {
   period: Period;
   /**
@@ -164,6 +165,9 @@ export function RejectsScreen({
   onSeeStations: () => void;
   onOpenReason: (r: ReasonRef) => void;
   canName: boolean;
+  /** Chart overhaul, Task T8b (29 Sep 2026): drag-select on the trend chart
+   *  snaps the WHOLE PAGE period to shift boundaries. */
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const { line } = useLive();
   // Rarely changes (it moves once a day at most), so a slow heartbeat is
@@ -198,9 +202,15 @@ export function RejectsScreen({
   // the trailing window must not reach past the replayed instant either.
   const narrow: RejectFilters = { station: station ?? undefined, product: product ?? undefined, tsTo: period.tsTo };
   const narrowKey = `${station ?? 'any'}:${product ?? 'any'}:${period.tsTo}`;
-  // The period, exactly as Line sends it to /api/production.
-  const periodF: RejectFilters = { ...narrow, from: period.from, to: period.to, shift: period.shift };
-  const periodKey = `${period.from}:${period.to}:${period.shift ?? 'all'}:${narrowKey}`;
+  // The period, exactly as Line sends it to /api/production. Chart overhaul
+  // T8b: fromShift/toShift ride along too, so a zoomed shift range narrows
+  // the reasons list, the period figures and the by-day table the same way
+  // it narrows every other screen — the trend/coded fetches above
+  // deliberately keep the FIXED trailing window instead (THE DETECTORS
+  // IGNORE THE PERIOD, this file's own header rule).
+  const pq = periodQuery(period);
+  const periodF: RejectFilters = { ...narrow, from: period.from, to: period.to, shift: period.shift, fromShift: pq.fromShift, toShift: pq.toShift };
+  const periodKey = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${narrowKey}`;
 
   const quality = usePolling(
     () => (win ? getRejectSpcFiltered({ ...narrow, from: win.from, to: win.to, rejectType: 'quality', bucket: 'day' }) : never()),
@@ -231,6 +241,7 @@ export function RejectsScreen({
     () => getRejectsFiltered(periodF),
     period.live ? 60_000 : 5 * 60_000,
     `reasons:${periodKey}`,
+    { enabled: period.live },
   );
   // The period figures, which are what the headline counts — the SAME
   // shift/tsTo Line sends, so the two screens agree.
@@ -238,16 +249,19 @@ export function RejectsScreen({
     () => getRejectSpcFiltered({ ...periodF, from: period.from, to: period.to, rejectType: 'quality', bucket: 'day' }),
     period.live ? 60_000 : 5 * 60_000,
     `pq:${periodKey}`,
+    { enabled: period.live },
   );
   const periodW = usePolling(
     () => getRejectSpcFiltered({ ...periodF, from: period.from, to: period.to, rejectType: 'weight', bucket: 'day' }),
     period.live ? 60_000 : 5 * 60_000,
     `pw:${periodKey}`,
+    { enabled: period.live },
   );
   const byDay = usePolling(
     () => getRejectsByDayCode({ ...periodF, from: period.from, to: period.to, code: code ?? undefined }),
     period.live ? 60_000 : 5 * 60_000,
     `byday:${periodKey}:${code ?? ''}`,
+    { enabled: period.live },
   );
 
   // A chosen reason that no longer appears in the period's reasons is still
@@ -527,6 +541,7 @@ export function RejectsScreen({
           must not print on a screen where every shown code IS named — the
           same screen offers "Name it" and writes those labels. */}
       <Block
+        chartWide
         label={periodOverlapsWindow ? M.trendTitle(win.requestedDays) : M.trendTitleNoShade(win.requestedDays)}
         note={anyReasonUnnamed ? W.rejects.namesAwaited : null}
       >
@@ -552,6 +567,7 @@ export function RejectsScreen({
                 periodFrom={period.from}
                 periodTo={period.to}
                 labelFmt={dayLabel}
+                onSelect={onSelectPeriod}
               />
             )}
           </div>

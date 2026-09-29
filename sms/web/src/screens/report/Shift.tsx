@@ -2,6 +2,7 @@
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtKg, fmtPct1, describeMismatchHours } from '../../lib/fmt';
+import type { PeriodParams } from '../../lib/period';
 import type { ShiftReportData, ShiftSection as ShiftSectionData } from '../../api';
 import { Fig, LineTable, DayBars } from './shared';
 
@@ -15,7 +16,7 @@ function shiftHasData(t: ShiftSectionData['totals']): boolean {
   return known.some((v) => v > 0);
 }
 
-export function ShiftSection({ d }: { d: ShiftReportData }) {
+export function ShiftSection({ d, onSelectPeriod }: { d: ShiftReportData; onSelectPeriod?: (p: PeriodParams) => void }) {
   const any = d.shifts.some((s) => shiftHasData(s.totals));
   if (!any) {
     return (
@@ -27,7 +28,7 @@ export function ShiftSection({ d }: { d: ShiftReportData }) {
   return (
     <>
       {d.shifts.map((s, i) => (
-        <OneShift key={s.shift} s={s} first={i === 0} />
+        <OneShift key={s.shift} s={s} first={i === 0} onSelectPeriod={onSelectPeriod} />
       ))}
       <Block plain>
         <p className="mut sm">{d.timeLostNote}</p>
@@ -45,7 +46,7 @@ export function ShiftSection({ d }: { d: ShiftReportData }) {
   );
 }
 
-function OneShift({ s, first }: { s: ShiftSectionData; first: boolean }) {
+function OneShift({ s, first, onSelectPeriod }: { s: ShiftSectionData; first: boolean; onSelectPeriod?: (p: PeriodParams) => void }) {
   const t = s.totals;
   const name = W.shiftName[s.shift];
   return (
@@ -57,7 +58,7 @@ function OneShift({ s, first }: { s: ShiftSectionData; first: boolean }) {
         <Fig v={fmtInt(t.rejectedCones)} u={W.reports.rejectedAtInspection.toLowerCase()} n={t.rejectRatePct != null ? W.reports.ofInspected(fmtPct1(t.rejectRatePct)) : null} />
       </div>
       <div style={{ marginTop: 18 }}>
-        <DayBars rows={s.byDay} label={W.report.conesPerDayFor(name)} />
+        <DayBars rows={s.byDay} label={W.report.conesPerDayFor(name)} chartId={`report-shift-day-bars-${s.shift}`} onSelect={onSelectPeriod} />
       </div>
       <div className="tw" style={{ marginTop: 18 }}>
         <LineTable rows={s.byDay} head={W.report.colDay} />

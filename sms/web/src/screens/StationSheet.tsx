@@ -573,7 +573,7 @@ function DailyMeans({
     if (flagged) context.push(d.nelson.map((id) => ruleLabel(id, data.rules ?? [])).join(' · '));
     // The on-chart "adjusted" text used to sit inside the plot, over the
     // line — moved here instead, never drawn over a mark again.
-    if (i === adjIndex) context.push('adjustment logged here');
+    if (i === adjIndex) context.push(W.chart.adjustmentLoggedHere);
     return { heading: short(d.date), rows, context: context.length > 0 ? context : undefined };
   };
 

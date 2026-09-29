@@ -28,7 +28,7 @@ import { useState } from 'react';
 import { useLive, usePolling, usePlantNow, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
-import type { Period } from '../lib/period';
+import { periodQuery, dayToShiftRange, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import { Block, Details, Empty, Failed, Figures, SkelChart, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
@@ -93,6 +93,7 @@ export function SacksScreen({
   canRecord,
   onOpenReading,
   onOpenDay,
+  onSelectPeriod,
 }: {
   period: Period;
   unit: SackUnit;
@@ -105,15 +106,23 @@ export function SacksScreen({
   onOpenReading: (type: RegisterType, id: string | number) => void;
   /** The stock sheet for one production day. */
   onOpenDay: (day: string) => void;
+  /** Chart overhaul, Task T8b (29 Sep 2026): drag-select on the per-day
+   *  weighed chart or the per-day avg-weight-vs-period chart snaps the WHOLE
+   *  PAGE period to shift boundaries — the same `onSelectPeriod?` contract
+   *  `StationSheet`/`Weight` already take. Optional so this compiles and
+   *  renders unchanged until App.tsx wires it. */
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const slow = period.live ? 60_000 : 10 * 60_000;
-  const key = `${period.from}:${period.to}:${period.shift ?? 'all'}:${period.tsTo}`;
+  const pq = periodQuery(period);
+  const key = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${period.tsTo}`;
   const summary = usePolling(
-    () => getSackSummary({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo }),
+    () => getSackSummary(pq),
     slow,
     `sacks:summary:${key}`,
+    { enabled: period.live },
   );
-  const ledger = usePolling(() => getSackStock({ from: period.from, to: period.to, tsTo: period.tsTo }), slow, `sacks:stock:${key}`);
+  const ledger = usePolling(() => getSackStock(pq), slow, `sacks:stock:${key}`, { enabled: period.live });
   // The per-day average sack weight, which no other endpoint on this screen
   // carries: /api/sacks/summary gives one average for the whole period and
   // the ledger gives none. The sack REPORT already computes it per day, at
@@ -121,9 +130,10 @@ export function SacksScreen({
   // server-side — this is an existing endpoint read from a second screen, not
   // a new payload.
   const report = usePolling(
-    () => getReportOf('sack', { from: period.from, to: period.to, shift: period.shift }),
+    () => getReportOf('sack', pq),
     slow,
     `sacks:report:${key}`,
+    { enabled: period.live },
   );
   // PDAS holds six materials all described "205-IL0-SD" on this line, so the
   // by-product table printed six identical row headings with figures ranging
@@ -183,7 +193,7 @@ export function SacksScreen({
             <SkelChart />
           ) : (
             <>
-              <SackWeighedChart days={ledger.data.data.days} />
+              <SackWeighedChart days={ledger.data.data.days} onSelectPeriod={onSelectPeriod} />
               {/* See W.chartStale: a chart drawn from a fetch that has since
                   failed reads as current evidence unless it says otherwise. */}
               {ledger.error && <p className="mut sm" style={{ marginTop: 6 }}>{W.chartStale}</p>}
@@ -205,7 +215,7 @@ export function SacksScreen({
             <SkelChart />
           ) : (
             <>
-              <AvgWeightPerDay report={report.data.data.report} />
+              <AvgWeightPerDay report={report.data.data.report} onSelectPeriod={onSelectPeriod} />
               {report.error && <p className="mut sm" style={{ marginTop: 6 }}>{W.chartStale}</p>}
             </>
           )}
@@ -290,7 +300,7 @@ export function SacksScreen({
  * sacks and kg, and the report module is not this screen's to import
  * internals from for a shape that does not fit it.
  */
-function SackWeighedChart({ days }: { days: LedgerDay[] }) {
+function SackWeighedChart({ days, onSelectPeriod }: { days: LedgerDay[]; onSelectPeriod?: (p: PeriodParams) => void }) {
   if (days.length === 0) return <Empty message={W.nothingHere} />;
   const data: BarDatum[] = days.map((d) => ({
     key: d.day,
@@ -300,12 +310,26 @@ function SackWeighedChart({ days }: { days: LedgerDay[] }) {
   }));
   const total = days.reduce((sum, d) => sum + d.weighed.sacks, 0);
   const busiest = days.reduce((best, d) => (d.weighed.sacks > best.weighed.sacks ? d : best), days[0]!);
+  // Chart overhaul T8b: one bar is one production day, so a drag snaps to
+  // that day's whole D.morning..D.night span — the same idiom
+  // `report/shared.tsx`'s `DayBars` already uses for the identical shape.
+  const brush = onSelectPeriod
+    ? {
+        refs: days.map((d): [ShiftRef, ShiftRef] => {
+          const r = dayToShiftRange(d.day, d.day);
+          return [r.from, r.to];
+        }),
+        onSelect: onSelectPeriod,
+      }
+    : undefined;
   return (
     <CategoryBars
       data={data}
       height={300}
       ariaLabel={W.sacks.weighedPerDayAria}
       valueFmt={fmtInt}
+      chartId="sacks-weighed-per-day"
+      brush={brush}
       resting={W.sacks.weighedResting(
         days.length,
         fmtInt(total),
@@ -334,7 +358,7 @@ function SackWeighedChart({ days }: { days: LedgerDay[] }) {
  *    useful answer. Without it niceDomain would scale ±0.07 kg to the full
  *    height of the block and invent a drift story.
  */
-function AvgWeightPerDay({ report }: { report: SackReportData }) {
+function AvgWeightPerDay({ report, onSelectPeriod }: { report: SackReportData; onSelectPeriod?: (p: PeriodParams) => void }) {
   const days = report.byDay.filter((r) => r.group !== 'total' && r.avgSackKg != null);
   if (days.length < 2 || report.totals.avgSackKg == null) return <Empty message={W.sacks.avgPerDayTooShort} />;
   const mean = report.totals.avgSackKg;
@@ -344,6 +368,15 @@ function AvgWeightPerDay({ report }: { report: SackReportData }) {
     value: Number(((r.avgSackKg as number) - mean).toFixed(3)),
   }));
   const worst = rows.reduce((a, b) => (Math.abs(b.value) > Math.abs(a.value) ? b : a), rows[0]!);
+  const brush = onSelectPeriod
+    ? {
+        refs: days.map((r): [ShiftRef, ShiftRef] => {
+          const rg = dayToShiftRange(r.group, r.group);
+          return [rg.from, rg.to];
+        }),
+        onSelect: onSelectPeriod,
+      }
+    : undefined;
   return (
     <>
       <p className="readout"><span className="dim">{W.sacks.avgPerDayResting(fmtKg(mean), fmtKg(Math.abs(worst.value)))}</span></p>
@@ -353,6 +386,8 @@ function AvgWeightPerDay({ report }: { report: SackReportData }) {
         zeroLabel={W.sacks.avgPerDayZero(fmtKg(mean))}
         valueFmt={(v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtKg(Math.abs(v))}`}
         height={260}
+        chartId="sacks-avg-weight-per-day"
+        brush={brush}
         /* 0.1 kg either side — about 0.2% of a 47 kg sack, and set by
            measurement rather than taste. At ±0.5 kg (the first value tried)
            the real day-to-day movement drew as an invisible hairline, which
@@ -751,11 +786,12 @@ export function History({
   const stale = health.kind !== 'ok';
   const rows = usePolling(
     () => getEvents({
-      type: 'sack', from: period.from, to: period.to, shift: period.shift, tsFrom: period.tsFrom, tsTo: period.tsTo,
+      type: 'sack', ...periodQuery(period), tsFrom: period.tsFrom,
       page, pageSize: HISTORY_PAGE_SIZE, sort: 'time', dir: 'desc',
     }),
     period.live ? LIST_POLL_MS : 5 * 60_000,
-    `sacks:history:${period.from}:${period.to}:${period.shift ?? 'all'}:${page}`,
+    `sacks:history:${period.from}:${period.to}:${periodQuery(period).fromShift ?? ''}:${periodQuery(period).toShift ?? ''}:${period.shift ?? 'all'}:${page}`,
+    { enabled: period.live },
   );
   const data = rows.data?.data;
   const total = data?.total ?? 0;

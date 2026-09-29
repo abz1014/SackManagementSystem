@@ -2,6 +2,7 @@
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
+import type { PeriodParams } from '../../lib/period';
 import type { RejectReason, RejectReportData } from '../../api';
 import { fmtDayShort, fmtPct, RejectTrendChart, type TrendBucket } from './shared';
 
@@ -14,7 +15,17 @@ import { fmtDayShort, fmtPct, RejectTrendChart, type TrendBucket } from './share
  * station/product filters this report was already showing (`st`/`pr` are
  * shared, so they ride along automatically).
  */
-export function RejectSection({ d, onOpenCode }: { d: RejectReportData; onOpenCode: (r: RejectReason) => void }) {
+export function RejectSection({
+  d,
+  onOpenCode,
+  onSelectPeriod,
+}: {
+  d: RejectReportData;
+  onOpenCode: (r: RejectReason) => void;
+  /** Chart overhaul, Task T8b (29 Sep 2026): drag-select on the trend chart
+   *  snaps the WHOLE PAGE period to shift boundaries. */
+  onSelectPeriod?: (p: PeriodParams) => void;
+}) {
   if (d.total === 0 && d.trend.every((t) => t.produced === 0)) {
     return (
       <Block first>
@@ -61,7 +72,7 @@ export function RejectSection({ d, onOpenCode }: { d: RejectReportData; onOpenCo
         )}
       </Block>
 
-      <Block label={W.reports.trend}>
+      <Block label={W.reports.trend} chartWide>
         {d.trend.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : (
@@ -79,6 +90,7 @@ export function RejectSection({ d, onOpenCode }: { d: RejectReportData; onOpenCo
               singleName={W.nav.rejects}
               ariaLabel={W.reports.trend}
               labelFmt={fmtDayShort}
+              onSelect={onSelectPeriod}
             />
             {/*
              * The 40+ day table this report used to print in full is now the

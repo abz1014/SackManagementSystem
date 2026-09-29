@@ -7,10 +7,11 @@
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtKg, fmtPct1, fmtSpan, describeMismatchHours } from '../../lib/fmt';
+import type { PeriodParams } from '../../lib/period';
 import type { DailyReportData, ReportLine } from '../../api';
 import { DayBars, Fig, LineTable } from './shared';
 
-export function DailySection({ d }: { d: DailyReportData }) {
+export function DailySection({ d, onSelectPeriod }: { d: DailyReportData; onSelectPeriod?: (p: PeriodParams) => void }) {
   if (d.totals.cones === 0) {
     return (
       <Block first>
@@ -24,8 +25,8 @@ export function DailySection({ d }: { d: DailyReportData }) {
         <Totals t={d.totals} pops={d.rejectPopulations} />
       </Block>
 
-      <Block label={W.report.conesPerDay}>
-        <DayBars rows={d.byDay} />
+      <Block label={W.report.conesPerDay} chartWide>
+        <DayBars rows={d.byDay} chartId="report-daily-day-bars" onSelect={onSelectPeriod} />
         {d.downtime ? (
           <p className="g" style={{ marginTop: 18 }}>
             {W.report.timeLost(fmtSpan(d.downtime.stoppedSeconds), d.downtime.stoppageCount)}{' '}

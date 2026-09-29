@@ -8,7 +8,7 @@
  * FILTERS_BY_TYPE: a control the server would refuse (400) is not offered,
  * the same rule App.tsx applies to the register's Export button.
  */
-import type { Period } from '../../lib/period';
+import { periodQuery, type Period } from '../../lib/period';
 import type { ReportFilters, ReportQuery, ReportType } from '../../api';
 
 export type FilterName = 'shift' | 'product' | 'station';
@@ -50,7 +50,13 @@ export function acceptsFilter(type: ReportType, f: FilterName): boolean {
  * with it.
  */
 export function queryFor(type: ReportType, period: Period, filters: ReportFilters, at: string | null): ReportQuery {
-  const q: ReportQuery = { period: 'custom', from: period.from, to: period.to, at };
+  const pq = periodQuery(period);
+  // T8b (29 Sep 2026): a zoomed shift range (period.key === 'range') must
+  // narrow the report the same way it narrows every other screen — from/to
+  // alone are production-day bounds and lose the shift-level precision a
+  // chart drag selected. fromShift/toShift ride along harmlessly for every
+  // other period key, exactly as periodQuery's own doc comment describes.
+  const q: ReportQuery = { period: 'custom', from: period.from, to: period.to, at, fromShift: pq.fromShift, toShift: pq.toShift };
   if (acceptsFilter(type, 'shift')) q.shift = filters.shift ?? period.shift ?? null;
   if (acceptsFilter(type, 'station') && filters.station != null) q.station = filters.station;
   if (acceptsFilter(type, 'product') && filters.product != null) q.product = filters.product;
@@ -68,7 +74,7 @@ export function filtersFor(type: ReportType, filters: ReportFilters): ReportFilt
 
 /** A stable key for polling: the type, the query, nothing else. */
 export function pollKey(type: ReportType, q: ReportQuery): string {
-  return `report:${type}:${q.from}:${q.to}:${q.shift ?? ''}:${q.station ?? ''}:${q.product ?? ''}:${q.at ?? ''}`;
+  return `report:${type}:${q.from}:${q.to}:${q.fromShift ?? ''}:${q.toShift ?? ''}:${q.shift ?? ''}:${q.station ?? ''}:${q.product ?? ''}:${q.at ?? ''}`;
 }
 
 /**

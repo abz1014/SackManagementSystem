@@ -27,7 +27,7 @@ import { useEffect, useState } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
-import type { Period } from '../lib/period';
+import { periodQuery, type Period } from '../lib/period';
 import { Block, Chevron, Empty, Failed, rowKeys, SkelLines, Toolbar, Toggle } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
@@ -61,11 +61,14 @@ function queryFor(
   batch: string = 'auto',
 ): RegisterQuery {
   const type: RegisterType = listing === 'sacks' ? 'sack' : listing === 'inspectionRejects' ? 'reject' : 'cone';
+  const pq = periodQuery(period);
   const base: RegisterQuery = {
     type,
     from: period.from,
     to: period.to,
     shift: period.shift,
+    fromShift: pq.fromShift,
+    toShift: pq.toShift,
     tsFrom: period.tsFrom,
     tsTo: period.tsTo,
     page,
@@ -170,13 +173,15 @@ export function ReadingsScreen({
         ? W.lag.late(fmtSpan(health.lagSeconds))
         : W.lag.noData;
 
-  const key = `${listing}:${period.from}:${period.to}:${period.shift ?? 'all'}:${station ?? 'any'}:${outsideOnly}:${states.join('+')}:${page}:${batch}`;
+  const pqKey = periodQuery(period);
+  const key = `${listing}:${period.from}:${period.to}:${pqKey.fromShift ?? ''}:${pqKey.toShift ?? ''}:${period.shift ?? 'all'}:${station ?? 'any'}:${outsideOnly}:${states.join('+')}:${page}:${batch}`;
   const rows = usePolling(
     () => getEvents(queryFor(listing, period, station, page, outsideOnly, states, batch)),
     // Only a live period can gain rows while it is open; a closed one is
     // polled at a slow heartbeat rather than never, so a re-sync still shows.
     period.live ? LIST_POLL_MS : 5 * 60_000,
     key,
+    { enabled: period.live },
   );
 
   // The count of readings the SCALE rejected, for the count line. Asked for
@@ -188,6 +193,7 @@ export function ReadingsScreen({
     () => getEvents({ ...queryFor('rejected', period, station, 1, false, [], batch), pageSize: 1 }),
     period.live ? LIST_POLL_MS : 5 * 60_000,
     `rejcount:${key}`,
+    { enabled: period.live },
   );
 
   // The batch disclosure: what is listed, and what else exists in this

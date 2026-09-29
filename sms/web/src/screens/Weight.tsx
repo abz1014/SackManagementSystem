@@ -30,7 +30,7 @@
 import { useRef, useState } from 'react';
 import { usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { TRAILING_DAYS, describePeriod, snapToShifts, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
+import { TRAILING_DAYS, describePeriod, periodQuery, snapToShifts, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, rowKeys, Toggle,
   SkelChart, SkelFigures, SkelLines,
@@ -114,6 +114,7 @@ export function WeightScreen({
   onSelectPeriod?: (p: PeriodParams) => void;
 }) {
 
+  const pq = periodQuery(period);
   const st = usePolling(
     () =>
       getWeightStations({
@@ -133,9 +134,12 @@ export function WeightScreen({
         periodFrom: period.from,
         periodTo: period.to,
         shift: period.shift,
+        periodFromShift: pq.fromShift,
+        periodToShift: pq.toShift,
       }),
     5 * 60_000,
-    `wstations:${period.from}:${period.to}:${period.shift ?? 'all'}`,
+    `wstations:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}`,
+    { enabled: period.live },
   );
 
   // The product is passed so the chart can draw the LIMITS, not just the
@@ -154,10 +158,13 @@ export function WeightScreen({
         from: period.from,
         to: period.to,
         shift: period.shift ?? undefined,
+        fromShift: pq.fromShift,
+        toShift: pq.toShift,
         productId: productId ?? undefined,
       }),
     period.live ? 60_000 : 5 * 60_000,
-    `spc-cone:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
+    `spc-cone:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
+    { enabled: period.live },
   );
   // The CHART's own population — follows `chartType`. For 'cone' with no
   // station chosen this duplicates `coneLine` above; the two are kept as
@@ -173,10 +180,13 @@ export function WeightScreen({
         from: period.from,
         to: period.to,
         shift: period.shift ?? undefined,
+        fromShift: pq.fromShift,
+        toShift: pq.toShift,
         productId: chartType === 'cone' ? (productId ?? undefined) : undefined,
       }),
     period.live ? 60_000 : 5 * 60_000,
-    `spc:${chartType}:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
+    `spc:${chartType}:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${productId ?? 'none'}`,
+    { enabled: period.live },
   );
   // One station's stream for the chart (Phase 4), cone only: sack1_TP1U2
   // carries no station/machine column, so there is nothing to select a
@@ -190,11 +200,14 @@ export function WeightScreen({
             from: period.from,
             to: period.to,
             shift: period.shift ?? undefined,
+            fromShift: pq.fromShift,
+            toShift: pq.toShift,
             productId: productId ?? undefined,
             station: chartStation,
           }),
     period.live ? 60_000 : 5 * 60_000,
-    `spc-station:${chartType}:${period.from}:${period.to}:${period.shift ?? 'all'}:${productId ?? 'none'}:${chartStation ?? 'none'}`,
+    `spc-station:${chartType}:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${productId ?? 'none'}:${chartStation ?? 'none'}`,
+    { enabled: period.live },
   );
 
   const names = usePolling(() => getStations(), 10 * 60_000, 'stations');
@@ -208,9 +221,10 @@ export function WeightScreen({
   // different reject counts on two screens. The key carries it too, or a
   // replay moved to a new instant would keep the old answer.
   const prod = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: 'none' }),
+    () => getProduction({ ...pq, groupBy: 'none' }),
     period.live ? 60_000 : 5 * 60_000,
-    `prod:${period.from}:${period.to}:${period.shift ?? 'all'}:${period.tsTo}`,
+    `prod:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${period.tsTo}`,
+    { enabled: period.live },
   );
 
   // UX Phase 7 Brief 5 (21 Sep 2026): `st` used to gate the WHOLE screen —
@@ -362,7 +376,7 @@ export function WeightScreen({
         </Block>
       )}
 
-      <Block>
+      <Block chartWide>
         <div className="row between" style={{ marginBottom: 12 }}>
           <div className="row">
             <Toggle

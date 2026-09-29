@@ -3,9 +3,9 @@
  * every chart in this module (bar `Histogram`, list `RankBars`,
  * `DeviationBars`) now carries, reached via keyboard (ArrowRight) so it does
  * not depend on pointer support in the test DOM. `RejectTrendChart` is not
- * covered here — it deliberately keeps its own pre-`ChartFrame` hover
- * contract (see its `onSelect` prop's doc comment in shared.tsx) for
- * `report.series.test.tsx`'s sake, which this task does not own.
+ * covered here — it was migrated onto `ChartFrame` separately (commit
+ * `ceecc55`), and its own tooltip and brush behaviour are covered by
+ * `report.series.test.tsx` instead, which this task does not own.
  */
 import { describe, expect, it } from 'vitest';
 import { fireEvent } from '@testing-library/react';

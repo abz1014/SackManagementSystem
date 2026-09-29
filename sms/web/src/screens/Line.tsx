@@ -28,7 +28,7 @@ import { useLive, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import { hasNewerElsewhere, quietBecauseGeneration } from '../lib/generationWords';
-import type { Period } from '../lib/period';
+import { periodQuery, dayToShiftRange, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
   SkelChart, SkelFigures, SkelLines, SkelStations, type FigureProps,
@@ -68,6 +68,7 @@ export function LineScreen({
   onOpenReading,
   onOpenProduct,
   canWrite,
+  onSelectPeriod,
 }: {
   period: Period;
   onNavigate: (s: Screen, filter?: ReadingsFilter) => void;
@@ -75,6 +76,10 @@ export function LineScreen({
   onOpenReading: (type: 'cone' | 'sack', id: string | number) => void;
   onOpenProduct: () => void;
   canWrite: boolean;
+  /** Chart overhaul, Task T8b (29 Sep 2026): drag-select on the cones-per-
+   *  day/shift chart snaps the WHOLE PAGE period to shift boundaries — the
+   *  same `onSelectPeriod?` contract Weight/StationSheet already take. */
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const { line, loading } = useLive();
   const health = assessHealth(line);
@@ -90,16 +95,19 @@ export function LineScreen({
   // `?at=` this screen counted the WHOLE shift while the Wall display counted
   // up to the replayed moment — mid-shift, Line read roughly double Wall for
   // the same shift. period.ts documents tsTo as exactly this guard.
-  const periodKey = `${period.from}:${period.to}:${period.shift ?? 'all'}:${period.tsTo}`;
+  const pq = periodQuery(period);
+  const periodKey = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${period.tsTo}`;
   const totals = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: 'none' }),
+    () => getProduction({ ...pq, groupBy: 'none' }),
     period.live ? REFRESH_MS : 5 * 60_000,
     `line-totals:${periodKey}`,
+    { enabled: period.live },
   );
   const perStation = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: 'station' }),
+    () => getProduction({ ...pq, groupBy: 'station' }),
     period.live ? REFRESH_MS : 5 * 60_000,
     `line-stations:${periodKey}`,
+    { enabled: period.live },
   );
   // UX charts pass 2 (23 Sep 2026): the shape of the period, as a mark.
   // Until now this screen stated its output as four numerals and drew
@@ -108,23 +116,25 @@ export function LineScreen({
   // grouping differs, so no new payload and nothing new computed.
   const spread: 'day' | 'shift' = period.days >= 2 ? 'day' : 'shift';
   const perSpread = usePolling(
-    () => getProduction({ from: period.from, to: period.to, shift: period.shift, tsTo: period.tsTo, groupBy: spread }),
+    () => getProduction({ ...pq, groupBy: spread }),
     period.live ? REFRESH_MS : 5 * 60_000,
     `line-spread:${spread}:${periodKey}`,
+    { enabled: period.live },
   );
   // Same leak, same fix: with no argument this asked for the product running
   // NOW, so a July replay showed today's product beside July's readings.
-  const product = usePolling(() => getProductAt(period.tsTo), REFRESH_MS, `product-at:${period.tsTo}`);
+  const product = usePolling(() => getProductAt(period.tsTo), REFRESH_MS, `product-at:${period.tsTo}`, { enabled: period.live });
   const attention = usePolling(
-    () => getAttention({ from: period.from, to: period.to, shift: period.shift }),
+    () => getAttention({ from: period.from, to: period.to, shift: period.shift, fromShift: pq.fromShift, toShift: pq.toShift }),
     REFRESH_MS,
-    `attention:${period.from}:${period.to}:${period.shift ?? 'all'}`,
+    `attention:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}`,
+    { enabled: period.live },
   );
   // What each machine is running (roadmap Phase 4, 14 Sep 2026): the product
   // on each station from its newest cones, in a two-hour window anchored on
   // the newest reading — never on the clock — and capped at the replay
   // instant, like everything else on this screen.
-  const machines = usePolling(() => getMachinesRunning(period.tsTo), REFRESH_MS, `machines-running:${period.tsTo}`);
+  const machines = usePolling(() => getMachinesRunning(period.tsTo), REFRESH_MS, `machines-running:${period.tsTo}`, { enabled: period.live });
   // PDAS holds several materials sharing one description (six read
   // "205-IL0-SD" on this line) — machinesRunning's own SQL only ever
   // resolves that plain description, so the parts that make them
@@ -231,7 +241,7 @@ export function LineScreen({
           <SkelChart />
         ) : (
           <>
-            <OutputSpread rows={perSpread.data.data.rows} spread={spread} />
+            <OutputSpread rows={perSpread.data.data.rows} spread={spread} period={period} onSelectPeriod={onSelectPeriod} />
             {/* A failed refresh must not leave a confident mark unlabelled —
                 see W.chartStale. The bars stay (they were a true reading);
                 the sentence says they stopped moving. */}
@@ -294,6 +304,7 @@ export function LineScreen({
               ids={stationIds(line, stations.data?.stations ?? [])}
               counts={perStation.data?.data.rows ?? null}
               stations={stations.data?.stations ?? []}
+              onOpen={onOpenStation}
             />
             <StationRowGrid
               line={line}
@@ -652,7 +663,19 @@ function kpiBlockNote(
  * stacking them would assert a whole/part relationship this screen has no
  * standing to assert. They are stated, per day, in the readout.
  */
-function OutputSpread({ rows, spread }: { rows: ProductionRow[]; spread: 'day' | 'shift' }) {
+function OutputSpread({
+  rows,
+  spread,
+  period,
+  onSelectPeriod,
+}: {
+  rows: ProductionRow[];
+  spread: 'day' | 'shift';
+  /** For the 'shift' spread's own brush refs — each row's shift belongs to
+   *  the single production day the period names. */
+  period: Period;
+  onSelectPeriod?: (p: PeriodParams) => void;
+}) {
   const real = rows.filter((r) => r.group !== 'total');
   if (real.length < 2) return <p className="state">{W.onePointNoShape(spread)}</p>;
   // WS-RG2 (23 Sep 2026 verification pass, gap 1): until this fix every field
@@ -680,12 +703,31 @@ function OutputSpread({ rows, spread }: { rows: ProductionRow[]; spread: 'day' |
   }));
   const total = real.reduce((n, r) => n + r.cones, 0);
   const best = real.reduce((a, b) => (b.cones > a.cones ? b : a), real[0]!);
+  // Chart overhaul T8b: 'day' bars are the D.morning..D.night span; 'shift'
+  // bars are a single shift of the ONE production day this period names
+  // (period.days === 1 whenever spread === 'shift' — see the caller's own
+  // `spread` choice above).
+  const brush = onSelectPeriod
+    ? {
+        refs: real.map((r): [ShiftRef, ShiftRef] => {
+          if (spread === 'day') {
+            const rg = dayToShiftRange(r.group, r.group);
+            return [rg.from, rg.to];
+          }
+          const ref: ShiftRef = { date: period.from, shift: r.group as ShiftRef['shift'] };
+          return [ref, ref];
+        }),
+        onSelect: onSelectPeriod,
+      }
+    : undefined;
   return (
     <CategoryBars
       data={data}
       height={300}
       ariaLabel={spread === 'day' ? W.conesPerDayAria : W.conesPerShiftAria}
       valueFmt={fmtInt}
+      chartId={`line-cones-per-${spread}`}
+      brush={brush}
       resting={W.conesResting(
         real.length,
         spread,
@@ -1125,7 +1167,17 @@ function fmtSignedCount(v: number): string {
  * is never set here — a station running above or below the row's median cone
  * count is not a fault, only Weight's drift rule gets to say that.
  */
-function StationCompare({ ids, counts, stations }: { ids: number[]; counts: ProductionRow[] | null; stations: StationRow[] }) {
+function StationCompare({
+  ids,
+  counts,
+  stations,
+  onOpen,
+}: {
+  ids: number[];
+  counts: ProductionRow[] | null;
+  stations: StationRow[];
+  onOpen: (station: number) => void;
+}) {
   if (counts == null) return null; // no invented bars while the count is still loading
   const nameOf = new Map(stations.map((s) => [s.stationId, s]));
   const rowById = new Map(counts.map((r) => [Number(r.group), r] as const));
@@ -1152,6 +1204,26 @@ function StationCompare({ ids, counts, stations }: { ids: number[]; counts: Prod
     value: (rowById.get(id)?.cones ?? 0) - med,
     title: `${stationLabel(nameOf.get(id), id)}: ${fmtInt(rowById.get(id)?.cones ?? 0)} cones (${fmtSignedCount((rowById.get(id)?.cones ?? 0) - med)} vs median)`,
   }));
+  // Chart overhaul, Task T8b (29 Sep 2026): onActivate opens the station
+  // sheet, the same hop the tiles below already offer; the tip states the
+  // count, the signed deviation and the row's own median in one sentence
+  // ("Station 5 · 1,234 cones · 20 fewer than the row median of 1,254"),
+  // per the task brief — richer than DeviationBars' own default
+  // `title`/`label: value` fallback.
+  const tip = (i: number) => {
+    const id = Number(rows[i]?.key);
+    const row = rowById.get(id);
+    if (!row || rows[i] == null) return null;
+    const delta = rows[i]!.value;
+    const cmp = delta === 0
+      ? W.chart.vsRowMedian
+      : `${fmtInt(Math.abs(delta))} ${delta > 0 ? 'more' : 'fewer'} than the row median of ${fmtInt(med)}`;
+    return {
+      heading: rows[i]!.label,
+      rows: [{ name: '', value: `${fmtInt(row.cones)} ${W.fig.cones} · ${cmp}` }],
+      hint: W.chart.openStation(String(id)),
+    };
+  };
   return (
     <DeviationBars
       rows={rows}
@@ -1159,6 +1231,12 @@ function StationCompare({ ids, counts, stations }: { ids: number[]; counts: Prod
       zeroLabel={W.stationsCompareZero}
       valueFmt={fmtSignedCount}
       height={260}
+      chartId="line-station-compare"
+      tip={tip}
+      onActivate={(i) => {
+        const id = Number(rows[i]?.key);
+        if (Number.isFinite(id)) onOpen(id);
+      }}
     />
   );
 }

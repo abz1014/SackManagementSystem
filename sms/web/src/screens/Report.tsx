@@ -33,7 +33,7 @@
 import { useMemo } from 'react';
 import { usePolling, useLive } from '../lib/live';
 import { W } from '../lib/words';
-import type { Period, ShiftCode } from '../lib/period';
+import type { Period, PeriodParams, ShiftCode } from '../lib/period';
 import { Block, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
 import { fmtDayLong, fmtInt } from '../lib/fmt';
 import {
@@ -67,6 +67,7 @@ export function ReportScreen({
   onProductChange,
   onOpenStation,
   onOpenCode,
+  onSelectPeriod,
 }: {
   period: Period;
   user: AuthUser;
@@ -87,6 +88,9 @@ export function ReportScreen({
   /** Same pass: the reject report's reasons are the only rows on this screen
    *  that name a reject code, so the code hop from §6.5 lands here. */
   onOpenCode: (code: string) => void;
+  /** Chart overhaul, Task T8b (29 Sep 2026): drag-select on the Daily/Shift
+   *  DayBars snaps the WHOLE PAGE period to shift boundaries. */
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const { line, asOf } = useLive();
   const rank = ROLE_RANK[user.role] ?? 1;
@@ -107,6 +111,7 @@ export function ReportScreen({
     () => (canRead ? getReportOf(type, q) : Promise.resolve(null)),
     period.live ? 60_000 : 10 * 60_000,
     `${pollKey(type, q)}:${canRead ? 'ok' : 'no'}`,
+    { enabled: period.live },
   );
 
   // usePolling keeps the LAST GOOD answer while a new key loads, so for a
@@ -243,7 +248,7 @@ export function ReportScreen({
       ) : (
         <>
           <div className="page print-only pd-host"><ExecSummary type={type} data={data} /></div>
-          <Sections type={type} data={data} names={names} products={productList} onOpenStation={onOpenStation} onOpenCode={onOpenCode} />
+          <Sections type={type} data={data} names={names} products={productList} onOpenStation={onOpenStation} onOpenCode={onOpenCode} onSelectPeriod={onSelectPeriod} />
           <div className="page print-only"><PrintNotes type={type} data={data} header={data.header} /></div>
         </>
       )}
@@ -253,7 +258,7 @@ export function ReportScreen({
 
 /** One switch, so a new type is one line here and one file under report/. */
 function Sections({
-  type, data, names, products, onOpenStation, onOpenCode,
+  type, data, names, products, onOpenStation, onOpenCode, onSelectPeriod,
 }: {
   type: ReportType;
   data: ReportResponse<ReportType>;
@@ -261,13 +266,14 @@ function Sections({
   products: ProductOption[];
   onOpenStation: (station: number) => void;
   onOpenCode: (code: string) => void;
+  onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   switch (type) {
-    case 'daily': return <DailySection d={(data as ReportResponse<'daily'>).report} />;
-    case 'shift': return <ShiftSection d={(data as ReportResponse<'shift'>).report} />;
+    case 'daily': return <DailySection d={(data as ReportResponse<'daily'>).report} onSelectPeriod={onSelectPeriod} />;
+    case 'shift': return <ShiftSection d={(data as ReportResponse<'shift'>).report} onSelectPeriod={onSelectPeriod} />;
     case 'product': return <ProductSection d={(data as ReportResponse<'product'>).report} products={products} />;
     case 'station': return <StationSection d={(data as ReportResponse<'station'>).report} names={names} onOpen={onOpenStation} />;
-    case 'reject': return <RejectSection d={(data as ReportResponse<'reject'>).report} onOpenCode={(r: RejectReason) => onOpenCode(rejectCodeParam(r))} />;
+    case 'reject': return <RejectSection d={(data as ReportResponse<'reject'>).report} onOpenCode={(r: RejectReason) => onOpenCode(rejectCodeParam(r))} onSelectPeriod={onSelectPeriod} />;
     case 'cone-weight': return <ConeWeightSection d={(data as ReportResponse<'cone-weight'>).report} names={names} />;
     case 'sack': return <SackSection d={(data as ReportResponse<'sack'>).report} products={products} />;
     case 'calibration': return <CalibrationSection d={(data as ReportResponse<'calibration'>).report} names={names} />;
