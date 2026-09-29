@@ -1240,7 +1240,15 @@ export function RejectTrendChart({
         const endItems: GutterLabelIn[] = [];
         if (lastQIdx != null) endItems.push({ y: y(series[lastQIdx]!.q!), text: `${qName} ${series[lastQIdx]!.q!.toFixed(1)}%`, prio: 1 });
         if (weight && lastWIdx != null) endItems.push({ y: y(series[lastWIdx]!.w!), text: `${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%`, prio: 0 });
-        const endLabels = placeGutterLabels(endItems, { top: T, bottom: fsize.height - B, lineH: 14 });
+        // `lineH` must come from the MEASURED font size, not a guessed
+        // constant: a fixed `14` under-stated the real line box whenever
+        // `fsize.fontPx` scaled above ~10.7px (the Wall's 1.3x UI scale,
+        // 13 * 1.3 = 16.9px, among others), so two close end values ("quality
+        // X.X%" / "weight X.X%") were placed less than one true text line
+        // apart and overlapped. `* 1.3` is the same line-height multiplier
+        // `RefLineGutterProvider` already uses for the identical problem.
+        const lineH = fsize.fontPx * 1.3;
+        const endLabels = placeGutterLabels(endItems, { top: T, bottom: fsize.height - B, lineH });
         let endIdxCursor = 0;
         const qEndLabel = lastQIdx != null ? endLabels[endIdxCursor++] ?? null : null;
         const wEndLabel = weight && lastWIdx != null ? endLabels[endIdxCursor++] ?? null : null;
@@ -1312,13 +1320,18 @@ export function RejectTrendChart({
             {/* Labelled on the mark, so the chart needs no legend — on the LAST
                 day that actually has a value, not the last index: the newest
                 bucket in the window may itself be the gap. */}
+            {/* Rendered at the SAME fontPx the lineH above was measured
+                from — the old `var(--fs-small)` CSS size did not necessarily
+                match the fixed `14` the layout math assumed, which is the
+                other half of why the two labels could still land closer than
+                a real line apart. */}
             {lastQIdx != null && qEndLabel?.text && (
-              <text x={fsize.width - R + 10} y={qEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--ink)">
+              <text x={fsize.width - R + 10} y={qEndLabel.y + 4} fontSize={fsize.fontPx} fill="var(--ink)">
                 {qName} {series[lastQIdx]!.q!.toFixed(1)}%
               </text>
             )}
             {weight && lastWIdx != null && wEndLabel?.text && (
-              <text x={fsize.width - R + 10} y={wEndLabel.y + 4} fontSize="var(--fs-small)" fill="var(--graphite)">
+              <text x={fsize.width - R + 10} y={wEndLabel.y + 4} fontSize={fsize.fontPx} fill="var(--graphite)">
                 {W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%
               </text>
             )}
