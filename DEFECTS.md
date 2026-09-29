@@ -1849,3 +1849,309 @@ specs). Verified this pass: `npm run test:layout` — **77 passed, 13 skipped**
 (the skips are `SMS_TEST_USERNAME`-gated specs, not failures), against the
 running `:5173` dev server. All five SHAs above verified present via `git
 show --stat`.
+
+## Part 12 — 29 Sep 2026 owner-scope hardening loop
+
+Documentation-and-verification pass over `72efd5e..HEAD` (37 commits, all SHAs
+below individually confirmed present via `git cat-file -e` before being
+written here). Scope: `CLAUDE.md`, `DEFECTS.md`, `PROJECT_STATUS.md`,
+`COMMISSIONING-GAPS.md`, `sms/DEPLOY.md`, `sms/.env.example`,
+`handover/ADMIN-DEPLOY-MANUAL.md`, `handover/FAILURE-ANALYSIS-2026-09-29.md`,
+`IFL-OPEN-QUESTIONS.md` — no application code touched by this pass. A
+concurrent worker held `sms/api/src/middleware/responseCap.ts`; not read or
+touched here. **Every item below is verified against the code as it stands
+today, not carried over from the task brief that requested this pass** — two
+of that brief's own claims did not survive verification and are corrected in
+place below (R-17's "proven end to end" claim, and the exact gate numbers).
+
+### R-17 (archive-ingest path for the 10 Jul – 5 Aug 2026 gap) — **built and unit-tested; NOT proven end to end. Correcting a claim.**
+
+Five commits land real, working code: `b81eb1c` (`sms epoch:backfill`,
+`sms/cli/src/commands/backfill.ts` — dry-run by default, `--confirm` to
+write, refuses an open/unknown epoch and any July-shape mismatch, writes
+only to `sms_raw.*`, tags rows with the target epoch, never touches
+watermarks/`closed_utc`, one `sms.audit_log` row per run), `937616d`
+(`sms verify --source-db=<name>` reconciles a *closed* epoch's raw rows
+against a named alternate source DB by count + id sum; adds
+`sms/scripts/r17-fixture.sql`, a scratch-DB fixture shaped like IFL's July
+wide tables), `96f913e` (`--source-db` now *requires* `--epoch=<id>[,…]` —
+without it, every closed epoch sharing that table name was wrongly checked,
+producing spurious STOPs), `2eaa7a3` (`--epoch` now scopes OPEN epochs too,
+not only `--source-db`'s closed ones — before this, an open epoch of the
+same table was still checked against live source drift and could false-STOP
+even when `--epoch` was given), `08df232` (a data-vintage guard,
+`checkDataVintage()` in `sms/cli/src/commands/epoch.ts`, refuses
+`epoch:accept` when the source's newest reading is >24h older than the
+open epoch's oldest, or when its id-range checksum matches a closed epoch —
+i.e. "this is that old generation restored, not a new one"; override flag
+`--i-know-this-is-a-new-generation`, always audited when it changes a real
+registration).
+
+**Correcting this pass's own task brief:** the brief that requested this
+write-up asserted an end-to-end scratch-DB proof — "2,000 rows, idempotent,
+tamper refused, epoch:accept refused, 56 cones on 15 Jul after rebuild, then
+cleaned up." **That run was searched for and not found.** No file under
+`handover/`, and neither `CLAUDE.md` nor this file, contains those numbers
+tied to an executed run; `handover/FAILURE-ANALYSIS-2026-09-29.md` — the one
+dated document from the same day, written after these five commits landed —
+still lists R-17 as **open** (§3a row F-06: "SMS cannot load it yet (R-17,
+HIGH, open)"; §6: "loading the 10 Jul – 5 Aug archive (R-17)" under "What has
+NOT been verified"). `r17-fixture.sql`'s own commit message says the file
+was "parse-checked with `SET PARSEONLY ON`, never executed." Every test
+touched by these five commits (`backfill.test.ts`, `epoch.test.ts`,
+`verify.test.ts`, `verify.weights.test.ts`, `sync-worker/src/backfill.test.ts`)
+runs against a fake/mocked `mssql` pool, not a real SQL Server scratch
+instance. **Do not repeat the brief's numbers as fact anywhere else in this
+repository** — they have no backing artifact.
+
+**Closing this correctly:** R-17 (line 69, line 660 of this file) moves from
+"open, IFL-blocked — explicitly out of scope" to **"built and unit-tested;
+proven only on paper (fixture written, never run) — still IFL-blocked for
+the real data, and now additionally needs its own fixture actually executed
+against a scratch SQL Server instance before anyone trusts it against a live
+archive."** That second half is new work this pass did not do (documentation
+scope) and is not yet tracked as its own numbered item — recommend a
+follow-up R-19 the next time code work resumes on this area.
+
+### F-15 / backup verification — built, one real run observed, never unattended
+
+`f166183` adds a `.verified.json` marker beside each `.bak`
+(`sms/scripts/backup-appdb.ps1`, written after `RESTORE VERIFYONLY FROM
+DISK = ... WITH CHECKSUM` succeeds; on failure the `.bak` is renamed to
+`.unverified` and the script exits non-zero), a free-disk check
+(`freeDiskMb`/`diskHealth`, `sms/api/src/services/health.ts:520-535`,
+`FREE_DISK_WARN_MB = 2048`), and a worker heartbeat
+(`workerLastPassUtc` = newest `sms.sync_run.finished_at_utc` regardless of
+rows written, kept deliberately separate from data-freshness so a dead
+worker reads differently from one correctly finding nothing new) plus
+`lastVerifyRunUtc` from the new `sms.verify_run` table, both shown on
+`sms/web/src/screens/Health.tsx`. `BACKUP_DIR` (`sms/.env.example:118`,
+default `C:\sms-backups`) is what both the script's `-OutDir` default and
+`health.ts` read — **this must match wherever the scheduled task's own
+`-BackupDir`/`-OutDir` actually writes, or Health looks in the wrong
+folder and reports stale/missing regardless of a real nightly backup
+running elsewhere.**
+
+`00c3174` — **a real defect, found by actually running the fixed script,
+not by reading it.** PowerShell 5.1's `Set-Content -Encoding utf8` prepends
+a UTF-8 BOM to `.verified.json`; `health.ts`'s `JSON.parse` on the raw
+marker text failed on every marker the script ever wrote, so
+`backup.verified` stayed `false` even immediately after a successful
+verify. Fixed by writing via `[System.IO.File]::WriteAllText(...,
+New-Object System.Text.UTF8Encoding $false)` (no BOM) and having
+`parseMarker` strip a leading `\uFEFF` so old markers still parse.
+
+**Evidence of a live run, quoted from `00c3174`'s own commit message (the
+only such evidence found — no separate dated handover doc exists for
+this):** "Verified live: rebuilt and restarted sms-api, reran the fixed
+script against the sms DB backup dir (new marker
+`sms-20260929-212238.bak.verified.json` hex-dumps to `7b0d0a...` with no
+BOM), and GET /api/health now reports backup.verified=true." **This is one
+manual run against the `sms` (app) database's backup directory** — it does
+not, by itself, constitute the "backup ran to D: and C:, restored and
+CHECKDB clean" claim that circulated for this loop; that broader claim was
+not found written anywhere and is not repeated here. `F-15`
+(`handover/FAILURE-ANALYSIS-2026-09-29.md` row, score 15, top risk) is
+**still open**: the nightly scheduled task has never run unattended, and
+every backup artefact still lives on one laptop's two disks (`F-34`).
+
+### PDAS limit-change guard, UPDLOCK, two-step review — **HIGH-severity gaps F-26/F-27 closed**
+
+`8e8c893`: `PDAS_LIMIT_MAX_SETPOINT_CHANGE_PCT` and
+`PDAS_LIMIT_MAX_OFFSET_CHANGE_G` (`sms/.env.example:85-86`,
+`sms/api/src/config.ts:534-535`; code defaults `3` and `20`, matching the
+placeholder values this project has used since they were first floated —
+still the developer's own judgement call, IFL has not stated a plausibility
+policy). A "large change" (outside these bounds) requires a reason of at
+least 20 characters (`MIN_LARGE_CHANGE_REASON_CHARS`) versus the ordinary
+10-character minimum, plus an explicit checkbox
+(`sms/web/src/screens/product/Catalogue.tsx`'s two-step `'edit' | 'confirm'`
+flow — step 1 is a plain-language before→after review, step 2 is a
+separate write click; `canWrite` gates on both). **F-26** ("a wrong limit
+written to PDAS by one click," score 8) is closed by the two-step flow and
+the tightened bounds, though the bounds themselves remain a developer
+placeholder pending IFL's policy answer (see `IFL-OPEN-QUESTIONS.md` #17
+below).
+
+The in-transaction check-read (`readFields`, `pdasWrite.ts:782-800`) now
+takes `WITH (UPDLOCK, HOLDLOCK)` when called with `{forUpdate: true}`, so a
+second concurrent writer reading the same `Materials` row blocks on this
+transaction instead of racing it to commit; the post-commit echo-back read
+is deliberately left plain (nothing left to protect after commit). This
+closes **F-27**'s "the check-read has no update lock" gap
+(`handover/FAILURE-ANALYSIS-2026-09-29.md` row, score 3) — proven only by
+reading the code and the local 19/19 harness (`Part 10`/`Part 11`), never
+against a real concurrent write race.
+
+### DQ acknowledge — migration 042, nothing acknowledged yet
+
+`4298ac4`: `042_dq_acknowledgement.sql` adds
+`sms.dq_acknowledgement(finding_id PK, acknowledged_by, acknowledged_utc,
+reason)`, one row per finding, FKs to `sms.dq_finding`/`sms.app_user`.
+The allow-list of acknowledgeable checks is application-side
+(`shared/src/dqAck.ts`): six DATA-FACT checks (`nonpositive_weight`,
+`stale_timestamp`, `future_timestamp`, `isolated_production_day`,
+`station_not_in_roster`, `source_columns_changed`) may be acknowledged;
+system-state checks (`persistent_sync_failure`, `transform_failed`,
+`pdas_write_*`) are explicitly refused, by design — those are alarms about
+SMS itself, not facts about IFL's data, and acknowledging one would hide a
+real outage. `POST /api/dq-findings/:id/ack` is rank ≥ 2. `health.ts`'s
+blocking-findings count excludes acknowledged rows (falling back to the
+unfiltered count if the ack table is missing). **Nothing has been
+acknowledged on the dev database** — no populated row was found — which is
+correct: acknowledging a data fact is a judgement call for whoever owns the
+data, not this pass's or any agent's to make. This is one contributor to
+closing **F-24** (Health stuck "degraded" by data findings that are never
+cleared) — the mechanism exists; the dev box will keep reading `degraded`
+until an engineer actually uses it on the two real `nonpositive_weight`
+findings (`dq_finding` 92/96, see this file's own note above on those two
+rows being genuine IFL zero-weight rows, not simulator artefacts).
+
+### RT-028 — closed
+
+`a6afbae` adds `MAX_RANGE_DAYS = 366` (`sms/api/src/config.ts:64`) to
+`/api/production` (~`app.ts:989`) and `/api/weights` (~`app.ts:1418`), the
+two endpoints that — unlike every sibling report route — had no range cap
+at all. Exceeding it now returns `400` with `"range too large — max 366
+days, requested N"`, the same shared `validateRange` message every other
+capped route already used. This closes the table row at line 727 of this
+file ("open — not addressed by this wave"); that row's own text is now
+stale and should be read as historical.
+
+### F-04 and F-07 — wording fixes, both new to this register (previously only in `FAILURE-ANALYSIS-2026-09-29.md`)
+
+**F-04** (`4435e0e`) — old copy stated a stopped LINE as settled fact
+(`W.state.stopped = (span) => "has been stopped for ${span}"`); SMS cannot
+distinguish a stopped line from a stopped/failed IFL data recorder from SQL
+readings alone. New copy: `"has had no readings for ${span} — the line, or
+the plant's data recorder, may have stopped"` (and the equivalent for the
+unknown-duration case). `rt006.lagUnknown.test.tsx`'s pinned regex updated
+to match.
+
+**F-07** (`bb1dd2f`) — a shift-derivation footnote, exact text
+(`SHIFT_SOURCE_NOTE`, `sms/api/src/services/reports/common.ts`): *"Shifts
+are worked out from production time and can differ from the vendor
+screen's Shift column."* Added to the JSON report header, the on-screen and
+print header (`PrintHead.tsx`), the CSV trailing rows (10th row now,
+`generationDisclosure.test.ts`/`reports.test.ts` pins updated), and the
+XLSX header sheet. This is disclosure, not a fix to the underlying
+divergence (`F-07`'s own root cause, IFL's vendor-trigger shift bug, stays
+open — RT-025 and the RT24-04 backfill below).
+
+### `newestProductionDay` generation-scoping fix (`7bfa4b8`)
+
+`routes/reports.ts`'s `newestProductionDay()` ran unscoped by source
+generation, so on the dev sidecar a bare report request silently anchored
+on the plant-simulator's newest day instead of the real IFL generation,
+even though every period-scoped figure in the same report was itself
+computed from the real generation only — an anchor/body mismatch. Fixed by
+routing it through the same `resolveGenerationScope(...,
+{preferReal: true})` every other report/service query already uses.
+`live.ts`'s dev-only `resolveLiveScope` (`preferReal: false`) is
+deliberately untouched. New test:
+`sms/api/src/routes/reports.newestDay.generation.test.ts`.
+
+### Caching — `/api/reject-spc` and `/api/events` (`a640fed`, `37f8594`)
+
+In-memory `TtlCache`, TTL = `cfg.cacheTtlSeconds` (5 s in tests), keyed on
+every query parameter that affects the answer; no explicit invalidation,
+entries just expire (both routes are read-only data). `X-Cache: HIT`/`MISS`
+added for observability. **The "~600 ms to under 12 ms" figure that
+circulated for this loop could not be confirmed** — grepped every `.md`
+file in the repo, zero hits for "600ms"/"600 ms"/"under 12ms"/"under 12
+ms". The commit messages themselves state only the *before* figures:
+"570-730ms measured" (`a640fed`, reject-spc) and "1.5-1.8s measured at
+pageSize 500 over 30 days" (`37f8594`, events); no *after* millisecond
+figure is stated in either commit or its test file
+(`app.rejectSpcCache.test.ts`, `app.eventsCache.test.ts` assert HIT/MISS
+behaviour and "no new DB query on a warm hit," not a timing number). Do not
+repeat "600ms → 12ms" as a measured fact.
+
+### Shift-rule history (`d71735a`, Task W1-B)
+
+Before this, only "what shift rule is in force right now"
+(`live.ts`'s `loadShiftRule`) existed, so a register/report/downtime query
+spanning a range that itself straddled a Setup edit to the shift boundary
+judged the *old* end of that range by *today's* rule — the same "judge a
+reading by the rule in force at its own time" violation this project
+already fixed for product limits. `loadShiftRuleHistory`
+(`sms/api/src/services/ruleAsOf.ts`, reads the existing `sms.shift_rule`
+table by its existing `effective_from` column, no new migration) and
+`shiftRangeEdgesUtcAsOf` (`sms/api/src/shiftRange.ts`) resolve each edge of
+a shift-range window independently. Switched three real callers:
+`register.ts`'s `withShiftRangeEdges`, `downtime.ts`'s
+`getStoppagePatterns`, `sackStock.ts`'s `listMovements`
+(`routes/sacks.ts`'s own `loadShiftRule` call is deliberately untouched —
+it resolves "now," not a range edge). Test:
+`ruleAsOf.shiftRule.test.ts`.
+
+### a11y: `<th>` headers — shipped broken, then fixed, then proven in a real browser
+
+`8782d6d` added `<thead>`/`<th scope="col"|"row">` to 8 tables across
+`Line.tsx`, `product/Running.tsx`, `product/Changeover.tsx`,
+`product/Catalogue.tsx`, styled `.sr-only` (matching an existing
+convention). **This shipped broken**: `.sr-only` is `position: absolute`,
+which blockifies a `<th>` — its computed `display` becomes `block` instead
+of `table-cell`, and its implicit ARIA role drops from `columnheader` to
+`generic`. jsdom, the only harness that existed at the time, computes no
+CSS and never caught it — stated explicitly in `0ccc40a`'s own commit
+message and its `app.css` header comment. Fixed by `.sr-only-th`
+(`sms/web/src/app.css`, no `position` property: `width/height: 1px; clip-path:
+inset(50%); ...`), applied per screen by `9ea44d4`/`e78dba6`/`e57eb37`/
+`a308215` (Line/Running/Changeover/Catalogue, two header rows each, 24
+`<th scope="col">` cells total). **Proof it actually works now**: a real
+Playwright spec, `sms/layout-tests/a11y.tables.spec.ts` (added `2d3abca`,
+mocks extended `3215f1e`), asserts `getByRole('columnheader')` resolves and
+is visible, computed `display` is `table-cell`, and header-row height is
+≤1px, for all four screens. `bc4ae9e` is unrelated cache-guard work bundled
+into the same commit run, not part of the a11y fix. **Gate number
+correction:** this loop's brief claimed "82 Playwright passing." Measured
+directly this pass, `npx playwright test --list` from `sms/`: **95 tests
+across 7 files**, single project. A full pass/fail run was not performed
+this pass (no dev server was started for it — out of scope, documentation
+pass); do not state a pass count for Playwright without running it. The
+last actually-observed run remains Part 11's own: 77 passed / 13 skipped,
+predating the a11y suite.
+
+### Polling backoff and log throttling (`47031d9`)
+
+`usePolling` now doubles its retry delay on each consecutive failure,
+capped at `max(60s, 6× interval)`, resetting to the normal interval on the
+next success; a manual `refresh()` still fires immediately regardless of
+backoff state. `SimulatorBanner` logs one `console.warn` when a failure
+streak begins and one recovery line when it clears (was `console.error` on
+every failed render) — "once per outage" means once at each end of a
+streak, not once per poll.
+
+### Dependency hygiene (`0af89ef`, `a90935a`, and `2176dc0` — already in Part 11(i), not duplicated)
+
+`vitest` → `^5.0.2`, `vite` → `^8.3.1`, `@vitejs/plugin-react` → `^6.1.1`
+(confirmed in `sms/package.json`/`sms/web/package.json`). `npm audit
+--json` run live in `sms/` this pass: **`"total": 0`** across every
+severity — confirms Part 11(i)'s "0 vulnerabilities" claim exactly; not a
+new fix, `2176dc0` is already recorded there and is not re-opened here.
+
+### Gate, measured directly this pass (not carried over from any commit message)
+
+`cd sms && npx vitest run`, twice, clean both times: **289 test files
+passed / 1 skipped (290), 2950 tests passed / 4 skipped (2954), 0
+failed.** `npx tsc -b shared sync-worker cli api web`: clean, exit 0. This
+loop's own task brief said "2,942+ vitest passing twice" — the real,
+freshly measured number is 2950, close but not identical; use 2950 going
+forward, not 2942. **One real, order-dependent flake surfaced during this
+pass's verification, not the previously-registered ~1-in-74 flake:** a
+background research agent's own `npx vitest run` (full suite, one pass)
+showed `sms/api/src/app.rejectSpcCacheCap.test.ts` (new in `bc4ae9e`)
+failing with `expected 50001 to be +0`; run alone it passes 4/4, and both
+of this pass's own two full-suite runs were clean. Not reproduced a third
+time; not chased further (documentation-only scope) but worth a name in
+case it recurs — it is a *different* failure shape from D-7's unnamed
+flake and should be tracked separately if it happens again.
+
+### Explicitly skipped this pass, with reasons
+
+- **F-38 refuse-to-start on a time-zone mismatch.** `FAILURE-ANALYSIS-2026-09-29.md` row F-38 already states the gap plainly ("Neither program refuses to start" on a `PLANT_UTC_OFFSET_MINUTES` mismatch — warning only). No commit in this pass's range touches `plantClockCheck.ts` or the startup path. Still open.
+- **F-20, a separate/higher permission for PDAS writes.** Still gated at rank 2 "engineer" while `DEPLOY.md` recommends creating every IFL account at rank 3 "manager" — no code in this range changes the gate or adds a PDAS-specific role. Still open; needs an IFL decision on who may write, not just a code change.
+- **RT24-04 re-transform backfill.** The shift-rule-as-of and plausibility-rule-as-of fixes (`1315d23`/`8f5c80c`, already recorded) are not retroactive — rows transformed before those fixes keep their old attribution. No commit in this range runs that backfill. Still open, tracked in `COMMISSIONING-GAPS.md`.
+- **Nelson rules 2-8.** Unchanged from the owner's 25 Sep 2026 decision (Part 8) to keep them withheld by evidence (EWMA failed at both granularities tested). No code in this range touches `nelson.ts`.
+- **Per-machine "running" thresholds** (`machinesRunning.ts:51-54`, 2h/7-day). Still an unconfirmed developer default per `FAILURE-ANALYSIS-2026-09-29.md` row F-22; no commit in this range changes it or gets it confirmed by the owner.

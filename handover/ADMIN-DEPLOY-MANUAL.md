@@ -761,6 +761,59 @@ scheduled tasks) copies `.env`, the TLS files it names, the NSSM service dumps, 
 scheduled task XML into an ACL-restricted folder (`.env` holds database passwords in
 clear text) under `BACKUP_DIR\config\<stamp>\`. Keeps the last 10 snapshots.
 
+### 11.8 Quick card — Restore from backup (added 29 Sep 2026)
+
+1. Find the newest **verified** backup: `GET /api/health` → `backup.verified`
+   (or check `BACKUP_DIR` by hand for a `.bak` with a matching
+   `<file>.verified.json` whose `sizeBytes` still matches the `.bak`'s
+   current size — an unverified `.bak` may have been renamed to
+   `.unverified` and skipped).
+2. `RESTORE FILELISTONLY FROM DISK = N'<file>.bak';` — read the logical file
+   names first, they vary by install.
+3. Restore into a **scratch** database, never straight over `sms`:
+   ```sql
+   RESTORE DATABASE sms_restore_test FROM DISK = N'<file>.bak'
+     WITH MOVE 'sms' TO N'<data dir>\sms_restore_test.mdf',
+          MOVE 'sms_log' TO N'<data dir>\sms_restore_test_log.ldf';
+   ```
+4. Spot-check: row counts against what you expect, `product_timeline`'s
+   newest row, `sms.source_epoch` still shows the right generations.
+5. Only once step 4 looks right: stop both services (`nssm stop SMS-Api`,
+   `nssm stop SMS-Sync`), then restore over the live database —
+   `RESTORE DATABASE sms FROM DISK = N'<file>.bak' WITH REPLACE` — start the
+   services back up, and confirm `GET /api/health` reports `status: "ok"`.
+6. Drop `sms_restore_test` once you're done with it.
+7. **What you lose:** anything written after the backup's timestamp and
+   before the restore — a product changeover, a calibration entry, a DQ
+   acknowledge. Readings themselves are re-read from IFL by the worker once
+   it resumes (the watermark is inside the restored database), so those
+   are not lost — say this out loud to whoever asked for the restore before
+   you run step 5.
+
+### 11.9 Quick card — Backfill the 10 Jul – 5 Aug 2026 data (added 29 Sep 2026)
+
+Full detail and the reason each step exists: `sms/DEPLOY.md`'s "Backfilling
+the 10 Jul – 5 Aug 2026 gap" section. **This has been unit-tested against a
+fake database only — the fixture meant to rehearse it against a real scratch
+SQL Server instance has never actually been run.** Rehearse it there first.
+
+1. Ask IFL for `db_datareader` on the archive database, for the same login
+   already reading the live source.
+2. `sms epoch:backfill --table=<name> --epoch=<id> --source-db=<archive-db>`
+   — no `--confirm` — read the dry-run plan (max ids, overlap check, tail
+   range). Repeat with `--all` to preview every table at once.
+3. `sms epoch:accept ...` to register the generation if it is not already
+   registered. If it refuses with a data-vintage error, and you are certain
+   this genuinely is the older generation (it is, by construction, for this
+   specific gap), add `--i-know-this-is-a-new-generation`.
+4. Re-run step 2 with `--confirm`.
+5. `sms rebuild --table=<t> --snapshot-id=<id> --epoch=<id> --confirm` —
+   take a backup first (11.1 above); a rebuild needs a snapshot id and
+   refuses without one.
+6. `sms verify --source-db=<archive-db> --epoch=<id>` to reconcile.
+7. Confirm on screen: the new date range appears in reports scoped to that
+   generation, and `sms summary --epoch=<id>` prints the expected totals.
+
 ## 12. Troubleshooting
 
 | Symptom | Likely cause | Fix |

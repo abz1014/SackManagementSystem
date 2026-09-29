@@ -547,7 +547,8 @@ ALTER ROLE db_backupoperator ADD MEMBER sms_backup;
 
 ### Running it
 
-- **Nightly:** `scripts\install-scheduled-tasks.ps1` registers it (roadmap Phase 11, 14 Sep 2026) as the task *SMS Nightly Backup* at 02:00, run **as a Windows account holding `db_backupoperator`** so no password appears in the task definition — the script is called with `-User ""`, which makes it connect as that account (`sqlcmd -E`). See *Scheduled tasks* under Operations below. Keeps 30 days. Run it by hand with a SQL login as before: `-User sms_backup -Pass <password>`.
+- **Nightly:** `scripts\install-scheduled-tasks.ps1` registers it (roadmap Phase 11, 14 Sep 2026) as the task *SMS Nightly Backup* at 02:00, run **as a Windows account holding `db_backupoperator`** so no password appears in the task definition — the script is called with `-User ""`, which makes it connect as that account (`sqlcmd -E`). See *Scheduled tasks* under Operations below. Keeps 30 days (`-NoPrune` switch disables this and keeps every backup forever — use it only when disk space is not a concern and you want a full history, e.g. before a risky operation, or when a separate offline retention policy already governs the files). Run it by hand with a SQL login as before: `-User sms_backup -Pass <password>`.
+- **Verified-backup marker (added 29 Sep 2026).** After `RESTORE VERIFYONLY FROM DISK = N'<file>' WITH CHECKSUM` succeeds, the script writes a `<file>.verified.json` marker beside the `.bak` (`{file, sizeBytes, verifiedUtc, method}`), written with no BOM (`[System.IO.File]::WriteAllText(..., New-Object System.Text.UTF8Encoding $false)` — PowerShell 5.1's `Set-Content -Encoding utf8` silently prepends a UTF-8 BOM that broke `GET /api/health`'s `JSON.parse` of every marker until this was found and fixed by actually running the script). On a `RESTORE VERIFYONLY` failure, the `.bak` is renamed to `<file>.unverified` and the script exits non-zero — Health then reports the newest file that *does* have a matching, size-consistent marker instead of trusting an unverified one. **`BACKUP_DIR` in `.env` must equal wherever the backup actually lands** — the script's own `-OutDir` default and `.env`'s `BACKUP_DIR` both default to `C:\sms-backups`, but if the scheduled task is registered with a different `-BackupDir` (see *Scheduled tasks* below), Health will look in the wrong folder and report backups missing or stale even while real ones are being taken elsewhere. Keep them in lock-step; this is the single most common way "backups run every night" and "Health says no backup" turn out to both be true.
 - **`-OutDir` must be writable by the SQL Server *service account*, not just
   whoever runs the script** — `BACKUP DATABASE` executes on the server
   process, not the client. An arbitrary user-profile folder is often not
@@ -676,6 +677,65 @@ added.
 | `retention` | n/a — prunes `sync_run`, non-critical `dq_finding` and expired sessions only, and never a reading of either layer | prints what it will never touch on every run |
 | `summary` | **yes, since 23 Sep 2026** — counts are `GROUP BY source_epoch` and printed one block per generation; optional `--epoch=N[,M]` narrows the scope and the excluded generations are named. **Before that: no.** It aggregated by `shift_date` alone and pooled every generation into one number with nothing on screen to say so | read-only, so it never destroyed anything — but it is the command someone reaches for before quoting a figure to IFL, which is the worst place for a silently pooled number. It **reports** rather than refusing (unlike `rebuild`): a read-only command that refuses is one an operator routes around with ad-hoc SQL that has no epoch predicate either. The same omission still runs through most API read services — one decision, not a per-command patch, and still open |
 | `user:create` / `user:password` | n/a — accounts, not readings | — |
+
+### Backfilling the 10 Jul – 5 Aug 2026 gap (`sms epoch:backfill`, added 29 Sep 2026)
+
+Once IFL sends the archive covering the gap between the July and September
+samples (still outstanding — `IFL-OPEN-QUESTIONS.md`), it needs a dedicated
+command, not `sync` — the worker only ever reads forward from a watermark,
+and this data lands inside a generation that is already **closed**.
+
+**Runbook:**
+
+1. **Grant read on the archive database to the IFL read-only login** —
+   whatever `IFL_DB_USER` is at the time, `db_datareader` on the archive
+   database only, same as the live source. This is a request to IFL, not a
+   step you can do yourself.
+2. `sms epoch:backfill --table=<name> --epoch=<id> --source-db=<archive-db>`
+   with **no `--confirm`** — this is the dry run, the default, and it is
+   safe to run as many times as you like. It prints the source's max id, the
+   existing max id already held, an overlap-proof check, and the tail range
+   it would insert. Read this output before touching `--confirm`.
+3. Repeat step 2 with `--all` in place of `--table=<name>` to preview every
+   table in one pass; the whole command aborts with **zero writes** if any
+   one table's check fails, so a partial backfill never happens silently.
+4. Once the dry run looks right, re-run with `--confirm`. This writes only
+   to `sms_raw.*` (never `sms.cone_event`/etc. directly, never watermarks or
+   `closed_utc`), tagging the new rows with the target epoch, and records
+   one `sms.audit_log` row (`action='epoch.backfill'`).
+5. `sms rebuild --table=<t> --snapshot-id=<id> --epoch=<id> --confirm` —
+   the backfill only inserts raw rows; canonical rows for that epoch still
+   need deriving from them, exactly as any other rebuild does (see *Backup &
+   restore* above — a rebuild needs a snapshot id and refuses without one).
+6. `sms verify --source-db=<archive-db> --epoch=<id>` — reconciles the
+   epoch's raw rows against the archive by count and id sum. `--source-db`
+   **requires** `--epoch` (fixed 29 Sep 2026, `96f913e` — without it, every
+   closed epoch sharing that table name used to be checked against the named
+   source, producing spurious STOPs unrelated to the one you actually mean).
+
+**Before any of this, `sms epoch:accept` needs to register the epoch**, and
+it now carries a data-vintage guard (added 29 Sep 2026, `08df232`): it
+refuses to register a "new" generation whose newest reading is implausibly
+old relative to what is already open, or whose id-range checksum matches a
+generation already closed — the case a *restored or rebuilt* old archive
+produces, since a restore gets today's `create_date` regardless of the
+data's real age. If you are certain the data genuinely is an older
+generation (which the 10 Jul – 5 Aug backfill is, by construction), pass
+**`--i-know-this-is-a-new-generation`** to bypass the guard; every use of
+this flag that changes a real registration is written to `sms.audit_log`
+(`epoch.accept.vintage_override`), so it is never a silent override.
+
+**What this has NOT been proven to do, stated plainly (29 Sep 2026):** every
+test covering `epoch:backfill`, the verify-scoping fixes, and the vintage
+guard runs against a fake/mocked SQL pool. A fixture,
+`sms/scripts/r17-fixture.sql`, exists to rehearse this whole runbook against
+a scratch SQL Server database shaped like IFL's July tables — but, by its
+own commit message, it has only been parse-checked (`SET PARSEONLY ON`),
+never executed. **Run this fixture for real, against a scratch database,
+before trusting this runbook against the actual archive when it arrives.**
+See `DEFECTS.md` Part 12 for the full account, including a specific claim
+about an end-to-end proof that circulated this pass and could not be
+confirmed anywhere in the repository.
 
 ### Health
 
@@ -811,6 +871,52 @@ install actually needs the non-default value. None is required.
   explicit wrong path fails loudly (PDF export disabled, reason stated) rather
   than silently falling back to the auto-probe — see `edge.ts`'s own header
   comment and `edge.test.ts`.
+
+### PDAS limit-change bounds (added 29 Sep 2026)
+
+`PDAS_LIMIT_MAX_SETPOINT_CHANGE_PCT` (default **3**) and
+`PDAS_LIMIT_MAX_OFFSET_CHANGE_G` (default **20**) — the plausibility window
+the "change limits" write path (`pdasWrite.ts`) accepts before it treats an
+edit as a "large change" needing a longer stated reason (≥ 20 characters,
+versus the ordinary 10-character minimum) and an explicit confirmation
+checkbox in Product › Catalogue's two-step review. **These bounds are ours,
+not IFL's** — the developer's own judgement call, since IFL has not stated a
+plausibility policy for an in-place limits edit. Do not present 3%/20g to
+IFL as a validated number; it is a placeholder pending their answer (see
+`IFL-OPEN-QUESTIONS.md` on who may change limits and by how much).
+
+### DQ finding acknowledge (added 29 Sep 2026, migration 042)
+
+`POST /api/dq-findings/:id/ack` (rank ≥ 2) lets an engineer acknowledge a
+DQ finding that is a **fact about IFL's data**, not about SMS's own health:
+`nonpositive_weight`, `stale_timestamp`, `future_timestamp`,
+`isolated_production_day`, `station_not_in_roster`, `source_columns_changed`.
+System-state checks (`persistent_sync_failure`, `transform_failed`,
+`pdas_write_*`) cannot be acknowledged — those are alarms about SMS itself
+and acknowledging one would hide a real outage. An acknowledged finding
+still exists (`sms.dq_acknowledgement`, one row per finding, who/when/why)
+but no longer counts toward Health's "degraded" verdict. **Nobody has
+acknowledged anything on the dev database as of 29 Sep 2026** — that is
+correct; it is an engineer's judgement call about their own data, not
+something to do by default or in bulk.
+
+### Running the Playwright layout tests
+
+```
+cd sms
+npm run test:layout
+```
+
+Needs a running dev server at the URL `playwright.config.ts`'s `baseURL`
+points at (`:5173` by default — start it separately, e.g. `npm run dev` in
+`web/`; the config does not auto-start one). Most specs run signed-out; a
+minority need `SMS_TEST_USERNAME`/`SMS_TEST_PASSWORD` env vars for a real
+signed-in session and are **skipped**, not failed, without them — create
+those credentials yourself first (agents may not create accounts, per this
+project's standing rule). As of 29 Sep 2026 the suite is 7 spec files, **95
+tests** (`npx playwright test --list` from `sms/`); the last full pass/fail
+run actually observed was 77 passed / 13 skipped, predating the newest spec
+(`a11y.tables.spec.ts`) — re-run it before trusting a specific pass count.
 
 ---
 

@@ -12,13 +12,14 @@
 > fifteen asks, ordered by what each unblocks — is the new
 > [`IFL-OPEN-QUESTIONS.md`](IFL-OPEN-QUESTIONS.md).
 
-**Commit-count note, added 28 Sep 2026, updated 29 Sep 2026:** `git rev-list --count
-origin/main..HEAD` measured **251** on 28 Sep and **303** on 29 Sep (also `git rev-list
---count origin/floor-first-rework..HEAD` = **103** on 29 Sep — that remote branch was last
-pushed 16 Sep). Every older "N commits ahead of origin/main" figure elsewhere in this file
-(85, 90 ["80" below], 179, ...) is a historical snapshot taken on the date its own passage
-states, left as written rather than rewritten in place. Still unpushed; only the owner
-pushes.
+**Commit-count note, added 28 Sep 2026, updated 29 Sep 2026, updated again 29 Sep 2026
+(owner-scope hardening loop, later the same day):** `git rev-list --count
+origin/main..HEAD` measured **251** on 28 Sep, **303** on 29 Sep, and **353** later the
+same day (also `git rev-list --count origin/floor-first-rework..HEAD` = **103** on 29 Sep —
+that remote branch was last pushed 16 Sep, not re-measured this pass). Every older "N
+commits ahead of origin/main" figure elsewhere in this file (85, 90 ["80" below], 179,
+251, 303, ...) is a historical snapshot taken on the date its own passage states, left as
+written rather than rewritten in place. Still unpushed; only the owner pushes.
 
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
@@ -53,6 +54,56 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 ---
 
 ## 2. Completed
+
+### 29 September 2026 — owner-scope hardening loop (later the same day than the entry below)
+
+Documentation-and-verification pass, 37 commits (`72efd5e..HEAD`), no application code
+changed by this pass itself (a concurrent worker landed `sms/api/src/middleware/
+responseCap.ts` in the same window). Full account: `DEFECTS.md` Part 12; dated summary:
+`CLAUDE.md`'s "Owner-scope hardening loop" section, now the newest entry under "Current
+phase". This pass's own gate, measured directly rather than carried over: `npx vitest run`
+from `sms/`, twice, clean both times — **289 files passed / 1 skipped (290), 2950 tests
+passed / 4 skipped, 0 failed**; `npx tsc -b shared sync-worker cli api web` clean;
+`npx playwright test --list` — **95 tests in 7 files** (not run pass/fail this pass).
+
+**What landed, real and tested:** `sms epoch:backfill` plus `sms verify --epoch`/
+`--source-db` scoping fixes and an `epoch:accept` data-vintage guard (`b81eb1c`,
+`937616d`, `96f913e`, `08df232`, `2eaa7a3` — R-17); a verified-backup marker with a BOM
+bug found and fixed by actually running it, plus free-disk and worker-heartbeat reporting
+on Health (`f166183`, `00c3174` — F-15); a PDAS limit-change guard, two-step UI review and
+`WITH (UPDLOCK, HOLDLOCK)` on the concurrent check-read (`8e8c893` — F-26/F-27); a DQ
+acknowledge mechanism, migration 042 (`4298ac4` — contributes to F-24); the missing
+366-day range cap on `/api/production`/`/api/weights` (`a6afbae` — RT-028, now closed);
+F-04/F-07 wording fixes (`4435e0e`, `bb1dd2f`); a `newestProductionDay` generation-scoping
+bug (`7bfa4b8`); caching for `/api/reject-spc` and `/api/events` (`a640fed`, `37f8594`);
+time-versioned shift-rule history for range edges (`d71735a`); an a11y `<th>` regression
+shipped, caught only once a real-browser Playwright spec existed, and fixed (`8782d6d` →
+`0ccc40a` → four screen commits → `2d3abca`); polling backoff (`47031d9`); `npm audit`
+reconfirmed at 0 vulnerabilities (`2176dc0`, already in `DEFECTS.md` Part 11).
+
+**Two claims from this pass's own task brief corrected, not carried forward as fact:**
+R-17 is **not** proven end to end — the brief's specific scratch-DB run numbers ("2,000
+rows... 56 cones on 15 Jul") were searched for across `handover/`, this file, `CLAUDE.md`
+and `DEFECTS.md` and not found; the fixture SQL exists but its own commit message says it
+was parse-checked only, never executed, and `handover/FAILURE-ANALYSIS-2026-09-29.md`
+(written the same day, after these commits) still lists R-17 open. And the vitest gate is
+**2950**, not the brief's "2,942+" — close, but the real measured number should be used
+going forward. See `DEFECTS.md` Part 12 for the full correction on both.
+
+**Explicitly skipped, with reasons (see `DEFECTS.md` Part 12):** F-38 (refuse-to-start on
+a time-zone mismatch — still warning-only), F-20 (a separate/higher PDAS-write permission
+— still the same rank as any other engineer action), the RT24-04 re-transform backfill,
+Nelson rules 2-8 (owner already decided 25 Sep to withhold them), per-machine running
+thresholds (still an unconfirmed developer default).
+
+**Verified on the local dev copy and simulator only**, same as every entry below. Still
+client- or owner-dependent, unchanged: the 10 Jul – 5 Aug archive itself; who may change
+PDAS limits and by how much (the 3%/20g bounds this pass documented are still ours, not
+IFL's); how/when the PLC picks up a changed limit; whether SMS should correct or reproduce
+IFL's `Shift` column; retention, a UPS, a rebuild warning, `DENY SELECT` on `dbo.Users`;
+the nightly backup running unattended off one laptop; and `handover/
+FAILURE-ANALYSIS-2026-09-29.md` §7's full G1-G8/W1-W6 go-live conditions, none of which a
+documentation pass can close by itself.
 
 ### 29 September 2026 — chart overhaul, PDAS harness at 19/19, and disclosure/health work
 

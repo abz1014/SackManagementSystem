@@ -362,3 +362,77 @@ The conclusion is unchanged: **years of headroom, not months**. But IFL's retent
 - `C:\Users\ABDULLAH SAJID\Desktop\sag database\sms\api\src\services\pdasWrite.ts`
 - `C:\Users\ABDULLAH SAJID\Desktop\sag database\sms\sync-worker\src\runner.ts`
 - `C:\Users\ABDULLAH SAJID\Desktop\sag database\sms\DEPLOY.md`
+
+---
+
+## Status addendum (29 Sep, later)
+
+Written after the owner-scope hardening loop (37 commits, `72efd5e..HEAD`; full
+account `DEFECTS.md` Part 12). This section updates the status of the failure
+modes and conditions this loop actually touched, in place, without deleting
+the original text above — the original readiness verdict, and every risk not
+named below, is unchanged.
+
+**F-15 (Backups, rank 1, score 15) — narrowed, still open as the top risk.**
+A verified-backup marker mechanism now exists (`f166183`) and a real BOM bug
+that silently broke every marker's `JSON.parse` was found and fixed by
+actually running the script (`00c3174` — one manual run, `sms-20260929-
+212238.bak.verified.json`, confirmed no-BOM, `GET /api/health` then reported
+`backup.verified=true`). **This is still one hand-run against the app DB's
+own backup directory, not a proven unattended nightly run**, and every copy
+of every backup still lives on the same laptop. The action that most reduces
+this risk is unchanged: register the task, watch 7 nights, copy off the
+machine.
+
+**F-26 (Change limits, wrong value written, rank 8) — closed.** A two-step
+UI review (`Catalogue.tsx`'s `'edit' | 'confirm'` flow) plus a tightened,
+named plausibility window
+(`PDAS_LIMIT_MAX_SETPOINT_CHANGE_PCT=3`, `PDAS_LIMIT_MAX_OFFSET_CHANGE_G=20`)
+now exist, gating any change outside those bounds behind a ≥20-character
+reason and an explicit checkbox (`8e8c893`). **The bounds themselves are
+still a developer placeholder, not an IFL-confirmed policy** — this row's
+"IFL names who may change limits" action item is unaffected; see
+`IFL-OPEN-QUESTIONS.md`.
+
+**F-27 (Concurrent/partial writes, rank tied at 3) — narrowed.** The
+check-read this row flagged as lacking an update lock now takes
+`WITH (UPDLOCK, HOLDLOCK)` when called for a write (`readFields(...,
+{forUpdate: true})`, `8e8c893`), closing the specific gap this row named.
+Proven only by code reading and the local 19/19 harness — never against a
+real concurrent write race with two live sessions.
+
+**F-24 (Health stuck "degraded" from data findings) — mechanism built, not
+yet exercised.** A DQ-finding acknowledge route now exists
+(`POST /api/dq-findings/:id/ack`, migration 042, `4298ac4`), excluding
+acknowledged findings from Health's blocking-findings count. It only covers
+six DATA-FACT checks, by design — system-state checks remain
+un-acknowledgeable so a real outage can never be silenced this way. Nothing
+has been acknowledged on the dev database as of this addendum; Health will
+keep reading `degraded` from `dq_finding` 92/96 until an engineer actually
+uses this on those two genuine IFL zero-weight rows.
+
+**R-17 / §6 item 11 (the 10 Jul – 5 Aug archive cannot be loaded as-is) —
+code exists, still not proven end to end; one claim corrected.**
+`sms epoch:backfill`, the `sms verify --epoch`/`--source-db` scoping fixes,
+and an `epoch:accept` data-vintage guard were all built and unit-tested this
+loop (`b81eb1c`, `937616d`, `96f913e`, `08df232`, `2eaa7a3`). Every test
+covering them runs against a fake pool; the fixture meant to rehearse this
+against a real scratch SQL Server instance
+(`sms/scripts/r17-fixture.sql`) has, by its own commit message, been
+"parse-checked... never executed." **A specific claim of an end-to-end
+scratch-DB proof circulated for this loop's own write-up and was searched
+for across this repository and not found — do not repeat it.** §6 item 11
+above is otherwise unchanged: this remains something SMS itself is not yet
+ready for, independent of whether IFL has sent the data.
+
+**RT-028 (§ not previously named in this document by id) — closed.**
+`/api/production` and `/api/weights` now share the same `MAX_RANGE_DAYS =
+366` cap every sibling report route already had (`a6afbae`).
+
+**Not touched by this loop, named so nobody assumes otherwise:** F-01, F-09,
+F-12, F-13, F-16, F-20, F-22 (per-machine thresholds still unconfirmed),
+F-23, F-28, F-30, F-31, F-33, F-34, F-35, F-36, F-37, F-38 (still
+warning-only, no refuse-to-start), F-41, F-43, F-45, and every G1-G8/W1-W6
+go-live condition in §7 above — none of them changed by a documentation-only
+pass. The readiness verdict in §7 stands exactly as written above this
+addendum.

@@ -409,6 +409,88 @@ your data, not a fix waiting on an answer.
 equipment (e.g. "ignore this row, it was a test") we could name it on screen instead of
 just flagging it as an error, which would make the finding more useful to whoever reads it.
 
+### 17. When you send the 10 Jul – 5 Aug archive, what format — and can it be a database backup?
+*(Added 29 September 2026, from the owner-scope hardening loop.)* We can load this gap once
+it arrives (the software side of that is built and tested against a stand-in database, though
+not yet rehearsed against a real one — our own work, not something we need from you). Our
+strong preference is **a `.bak` file of `DATA_TP1U2` taken before the 5 August rebuild** —
+a database backup restores cleanly and completely, where a spreadsheet or CSV export risks
+losing precision, column types, or rows silently. If a `.bak` from that exact date no longer
+exists, tell us what you do have (a later backup, an export, anything) and we'll work with it.
+
+**Blocked without it:** the 10 Jul – 5 Aug gap in every report and trend stays a gap.
+
+**Cost of staying blocked:** the longer this waits, the likelier it is that even a later
+backup no longer reaches back before 5 August, given your own retention.
+
+### 18. Who may change a running product's limits — and is a second person's approval needed?
+*(Added 29 September 2026.)* Our software now requires a plain-language before→after review
+and a second click before writing any limits change to PDAS, and it refuses an ordinary edit
+without a stated reason of at least ten characters. For a *large* change (more than roughly
+3% on the setpoint, or more than roughly 20g on either tolerance) it currently also demands a
+longer reason and an extra confirmation — **but 3%/20g are our own placeholder numbers, not
+numbers you have approved.** Two things we need from you: (1) is a single person's click
+enough, or does a limits change need a second person's sign-off before it takes effect; and
+(2) what change size should actually trigger the "this is unusually large, are you sure"
+step — tell us a number, or tell us the 3%/20g placeholder is fine as it stands.
+
+**Blocked without it:** nothing today — the placeholder guard is safe (if anything,
+over-cautious) either way. This becomes urgent only once PDAS writes are enabled at the
+plant, which is still gated on the local proof and your written authority (already given
+19 Sep 2026, see `DEFECTS.md` D-12) plus the plant-side rehearsals in `handover/`.
+
+### 19. How and when does the PLC actually pick up a changed limit from PDAS?
+*(Added 29 September 2026 — restates a question this project has asked in other words
+before, gathered here because it is now the single biggest gap in what our software can
+honestly claim about a limits change.)* Our software writes a new limit to PDAS's own table
+the moment someone confirms the change, and the screen currently states this as if it were
+the whole story. We do not know whether the scale then picks it up immediately, at the next
+product change, only after a restart, or not automatically at all. Until we know, our own
+sentence describing "the limit is now in force" is a guess dressed as a fact.
+
+**Blocked without it:** nothing breaks today, but the screen may be telling your engineers
+something that isn't true.
+
+**Cost of staying blocked:** an engineer who trusts our screen instead of checking the
+machine could run a shift against the old limit without knowing it.
+
+### 20. Should SMS correct the Shift column, or reproduce your vendor screen's version of it?
+*(Added 29 September 2026 — restates open item #7's underlying question in the specific
+terms our own report footnote now states on every report.)* We already told you (§7) that
+your `Shift` column is derived from when a row was *inserted*, not when the cone was
+actually produced, and that our reports now compute shift from production time instead —
+which means **our shift totals will not match your own PDAS/vendor screens for the same
+day.** Every report we produce now says this in one sentence, so nobody is surprised by it.
+The question we still need answered: do you want us to keep computing the *corrected* shift
+(ours), or to deliberately *reproduce* your vendor screen's version (including its known
+quirk) so the two systems agree, even though one of them would then be knowingly wrong?
+
+**Blocked without it:** nothing — we default to the corrected version, stated as such.
+
+**Cost of staying blocked:** every parallel-run comparison against your own figures (see
+`handover/FAILURE-ANALYSIS-2026-09-29.md`'s go-live condition G6) will show a shift-boundary
+difference that has to be re-explained each time, instead of settled once.
+
+### 21. Retention, a warning before a table rebuild, and locking down `dbo.Users`
+*(Added 29 September 2026 — three small, previously-scattered asks gathered into one
+item.)* Three separate things we need a decision on, none urgent on its own:
+
+- **How long should SMS keep raw and canonical readings** against SQL Server Express's 10 GB
+  cap? At the measured rate this is years away, not months, but it is still your call, not
+  ours to assume (this project's own working rule).
+- **Will you warn us before your team drops and recreates a weighing table**, the way it did
+  on 5 August 2026? That rebuild is what created the July/September split this whole gap
+  question is about; a few minutes' warning next time would let us close the generation
+  cleanly instead of discovering it after the fact.
+- **May we ask for `DENY SELECT` on `dbo.Users`** for whatever read-only login you provision
+  for us? That table holds three accounts with plaintext passwords equal to the usernames
+  (`CLAUDE.md`'s own Security section already flags this); we have no use for it and would
+  rather be structurally unable to read it than rely on our own discipline not to.
+
+**Blocked without it:** nothing today for the first two; the third is a small hardening step
+we can ask for regardless of your answer, since it costs you nothing to grant. UPS
+confirmation is item 12 above, not repeated here.
+
 ---
 
 ## What IFL has already answered — do not ask these again

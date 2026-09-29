@@ -18,13 +18,105 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
-**Commit-count note, added 28 Sep 2026, updated 29 Sep 2026 (final gate):**
-`git rev-list --count origin/main..HEAD` measured **251** on 28 Sep and
-**318** on 29 Sep. Every older "N commits ahead of origin/main" figure below
-this line (85, 90, 95, 114, 179, 251, ...) is historical — a count taken on
-the date its own section states, not the current count — and is left as
-written rather than rewritten in place, per this file's own convention of
-dated, superseded-not-deleted entries.
+**Commit-count note, added 28 Sep 2026, updated 29 Sep 2026 (final gate), updated again
+29 Sep 2026 (owner-scope hardening loop):** `git rev-list --count origin/main..HEAD`
+measured **251** on 28 Sep, **318** on 29 Sep (chart-overhaul pass), and **353** later the
+same day (this pass — documentation-only, no app code committed by this pass itself; the
+number moved because a concurrent worker landed commits on `responseCap.ts` in the same
+window). Every older "N commits ahead of origin/main" figure below this line (85, 90, 95,
+114, 179, 251, 318, ...) is historical — a count taken on the date its own section states,
+not the current count — and is left as written rather than rewritten in place, per this
+file's own convention of dated, superseded-not-deleted entries.
+
+### Owner-scope hardening loop (29 Sep 2026, later the same day than the chart-overhaul entry below)
+
+Documentation-and-verification pass over 37 commits (`72efd5e..HEAD`); full
+account in `DEFECTS.md` Part 12. No application code changed by this pass.
+Every number below was re-measured directly, not copied from a commit
+message — two figures circulated for this pass did not survive that check
+and are corrected here rather than repeated.
+
+**Built and real:** `sms epoch:backfill` (dry-run by default, `--confirm` to
+write, refuses an open/unknown epoch or a July-shape mismatch, writes only
+`sms_raw.*`) plus `sms verify --epoch`/`--source-db` scoping fixes and a
+data-vintage guard on `epoch:accept` (refuses a restored/rebuilt old archive
+masquerading as new; override `--i-know-this-is-a-new-generation`) — `b81eb1c`,
+`937616d`, `96f913e`, `08df232`, `2eaa7a3`. A verified-backup marker
+(`.verified.json`, BOM bug found and fixed by actually running it — `00c3174`
+— `Set-Content`'s UTF-8 BOM silently broke every marker's `JSON.parse` until
+this pass), free-disk and worker-heartbeat reporting on Health (`f166183`).
+A PDAS limit-change guard (`PDAS_LIMIT_MAX_SETPOINT_CHANGE_PCT`/
+`_MAX_OFFSET_CHANGE_G`, still developer placeholders at 3%/20g), a two-step
+UI review, and `WITH (UPDLOCK, HOLDLOCK)` on the concurrent-write check-read
+(`8e8c893`). A DQ-finding acknowledge mechanism, migration 042, six
+data-fact checks acknowledgeable, system-state checks deliberately excluded
+(`4298ac4`) — nothing has actually been acknowledged on the dev box yet,
+correctly, since that is an engineer's call. `RT-028`'s missing 366-day range
+cap on `/api/production`/`/api/weights`, closed (`a6afbae`). Report wording
+fixes F-04 (a stopped line vs. a stopped recorder) and F-07 (a shift
+footnote disclosing SMS's shift figures can differ from IFL's own vendor
+screen) — `4435e0e`, `bb1dd2f`. A generation-scoping bug in
+`newestProductionDay` that could silently anchor a report on the simulator's
+newest day instead of the real generation, fixed (`7bfa4b8`). Caching for
+`/api/reject-spc` and `/api/events` (`a640fed`, `37f8594`). Time-versioned
+shift-rule history for range edges that straddle a Setup edit (`d71735a`).
+An a11y regression **shipped broken, then fixed, then proven in a real
+browser**: `<th>` headers styled `.sr-only` blockify under real CSS
+(dropping their ARIA `columnheader` role) in a way jsdom's fake DOM never
+caught; `.sr-only-th` (no `position` property) fixes it, and a new
+Playwright spec (`a11y.tables.spec.ts`) proves it across all four affected
+screens — `8782d6d` → `0ccc40a` → `9ea44d4`/`e78dba6`/`e57eb37`/`a308215` →
+`2d3abca`. Polling backoff and outage-scoped log throttling (`47031d9`).
+`npm audit --json`: 0 vulnerabilities at every severity, reconfirmed live
+this pass (`2176dc0`, already recorded in `DEFECTS.md` Part 11).
+
+**Two claims corrected, not repeated as fact:**
+- **R-17 is not proven end to end.** The task brief for this pass asserted a
+  scratch-DB run ("2,000 rows, idempotent, tamper refused, ... 56 cones on 15
+  Jul, then cleaned up"). That run was searched for across `handover/`,
+  `CLAUDE.md` and `DEFECTS.md` and **not found** — `r17-fixture.sql`'s own
+  commit message says it was parse-checked only, never executed, and every
+  test touching this pass's five R-17 commits runs against a fake pool.
+  `handover/FAILURE-ANALYSIS-2026-09-29.md`, written the same day after
+  these commits landed, still lists R-17 as open. The code is real and
+  unit-tested; the end-to-end proof is not. See `DEFECTS.md` Part 12 for the
+  full correction.
+- **The gate is 2950, not "2,942+."** `npx vitest run` from `sms/`, twice,
+  clean both times: **289 files passed / 1 skipped (290), 2950 tests passed
+  / 4 skipped, 0 failed**; `npx tsc -b shared sync-worker cli api web` clean.
+  Playwright: `npx playwright test --list` reports **95 tests in 7 files**
+  (not the "82" the brief stated) — a pass/fail run was not performed this
+  pass; the last observed clean run remains 77 passed / 13 skipped, from
+  before the a11y suite existed (Part 11). One order-dependent test failure
+  (`app.rejectSpcCacheCap.test.ts`, new in `bc4ae9e`) surfaced once during a
+  concurrent-run investigation and did not reproduce in two clean full-suite
+  runs afterward — named in `DEFECTS.md` Part 12 in case it recurs, not
+  treated as fixed or as the known ~1-in-74 flake (D-7).
+
+**Explicitly not touched by this pass, with reasons in `DEFECTS.md` Part
+12:** F-38 (no refuse-to-start on a time-zone mismatch — warning only), F-20
+(PDAS writes still gated at the same rank as every other engineer action,
+no separate/higher permission), the RT24-04 re-transform backfill (rows
+transformed before the shift/plausibility as-of fixes are not retroactively
+rewritten), Nelson rules 2-8 (unchanged from the owner's 25 Sep decision),
+and the per-machine running thresholds (`machinesRunning.ts:51-54`, still an
+unconfirmed developer default).
+
+**Verified on the local dev copy and the plant simulator only** — nothing in
+this pass touched IFL's real databases or the plant, and none of it changes
+`PDAS_WRITE_ENABLED` (still `false`) or `LIVE_ALLOW_SIMULATOR` (dev-only).
+**Still client- or owner-dependent, unchanged by this pass:** the 10 Jul – 5
+Aug archive itself (IFL has not sent it — R-17's code readiness does not
+change this); who may change PDAS limits and whether two-person approval is
+needed, and what change size is actually acceptable (the 3%/20g bounds are
+ours, not IFL's — see `IFL-OPEN-QUESTIONS.md`); how/when the PLC picks up a
+changed limit (F-31, still open); whether SMS should correct the vendor's
+`Shift` column or reproduce it (F-07's underlying question, only disclosed
+by this pass, not resolved); retention, a UPS, a rebuild warning, and `DENY
+SELECT` on `dbo.Users` (all still owner/IFL calls); the nightly backup
+running unattended off this one laptop (F-15, still the #1-ranked risk);
+and everything in `handover/FAILURE-ANALYSIS-2026-09-29.md` §7's go-live
+conditions (G1-G8, W1-W6), none of which this pass could close by itself.
 
 ### Chart overhaul, re-audit and fixes (28–29 Sep 2026)
 

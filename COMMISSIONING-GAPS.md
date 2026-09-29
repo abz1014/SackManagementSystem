@@ -8,6 +8,20 @@ Originally written 23 Sep 2026 after the first red-team audit (`d2cba5e`) and it
 inline below, in place, per this file's own convention** — old text is struck through
 or labelled superseded, not deleted, so the file shows its own history.
 
+**29 Sep 2026 addendum (owner-scope hardening loop, documentation-only, no app code
+changed by this pass).** Full account: `DEFECTS.md` Part 12; dated summary: `CLAUDE.md`'s
+"Owner-scope hardening loop" section. Closed or narrowed below, in place: the
+`newestProductionDay` generation-pooling anchor (§2, now fixed), and the nightly-backup
+item (§1, narrowed — a verified marker mechanism now exists and one manual run proved it
+works, but no unattended run has happened). **Also new this pass, not previously in this
+file:** `sms epoch:backfill` and the `epoch:accept` data-vintage guard exist and are
+unit-tested (fake pools only) but the R-17 fixture was never run against a real SQL Server
+instance — see §4 below, corrected in place, for a claim about this that did not survive
+verification. A PDAS limit-change guard, two-step UI review and `WITH (UPDLOCK, HOLDLOCK)`
+now exist (narrows F-26/F-27 in `handover/FAILURE-ANALYSIS-2026-09-29.md`, not previously
+named in this file). RT-028's missing range cap on `/api/production`/`/api/weights` is
+closed.
+
 ## 1. Stops commissioning
 
 - No read-only login/host for the live plant server — nothing can be installed until this arrives → IFL #1
@@ -37,6 +51,12 @@ or labelled superseded, not deleted, so the file shows its own history.
   `PDAS_WRITE_ENABLED` against the plant → ours + IFL #3
 - Windows service (NSSM) never installed or exercised on any machine → ours
 - Nightly backup scheduled only on paper, never run unattended → ours
+  (**Narrowed 29 Sep 2026, owner-scope hardening loop:** a verified-backup marker
+  mechanism now exists and a BOM bug that silently broke every marker's `JSON.parse` was
+  found and fixed by actually running it once, `00c3174` — `GET /api/health` now reports
+  `backup.verified=true` for that one manual run. This is still one hand-run against the
+  `sms` app DB's backup directory, not a proven unattended nightly run — the item above
+  stays open. See `DEFECTS.md` Part 12, F-15.)
 - ~114 commits ahead of `origin/floor-first-rework` (last pushed 16 Sep), ~179 ahead of `origin/main` — never seen by CI → ours
 - No off-machine copy of IFL's data — both samples live on one laptop → ours
 
@@ -72,7 +92,11 @@ or labelled superseded, not deleted, so the file shows its own history.
   exhaustive, unrecognised kinds read "could not be read"; verified present in
   `sms/web/src/lib/health.ts:44,60-71`. See `DEFECTS.md` Part 8.
 - Nelson rules 2–8 flag 37.6–54.8% of station-groups on real data and stay deliberately suppressed pending an owner decision on one of four options (RT-019/`DEFECTS.md` D-10) → ours
-- `routes/reports.ts`'s `newestProductionDay()` anchor still pools every source generation when picking the "default" report day (D-11's report-layer fix covers the report bodies; this one anchor query was not in that list) → ours
+- ~~`routes/reports.ts`'s `newestProductionDay()` anchor still pools every source generation when picking the "default" report day (D-11's report-layer fix covers the report bodies; this one anchor query was not in that list) → ours~~
+  **Fixed 29 Sep 2026, `7bfa4b8`** (owner-scope hardening loop) — the anchor now routes
+  through the same `resolveGenerationScope(..., {preferReal: true})` every other
+  report/service query already uses, closing the anchor/body mismatch. `live.ts`'s
+  dev-only `resolveLiveScope` is deliberately untouched. See `DEFECTS.md` Part 12.
 - **Added 24 Sep 2026, second audit (`ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md`, `DEFECTS.md` Part 6):**
   - ~~Line's headline reject rate silently reverts to the pre-fix double-count formula if `unmatchedRejects` is missing from a response, no caveat shown (RT24-07, in progress, hash pending) → ours~~
     **Fixed 24 Sep 2026, `4e8513c`.** Verified 28 Sep 2026: `Line.tsx` now reads
@@ -128,6 +152,15 @@ or labelled superseded, not deleted, so the file shows its own history.
 
 - PDF export has never been invoked end to end outside a script
 - `sms verify` has never run against a live plant login
+- **Added 29 Sep 2026 (owner-scope hardening loop):** `sms epoch:backfill`, the
+  `--source-db`/`--epoch` verify-scoping fixes, and the `epoch:accept` data-vintage guard
+  (R-17, `b81eb1c`/`937616d`/`96f913e`/`08df232`/`2eaa7a3`) are real, working code with
+  unit-test coverage — but every one of those tests runs against a fake/mocked `mssql`
+  pool. The R-17 fixture (`sms/scripts/r17-fixture.sql`) was, by its own commit message,
+  "parse-checked... never executed" against a real SQL Server instance. A claim that this
+  had been proven end to end on a scratch database, with specific row counts, was checked
+  against every file in `handover/`, this file, `CLAUDE.md` and `DEFECTS.md` this pass and
+  **not found anywhere** — do not repeat it. See `DEFECTS.md` Part 12.
 - ~~Print/PDF layout is verified only by viewport-resize simulation, never a real print dialog~~
   **Superseded 24 Sep 2026:** a real browser/layout harness now exists
   (`sms/playwright.config.ts`, `layout-tests/`, commit `b866754`; run 24 Sep 2026: 3 passed /
