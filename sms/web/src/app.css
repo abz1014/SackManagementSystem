@@ -315,6 +315,21 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+/* `.sr-only` uses position:absolute, which blockifies a <th> (its computed
+   display becomes block, not table-cell) — real browsers then expose the
+   cell as a generic node, not `columnheader`, so a screen reader gets no
+   column context at all. jsdom computes no CSS, so this never showed up in
+   tests. `.sr-only-th` keeps `display: table-cell` (no `position`) and
+   collapses the header row visually instead — zero border, zero padding,
+   zero font-size/line-height, clipped to 1x1px — so the row reads as
+   `columnheader` to the accessibility tree with no visible change to the
+   table. Use this on `<th scope="col">` cells; `.sr-only` is still correct
+   for non-table content. */
+.sr-only-th {
+  width: 1px; height: 1px; padding: 0; margin: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  border: 0; font-size: 0; line-height: 0;
+}
 .skip-link {
   position: absolute; left: -9999px; top: 0; z-index: 100;
   background: var(--ink); color: #fff; padding: 10px 16px; text-decoration: none;
