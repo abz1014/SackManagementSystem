@@ -156,6 +156,24 @@ export interface ReportHeader {
   definitions: 'KPI-DEFINITIONS.md';
   approval: 'awaiting';
   /**
+   * Failure analysis F-07 (VERIFICATION-2026-09-23.md / the 29 Sep 2026 FMEA,
+   * Task W2-C): every report's `shift` column/filter is SMS's own derivation
+   * from `ProductionDate` (the plant clock, CLAUDE.md's "TWO CLOCKS" rule),
+   * never the vendor's stored `Shift` column, which `shiftCheck.ts` already
+   * proves disagrees for many rows (it is derived from insert time, which
+   * lags). A reader comparing this report's shift breakdown against the
+   * vendor's own screen must be told why the two can differ, on every
+   * surface the report reaches — the JSON header (screen + print), the CSV
+   * trailing rows, and the XLSX header sheet (which reads the CSV's own
+   * `attributionRows`). One constant, `SHIFT_SOURCE_NOTE` below, is the only
+   * place this sentence is written. Optional for the same back-compat reason
+   * `periodLabel`/`generationLine` are (hand-built `ReportHeader` fakes other
+   * workers hold open mid-flight) — `buildHeader` always sets it;
+   * `attributionRows` falls back to `SHIFT_SOURCE_NOTE` itself for a header
+   * built before this field existed, so the CSV/XLSX row is never missing.
+   */
+  shiftNote?: string;
+  /**
    * RT24-03 (24 Sep 2026): whether this report's period crosses IFL's
    * 2026-08-05 rebuild boundary and a source generation had to be excluded
    * to keep every figure on this report describing one physical table
@@ -196,6 +214,15 @@ export interface ReportHeader {
  */
 /** How a simulator source is named in print — its database name ends in _SIM. */
 export const SIMULATOR_DB_HINT = 'DATA_TP1U2_SIM, synthetic data, not IFL’s';
+
+/**
+ * F-07's one wording — see `ReportHeader.shiftNote`'s own doc comment. Read
+ * by `header.ts` (JSON header, screen + print) and `csv.ts`'s
+ * `attributionRows` (CSV trailing rows and, via the CSV code the XLSX header
+ * sheet reuses, the XLSX file too) — never re-typed at either call site.
+ */
+export const SHIFT_SOURCE_NOTE =
+  "Shifts are worked out from production time and can differ from the vendor screen's Shift column.";
 
 export function generationDisclosureLines(h: Pick<ReportHeader, 'spansGenerations' | 'sourceGeneration' | 'otherGenerationExcluded'>): [string, string] | null {
   if (!h.spansGenerations) return null;

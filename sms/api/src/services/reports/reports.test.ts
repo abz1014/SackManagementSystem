@@ -315,7 +315,9 @@ describe('CSV escaping agrees with the register export', () => {
     expect(blank).toBe('1,2');
     expect(attr[0]).toBe('');
     expect(attr.slice(1).map((l) => l.split(',')[0])).toEqual([
-      'report', 'line', 'period', 'filters', 'generated_at_plant_time', 'generated_by', 'sms_version', 'definitions', 'ifl_approval',
+      // Task W2-C (29 Sep 2026, F-07): 'note' (the shift-derivation caveat)
+      // is now always the last trailing row — see attributionRows (csv.ts).
+      'report', 'line', 'period', 'filters', 'generated_at_plant_time', 'generated_by', 'sms_version', 'definitions', 'ifl_approval', 'note',
     ]);
     expect(attributionRows(header).find(([k]) => k === 'filters')![1]).toBe('shift=night');
     expect(attributionRows(header).find(([k]) => k === 'generated_by')![1]).toBe('The GM');

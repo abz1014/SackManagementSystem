@@ -42,7 +42,10 @@ function makeHeader(type: ReportType, spans: boolean): ReportHeader {
   };
 }
 
-const NON_SPANNING_TRAILING_ROW_COUNT = 9; // report, line, period, filters, generated_at, generated_by, sms_version, definitions, ifl_approval
+// Task W2-C (29 Sep 2026, F-07): a tenth row, `note` (the shift-derivation
+// caveat, common.ts's SHIFT_SOURCE_NOTE), is now always present — see
+// attributionRows (csv.ts).
+const NON_SPANNING_TRAILING_ROW_COUNT = 10; // report, line, period, filters, generated_at, generated_by, sms_version, definitions, ifl_approval, note
 
 describe.each(REPORT_TYPES)('generation disclosure — %s', (type) => {
   describe('non-spanning (current behaviour must be unchanged)', () => {

@@ -2498,6 +2498,8 @@ export interface ReportHeader {
   smsVersion: string;
   definitions: 'KPI-DEFINITIONS.md';
   approval: 'awaiting';
+  /** F-07 (Task W2-C, 29 Sep 2026): the shift-derivation caveat, server-composed (common.ts's SHIFT_SOURCE_NOTE). Optional for the same back-compat reason as generationLine — a server built before this field simply omits it. */
+  shiftNote?: string;
   /** RT24-03 (24 Sep 2026): whether this report's period crosses IFL's 2026-08-05 rebuild boundary and a source generation had to be excluded. */
   spansGenerations: boolean;
   sourceGeneration: string | null;

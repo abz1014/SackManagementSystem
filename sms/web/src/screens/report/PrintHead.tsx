@@ -101,6 +101,12 @@ export function PrintHead({ header, title }: { header: ReportHeader | null; titl
         <span>{generatedLine(header)}</span>
         <span>{W.reports.definitionsNote}</span>
       </div>
+      {/* F-07 (Task W2-C, 29 Sep 2026): server-supplied, never re-typed on
+          the client (header.shiftNote, common.ts's SHIFT_SOURCE_NOTE).
+          Guarded, not asserted unconditional, only for a server built
+          before this field existed (shiftNote is optional client-side for
+          exactly that back-compat reason, same as generationLine above). */}
+      {header.shiftNote && <div className="ph-foot mut">{header.shiftNote}</div>}
       {/* Task B (28 Sep 2026): prints when the period spans batches OR the
           source itself is the simulator — a period entirely covered by the
           simulator excludes nothing (spansGenerations stays false), so

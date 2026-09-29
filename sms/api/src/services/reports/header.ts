@@ -17,7 +17,7 @@ import { getLineIdentity } from '../lineConfig.js';
 import { SERVICE_VERSION } from '../health.js';
 import { plantNowMs } from '../plantClock.js';
 import type { ShiftRange } from '../../shiftRange.js';
-import { daysIn, generationDisclosureLines, REPORT_TITLES, type ReportFilters, type ReportHeader, type ReportType } from './common.js';
+import { daysIn, generationDisclosureLines, REPORT_TITLES, SHIFT_SOURCE_NOTE, type ReportFilters, type ReportHeader, type ReportType } from './common.js';
 
 /**
  * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): the plain-words form of a
@@ -158,6 +158,7 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
     smsVersion: SERVICE_VERSION,
     definitions: 'KPI-DEFINITIONS.md',
     approval: 'awaiting',
+    shiftNote: SHIFT_SOURCE_NOTE,
     ...disclosure,
     generationLine,
     simulatorSource,

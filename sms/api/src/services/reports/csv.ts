@@ -15,7 +15,7 @@
  * stop at the blank line; anyone who opens the file properly finds the line,
  * the period, who generated it and from which version.
  */
-import { generationDisclosureLines, type ReportHeader } from './common.js';
+import { generationDisclosureLines, SHIFT_SOURCE_NOTE, type ReportHeader } from './common.js';
 import { batchName } from '../batchName.js';
 
 export type CsvCell = string | number | boolean | null | undefined;
@@ -80,6 +80,13 @@ export function attributionRows(h: ReportHeader): [string, string][] {
     ['sms_version', h.smsVersion],
     ['definitions', h.definitions],
     ['ifl_approval', h.approval],
+    // F-07 (Task W2-C, 29 Sep 2026): always present, not conditional — the
+    // shift-derivation caveat applies to every report, not just one that
+    // spans a source-generation boundary. Reads the header's own
+    // `shiftNote` when set (buildHeader always sets it); falls back to the
+    // one constant directly for a hand-built header fixture that predates
+    // this field, so the row is never silently missing.
+    ['note', h.shiftNote ?? SHIFT_SOURCE_NOTE],
   ];
   // RT24-03 (24 Sep 2026): a report spanning IFL's 2026-08-05 rebuild used to
   // exclude the other generation's readings SILENTLY on every exported
