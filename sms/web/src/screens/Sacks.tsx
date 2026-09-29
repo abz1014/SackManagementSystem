@@ -28,7 +28,7 @@ import { useState } from 'react';
 import { useLive, usePolling, usePlantNow, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
-import { periodQuery, dayToShiftRange, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
+import { periodQuery, dayToShiftRange, describePeriod, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import { Block, Details, Empty, Failed, Figures, SkelChart, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
@@ -57,8 +57,18 @@ const HISTORY_PAGE_SIZE = 25;
 /** Roadmap Phase 2b (16 Sep 2026): the ledger's unit, in the URL as `su`. */
 export type SackUnit = 'sacks' | 'kg';
 
+/**
+ * Re-audit fix (29 Sep 2026): this used to format only the dates, so "This
+ * shift" and "Today" read identically on the headline — a period with the
+ * SAME from/to date but different meaning printed the same sentence. When
+ * the period IS exactly one shift (`p.shift` set — see lib/period.ts's
+ * `Period`), name the shift, the same fact Line.tsx's own headline states
+ * for its "into shift" branch. `describePeriod` already renders that as
+ * "2 Sep, evening shift"; every other period keeps this screen's own
+ * long-date wording, unchanged.
+ */
 const periodLabel = (p: Period): string =>
-  p.from === p.to ? fmtDayLong(p.from) : `${fmtDayLong(p.from)} to ${fmtDayLong(p.to)}`;
+  p.shift ? describePeriod(p) : p.from === p.to ? fmtDayLong(p.from) : `${fmtDayLong(p.from)} to ${fmtDayLong(p.to)}`;
 
 /**
  * UX Phase WS-B2 (23 Sep 2026) — THE UNDIAGNOSED FAILURE MODE, established.
