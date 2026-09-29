@@ -17,7 +17,10 @@ works, but no unattended run has happened). **Also new this pass, not previously
 file:** `sms epoch:backfill` and the `epoch:accept` data-vintage guard exist and are
 unit-tested (fake pools only) but the R-17 fixture was never run against a real SQL Server
 instance — see §4 below, corrected in place, for a claim about this that did not survive
-verification. A PDAS limit-change guard, two-step UI review and `WITH (UPDLOCK, HOLDLOCK)`
+verification. **Corrected again, 29 Sep 2026, later the same day:** the fixture HAS since
+been run, twice, against real scratch SQL Server databases — see
+`handover/R17-SCRATCH-RUN-2026-09-29.md` and `DEFECTS.md` Part 12; §4 below is updated in
+place. A PDAS limit-change guard, two-step UI review and `WITH (UPDLOCK, HOLDLOCK)`
 now exist (narrows F-26/F-27 in `handover/FAILURE-ANALYSIS-2026-09-29.md`, not previously
 named in this file). RT-028's missing range cap on `/api/production`/`/api/weights` is
 closed.
@@ -152,7 +155,7 @@ closed.
 
 - PDF export has never been invoked end to end outside a script
 - `sms verify` has never run against a live plant login
-- **Added 29 Sep 2026 (owner-scope hardening loop):** `sms epoch:backfill`, the
+- ~~**Added 29 Sep 2026 (owner-scope hardening loop):** `sms epoch:backfill`, the
   `--source-db`/`--epoch` verify-scoping fixes, and the `epoch:accept` data-vintage guard
   (R-17, `b81eb1c`/`937616d`/`96f913e`/`08df232`/`2eaa7a3`) are real, working code with
   unit-test coverage — but every one of those tests runs against a fake/mocked `mssql`
@@ -160,7 +163,16 @@ closed.
   "parse-checked... never executed" against a real SQL Server instance. A claim that this
   had been proven end to end on a scratch database, with specific row counts, was checked
   against every file in `handover/`, this file, `CLAUDE.md` and `DEFECTS.md` this pass and
-  **not found anywhere** — do not repeat it. See `DEFECTS.md` Part 12.
+  **not found anywhere** — do not repeat it. See `DEFECTS.md` Part 12.~~
+  **Corrected 29 Sep 2026, later the same day:** the search above was incomplete, not the
+  run's absence. Two scratch-DB integration runs were genuinely executed by agents on the
+  dev PC that same day; their results were reported to the orchestrator and simply never
+  written to the repository until `handover/R17-SCRATCH-RUN-2026-09-29.md` was added. R-17
+  is now **built, unit-tested, and proven end to end against real SQL Server scratch
+  databases** (not fake pools) — moved out of this "Built but unproven" section, into
+  §1/§3 wherever it is otherwise referenced. It is still IFL-blocked for the real 10 Jul –
+  5 Aug archive, which is a separate fact from whether SMS's own code is ready. See
+  `DEFECTS.md` Part 12.
 - ~~Print/PDF layout is verified only by viewport-resize simulation, never a real print dialog~~
   **Superseded 24 Sep 2026:** a real browser/layout harness now exists
   (`sms/playwright.config.ts`, `layout-tests/`, commit `b866754`; run 24 Sep 2026: 3 passed /

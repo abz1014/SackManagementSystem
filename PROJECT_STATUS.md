@@ -82,11 +82,17 @@ shipped, caught only once a real-browser Playwright spec existed, and fixed (`87
 reconfirmed at 0 vulnerabilities (`2176dc0`, already in `DEFECTS.md` Part 11).
 
 **Two claims from this pass's own task brief corrected, not carried forward as fact:**
-R-17 is **not** proven end to end — the brief's specific scratch-DB run numbers ("2,000
-rows... 56 cones on 15 Jul") were searched for across `handover/`, this file, `CLAUDE.md`
-and `DEFECTS.md` and not found; the fixture SQL exists but its own commit message says it
-was parse-checked only, never executed, and `handover/FAILURE-ANALYSIS-2026-09-29.md`
-(written the same day, after these commits) still lists R-17 open. And the vitest gate is
+R-17 was believed **not** proven end to end — the brief's specific scratch-DB run numbers
+("2,000 rows... 56 cones on 15 Jul") were searched for across `handover/`, this file,
+`CLAUDE.md` and `DEFECTS.md` and not found; the fixture SQL exists but its own commit
+message says it was parse-checked only, never executed, and
+`handover/FAILURE-ANALYSIS-2026-09-29.md` (written the same day, after these commits)
+still lists R-17 open. **Corrected 29 Sep 2026, later the same day:** that search was
+incomplete, not the run's absence — two scratch-DB integration runs genuinely were
+executed by agents on the dev PC that same day, reported to the orchestrator, and never
+written to the repo until `handover/R17-SCRATCH-RUN-2026-09-29.md` was added. **R-17 is
+now built, unit-tested, and proven end to end on scratch SQL Server copies.** Loading
+IFL's real 10 Jul – 5 Aug archive remains IFL-blocked, unchanged. And the vitest gate is
 **2950**, not the brief's "2,942+" — close, but the real measured number should be used
 going forward. See `DEFECTS.md` Part 12 for the full correction on both.
 
@@ -823,7 +829,11 @@ entry) and the IFL-facing documents were brought true. Two things are mid-flight
 finished, and are named here rather than in a completed section: **D-11** (source generations
 pooled across IFL's 5 August rebuild) is **partly fixed** — `DEFECTS.md` lists the remaining
 call sites by `file:line`; and the archive-ingest path (**R-17**) is still unbuilt, which is
-what would block loading the 10 Jul – 5 Aug data on the day IFL sends it.
+what would block loading the 10 Jul – 5 Aug data on the day IFL sends it. **Superseded 29 Sep
+2026:** R-17 was built the same day (§2's "owner-scope hardening loop" entry) and, as of the
+final record-keeping pass later that day, proven end to end on scratch SQL Server copies —
+see `handover/R17-SCRATCH-RUN-2026-09-29.md` and `DEFECTS.md` Part 12. It remains IFL-blocked
+for the real archive only.
 
 ---
 
@@ -879,6 +889,9 @@ only; no PLC work at all; and who supplies the PC (the owner).
 **One thing that is ours, not IFL's, and would otherwise be mistaken for an IFL dependency:**
 even when the 10 Jul – 5 Aug data arrives, the reader and epoch machinery cannot load it as it
 stands (`DEFECTS.md` R-17, HIGH). That work should be done before the data lands, not after.
+**Updated 29 Sep 2026:** that work is now done and proven end to end on scratch copies
+(`handover/R17-SCRATCH-RUN-2026-09-29.md`) — the only thing genuinely left in this row is the
+archive itself, which is IFL's to send.
 
 Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does not depend on them.
 

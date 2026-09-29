@@ -425,6 +425,22 @@ for across this repository and not found — do not repeat it.** §6 item 11
 above is otherwise unchanged: this remains something SMS itself is not yet
 ready for, independent of whether IFL has sent the data.
 
+**Addendum, 29 Sep 2026, later the same day (final record-keeping pass):** the
+paragraph above was correct about what it found and incomplete about why.
+Two scratch-DB integration runs genuinely were executed by agents on the dev
+PC that same day — before this document was written — and their results were
+reported to the orchestrating session but never committed to the repository,
+which is exactly the gap the search above (correctly) found. That gap is now
+closed: `handover/R17-SCRATCH-RUN-2026-09-29.md` records both runs in full
+(2,000-row idempotent backfill, tampered-source refusal, a rebuild taking
+2026-07-15 from 0 to 56 cones, two real bugs found and fixed by `96f913e`/
+`08df232`, and a second run on HEAD `08df232` reconfirming all of it plus
+`2eaa7a3` and the vintage guard's refusal of a restored old archive). **R-17
+is now built, unit-tested, and proven end to end against real SQL Server
+scratch databases — not fake pools.** The one thing that has not changed:
+none of this touched IFL's real 10 Jul – 5 Aug archive, which IFL still has
+not sent, and none of it touched the live plant.
+
 **RT-028 (§ not previously named in this document by id) — closed.**
 `/api/production` and `/api/weights` now share the same `MAX_RANGE_DAYS =
 366` cap every sibling report route already had (`a6afbae`).

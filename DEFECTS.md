@@ -1864,7 +1864,29 @@ today, not carried over from the task brief that requested this pass** — two
 of that brief's own claims did not survive verification and are corrected in
 place below (R-17's "proven end to end" claim, and the exact gate numbers).
 
-### R-17 (archive-ingest path for the 10 Jul – 5 Aug 2026 gap) — **built and unit-tested; NOT proven end to end. Correcting a claim.**
+### R-17 (archive-ingest path for the 10 Jul – 5 Aug 2026 gap) — **built, unit-tested, AND proven end to end on scratch copies. Correcting a claim — twice.**
+
+**Update, 29 Sep 2026, later the same day (final record-keeping pass):** the
+"NOT proven end to end" verdict directly below was itself incomplete, not
+wrong about what it found. Two scratch-DB integration runs genuinely were
+executed by agents on the dev PC earlier the same day this section was first
+written; their results were reported to the orchestrating session and never
+written to the repository, which is exactly what the search below correctly
+failed to find. That gap is now closed: `handover/
+R17-SCRATCH-RUN-2026-09-29.md` records both runs — RUN 1 (before
+`96f913e`/`08df232`) inserted 2,000 tail rows idempotently, rebuilt 56 cones
+on 2026-07-15 in scratch, refused a tampered archive, and found the two real
+bugs those two commits then fixed; RUN 2 (on HEAD `08df232`, from a verified
+backup into `SMS_SCRATCH_R17`) reconfirmed all of it plus `2eaa7a3`'s
+open-epoch scoping fix and `epoch:accept`'s vintage guard correctly refusing
+an old archive. **R-17's code is now proven end to end against real SQL
+Server scratch databases — not fake pools, not paper.** What remains
+unchanged: none of this touched IFL's real 10 Jul – 5 Aug archive (still
+unsent) or the live plant, and the archive database will need `CREATE USER
+sms_readonly` plus `db_datareader` granted before the real load can happen
+(now stated in `sms/DEPLOY.md`'s backfill runbook step 1). The rest of this
+section is left as originally written, per this register's own
+dated/superseded-not-deleted convention.
 
 Five commits land real, working code: `b81eb1c` (`sms epoch:backfill`,
 `sms/cli/src/commands/backfill.ts` — dry-run by default, `--confirm` to

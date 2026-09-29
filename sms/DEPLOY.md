@@ -689,8 +689,15 @@ and this data lands inside a generation that is already **closed**.
 
 1. **Grant read on the archive database to the IFL read-only login** —
    whatever `IFL_DB_USER` is at the time, `db_datareader` on the archive
-   database only, same as the live source. This is a request to IFL, not a
-   step you can do yourself.
+   database only, same as the live source. Concretely this needs both a
+   `CREATE USER <login>` (or `FOR LOGIN <login>`) *inside the archive
+   database itself* — a SQL Server login is not automatically a user of
+   every database — and then `EXEC sp_addrolemember 'db_datareader',
+   '<login>'` (or the equivalent `ALTER ROLE` syntax) against that same
+   archive database. Confirmed by running the equivalent grant while
+   standing up the scratch fixtures for the 29 Sep 2026 R-17 rehearsal — see
+   `handover/R17-SCRATCH-RUN-2026-09-29.md`'s operational note. This is a
+   request to IFL, not a step you can do yourself.
 2. `sms epoch:backfill --table=<name> --epoch=<id> --source-db=<archive-db>`
    with **no `--confirm`** — this is the dry run, the default, and it is
    safe to run as many times as you like. It prints the source's max id, the

@@ -19,14 +19,53 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 ## Current phase
 
 **Commit-count note, added 28 Sep 2026, updated 29 Sep 2026 (final gate), updated again
-29 Sep 2026 (owner-scope hardening loop):** `git rev-list --count origin/main..HEAD`
-measured **251** on 28 Sep, **318** on 29 Sep (chart-overhaul pass), and **353** later the
-same day (this pass — documentation-only, no app code committed by this pass itself; the
-number moved because a concurrent worker landed commits on `responseCap.ts` in the same
-window). Every older "N commits ahead of origin/main" figure below this line (85, 90, 95,
-114, 179, 251, 318, ...) is historical — a count taken on the date its own section states,
-not the current count — and is left as written rather than rewritten in place, per this
-file's own convention of dated, superseded-not-deleted entries.
+29 Sep 2026 (owner-scope hardening loop), updated again 29 Sep 2026 (final
+record-keeping pass, this section):** `git rev-list --count origin/main..HEAD` measured
+**251** on 28 Sep, **318** on 29 Sep (chart-overhaul pass), **353** later the same day
+(owner-scope hardening loop — documentation-only, no app code committed by that pass
+itself; the number moved because a concurrent worker landed commits on `responseCap.ts`
+in the same window), and **354** at this pass's own HEAD. Every older "N commits ahead of
+origin/main" figure below this line (85, 90, 95, 114, 179, 251, 318, 353, ...) is
+historical — a count taken on the date its own section states, not the current count —
+and is left as written rather than rewritten in place, per this file's own convention of
+dated, superseded-not-deleted entries.
+
+### Final record-keeping and gate (29 Sep 2026, later the same day than the owner-scope hardening loop below)
+
+This pass wrote the missing R-17 scratch-DB run record (see the correction in the
+"Two claims corrected" list below), corrected the "R-17 not proven end to end" statement
+in place, dated, in `DEFECTS.md` Part 12, `PROJECT_STATUS.md`, `COMMISSIONING-GAPS.md` and
+`handover/FAILURE-ANALYSIS-2026-09-29.md`'s addendum — all keeping the old text per this
+project's convention — and added the archive-DB `CREATE USER` step to `sms/DEPLOY.md`'s
+backfill runbook. No application code changed by this pass. New handover file:
+`handover/R17-SCRATCH-RUN-2026-09-29.md`.
+
+**Flake check (`api/src/app.rejectSpcCacheCap.test.ts`):** run 20× in isolation — 20/20
+passed. Full `sms/api` suite (149 files / 1726 tests) run 3× — 3/3 clean, 0 failures. The
+one prior failure did not reproduce; the file's own tests are pure-function assertions
+with no shared cache or module state between them, so there is no order-dependency to fix.
+No code change made; treat this as consistent with the general ~1-in-74 flake already
+tracked as `DEFECTS.md` D-7, not as a defect specific to this file.
+
+**Final gate, measured directly this pass, from `sms/`:**
+- `npm run typecheck` (`tsc -b shared sync-worker cli api web`) — **clean**.
+- `npx vitest run`, twice — both runs identical: **289 files passed / 1 skipped (290),
+  2950 tests passed / 4 skipped (2954), 0 failed**.
+- `npm run build` (all five workspaces) — **clean**; `web`'s Vite build emits one chunk
+  over the 500 kB warning threshold (563.84 kB / gzip 155.14 kB), a pre-existing warning,
+  not a build failure.
+- `npm audit` — **0 vulnerabilities**. `npm audit --omit=dev` — **0 vulnerabilities**.
+- `npm run test:layout` (Playwright, real Edge browser against the already-running
+  `localhost:5173` dev server) — **82 passed, 13 skipped, 0 failed** (the 13 skips are the
+  same signed-in-session-only cases named in `COMMISSIONING-GAPS.md` §4, unchanged by this
+  pass).
+- `GET http://localhost:5173/api/health` — **HTTP 200** (body reports `status: "degraded"`
+  for unrelated reasons — `backup`/`disk`/`lastVerifyRunUtc` fields are null on this dev
+  box — the route itself answers correctly).
+- The plant simulator (`scripts\simulate-plant.mjs --live`), the sync-worker
+  (`sync-worker\dist\index.js`), the API (`api\dist\index.js`) and the Vite dev server on
+  :5173 were all confirmed running throughout, by process listing, and were never stopped
+  by this pass.
 
 ### Owner-scope hardening loop (29 Sep 2026, later the same day than the chart-overhaul entry below)
 
@@ -71,16 +110,33 @@ screens — `8782d6d` → `0ccc40a` → `9ea44d4`/`e78dba6`/`e57eb37`/`a308215` 
 this pass (`2176dc0`, already recorded in `DEFECTS.md` Part 11).
 
 **Two claims corrected, not repeated as fact:**
-- **R-17 is not proven end to end.** The task brief for this pass asserted a
-  scratch-DB run ("2,000 rows, idempotent, tamper refused, ... 56 cones on 15
-  Jul, then cleaned up"). That run was searched for across `handover/`,
-  `CLAUDE.md` and `DEFECTS.md` and **not found** — `r17-fixture.sql`'s own
-  commit message says it was parse-checked only, never executed, and every
-  test touching this pass's five R-17 commits runs against a fake pool.
-  `handover/FAILURE-ANALYSIS-2026-09-29.md`, written the same day after
-  these commits landed, still lists R-17 as open. The code is real and
-  unit-tested; the end-to-end proof is not. See `DEFECTS.md` Part 12 for the
-  full correction.
+- **R-17 is not proven end to end — corrected 29 Sep 2026, later the same
+  day.** The task brief for this pass asserted a scratch-DB run ("2,000 rows,
+  idempotent, tamper refused, ... 56 cones on 15 Jul, then cleaned up"). At
+  the time this paragraph was first written, that run was searched for
+  across `handover/`, `CLAUDE.md` and `DEFECTS.md` and **not found** —
+  `r17-fixture.sql`'s own commit message says it was parse-checked only,
+  never executed, and every test touching this pass's five R-17 commits runs
+  against a fake pool. `handover/FAILURE-ANALYSIS-2026-09-29.md`, written the
+  same day after these commits landed, still lists R-17 as open. **That
+  search was incomplete, not the run's absence: two scratch-DB integration
+  runs genuinely were executed by agents on the dev PC that same day, their
+  results were reported to the orchestrator, and simply never got written to
+  the repository until now.** The record is `handover/
+  R17-SCRATCH-RUN-2026-09-29.md`, written later 29 Sep 2026: RUN 1 (before
+  `96f913e`/`08df232`) inserted 2,000 tail rows idempotently, rebuilt 56
+  cones on 2026-07-15, refused the tampered archive, and surfaced two real
+  bugs (the `--source-db` scoping gap and the `create_date`-based vintage
+  check), both fixed the same day; RUN 2 (on HEAD `08df232`, from a verified
+  backup into `SMS_SCRATCH_R17`) reconfirmed all of it plus `2eaa7a3`'s
+  open-epoch scoping fix, and additionally proved `epoch:accept` correctly
+  refusing the old archive and its override flag behaving as an audited,
+  non-destructive dry run. **R-17 is now built, unit-tested, AND proven end
+  to end on scratch copies.** What is still true and unchanged: this was all
+  against scratch SQL Server databases, never IFL's real 10 Jul – 5 Aug
+  archive (still unsent) and never the live plant. See `DEFECTS.md` Part 12
+  for the fuller correction and `handover/R17-SCRATCH-RUN-2026-09-29.md` for
+  the full run record.
 - **The gate is 2950, not "2,942+."** `npx vitest run` from `sms/`, twice,
   clean both times: **289 files passed / 1 skipped (290), 2950 tests passed
   / 4 skipped, 0 failed**; `npx tsc -b shared sync-worker cli api web` clean.
