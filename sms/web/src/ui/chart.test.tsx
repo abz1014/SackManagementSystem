@@ -6,13 +6,19 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { CategoryBars, RefLine, RefLineGutterProvider, type BarDatum } from './chart';
 import { rectsIntersect, type Rect } from './chartLayout';
-import { installDomStubs } from '../testkit/domStubs';
+import { installDomStubs, installControllableResizeObserver, fireResize } from '../testkit/domStubs';
 import type { ShiftRef } from '../lib/period';
 
 installDomStubs();
+// Overwrites the silent stub `installDomStubs()` installed above, for this
+// file only (module state is per test file under vitest's default
+// isolation — see `domStubs.ts`'s own doc comment). Safe for every other
+// test in this file: without an explicit `fireResize` call the observer
+// never fires, so nothing here changes for a test that never resizes.
+installControllableResizeObserver();
 
 afterEach(() => {
   cleanup();
@@ -212,6 +218,77 @@ describe('CategoryBars brush', () => {
   it('does not render a brush affordance when no brush prop is given', () => {
     const { container } = renderBars();
     expect(container.querySelector('.chart-brush')).toBeNull();
+  });
+});
+
+/* --------------------------------------------------- CategoryBars ticks */
+
+/**
+ * Layout defect fix (chart overhaul wave 3, `layout-tests/charts.spec.ts`'s
+ * Line-600 case, 29 Sep 2026): "Morning"/"Evening" overlapped at 600px. The
+ * old tick count came from `fittingTicks`, an estimate of how many labels
+ * fit the WHOLE plot width — with few categories that estimate can say
+ * "keep every one" while a single label is still wider than the one bar
+ * SLOT it actually has to sit in. The fix measures the widest label with
+ * `textPx` (the same estimator `chartLayout.ts` uses elsewhere) against the
+ * real per-bar slot from the current layout, so it can only ever keep as
+ * many ticks as their own slots can hold.
+ *
+ * 360px stands in for a real chart body inside a 600px viewport (nav rail +
+ * page padding leave less than the full viewport for the chart) — the width
+ * at which seven shift bars ("Morning"/"Evening"/"Night", cycled, matching
+ * Line's real per-shift chart) is tight enough to force thinning.
+ */
+describe('CategoryBars tick thinning', () => {
+  const SHIFT_DATA: BarDatum[] = Array.from({ length: 7 }, (_, i) => ({
+    key: `s${i}`,
+    label: ['Morning', 'Evening', 'Night'][i % 3]!,
+    value: 1200 + i * 47,
+  }));
+
+  function flushWidth(el: Element, width: number) {
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 1;
+    });
+    try {
+      act(() => fireResize(el, width));
+    } finally {
+      rafSpy.mockRestore();
+    }
+  }
+
+  it('at 600px (a 360px chart body), shown x-axis labels never sit closer than the label\'s own measured width', () => {
+    const { container } = renderBars({ data: SHIFT_DATA, ariaLabel: 'Cones weighed per shift' });
+    const body = frameBody(container);
+    flushWidth(body, 360);
+
+    const svg = container.querySelector('svg.chart')!;
+    // x-axis tick text sits at the bottom of the plot, distinct from the
+    // bars/grid text above it — `y` close to the svg's own height.
+    const svgHeight = Number(svg.getAttribute('viewBox')!.split(' ')[3]);
+    const ticks = Array.from(svg.querySelectorAll('text')).filter((t) => Number(t.getAttribute('y')) > svgHeight - 20);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.length).toBeLessThan(SHIFT_DATA.length); // thinning actually happened at this width
+
+    const fontPx = Number(ticks[0]!.getAttribute('font-size')) || 13;
+    const minPitch = Math.ceil(7 * fontPx * 0.6 + 4) + 12; // textPx('Evening'.length, fontPx) + the same padding CategoryBars adds
+    const xs = ticks.map((t) => Number(t.getAttribute('x'))).sort((a, b) => a - b);
+    for (let i = 1; i < xs.length; i++) {
+      expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(minPitch - 1e-6);
+    }
+  });
+
+  it('at a full 1036px fallback width, every shift tick still fits and none is dropped', () => {
+    const { container } = renderBars({ data: SHIFT_DATA, ariaLabel: 'Cones weighed per shift' });
+    // No fireResize: stays at useChartSize's 1036px fallback, comfortably
+    // wide for seven short shift labels — a regression guard against
+    // over-thinning once the fix is in place.
+    const svg = container.querySelector('svg.chart')!;
+    const svgHeight = Number(svg.getAttribute('viewBox')!.split(' ')[3]);
+    const ticks = svg.querySelectorAll('text');
+    const bottomTicks = Array.from(ticks).filter((t) => Number(t.getAttribute('y')) > svgHeight - 20);
+    expect(bottomTicks.length).toBe(SHIFT_DATA.length);
   });
 });
 

@@ -39,7 +39,7 @@ import {
   type RefObject,
 } from 'react';
 import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameBrush } from './ChartFrame';
-import { placeGutterLabels, bandHit, type GutterLabelIn, type GutterLabelOut, type Rect } from './chartLayout';
+import { placeGutterLabels, bandHit, textPx, type GutterLabelIn, type GutterLabelOut, type Rect } from './chartLayout';
 import { useChartWidthFromSize } from './useChartSize';
 import { describePeriod, snapToShifts, type PeriodParams, type ShiftRef } from '../lib/period';
 
@@ -617,8 +617,19 @@ export function CategoryBars({
           data.map((d) => d.value),
           { zero: true, pad: 0.06 },
         );
+        // Thinning is measured against the bar's own SLOT width, not an
+        // estimate of how many labels fit the whole plot (`fittingTicks`,
+        // still used elsewhere) — with a short data set (e.g. three shifts)
+        // `fittingTicks` can say "all of them fit" while each label is
+        // actually wider than the one slot it has to sit in, which is
+        // exactly what overlapped "Morning"/"Evening" at 600px. `textPx` is
+        // the same measured-width estimate `chartLayout.ts`'s other gutter/
+        // thinning math already uses, so this stays consistent with
+        // `DeviationBars`' own slot-based `step` in report/shared.tsx.
         const widest = Math.max(...data.map((d) => d.label.length));
-        const tickCount = fittingTicks(size.width - L - R, widest, size.fontPx, data.length, 12);
+        const labelPx = Math.ceil(textPx(widest, size.fontPx)) + 12;
+        const perTick = Math.max(1, Math.ceil(labelPx / Math.max(1, layout.slot)));
+        const tickCount = Math.max(2, Math.min(data.length, Math.ceil(data.length / perTick)));
         const ticks = new Set(tickIndices(data.length, tickCount));
 
         // `role="img" aria-label` here duplicates ChartFrame's own wrapper div
@@ -648,7 +659,17 @@ export function CategoryBars({
             ))}
             {data.map((d, i) => (
               <rect
-                key={d.key}
+                // Keyed by INDEX, not `d.key`: a bar's own data key is a
+                // caller-supplied identity (`BarDatum.key`) that this
+                // component does not itself guarantee is unique across the
+                // whole array — a duplicate (seen with cycling shift labels
+                // sharing the same key across several bars) makes React's
+                // reconciliation reuse/misplace DOM nodes across a re-render
+                // at a different width, leaving stale bars/ticks from an
+                // earlier layout still in the DOM. The bar's position in
+                // `data` is always unique and always what this element
+                // actually represents.
+                key={`bar-${i}`}
                 x={cx(i) - bw / 2}
                 y={Math.min(zeroY, y(d.value))}
                 width={bw}
@@ -664,7 +685,8 @@ export function CategoryBars({
             {data.map((d, i) =>
               ticks.has(i) ? (
                 <text
-                  key={`t${d.key}`}
+                  // Same reasoning as the bar's own key above.
+                  key={`tick-${i}`}
                   x={cx(i)}
                   y={size.height - 8}
                   fontSize={size.fontPx}
