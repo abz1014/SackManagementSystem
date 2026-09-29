@@ -14,7 +14,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { W } from '../lib/words';
-import { PERIOD_KEYS, type PeriodKey, type PeriodParams } from '../lib/period';
+import { PERIOD_KEYS, describePeriod, type PeriodKey, type PeriodParams, type ShiftRef } from '../lib/period';
 import type { Health } from '../lib/health';
 import { fmtClockSec, fmtClock, fmtClockOn, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
@@ -70,6 +70,29 @@ function GearIcon() {
   );
 }
 
+/**
+ * The 'range' period button's own label: `describePeriod`'s shift-span
+ * wording ("2 Sep morning shift – 3 Sep night shift") once a chart drag-
+ * select has actually set one, else the plain fallback word. `describePeriod`
+ * takes a full `Period` (it also wants `tsTo`/`live`/`days` for its OTHER
+ * branches), but the range branch it takes here reads only
+ * `fromShift`/`toShift`, so the rest of the object is filled with harmless
+ * placeholders never inspected by that branch.
+ */
+function rangeButtonLabel(range: { from: ShiftRef; to: ShiftRef } | undefined): string {
+  if (!range) return W.period.range;
+  return describePeriod({
+    key: 'range',
+    from: range.from.date,
+    to: range.to.date,
+    tsTo: '',
+    fromShift: range.from,
+    toShift: range.to,
+    live: false,
+    days: 0,
+  });
+}
+
 /* ---------------------------------------------------- the period control */
 
 export function PeriodControl({
@@ -97,7 +120,7 @@ export function PeriodControl({
             aria-pressed={value.key === k}
             onClick={() => onChange(k === 'pick' ? { key: 'pick', picked: picked ?? todayRange(plantNowUtc) } : { key: k })}
           >
-            {W.period[k as PeriodKey]}
+            {k === 'range' ? rangeButtonLabel(value.key === 'range' ? value.range : undefined) : W.period[k as Exclude<PeriodKey, 'range'>]}
           </button>
         ))}
       </div>

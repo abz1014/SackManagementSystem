@@ -76,6 +76,11 @@ export const W = {
     week: 'This week',
     month: 'This month',
     pick: 'Pick dates',
+    /* 'range' (12f8022, 28 Sep 2026) is set only by a chart drag-select, never
+       clicked directly — PeriodControl shows this fallback only before a
+       range exists (e.g. mid-render); once one does, it shows the shift-
+       bounded span itself via describePeriod, not this word. */
+    range: 'Custom range',
   } as const,
   periodTo: 'to',
   soFar: 'so far',
