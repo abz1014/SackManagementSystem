@@ -10,7 +10,7 @@
  * IFL-shaped payload (no simulator generation anywhere) must render NOTHING.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { waitFor } from '@testing-library/react';
+import { act, waitFor } from '@testing-library/react';
 import { installFakeFetch } from '../testkit/fetchRouter';
 import { renderWithLive } from '../testkit/render';
 import { GENERATION_FIXTURE, LIVE_FIXTURE, SIMULATOR_GENERATION_FIXTURE } from '../testkit/fixtures';
@@ -20,6 +20,10 @@ import type { DataBatchData, Envelope, LiveData, LiveGenerationNote } from '../a
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // A test that switches to fake timers (the backoff/logging test below)
+  // must not leak them into the next test's real-timer `waitFor`s, which
+  // would otherwise hang until `waitFor`'s own timeout.
+  vi.useRealTimers();
 });
 
 const liveWith = (g: LiveGenerationNote): Envelope<LiveData> => ({
@@ -136,7 +140,7 @@ describe('SimulatorBanner — which views show which half', () => {
 
 describe('SimulatorBanner — a failed /api/data-batch fetch must not claim "real"', () => {
   it('simulated live + failed period fetch: sentence (c), the live-only wording, never (b)', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     installFakeFetch({
       '/api/live': liveWith(SIMULATOR_GENERATION_FIXTURE),
       '/api/data-batch': new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
@@ -152,7 +156,7 @@ describe('SimulatorBanner — a failed /api/data-batch fetch must not claim "rea
   });
 
   it('real live + failed period fetch: renders NOTHING (never asserts the period is real or simulated)', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fake = installFakeFetch({
       '/api/live': liveWith(GENERATION_FIXTURE),
       '/api/data-batch': new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
@@ -162,6 +166,54 @@ describe('SimulatorBanner — a failed /api/data-batch fetch must not claim "rea
     await waitFor(() => expect(errSpy).toHaveBeenCalled());
     expect(container.querySelector('.simulator-banner')).toBeNull();
     errSpy.mockRestore();
+  });
+});
+
+/**
+ * Backoff/logging task, 29 Sep 2026: a failed period fetch used to log
+ * `console.error` on every RE-RENDER while `.error` stayed set, not once
+ * per outage — with `usePolling`'s own retry now backed off (see
+ * `lib/live.tsx`), a single outage lasting several retries must still print
+ * exactly one failure line, plus one recovery line when it clears.
+ */
+describe('SimulatorBanner logs the console at most once per outage', () => {
+  it('warns once when the period fetch starts failing, stays at one through a backed-off retry, then logs once more on recovery', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let calls = 0;
+    installFakeFetch({
+      '/api/live': liveWith(GENERATION_FIXTURE),
+      '/api/data-batch': () => {
+        calls += 1;
+        return calls <= 2 ? new Response(JSON.stringify({ error: 'boom' }), { status: 500 }) : batchOf(false);
+      },
+    });
+    renderWithLive(<SimulatorBanner view="line" productTab="running" from={FROM} to={TO} />);
+
+    // Initial fetch — 1st failure of the streak.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    // The backed-off retry (2nd failure, same streak): still exactly one warn.
+    // ASYNC advance so the fake timer's own catch/`schedule()` microtasks run
+    // before this window closes — see `live.polling.test.tsx`'s capped-delay
+    // test for why the sync `advanceTimersByTime` isn't enough here.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    // The next retry succeeds: one more line, the recovery notice.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(String(warnSpy.mock.calls[1]?.[0])).toMatch(/recovered/);
+
+    warnSpy.mockRestore();
   });
 });
 

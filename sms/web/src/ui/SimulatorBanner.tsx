@@ -26,6 +26,7 @@
  * `undefined` on a failed fetch, which `simulatorBannerSentence` treats as
  * "say nothing about the period", never as "the period is real".
  */
+import { useEffect, useRef } from 'react';
 import { useLive, usePolling, LIVE_POLL_MS } from '../lib/live';
 import { getDataBatch, type DataBatchData } from '../api';
 import { currentIsSimulator } from '../lib/generationWords';
@@ -65,10 +66,26 @@ export function SimulatorBanner({
     LIVE_POLL_MS,
     `simulator-banner:${hasPeriodFigures}:${from}:${to}`,
   );
-  if (period.error) {
-    // eslint-disable-next-line no-console -- read per reliability.guard's own rule; no UI claim follows from this.
-    console.error('SimulatorBanner: GET /api/data-batch failed:', period.error);
-  }
+  // Log at most once per outage, not once per render while the poll's own
+  // backoff (see `usePolling` in `lib/live.tsx`) keeps retrying underneath —
+  // this component re-renders on every context/prop change, and logging the
+  // raw `.error` unconditionally on every render turned a single outage into
+  // a burst of duplicate lines (Task, 29 Sep 2026: 9 open tabs × a few
+  // seconds of an API restart produced 24 error lines for one real event).
+  // `.error` is still read and still drives the UI exactly as before; only
+  // the console-logging cadence changes here.
+  const wasErrorRef = useRef(false);
+  useEffect(() => {
+    if (period.error && !wasErrorRef.current) {
+      wasErrorRef.current = true;
+      // eslint-disable-next-line no-console -- read per reliability.guard's own rule; no UI claim follows from this.
+      console.warn('SimulatorBanner: GET /api/data-batch failing:', period.error);
+    } else if (!period.error && wasErrorRef.current) {
+      wasErrorRef.current = false;
+      // eslint-disable-next-line no-console -- recovery notice, not an error.
+      console.warn('SimulatorBanner: GET /api/data-batch recovered');
+    }
+  }, [period.error]);
 
   const liveSimulator = hasLiveFigures && currentIsSimulator(line?.generation ?? null);
   const periodSimulator: boolean | undefined = hasPeriodFigures

@@ -18,6 +18,19 @@ import { ApiError, getLive, type LiveLine, type Meta } from '../api';
 export const LIVE_POLL_MS = 10_000;
 export const LIST_POLL_MS = 15_000;
 
+/**
+ * Failure backoff cap for `usePolling` (Task, 29 Sep 2026). While the API is
+ * unreachable — e.g. mid-restart, when Vite's dev proxy answers every
+ * request with a 500 — a fixed `intervalMs` retry means every open tab
+ * hammers the (still-down) server every `intervalMs`, forever, with no
+ * relief until it comes back. The delay now doubles per consecutive
+ * failure, capped here, and resets to `intervalMs` on the next success (or
+ * immediately on a manual `refresh()`). The cap is the larger of a flat 60 s
+ * and 6× the poll's own interval, so a slow list poll (`LIST_POLL_MS`)
+ * still backs off meaningfully relative to its own cadence.
+ */
+export const BACKOFF_CAP_MS = 60_000;
+
 export interface PollState<T> {
   data: T | null;
   error: string | null;
@@ -93,6 +106,12 @@ export function usePolling<T>(
   const fnRef = useRef(fn);
   fnRef.current = fn;
   const prevKeyRef = useRef<string | null>(null);
+  // Consecutive-failure streak, used only to compute the next delay
+  // (`schedule` below). Lives outside the effect (a plain useRef, not
+  // effect-local state) so it survives the effect re-running on a manual
+  // `refresh()` tick — a refresh must still fire its OWN fetch immediately,
+  // but the streak it inherits still governs the delay after that fetch.
+  const failStreakRef = useRef(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
@@ -108,7 +127,12 @@ export function usePolling<T>(
 
     const schedule = () => {
       if (!enabled) return; // not live: one fetch per key/refresh, no repeat
-      timer = window.setTimeout(run, intervalMs);
+      const cap = Math.max(BACKOFF_CAP_MS, intervalMs * 6);
+      const delay =
+        failStreakRef.current > 0
+          ? Math.min(intervalMs * 2 ** failStreakRef.current, cap)
+          : intervalMs;
+      timer = window.setTimeout(run, delay);
     };
     const run = async () => {
       try {
@@ -117,6 +141,7 @@ export function usePolling<T>(
         setData(d);
         setError(null);
         setUpdatedAt(Date.now());
+        failStreakRef.current = 0; // back to normal cadence on the next success
       } catch (e) {
         if (!cancelled) {
           // RT-014 (ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md): `Failed`
@@ -130,6 +155,7 @@ export function usePolling<T>(
           const status = e instanceof ApiError ? e.status : null;
           const message = String((e as Error).message ?? e);
           setError(status != null ? `[${status}] ${message}` : message);
+          failStreakRef.current += 1; // next schedule() backs off further
         }
       } finally {
         if (!cancelled) {
