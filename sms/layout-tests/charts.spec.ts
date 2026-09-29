@@ -60,6 +60,7 @@ const SCREENS: ScreenDef[] = [
 ];
 
 async function primeScreen(page: Page, def: ScreenDef) {
+  page.on('console', (msg) => { if (msg.text().includes('DEBUG_CATBARS')) console.log(msg.text()); });
   // Order matters: Playwright runs the LAST-registered matching route
   // first, so the catch-all must be installed BEFORE anything specific
   // (see mocks.ts's header on mockCatchAll).
@@ -345,29 +346,55 @@ test('Weight over-time chart: brush drag zooms to a shift range', async ({ page 
   // `page.mouse`, because a mouse-driven drag never reached this handler in
   // this harness's Edge channel even though the identical sequence as real
   // PointerEvents does.
+  //
+  // Root-cause note (chart overhaul wave 3, Task T9 red-team, 29 Sep 2026):
+  // this test used to skip itself here because `p` never became `range`.
+  // Two separate causes, both confirmed by driving the real, signed-in app
+  // against live simulator data in a browser (never against this mock):
+  //  1) `support/mocks.ts`'s `spc()` fixture omitted every subgroup's
+  //     `firstShiftDate`/`firstShiftCode`/`lastShiftDate`/`lastShiftCode` —
+  //     fields the real `/api/spc` always populates (`api/src/services/
+  //     spc.ts`'s `decodeShiftKey` comment: "never null in practice").
+  //     `Weight.tsx`'s `subgroupShiftRange` returns null, and `commitBrush`
+  //     silently no-ops, whenever any of the four is missing — CORRECT
+  //     behaviour for a genuinely old API response, but this fixture wasn't
+  //     one; it was just incomplete. Fixed in `mocks.ts` (now included).
+  //  2) Separately, `useChartBrush`'s `beginActive` calls
+  //     `target.setPointerCapture?.(pointerId)` on pointerdown, and firing
+  //     the whole down/move/move/up sequence in one synchronous burst (as
+  //     this test always has) raced that capture on real production code
+  //     too — reproduced against the live app: the identical burst
+  //     committed NOTHING, while the identical sequence with a short delay
+  //     between each dispatched event committed correctly every time. A real
+  //     mouse drag is never a zero-time burst (the OS delivers move events
+  //     spaced by its own sampling interval), so this is a synthetic-event
+  //     artifact of this harness, the same category the comment above
+  //     already documents for `page.mouse` vs raw `PointerEvent`s — not an
+  //     app defect. Small `waitForTimeout`s between dispatches below sidestep
+  //     it, exercising the same real handlers a real drag would reach.
   const y = box!.y + box!.height / 2;
   const x0 = box!.x + box!.width * 0.2;
+  const xMid = box!.x + box!.width * 0.45;
   const x1 = box!.x + box!.width * 0.7;
-  await page.evaluate(
-    ({ x0, x1, y }) => {
-      const el = document.querySelector('.chart-frame-body') as HTMLElement | null;
-      if (!el) return;
-      el.dispatchEvent(new PointerEvent('pointerdown', { clientX: x0, clientY: y, pointerId: 1, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new PointerEvent('pointermove', { clientX: (x0 + x1) / 2, clientY: y, pointerId: 1, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new PointerEvent('pointermove', { clientX: x1, clientY: y, pointerId: 1, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new PointerEvent('pointerup', { clientX: x1, clientY: y, pointerId: 1, bubbles: true, cancelable: true }));
-    },
-    { x0, x1, y },
-  );
+  const dispatchPointer = (type: string, x: number) =>
+    page.evaluate(
+      ({ type, x, y }) => {
+        const el = document.querySelector('.chart-frame-body') as HTMLElement | null;
+        el?.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, bubbles: true, cancelable: true }));
+      },
+      { type, x, y },
+    );
+  await dispatchPointer('pointerdown', x0);
+  await page.waitForTimeout(60);
+  await dispatchPointer('pointermove', xMid);
+  await page.waitForTimeout(60);
+  await dispatchPointer('pointermove', x1);
+  await page.waitForTimeout(60);
+  await dispatchPointer('pointerup', x1);
   await page.waitForTimeout(400);
 
   const url = new URL(page.url());
-  const p = url.searchParams.get('p');
-  if (p !== 'range') {
-    console.log(`[brush] Weight over-time chart drag did not produce p=range (got p=${p}); URL: ${page.url()}`);
-    test.skip(true, 'brush drag on this fixture data did not commit a range — see console log for the resulting URL');
-  }
-  expect(url.searchParams.get('p')).toBe('range');
+  expect(url.searchParams.get('p'), `brush drag did not produce p=range; URL: ${page.url()}`).toBe('range');
   const from = url.searchParams.get('from') ?? '';
   const to = url.searchParams.get('to') ?? '';
   expect(from, 'from= param missing a shift suffix').toMatch(/\.(morning|evening|night)/);

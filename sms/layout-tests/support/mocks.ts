@@ -260,13 +260,57 @@ export function weightStations(): unknown {
   });
 }
 
+/**
+ * chart overhaul wave 3, Task T9 red-team (29 Sep 2026): `subgroupShiftRange`
+ * (`web/src/screens/Weight.tsx`) reads `firstShiftDate`/`firstShiftCode`/
+ * `lastShiftDate`/`lastShiftCode` off every subgroup to snap a brush drag to
+ * shift boundaries, and returns `null` — silently declining the drag — when
+ * any of them is missing. The real `/api/spc` (`api/src/services/spc.ts`'s
+ * `decodeShiftKey`) always populates all four ("a group always has at least
+ * one row... minShiftKey/maxShiftKey are never null in practice", spc.ts's
+ * own comment); this fixture previously omitted them entirely, which is why
+ * `layout-tests/charts.spec.ts`'s "Weight over-time chart: brush drag zooms
+ * to a shift range" test never committed a range and had to skip itself —
+ * a FIXTURE GAP against this screen's real wire contract, confirmed by
+ * driving the same drag against the live simulator-backed app (which snaps
+ * correctly once real subgroups, which always carry these fields, are used).
+ * `shiftFor` below is a small, self-contained re-derivation of the app's own
+ * boundary rule (`web/src/lib/period.ts`'s `SHIFT_START_HOUR`:
+ * 06:00/14:00/22:00, plant-clock hours labelled UTC per CLAUDE.md's TWO
+ * CLOCKS rule) — good enough to produce internally-consistent shift refs for
+ * a mock, not a claim that it matches `decodeShiftKey`'s SQL byte for byte.
+ */
+type MockShiftName = 'morning' | 'evening' | 'night';
+function shiftFor(ts: string): { date: string; code: MockShiftName } {
+  const d = new Date(ts);
+  const h = d.getUTCHours();
+  const code: MockShiftName = h >= 6 && h < 14 ? 'morning' : h >= 14 && h < 22 ? 'evening' : 'night';
+  // The night shift (22:00-06:00) is dated by the day it STARTS on, so hours
+  // 0-5 belong to the PREVIOUS calendar day's night shift.
+  const dayOffsetMs = code === 'night' && h < 6 ? -86_400_000 : 0;
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) + dayOffsetMs)
+    .toISOString()
+    .slice(0, 10);
+  return { date, code };
+}
+
 export function spc(type: 'cone' | 'sack' = 'cone'): unknown {
   const n = 40;
   const grandMean = type === 'cone' ? 1950 : 27.6;
   const subgroups = Array.from({ length: n }, (_, i) => {
     const mean = grandMean + Math.sin(i / 5) * (type === 'cone' ? 6 : 0.6);
+    const startTs = new Date(Date.UTC(2026, 8, 5, 0, 0, 0) + i * 60 * 60_000).toISOString();
+    // Each subgroup here is exactly one hour wide (bucketMinutes: 60 below),
+    // so its first and last row fall in the same shift almost always — the
+    // end instant only matters for a bucket that straddles a shift boundary,
+    // which an hour-wide bucket starting exactly on 06:00/14:00/22:00 never
+    // does. Computed from both ends anyway so this stays correct if the
+    // bucket width here ever changes.
+    const endTs = new Date(Date.UTC(2026, 8, 5, 0, 0, 0) + (i + 1) * 60 * 60_000 - 1000).toISOString();
+    const first = shiftFor(startTs);
+    const last = shiftFor(endTs);
     return {
-      ts: new Date(Date.UTC(2026, 8, 5, 0, 0, 0) + i * 60 * 60_000).toISOString(),
+      ts: startTs,
       n: 40,
       mean,
       s: type === 'cone' ? 7.2 : 0.7,
@@ -277,6 +321,10 @@ export function spc(type: 'cone' | 'sack' = 'cone'): unknown {
       xViolates: i === 30,
       sViolates: false,
       nelson: [] as string[],
+      firstShiftDate: first.date,
+      firstShiftCode: first.code,
+      lastShiftDate: last.date,
+      lastShiftCode: last.code,
     };
   });
   const stations =
