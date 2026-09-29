@@ -111,6 +111,10 @@ const TIP_WIDTH_PX = 240;
 const TIP_ROW_H_PX = 18;
 const TIP_PAD_PX = 24;
 const RESIZE_STEP_PX = 20;
+/** A pointer released within this many px of where it went down is a click,
+ *  not a drag — mirrors `useChartBrush`'s own `DEFAULT_MIN_PX` (6), the
+ *  distance a brush itself requires before it commits a range. */
+const CLICK_MAX_MOVE_PX = 6;
 
 /**
  * A pure-geometry estimate of the tooltip's rendered size, in the same
@@ -156,6 +160,17 @@ export function ChartFrame(props: ChartFrameProps) {
   const lastPointerRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef<{ y: number; h: number } | null>(null);
   const [resizing, setResizing] = useState(false);
+  /* FIX 1 (re-audit, 29 Sep 2026): a mouse/pen click never reached
+   * `onActivate` — only the Enter key did, and touch had its own tap path.
+   * `chartBrush.active` cannot tell a plain click apart from a drag here:
+   * for mouse/pen `useChartBrush.beginActive` sets it true on pointerDOWN,
+   * before any movement, so a genuine zero-movement click would already
+   * read as "was brushing". This ref instead tracks the pointer's OWN down
+   * position, independent of whether a `brush` prop exists at all, so
+   * click-activation works on a chart with no brush (StationCompare) and is
+   * correctly suppressed on a chart WITH one once the drag clears the same
+   * `minPx` distance `useChartBrush`'s own default uses. */
+  const clickStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const wrapperPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -181,8 +196,9 @@ export function ChartFrame(props: ChartFrameProps) {
   const onWrapperPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       chartBrush.bind.onPointerDown(e);
+      if (e.pointerType !== 'touch') clickStartRef.current = wrapperPoint(e);
     },
-    [chartBrush.bind],
+    [chartBrush.bind, wrapperPoint],
   );
 
   const onWrapperPointerMove = useCallback(
@@ -207,13 +223,36 @@ export function ChartFrame(props: ChartFrameProps) {
         if (i == null) {
           setPinned(false);
           setActive(null);
+        } else if (pinned && active === i) {
+          // Owner's touch policy: tap shows the tooltip, a SECOND tap on the
+          // SAME already-pinned mark activates it — mirrors the mouse click
+          // path below without changing the first-tap behaviour.
+          onActivate?.(i);
         } else {
           setPinned(true);
           setActive(i);
         }
+      } else if (e.pointerType !== 'touch' && !size.print && onActivate) {
+        // FIX 1 (re-audit, 29 Sep 2026): mouse/pen click activation.
+        // Deliberately NOT gated on `wasBrushing`/`chartBrush.active` — for
+        // mouse/pen, `useChartBrush.beginActive` sets `active` true on
+        // pointerDOWN itself, before any movement, so a genuine zero-
+        // movement click would always read as "was brushing" and this would
+        // never fire. Gated on the pointer's OWN measured movement instead,
+        // so it works whether or not a `brush` prop exists, and is
+        // correctly suppressed once a real drag (>= CLICK_MAX_MOVE_PX,
+        // matching `useChartBrush`'s own minPx) has happened.
+        const down = clickStartRef.current;
+        const p = wrapperPoint(e);
+        const moved = down ? Math.hypot(p.x - down.x, p.y - down.y) : Infinity;
+        if (moved < CLICK_MAX_MOVE_PX) {
+          const i = hit(p.x, p.y);
+          if (i != null) onActivate(i);
+        }
       }
+      if (e.pointerType !== 'touch') clickStartRef.current = null;
     },
-    [chartBrush.active, chartBrush.bind, hit, wrapperPoint],
+    [active, chartBrush.active, chartBrush.bind, hit, onActivate, pinned, size.print, wrapperPoint],
   );
 
   const onWrapperPointerCancel = useCallback(

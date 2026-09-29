@@ -302,6 +302,95 @@ describe('ChartFrame brush commit does not warn during render (FIX 1 regression)
   });
 });
 
+describe('ChartFrame mouse click activation (re-audit FIX 1, 29 Sep 2026)', () => {
+  it('a click on a mark calls onActivate with the right index', () => {
+    const onActivate = vi.fn();
+    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />);
+    const body = getBody(container);
+
+    // XS[2] = 50 — a plain click, no movement between down and up.
+    firePointer(body, 'pointerdown', 50);
+    firePointer(body, 'pointerup', 50);
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(onActivate).toHaveBeenCalledWith(2);
+  });
+
+  it('a drag-brush does NOT call onActivate', () => {
+    const onActivate = vi.fn();
+    const onCommit = vi.fn();
+    const { container } = render(
+      <ChartFrame {...baseProps({ onActivate, brush: { onCommit, xs: XS } })} />,
+    );
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 70);
+    firePointer(body, 'pointermove', 20);
+    firePointer(body, 'pointerup', 20);
+
+    expect(onCommit).toHaveBeenCalledTimes(1); // the brush itself still commits
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it('no onActivate supplied: a click does not throw and does nothing special', () => {
+    const { container } = render(<ChartFrame {...baseProps()} />); // no onActivate
+    const body = getBody(container);
+
+    expect(() => {
+      firePointer(body, 'pointerdown', 50);
+      firePointer(body, 'pointerup', 50);
+    }).not.toThrow();
+  });
+
+  it('a small movement below the click/drag threshold still counts as a click', () => {
+    const onActivate = vi.fn();
+    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />);
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 50);
+    firePointer(body, 'pointerup', 52); // 2px — well under CLICK_MAX_MOVE_PX (6)
+
+    expect(onActivate).toHaveBeenCalledWith(2);
+  });
+
+  it('a movement at/above the threshold, even with no brush configured, does not activate', () => {
+    const onActivate = vi.fn();
+    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />); // no brush prop at all
+    const body = getBody(container);
+
+    firePointer(body, 'pointerdown', 50);
+    firePointer(body, 'pointerup', 60); // 10px — a real drag, no brush to catch it
+
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChartFrame touch tap-then-activate', () => {
+  it('first tap pins the mark (tooltip), second tap on the SAME pinned mark calls onActivate', () => {
+    const onActivate = vi.fn();
+    const { container } = render(<ChartFrame {...baseProps({ onActivate })} />);
+    const body = getBody(container);
+
+    const tap = (x: number) => {
+      const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: x, clientY: 0, button: 0 });
+      Object.defineProperty(down, 'pointerId', { value: 1, configurable: true });
+      Object.defineProperty(down, 'pointerType', { value: 'touch', configurable: true });
+      act(() => body.dispatchEvent(down));
+      const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: x, clientY: 0, button: 0 });
+      Object.defineProperty(up, 'pointerId', { value: 1, configurable: true });
+      Object.defineProperty(up, 'pointerType', { value: 'touch', configurable: true });
+      act(() => body.dispatchEvent(up));
+    };
+
+    tap(50); // first tap: pins point 2, no activation
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(container.querySelector('.chart-tip')?.textContent).toContain('Point 2');
+
+    tap(50); // second tap on the same pinned mark: activates
+    expect(onActivate).toHaveBeenCalledWith(2);
+  });
+});
+
 describe('ChartFrame back navigation', () => {
   it('double-click calls onBack', () => {
     const onBack = vi.fn();
