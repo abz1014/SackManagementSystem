@@ -1029,8 +1029,8 @@ function MachinesBlock({
             still get column context; nothing changes on screen. */}
         <thead>
           <tr>
-            <th scope="col" className="sr-only">{W.cone.colStation}</th>
-            <th scope="col" className="sr-only">{W.cone.colActivity}</th>
+            <th scope="col" className="sr-only-th">{W.cone.colStation}</th>
+            <th scope="col" className="sr-only-th">{W.cone.colActivity}</th>
           </tr>
         </thead>
         <tbody>
@@ -1364,8 +1364,8 @@ function LastReadings({
           still get column context; nothing changes on screen. */}
       <thead>
         <tr>
-          <th scope="col" className="sr-only">{W.cone.colRecord}</th>
-          <th scope="col" className="sr-only">{W.cone.colDetails}</th>
+          <th scope="col" className="sr-only-th">{W.cone.colRecord}</th>
+          <th scope="col" className="sr-only-th">{W.cone.colDetails}</th>
         </tr>
       </thead>
       <tbody>
