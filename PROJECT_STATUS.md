@@ -133,13 +133,21 @@ Health). Do not read any earlier "seven entries" passage in this file or `CLAUDE
 current.
 
 **Health "degraded" on the dev box, explained.** Checked this pass, not a new defect: the
-dev box currently reads `degraded` because of two things both expected on a dev copy — 2
-ERROR `nonpositive_weight` DQ findings present in the simulator-generated data, and a
-15-day-old backup. The simulator finding was traced to a real (if narrow) simulator bug —
-`sms/scripts/simulate-plant.mjs`'s reject-weight branch clamps a would-be-negative
-Box-Muller draw to exactly 0 via `Math.max(0, w)`, which itself satisfies the app's own
-`weight <= 0` DQ check rather than avoiding it. See `DEFECTS.md` Part 11 for the full
-account and a fix recommendation (not applied this pass).
+dev box currently reads `degraded` because of two things — 2 ERROR `nonpositive_weight`
+DQ findings, and a 15-day-old backup. ~~The simulator finding was traced to a real (if
+narrow) simulator bug — `sms/scripts/simulate-plant.mjs`'s reject-weight branch clamps a
+would-be-negative Box-Muller draw to exactly 0 via `Math.max(0, w)`, which itself
+satisfies the app's own `weight <= 0` DQ check rather than avoiding it.~~ **Corrected
+29 Sep 2026, later the same day:** the two findings (`dq_finding` 92 and 96) are **real
+IFL data, not simulator output** — `DATA_TP1U2.sack1_TP1U2` id=1209 (Weight 0, inRange 0,
+2026-06-26), `DATA_TP1U2_SEP07.sack1_TP1U2` id=3125 (Weight 0, MaterialId 0, 2026-08-21),
+and `DATA_TP1U2.rejectWeight1_TP1U2` id=153 (Weight 0, carrying the 1970-01-01 sentinel —
+see D-29). These are genuine zero-weight scale-fault/sentinel rows in IFL's own tables,
+correctly flagged by the ERROR check — not a simulator artifact. The `Math.max(0, w)`
+clamp described above is real code but applies only to simulator weight-reject cones,
+needs roughly a 37σ draw to fire, and never touches sacks, so it cannot be the cause of
+either finding. A new question for IFL is in `IFL-OPEN-QUESTIONS.md` (what a weight of
+exactly 0 means). See `DEFECTS.md` Part 11 for the full, corrected account.
 
 ### 24 September 2026 — RT24-10/11/12/13 and RT-014 closed (later the same day than the entry below)
 

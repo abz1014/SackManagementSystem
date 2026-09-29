@@ -1728,12 +1728,13 @@ approval of the patch bump.** Not applied this pass (documentation-only scope,
 and a dependency bump is an owner call per this project's working rules).
 
 **Health "degraded" on the dev box — explained, by design, not a new defect.**
-The dev box currently shows `degraded` because of two things that are both
-expected on a dev copy: 2 ERROR `nonpositive_weight` DQ findings present in the
-simulator-generated data, and a 15-day-old backup. Neither indicates a code
-defect in the health/DQ machinery itself.
+The dev box currently shows `degraded` because of two things: 2 ERROR
+`nonpositive_weight` DQ findings (`dq_finding` 92 and 96 — corrected below, these
+are real IFL rows, not simulator output), and a 15-day-old backup. Neither
+indicates a code defect in the health/DQ machinery itself; both findings are the
+DQ check correctly doing its job.
 
-**Simulator-generated `nonpositive_weight` findings — checked against
+~~**Simulator-generated `nonpositive_weight` findings — checked against
 `sms/scripts/simulate-plant.mjs` this pass; recorded as a simulator bug, not
 expected behaviour.** The reject-weight branch (`generateBatch`, ~line 296-303)
 draws `w = rand() < 0.7 ? gauss(2055, 55) : gauss(1890, 45)` and then writes
@@ -1754,4 +1755,32 @@ this task's scope — documentation only):** clamp to a small positive floor (e.
 against an unrealistic draw doesn't manufacture the exact DQ condition it exists
 to avoid. The RNG is seeded deterministically (`rng(20260902)`), so this
 reproduces identically on every run of the same seed — it is not a rare,
-non-reproducible flake.
+non-reproducible flake.~~
+
+**Corrected 29 Sep 2026, later the same day — the paragraph above is wrong and
+must not be repeated.** A verification worker traced `dq_finding` 92 and 96 to
+their actual source rows and both are **real IFL data, from the attached client
+databases, not simulator output**:
+
+- `DATA_TP1U2.sack1_TP1U2` id=1209 — `Weight 0`, `inRange 0`, `2026-06-26`.
+- `DATA_TP1U2_SEP07.sack1_TP1U2` id=3125 — `Weight 0`, `MaterialId 0`,
+  `2026-08-21`.
+- `DATA_TP1U2.rejectWeight1_TP1U2` id=153 — `Weight 0`, carrying the
+  `1970-01-01` `ProductionDate` sentinel already discussed elsewhere in this
+  register (D-29).
+
+These are genuine zero-weight rows in IFL's own tables — either a scale fault
+(the sack rows) or bound up with the known 1970 clock-fault sentinel (the reject
+row) — and the `nonpositive_weight` ERROR is the DQ check correctly flagging
+them, not a false positive. `simulate-plant.mjs:298-302`'s `Math.max(0, w)`
+clamp is real (the struck-through analysis above is accurate as *code
+description*) but is not the cause here: it applies only to weight-reject
+cones (`rejectWeight1_TP1U2`-shaped rows from the simulator, a different table
+population than the three real rows above), needs roughly a 37σ draw to ever
+fire, and never touches `sack1_TP1U2` at all — so it cannot explain either sack
+finding, and did not produce the reject finding either (that row is real IFL
+data, id 153, not a simulator-inserted id). The fix recommendation above
+(clamp to a positive floor instead of 0) may still be worth doing someday as
+simulator hygiene, but it is not a live bug causing any finding on the dev box
+today, and is not being tracked as one. See `IFL-OPEN-QUESTIONS.md` for the new
+question this raises for IFL: what a recorded weight of exactly 0 means.

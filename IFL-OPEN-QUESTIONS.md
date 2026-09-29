@@ -380,6 +380,35 @@ confirm they are moot rather than assuming it.
   name the product that was created, it has been quietly wrong since the procedure was written.
   Worth knowing; not something we need an answer to.
 
+### 16. What does a sack or reject weight of exactly 0 mean: scale fault, test, or a record to ignore?
+*(Added 29 September 2026, from a documentation-sync/verification pass. Numbered 16 rather
+than inserted into Tier 2's own run — items 1-15 are cited by number elsewhere in this
+repo, e.g. `IFL-OPEN-QUESTIONS.md` item 3 in `handover/PDAS-WRITE-GRANT-2026-09-19.md` and
+`IFL-TECHNICAL-ANNEX.md`, so their numbers are not renumbered to make room.)*
+
+Our own DQ check (`nonpositive_weight`, ERROR severity — `weight <= 0`) is firing correctly
+on three real rows in your data, re-verified directly against the attached databases:
+
+- `DATA_TP1U2.sack1_TP1U2` id=1209 — `Weight 0`, `inRange 0`, 2026-06-26.
+- `DATA_TP1U2_SEP07.sack1_TP1U2` id=3125 — `Weight 0`, `MaterialId 0`, 2026-08-21.
+- `DATA_TP1U2.rejectWeight1_TP1U2` id=153 — `Weight 0`, carrying the same 1970-01-01
+  clock-fault `ProductionDate` sentinel already flagged elsewhere in this project
+  (`DEFECTS.md` D-29).
+
+These are not a bug in our software — we checked the possibility that our own plant
+simulator produced them and it did not; they are genuine rows in your own tables. We do not
+know what a weight of exactly 0 means on your equipment: a scale fault (nothing on the
+platform, or a fault reading), a test/calibration weighing that should never have been
+logged as production, or something else entirely.
+
+**Blocked without it:** nothing today — the rows are correctly flagged and excluded from
+averages by the app's own plausibility rules either way. This is a request to understand
+your data, not a fix waiting on an answer.
+
+**Cost of staying blocked:** low, but if 0 turns out to mean something specific on your
+equipment (e.g. "ignore this row, it was a test") we could name it on screen instead of
+just flagging it as an error, which would make the finding more useful to whoever reads it.
+
 ---
 
 ## What IFL has already answered — do not ask these again
