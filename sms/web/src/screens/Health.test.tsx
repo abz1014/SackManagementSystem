@@ -61,6 +61,7 @@ const BASE_HEALTH: HealthReport = {
   disk: { appDataFreeMb: 5000, backupFreeMb: 5000 },
   lastVerifyRunUtc: '2026-09-28T10:00:00.000Z',
   workerLastPassUtc: '2026-09-29T11:55:00.000Z',
+  dqAcknowledged: 0,
 };
 
 function routesFor(health: HealthReport) {

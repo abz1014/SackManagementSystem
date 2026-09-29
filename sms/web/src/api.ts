@@ -1108,6 +1108,8 @@ export interface SchemaFingerprint {
   epochLabel: string | null;
 }
 export interface DqFinding {
+  /** sms.dq_finding.finding_id (Task W2-B, 29 Sep 2026) — what ackDqFinding acts on. */
+  findingId: number;
   checkName: string;
   severity: string;
   subjectTable: string | null;
@@ -1121,6 +1123,12 @@ export interface DqFinding {
    * "the link is broken" — see getDqDestination.
    */
   subjectRef: number | null;
+  /** Task W2-B: whether this check is on the acknowledgeable allow-list at
+   *  all — a system-state finding never renders an Acknowledge control. */
+  acknowledgeable: boolean;
+  acknowledgedBy: string | null;
+  acknowledgedUtc: string | null;
+  acknowledgedReason: string | null;
 }
 export interface SyncLifetime {
   passes: number;
@@ -1192,6 +1200,17 @@ export interface DqDestination { type: 'cone' | 'sack' | 'reject'; id: number }
 export function getDqDestination(table: string, ref: number): Promise<DqDestination> {
   const p = new URLSearchParams({ table, ref: String(ref) });
   return get(`/api/dq-destination?${p.toString()}`);
+}
+
+/**
+ * Task W2-B (29 Sep 2026): acknowledge one standing DQ finding by its
+ * finding_id, with a reason of at least 10 characters. Rank 2 (engineer) on
+ * the server; refused 409 for a finding whose check is not on the
+ * acknowledgeable allow-list, 404 for an unknown finding_id, 409 if it is
+ * already acknowledged — see api/src/services/dqAck.ts.
+ */
+export function ackDqFinding(findingId: number, reason: string): Promise<{ findingId: number; acknowledgedUtc: string; reason: string }> {
+  return post(`/api/dq-findings/${findingId}/ack`, { reason });
 }
 
 /**
@@ -1781,6 +1800,8 @@ export interface HealthReport {
   lastVerifyRunUtc: string | null;
   /** The sync worker's own heartbeat — newest `sms.sync_run.finished_at_utc`, regardless of rows written. Distinct from `acquisition.ageSeconds`, which measures DATA age, not whether the recorder is still checking in. Null when anonymous or no pass has run yet. */
   workerLastPassUtc: string | null;
+  /** Task W2-B (29 Sep 2026): count of ERROR/CRITICAL findings acknowledged — informational only, never folded into `status`. Null when anonymous or the database was unreachable; 0 means reachable and genuinely none acknowledged. */
+  dqAcknowledged: number | null;
 }
 /** Unauthenticated on the server; the browser always has its cookie, so the full report comes back. */
 export function getHealth(): Promise<HealthReport> {

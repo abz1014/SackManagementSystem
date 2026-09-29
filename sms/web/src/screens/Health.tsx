@@ -132,9 +132,12 @@ function ReconciliationBlock() {
 
 export function HealthScreen({
   isAdmin,
+  canAcknowledge = false,
   onOpenReading,
 }: {
   isAdmin: boolean;
+  /** Task W2-B: rank >= 2 (engineer) — passed through to SyncHealthBlock. Optional/defaulted for the same reason as SyncHealthBlock's own prop. */
+  canAcknowledge?: boolean;
   /** UX Phase 7 Brief 3: a DQ finding's link to the source row it counts —
    *  see SyncHealthBlock's DqSourceLink. Same shape as every other screen's
    *  onOpenReading (App.tsx's `go({ sheet: { kind, id } })`). */
@@ -159,7 +162,7 @@ export function HealthScreen({
         )}
       </div>
 
-      <SyncHealthBlock first isAdmin={isAdmin} onOpenReading={onOpenReading} />
+      <SyncHealthBlock first isAdmin={isAdmin} canAcknowledge={canAcknowledge} onOpenReading={onOpenReading} />
 
       <PdasWriteBlock report={r} error={h.error} onRetry={h.refresh} />
 

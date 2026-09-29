@@ -764,7 +764,7 @@ function Chrome({
           {/* Open to every signed-in account (roadmap Phase 11): the sync's
               state was admin-only while IFL's accounts are created at manager. */}
           {route.view === 'health' && (
-            <HealthScreen isAdmin={rank >= 4} onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })} />
+            <HealthScreen isAdmin={rank >= 4} canAcknowledge={rank >= ENGINEER_RANK} onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })} />
           )}
         </main>
 

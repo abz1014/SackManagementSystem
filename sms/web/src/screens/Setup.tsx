@@ -50,7 +50,10 @@ export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
         <p className="q">{W.question.setup}</p>
         <h1 className="wide">Setup</h1>
       </div>
-      <SyncHealthBlock first isAdmin />
+      {/* Setup is admin-only (rank >= 4), which is already above the rank >= 2
+          the acknowledge control itself needs — see SyncHealthBlock's own
+          canAcknowledge doc. */}
+      <SyncHealthBlock first isAdmin canAcknowledge />
       <LineBlock />
       <MachinesBlock />
       <StationsBlock />

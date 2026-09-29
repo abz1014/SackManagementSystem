@@ -60,6 +60,25 @@ export const HW = {
      *  new looks identical to a dead one under the reading's own age alone. */
     both: (checkedIn: string, reading: string) => `The recorder last checked in at ${checkedIn} — newest reading at ${reading}.`,
   },
+  /**
+   * Task W2-B (29 Sep 2026, failure analysis F-24): acknowledging a known
+   * data-fact DQ finding so it stops holding Health at "degraded" forever.
+   * See shared/src/dqAck.ts for exactly which checks this applies to.
+   */
+  dqAck: {
+    /** The count sentence — shown whenever at least one acknowledgement exists, regardless of current status. */
+    summary: (n: number) => `${n} known data finding${n === 1 ? '' : 's'} acknowledged.`,
+    control: 'Acknowledge',
+    cancel: 'Cancel',
+    submit: 'Record acknowledgement',
+    reasonPlaceholder: 'Why is this finding known and not actionable right now? (at least 10 characters)',
+    reasonTooShort: 'Say a bit more — at least 10 characters.',
+    acknowledgedBy: (who: string, when: string) => `Acknowledged by ${who} at ${when}.`,
+    acknowledgedByUnknown: (when: string) => `Acknowledged at ${when}.`,
+    submitting: 'Recording…',
+    failed: 'Could not record the acknowledgement — try again.',
+    alreadyAcknowledged: 'This finding was just acknowledged by someone else.',
+  },
 } as const;
 
 /** True when `report.disk` shows either volume below the warning line — pure, so the screen and a test can agree on when to show the low-disk sentence without duplicating the arithmetic. */

@@ -22,6 +22,7 @@ const BASE_REPORT: HealthReport = {
   disk: null,
   lastVerifyRunUtc: null,
   workerLastPassUtc: null,
+  dqAcknowledged: null,
 };
 
 describe('PdasWriteBlock', () => {

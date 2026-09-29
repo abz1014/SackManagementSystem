@@ -398,6 +398,16 @@ const PAIRINGS: Pairing[] = [
       'EXPORT_RANK from services/reports/common.ts (reports.ts:49), a DIFFERENT constant from App.tsx’s EXPORT_RANK used by the ' +
       'Readings register export above — same value today, separate declarations, worth crosschecking independently.',
   },
+  {
+    control: 'Health/Setup’s DQ-finding Acknowledge control (SyncHealthBlock.tsx AcknowledgeControl, ackDqFinding)',
+    clientConstName: 'ENGINEER_RANK',
+    routeFile: `${API_SRC}/routes/dqAck.ts`,
+    routeNeedle: "app.post('/api/dq-findings/:id/ack'",
+    evidence:
+      'App.tsx passes canAcknowledge={rank >= ENGINEER_RANK} into HealthScreen -> SyncHealthBlock (Task W2-B, 29 Sep 2026); the ' +
+      'route is gated by its own local ENGINEER_RANK constant (routes/dqAck.ts), matching changeover.ts’s own precedent above for ' +
+      'why a route module keeps its own literal rather than importing app.ts’s closure-local one.',
+  },
 ];
 
 /**
@@ -655,7 +665,7 @@ describe('client write-gate vs server write-gate crosscheck (the GET-only gap ap
     ).toEqual([]);
   });
 
-  it('discoverRouteGates finds exactly the 31 routes this file accounts for (PAIRINGS + EXEMPTIONS) — a drift in either direction needs a human to look', () => {
+  it('discoverRouteGates finds exactly the 32 routes this file accounts for (PAIRINGS + EXEMPTIONS) — a drift in either direction needs a human to look', () => {
     const gates = discoverRouteGates();
     expect(gates.length).toBe(PAIRINGS.length + EXEMPTIONS.length);
   });

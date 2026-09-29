@@ -15,10 +15,12 @@
  * UX Phase 8 Brief C (21 Sep 2026).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent } from '@testing-library/react';
 import { installFakeFetch } from '../../testkit/fetchRouter';
 import { renderWithLive } from '../../testkit/render';
 import { LIVE_FIXTURE, OPERATIONS_FIXTURE } from '../../testkit/fixtures';
 import { W } from '../../lib/words';
+import { HW } from '../../lib/healthWords';
 import { SyncHealthBlock } from './SyncHealthBlock';
 
 // `fetchRouter.ts`'s own contract: "a test that installs its own router must
@@ -147,5 +149,117 @@ describe('SyncHealthBlock — the verdict is exhaustive over LiveHealthKind (fou
     const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} />);
     await findByText(W.sync.unknownKind);
     expect(queryByText(W.sync.ok)).toBeNull();
+  });
+});
+
+/**
+ * Task W2-B (29 Sep 2026, failure analysis F-24): the Acknowledge control
+ * renders only for (a) a check on the allow-list AND (b) a caller with
+ * canAcknowledge — never for a system-state check regardless of rank, and
+ * never for anyone below rank 2 regardless of the check.
+ */
+function opsWithFindings(findings: Array<Record<string, unknown>>): typeof OPERATIONS_FIXTURE {
+  const clone = JSON.parse(JSON.stringify(OPERATIONS_FIXTURE)) as typeof OPERATIONS_FIXTURE;
+  clone.data.dq.findings = findings as unknown as typeof clone.data.dq.findings;
+  return clone;
+}
+
+const ACKNOWLEDGEABLE_FINDING = {
+  findingId: 501,
+  checkName: 'nonpositive_weight',
+  severity: 'ERROR',
+  subjectTable: 'cone_event',
+  detail: '2 rows with weight <= 0',
+  subjectRef: 8801,
+  acknowledgeable: true,
+  acknowledgedBy: null,
+  acknowledgedUtc: null,
+  acknowledgedReason: null,
+};
+
+const SYSTEM_STATE_FINDING = {
+  findingId: 900,
+  checkName: 'transform_failed',
+  severity: 'CRITICAL',
+  subjectTable: 'cone_event',
+  detail: 'canonical write failed',
+  subjectRef: null,
+  acknowledgeable: false,
+  acknowledgedBy: null,
+  acknowledgedUtc: null,
+  acknowledgedReason: null,
+};
+
+describe('SyncHealthBlock — the Acknowledge control (Task W2-B)', () => {
+  it('renders for an allow-listed finding when canAcknowledge is true', async () => {
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': opsWithFindings([ACKNOWLEDGEABLE_FINDING]) });
+    const { findByText } = renderWithLive(<SyncHealthBlock isAdmin={false} canAcknowledge />);
+    await findByText('nonpositive_weight');
+    await findByText(HW.dqAck.control);
+  });
+
+  it('does NOT render for the same allow-listed finding when canAcknowledge is false (rank 1)', async () => {
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': opsWithFindings([ACKNOWLEDGEABLE_FINDING]) });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} canAcknowledge={false} />);
+    await findByText('nonpositive_weight');
+    expect(queryByText(HW.dqAck.control)).toBeNull();
+  });
+
+  it('never renders for a system-state finding, even when canAcknowledge is true', async () => {
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': opsWithFindings([SYSTEM_STATE_FINDING]) });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} canAcknowledge />);
+    await findByText('transform_failed');
+    expect(queryByText(HW.dqAck.control)).toBeNull();
+  });
+
+  it('an already-acknowledged finding shows who/when/why instead of the control, and the summary sentence', async () => {
+    const acked = { ...ACKNOWLEDGEABLE_FINDING, acknowledgedBy: 'Ali Raza', acknowledgedUtc: '2026-09-29T09:00:00.000Z', acknowledgedReason: 'known clock-fault day' };
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/operations': opsWithFindings([acked]) });
+    const { findByText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} canAcknowledge />);
+    await findByText(HW.dqAck.summary(1));
+    await findByText(/known clock-fault day/);
+    expect(queryByText(HW.dqAck.control)).toBeNull();
+  });
+
+  it('submitting a reason under 10 characters shows the length error and does not call the API', async () => {
+    const fetches = installFakeFetch({
+      '/api/live': LIVE_FIXTURE,
+      '/api/operations': opsWithFindings([ACKNOWLEDGEABLE_FINDING]),
+      '/api/dq-findings/501/ack': () => {
+        throw new Error('must not be called with a short reason');
+      },
+    });
+    const { findByText, getByText, getByPlaceholderText } = renderWithLive(<SyncHealthBlock isAdmin={false} canAcknowledge />);
+    await findByText(HW.dqAck.control);
+    fireEvent.click(getByText(HW.dqAck.control));
+    const input = getByPlaceholderText(HW.dqAck.reasonPlaceholder);
+    fireEvent.change(input, { target: { value: 'short' } });
+    fireEvent.click(getByText(HW.dqAck.submit, { selector: 'button[type="submit"]' }));
+    await findByText(HW.dqAck.reasonTooShort);
+    expect(fetches.requests.some((r) => r.startsWith('/api/dq-findings/'))).toBe(false);
+  });
+
+  it('a successful acknowledgement re-fetches /api/operations and the control disappears in favour of who/when', async () => {
+    let acked = false;
+    installFakeFetch({
+      '/api/live': LIVE_FIXTURE,
+      '/api/operations': () =>
+        opsWithFindings([
+          acked
+            ? { ...ACKNOWLEDGEABLE_FINDING, acknowledgedBy: 'engineer', acknowledgedUtc: '2026-09-29T12:00:00.000Z', acknowledgedReason: 'reviewed, benign' }
+            : ACKNOWLEDGEABLE_FINDING,
+        ]),
+      '/api/dq-findings/501/ack': () => {
+        acked = true;
+        return { findingId: 501, acknowledgedUtc: '2026-09-29T12:00:00.000Z', reason: 'reviewed, benign' };
+      },
+    });
+    const { findByText, getByText, getByPlaceholderText, queryByText } = renderWithLive(<SyncHealthBlock isAdmin={false} canAcknowledge />);
+    await findByText(HW.dqAck.control);
+    fireEvent.click(getByText(HW.dqAck.control));
+    fireEvent.change(getByPlaceholderText(HW.dqAck.reasonPlaceholder), { target: { value: 'reviewed, benign' } });
+    fireEvent.click(getByText(HW.dqAck.submit, { selector: 'button[type="submit"]' }));
+    await findByText(/reviewed, benign/);
+    expect(queryByText(HW.dqAck.control)).toBeNull();
   });
 });

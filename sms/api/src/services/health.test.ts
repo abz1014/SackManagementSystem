@@ -10,6 +10,8 @@ import {
   clearDegraded,
   degradedReasons,
   diskHealth,
+  dqAcknowledgedCount,
+  dqBlockingFindings,
   foldStatus,
   freeDiskMb,
   FREE_DISK_WARN_MB,
@@ -373,6 +375,7 @@ describe('getHealth — redaction and the degraded marker', () => {
     probeDatabase: async () => okDb,
     acquisitionHealth: async () => okAcq,
     dqBlockingFindings: async () => 0,
+    dqAcknowledgedCount: async () => 0,
     backupHealth: (dir: string) => ({ dir, newestFile: 'sms.bak', newestAtUtc: null, ageDays: 0.5, warning: false, verified: true, newestUnverified: false }),
     diskHealth: (appDataDir: string, backupDir: string) => ({ appDataFreeMb: 5000, backupFreeMb: 5000 }),
     workerLastPassUtc: async () => '2026-09-29T00:00:00.000Z',
@@ -619,5 +622,73 @@ describe('getHealth — redaction and the degraded marker', () => {
     );
     expect(h.status).toBe('ok');
     expect(h.pdasWrite?.canReadBack).toBeNull();
+  });
+});
+
+/**
+ * Task W2-B (29 Sep 2026, failure analysis F-24): dqBlockingFindings and
+ * dqAcknowledgedCount against a fake pool that actually models sms.dq_finding
+ * and sms.dq_acknowledgement, so the SQL shape (the LEFT JOIN exclusion, the
+ * fallback when the join itself fails) is pinned, not just the deps-mocked
+ * getHealth level covered above.
+ */
+describe('dqBlockingFindings / dqAcknowledgedCount — acknowledgement-aware DQ counting', () => {
+  interface FindingRow { finding_id: number; severity: string }
+  function fakePool(opts: { findings: FindingRow[]; acked: number[]; ackTableMissing?: boolean }) {
+    const request = () => ({
+      input: () => request(),
+      query: async <T,>(sql: string) => {
+        if (/dq_acknowledgement/.test(sql) && opts.ackTableMissing) {
+          throw new Error("Invalid object name 'sms.dq_acknowledgement'.");
+        }
+        if (/LEFT JOIN sms\.dq_acknowledgement/.test(sql)) {
+          const n = opts.findings.filter((f) => (f.severity === 'ERROR' || f.severity === 'CRITICAL') && !opts.acked.includes(f.finding_id)).length;
+          return { recordset: [{ n }] as T[], rowsAffected: [1] };
+        }
+        if (/JOIN sms\.dq_acknowledgement/.test(sql)) {
+          const n = opts.findings.filter((f) => (f.severity === 'ERROR' || f.severity === 'CRITICAL') && opts.acked.includes(f.finding_id)).length;
+          return { recordset: [{ n }] as T[], rowsAffected: [1] };
+        }
+        // The unfiltered fallback query — no dq_acknowledgement join at all.
+        const n = opts.findings.filter((f) => f.severity === 'ERROR' || f.severity === 'CRITICAL').length;
+        return { recordset: [{ n }] as T[], rowsAffected: [1] };
+      },
+    });
+    return { request } as unknown as ConnectionPool;
+  }
+
+  it("an acknowledged finding with nothing else wrong: dqBlockingFindings is 0 (foldStatus then reads 'ok')", async () => {
+    const pool = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }], acked: [501] });
+    await expect(dqBlockingFindings(pool)).resolves.toBe(0);
+    const db = { ok: true, latencyMs: 1, sizeMb: 10 };
+    expect(foldStatus(db, null, false, await dqBlockingFindings(pool), false, null)).toBe('ok');
+  });
+
+  it('a finding that is NOT acknowledged still blocks', async () => {
+    const pool = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }], acked: [] });
+    await expect(dqBlockingFindings(pool)).resolves.toBe(1);
+  });
+
+  it('sms.dq_acknowledgement missing (migration 042 unapplied): falls back to the unfiltered dq_finding count, NEVER 0 by omission', async () => {
+    const pool = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }, { finding_id: 502, severity: 'CRITICAL' }], acked: [], ackTableMissing: true });
+    // Both findings are real and unacknowledged; the join throws (missing
+    // table) and dqBlockingFindings must fall back to the plain COUNT, which
+    // still sees both — this is the CRITICAL case named in the brief: a
+    // failed DQ-adjacent query must never silently read as fewer problems.
+    await expect(dqBlockingFindings(pool)).resolves.toBe(2);
+  });
+
+  it('a NEW finding on the same check as an already-acknowledged one blocks again — acknowledgement is per finding_id, not per check', async () => {
+    const before = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }], acked: [501] });
+    await expect(dqBlockingFindings(before)).resolves.toBe(0);
+    const after = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }, { finding_id: 777, severity: 'ERROR' }], acked: [501] });
+    await expect(dqBlockingFindings(after)).resolves.toBe(1);
+  });
+
+  it('dqAcknowledgedCount counts only acknowledged ERROR/CRITICAL findings, and degrades to 0 (not an error) when the table is missing', async () => {
+    const pool = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }, { finding_id: 502, severity: 'WARNING' }], acked: [501] });
+    await expect(dqAcknowledgedCount(pool)).resolves.toBe(1);
+    const missing = fakePool({ findings: [{ finding_id: 501, severity: 'ERROR' }], acked: [501], ackTableMissing: true });
+    await expect(dqAcknowledgedCount(missing)).resolves.toBe(0);
   });
 });

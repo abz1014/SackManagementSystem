@@ -644,7 +644,13 @@ function rankComparisons(src: string): string[] {
  * that without weakening the check — the set of ten tokens is exact either
  * way.
  */
-const EXPECTED_RANK_TOKENS = ['4', '4', '4', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'EXPORT_RANK'];
+// Task W2-B (29 Sep 2026): one more ENGINEER_RANK entry — HealthScreen's new
+// canAcknowledge={rank >= ENGINEER_RANK} prop (App.tsx), gating the DQ-finding
+// Acknowledge control the same way every other engineer-rank WRITE control on
+// this list already is. Not a new read-tier gate: Health itself stays open to
+// every signed-in account (rank 1 still sees every finding), only the write
+// control is rank-gated — exactly rule 2 of CLAUDE.md's ONE AUDIENCE section.
+const EXPECTED_RANK_TOKENS = ['4', '4', '4', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'ENGINEER_RANK', 'EXPORT_RANK'];
 
 describe('GUARD 2, Part A — App.tsx grants no NEW read-tier rank gate (ONE AUDIENCE, CLAUDE.md)', () => {
   const src = readCode(APP_TSX);

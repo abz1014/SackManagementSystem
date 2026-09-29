@@ -1,6 +1,8 @@
 /** Operations service (ARCHITECTURE §8): sync health, schema, DQ roll-up. */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import { isAcknowledgeableDqCheck } from '@sms/shared';
+import { listDqAcknowledgements } from './dqAck.js';
 
 export interface SyncStatus {
   targetTable: string;
@@ -157,6 +159,11 @@ export interface OperationsData {
     latestRunId: string | null;
     bySeverity: Record<string, number>;
     findings: {
+      /** sms.dq_finding.finding_id (Task W2-B, 29 Sep 2026) — the acknowledge
+       *  control needs this to name which row it is acting on; findings were
+       *  identified only by (table, check, index) before, which is not a
+       *  stable key across a re-fetch. */
+      findingId: number;
       checkName: string;
       severity: string;
       subjectTable: string | null;
@@ -171,6 +178,13 @@ export interface OperationsData {
        * them by construction, not by an omission here. UX Phase 7 Brief 2.
        */
       subjectRef: number | null;
+      /** Task W2-B: whether this check is on the allow-list at all — a
+       *  system-state finding renders no acknowledge control. */
+      acknowledgeable: boolean;
+      /** Present only once this exact finding_id has been acknowledged. */
+      acknowledgedBy: string | null;
+      acknowledgedUtc: string | null;
+      acknowledgedReason: string | null;
     }[];
   };
 }
@@ -391,25 +405,39 @@ export async function getOperations(pool: ConnectionPool, lineId: number): Promi
   const bySeverity: Record<string, number> = { CRITICAL: 0, ERROR: 0, WARNING: 0, INFO: 0 };
   const f = await pool.request().query<{
     run_id: string;
+    finding_id: number;
     check_name: string;
     severity: string;
     subject_table: string | null;
     detail: string | null;
     subject_ref: number | null;
   }>(
-    `SELECT TOP 200 run_id, check_name, severity, subject_table, detail, subject_ref
+    `SELECT TOP 200 run_id, finding_id, check_name, severity, subject_table, detail, subject_ref
      FROM sms.dq_finding
      ORDER BY CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'ERROR' THEN 1 WHEN 'WARNING' THEN 2 ELSE 3 END,
               finding_id DESC`,
   );
   for (const r of f.recordset) bySeverity[r.severity] = (bySeverity[r.severity] ?? 0) + 1;
-  const findings: OperationsData['dq']['findings'] = f.recordset.map((r) => ({
-    checkName: r.check_name,
-    severity: r.severity,
-    subjectTable: r.subject_table,
-    detail: r.detail,
-    subjectRef: r.subject_ref == null ? null : Number(r.subject_ref),
-  }));
+  // Task W2-B: acknowledgements joined in-process rather than a SQL JOIN —
+  // listDqAcknowledgements already degrades to an empty map when migration
+  // 042 has not been applied, so this findings list keeps working exactly as
+  // before on an older database.
+  const acks = await listDqAcknowledgements(pool);
+  const findings: OperationsData['dq']['findings'] = f.recordset.map((r) => {
+    const ack = acks.get(Number(r.finding_id)) ?? null;
+    return {
+      findingId: Number(r.finding_id),
+      checkName: r.check_name,
+      severity: r.severity,
+      subjectTable: r.subject_table,
+      detail: r.detail,
+      subjectRef: r.subject_ref == null ? null : Number(r.subject_ref),
+      acknowledgeable: isAcknowledgeableDqCheck(r.check_name),
+      acknowledgedBy: ack?.acknowledgedBy ?? null,
+      acknowledgedUtc: ack?.acknowledgedUtc ?? null,
+      acknowledgedReason: ack?.reason ?? null,
+    };
+  });
   // kept for API-shape stability: the run that recorded the newest finding
   const latestRunId = f.recordset[0]?.run_id ?? null;
 

@@ -226,6 +226,7 @@ const HEALTH_FIXTURE: HealthReport = {
   disk: { appDataFreeMb: 5000, backupFreeMb: 5000 },
   lastVerifyRunUtc: null,
   workerLastPassUtc: '2026-09-07T03:00:00Z',
+  dqAcknowledged: 0,
 };
 
 const RECONCILIATION_FIXTURE: Envelope<ReconciliationData> = {

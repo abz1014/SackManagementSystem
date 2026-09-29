@@ -215,6 +215,16 @@ export interface HealthReport {
    * sync_run row exists yet.
    */
   workerLastPassUtc: string | null;
+  /**
+   * Task W2-B (29 Sep 2026): how many of the ERROR/CRITICAL findings that
+   * WOULD be blocking have been acknowledged by an engineer — informational
+   * only, like lastVerifyRunUtc above; never folds into `status`. Null for
+   * an anonymous caller or when the database was unreachable, 0 (not null)
+   * when reachable but nothing is acknowledged — the same "null means
+   * couldn't read, 0 means genuinely none" distinction this file uses
+   * throughout.
+   */
+  dqAcknowledged: number | null;
 }
 
 /* ------------------------------------------------------------ the service */
@@ -395,11 +405,61 @@ export async function acquisitionHealth(pool: ConnectionPool, lineId: number): P
  * against an unmigrated database, same as acquisitionHealth: a missing table
  * must not take the whole probe down with it.
  */
+/**
+ * Task W2-B (29 Sep 2026, failure analysis F-24): a finding an engineer has
+ * acknowledged (sms.dq_acknowledgement, migration 042) no longer counts as
+ * blocking — that is the whole point of acknowledging one. The LEFT JOIN ...
+ * WHERE ack.finding_id IS NULL shape means a missing dq_acknowledgement
+ * table (migration 042 not yet applied) throws from THIS query the same way
+ * a missing dq_finding table always has, and the catch below falls back to
+ * the unfiltered COUNT — CRITICAL: never 0 on error. The defect this guards
+ * against already happened once, at ~line 516 of an earlier revision of this
+ * file: a failed DQ query was read as "zero blocking findings", the false
+ * all-clear this whole health fold exists to prevent.
+ */
 export async function dqBlockingFindings(pool: ConnectionPool): Promise<number> {
-  const r = await pool
-    .request()
-    .query<{ n: number }>(`SELECT COUNT(*) AS n FROM sms.dq_finding WHERE severity IN ('ERROR', 'CRITICAL')`);
-  return Number(r.recordset[0]?.n ?? 0);
+  try {
+    const r = await pool.request().query<{ n: number }>(
+      `SELECT COUNT(*) AS n
+       FROM sms.dq_finding f
+       LEFT JOIN sms.dq_acknowledgement ack ON ack.finding_id = f.finding_id
+       WHERE f.severity IN ('ERROR', 'CRITICAL') AND ack.finding_id IS NULL`,
+    );
+    return Number(r.recordset[0]?.n ?? 0);
+  } catch {
+    // sms.dq_acknowledgement does not exist yet (migration 042 unapplied), or
+    // some other transient read failure on the joined query. Fall back to the
+    // unfiltered count over dq_finding alone — acknowledgement is a REDUCTION
+    // of what blocks; losing it must never look like a healthier system than
+    // an unacknowledged read would, and it must never silently become 0.
+    const r = await pool
+      .request()
+      .query<{ n: number }>(`SELECT COUNT(*) AS n FROM sms.dq_finding WHERE severity IN ('ERROR', 'CRITICAL')`);
+    return Number(r.recordset[0]?.n ?? 0);
+  }
+}
+
+/**
+ * Count of findings acknowledged (Task W2-B) that would otherwise have been
+ * blocking — i.e. severity ERROR/CRITICAL and currently standing in
+ * dq_finding, with an ack row. Used only for the "N known data findings
+ * acknowledged" sentence; never folds into `status`. Returns 0, not an
+ * error, when the table is missing — this is informational only, unlike
+ * dqBlockingFindings above which must never silently read as fewer problems
+ * than really exist.
+ */
+export async function dqAcknowledgedCount(pool: ConnectionPool): Promise<number> {
+  try {
+    const r = await pool.request().query<{ n: number }>(
+      `SELECT COUNT(*) AS n
+       FROM sms.dq_finding f
+       JOIN sms.dq_acknowledgement ack ON ack.finding_id = f.finding_id
+       WHERE f.severity IN ('ERROR', 'CRITICAL')`,
+    );
+    return Number(r.recordset[0]?.n ?? 0);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -706,6 +766,7 @@ export interface HealthDeps {
   probeDatabase: typeof probeDatabase;
   acquisitionHealth: typeof acquisitionHealth;
   dqBlockingFindings: typeof dqBlockingFindings;
+  dqAcknowledgedCount: typeof dqAcknowledgedCount;
   backupHealth: (dir: string) => BackupHealth;
   diskHealth: (appDataDir: string, backupDir: string) => DiskHealth;
   workerLastPassUtc: typeof workerLastPassUtc;
@@ -716,6 +777,7 @@ const realDeps: HealthDeps = {
   probeDatabase,
   acquisitionHealth,
   dqBlockingFindings,
+  dqAcknowledgedCount,
   backupHealth: (dir) => backupHealth(dir),
   diskHealth: (appDataDir, backupDir) => diskHealth(appDataDir, backupDir),
   workerLastPassUtc,
@@ -755,6 +817,7 @@ export async function getHealth(
   if (db.ok) clearDegraded();
   let acq: AcquisitionFacts | null = null;
   let dqBlocking = 0;
+  let dqAcknowledged: number | null = null;
   let workerLastPass: string | null = null;
   let verifyRunLast: string | null = null;
   if (db.ok) {
@@ -767,6 +830,11 @@ export async function getHealth(
       dqBlocking = await deps.dqBlockingFindings(pool);
     } catch {
       dqBlocking = 0; // same reasoning: sms.dq_finding missing must not fail the probe
+    }
+    try {
+      dqAcknowledged = await deps.dqAcknowledgedCount(pool);
+    } catch {
+      dqAcknowledged = null; // informational only — see the field's own doc
     }
     try {
       workerLastPass = await deps.workerLastPassUtc(pool, opts.lineId);
@@ -849,5 +917,6 @@ export async function getHealth(
     disk: a ? disk : null,
     lastVerifyRunUtc: a ? verifyRunLast : null,
     workerLastPassUtc: a ? workerLastPass : null,
+    dqAcknowledged: a ? dqAcknowledged : null,
   };
 }

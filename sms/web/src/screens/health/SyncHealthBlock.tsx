@@ -16,13 +16,64 @@
 import { useState } from 'react';
 import { useLive, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
+import { HW } from '../../lib/healthWords';
 import { Block, Details, Failed, SkelLines } from '../../ui/bits';
 import { fmtAppInstant, fmtClock, fmtSpan } from '../../lib/fmt';
 import { healthExcludedLine, healthGenerationLine } from '../../lib/generationWords';
 import { batchName } from '../../lib/batchName';
 import { noOpenEpochs } from '../../lib/syncHealth';
-import { adminGetSources, getOperations, getDqDestination, ApiError, type DqFinding } from '../../api';
+import { adminGetSources, getOperations, getDqDestination, ackDqFinding, ApiError, type DqFinding } from '../../api';
 import { useResource } from '../setup/shared';
+
+/**
+ * Task W2-B (29 Sep 2026): the Acknowledge control for one acknowledgeable,
+ * not-yet-acknowledged finding. `onDone` re-fetches the findings list (the
+ * caller's own `ops.refresh`) rather than mutating local state — the same
+ * "server is the truth, re-poll" idiom Catalogue.tsx's ActiveForm uses for
+ * PDAS writes, and it means a second engineer's concurrent acknowledgement
+ * (ALREADY_ACKNOWLEDGED, 409) is caught by the next poll rather than raced.
+ */
+function AcknowledgeControl({ findingId, onDone }: { findingId: number; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <button type="button" className="linkish" onClick={() => setOpen(true)}>
+        {HW.dqAck.control}
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (reason.trim().length < 10) { setErr(HW.dqAck.reasonTooShort); return; }
+        setBusy(true); setErr(null);
+        try {
+          await ackDqFinding(findingId, reason.trim());
+          onDone();
+        } catch (x) {
+          setErr(x instanceof ApiError && x.status === 409 ? HW.dqAck.alreadyAcknowledged : HW.dqAck.failed);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={HW.dqAck.reasonPlaceholder}
+        style={{ width: '28ch' }}
+      />{' '}
+      <button type="submit" className="btn" disabled={busy}>{busy ? HW.dqAck.submitting : HW.dqAck.submit}</button>{' '}
+      <button type="button" className="btn" onClick={() => { setOpen(false); setErr(null); }}>{HW.dqAck.cancel}</button>
+      {err && <p className="acc sm">{err}</p>}
+    </form>
+  );
+}
 
 /**
  * A DQ finding's link to the first offending row it counts (UX Phase 7
@@ -94,10 +145,17 @@ function DqSourceLink({
 export function SyncHealthBlock({
   first,
   isAdmin,
+  canAcknowledge = false,
   onOpenReading,
 }: {
   first?: boolean;
   isAdmin: boolean;
+  /** Task W2-B: rank >= 2 (engineer). Setup.tsx passes `true` (its whole
+   *  screen is already admin-only, rank >= 4); Health.tsx passes the real
+   *  rank check so a viewer (rank 1) sees findings but no control. Optional,
+   *  defaulting to false, so an existing caller that predates this control
+   *  (a test render, say) does not have to know about it to keep compiling. */
+  canAcknowledge?: boolean;
   /** UX Phase 7 Brief 3: opens the canonical row a DQ finding's subjectRef
    *  resolves to, the same sheet Line/Readings/Sacks open theirs in. Health
    *  always passes one; Setup's copy of this block does not (see
@@ -144,12 +202,19 @@ export function SyncHealthBlock({
   // no matter what was standing. Found 14 Sep 2026 while making the worker's
   // halts visible; the transform_failed CRITICAL finding is the first that
   // would have been hidden by it in practice.
-  const blocking = ops.data?.data.dq.findings.filter((f) => f.severity === 'ERROR' || f.severity === 'CRITICAL') ?? [];
+  // Task W2-B: an acknowledged finding no longer counts as blocking — this
+  // must agree with /api/health's own dqBlockingFindings (health.ts), which
+  // excludes the same rows the same way, or Health's headline status and
+  // this count would disagree on the same page.
+  const blocking = (ops.data?.data.dq.findings ?? []).filter(
+    (f) => (f.severity === 'ERROR' || f.severity === 'CRITICAL') && f.acknowledgedUtc == null,
+  );
   const mixedRules = ops.data?.data.shiftRuleRegimes?.filter((r) => r.mixed) ?? [];
 
   // Every finding, not only the blocking ones counted above — grouped by the
   // table it is about, '—' for the (rare) finding with none.
   const allFindings = ops.data?.data.dq.findings ?? [];
+  const acknowledgedCount = allFindings.filter((f) => f.acknowledgedUtc != null).length;
   const findingsByTable = new Map<string, typeof allFindings>();
   for (const f of allFindings) {
     const key = f.subjectTable ?? '—';
@@ -263,34 +328,61 @@ export function SyncHealthBlock({
         ) : allFindings.length === 0 ? (
           <p className="mut">{W.health.dqFindingsNone}</p>
         ) : (
-          <div className="tw">
-            <table>
-              <thead>
-                <tr>
-                  <th>Table</th>
-                  <th>Check</th>
-                  <th>Severity</th>
-                  <th>Detail</th>
-                  <th>Source row</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...findingsByTable.entries()].flatMap(([table, findings]) =>
-                  findings.map((f, i) => (
-                    <tr key={`${table}:${f.checkName}:${i}`}>
-                      <td>{i === 0 ? table : ''}</td>
-                      <td>{f.checkName}</td>
-                      <td className={f.severity === 'ERROR' || f.severity === 'CRITICAL' ? 'acc' : ''}>{f.severity}</td>
-                      <td>{f.detail ?? '—'}</td>
-                      <td>
-                        <DqSourceLink finding={f} onOpenReading={onOpenReading} />
-                      </td>
-                    </tr>
-                  )),
-                )}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Task W2-B: shown whenever at least one acknowledgement stands,
+                regardless of whether anything is currently blocking — an
+                engineer who acknowledged three findings that later cleared
+                on their own should still see that history. */}
+            {acknowledgedCount > 0 && (
+              <p className="mut sm" style={{ marginBottom: 8 }}>{HW.dqAck.summary(acknowledgedCount)}</p>
+            )}
+            <div className="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Table</th>
+                    <th>Check</th>
+                    <th>Severity</th>
+                    <th>Detail</th>
+                    <th>Source row</th>
+                    <th>Acknowledged</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...findingsByTable.entries()].flatMap(([table, findings]) =>
+                    findings.map((f, i) => (
+                      <tr key={`${table}:${f.checkName}:${f.findingId}`}>
+                        <td>{i === 0 ? table : ''}</td>
+                        <td>{f.checkName}</td>
+                        <td className={f.severity === 'ERROR' || f.severity === 'CRITICAL' ? 'acc' : ''}>{f.severity}</td>
+                        <td>{f.detail ?? '—'}</td>
+                        <td>
+                          <DqSourceLink finding={f} onOpenReading={onOpenReading} />
+                        </td>
+                        {/* System-state findings (acknowledgeable === false) show no
+                            control at all — never even a disabled one, so there is
+                            nothing on screen implying they could be silenced. */}
+                        <td>
+                          {f.acknowledgedUtc != null ? (
+                            <span className="mut sm">
+                              {f.acknowledgedBy
+                                ? HW.dqAck.acknowledgedBy(f.acknowledgedBy, fmtAppInstant(f.acknowledgedUtc))
+                                : HW.dqAck.acknowledgedByUnknown(fmtAppInstant(f.acknowledgedUtc))}
+                              {f.acknowledgedReason && <><br />“{f.acknowledgedReason}”</>}
+                            </span>
+                          ) : f.acknowledgeable && canAcknowledge ? (
+                            <AcknowledgeControl findingId={f.findingId} onDone={ops.refresh} />
+                          ) : (
+                            <span className="mut">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Details>
 
