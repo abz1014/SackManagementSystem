@@ -47,4 +47,31 @@ describe('printed executive summary', () => {
     expect(s.tiles[0]?.note).toContain('1 of 34 days');
     expect(s.sentences.join(' ')).toContain('no change against it is stated');
   });
+
+  it('shift production: grand total pass, weight rejects, efficiency and the lowest shift', () => {
+    const f = (pass: number, weightRejects: number, efficiencyPct: number) => ({ pass, weightRejects, total: pass + weightRejects, efficiencyPct });
+    const data = {
+      header,
+      report: {
+        summary: [{ shift: 'morning', ...f(900, 10, 98.9) }, { shift: 'evening', ...f(800, 40, 95.24) }, { shift: 'night', ...f(850, 5, 99.42) }],
+        grandTotal: f(2550, 55, 97.89),
+      },
+    } as unknown as ReportResponse<'shift-production'>;
+    const s = summarise('shift-production', data);
+    const text = s.sentences.join(' ');
+    expect(text).toContain('2,550 packages passed and 55 were rejected on weight, an efficiency of 97.89%.');
+    expect(text).toMatch(/evening shift had the lowest efficiency, 95\.24%/);
+    expect(s.tiles[0]?.value).toBe('2,550');
+  });
+
+  it('rejected cones: total rejected and the line weight range', () => {
+    const data = {
+      header,
+      report: { total: 12, weightRange: { line: { minG: 1500.5, maxG: 2300, avgG: 1950, n: 900 }, byWinder: [], plausibility: { loG: 1, hiG: 2 }, excludedImplausible: 0 } },
+    } as unknown as ReportResponse<'rejected-cones'>;
+    const s = summarise('rejected-cones', data);
+    const text = s.sentences.join(' ');
+    expect(text).toContain('12 cones were rejected on weight.');
+    expect(text).toContain('Line weights ranged from');
+  });
 });

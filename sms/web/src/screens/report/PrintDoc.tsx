@@ -228,6 +228,37 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
       out.weightCaveat = true;
       break;
     }
+    case 'shift-production': {
+      const d = (data as ReportResponse<'shift-production'>).report;
+      const g = d.grandTotal;
+      out.tiles = [
+        { label: 'Pass packages', value: fmtInt(g.pass) },
+        { label: 'Weight rejections', value: fmtInt(g.weightRejects), attn: g.weightRejects > 0 },
+        { label: 'Total', value: fmtInt(g.total) },
+        { label: 'Efficiency', value: g.efficiencyPct == null ? '—' : `${g.efficiencyPct.toFixed(2)}%` },
+      ];
+      if (g.total > 0) {
+        out.sentences.push(`${fmtInt(g.pass)} packages passed and ${fmtInt(g.weightRejects)} were rejected on weight, an efficiency of ${g.efficiencyPct == null ? 'not available' : `${g.efficiencyPct.toFixed(2)}%`}.`);
+        const known = d.summary.filter((r) => r.efficiencyPct != null && r.total > 0);
+        if (known.length > 1) {
+          const low = known.reduce((a, b) => (b.efficiencyPct! < a.efficiencyPct! ? b : a));
+          out.sentences.push(`The ${W.shiftName[low.shift].toLowerCase()} shift had the lowest efficiency, ${low.efficiencyPct!.toFixed(2)}%.`);
+        }
+      }
+      break;
+    }
+    case 'rejected-cones': {
+      const d = (data as ReportResponse<'rejected-cones'>).report;
+      const l = d.weightRange.line;
+      out.tiles = [
+        { label: 'Rejected cones', value: fmtInt(d.total), attn: d.total > 0 },
+        { label: 'Lightest', value: l.minG == null ? '—' : fmtG1(l.minG) },
+        { label: 'Heaviest', value: l.maxG == null ? '—' : fmtG1(l.maxG) },
+      ];
+      out.sentences.push(`${plural(d.total, 'cone')} ${d.total === 1 ? 'was' : 'were'} rejected on weight.`);
+      if (l.n > 0 && l.minG != null && l.maxG != null) out.sentences.push(`Line weights ranged from ${fmtG1(l.minG)} to ${fmtG1(l.maxG)}.`);
+      break;
+    }
     case 'machine-product': {
       const d = (data as ReportResponse<'machine-product'>).report;
       const within = d.changes.filter((c) => c.kind === 'within_shift').length;

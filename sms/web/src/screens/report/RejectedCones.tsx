@@ -10,7 +10,7 @@ export function fmtG2(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const totalStyle = { fontWeight: 700, fontStyle: 'italic' } as const;
+const T = W.iflReports;
 
 export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
   const wr = d.weightRange;
@@ -23,7 +23,7 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
   }
   return (
     <div data-report-orientation="portrait">
-      <Block first label="Rejected cones">
+      <Block first label={T.rejectedCones}>
         {d.list.length === 0 ? (
           <Empty message={W.nothingHere} />
         ) : (
@@ -31,10 +31,10 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
             <table className="ifl-table">
               <thead>
                 <tr>
-                  <th>Production date</th>
-                  <th>Shift</th>
-                  <th className="n">Winder No.</th>
-                  <th className="n">Weight (g)</th>
+                  <th>{T.productionDate}</th>
+                  <th>{T.shift}</th>
+                  <th className="n">{T.winderNo}</th>
+                  <th className="n">{T.weightG}</th>
                 </tr>
               </thead>
               <tbody>
@@ -46,8 +46,8 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
                     <td className="n">{fmtG2(r.weightG)}</td>
                   </tr>
                 ))}
-                <tr className="total" style={totalStyle}>
-                  <td colSpan={3}>Total rejected cones</td>
+                <tr className="total">
+                  <td colSpan={3}>{T.totalRejectedCones}</td>
                   <td className="n">{fmtInt(d.total)}</td>
                 </tr>
               </tbody>
@@ -56,16 +56,16 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
         )}
         <p className="mut sm" style={{ marginTop: 8 }}>{d.note}</p>
       </Block>
-      <Block label="Weight range">
+      <Block label={T.weightRange}>
         <div className="tw" style={{ breakInside: 'avoid' }}>
           <table className="ifl-table">
             <thead>
               <tr>
-                <th className="n">Winder</th>
-                <th className="n">Min (g)</th>
-                <th className="n">Max (g)</th>
-                <th className="n">Avg (g)</th>
-                <th className="n">n</th>
+                <th className="n">{T.winder}</th>
+                <th className="n">{T.minG}</th>
+                <th className="n">{T.maxG}</th>
+                <th className="n">{T.avgG}</th>
+                <th className="n">{T.n}</th>
               </tr>
             </thead>
             <tbody>
@@ -78,8 +78,8 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
                   <td className="n">{fmtInt(w.n)}</td>
                 </tr>
               ))}
-              <tr className="total" style={totalStyle}>
-                <td>Line</td>
+              <tr className="total">
+                <td>{T.line}</td>
                 <td className="n">{fmtG2(wr.line.minG)}</td>
                 <td className="n">{fmtG2(wr.line.maxG)}</td>
                 <td className="n">{fmtG2(wr.line.avgG)}</td>
@@ -90,7 +90,7 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
         </div>
         {wr.excludedImplausible > 0 && (
           <p className="mut sm" style={{ marginTop: 8 }}>
-            {fmtInt(wr.excludedImplausible)} readings outside {fmtInt(wr.plausibility.loG)}–{fmtInt(wr.plausibility.hiG)} g were excluded from the range as implausible.
+            {T.implausible(fmtInt(wr.excludedImplausible), fmtInt(wr.plausibility.loG), fmtInt(wr.plausibility.hiG))}
           </p>
         )}
       </Block>

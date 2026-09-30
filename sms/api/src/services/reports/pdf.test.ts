@@ -7,7 +7,7 @@
  * `npx vitest run` never needs Edge installed to pass, including in CI.
  */
 import { describe, it, expect } from 'vitest';
-import { buildRenderUrl, countPdfPages, buildPdfOptions, buildFooterTemplate, formatPlantStamp } from './pdf.js';
+import { buildRenderUrl, countPdfPages, buildPdfOptions } from './pdf.js';
 import type { ResolvedPeriod } from '../report.js';
 
 const resolved: ResolvedPeriod = { period: 'custom', from: '2026-09-01', to: '2026-09-07' };
@@ -73,35 +73,15 @@ describe('countPdfPages', () => {
   });
 });
 
-describe('W4: PDF footer and print options', () => {
-  const at = Date.UTC(2026, 8, 30, 14, 5); // plant-clock 30-09-2026 14:05
-
-  it('formats the plant clock as DD-MM-YYYY HH:mm', () => {
-    expect(formatPlantStamp(at)).toBe('30-09-2026 14:05');
-  });
-
-  it('turns the header/footer on, keeps CSS page size (orientation from @page), backgrounds on, empty header', () => {
-    const o = buildPdfOptions(at, '1.2.3');
-    expect(o.displayHeaderFooter).toBe(true);
+describe('PDF print options', () => {
+  it('keeps CSS page size (orientation from @page), backgrounds on, and Chromium header/footer OFF so the CSS @page footer prints once', () => {
+    const o = buildPdfOptions() as Record<string, unknown>;
     expect(o.preferCSSPageSize).toBe(true);
     expect(o.printBackground).toBe(true);
-    expect(o.headerTemplate.replace(/<[^>]*>/g, '')).toBe(''); // no visible text in the header
-    expect((o as Record<string, unknown>).format).toBeUndefined();
-    expect((o as Record<string, unknown>).landscape).toBeUndefined();
-  });
-
-  it('footer carries page X of Y, the plant-clock time, the version and IFL internal, in small grey text', () => {
-    const f = buildPdfOptions(at, '1.2.3').footerTemplate;
-    expect(f).toContain('Page <span class="pageNumber"></span> of <span class="totalPages"></span>');
-    expect(f).toContain('Generated 30-09-2026 14:05 (plant time)');
-    expect(f).toContain('SMS v1.2.3');
-    expect(f).toContain('IFL internal');
-    expect(f).toMatch(/font-size:7pt/);
-    expect(f).toMatch(/color:#777/);
-  });
-
-  it('does not double the v of a version that already has one, and escapes markup', () => {
-    expect(buildFooterTemplate('x', 'v2.0')).toContain('SMS v2.0');
-    expect(buildFooterTemplate('<b>', '1')).toContain('&lt;b&gt;');
+    expect(o.displayHeaderFooter).toBeUndefined();
+    expect(o.footerTemplate).toBeUndefined();
+    expect(o.headerTemplate).toBeUndefined();
+    expect(o.format).toBeUndefined();
+    expect(o.landscape).toBeUndefined();
   });
 });

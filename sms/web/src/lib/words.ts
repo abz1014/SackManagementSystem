@@ -2382,6 +2382,33 @@ export const W = {
 
   /* The printed / PDF report document (25 Sep 2026): cover band, executive
      summary and closing notes. Print-only — none of this appears on screen. */
+  /** Shift Production and Rejected Cones report screens (IFL SSRS style). */
+  iflReports: {
+    total: 'Total',
+    summary: 'Summary',
+    byWinder: 'By winder',
+    shift: 'Shift',
+    date: 'Date',
+    winder: 'Winder',
+    passPackages: 'Pass packages',
+    weightRejections: 'Weight rejections',
+    weightRejShort: 'Weight rej.',
+    pass: 'Pass',
+    efficiency: 'Efficiency %',
+    rejectedCones: 'Rejected cones',
+    productionDate: 'Production date',
+    winderNo: 'Winder No.',
+    weightG: 'Weight (g)',
+    totalRejectedCones: 'Total rejected cones',
+    weightRange: 'Weight range',
+    minG: 'Min (g)',
+    maxG: 'Max (g)',
+    avgG: 'Avg (g)',
+    n: 'n',
+    line: 'Line',
+    noWinder: (pass: string, rej: string) => `${pass} pass and ${rej} weight rejections carry no winder and are in the totals above but not in the winder rows below.`,
+    implausible: (n: string, lo: string, hi: string) => `${n} readings outside ${lo}–${hi} g were excluded from the range as implausible.`,
+  },
   printDoc: {
     company: 'Ibrahim Fibres Limited',
     /** IFL house style: the centred company line above every report title. */
@@ -2390,7 +2417,6 @@ export const W = {
     shift: 'Shift',
     shiftHours: { morning: 'Morning 06:00–14:00', evening: 'Evening 14:00–22:00', night: 'Night 22:00–06:00' } as Record<string, string>,
     footnotes: 'Notes',
-    pageOf: 'Page',
     system: 'Sack Management System',
     internal: 'IFL internal',
     confidential: 'For internal use within Ibrahim Fibres Limited. Not for distribution outside the company.',

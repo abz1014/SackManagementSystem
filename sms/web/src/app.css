@@ -1221,11 +1221,7 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
      the confidentiality line and "Page X of Y". Page-margin boxes (Chrome /
      Edge 131+), so browser Print and the server's PDF export both carry it. */
   @bottom-left {
-    content: "IFL internal · Ibrahim Fibres Limited · Sack Management System";
-    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
-  }
-  @bottom-right {
-    content: "Page " counter(page) " of " counter(pages);
+    content: "IFL internal · Sack Management System · Page " counter(page) " of " counter(pages);
     font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
   }
 }
@@ -1240,11 +1236,7 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
   size: A4 portrait;
   margin: 18mm 18mm 20mm;
   @bottom-left {
-    content: "IFL internal · Ibrahim Fibres Limited · Sack Management System";
-    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
-  }
-  @bottom-right {
-    content: "Page " counter(page) " of " counter(pages);
+    content: "IFL internal · Sack Management System · Page " counter(page) " of " counter(pages);
     font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
   }
 }
@@ -1361,16 +1353,6 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
 
   /* Cover band */
   .print-head { margin: 0 0 14pt; padding: 0; border: 0; }
-  .ph-brand {
-    display: flex; align-items: baseline; gap: 10pt;
-    background: var(--ink); color: #fff; padding: 9pt 12pt 8pt; border-bottom: 3pt solid var(--acc-fill);
-  }
-  .ph-co { font-size: 12pt; font-weight: 600; letter-spacing: 0.01em; }
-  .ph-sys { font-size: 9.5pt; opacity: 0.8; }
-  .ph-tag {
-    margin-left: auto; font-size: 7.5pt; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
-    border: 0.75pt solid rgba(255,255,255,0.7); padding: 1.5pt 6pt; border-radius: 2pt;
-  }
   .ph-title { display: block; font-size: 20pt; font-weight: 600; letter-spacing: -0.015em; line-height: 1.15; margin: 10pt 0 6pt; color: var(--ink); }
   .ph-meta {
     display: grid; grid-template-columns: repeat(6, auto); justify-content: start; gap: 0 22pt;
@@ -1473,6 +1455,9 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
  * PDF export sets its own footerTemplate (pdf.ts, handled elsewhere).
  * ------------------------------------------------------------------------- */
 .ifl-table { border-collapse: collapse; }
+/* Efficiency below 100: tint AND bold so it survives black-and-white print. */
+.ifl-table td.eff-low { font-weight: 700; background: rgba(200, 120, 0, 0.12); }
+@media print { .ifl-table td.eff-low { background: rgba(200, 120, 0, 0.12) !important; } }
 .ifl-table th, .ifl-table td { border: 0.75pt solid #D3D3D3; }
 .ifl-table th { background: #ADD8E6; font-weight: 700; text-align: center; }
 .ifl-table td.n, .ifl-table th.n { text-align: right; font-variant-numeric: tabular-nums; }

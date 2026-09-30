@@ -50,9 +50,9 @@ describe('ShiftProductionSection', () => {
     expect(text).toContain('4 pass');
     expect(container.querySelectorAll('tr.total').length).toBe(2);
     const low = [...container.querySelectorAll('td.n')].find((td) => td.textContent === '90.91') as HTMLElement;
-    expect(low.style.fontWeight).toBe('700');
+    expect(low.classList.contains('eff-low')).toBe(true);
     const full = [...container.querySelectorAll('td.n')].find((td) => td.textContent === '100.00') as HTMLElement;
-    expect(full.style.fontWeight).toBe('');
+    expect(full.classList.contains('eff-low')).toBe(false);
   });
   it('empty state', () => {
     const empty = { ...sp, rows: [], summary: [], shiftTotals: [], grandTotal: { pass: 0, weightRejects: 0, total: 0, efficiencyPct: null } };

@@ -45,9 +45,6 @@ import puppeteer, { type Browser } from 'puppeteer-core';
 import { mintRenderToken, revokeRenderToken, RENDER_TOKEN_COOKIE, type AuthUser } from '../../auth.js';
 import type { ReportFilters, ReportType } from './common.js';
 import type { ResolvedPeriod } from '../report.js';
-import { plantNowMs } from '../plantClock.js';
-import { SERVICE_VERSION } from '../health.js';
-import { xmlEscape } from './xlsx.js';
 
 /** One page load must complete (network-idle, then the header actually rendering) within this long, or the render fails loudly. */
 export const RENDER_TIMEOUT_MS = 30_000;
@@ -108,39 +105,11 @@ export function countPdfPages(buffer: Buffer): number {
   return matches ? matches.length : 0;
 }
 
-/** Plant-clock instant as DD-MM-YYYY HH:mm. */
-export function formatPlantStamp(plantMs: number): string {
-  const d = new Date(plantMs);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
-}
-
-/**
- * W4: the running footer stamped on every page by Chromium: "IFL internal ·
- * SMS vX" left, generated time (plant clock) centre, "Page X of Y" right, in
- * small grey text. Chromium substitutes the pageNumber/totalPages spans and
- * ignores the page's own CSS, so the styling is inline.
- */
-export function buildFooterTemplate(generated: string, version: string): string {
-  const v = xmlEscape(`v${version.replace(/^v/i, '')}`);
-  return (
-    `<div style="width:100%;box-sizing:border-box;padding:0 14mm;font-family:Arial,Helvetica,sans-serif;font-size:7pt;color:#777;` +
-    `display:flex;justify-content:space-between;align-items:center;">` +
-    `<span style="flex:1;text-align:left;">IFL internal &middot; SMS ${v}</span>` +
-    `<span style="flex:1;text-align:center;">Generated ${xmlEscape(generated)} (plant time)</span>` +
-    `<span style="flex:1;text-align:right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>` +
-    `</div>`
-  );
-}
-
-/** The options handed to Chromium's print engine. Orientation and margins come from the page's own CSS (`preferCSSPageSize`). */
-export function buildPdfOptions(nowPlantMs: number = plantNowMs(), version: string = SERVICE_VERSION) {
+/** The options handed to Chromium's print engine. Orientation, margins and the running footer ("Page X of Y") all come from the page's own CSS (`@page`, `preferCSSPageSize`); Chromium's own header/footer is deliberately off so the footer prints once. */
+export function buildPdfOptions() {
   return {
     printBackground: true,
     preferCSSPageSize: true,
-    displayHeaderFooter: true,
-    headerTemplate: '<div></div>',
-    footerTemplate: buildFooterTemplate(formatPlantStamp(nowPlantMs), version),
   };
 }
 

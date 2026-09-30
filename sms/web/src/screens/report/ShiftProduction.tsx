@@ -5,6 +5,8 @@ import { fmtInt } from '../../lib/fmt';
 import type { ShiftProductionFigures, ShiftProductionReportData } from '../../api';
 import { fmtDmy } from './PrintHead';
 
+const T = W.iflReports;
+
 /** Efficiency to 2 dp, "—" when unknown. */
 export function fmtEff(n: number | null | undefined): string {
   return n == null ? '—' : n.toFixed(2);
@@ -14,7 +16,7 @@ export function fmtEff(n: number | null | undefined): string {
 function EffCell({ v }: { v: number | null }) {
   const low = v != null && v < 100;
   return (
-    <td className="n" style={low ? { fontWeight: 700, background: 'rgba(200, 120, 0, 0.12)' } : undefined}>
+    <td className={low ? 'n eff-low' : 'n'}>
       {fmtEff(v)}
     </td>
   );
@@ -30,8 +32,6 @@ function FigureCells({ f }: { f: ShiftProductionFigures }) {
     </>
   );
 }
-
-const totalStyle = { fontWeight: 700, fontStyle: 'italic' } as const;
 
 export function ShiftProductionSection({ d }: { d: ShiftProductionReportData }) {
   if (d.grandTotal.total === 0 && d.rows.length === 0) {
@@ -54,16 +54,16 @@ export function ShiftProductionSection({ d }: { d: ShiftProductionReportData }) 
 
   return (
     <div data-report-orientation="portrait">
-      <Block first label="Summary">
+      <Block first label={T.summary}>
         <div className="tw">
           <table className="ifl-table">
             <thead>
               <tr>
-                <th>Shift</th>
-                <th className="n">Pass packages</th>
-                <th className="n">Weight rejections</th>
-                <th className="n">Total</th>
-                <th className="n">Efficiency %</th>
+                <th>{T.shift}</th>
+                <th className="n">{T.passPackages}</th>
+                <th className="n">{T.weightRejections}</th>
+                <th className="n">{T.total}</th>
+                <th className="n">{T.efficiency}</th>
               </tr>
             </thead>
             <tbody>
@@ -73,8 +73,8 @@ export function ShiftProductionSection({ d }: { d: ShiftProductionReportData }) 
                   <FigureCells f={s} />
                 </tr>
               ))}
-              <tr className="total" style={totalStyle}>
-                <td>Total</td>
+              <tr className="total">
+                <td>{T.total}</td>
                 <FigureCells f={d.grandTotal} />
               </tr>
             </tbody>
@@ -83,22 +83,22 @@ export function ShiftProductionSection({ d }: { d: ShiftProductionReportData }) 
         <p className="mut sm" style={{ marginTop: 8 }}>{d.note}</p>
         {(wo.pass > 0 || wo.weightRejects > 0) && (
           <p className="mut sm" style={{ marginTop: 4 }}>
-            {fmtInt(wo.pass)} pass and {fmtInt(wo.weightRejects)} weight rejections carry no winder and are in the totals above but not in the winder rows below.
+            {T.noWinder(fmtInt(wo.pass), fmtInt(wo.weightRejects))}
           </p>
         )}
       </Block>
-      <Block label="By winder">
+      <Block label={T.byWinder}>
         <div className="tw">
           <table className="ifl-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Shift</th>
-                <th className="n">Winder</th>
-                <th className="n">Pass</th>
-                <th className="n">Weight rej.</th>
-                <th className="n">Total</th>
-                <th className="n">Efficiency %</th>
+                <th>{T.date}</th>
+                <th>{T.shift}</th>
+                <th className="n">{T.winder}</th>
+                <th className="n">{T.pass}</th>
+                <th className="n">{T.weightRejShort}</th>
+                <th className="n">{T.total}</th>
+                <th className="n">{T.efficiency}</th>
               </tr>
             </thead>
             {groups.map((g) => {
@@ -115,8 +115,8 @@ export function ShiftProductionSection({ d }: { d: ShiftProductionReportData }) 
                     </tr>
                   ))}
                   {t && (
-                    <tr className="total" style={totalStyle}>
-                      <td className="n">Total</td>
+                    <tr className="total">
+                      <td className="n">{T.total}</td>
                       <FigureCells f={t} />
                     </tr>
                   )}
