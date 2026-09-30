@@ -744,6 +744,12 @@ export function dataBarTarget(type: ReportType, sheets: readonly Sheet[]): { she
     case 'management-summary':
       sheet = byName(sheets, 'Chart');
       break;
+    case 'shift-production':
+      sheet = byName(sheets, 'Summary');
+      break;
+    case 'rejected-cones':
+      sheet = byName(sheets, 'Weight range winder');
+      break;
     default:
       sheet = undefined;
   }
@@ -877,6 +883,16 @@ export function chartSpecFor(type: ReportType, data: unknown): ChartSpecResult |
       const d = data as ReportDataByType['machine-product'];
       const points = d.products.filter((p) => isNum(p.cones)).map((p) => ({ category: p.label, value: p.cones }));
       return points.length ? { title: 'Cones by product', categoryLabel: 'Product', valueLabel: 'Cones', points } : null;
+    }
+    case 'shift-production': {
+      const d = data as ReportDataByType['shift-production'];
+      const points = d.summary.filter((r) => isNum(r.efficiencyPct)).map((r) => ({ category: r.shift, value: r.efficiencyPct as number }));
+      return points.length ? { title: 'Efficiency by shift', categoryLabel: 'Shift', valueLabel: 'Efficiency (%)', points } : null;
+    }
+    case 'rejected-cones': {
+      const d = data as ReportDataByType['rejected-cones'];
+      const points = d.weightRange.byWinder.filter((r) => isNum(r.avgG)).map((r) => ({ category: `Winder ${r.winder}`, value: r.avgG as number }));
+      return points.length ? { title: 'Average cone weight by winder', categoryLabel: 'Winder', valueLabel: 'Average (g)', points } : null;
     }
     default:
       return null;

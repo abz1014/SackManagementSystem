@@ -18,6 +18,8 @@ import { getSackReport, sackCsv, type SackReportData } from './sack.js';
 import { getCalibrationReport, calibrationCsv, type CalibrationReportData } from './calibration.js';
 import { getManagementSummary, summaryCsv, type ManagementSummaryData } from './summary.js';
 import { getMachineProductReport, machineProductCsv, type MachineProductReportData } from './machineProduct.js';
+import { getShiftProductionReport, shiftProductionCsv, type ShiftProductionReportData } from './shiftProduction.js';
+import { getRejectedConesReport, rejectedConesCsv, type RejectedConesReportData } from './rejectedCones.js';
 
 export interface ReportDataByType {
   daily: DailyReportData;
@@ -30,6 +32,8 @@ export interface ReportDataByType {
   calibration: CalibrationReportData;
   'management-summary': ManagementSummaryData;
   'machine-product': MachineProductReportData;
+  'shift-production': ShiftProductionReportData;
+  'rejected-cones': RejectedConesReportData;
 }
 
 export type AnyReportData = ReportDataByType[ReportType];
@@ -64,6 +68,8 @@ const BUILDERS: { [T in ReportType]: Builder<T> } = {
   calibration: getCalibrationReport,
   'management-summary': getManagementSummary,
   'machine-product': getMachineProductReport,
+  'shift-production': getShiftProductionReport,
+  'rejected-cones': getRejectedConesReport,
 };
 
 const CSV: { [T in ReportType]: (d: ReportDataByType[T]) => CsvTable } = {
@@ -77,6 +83,8 @@ const CSV: { [T in ReportType]: (d: ReportDataByType[T]) => CsvTable } = {
   calibration: calibrationCsv,
   'management-summary': summaryCsv,
   'machine-product': machineProductCsv,
+  'shift-production': shiftProductionCsv,
+  'rejected-cones': rejectedConesCsv,
 };
 
 export function buildReport<T extends ReportType>(
@@ -99,6 +107,8 @@ export function reportCsv<T extends ReportType>(type: T, data: ReportDataByType[
 }
 
 export * from './common.js';
+export type { ShiftProductionReportData, ShiftProductionRow, ShiftProductionSummaryRow, ShiftProductionShiftTotal, ShiftProductionFigures } from './shiftProduction.js';
+export type { RejectedConesReportData, RejectedConeRow, WeightRangeRow, WeightRangeByWinder } from './rejectedCones.js';
 export { buildHeader } from './header.js';
 export { csvDocument, csvFilename, reportFilename, attributionRows, toCsv, escapeCell } from './csv.js';
 export { buildXlsx, reportSheets, XLSX_CONTENT_TYPE } from './xlsx.js';

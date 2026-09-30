@@ -23,6 +23,8 @@ import { sackCsv } from './sack.js';
 import { calibrationCsv } from './calibration.js';
 import { summaryCsv } from './summary.js';
 import { machineProductCsv } from './machineProduct.js';
+import { shiftProductionCsv } from './shiftProduction.js';
+import { rejectedConesCsv } from './rejectedCones.js';
 
 /**
  * A minimal zip reader for the shape `buildZip` writes: local file header +
@@ -413,6 +415,22 @@ const machineProductData: any = {
   ],
 };
 
+const f = (pass: number, rej: number) => ({ pass, weightRejects: rej, total: pass + rej, efficiencyPct: Math.round((10000 * pass) / (pass + rej)) / 100 });
+const shiftProductionData: any = {
+  period: dailyData.period,
+  summary: [{ shift: 'morning', ...f(90, 10) }],
+  grandTotal: f(90, 10),
+  rows: [{ date: '2026-09-01', shift: 'morning', winder: 1, ...f(90, 10) }],
+  shiftTotals: [{ date: '2026-09-01', shift: 'morning', ...f(90, 10) }],
+  withoutWinder: { pass: 0, weightRejects: 0 },
+};
+const rejectedConesData: any = {
+  period: dailyData.period,
+  list: [{ date: '2026-09-01', shift: 'morning', winder: 1, weightG: 1200, producedAtUtc: '2026-09-01T07:00:00.000Z' }],
+  total: 1,
+  weightRange: { line: { n: 90, minG: 1900, maxG: 2000, avgG: 1950 }, byWinder: [{ winder: 1, n: 90, minG: 1900, maxG: 2000, avgG: 1950 }], plausibility: { loG: 1500, hiG: 2100 }, excludedImplausible: 0 },
+};
+
 const FIXTURES: Record<ReportType, { data: any; table: CsvTable }> = {
   daily: { data: dailyData, table: dailyCsv(dailyData) },
   shift: { data: shiftData, table: shiftCsv(shiftData) },
@@ -424,6 +442,8 @@ const FIXTURES: Record<ReportType, { data: any; table: CsvTable }> = {
   calibration: { data: calibrationData, table: calibrationCsv(calibrationData) },
   'management-summary': { data: summaryData, table: summaryCsv(summaryData) },
   'machine-product': { data: machineProductData, table: machineProductCsv(machineProductData) },
+  'shift-production': { data: shiftProductionData, table: shiftProductionCsv(shiftProductionData) },
+  'rejected-cones': { data: rejectedConesData, table: rejectedConesCsv(rejectedConesData) },
 };
 
 const TYPES = Object.keys(FIXTURES) as ReportType[];

@@ -39,6 +39,9 @@ export const REPORT_TYPES = [
   // 15 Sep 2026 to Q28 ("sack stock per machine" = production per machine by
   // shift and day). Registered last so the nine existing CSV/RBAC pins hold.
   'machine-product',
+  // IFL-SSRS-styled pair (30 Sep 2026), registered after the existing ten.
+  'shift-production',
+  'rejected-cones',
 ] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
@@ -58,6 +61,8 @@ export const REPORT_TITLES: Record<ReportType, string> = {
   calibration: 'Calibration report',
   'management-summary': 'Management summary',
   'machine-product': 'Product by machine and shift',
+  'shift-production': 'Shift Production Report',
+  'rejected-cones': 'Rejected Cones Report',
 };
 
 /**
@@ -78,6 +83,8 @@ export const REPORT_RANK: Record<ReportType, 1 | 3> = {
   calibration: 1,
   'management-summary': 3,
   'machine-product': 1,
+  'shift-production': 1,
+  'rejected-cones': 1,
 };
 export const EXPORT_RANK = 3;
 
@@ -112,6 +119,8 @@ export const FILTERS_BY_TYPE: Record<ReportType, readonly ReportFilterName[]> = 
   // machine. No product filter: a cell that hid the other product a machine
   // ran in the same shift would misreport the shift.
   'machine-product': ['shift', 'station'],
+  'shift-production': ['shift'],
+  'rejected-cones': ['shift', 'station'],
 };
 
 /** A production-day range, inclusive, as every day-grained endpoint takes it. */
