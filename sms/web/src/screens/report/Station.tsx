@@ -1,9 +1,9 @@
 /** Machine / station report: the one station ranking, on paper. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
 import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
-import { fmtAppInstant, fmtInt, fmtPct1 } from '../../lib/fmt';
+import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import { stationLabel, type StationReportData, type StationRow } from '../../api';
-import { DeviationBars, fmtG1, fmtSignedG, StateCells, StateHeads, type DeviationRow } from './shared';
+import { DeviationBars, fmtAppInstantDmy, fmtG1, fmtSignedG, StateCells, StateHeads, type DeviationRow } from './shared';
 
 /**
  * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.6):
@@ -57,7 +57,7 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
           zeroLabel={W.report.refLineZero}
         />
         <div className="tw tw-span">
-          <table>
+          <table className="ifl-table">
             <thead>
               <tr>
                 <th>{W.reports.colStation}</th>
@@ -98,7 +98,7 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
                   <td className="n">{fmtPct1(r.rejectRatePct)}</td>
                   <StateCells s={r.states} />
                   {/* An app-written instant (genuine UTC), so the viewer's own zone, never the plant formatters. */}
-                  <td>{r.lastAdjustedUtc ? fmtAppInstant(r.lastAdjustedUtc) : '—'}</td>
+                  <td>{r.lastAdjustedUtc ? fmtAppInstantDmy(r.lastAdjustedUtc) : '—'}</td>
                 </tr>
               ))}
             </tbody>

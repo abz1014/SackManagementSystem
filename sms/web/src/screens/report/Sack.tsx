@@ -17,7 +17,7 @@ import { distinctProductLabels } from '../../lib/productLabel';
 import { Block, Empty, Failed, SkelLines } from '../../ui/bits';
 import { fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
 import { getSackStock, type ProductOption, type SackReportData, type StockLedgerData } from '../../api';
-import { fmtDayShort, Fig, Histogram, LineTable } from './shared';
+import { fmtDayDmy, Fig, Histogram, LineTable } from './shared';
 
 export function SackSection({ d, products }: { d: SackReportData; products: ProductOption[] }) {
   const t = d.totals;
@@ -58,7 +58,7 @@ export function SackSection({ d, products }: { d: SackReportData; products: Prod
           {d.byProduct.length > 0 && (
             <Block label={W.reports.byProduct}>
               <div className="tw">
-                <table>
+                <table className="ifl-table">
                   <thead>
                     <tr>
                       <th>{W.reports.colProduct}</th>
@@ -106,7 +106,7 @@ function StockBlock({ from, to }: { from: string; to: string }) {
   return (
     <Block
       label={cumulative ? W.reports.stockCumulative : W.reports.stock}
-      note={cumulative ? W.reports.stockCumulativeBasis(fmtDayShort(led.countedSinceDay!)) : W.reports.stockBasis}
+      note={cumulative ? W.reports.stockCumulativeBasis(fmtDayDmy(led.countedSinceDay!)) : W.reports.stockBasis}
     >
       {notStarted ? (
         <p className="mut">{W.reports.stockNotStarted}</p>
@@ -127,7 +127,7 @@ function Ledger({ d }: { d: StockLedgerData }) {
   return (
     <>
       <div className="tw">
-        <table>
+        <table className="ifl-table">
           <thead>
             <tr>
               <th>{W.reports.colDay}</th>
@@ -142,7 +142,7 @@ function Ledger({ d }: { d: StockLedgerData }) {
           <tbody>
             {d.days.map((r) => (
               <tr key={r.day}>
-                <td>{fmtDayShort(r.day)}</td>
+                <td>{fmtDayDmy(r.day)}</td>
                 <td className="n">{n(r.opening)}</td>
                 <td className="n">{n(r.receipts)}</td>
                 <td className="n">{n(r.issues)}</td>

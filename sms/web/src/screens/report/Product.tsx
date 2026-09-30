@@ -44,7 +44,7 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
       </Block>
       <Block label={W.reports.colProduct}>
         <div className="tw tw-span">
-          <table>
+          <table className="ifl-table">
             <thead>
               <tr>
                 <th>{W.reports.colProduct}</th>

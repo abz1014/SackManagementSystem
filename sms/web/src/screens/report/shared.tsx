@@ -27,6 +27,7 @@ import {
 } from '../../ui/chartLayout';
 import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
 import { fmtDayLong, fmtInt, fmtPct1 } from '../../lib/fmt';
+import { fmtDmy } from './PrintHead';
 import type { ReportLine, StateCounts } from '../../api';
 
 export function Fig({ v, u, n }: { v: string; u: string; n: string | null }) {
@@ -109,7 +110,7 @@ export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[
   const body = rows.filter((r) => r.group !== 'total');
   if (body.length === 0) return <Empty message={W.nothingHere} />;
   return (
-    <table>
+    <table className="ifl-table">
       <thead>
         <tr>
           <th>{head}</th>
@@ -123,7 +124,7 @@ export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[
       <tbody>
         {body.map((r) => (
           <tr key={r.group}>
-            <td>{head === W.report.colShift ? (W.shiftName[r.group as 'morning'] ?? r.group) : fmtDayShort(r.group)}</td>
+            <td>{head === W.report.colShift ? (W.shiftName[r.group as 'morning'] ?? r.group) : fmtDayDmy(r.group)}</td>
             <td className="n">{fmtInt(r.cones)}</td>
             <td className="n">{fmtInt(r.sacks)}</td>
             <td className="n">{fmtInt(Math.round(r.sackWeightKg))} {W.fig.kg}</td>
@@ -1350,4 +1351,16 @@ export function RejectTrendChart({
       }}
     </ChartFrame>
   );
+}
+
+/** "31-08-2026" — table dates in IFL house style (owner 30 Sep: DD-MM-YYYY). Charts keep fmtDayShort. */
+export function fmtDayDmy(day: string): string {
+  return fmtDmy(day);
+}
+
+/** "31-08-2026 14:03" for an app-written UTC instant, in the viewer's own zone (same zone rule as fmtAppInstant). */
+export function fmtAppInstantDmy(iso: string): string {
+  const t = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(t.getDate())}-${p(t.getMonth() + 1)}-${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`;
 }

@@ -13,9 +13,9 @@
 import { usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import { Block, Empty, SkelLines } from '../../ui/bits';
-import { fmtAppInstant, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
 import { listAdjustments, stationLabel, type CalibrationAdjustment, type CalibrationReportData, type StationRow } from '../../api';
-import { DeviationBars, fmtG1, fmtSignedG, type DeviationRow } from './shared';
+import { DeviationBars, fmtAppInstantDmy, fmtG1, fmtSignedG, type DeviationRow } from './shared';
 
 export function CalibrationSection({ d, names }: { d: CalibrationReportData; names: StationRow[] }) {
   const nameOf = (n: number | null) => (n == null ? W.reports.wholeLine : stationLabel(names.find((s) => s.stationId === n), n));
@@ -71,7 +71,7 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
               dropping a column; "Last adjusted" wraps to two lines on its
               17%-wide column instead of forcing the table wider. */}
           <div className="tw tw-span">
-            <table className="calib-tbl">
+            <table className="calib-tbl ifl-table">
               <colgroup>
                 <col style={{ width: '10%' }} />
                 <col style={{ width: '9%' }} />
@@ -110,7 +110,7 @@ export function CalibrationSection({ d, names }: { d: CalibrationReportData; nam
                     <td>{s.flagged ? W.reports.flaggedYes : W.reports.flaggedNo}</td>
                     <td className="n">{s.daysFlagged} / {s.daysWithData}</td>
                     <td className="n">{s.adjustmentsInPeriod}</td>
-                    <td>{s.lastAdjustedUtc ? fmtAppInstant(s.lastAdjustedUtc) : '—'}</td>
+                    <td>{s.lastAdjustedUtc ? fmtAppInstantDmy(s.lastAdjustedUtc) : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -174,7 +174,7 @@ function AdjustmentsBlock({ d, nameOf }: { d: CalibrationReportData; nameOf: (n:
         <>
           {detailsMissing && <p className="mut sm" style={{ marginBottom: 10 }}>{W.reports.adjustmentsNotAvailable}</p>}
           <div className="tw">
-            <table>
+            <table className="ifl-table">
               <thead>
                 <tr>
                   <th>{W.reports.colWhen}</th>
@@ -190,7 +190,7 @@ function AdjustmentsBlock({ d, nameOf }: { d: CalibrationReportData; nameOf: (n:
                 {rows.map(({ a, detail }) => (
                   <tr key={String(a.adjustmentId)}>
                     {/* An app-written instant (genuine UTC): the viewer's zone, never the plant formatters. */}
-                    <td>{fmtAppInstant(a.adjustedAtUtc)}</td>
+                    <td>{fmtAppInstantDmy(a.adjustedAtUtc)}</td>
                     <td>{nameOf(a.stationId)}</td>
                     <td className="n">{fmtSignedG(a.amountG)}</td>
                     {rich && <td className="n">{detail ? fmtG1(detail.beforeG) : '—'}</td>}

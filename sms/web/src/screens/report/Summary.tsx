@@ -80,7 +80,7 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
 
       <Block label={W.reports.kpi}>
         <div className="tw">
-          <table>
+          <table className="ifl-table">
             <thead>
               <tr>
                 <th>{W.reports.kpi}</th>
@@ -137,7 +137,7 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
 
       <Block label={W.reports.productMix}>
         <div className="tw">
-          <table>
+          <table className="ifl-table">
             <thead>
               <tr>
                 <th>{W.reports.colProduct}</th>

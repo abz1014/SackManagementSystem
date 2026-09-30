@@ -4,7 +4,7 @@ import { Block, Empty } from '../../ui/bits';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { PeriodParams } from '../../lib/period';
 import type { RejectReason, RejectReportData } from '../../api';
-import { fmtDayShort, fmtPct, RejectTrendChart, type TrendBucket } from './shared';
+import { fmtDayDmy, fmtDayShort, fmtPct, RejectTrendChart, type TrendBucket } from './shared';
 
 /**
  * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.5
@@ -100,7 +100,7 @@ export function RejectSection({
              */}
             {d.trend.some((t) => t.outOfControl) ? (
               <div className="tw" style={{ marginTop: 18 }}>
-                <table>
+                <table className="ifl-table">
                   <thead>
                     <tr>
                       <th>{W.reports.colDay}</th>
@@ -114,7 +114,7 @@ export function RejectSection({
                   <tbody>
                     {d.trend.filter((t) => t.outOfControl).map((t) => (
                       <tr key={t.day} className="hit">
-                        <td>{fmtDayShort(t.day)}</td>
+                        <td>{fmtDayDmy(t.day)}</td>
                         <td className="n">{fmtInt(t.produced)}</td>
                         <td className="n">{fmtInt(t.rejects)}</td>
                         <td className="n">{fmtPct(t.ratePct, 2)}</td>
@@ -137,7 +137,7 @@ export function RejectSection({
           <Empty message={W.nothingHere} />
         ) : (
           <div className="tw tw-span">
-            <table>
+            <table className="ifl-table">
               <thead>
                 <tr>
                   <th>{W.reports.colDay}</th>
@@ -150,7 +150,7 @@ export function RejectSection({
               <tbody>
                 {d.byDayCode.map((r, i) => (
                   <tr key={`${r.day}-${r.rejectType}-${r.tubeCode}-${r.materialCode}-${i}`}>
-                    <td>{fmtDayShort(r.day)}</td>
+                    <td>{fmtDayDmy(r.day)}</td>
                     <td>{r.displayLabel}</td>
                     <td className="n">{fmtInt(r.count)}</td>
                     <td className="n">{fmtInt(r.inspected)}</td>

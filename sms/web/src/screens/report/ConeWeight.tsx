@@ -91,7 +91,7 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
           <Empty message={W.nothingHere} />
         ) : (
           <div className="tw">
-            <table>
+            <table className="ifl-table">
               <thead>
                 <tr>
                   <th>{W.reports.colStation}</th>

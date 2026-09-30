@@ -24,7 +24,7 @@ import { W } from '../../lib/words';
 import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
 import { fmtClock, fmtInt } from '../../lib/fmt';
 import type { MachineProductChange, MachineProductReportData, MachineShiftCell } from '../../api';
-import { fmtDayShort } from './shared';
+import { fmtDayDmy } from './shared';
 
 /** The row/change label: the machine's own name, then the station's, then a plain numbered fallback. */
 function machineLabel(station: number, machineName: string | null, stationName?: string | null): string {
@@ -103,7 +103,7 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
             measurement that showed the old layout losing the machine label
             off-screen. Same `d`, same cells, only the axes are swapped. */}
         <div className="tw mp-scroll no-print">
-          <table>
+          <table className="ifl-table">
             <thead>
               <tr>
                 <th>{W.reports.colWhen}</th>
@@ -125,7 +125,7 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
               {d.columns.map((c, ci) => (
                 <tr key={`${c.day}|${c.shift}`}>
                   <td className="n">
-                    {fmtDayShort(c.day)}
+                    {fmtDayDmy(c.day)}
                     <br />
                     {W.shiftName[c.shift]}
                   </td>
@@ -152,7 +152,7 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
           <p className="mut">{W.reports.noChangeovers}</p>
         ) : (
           <div className="tw">
-            <table>
+            <table className="ifl-table">
               <thead>
                 <tr>
                   <th>{W.reports.colWhen}</th>
@@ -173,7 +173,7 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
 
       <Block label={W.reports.byProduct}>
         <div className="tw">
-          <table>
+          <table className="ifl-table">
             <thead>
               <tr>
                 <th>{W.reports.colProduct}</th>
@@ -189,8 +189,8 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
                   <td>{p.label}</td>
                   <td className="n">{fmtInt(p.cones)}</td>
                   <td className="n">{fmtInt(p.machines)}</td>
-                  <td>{fmtDayShort(p.firstUtc)} {fmtClock(p.firstUtc)}</td>
-                  <td>{fmtDayShort(p.lastUtc)} {fmtClock(p.lastUtc)}</td>
+                  <td>{fmtDayDmy(p.firstUtc)} {fmtClock(p.firstUtc)}</td>
+                  <td>{fmtDayDmy(p.lastUtc)} {fmtClock(p.lastUtc)}</td>
                 </tr>
               ))}
             </tbody>
@@ -203,7 +203,7 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
 
 /**
  * The print/PDF version of the machine matrix: `d.columns` tiled into
- * `MACHINE_PRODUCT_COLS_PER_PAGE`-wide pages, each its own `<table>` with the
+ * `MACHINE_PRODUCT_COLS_PER_PAGE`-wide pages, each its own `<table className="ifl-table">` with the
  * row-label column repeated and the span stated above it. `break-after: page`
  * (`.mp-page`, app.css) puts each page on its own sheet under the existing
  * `report-landscape` @page rule — one table per printed page, not one huge
@@ -227,13 +227,13 @@ function MachineProductPrintPages({ d }: { d: MachineProductReportData }) {
             <p className="mut sm" style={{ marginTop: first ? 0 : 18, marginBottom: 6 }}>
               {W.reports.machineProductPageSpan(fmtInt(fromCol), fmtInt(toCol), fmtInt(total), fmtInt(pi + 1), fmtInt(pages.length))}
             </p>
-            <table>
+            <table className="ifl-table">
               <thead>
                 <tr>
                   <th>{W.reports.colMachine}</th>
                   {pageCols.map((c) => (
                     <th key={`${c.day}|${c.shift}`} className="n">
-                      {fmtDayShort(c.day)}
+                      {fmtDayDmy(c.day)}
                       <br />
                       {W.shiftName[c.shift]}
                     </th>
@@ -277,7 +277,7 @@ function Cell({ cell, labels }: { cell: MachineShiftCell; labels: Record<string,
 function ChangeRow({ c, labels }: { c: MachineProductChange; labels: Record<string, string> }) {
   return (
     <tr>
-      <td>{fmtDayShort(c.day)} {W.shiftName[c.shift]}{' · '}{fmtClock(c.firstUtc)}</td>
+      <td>{fmtDayDmy(c.day)} {W.shiftName[c.shift]}{' · '}{fmtClock(c.firstUtc)}</td>
       <td>{machineLabel(c.station, c.machineName)}</td>
       <td>{labelOf(c.fromMaterialId, c.fromProductName, labels)}</td>
       <td>{labelOf(c.toMaterialId, c.toProductName, labels)}</td>
