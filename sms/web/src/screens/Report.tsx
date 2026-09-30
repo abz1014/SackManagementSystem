@@ -55,6 +55,8 @@ import { SackSection } from './report/Sack';
 import { CalibrationSection } from './report/Calibration';
 import { SummarySection } from './report/Summary';
 import { MachineProductSection } from './report/MachineProduct';
+import { ShiftProductionSection } from './report/ShiftProduction';
+import { RejectedConesSection } from './report/RejectedCones';
 
 export function ReportScreen({
   period,
@@ -280,6 +282,8 @@ function Sections({
     case 'calibration': return <CalibrationSection d={(data as ReportResponse<'calibration'>).report} names={names} />;
     case 'management-summary': return <SummarySection d={(data as ReportResponse<'management-summary'>).report} products={products} />;
     case 'machine-product': return <MachineProductSection d={(data as ReportResponse<'machine-product'>).report} onOpen={onOpenStation} />;
+    case 'shift-production': return <ShiftProductionSection d={(data as ReportResponse<'shift-production'>).report} />;
+    case 'rejected-cones': return <RejectedConesSection d={(data as ReportResponse<'rejected-cones'>).report} />;
   }
 }
 

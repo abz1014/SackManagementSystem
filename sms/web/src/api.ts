@@ -2492,10 +2492,10 @@ export function recordSackMovement(m: SackMovementInput): Promise<{ movementId: 
 
 export type ReportType =
   | 'daily' | 'shift' | 'product' | 'station' | 'reject' | 'cone-weight' | 'sack' | 'calibration' | 'management-summary'
-  | 'machine-product';
+  | 'machine-product' | 'shift-production' | 'rejected-cones';
 export const REPORT_TYPES: readonly ReportType[] = [
   'daily', 'shift', 'product', 'station', 'reject', 'cone-weight', 'sack', 'calibration', 'management-summary',
-  'machine-product',
+  'machine-product', 'shift-production', 'rejected-cones',
 ];
 
 export interface ReportFilters {
@@ -2912,6 +2912,54 @@ export interface MachineProductReportData {
   note: string;
 }
 
+type ShiftCode = 'morning' | 'evening' | 'night';
+/** Shift Production report (IFL SSRS style, 30 Sep 2026); mirrors api/src/services/reports/shiftProduction.ts. */
+export interface ShiftProductionFigures {
+  pass: number;
+  weightRejects: number;
+  total: number;
+  efficiencyPct: number | null;
+}
+export interface ShiftProductionSummaryRow extends ShiftProductionFigures { shift: ShiftCode }
+export interface ShiftProductionRow extends ShiftProductionFigures { date: string; shift: ShiftCode; winder: number }
+export interface ShiftProductionShiftTotal extends ShiftProductionFigures { date: string; shift: ShiftCode }
+export interface ShiftProductionReportData {
+  period: { period: string; from: string; to: string };
+  filters: ReportFilters;
+  lineId: number;
+  summary: ShiftProductionSummaryRow[];
+  grandTotal: ShiftProductionFigures;
+  rows: ShiftProductionRow[];
+  shiftTotals: ShiftProductionShiftTotal[];
+  withoutWinder: { pass: number; weightRejects: number };
+  note: string;
+}
+
+/** Rejected Cones report; mirrors api/src/services/reports/rejectedCones.ts. */
+export interface RejectedConeRow {
+  date: string;
+  shift: ShiftCode;
+  winder: number | null;
+  weightG: number;
+  producedAtUtc: string;
+}
+export interface WeightRangeRow { minG: number | null; maxG: number | null; avgG: number | null; n: number }
+export interface WeightRangeByWinder extends WeightRangeRow { winder: number }
+export interface RejectedConesReportData {
+  period: { period: string; from: string; to: string };
+  filters: ReportFilters;
+  lineId: number;
+  list: RejectedConeRow[];
+  total: number;
+  weightRange: {
+    line: WeightRangeRow;
+    byWinder: WeightRangeByWinder[];
+    plausibility: { loG: number; hiG: number };
+    excludedImplausible: number;
+  };
+  note: string;
+}
+
 export interface ReportDataByType {
   daily: DailyReportData;
   shift: ShiftReportData;
@@ -2923,6 +2971,8 @@ export interface ReportDataByType {
   calibration: CalibrationReportData;
   'management-summary': ManagementSummaryData;
   'machine-product': MachineProductReportData;
+  'shift-production': ShiftProductionReportData;
+  'rejected-cones': RejectedConesReportData;
 }
 
 export interface ReportResponse<T extends ReportType> {

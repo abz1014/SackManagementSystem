@@ -2097,6 +2097,8 @@ export const W = {
       calibration: 'Calibration',
       'management-summary': 'Management summary',
       'machine-product': 'Product by machine',
+      'shift-production': 'Shift production',
+      'rejected-cones': 'Rejected cones',
     } as const,
     /* The one-line question each report answers, under its title. */
     question: {
@@ -2110,6 +2112,8 @@ export const W = {
       calibration: 'Which stations drifted, and what was adjusted.',
       'management-summary': 'The figures that matter, beside the period before.',
       'machine-product': 'Which product ran on which machine, in which shift.',
+      'shift-production': 'Pass, weight rejects and efficiency per shift and winder.',
+      'rejected-cones': 'Every weight-rejected cone, and the weight range per winder.',
     } as const,
     /* The print header. */
     generated: 'Generated',
