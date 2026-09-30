@@ -1,0 +1,40 @@
+# Independent review (T11) of the IFL SMS User & IT Guide
+
+Reviewer did not write the guide. Every image in `images/` was opened and compared with its caption and the surrounding step text; the final PDF was read page by page (contact sheets); commands were spot-checked against `sms/cli/src` and the `sms/scripts/*.ps1` parameter blocks (read-only); LIMITATIONS were spot-checked against `facts/LIMITATIONS.md`.
+
+Figure count (rebuilt): 81 pages, 55 captioned figures from 53 image files (55 figure references (S21 and S22 are each used twice, in chapter 5 and in chapter 7). The earlier "55" was the reference count and the "53" the file count; the previous PDF showed only 53 captions because the two chapter 5 figures were silently lost (R-01). The rebuilt PDF has 55 captioned figures from 53 distinct images. No figure lost.
+
+| ID | Location | Defect | Fix | Status |
+|---|---|---|---|---|
+| R-01 | src/05-verification-checklist.md:13,19; PDF chapter 5 | The two figures (S21, S22) were indented under tick items, so the build printed the raw markdown text instead of the pictures; two figures missing (PDF had 53 captions, not 55). checks.py did not catch it. | Un-indented the image lines so they render as figures. | fixed |
+| R-02 | src/06-configuration.md:111-113 (Audit log figure S32b) | The figure sat in the middle of the PDAS "Why it is off" list, far from the Audit log bullet. | Moved directly under the Audit log bullet. | fixed |
+| R-03 | src/10-security.md:5 | Text said "four distinct SQL logins"; the table lists five. | Changed to five. | fixed |
+| R-04 | src/04-installation.md:131; src/06-configuration.md:85,146 | Literal `*write*`, `*writing*`, `*selectable*`, `*and*` asterisks printed (italic markup is not supported by the build). | Removed the asterisks. | fixed |
+| R-05 | src/06-configuration.md Reject codes bullet; Figure S31 | Text said codes are named "from the Rejects screen itself, not here"; the Setup Reject codes block has an editable Name box plus Pass? and Severity selects (S31, RejectCodesBlock.tsx). | Rewrote the bullet to describe those controls and that the Rejects screen also names codes. | fixed |
+| R-06 | src/07-daily-use.md (Rejects, naming a reason) | "A manager can type a name for a code"; the server gate is rank 2 = engineer (`app.ts` PUT /api/reject-codes, `requireRole(2)`), and chapter 6 says engineer. The screen itself says "A manager can name a code here". | Text now says engineer or above and notes the on-screen wording. | fixed (the on-screen wording is a copy question for the maintainer) |
+| R-07 | src/07-daily-use.md Figure D14 caption | Caption said the form "was cut off before the remaining fields and buttons"; the image shows Target, Below, Above, Why, Save and Cancel complete. | Caption corrected. | fixed |
+| R-08 | src/07-daily-use.md Changeover steps; Figure D13 | Steps omitted that a lot / description is required (a plan blocker shown in D13). | Added to step 2. | fixed |
+| R-09 | src/06-configuration.md Figure D15 caption | "cropped before its buttons": Add and Cancel are visible. | Caption corrected. | fixed |
+| R-10 | src/06-configuration.md Figure S24 caption | Image also shows the start of the Line block. | Caption says so. | fixed |
+| R-11 | src/02-how-sms-works.md:100 Figure F-architecture caption | Caption mentioned the CLI and a "browser"; the diagram has no CLI box and shows desk PCs, the wall display and the PDAS-writes (off) box. | Caption rewritten to match the diagram; the bullets still describe the CLI. | fixed |
+| R-12 | src/appendix-c-known-limitations.md item 16 | "Roughly a quarter ... verified by reading" is inverted. facts/LIMITATIONS.md section 16: the mechanical check covers about 6 of 25 to 32 routes; the rest are verified by reading. | Corrected. | fixed |
+| R-13 | src/04-installation.md 4.12 | `install-scheduled-tasks.ps1` defaults `-Server` to `localhost,14330` (a development port); the guide did not say so, so a real install could back up the wrong place. | Added a Note: add `-Server "<host>,<port>"` if different; run as administrator. | fixed |
+| R-14 | src/appendix-b-command-reference.md B.3 heading | "sms\scripts\*.ps1" is not a package path (package root is `sms`). | Now `scripts\*.ps1`. | fixed |
+| R-15 | build/build_docx.py | Chapters were separated by a page-break paragraph; when the previous page was full this produced a blank page (page 19 in the earlier PDF) and a blank final page. | Chapters start with page_break_before; trailing empty paragraphs trimmed. No blank pages remain. | fixed |
+| R-16 | build/build_docx.py figures; PDF | Figures always inserted 16 cm wide: tall screenshots ran off the page, captions landed on the next page apart from their picture, small panel crops (D01, D02, D05 ...) were blown up to 16 cm. | Picture keeps with its caption; height capped at 20 cm (width reduced for tall images); narrow panel crops scaled in proportion (minimum 6.5 cm). Full-width screenshots stay 16 cm. | fixed |
+| R-17 | build/build_docx.py tables | Table rows split across pages (roles table cut mid-cell); header row did not repeat. | Rows cannot split; header row repeats. | fixed |
+| R-18 | src/appendix-d-signoff.md | Closing note pushed an extra page. | Shortened the note (meaning unchanged). | fixed |
+| R-19 | Figures S05 (Fig 24), S07 (Fig 26), S12 (Fig 38), S02, S13, S21 (Figs 2, 53), S08, S30 | Full-page-length captures (up to 5,200 px tall) are scaled to about 6 to 12 cm wide to fit one page, so their text is not legible in print. Captions and steps describe them correctly. | Needs a re-shoot cropped to the visible top of the screen (or two crops per screen). Cannot be fixed without new images. | fixed (S30 partly) - Re-shot viewport-only (S02, S05, S07, S12, S21 at 1680x1000 or 1920; S08 at 1680x1300; S13 cropped to its Products block). Captions rewritten to describe exactly what is visible. S30 (Setup Rules) is a block crop 1036x2330 and remains tall (about 9 cm wide in print); left as is. |
+| R-20 | Figures S21 (Figs 2, 53), Data batches table | In the capture the "Last seen" and "Status" columns overprint each other. App layout defect at that capture width. | Re-shoot at a wider viewport, or report to the maintainer. | fixed - the new S21 shows the Sync health block only; the Data batches table is no longer pictured, so the overprint is not shown. The underlying layout defect at narrow widths was not re-tested and is noted for the maintainer. |
+| R-21 | PDF cover and TOC | Cover carries the running header and footer ("Page 1 of 86"); the TOC lists its own heading. Cosmetic. | Needs a first-page header and a TOC heading style change in the pipeline. | fixed - cover has no header/footer; TOC heading is no longer a Heading 1, so it is not listed in the TOC. |
+| R-22 | PDF section 6.3 roles table | Equal column widths; Rank column too wide, role text cramped. Cosmetic. | Column widths not controllable in the pipeline. | fixed - narrow columns (Rank) get a fixed 1.6 cm width; roles table now reads well. |
+| R-23 | Chapter 8 rows 1 and 2 | The quoted messages keep template placeholders `${span}` and `${since}` (LABELS.md records them as patterns). Correct but may confuse readers. | Owner decision: keep, or add a sentence that the placeholder is replaced by a time. | fixed - chapter 8 now says the placeholders are filled by SMS with a time. |
+| R-24 | Verification record, not a defect | Redaction: no real host, IP, login, person name, C:\Users path or hostname in text or in any of the 53 images (only "TP1 Line 3 Unit 2", demo names, `demo-admin`, `C:\sms-demo-backups`, loopback ::ffff:127.0.0.1). Labels: 82 usages pass check_labels.py; visible labels compared by eye with the images. Commands: 22 cmd/powershell lines match `cli/src` and the `.ps1` parameter blocks. Paths: all in the manifest or IT placeholders. | none | verified |
+
+## Counts
+
+Found 23 defects (R-01 to R-23) plus one verification record (R-24). Fixed 23 (R-01 to R-23; R-19 fully for seven images, S30 left tall). Open 0.
+
+## Build
+
+`build.ps1` without -Draft: 0 FAIL, 0 WARN; output copied to Desktop\SMS-Guide.

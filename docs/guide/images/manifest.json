@@ -1,0 +1,648 @@
+{
+  "shots": [
+    {
+      "id": "F-architecture",
+      "takenAt": "2026-09-30T08:50:20.630Z",
+      "url": "file://C:\\Users\\ABDULLAH SAJID\\Desktop\\sag database\\docs\\guide\\src\\diagrams\\architecture.html",
+      "viewport": {
+        "width": 1940,
+        "height": 620
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S01",
+      "takenAt": "2026-09-30T08:44:07.285Z",
+      "url": "http://127.0.0.1:4100/",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S02",
+      "takenAt": "2026-09-30T09:07:46.249Z",
+      "url": "http://127.0.0.1:4100/?s=line",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S03",
+      "takenAt": "2026-09-30T08:44:12.919Z",
+      "url": "http://127.0.0.1:4100/?s=line",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S04",
+      "takenAt": "2026-09-30T08:44:15.955Z",
+      "url": "http://127.0.0.1:4100/?s=line",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S05",
+      "takenAt": "2026-09-30T09:08:16.882Z",
+      "url": "http://127.0.0.1:4100/?s=readings",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S06",
+      "takenAt": "2026-09-30T08:44:20.998Z",
+      "url": "http://127.0.0.1:4100/?s=readings&rl=rejected",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S07",
+      "takenAt": "2026-09-30T09:08:19.311Z",
+      "url": "http://127.0.0.1:4100/?s=readings&rl=sacks",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D01",
+      "takenAt": "2026-09-30T08:40:31.622Z",
+      "url": "http://127.0.0.1:4100/?s=line",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S08",
+      "takenAt": "2026-09-30T09:08:07.808Z",
+      "url": "http://127.0.0.1:4100/?s=weight",
+      "viewport": {
+        "width": 1680,
+        "height": 1300
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D02",
+      "takenAt": "2026-09-30T08:40:34.215Z",
+      "url": "http://127.0.0.1:4100/?s=line",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S09",
+      "takenAt": "2026-09-30T08:44:30.070Z",
+      "url": "http://127.0.0.1:4100/?s=weight&p=week&wm=time",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D03",
+      "takenAt": "2026-09-30T08:39:53.448Z",
+      "url": "http://127.0.0.1:4100/?s=weight&sheet=station:4",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S10",
+      "takenAt": "2026-09-30T08:44:33.148Z",
+      "url": "http://127.0.0.1:4100/?s=weight",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D04",
+      "takenAt": "2026-09-30T08:42:18.463Z",
+      "url": "http://127.0.0.1:4100/?s=weight&sheet=station:4",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S11",
+      "takenAt": "2026-09-30T08:44:35.790Z",
+      "url": "http://127.0.0.1:4100/?s=rejects",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D05",
+      "takenAt": "2026-09-30T08:39:58.433Z",
+      "url": "http://127.0.0.1:4100/?s=readings",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S12",
+      "takenAt": "2026-09-30T09:07:21.043Z",
+      "url": "http://127.0.0.1:4100/?s=sacks",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D06",
+      "takenAt": "2026-09-30T08:40:00.977Z",
+      "url": "http://127.0.0.1:4100/?s=readings&rl=sacks",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S13",
+      "takenAt": "2026-09-30T09:07:54.781Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=running",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D07",
+      "takenAt": "2026-09-30T08:40:03.510Z",
+      "url": "http://127.0.0.1:4100/?s=readings&rl=rejected",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S14",
+      "takenAt": "2026-09-30T08:44:43.371Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=changeover",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D08",
+      "takenAt": "2026-09-30T08:40:36.872Z",
+      "url": "http://127.0.0.1:4100/?s=rejects",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S15",
+      "takenAt": "2026-09-30T08:44:45.820Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=catalogue",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S16",
+      "takenAt": "2026-09-30T08:44:48.268Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=history",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D09",
+      "takenAt": "2026-09-30T08:42:39.261Z",
+      "url": "http://127.0.0.1:4100/?s=rejects",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S17",
+      "takenAt": "2026-09-30T08:44:50.882Z",
+      "url": "http://127.0.0.1:4100/?s=report&rt=daily",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D10",
+      "takenAt": "2026-09-30T08:42:24.153Z",
+      "url": "http://127.0.0.1:4100/?s=sacks",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S18",
+      "takenAt": "2026-09-30T08:44:53.588Z",
+      "url": "http://127.0.0.1:4100/?s=report&rt=management-summary",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D11",
+      "takenAt": "2026-09-30T08:42:27.088Z",
+      "url": "http://127.0.0.1:4100/?s=sacks",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S19",
+      "takenAt": "2026-09-30T08:44:56.170Z",
+      "url": "http://127.0.0.1:4100/?s=report&rt=calibration",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S20",
+      "takenAt": "2026-09-30T08:44:58.655Z",
+      "url": "http://127.0.0.1:4100/?s=report&rt=machine-product",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S21",
+      "takenAt": "2026-09-30T09:07:25.942Z",
+      "url": "http://127.0.0.1:4100/?s=health",
+      "viewport": {
+        "width": 1920,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S22",
+      "takenAt": "2026-09-30T08:45:03.657Z",
+      "url": "http://127.0.0.1:4100/?s=health",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S23",
+      "takenAt": "2026-09-30T08:45:06.128Z",
+      "url": "http://127.0.0.1:4100/?s=health",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S24",
+      "takenAt": "2026-09-30T08:49:49.077Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S25",
+      "takenAt": "2026-09-30T08:45:11.449Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S26",
+      "takenAt": "2026-09-30T08:45:14.014Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S27",
+      "takenAt": "2026-09-30T08:45:16.602Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S28",
+      "takenAt": "2026-09-30T08:45:19.175Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S29",
+      "takenAt": "2026-09-30T08:45:21.774Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S30",
+      "takenAt": "2026-09-30T09:07:28.554Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S31",
+      "takenAt": "2026-09-30T08:45:27.071Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S32a",
+      "takenAt": "2026-09-30T08:45:29.653Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S32b",
+      "takenAt": "2026-09-30T08:45:32.188Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S33",
+      "takenAt": "2026-09-30T08:45:35.159Z",
+      "url": "http://127.0.0.1:4100/?s=wall",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dpr": 1,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S34",
+      "takenAt": "2026-09-30T08:49:52.144Z",
+      "url": "http://127.0.0.1:4100/?s=line",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D12",
+      "takenAt": "2026-09-30T08:42:51.997Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=running",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D13",
+      "takenAt": "2026-09-30T08:42:57.036Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=changeover",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D14",
+      "takenAt": "2026-09-30T08:49:54.634Z",
+      "url": "http://127.0.0.1:4100/?s=product&pt=catalogue",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D15",
+      "takenAt": "2026-09-30T08:50:19.610Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D16",
+      "takenAt": "2026-09-30T08:41:09.617Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D17",
+      "takenAt": "2026-09-30T08:41:12.252Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "D18",
+      "takenAt": "2026-09-30T08:41:55.417Z",
+      "url": null,
+      "viewport": null,
+      "pass": "skipped",
+      "reason": "The People table shows no Reset button on the signed-in admin's own row (password change is via the account menu, D02), and the demo has only one account; creating a second account is forbidden for this pass. Text-only in the guide."
+    }
+  ]
+}

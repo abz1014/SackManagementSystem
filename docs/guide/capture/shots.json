@@ -1,0 +1,1013 @@
+{
+  "_readme": [
+    "Shot list for docs/guide/capture/capture.mjs \u00e2\u20ac\u201d encodes shot-list section 3 of the illustrated-guide plan (S01-S34, D01-D22).",
+    "Values wrapped {{LIKE_THIS}} are placeholders for demo-specific IDs (problem station number, a cone/sack/reject id, a stock day, the top reject code) that only exist once T5 runs the demo and writes docs/guide/demo/DEMO-STATE.md. `--dry` lists every remaining placeholder.",
+    "Every `crop` selector targets the shared `Block` component's rendered markup (`section.block` containing `p.h2` with the block's exact label \u00e2\u20ac\u201d see sms/web/src/ui/bits.tsx) or the shared `Sheet` dialog (`.sheet[role=dialog]` \u00e2\u20ac\u201d sms/web/src/ui/Sheet.tsx), both confirmed by reading the component source, not guessed.",
+    "`notCapturable: true` rows (D19, D20) are recorded for completeness and produce no PNG; `capture.mjs --dry` reports them as skipped, not as failures.",
+    "Selectors marked with a `_uncertain` note are a best-effort reading of the source and must be eye-checked by whoever runs T7/T8 against the live demo; re-shoot with a corrected selector on failure rather than trusting the PNG blindly."
+  ],
+  "defaults": {
+    "baseUrl": "http://127.0.0.1:4100",
+    "viewport": {
+      "width": 1680,
+      "height": 1000
+    },
+    "dpr": 2,
+    "uiScale": "1",
+    "loadingText": "Loading\u00e2\u20ac\u00a6"
+  },
+  "diagram": {
+    "id": "F-architecture",
+    "htmlFile": "../src/diagrams/architecture.html",
+    "viewport": {
+      "width": 1940,
+      "height": 620
+    },
+    "dpr": 2,
+    "note": "Architecture diagram (section 1.1). Rendered via page.setContent from a local HTML file, not a screenshot of the running app \u00e2\u20ac\u201d no host/login/denylist checks apply to it, only the loading-text and full-page save."
+  },
+  "shots": [
+    {
+      "id": "S01",
+      "section": "4.7, 7.1",
+      "url": "/",
+      "signedOut": true,
+      "actions": [
+        {
+          "type": "waitForSelector",
+          "by": "role",
+          "role": "textbox",
+          "name": "Username"
+        }
+      ],
+      "note": "Signed-out login form: Username, Password, Sign in. New browser context, no storage state.",
+      "mustBeVisible": [
+        "Username field",
+        "Password field",
+        "Sign in button"
+      ]
+    },
+    {
+      "id": "S02",
+      "section": "7.2, Quick start",
+      "url": "/?s=line",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ],
+      "note": "Line headline, stations row, attention block. Requires the simulator running live.",
+      "mustBeVisible": [
+        "headline (\"is running\"/\"stopped\"/\"idle\")",
+        "stations row",
+        "Attention block"
+      ],
+      "fullPage": false
+    },
+    {
+      "id": "S03",
+      "section": "1.2, 7.1",
+      "url": "/?s=line",
+      "crop": "section.crop-bar-strip",
+      "cropCombine": [
+        ".bar",
+        ".strip"
+      ],
+      "note": "Nav, period buttons, Wall button, gear (admin), initials menu, plant clock, lag sentence with its \"details\" link. Cropped by unioning .bar and .strip (sms/web/src/ui/Bar.tsx) \u00e2\u20ac\u201d see capture.mjs's cropUnion helper.",
+      "mustBeVisible": [
+        "nav: Line/Readings/Weight/Rejects/Sacks/Product/Report",
+        "period buttons",
+        "Wall button",
+        "initials menu button",
+        "plant clock",
+        "lag sentence ending \"details\""
+      ]
+    },
+    {
+      "id": "S04",
+      "section": "7.2",
+      "url": "/?s=line",
+      "crop": "section.block:has(p.h2:text-is(\"Attention\"))",
+      "note": "Problem station 7 (reject spike) must be visible in the stations row or the Attention list above this block; DEMO-STATE.md names the station and the report evidence.",
+      "mustBeVisible": [
+        "Attention heading",
+        "attention findings list (or the calm state sentence)"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ]
+    },
+    {
+      "id": "S05",
+      "section": "7.3",
+      "url": "/?s=readings",
+      "mustBeVisible": [
+        "cone register table",
+        "state filter chips"
+      ],
+      "fullPage": false,
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ]
+    },
+    {
+      "id": "S06",
+      "section": "7.3",
+      "url": "/?s=readings&rl=rejected",
+      "mustBeVisible": [
+        "rejected listing table"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S07",
+      "section": "7.3",
+      "url": "/?s=readings&rl=sacks",
+      "mustBeVisible": [
+        "sack listing table"
+      ],
+      "fullPage": false,
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ]
+    },
+    {
+      "id": "S08",
+      "section": "7.4",
+      "url": "/?s=weight",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        },
+        {
+          "type": "click",
+          "by": "text",
+          "text": "Distribution",
+          "optional": true,
+          "_note": "Distribution is the default mode for a single-shift period (App.tsx resolveWeightMode); the explicit click is a no-op safety net if the tab label is present."
+        }
+      ],
+      "mustBeVisible": [
+        "bell-curve distribution chart",
+        "limit line",
+        "target line"
+      ],
+      "fullPage": false,
+      "viewport": {
+        "width": 1680,
+        "height": 1300
+      }
+    },
+    {
+      "id": "S09",
+      "section": "7.4",
+      "url": "/?s=weight&p=week&wm=time",
+      "_note": "Plan text says \"use the real period parameter from lib/period.ts\" \u00e2\u20ac\u201d period key is `key=week` per PERIOD_KEYS/parsePeriodParams (sms/web/src/lib/period.ts), not `p=week`; kept both here so a stale key still resolves via the This week button click below.",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ],
+      "note": "Requires 7+ days of data in the demo generation.",
+      "mustBeVisible": [
+        "over-time chart (X\u00cc\u201e line)"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S10",
+      "section": "7.4",
+      "url": "/?s=weight",
+      "crop": "section.block:has(p.h2:has-text(\"Stations\"))",
+      "note": "Weight screen's own Stations table (words.ts stationsTable). Problem station 4 (weight bias) should read visibly off target/line.",
+      "mustBeVisible": [
+        "stations table with bias vs line and vs target columns"
+      ],
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ]
+    },
+    {
+      "id": "S11",
+      "section": "7.5",
+      "url": "/?s=rejects",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ],
+      "mustBeVisible": [
+        "Pareto of reject reasons",
+        "trend chart"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S12",
+      "section": "7.6, App. C",
+      "url": "/?s=sacks",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ],
+      "mustBeVisible": [
+        "sack figures",
+        "day rows",
+        "\"no sack stock per machine\" sentence, if the screen shows one"
+      ],
+      "fullPage": false
+    },
+    {
+      "id": "S13",
+      "section": "7.7, App. C",
+      "url": "/?s=product&pt=running",
+      "note": "Requires PDAS_DEMO Material 1024 set MaterialActive=0 and machine 14 running it (T1's demo data step 4).",
+      "mustBeVisible": [
+        "six product groups",
+        "\"(retired in PDAS)\" marker on machine 14"
+      ],
+      "crop": "section.block:has(p.h2:text-is(\"Products in force now\"))"
+    },
+    {
+      "id": "S14",
+      "section": "7.7",
+      "url": "/?s=product&pt=changeover",
+      "mustBeVisible": [
+        "changeover form fields",
+        "Check the plan button"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S15",
+      "section": "7.7",
+      "url": "/?s=product&pt=catalogue",
+      "mustBeVisible": [
+        "product list with limits"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S16",
+      "section": "7.7",
+      "url": "/?s=product&pt=history",
+      "note": "May legitimately be empty (words.ts product.changeover.noneYet: \"No changeover has been planned yet.\") \u00e2\u20ac\u201d caption must say so rather than imply a populated trail.",
+      "mustBeVisible": [
+        "product-change trail table, or the empty-state sentence"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S17",
+      "section": "7.8",
+      "url": "/?s=report&rt=daily",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        }
+      ],
+      "mustBeVisible": [
+        "daily report table",
+        "Print button",
+        "Export buttons"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S18",
+      "section": "7.8",
+      "url": "/?s=report&rt=management-summary",
+      "mustBeVisible": [
+        "summary vs previous period"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S19",
+      "section": "7.8",
+      "url": "/?s=report&rt=calibration",
+      "mustBeVisible": [
+        "drifting station(s) table"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S20",
+      "section": "7.8",
+      "url": "/?s=report&rt=machine-product",
+      "note": "Roughly 103 columns on a full range (CLAUDE.md Phase 9 note); keep the demo period short enough to be legible, or accept the on-screen table is wide and say so in the caption.",
+      "mustBeVisible": [
+        "product-by-machine table"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "S21",
+      "section": "5, 8, 9",
+      "url": "/?s=health",
+      "mustBeVisible": [
+        "headline verdict",
+        "sync block",
+        "DB size",
+        "app version",
+        "backup age"
+      ],
+      "fullPage": false,
+      "viewport": {
+        "width": 1920,
+        "height": 1000
+      }
+    },
+    {
+      "id": "S22",
+      "section": "5",
+      "url": "/?s=health",
+      "crop": "section.block:has(p.h2:text-is(\"Sync health\"))",
+      "mustBeVisible": [
+        "per-table sync outcome",
+        "generation labelled Simulator",
+        "watermark"
+      ]
+    },
+    {
+      "id": "S23",
+      "section": "6.3",
+      "url": "/?s=health",
+      "crop": "section.block:has(p.h2:text-is(\"PDAS write checking\"))",
+      "mustBeVisible": [
+        "disabled state",
+        "\"PDAS_WRITE_ENABLED is not true.\" reason"
+      ]
+    },
+    {
+      "id": "S24",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "mustBeVisible": [
+        "\"Setup\" heading",
+        "Sync health block"
+      ],
+      "fullPage": false
+    },
+    {
+      "id": "S25",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Sync health\"))",
+      "mustBeVisible": [
+        "Sync health block, whole"
+      ]
+    },
+    {
+      "id": "S26",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Line\"))",
+      "mustBeVisible": [
+        "Line block, whole"
+      ]
+    },
+    {
+      "id": "S27",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Machines\"))",
+      "mustBeVisible": [
+        "Machines block, whole"
+      ]
+    },
+    {
+      "id": "S28",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Stations\"))",
+      "mustBeVisible": [
+        "Stations block, whole"
+      ]
+    },
+    {
+      "id": "S29",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Sources\"))",
+      "mustBeVisible": [
+        "Sources block, whole"
+      ]
+    },
+    {
+      "id": "S30",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Rules\"))",
+      "mustBeVisible": [
+        "Rules block, whole"
+      ]
+    },
+    {
+      "id": "S31",
+      "section": "6.2, 10",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Reject codes\"))",
+      "mustBeVisible": [
+        "Reject codes block, whole"
+      ]
+    },
+    {
+      "id": "S32a",
+      "section": "6.2, 10",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"People\"))",
+      "mustBeVisible": [
+        "People block, whole"
+      ]
+    },
+    {
+      "id": "S32b",
+      "section": "6.2, 10",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Audit log\"))",
+      "mustBeVisible": [
+        "Audit log block, whole"
+      ],
+      "_note": "Plan's row 'S25-S32' names 8 blocks (Line, Machines, Stations, Sources, Rules, Reject codes, People, Audit log) but only 8 ids in a range S25-S32 inclusive is 8 slots and Sync health makes 9 blocks total on the page (Setup.tsx). Encoded here as S25=Sync health, S26=Line, S27=Machines, S28=Stations, S29=Sources, S30=Rules, S31=Reject codes, S32a=People, S32b=Audit log \u00e2\u20ac\u201d one extra id (S32b) rather than dropping a block; flag this numbering to T7/T9 rather than silently omitting Audit log."
+    },
+    {
+      "id": "S33",
+      "section": "7.9, 4.13",
+      "url": "/?s=wall",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dpr": 1,
+      "note": "Requires the simulator running live.",
+      "mustBeVisible": [
+        "full wall board, one card per line"
+      ]
+    },
+    {
+      "id": "S34",
+      "section": "7.1",
+      "url": "/?s=line",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Pick dates"
+        }
+      ],
+      "mustBeVisible": [
+        "From date input",
+        "To date input"
+      ],
+      "fullPage": false
+    },
+    {
+      "id": "D01",
+      "section": "7.1",
+      "url": "/?s=line",
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".menu-wrap .icon-btn.initials"
+        }
+      ],
+      "crop": ".menu-wrap .menu",
+      "mustBeVisible": [
+        "name",
+        "role",
+        "Text size Desk/Wall toggle",
+        "Change password",
+        "Sign out"
+      ]
+    },
+    {
+      "id": "D02",
+      "section": "7.1, 10",
+      "url": "/?s=line",
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".menu-wrap .icon-btn.initials"
+        },
+        {
+          "type": "click",
+          "by": "text",
+          "text": "Change password"
+        }
+      ],
+      "crop": ".sheet[role=dialog]",
+      "closeActions": [
+        {
+          "type": "press",
+          "key": "Escape"
+        }
+      ],
+      "note": "Do not type into the password fields \u00e2\u20ac\u201d capture the empty form only.",
+      "mustBeVisible": [
+        "password sheet form"
+      ]
+    },
+    {
+      "id": "D03",
+      "section": "7.4",
+      "url": "/?s=weight&sheet=station:4",
+      "crop": ".sheet[role=dialog]",
+      "mustBeVisible": [
+        "station sheet for the problem station"
+      ]
+    },
+    {
+      "id": "D04",
+      "section": "7.4",
+      "url": "/?s=weight&sheet=station:4",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Log an adjustment"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        },
+        {
+          "type": "scrollSheetBottom"
+        }
+      ],
+      "crop": ".sheet[role=dialog]",
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "mustBeVisible": [
+        "adjustment form"
+      ]
+    },
+    {
+      "id": "D05",
+      "section": "7.3",
+      "url": "/?s=readings",
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".tw table tbody tr.click:first-child"
+        }
+      ],
+      "crop": ".sheet[role=dialog]",
+      "closeActions": [
+        {
+          "type": "press",
+          "key": "Escape"
+        }
+      ],
+      "note": "First row of the cone register (sms/web/src/screens/Readings.tsx ReadingTable \u00e2\u20ac\u201d tr.click, onClick opens the sheet).",
+      "mustBeVisible": [
+        "cone reading sheet"
+      ]
+    },
+    {
+      "id": "D06",
+      "section": "7.3",
+      "url": "/?s=readings&rl=sacks",
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".tw table tbody tr.click:first-child"
+        }
+      ],
+      "crop": ".sheet[role=dialog]",
+      "closeActions": [
+        {
+          "type": "press",
+          "key": "Escape"
+        }
+      ],
+      "mustBeVisible": [
+        "sack sheet"
+      ]
+    },
+    {
+      "id": "D07",
+      "section": "7.3, 7.5",
+      "url": "/?s=readings&rl=rejected",
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".tw table tbody tr.click:first-child"
+        }
+      ],
+      "crop": ".sheet[role=dialog]",
+      "closeActions": [
+        {
+          "type": "press",
+          "key": "Escape"
+        }
+      ],
+      "mustBeVisible": [
+        "reject sheet"
+      ]
+    },
+    {
+      "id": "D08",
+      "section": "7.5",
+      "url": "/?s=rejects",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This week"
+        },
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".bars button.linkish[aria-pressed]",
+          "_uncertain": "Rejects.tsx's Pareto bars are rendered by a component that takes an onChoose(r) callback (line ~532); the exact clickable element per bar was not confirmed against the live DOM. Try this selector first; if it misses, read sms/web/src/screens/Rejects.tsx's Pareto sub-component and fix the selector here."
+        }
+      ],
+      "mustBeVisible": [
+        "Pareto with the top reason selected (bold/ink bar)",
+        "trend and days filtered to it"
+      ],
+      "note": "Clicking a Pareto bar name does not open a sheet: it toggles a filter (aria-pressed) that follows the reason through the trend and days. Captured as a viewport shot after the click."
+    },
+    {
+      "id": "D09",
+      "section": "7.5",
+      "url": "/?s=rejects",
+      "actions": [
+        {
+          "type": "click",
+          "by": "text",
+          "text": "Name it"
+        },
+        {
+          "type": "scrollTo",
+          "selector": ".bars input"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "press",
+          "key": "Escape"
+        }
+      ],
+      "note": "Inline editor (Rejects.tsx line ~749), not a Sheet \u00e2\u20ac\u201d no .sheet crop; capture the viewport or crop the row/table containing the open editor.",
+      "mustBeVisible": [
+        "inline reject-code name editor"
+      ]
+    },
+    {
+      "id": "D10",
+      "section": "7.6",
+      "url": "/?s=sacks",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "This month"
+        },
+        {
+          "type": "click",
+          "by": "css",
+          "selector": ".tw table tbody tr.click:has-text(\"25 September\")"
+        }
+      ],
+      "crop": ".sheet[role=dialog]",
+      "closeActions": [
+        {
+          "type": "press",
+          "key": "Escape"
+        }
+      ],
+      "mustBeVisible": [
+        "stock sheet for one day"
+      ]
+    },
+    {
+      "id": "D11",
+      "section": "7.6",
+      "url": "/?s=sacks",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Record a movement"
+        },
+        {
+          "type": "wait",
+          "ms": 400
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "mustBeVisible": [
+        "movement form"
+      ],
+      "crop": "section.block:has(form)"
+    },
+    {
+      "id": "D12",
+      "section": "7.7",
+      "url": "/?s=product&pt=running",
+      "actions": [
+        {
+          "type": "click",
+          "by": "css",
+          "selector": "button:text-is(\"Change\")"
+        },
+        {
+          "type": "wait",
+          "ms": 500
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "note": "words.ts product.change = \"Change\" (Running.tsx lines 186/216). If more than one \"Change\" button is on screen (one per product group), this clicks the first.",
+      "mustBeVisible": [
+        "set-product form"
+      ]
+    },
+    {
+      "id": "D13",
+      "section": "7.7, 6.3",
+      "url": "/?s=product&pt=changeover",
+      "actions": [
+        {
+          "type": "selectIndex",
+          "selector": "label.field select",
+          "nth": 0,
+          "index": 1
+        },
+        {
+          "type": "selectIndex",
+          "selector": "label.field select",
+          "nth": 1,
+          "index": 1
+        },
+        {
+          "type": "selectIndex",
+          "selector": "label.field select",
+          "nth": 2,
+          "index": 1
+        },
+        {
+          "type": "fill",
+          "by": "css",
+          "selector": "label.field:has-text(\"Why is this changing\") input",
+          "value": "Demo dry run for the guide screenshots"
+        },
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Check the plan"
+        },
+        {
+          "type": "wait",
+          "ms": 2500
+        }
+      ],
+      "note": "NEVER click Execute the changeover. capture.mjs refuses any click whose target name/text matches /execute/i regardless of what this file says.",
+      "mustBeVisible": [
+        "plan output",
+        "words.ts changeover.operatorNote sentence",
+        "\"PDAS_WRITE_ENABLED is not true.\" reason",
+        "Execute button visibly disabled/greyed"
+      ],
+      "fullPage": true
+    },
+    {
+      "id": "D14",
+      "section": "7.7",
+      "url": "/?s=product&pt=catalogue",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Change limits"
+        },
+        {
+          "type": "scrollTo",
+          "by": "css",
+          "selector": "button[type=submit]"
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "note": "If the button is absent while writes are off, record that as the outcome instead of failing the shot (per T4 spec).",
+      "optionalButtonMissingOk": true,
+      "mustBeVisible": [
+        "limits form, or its absence noted"
+      ]
+    },
+    {
+      "id": "D15",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Add a machine"
+        },
+        {
+          "type": "scrollTo",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "mustBeVisible": [
+        "add-a-machine form"
+      ]
+    },
+    {
+      "id": "D16",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Add a station"
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "mustBeVisible": [
+        "add-a-station form"
+      ]
+    },
+    {
+      "id": "D17",
+      "section": "4.8, 10",
+      "url": "/?s=setup",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "New account"
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "note": "Do not fill the form. Username/Display name/Password/Role fields only.",
+      "mustBeVisible": [
+        "new-account form with role picker"
+      ]
+    },
+    {
+      "id": "D18",
+      "section": "10",
+      "url": "/?s=setup",
+      "actions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Reset"
+        }
+      ],
+      "closeActions": [
+        {
+          "type": "click",
+          "by": "role",
+          "role": "button",
+          "name": "Cancel"
+        }
+      ],
+      "note": "words.ts health.reset \u00e2\u20ac\u201d appears once per row in the People table; clicks the first.",
+      "mustBeVisible": [
+        "reset-password form"
+      ],
+      "notCapturable": true,
+      "reason": "The People table shows no Reset button on the signed-in admin's own row (password change is via the account menu, D02), and the demo has only one account; creating a second account is forbidden for this pass. Text-only in the guide."
+    },
+    {
+      "id": "D19",
+      "section": "7.8",
+      "notCapturable": true,
+      "reason": "Report > Print opens the operating system's own print dialog, which is outside the browser page and cannot be screenshotted by Playwright. Text-only in the guide."
+    },
+    {
+      "id": "D20",
+      "section": "7.8",
+      "notCapturable": true,
+      "reason": "Report > Export PDF/Excel/CSV triggers a file download; downloads are blocked in this tool (acceptDownloads:false) by design. Text-only in the guide; S17 already shows the export buttons themselves."
+    },
+    {
+      "id": "D21",
+      "section": "8",
+      "optional": true,
+      "notCapturable": true,
+      "reason": "Requires stopping the demo API process for ~30s and restarting it \u00e2\u20ac\u201d an operational action outside capture.mjs's read-only scope. Left for T5/T8 to perform by hand with the demo.ps1 launcher if wanted; not automated here."
+    },
+    {
+      "id": "D22",
+      "section": "8",
+      "optional": true,
+      "notCapturable": true,
+      "reason": "Requires stopping the demo sync worker for more than 3 cadences and restarting it \u00e2\u20ac\u201d same reasoning as D21."
+    }
+  ]
+}

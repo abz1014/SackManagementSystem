@@ -1,0 +1,24 @@
+# One chapter filename per line, in build order, relative to docs/guide/src/.
+# Lines starting with # and blank lines are ignored.
+
+00-front-matter.md
+01-quick-start.md
+02-how-sms-works.md
+02a-whats-in-the-package.md
+03-what-ifl-it-must-provide.md
+04-installation.md
+05-verification-checklist.md
+06-configuration.md
+07-daily-use.md
+08-troubleshooting.md
+09-maintenance.md
+10-security.md
+11-faq.md
+12-contacts.md
+appendix-a-configuration-keys.md
+appendix-b-command-reference.md
+appendix-c-known-limitations.md
+appendix-d-signoff.md
+
+# _sample.md and _sample-appendix.md (docs/guide/src/_sample*.md) are the
+# T3 pipeline test fixtures and are deliberately NOT listed here.
