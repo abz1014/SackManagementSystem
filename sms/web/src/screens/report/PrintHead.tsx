@@ -63,56 +63,68 @@ export function GenerationDisclosure({ header }: { header: ReportHeader | null }
   return <p className="mut sm no-print" style={{ marginTop: 4 }}>{text}</p>;
 }
 
-/** "5 September 2026" or "5 – 7 September 2026" style period for the cover band. */
+/** "2026-09-15" to "15-09-2026" — IFL house style, DD-MM-YYYY everywhere in reports. */
+export function fmtDmy(d: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : d;
+}
+
+/** "15-09-2026 14:03" on the plant's clock. */
+export function fmtPlantDmyTime(iso: string): string {
+  const t = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(t.getUTCDate())}-${p(t.getUTCMonth() + 1)}-${t.getUTCFullYear()} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+}
+
 function periodText(from: string, to: string): string {
-  const f = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
-  return from === to ? f(from) : `${f(from)} to ${f(to)}`;
+  return from === to ? fmtDmy(from) : `${fmtDmy(from)} to ${fmtDmy(to)}`;
+}
+
+/** Logo + centred company line + underlined title: the IFL house-style masthead. */
+function Masthead({ title }: { title: string }) {
+  return (
+    <div className="ph-mast">
+      <img className="ph-logo" src="/ifl-logo.jpg" alt={W.printDoc.logoAlt} />
+      <div className="ph-center">
+        <div className="ph-company">{W.printDoc.plantName}</div>
+        {title && <div className="ph-title">{title}</div>}
+      </div>
+    </div>
+  );
 }
 
 /**
- * The branded cover band (25 Sep 2026 report-document pass): company and
- * system, the report's title, and a labelled grid of line / period /
- * filters, then the one attribution line every printed page carries. The
- * "generated" instant is the PLANT clock (TWO CLOCKS) and is labelled so.
+ * IFL house-style header (30 Sep 2026): logo top-left, centred company line,
+ * underlined title, and a right-aligned compact metadata grid. Every
+ * disclosure sentence (definitions, shift, batch/simulator) now lives in the
+ * numbered footnote block at the END of the document (PrintDoc.tsx's
+ * PrintNotes) — `inlineNotes` keeps them here only for the register, which
+ * has no closing block. "Generated" is the PLANT clock (TWO CLOCKS).
  */
-export function PrintHead({ header, title }: { header: ReportHeader | null; title?: string }) {
+export function PrintHead({ header, title, inlineNotes = false }: { header: ReportHeader | null; title?: string; inlineNotes?: boolean }) {
   if (!header) return null;
-  const filters = Object.entries(header.filters)
-    .filter(([, v]) => v != null)
+  const other = Object.entries(header.filters)
+    .filter(([k, v]) => v != null && k !== 'shift')
     .map(([k, v]) => `${k} ${String(v)}`)
     .join(' · ');
+  const shift = header.filters.shift ? (W.printDoc.shiftHours[header.filters.shift] ?? header.filters.shift) : null;
   return (
     <div className="print-head">
-      <div className="ph-brand">
-        <span className="ph-co">{W.printDoc.company}</span>
-        <span className="ph-sys">{W.printDoc.system}</span>
-        <span className="ph-tag">{W.printDoc.internal}</span>
-      </div>
-      <div className="ph-title">{title ?? header.title}</div>
+      <Masthead title={title ?? header.title} />
       <dl className="ph-meta">
         <div><dt>{W.printDoc.line}</dt><dd>{header.lineName}</dd></div>
         <div><dt>{W.printDoc.period}</dt><dd>{periodText(header.period.from, header.period.to)}</dd></div>
-        {filters && <div><dt>{W.printDoc.filters}</dt><dd>{filters}</dd></div>}
-        <div><dt>{W.printDoc.generatedAt}</dt><dd>{fmtPlantInstant(header.generatedAtPlantUtc)}</dd></div>
+        {shift && <div><dt>{W.printDoc.shift}</dt><dd>{shift}</dd></div>}
+        {other && <div><dt>{W.printDoc.filters}</dt><dd>{other}</dd></div>}
         <div><dt>{W.printDoc.generatedBy}</dt><dd>{header.generatedBy}</dd></div>
-        <div><dt>{W.printDoc.version}</dt><dd>{W.reports.version} {header.smsVersion}</dd></div>
+        <div><dt>{W.printDoc.generatedAt}</dt><dd>{fmtPlantDmyTime(header.generatedAtPlantUtc)}</dd></div>
       </dl>
       <div className="ph-foot">
         <span>{generatedLine(header)}</span>
-        <span>{W.reports.definitionsNote}</span>
+        {inlineNotes && <span>{W.reports.definitionsNote}</span>}
       </div>
-      {/* F-07 (Task W2-C, 29 Sep 2026): server-supplied, never re-typed on
-          the client (header.shiftNote, common.ts's SHIFT_SOURCE_NOTE).
-          Guarded, not asserted unconditional, only for a server built
-          before this field existed (shiftNote is optional client-side for
-          exactly that back-compat reason, same as generationLine above). */}
-      {header.shiftNote && <div className="ph-foot mut">{header.shiftNote}</div>}
-      {/* Task B (28 Sep 2026): prints when the period spans batches OR the
-          source itself is the simulator — a period entirely covered by the
-          simulator excludes nothing (spansGenerations stays false), so
-          spansGenerations alone used to leave a simulator-only page with no
-          disclosure at all. */}
-      {generationDisclosureText(header) && (
+      {inlineNotes && header.shiftNote && <div className="ph-foot mut">{header.shiftNote}</div>}
+      {inlineNotes && generationDisclosureText(header) && (
         <div className="ph-foot mut">{generationDisclosureText(header)}</div>
       )}
     </div>
@@ -165,16 +177,12 @@ export function RegisterPrintHead({
     `print-head:${from}:${to}:${at ?? ''}:${batch ?? 'auto'}`,
   );
   const { line } = useLive();
-  if (h.data?.header) return <PrintHead header={h.data.header} title={title} />;
+  if (h.data?.header) return <PrintHead header={h.data.header} title={title} inlineNotes />;
   if (h.error) {
     return (
       <div className="print-head">
-        <div className="ph-brand">
-          <span className="ph-co">{W.printDoc.company}</span>
-          <span className="ph-sys">{W.printDoc.system}</span>
-          <span className="ph-tag">{W.printDoc.internal}</span>
-        </div>
-        <b className="ph-title">
+        <Masthead title="" />
+        <b className="ph-degraded">
           {line?.lineName ? `${line.lineName} · ` : ''}
           {title}
           {' · '}

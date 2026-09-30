@@ -1230,6 +1230,25 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
   }
 }
 
+/* [IFL HOUSE STYLE, 30 Sep 2026] Portrait reports (the two new types) mark
+   their own root with data-report-orientation="portrait" (see the contract
+   note at the end of this file). Same specificity as the landscape rule
+   above and later in source, so it wins when both hooks are in the DOM
+   (the Report chip row is always present). */
+main:has([data-report-orientation="portrait"][data-report-orientation]) { page: report-portrait; }
+@page report-portrait {
+  size: A4 portrait;
+  margin: 18mm 18mm 20mm;
+  @bottom-left {
+    content: "IFL internal · Ibrahim Fibres Limited · Sack Management System";
+    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
+  }
+}
+
 @media print {
   .bar, .strip, .replay, .no-print, .scrim, .sheet, .wall, .toggle { display: none !important; } /* [PHASE 9 PRINT P5] .toggle added */
   /* [CHART T3, 28 Sep 2026; brush removed wave 4/T1, 29 Sep 2026] Owner
@@ -1437,4 +1456,57 @@ main:has([role="group"][aria-label="Report"]) { page: report-landscape; }
   .pd-notes ol { margin: 0; padding-left: 12pt; columns: 3; column-gap: 18pt; font-size: 7.5pt; line-height: 1.4; color: var(--graphite); }
   .pd-notes li { margin-bottom: 3pt; break-inside: avoid; }
   .pd-conf { margin-top: 10pt; padding-top: 5pt; border-top: 0.75pt solid var(--rule-2); font-size: 7.5pt; color: var(--muted); }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * [IFL HOUSE STYLE] 30 Sep 2026 — mirrors IFL's own SSRS reports.
+ * CONTRACT for report components:
+ *   - `.ifl-table` on a <table> (or on its `.tw` wrapper's table): light-blue
+ *     #ADD8E6 bold centred header, #D3D3D3 borders, 9pt body, header row
+ *     repeats per page, `tr.total` / `tfoot tr` bold italic, numeric cells
+ *     (`.n`) right-aligned. Apply `.n` on numeric th/td; format with
+ *     thousands separators and DD-MM-YYYY dates in the component.
+ *   - a portrait report puts data-report-orientation="portrait" on its root
+ *     element; no attribute means landscape (existing behaviour).
+ * The footer (Page X of Y) is an @page margin box (Chromium); the server's
+ * PDF export sets its own footerTemplate (pdf.ts, handled elsewhere).
+ * ------------------------------------------------------------------------- */
+.ifl-table { border-collapse: collapse; }
+.ifl-table th, .ifl-table td { border: 0.75pt solid #D3D3D3; }
+.ifl-table th { background: #ADD8E6; font-weight: 700; text-align: center; }
+.ifl-table td.n, .ifl-table th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.ifl-table tr.total td, .ifl-table tfoot td, .ifl-table tfoot th { font-weight: 700; font-style: italic; }
+@media print {
+  .ifl-table { width: 100%; font-size: 9pt !important; }
+  .ifl-table th, .ifl-table td { font-size: 9pt !important; text-transform: none; letter-spacing: 0; padding: 2.5pt 5pt !important; border: 0.75pt solid #D3D3D3 !important; }
+  .ifl-table th { background: #ADD8E6 !important; color: #000; font-weight: 700; text-align: center; vertical-align: middle; }
+  .ifl-table tbody tr:nth-child(even) td { background: none; }
+  .ifl-table tr.total td, .ifl-table tfoot td { font-weight: 700; font-style: italic; }
+  .ifl-table thead { display: table-header-group; }
+  .ifl-table tr, .block, .pd-tile { break-inside: avoid; }
+  thead { display: table-header-group; }
+
+  /* Masthead: logo left, centred company line + underlined title, metadata right. */
+  .print-head { display: block !important; margin: 0 0 10pt; }
+  .ph-mast { position: relative; min-height: 22mm; text-align: center; }
+  .ph-logo { position: absolute; left: 0; top: 0; width: 22mm; height: auto; }
+  .ph-center { padding: 0 24mm; }
+  .ph-company { font-size: 15pt; font-weight: 700; color: #000; line-height: 1.2; }
+  .ph-title { font-size: 12pt; font-weight: 700; text-decoration: underline; margin: 4pt 0 0; color: #000; letter-spacing: 0; }
+  .ph-meta {
+    display: grid; grid-template-columns: max-content max-content; justify-content: end; gap: 1pt 10pt;
+    margin: 6pt 0 0 auto; padding: 0; border: 0; text-align: left; font-size: 8.5pt;
+  }
+  .ph-meta > div { display: contents; }
+  .ph-meta dt { font-size: 8.5pt; font-weight: 700; text-transform: none; letter-spacing: 0; color: #000; }
+  .ph-meta dt::after { content: ":"; }
+  .ph-meta dd { margin: 0; font-size: 8.5pt; font-weight: 400; }
+  .ph-degraded { display: block; text-align: center; text-decoration: underline; font-size: 12pt; }
+
+  /* One compact numbered footnote block at the END of the document. */
+  .pd-notes { margin-top: 12pt; }
+  .pd-notes .pd-h { font-size: 8pt; border-bottom: 0.5pt solid #999; margin-bottom: 4pt; }
+  .pd-notes ol.pd-footnotes { columns: 1; font-size: 8pt; color: #666; padding-left: 14pt; line-height: 1.35; }
+  .pd-notes .pd-conf { font-size: 8pt; color: #666; }
 }

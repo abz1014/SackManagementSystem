@@ -2380,6 +2380,13 @@ export const W = {
      summary and closing notes. Print-only — none of this appears on screen. */
   printDoc: {
     company: 'Ibrahim Fibres Limited',
+    /** IFL house style: the centred company line above every report title. */
+    plantName: 'Ibrahim Fibres Limited (Textile Plant 4)',
+    logoAlt: 'IFL',
+    shift: 'Shift',
+    shiftHours: { morning: 'Morning 06:00–14:00', evening: 'Evening 14:00–22:00', night: 'Night 22:00–06:00' } as Record<string, string>,
+    footnotes: 'Notes',
+    pageOf: 'Page',
     system: 'Sack Management System',
     internal: 'IFL internal',
     confidential: 'For internal use within Ibrahim Fibres Limited. Not for distribution outside the company.',

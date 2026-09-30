@@ -341,6 +341,8 @@ export function PrintNotes({ type, data, header }: { type: ReportType; data: Rep
     ...(s?.weightCaveat ? [W.printDoc.weightNote] : []),
     W.printDoc.clockNote,
     W.printDoc.approvalNote,
+    W.reports.definitionsNote,
+    ...(header.shiftNote ? [header.shiftNote] : []),
     W.printDoc.sourceNote,
     // Task B (28 Sep 2026): the same widened trigger as PrintHead.tsx —
     // spanning batches OR the source itself being the simulator, since a
@@ -353,8 +355,8 @@ export function PrintNotes({ type, data, header }: { type: ReportType; data: Rep
   ];
   return (
     <section className="print-only pd-notes">
-      <h2 className="pd-h">{W.printDoc.notes}</h2>
-      <ol>
+      <h2 className="pd-h">{W.printDoc.footnotes}</h2>
+      <ol className="pd-footnotes">
         {[...new Set(items)].map((t) => <li key={t}>{t}</li>)}
       </ol>
       <p className="pd-conf">{W.printDoc.confidential}</p>

@@ -126,3 +126,30 @@ describe('RegisterPrintHead — /api/reports/header fails', () => {
     expect(queryByText(W.reports.printedSelectionNote)).toBeNull();
   });
 });
+
+describe('IFL house-style masthead', () => {
+  it('renders the logo, the centred company line, the underlined title and DD-MM-YYYY dates', async () => {
+    const { PrintHead } = await import('./PrintHead');
+    const { container } = renderWithLive(<PrintHead header={{ ...HEADER, filters: { shift: 'morning' } }} />);
+    const img = container.querySelector('img.ph-logo')!;
+    expect(img.getAttribute('src')).toBe('/ifl-logo.jpg');
+    expect(img.getAttribute('alt')).toBe('IFL');
+    expect(container.querySelector('.ph-company')?.textContent).toBe('Ibrahim Fibres Limited (Textile Plant 4)');
+    expect(container.querySelector('.ph-title')?.textContent).toBe('Readings · Cones');
+    const meta = container.querySelector('.ph-meta')!.textContent!;
+    expect(meta).toContain('10-09-2026 to 12-09-2026');
+    expect(meta).toContain('21-09-2026 09:15');
+    expect(meta).toContain('06:00–14:00');
+  });
+
+  it('keeps disclosures out of the head unless inlineNotes, and out of the header entirely otherwise', async () => {
+    const { PrintHead } = await import('./PrintHead');
+    const h = { ...HEADER, shiftNote: 'SHIFT NOTE X' };
+    const a = renderWithLive(<PrintHead header={h} />);
+    expect(a.queryByText('SHIFT NOTE X')).toBeNull();
+    expect(a.queryByText(W.reports.definitionsNote)).toBeNull();
+    a.unmount();
+    const b = renderWithLive(<PrintHead header={h} inlineNotes />);
+    expect(b.queryByText('SHIFT NOTE X')).not.toBeNull();
+  });
+});
