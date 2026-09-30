@@ -10,6 +10,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { inflateRawSync } from 'node:zlib';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { buildXlsx, columnLetter, excelSerial, sheetName, crc32, reportSheets, dataBarTarget, chartSpecFor, type Sheet } from './xlsx.js';
 import type { ReportHeader, ReportType } from './common.js';
 import type { CsvTable } from './csv.js';
@@ -497,7 +499,7 @@ describe('U4a/U4b: every report type gets a well-formed workbook with its one ch
       expect(byName.has('xl/charts/chart1.xml'), `${type}: no chart1.xml — fixture produced no chartable series`).toBe(true);
 
       // Check 2: every part is well-formed XML.
-      for (const e of entries) assertWellFormedXml(e.data.toString('utf8'), `${type}/${e.name}`);
+      for (const e of entries.filter((x) => !x.name.endsWith('.jpeg'))) assertWellFormedXml(e.data.toString('utf8'), `${type}/${e.name}`);
 
       // Check 3: [Content_Types].xml is a closed set, both directions.
       const ct = byName.get('[Content_Types].xml')!.data.toString('utf8');
@@ -623,19 +625,21 @@ describe('U4b: chartSpecFor prefers a deviation series and falls back to raw cou
 });
 
 describe('U4c: styling — title bands, header fill, auto-width, print titles', () => {
-  it('every non-attribution sheet carries a two-line title band above the header row', () => {
+  it('every sheet carries the three-line IFL banner above the header row', () => {
     const header = makeHeader('daily', 'Daily production report');
     const sheets = reportSheets('daily', dailyData, header, dailyCsv(dailyData));
     const reportSheet = sheets.find((s) => s.name === 'Report')!;
-    expect(reportSheet.titleRows ?? []).toEqual([]); // the attribution sheet IS the title band
+    expect(reportSheet.titleRows?.length).toBe(3); // W4: the first sheet carries the IFL banner too
 
     const daySheet = sheets.find((s) => s.name === 'Day')!;
-    expect(daySheet.titleRows?.length).toBe(2);
-    expect(daySheet.titleRows![0]).toContain('Daily production report');
-    expect(daySheet.titleRows![0]).toContain('Day');
-    expect(daySheet.titleRows![1]).toContain('TP1 Line 3');
-    expect(daySheet.titleRows![1]).toContain('2026-09-01 to 2026-09-03');
-    expect(daySheet.titleRows![1]).toContain('test-build');
+    expect(daySheet.titleRows?.length).toBe(3);
+    expect(daySheet.titleRows![0]).toBe('Ibrahim Fibres Limited (Textile Plant 4)');
+    expect(daySheet.titleRows![1]).toContain('Daily production report');
+    expect(daySheet.titleRows![1]).toContain('Day');
+    expect(daySheet.titleRows![2]).toContain('TP1 Line 3');
+    expect(daySheet.titleRows![2]).toContain('01-09-2026 to 03-09-2026');
+    expect(daySheet.titleRows![2]).toContain('Generated: 03-09-2026 10:00');
+    expect(daySheet.titleRows![2]).toContain('test-build');
   });
 
   it('the title band is merged, bold, and pushes the header row and freeze pane down by its own height', () => {
@@ -647,13 +651,13 @@ describe('U4c: styling — title bands, header fill, auto-width, print titles', 
     const sheetIdx = sheets.indexOf(daySheet);
     const xml = entries.find((e) => e.name === `xl/worksheets/sheet${sheetIdx + 1}.xml`)!.data.toString('utf8');
 
-    expect(xml).toContain('<mergeCells count="2">');
+    expect(xml).toContain('<mergeCells count="3">');
     expect(xml).toContain('<mergeCell ref="A1:');
-    expect(xml).toContain('<mergeCell ref="A2:');
-    // header row is row 3 (two title rows above it); freeze covers through row 3.
-    expect(xml).toContain('<row r="3">');
-    expect(xml).toContain('ySplit="3"');
-    expect(xml).toContain('topLeftCell="A4"');
+    expect(xml).toContain('<mergeCell ref="A3:');
+    // header row is row 4 (three title rows above it); freeze covers through row 4.
+    expect(xml).toContain('<row r="4">');
+    expect(xml).toContain('ySplit="4"');
+    expect(xml).toContain('topLeftCell="A5"');
   });
 
   it('header cells use the filled/bordered style, not the plain bold one', () => {
@@ -668,7 +672,7 @@ describe('U4c: styling — title bands, header fill, auto-width, print titles', 
     const stylesXmlPart = entries.find((e) => e.name === 'xl/styles.xml')!.data.toString('utf8');
     expect(stylesXmlPart).toContain('<fills count="3">');
     expect(stylesXmlPart).toContain('<borders count="2">');
-    expect(stylesXmlPart).toContain('<cellXfs count="7">');
+    expect(stylesXmlPart).toContain('<cellXfs count="14">');
   });
 
   it('numbers carry a thousands separator and percentages remain fractions with a % format', () => {
@@ -684,7 +688,7 @@ describe('U4c: styling — title bands, header fill, auto-width, print titles', 
     ]));
     const styles = entries.find((e) => e.name === 'xl/styles.xml')!.data.toString('utf8');
     expect(styles).toContain('formatCode="#,##0"');
-    expect(styles).toContain('formatCode="#,##0.0"');
+    expect(styles).toContain('formatCode="#,##0.00"');
     expect(styles).toContain('formatCode="0.0%"');
     const sheet1 = entries.find((e) => e.name === 'xl/worksheets/sheet1.xml')!.data.toString('utf8');
     expect(sheet1).toContain('<v>12345</v>'); // raw value; #,##0 formatting is display-only
@@ -721,5 +725,107 @@ describe('U4c: styling — title bands, header fill, auto-width, print titles', 
     const titleIds = [...workbook.matchAll(/_xlnm\.Print_Titles" localSheetId="(\d+)"/g)].map((m) => Number(m[1]));
     expect(areaIds).toEqual(sheets.map((_, i) => i));
     expect(titleIds).toEqual(sheets.map((_, i) => i));
+  });
+});
+
+/* ------------------------------------------------ W4: IFL house style */
+
+const LOGO_PATH = fileURLToPath(new URL('../../../../web/public/ifl-logo.jpg', import.meta.url));
+
+describe('W4: IFL house style in the workbook', () => {
+  const logo = existsSync(LOGO_PATH) ? readFileSync(LOGO_PATH) : Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const build = (type: ReportType) => {
+    const header = makeHeader(type, 'Some report');
+    const { data, table } = FIXTURES[type];
+    const sheets = reportSheets(type, data, header, table);
+    return { sheets, entries: readZipEntries(buildXlsx(sheets, { logo })) };
+  };
+  const text = (entries: { name: string; data: Buffer }[], name: string) => entries.find((e) => e.name === name)!.data.toString('utf8');
+
+  it('embeds the logo as xl/media/image1.jpeg with a jpeg default content type, a pic anchor and an image rel', () => {
+    const { entries } = build('daily');
+    const img = entries.find((e) => e.name === 'xl/media/image1.jpeg')!;
+    expect(img.data.equals(logo)).toBe(true);
+    expect(text(entries, '[Content_Types].xml')).toContain('<Default Extension="jpeg" ContentType="image/jpeg"/>');
+    expect(text(entries, 'xl/worksheets/_rels/sheet1.xml.rels')).toContain('drawings/drawing2.xml');
+    expect(text(entries, 'xl/worksheets/sheet1.xml')).toContain('<drawing r:id="rId1"/>');
+    const drawing = text(entries, 'xl/drawings/drawing2.xml');
+    expect(drawing).toContain('<xdr:twoCellAnchor');
+    expect(drawing).toContain('<xdr:pic>');
+    expect(drawing).toContain('r:embed="rId1"');
+    expect(text(entries, 'xl/drawings/_rels/drawing2.xml.rels')).toContain('Target="../media/image1.jpeg"');
+    expect(text(entries, '[Content_Types].xml')).toContain('/xl/drawings/drawing2.xml');
+  });
+
+  it('shares one drawing with the chart when the first sheet is the chart sheet', () => {
+    const sheets: Sheet[] = [{
+      name: 'Chart', columns: [{ header: 'C', key: 'c', type: 'text' }, { header: 'V', key: 'v', type: 'number' }],
+      rows: [{ c: 'a', v: 1 }], chart: { title: 't', categoryKey: 'c', valueKey: 'v', valueLabel: 'V' },
+    }];
+    const entries = readZipEntries(buildXlsx(sheets, { logo }));
+    const d = text(entries, 'xl/drawings/drawing1.xml');
+    expect(d).toContain('<xdr:graphicFrame');
+    expect(d).toContain('<xdr:pic>');
+    expect(text(entries, 'xl/drawings/_rels/drawing1.xml.rels')).toContain('image1.jpeg');
+    expect(entries.some((e) => e.name === 'xl/drawings/drawing2.xml')).toBe(false);
+  });
+
+  it('skips the logo cleanly when none is available', () => {
+    const entries = readZipEntries(buildXlsx(fixture, { logo: null }));
+    expect(entries.some((e) => e.name.startsWith('xl/media/'))).toBe(false);
+    expect(text(entries, '[Content_Types].xml')).not.toContain('jpeg');
+  });
+
+  it('prints shift-production and rejected-cones portrait, every other type landscape, fitted one page wide', () => {
+    for (const type of TYPES) {
+      const { sheets, entries } = build(type);
+      const want = type === 'shift-production' || type === 'rejected-cones' ? 'portrait' : 'landscape';
+      sheets.forEach((_, i) => {
+        const xml = text(entries, `xl/worksheets/sheet${i + 1}.xml`);
+        expect(xml, `${type} sheet ${i + 1}`).toContain(`orientation="${want}"`);
+        expect(xml).toContain('fitToWidth="1"');
+        expect(xml).toContain('<pageSetUpPr fitToPage="1"/>');
+      });
+    }
+  });
+
+  it('writes the running footer: IFL internal + SMS version left, generated time centre, Page X of Y right', () => {
+    const { entries } = build('daily');
+    const xml = text(entries, 'xl/worksheets/sheet1.xml');
+    expect(xml).toContain('<oddFooter>&amp;LIFL internal \u00b7 SMS vtest-build&amp;CGenerated 03-09-2026 10:00 (plant time)&amp;RPage &amp;P of &amp;N</oddFooter>');
+  });
+
+  it('styles: header fill ADD8E6, D3D3D3 borders, bold-italic total font, right-aligned #,##0 numbers', () => {
+    const { entries } = build('daily');
+    const st = text(entries, 'xl/styles.xml');
+    expect(st).toContain('FFADD8E6');
+    expect(st).toContain('FFD3D3D3');
+    expect(st).toContain('<font><b/><i/>');
+    expect(st).toContain('<font><b/><u/>');
+    expect(st).toContain('formatCode="#,##0"');
+    expect(st).toContain('<alignment horizontal="right"/>');
+  });
+
+  it('a row whose first text cell starts with Total is written in the bold-italic total styles', () => {
+    const sheets: Sheet[] = [{
+      name: 'T', columns: [{ header: 'Name', key: 'n', type: 'text' }, { header: 'Cones', key: 'c', type: 'integer' }],
+      rows: [{ n: 'A', c: 1200 }, { n: 'Total', c: 1200 }], titleRows: ['x', 'y', 'z'],
+    }];
+    const xml = text(readZipEntries(buildXlsx(sheets, { logo: null })), 'xl/worksheets/sheet1.xml');
+    expect(xml).toContain('<c r="A6" t="inlineStr" s="8">');
+    expect(xml).toContain('<c r="B6" s="9">');
+    expect(xml).toContain('<c r="B5" s="2">');
+  });
+
+  it('with a logo the banner text starts in column B so the picture never overprints it', () => {
+    const { entries } = build('daily');
+    const xml = text(entries, 'xl/worksheets/sheet1.xml');
+    expect(xml).toContain('<mergeCell ref="B1:');
+    expect(xml).toContain('ht="22" customHeight="1"');
+  });
+
+  it('keeps every zip entry CRC valid', () => {
+    const { entries } = build('shift-production');
+    for (const e of entries) expect(crc32(e.data)).toBe(e.crc);
   });
 });

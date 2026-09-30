@@ -67,6 +67,9 @@
  * not introduce a second one.
  */
 import { deflateRawSync } from 'node:zlib';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ReportHeader, ReportType } from './common.js';
 import { attributionRows, type CsvCell, type CsvTable } from './csv.js';
 import type { AnyReportData, ReportDataByType } from './index.js';
@@ -105,11 +108,18 @@ export interface Sheet {
    * sheet itself (`headerSheet`), which already IS that banner.
    */
   titleRows?: string[];
+  /** W4: print orientation for this sheet (default landscape). */
+  orientation?: 'portrait' | 'landscape';
+  /** W4: print footer text, left and centre (the right is always "Page &P of &N"). */
+  footerLeft?: string;
+  footerCenter?: string;
 }
 
 export interface WorkbookMeta {
   /** Application name for docProps — informational only. */
   creator?: string;
+  /** W4: logo JPEG bytes for the first sheet; `null` = none, absent = load from the web app's public folder. */
+  logo?: Buffer | null;
 }
 
 /* ---------------------------------------------------------------- CRC-32 */
@@ -263,7 +273,19 @@ export function excelSerial(d: Date): number {
  * `headerFill` (U4c) is the filled, bordered, bold style for column-header
  * and title-band cells — the monochrome "proper structure" IFL asked for.
  */
-const STYLE = { plain: 0, bold: 1, integer: 2, number: 3, percent: 4, date: 5, headerFill: 6 } as const;
+const STYLE = {
+  plain: 0, bold: 1, integer: 2, number: 3, percent: 4, date: 5, headerFill: 6, text: 7,
+  totalText: 8, totalInteger: 9, totalNumber: 10, totalPercent: 11, company: 12, title: 13,
+} as const;
+
+/** W4: IFL's own report style (owner-approved 30 Sep 2026). */
+const IFL_HEADER_FILL = 'ADD8E6';
+const IFL_BORDER = 'D3D3D3';
+export const COMPANY_LINE = 'Ibrahim Fibres Limited (Textile Plant 4)';
+const LOGO_PX = 80;
+const TITLE_ROW_PT = 22;
+const EMU_PX = 9525;
+const EMU_PT = 12700;
 
 const DEFAULT_WIDTH: Record<ColumnType, number> = { text: 18, number: 12, integer: 10, percent: 10, date: 18, boolean: 10 };
 
@@ -280,7 +302,7 @@ export function sheetName(raw: string, taken: Set<string>): string {
 }
 
 function cellXml(ref: string, v: CsvCell | Date, type: ColumnType, styleIndex?: number): string {
-  if (v == null || v === '') return '';
+  if (v == null || v === '') return styleIndex != null && styleIndex !== STYLE.plain ? `<c r="${ref}" s="${styleIndex}"/>` : '';
   if (v instanceof Date || type === 'date') {
     const d = v instanceof Date ? v : new Date(String(v));
     if (Number.isNaN(d.getTime())) return `<c r="${ref}" t="inlineStr"><is><t>${xmlText(String(v))}</t></is></c>`;
@@ -288,7 +310,7 @@ function cellXml(ref: string, v: CsvCell | Date, type: ColumnType, styleIndex?: 
   }
   if (typeof v === 'boolean' || type === 'boolean') {
     const b = typeof v === 'boolean' ? v : String(v).toLowerCase() === 'true';
-    return `<c r="${ref}" t="b"${styleIndex != null ? ` s="${styleIndex}"` : ''}><v>${b ? 1 : 0}</v></c>`;
+    return `<c r="${ref}" t="b" s="${styleIndex ?? STYLE.text}"><v>${b ? 1 : 0}</v></c>`;
   }
   if (typeof v === 'number' && Number.isFinite(v)) {
     if (type === 'percent') return `<c r="${ref}" s="${styleIndex ?? STYLE.percent}"><v>${v / 100}</v></c>`;
@@ -296,7 +318,7 @@ function cellXml(ref: string, v: CsvCell | Date, type: ColumnType, styleIndex?: 
     return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
   }
   const t = `<is><t xml:space="preserve">${xmlText(String(v))}</t></is>`;
-  return `<c r="${ref}" t="inlineStr"${styleIndex != null ? ` s="${styleIndex}"` : ''}>${t}</c>`;
+  return `<c r="${ref}" t="inlineStr" s="${styleIndex ?? STYLE.text}">${t}</c>`;
 }
 
 /** U4c: the widest header or cell in a column, floor-clamped to the type default, capped so one long value cannot blow out a sheet. */
@@ -317,24 +339,62 @@ function sheetExtent(sheet: Sheet): { headerRowNum: number; lastRow: number; las
   return { headerRowNum, lastRow: headerRowNum + sheet.rows.length, lastCol: columnLetter(Math.max(sheet.columns.length - 1, 0)) };
 }
 
-function worksheetXml(sheet: Sheet, hasDrawing: boolean): string {
+function isTotalRow(sheet: Sheet, row: Sheet['rows'][number]): boolean {
+  for (const c of sheet.columns) {
+    const v = row[c.key];
+    if (typeof v === 'string' && v !== '') return /^\s*(grand\s+)?totals?\b/i.test(v);
+  }
+  return false;
+}
+
+/** Where the title text starts: column B when a logo occupies A1:A3, else A. */
+function titleStartCol(sheet: Sheet, hasLogo: boolean): string {
+  return hasLogo && sheet.columns.length > 1 ? 'B' : 'A';
+}
+
+function worksheetXml(sheet: Sheet, hasDrawing: boolean, hasLogo: boolean): string {
   const titleRows = sheet.titleRows ?? [];
   const { headerRowNum, lastCol } = sheetExtent(sheet);
+  const startCol = titleStartCol(sheet, hasLogo);
 
   const cols = sheet.columns
-    .map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${c.width ?? autoWidth(c, sheet.rows)}" customWidth="1"/>`)
+    .map((c, i) => {
+      // The logo sits in column A: keep it wide enough to hold it.
+      const w = c.width ?? autoWidth(c, sheet.rows);
+      return `<col min="${i + 1}" max="${i + 1}" width="${hasLogo && i === 0 ? Math.max(w, 15) : w}" customWidth="1"/>`;
+    })
     .join('');
 
-  const titleXml = titleRows.map((text, i) => `<row r="${i + 1}">${cellXml(`A${i + 1}`, text, 'text', STYLE.bold)}</row>`).join('');
+  const titleStyle = (i: number) => (i === 0 ? STYLE.company : i === 1 ? STYLE.title : STYLE.plain);
+  const rowAttrs = (i: number) => (hasLogo && i < 3 ? ` ht="${TITLE_ROW_PT}" customHeight="1"` : '');
+  const titleXml = titleRows
+    .map((text, i) => `<row r="${i + 1}"${rowAttrs(i)}>${cellXml(`${startCol}${i + 1}`, text, 'text', titleStyle(i))}</row>`)
+    .join('');
   const mergeCells = titleRows.length
-    ? `<mergeCells count="${titleRows.length}">${titleRows.map((_, i) => `<mergeCell ref="A${i + 1}:${lastCol}${i + 1}"/>`).join('')}</mergeCells>`
+    ? `<mergeCells count="${titleRows.length}">${titleRows.map((_, i) => `<mergeCell ref="${startCol}${i + 1}:${lastCol}${i + 1}"/>`).join('')}</mergeCells>`
     : '';
 
   const head = sheet.columns.map((c, i) => cellXml(`${columnLetter(i)}${headerRowNum}`, c.header, 'text', STYLE.headerFill)).join('');
   const body = sheet.rows
     .map((row, r) => {
       const rowNum = headerRowNum + 1 + r;
-      const cells = sheet.columns.map((c, i) => cellXml(`${columnLetter(i)}${rowNum}`, row[c.key], c.type)).join('');
+      const total = isTotalRow(sheet, row);
+      const cells = sheet.columns
+        .map((c, i) => {
+          const v = row[c.key];
+          const empty = v == null || v === '';
+          let style: number | undefined;
+          if (total) {
+            style =
+              c.type === 'percent' ? STYLE.totalPercent
+              : c.type === 'date' || v instanceof Date ? undefined
+              : typeof v === 'number' ? (c.type === 'integer' || Number.isInteger(v) ? STYLE.totalInteger : STYLE.totalNumber)
+              : STYLE.totalText;
+          }
+          if (empty) style = total ? STYLE.totalText : STYLE.text;
+          return cellXml(`${columnLetter(i)}${rowNum}`, v, c.type, style);
+        })
+        .join('');
       return `<row r="${rowNum}">${cells}</row>`;
     })
     .join('');
@@ -358,50 +418,73 @@ function worksheetXml(sheet: Sheet, hasDrawing: boolean): string {
     }
   }
 
-  // U4c: sensible defaults for printing straight from Excel — margins plus, per sheet, a print area/titles pair (set at the workbook level, in `definedNamesXml`).
+  // W4: margins, per-type orientation fitted to one page wide, and the running footer.
   const pageMargins = `<pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`;
+  const pageSetup = `<pageSetup paperSize="9" orientation="${sheet.orientation ?? 'landscape'}" fitToWidth="1" fitToHeight="0"/>`;
+  const amp = (t: string) => t.replace(/&/g, '&&');
+  const footer =
+    `<headerFooter><oddFooter>${xmlEscape(`&L${amp(sheet.footerLeft ?? 'IFL internal')}&C${amp(sheet.footerCenter ?? '')}&RPage &P of &N`)}</oddFooter></headerFooter>`;
   const drawing = hasDrawing ? '<drawing r:id="rId1"/>' : '';
 
   return (
     `${XML_HEAD}<worksheet xmlns="${NS_MAIN}" xmlns:r="${NS_REL}">` +
+    `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>` +
     `<sheetViews><sheetView workbookViewId="0">${freeze}</sheetView></sheetViews>` +
     (cols ? `<cols>${cols}</cols>` : '') +
     `<sheetData>${titleXml}<row r="${headerRowNum}">${head}</row>${body}</sheetData>` +
     mergeCells +
     conditionalFormatting +
     pageMargins +
+    pageSetup +
+    footer +
     drawing +
     `</worksheet>`
   );
 }
 
 function stylesXml(): string {
+  const right = `<alignment horizontal="right"/>`;
+  const xf = (numFmt: number, font: number, inner = '') =>
+    `<xf numFmtId="${numFmt}" fontId="${font}" fillId="0" borderId="1" xfId="0" applyBorder="1"${numFmt ? ' applyNumberFormat="1"' : ''}${font ? ' applyFont="1"' : ''}${inner ? ' applyAlignment="1">' + inner + '</xf>' : '/>'}`;
   return (
     `${XML_HEAD}<styleSheet xmlns="${NS_MAIN}">` +
     `<numFmts count="4">` +
     `<numFmt numFmtId="164" formatCode="#,##0"/>` +
-    `<numFmt numFmtId="165" formatCode="#,##0.0"/>` +
+    `<numFmt numFmtId="165" formatCode="#,##0.00"/>` +
     `<numFmt numFmtId="166" formatCode="0.0%"/>` +
-    `<numFmt numFmtId="167" formatCode="yyyy\\-mm\\-dd\\ hh:mm"/>` +
+    `<numFmt numFmtId="167" formatCode="dd\-mm\-yyyy\ hh:mm"/>` +
     `</numFmts>` +
-    `<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>` +
-    // Three fills: Excel treats the first two (none, gray125) as reserved and refuses a file
-    // without them; the third is the one monochrome band this workbook is allowed — the header
-    // row and title band's grey. No colour palette, no banded rows.
+    `<fonts count="5">` +
+    `<font><sz val="11"/><name val="Calibri"/></font>` +
+    `<font><b/><sz val="11"/><name val="Calibri"/></font>` +
+    `<font><b/><i/><sz val="11"/><name val="Calibri"/></font>` +
+    `<font><b/><sz val="14"/><name val="Calibri"/></font>` +
+    `<font><b/><u/><sz val="12"/><name val="Calibri"/></font>` +
+    `</fonts>` +
+    // Excel treats the first two fills (none, gray125) as reserved; the third is IFL's header blue.
     `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>` +
-    `<fill><patternFill patternType="solid"><fgColor rgb="FF${MONO_HEADER_FILL}"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+    `<fill><patternFill patternType="solid"><fgColor rgb="FF${IFL_HEADER_FILL}"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+    // Border 1: thin light-grey box on all four sides.
     `<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>` +
-    `<border><left/><right/><top/><bottom style="thin"><color rgb="FF${MONO_GREY}"/></bottom><diagonal/></border></borders>` +
+    `<border>` +
+    ['left', 'right', 'top', 'bottom'].map((e) => `<${e} style="thin"><color rgb="FF${IFL_BORDER}"/></${e}>`).join('') +
+    `<diagonal/></border></borders>` +
     `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
-    `<cellXfs count="7">` +
-    `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
-    `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
-    `<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
-    `<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
-    `<xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
-    `<xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
-    // headerFill (index 6, U4c): bold + the header fill + a bottom border under the header row.
-    `<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
+    `<cellXfs count="14">` +
+    /* 0 plain   */ `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+    /* 1 bold    */ `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
+    /* 2 integer */ xf(164, 0, right) +
+    /* 3 number  */ xf(165, 0, right) +
+    /* 4 percent */ xf(166, 0, right) +
+    /* 5 date    */ xf(167, 0) +
+    /* 6 header  */ `<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>` +
+    /* 7 text    */ xf(0, 0) +
+    /* 8 tot txt */ xf(0, 2) +
+    /* 9 tot int */ xf(164, 2, right) +
+    /* 10 tot num*/ xf(165, 2, right) +
+    /* 11 tot pct*/ xf(166, 2, right) +
+    /* 12 company*/ `<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
+    /* 13 title  */ `<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
     `</cellXfs>` +
     `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
     `</styleSheet>`
@@ -442,22 +525,26 @@ function rootRelsXml(): string {
   return `${XML_HEAD}<Relationships xmlns="${NS_PKG_REL}"><Relationship Id="rId1" Type="${NS_REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
 }
 
-function contentTypesXml(n: number, hasChart: boolean): string {
+function contentTypesXml(n: number, hasChart: boolean, hasLogo = false, logoOwnDrawing = false): string {
   const sheets = Array.from({ length: n }, (_, i) =>
     `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
   ).join('');
+  const drawingType = 'application/vnd.openxmlformats-officedocument.drawing+xml';
   const chartParts = hasChart
-    ? `<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>` +
+    ? `<Override PartName="/xl/drawings/drawing1.xml" ContentType="${drawingType}"/>` +
       `<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`
     : '';
+  const logoDrawing = hasLogo && logoOwnDrawing ? `<Override PartName="/xl/drawings/drawing2.xml" ContentType="${drawingType}"/>` : '';
   return (
     `${XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
     `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
     `<Default Extension="xml" ContentType="application/xml"/>` +
+    (hasLogo ? `<Default Extension="jpeg" ContentType="image/jpeg"/>` : '') +
     `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
     `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
     sheets +
     chartParts +
+    logoDrawing +
     `</Types>`
   );
 }
@@ -466,20 +553,23 @@ export const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.
 
 /* --------------------------------------------------------- U4b: the chart */
 
-/** The chart sheet's own worksheet → drawing relationship. */
-function sheetDrawingRelsXml(): string {
-  return `${XML_HEAD}<Relationships xmlns="${NS_PKG_REL}"><Relationship Id="rId1" Type="${NS_REL}/drawing" Target="../drawings/drawing1.xml"/></Relationships>`;
+/** A sheet's worksheet -> drawing relationship. */
+function sheetDrawingRelsXml(drawingFile = 'drawing1.xml'): string {
+  return `${XML_HEAD}<Relationships xmlns="${NS_PKG_REL}"><Relationship Id="rId1" Type="${NS_REL}/drawing" Target="../drawings/${drawingFile}"/></Relationships>`;
 }
 
-/** The drawing → chart relationship. */
-function drawingRelsXml(): string {
-  return `${XML_HEAD}<Relationships xmlns="${NS_PKG_REL}"><Relationship Id="rId1" Type="${NS_REL}/chart" Target="../charts/chart1.xml"/></Relationships>`;
-}
-
-/** One anchored frame, sized to be readable without dwarfing the sheet's own data. */
-function drawingXml(): string {
+/** The drawing -> chart (rId1) and -> logo image (rId2 when shared with the chart, else rId1) relationships. */
+function drawingRelsXml(chart: boolean, logoRid: string | null): string {
   return (
-    `${XML_HEAD}<xdr:wsDr xmlns:xdr="${NS_XDR}" xmlns:a="${NS_A}">` +
+    `${XML_HEAD}<Relationships xmlns="${NS_PKG_REL}">` +
+    (chart ? `<Relationship Id="rId1" Type="${NS_REL}/chart" Target="../charts/chart1.xml"/>` : '') +
+    (logoRid ? `<Relationship Id="${logoRid}" Type="${NS_REL}/image" Target="../media/image1.jpeg"/>` : '') +
+    `</Relationships>`
+  );
+}
+
+function chartAnchorXml(): string {
+  return (
     `<xdr:twoCellAnchor>` +
     `<xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
     `<xdr:to><xdr:col>10</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>22</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
@@ -491,7 +581,34 @@ function drawingXml(): string {
     `</a:graphicData></a:graphic>` +
     `</xdr:graphicFrame>` +
     `<xdr:clientData/>` +
-    `</xdr:twoCellAnchor>` +
+    `</xdr:twoCellAnchor>`
+  );
+}
+
+/** The IFL logo, an 80 px square at A1 spanning the three title rows. */
+function logoAnchorXml(rid: string): string {
+  const size = LOGO_PX * EMU_PX;
+  const rowEmu = TITLE_ROW_PT * EMU_PT;
+  return (
+    `<xdr:twoCellAnchor editAs="oneCell">` +
+    `<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+    `<xdr:to><xdr:col>0</xdr:col><xdr:colOff>${size}</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>${size - 2 * rowEmu}</xdr:rowOff></xdr:to>` +
+    `<xdr:pic>` +
+    `<xdr:nvPicPr><xdr:cNvPr id="3" name="IFL logo" descr="Ibrahim Fibres Limited logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>` +
+    `<xdr:blipFill><a:blip xmlns:r="${NS_REL}" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
+    `<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${size}" cy="${size}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>` +
+    `</xdr:pic>` +
+    `<xdr:clientData/>` +
+    `</xdr:twoCellAnchor>`
+  );
+}
+
+/** One drawing part: the chart anchor and/or the logo anchor. */
+function drawingXml(chart: boolean, logoRid: string | null): string {
+  return (
+    `${XML_HEAD}<xdr:wsDr xmlns:xdr="${NS_XDR}" xmlns:a="${NS_A}">` +
+    (chart ? chartAnchorXml() : '') +
+    (logoRid ? logoAnchorXml(logoRid) : '') +
     `</xdr:wsDr>`
   );
 }
@@ -543,32 +660,79 @@ function chartXml(sheetXmlName: string, sheet: Sheet): string {
   );
 }
 
+/**
+ * W4: the IFL logo, read at runtime from the web app (WEB_DIST, then the
+ * public folder, then paths relative to this module and the working
+ * directory). Missing is not fatal: the workbook is built without a logo and
+ * one warning is logged.
+ */
+let logoWarned = false;
+export function loadLogo(): Buffer | null {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.WEB_DIST ? join(resolve(process.env.WEB_DIST), 'ifl-logo.jpg') : null,
+    join(process.cwd(), 'web', 'dist', 'ifl-logo.jpg'),
+    join(process.cwd(), 'web', 'public', 'ifl-logo.jpg'),
+    join(process.cwd(), '..', 'web', 'public', 'ifl-logo.jpg'),
+    join(here, '..', '..', '..', '..', 'web', 'dist', 'ifl-logo.jpg'),
+    join(here, '..', '..', '..', '..', 'web', 'public', 'ifl-logo.jpg'),
+  ].filter((c): c is string => c != null);
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return readFileSync(c);
+    } catch {
+      // unreadable: try the next
+    }
+  }
+  if (!logoWarned) {
+    logoWarned = true;
+    console.warn('[xlsx] ifl-logo.jpg not found (WEB_DIST, web/dist, web/public); exporting workbooks without the logo');
+  }
+  return null;
+}
+
 /** The workbook, as the bytes of an .xlsx file. */
-export function buildXlsx(sheets: readonly Sheet[], _meta: WorkbookMeta = {}, stamp = new Date()): Buffer {
+export function buildXlsx(sheets: readonly Sheet[], meta: WorkbookMeta = {}, stamp = new Date()): Buffer {
   if (sheets.length === 0) throw new Error('a workbook needs at least one sheet');
   const taken = new Set<string>();
   const names = sheets.map((s) => sheetName(s.name, taken));
-  // At most one sheet carries `.chart` — reportSheets() below enforces this; buildXlsx only
-  // ever draws chart1.xml/drawing1.xml once, at the FIRST sheet that has one.
+  // At most one sheet carries `.chart`; buildXlsx only ever draws chart1.xml once, at the FIRST sheet that has one.
   const chartIdx = sheets.findIndex((s) => s.chart);
   const hasChart = chartIdx >= 0;
+  const logo = meta.logo === undefined ? loadLogo() : meta.logo;
+  const hasLogo = logo != null && logo.length > 0;
+  // The logo lives on sheet 1. When that sheet also has the chart they share drawing1.xml.
+  const logoShared = hasLogo && chartIdx === 0;
   const parts: ZipEntry[] = [
-    { name: '[Content_Types].xml', data: Buffer.from(contentTypesXml(sheets.length, hasChart), 'utf8') },
+    { name: '[Content_Types].xml', data: Buffer.from(contentTypesXml(sheets.length, hasChart, hasLogo, hasLogo && !logoShared), 'utf8') },
     { name: '_rels/.rels', data: Buffer.from(rootRelsXml(), 'utf8') },
     { name: 'xl/workbook.xml', data: Buffer.from(workbookXml(names, sheets), 'utf8') },
     { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(workbookRelsXml(sheets.length), 'utf8') },
     { name: 'xl/styles.xml', data: Buffer.from(stylesXml(), 'utf8') },
-    ...sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: Buffer.from(worksheetXml(s, i === chartIdx), 'utf8') })),
+    ...sheets.map((s, i) => ({
+      name: `xl/worksheets/sheet${i + 1}.xml`,
+      data: Buffer.from(worksheetXml(s, i === chartIdx || (i === 0 && hasLogo), i === 0 && hasLogo), 'utf8'),
+    })),
   ];
   if (hasChart) {
     const s = sheets[chartIdx]!;
     const name = names[chartIdx]!;
     parts.push(
-      { name: `xl/worksheets/_rels/sheet${chartIdx + 1}.xml.rels`, data: Buffer.from(sheetDrawingRelsXml(), 'utf8') },
-      { name: 'xl/drawings/drawing1.xml', data: Buffer.from(drawingXml(), 'utf8') },
-      { name: 'xl/drawings/_rels/drawing1.xml.rels', data: Buffer.from(drawingRelsXml(), 'utf8') },
+      { name: `xl/worksheets/_rels/sheet${chartIdx + 1}.xml.rels`, data: Buffer.from(sheetDrawingRelsXml('drawing1.xml'), 'utf8') },
+      { name: 'xl/drawings/drawing1.xml', data: Buffer.from(drawingXml(true, logoShared ? 'rId2' : null), 'utf8') },
+      { name: 'xl/drawings/_rels/drawing1.xml.rels', data: Buffer.from(drawingRelsXml(true, logoShared ? 'rId2' : null), 'utf8') },
       { name: 'xl/charts/chart1.xml', data: Buffer.from(chartXml(name, s), 'utf8') },
     );
+  }
+  if (hasLogo) {
+    if (!logoShared) {
+      parts.push(
+        { name: 'xl/worksheets/_rels/sheet1.xml.rels', data: Buffer.from(sheetDrawingRelsXml('drawing2.xml'), 'utf8') },
+        { name: 'xl/drawings/drawing2.xml', data: Buffer.from(drawingXml(false, 'rId1'), 'utf8') },
+        { name: 'xl/drawings/_rels/drawing2.xml.rels', data: Buffer.from(drawingRelsXml(false, 'rId1'), 'utf8') },
+      );
+    }
+    parts.push({ name: 'xl/media/image1.jpeg', data: logo! });
   }
   return buildZip(parts, stamp);
 }
@@ -594,14 +758,29 @@ export function headerSheet(h: ReportHeader): Sheet {
     ],
     rows,
     freeze: false,
+    titleRows: titleRowsFor(h, null),
   };
 }
 
-/** U4c: the two-line banner every OTHER sheet carries — report name + this sheet's own role, then line/period/generated-at/version, exactly what the print header and the CSV's trailing rows already state. */
-function titleRowsFor(header: ReportHeader, sheetTitle: string): string[] {
+/** 'YYYY-MM-DD' (or an ISO instant) as DD-MM-YYYY, unparseable input unchanged. */
+export function ddmmyyyy(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : iso;
+}
+
+/** An ISO instant on the plant clock as "DD-MM-YYYY HH:mm". */
+export function ddmmyyyyHm(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(iso);
+  return m ? `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}` : ddmmyyyy(iso);
+}
+
+/** W4: the three-row IFL banner: company, report title (with this sheet's role), then the metadata line. */
+export function titleRowsFor(header: ReportHeader, sheetTitle: string | null): string[] {
+  const shift = header.filters.shift ?? 'All shifts';
   return [
-    `${header.title} — ${sheetTitle}`,
-    `${header.lineName} · ${header.period.from} to ${header.period.to} · Generated ${header.generatedAtPlantUtc} (plant time) by ${header.generatedBy} · SMS ${header.smsVersion}`,
+    COMPANY_LINE,
+    sheetTitle ? `${header.title} - ${sheetTitle}` : header.title,
+    `Line: ${header.lineName} \u00b7 Period: ${ddmmyyyy(header.period.from)} to ${ddmmyyyy(header.period.to)} \u00b7 Shift: ${shift} \u00b7 Generated: ${ddmmyyyyHm(header.generatedAtPlantUtc)} (plant time) \u00b7 SMS v${header.smsVersion.replace(/^v/i, '')}`,
   ];
 }
 
@@ -899,6 +1078,9 @@ export function chartSpecFor(type: ReportType, data: unknown): ChartSpecResult |
   }
 }
 
+/** The two IFL SSRS-style report types print portrait; the rest landscape. */
+const PORTRAIT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>(['shift-production', 'rejected-cones']);
+
 /** Every sheet of a report: the header, any type-specific sheet, the CSV's sections, then — when the data has one — the one chart sheet. The data bar lands last, on whichever of those sheets `dataBarTarget` names. */
 export function reportSheets<T extends ReportType>(type: T, data: ReportDataByType[T], header: ReportHeader, table: CsvTable): Sheet[] {
   const own = type === 'machine-product' ? machineProductSheets(data as MachineProductReportData, header) : [];
@@ -922,6 +1104,13 @@ export function reportSheets<T extends ReportType>(type: T, data: ReportDataByTy
   if (target) {
     const s = sheets.find((s) => s.name === target.sheetName);
     if (s) s.dataBarKey = target.key;
+  }
+  // W4: print set-up shared by every sheet of the workbook.
+  const orientation = PORTRAIT_TYPES.has(type) ? 'portrait' : 'landscape';
+  for (const s of sheets) {
+    s.orientation = orientation;
+    s.footerLeft = `IFL internal \u00b7 SMS v${header.smsVersion.replace(/^v/i, '')}`;
+    s.footerCenter = `Generated ${ddmmyyyyHm(header.generatedAtPlantUtc)} (plant time)`;
   }
   return sheets;
 }
