@@ -997,7 +997,7 @@ export const W = {
     /* IFL has not supplied the meaning of the inspection codes. Until they do
        the list must not present a raw code pair as if it were a reason. */
     namesAwaited: 'Reason names have not been supplied yet. An engineer or manager can name a code here; the name applies to history.',
-    nameIt: 'Name it',
+    nameIt: 'Name it', nameHint: 'Name, then Enter',
     seeTheCones: 'See the rejected cones themselves',
     // Fixed alongside finding H4/M8 (Sep 2026 audit): this used to describe
     // the SCALE-rejected cone toggle, but the link actually opens the

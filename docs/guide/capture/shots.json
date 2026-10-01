@@ -1031,9 +1031,14 @@
       "section": "5",
       "url": "/?s=health",
       "crop": "section.block:has(table.epoch-tbl)",
+      "viewport": {
+        "width": 1920,
+        "height": 1000
+      },
       "mustBeVisible": [
         "Last seen",
-        "Status"
+        "Status",
+        "Registered by"
       ]
     }
   ]

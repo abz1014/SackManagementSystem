@@ -788,7 +788,9 @@ function Reasons({
                       value={draft}
                       autoFocus
                       aria-label="Name for this code"
-                      style={{ width: 120, fontSize: 'var(--fs-small)', padding: '2px 6px' }}
+                      placeholder={W.rejects.nameHint}
+                      title={W.rejects.nameHint}
+                      style={{ width: 140, fontSize: 'var(--fs-small)', padding: '2px 6px' }}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { setEditing(null); setSaveError(null); }

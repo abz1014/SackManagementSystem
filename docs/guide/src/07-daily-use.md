@@ -219,10 +219,10 @@ said what they mean. An engineer or above can type a name for a code and it
 applies to all past and future readings. (The note on the Rejects screen reads
 "An engineer or manager can name a code here", matching the server rule.)
 
-![Rejects, This shift: the first reason's name box is open in the reasons list (an empty outlined box beside the bar). Nothing was saved.](../images/D09.png)
+![Rejects, This shift: the first reason's name box is open in the reasons list, an empty box with the hint "Name, then Enter". Enter saves the name; Escape closes it. Nothing was saved.](../images/D09.png)
 
 1. Find the reason in the list and press [[Name it]].
-1. Type the name and confirm it.
+1. Type the name in the box ("Name, then Enter") and press Enter to save, or Escape to close without saving.
 
 ## Sacks: how many sacks and what is in stock {#sacks}
 
@@ -420,7 +420,7 @@ the service and the backups. Open it from the top bar.
 
 ![The Sync health block: "The plant connection is healthy", last successful pass, oldest table, plant connection time and blocking findings, with Data quality findings and Per table folded away.](../images/S22.png)
 
-![The Data batches block: one row per source table batch, with Batch, Source, First seen, Last seen and Status in separate, readable columns. The table scrolls sideways on narrower windows to reach Registered by.](../images/S35.png)
+![The Data batches block: one row per source table batch, with Batch, Source, First seen, Last seen, Status, Registered by and Rows held, all in separate, readable columns across the full width of the block.](../images/S35.png)
 
 ![The PDAS write checking block: "PDAS writes: off. This installation is not writing to PDAS. There is nothing to check."](../images/S23.png)
 

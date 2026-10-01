@@ -2206,3 +2206,11 @@ widths 1280 / 1024 / 768).
   hidden; fails on the demo, unrelated to A1/A5 (spec should target `.epoch-tbl`).
 - Proof images: `docs/guide/capture/proof/A5-health-batches-{768,1024,1280}.png`,
   `A1-bar-pick-dates-{768,1024,1280}.png`.
+
+**1 Oct 2026, later: S35 / D09 follow-up (independent confirmation pass).** Two app edits.
+(1) Health "Data batches": `epoch-tbl` also carries `tw-span` (`SystemHistoryBlock.tsx`), so the
+eight-column table spans the whole block instead of scrolling inside the 816px column and cutting
+off "Registered by"; spec in `sms/layout-tests/health-and-bar.spec.ts` (no sideways scroll at 1280
+and 1920). (2) Rejects "Name it" editor: input now has the placeholder "Name, then Enter"
+(`words.ts` `nameHint`, `Rejects.tsx`); spec proves placeholder and no overlap at 1280. Gate:
+vitest 292 files / 3025 tests passed, typecheck and build clean, `test:layout` 104 passed vs demo.

@@ -82,3 +82,52 @@ for (const width of WIDTHS) {
     }
   });
 }
+
+// S35 (1 Oct 2026): the Data batches table was cut off (Registered by) because
+// it scrolled sideways inside the 816px content column. It now spans the block.
+for (const width of [1280, 1920] as const) {
+  test(`Health Data batches: whole table visible, no sideways scroll at ${width}`, async ({ browser, baseURL }) => {
+    const s = await signedInPage(browser, baseURL!);
+    test.skip(s.page === null, (s as { reason: string }).reason ?? 'no session');
+    if (s.page === null) return;
+    const { page, context } = s;
+    try {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/?s=health');
+      const tw = page.locator('.tw:has(table.epoch-tbl)');
+      await expect(tw).toBeVisible({ timeout: 15_000 });
+      const m = await tw.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+      expect(m.sw, 'table scrollWidth vs wrapper').toBeLessThanOrEqual(m.cw + 1);
+      const last = page.locator('table.epoch-tbl tbody tr').first().locator('td').nth(6);
+      const lb = await rect(last), wb = await rect(tw);
+      expect(lb.x + lb.width, 'Registered by inside wrapper').toBeLessThanOrEqual(wb.x + wb.width + 1);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+// D09 (1 Oct 2026): the open "Name it" editor was an unlabelled empty box. It now
+// carries a "Name, then Enter" placeholder, and must not overlap the count text.
+test('Rejects name editor: placeholder shown, no overlap with the count at 1280', async ({ browser, baseURL }) => {
+  const s = await signedInPage(browser, baseURL!);
+  test.skip(s.page === null, (s as { reason: string }).reason ?? 'no session');
+  if (s.page === null) return;
+  const { page, context } = s;
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/?s=rejects');
+    await page.getByRole('button', { name: 'Name it' }).first().click();
+    const input = page.getByLabel('Name for this code');
+    await expect(input).toBeVisible();
+    await expect(input).toHaveAttribute('placeholder', /then Enter/);
+    const row = input.locator('xpath=ancestor::div[1]');
+    const ir = await rect(input), rr = await rect(row);
+    expect(ir.x + ir.width, 'input inside row').toBeLessThanOrEqual(rr.x + rr.width + 1);
+    const em = await rect(row.locator('em'));
+    expect(hit(ir, em), 'input vs count text').toBe(false);
+    await page.keyboard.press('Escape');
+  } finally {
+    await context.close();
+  }
+});

@@ -76,7 +76,7 @@ export function SystemHistoryBlock() {
            same fix Weight's station table and the Calibration report use
            for the same shape of problem (their own comments this date). */
         <div className="tw" style={{ marginTop: 12 }}>
-          <table className="epoch-tbl">
+          <table className="epoch-tbl tw-span">
             <colgroup>
               <col style={{ width: '21%' }} />
               <col style={{ width: '8%' }} />
