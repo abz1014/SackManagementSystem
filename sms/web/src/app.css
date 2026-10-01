@@ -344,7 +344,8 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
 
 .bar {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 20px; padding: 0 32px; height: 56px; background: var(--paper);
+  gap: 20px; padding: 0 32px; min-height: 56px; background: var(--paper);
+  flex-wrap: wrap; row-gap: 8px; /* A1 (1 Oct 2026): the bar grows when "Pick dates" needs a row */
 }
 .nav { display: flex; align-items: center; gap: 26px; height: 56px; min-width: 0; }
 .brand { font-weight: 600; letter-spacing: 0.04em; margin-right: 6px; }
@@ -358,7 +359,7 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
 .nav-link.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
 .nav-link:focus-visible { outline-offset: -4px; }
 
-.bar-right { display: flex; align-items: center; gap: 14px; }
+.bar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -406,7 +407,7 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
 .period button[disabled] { opacity: 0.42; cursor: not-allowed; }
 .period button[disabled]:hover { color: var(--graphite); }
 
-.picked { display: inline-flex; align-items: center; gap: 8px; }
+.picked { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .picked input {
   font: inherit; font-size: var(--fs-small); padding: 3px 8px;
   border: 1px solid var(--rule-2); border-radius: var(--radius); background: var(--paper); color: var(--ink);
@@ -733,8 +734,13 @@ tbody tr:last-child td { border-bottom: 0; }
    `<colgroup>` percentages authoritative instead of advisory, so a long
    "What the data shows" sentence wraps inside its own 25% column rather than
    widening the table past its container. */
-.station-tbl, .calib-tbl, .epoch-tbl { table-layout: fixed; }
+.station-tbl, .calib-tbl { table-layout: fixed; }
 .station-tbl th, .calib-tbl th, .epoch-tbl th { white-space: normal; }
+/* A5 (1 Oct 2026): the epoch register's fixed percentage columns let "Last seen"
+   and "Status" timestamps spill into each other. Auto layout + a floor width +
+   nowrap on the timestamp cells; the .tw wrapper scrolls if it still cannot fit. */
+.epoch-tbl { min-width: 960px; }
+.epoch-tbl td:nth-child(4), .epoch-tbl td:nth-child(5), .epoch-tbl td:nth-child(6) { white-space: nowrap; padding-right: 16px; }
 /* Report tables too wide for the content column (25 Sep 2026): Calibration's
    ten columns in the ~816px column beside the 180px hanging label overprinted
    "Adjustments" onto "Last adjusted" and wrapped "Station 11". A block whose

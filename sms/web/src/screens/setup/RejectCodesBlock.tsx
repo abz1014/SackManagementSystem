@@ -6,7 +6,7 @@
  * sms.reject_code row the first time it sees a (type, tube code, material
  * code) triple, so this table lists what the readings have carried, never a
  * catalogue. IFL has not supplied the meanings, and until they do Rejects
- * prints "code 3/0 — not yet named". A manager can name one from Rejects as
+ * prints "code 3/0 — not yet named". An engineer (rank 2) or above can name one from Rejects as
  * well; this is the one place all three fields are editable together
  * (roadmap Phase 1, 14 Sep 2026).
  *

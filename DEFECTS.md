@@ -2177,3 +2177,32 @@ flake and should be tracked separately if it happens again.
 - **RT24-04 re-transform backfill.** The shift-rule-as-of and plausibility-rule-as-of fixes (`1315d23`/`8f5c80c`, already recorded) are not retroactive — rows transformed before those fixes keep their old attribution. No commit in this range runs that backfill. Still open, tracked in `COMMISSIONING-GAPS.md`.
 - **Nelson rules 2-8.** Unchanged from the owner's 25 Sep 2026 decision (Part 8) to keep them withheld by evidence (EWMA failed at both granularities tested). No code in this range touches `nelson.ts`.
 - **Per-machine "running" thresholds** (`machinesRunning.ts:51-54`, 2h/7-day). Still an unconfirmed developer default per `FAILURE-ANALYSIS-2026-09-29.md` row F-22; no commit in this range changes it or gets it confirmed by the owner.
+
+## Part 13 addendum, 1 Oct 2026 — A3 / A4 (documentation and installer default)
+
+- **A3 (R-12 closed).** `sms/scripts/install-scheduled-tasks.ps1` `-Server` is now `[Parameter(Mandatory = $true)]` with no default (was `localhost,14330`, a dev port). Proven: without `-Server` the script errors "missing mandatory parameters: Server"; with `-Server "h,1" -WhatIf` it prints three tasks using `h,1` and registers nothing. Every example updated (`sms/DEPLOY.md`, guide ch.4 and Appendix B, `docs/guide/facts/COMMANDS.md`); guide ch.4's note rewritten to say the parameter is required. `backup-appdb.ps1`'s own `-Server` default is separate and unchanged.
+- **A4.** `sms/DEPLOY.md` told operators to pass `--i-know-this-is-a-new-generation` for the 10 Jul - 5 Aug backfill. Wrong: that data goes through `epoch:backfill`, not `epoch:accept`. Per `cli/src/commands/epoch.ts`, the flag (line 464) bypasses only the data-vintage guard (461-495); the chronology guard (424-459) refuses an older archive with no override. DEPLOY.md and guide ch.9 corrected, no code changed.
+- **T2 (1 Oct 2026).** `words.ts` `W.rejects.namesAwaited` and the RejectCodesBlock header comment said a manager names a reject code; server gate `PUT /api/reject-codes/:id` is `requireRole(2)` (engineer+; RBAC row already in `app.rbac.test.ts`). Copy corrected to "An engineer or manager". Guide LABELS/ch.7/README/REVIEW updated.
+
+## Part 13 addendum, 1 Oct 2026 — A1 / A5 (top-bar date picker, Health data-batches table)
+
+Two real layout defects, found in the demo, proven red-then-green in a real Edge
+browser against the demo at 127.0.0.1:4100 (`sms/layout-tests/health-and-bar.spec.ts`,
+widths 1280 / 1024 / 768).
+
+- **A5 — Health › Data batches: "Last seen" and "Status" overprint.** `.epoch-tbl`
+  used `table-layout: fixed` with percentage columns; the two timestamp-bearing
+  cells spilled into each other. Fix (`web/src/app.css`): `.epoch-tbl` back to auto
+  layout, `min-width: 960px`, `white-space: nowrap` + right padding on columns 4-6;
+  the existing `.tw` wrapper scrolls if it still cannot fit. Before: red at 1280,
+  1024 and 768 (text rects of the two cells intersect). After: green at all three.
+- **A1 — top bar "Pick dates" inputs overlap the bar.** `.bar` had a fixed
+  `height: 56px` above 900px, so the wrapped From/To inputs hung out of the bar
+  (bottom at y=71 vs bar bottom 56 at 1280). Fix (`app.css`): `min-height: 56px`,
+  `flex-wrap: wrap`, `row-gap: 8px` on `.bar`; `.bar-right` and `.picked` wrap.
+  Before: red at 1280 (the 1024 and 768 cases already passed). After: green at all three.
+- Not part of these fixes: `table-clipping.spec.ts` "Health epoch register" cases take
+  `.tw` `.first()`, which on demo data is the (tall) DQ-findings table and is reported
+  hidden; fails on the demo, unrelated to A1/A5 (spec should target `.epoch-tbl`).
+- Proof images: `docs/guide/capture/proof/A5-health-batches-{768,1024,1280}.png`,
+  `A1-bar-pick-dates-{768,1024,1280}.png`.

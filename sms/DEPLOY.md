@@ -720,17 +720,31 @@ and this data lands inside a generation that is already **closed**.
    closed epoch sharing that table name used to be checked against the named
    source, producing spurious STOPs unrelated to the one you actually mean).
 
-**Before any of this, `sms epoch:accept` needs to register the epoch**, and
-it now carries a data-vintage guard (added 29 Sep 2026, `08df232`): it
-refuses to register a "new" generation whose newest reading is implausibly
-old relative to what is already open, or whose id-range checksum matches a
-generation already closed — the case a *restored or rebuilt* old archive
-produces, since a restore gets today's `create_date` regardless of the
-data's real age. If you are certain the data genuinely is an older
-generation (which the 10 Jul – 5 Aug backfill is, by construction), pass
-**`--i-know-this-is-a-new-generation`** to bypass the guard; every use of
-this flag that changes a real registration is written to `sms.audit_log`
-(`epoch.accept.vintage_override`), so it is never a silent override.
+**Do not run `sms epoch:accept` for this data.** The 10 Jul – 5 Aug archive
+continues a generation SMS already holds, so it goes in through
+`epoch:backfill` (steps 2-4 above), never through `epoch:accept`, and the
+`--i-know-this-is-a-new-generation` flag is **not** part of this runbook.
+What the code actually does (`sms/cli/src/commands/epoch.ts`):
+
+- `epoch:accept` carries two refusals for a source older than what is open.
+  The **chronology guard** (lines 424-459) refuses, exit 2, any registration
+  whose source `createdKey` is older than the open epoch's, and names
+  `epoch:backfill` as the right path; **no flag overrides it**. The
+  **data-vintage guard** (lines 461-495, `checkDataVintage` ~165-181) refuses
+  a source whose newest reading predates the open generation's oldest
+  (1-day tolerance) or whose id range checksum-matches a closed epoch — the
+  restored/rebuilt-old-archive case, since a restore gets today's
+  `create_date`.
+- `--i-know-this-is-a-new-generation` (line 464) bypasses **only** the
+  data-vintage guard, for the rare case of a genuinely new generation whose
+  own data predates the open one. It does not bypass the chronology guard,
+  and a backfill is not that case. When it changes a real registration it is
+  recorded in `sms.audit_log` as `epoch.accept.vintage_override` (lines
+  608-632).
+- Passing the flag for the backfill data would therefore be wrong either
+  way: it would not get past the chronology guard, and if it did register
+  anything it would create a new, older-than-open generation instead of
+  extending the closed one.
 
 **What this has NOT been proven to do, stated plainly (29 Sep 2026):** every
 test covering `epoch:backfill`, the verify-scoping fixes, and the vintage
@@ -763,10 +777,10 @@ confirmed anywhere in the repository.
 
 ### Scheduled tasks
 
-`scripts\install-scheduled-tasks.ps1` registers the three recurring jobs (run as an administrator; `-WhatIf` prints what it would register and registers nothing):
+`scripts\install-scheduled-tasks.ps1` registers the three recurring jobs (run as an administrator; `-WhatIf` prints what it would register and registers nothing; `-Server` is required and has no default, so it must name the app database's real `<host>,<port>`):
 
 ```
-powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "PLANT\svc-sms" -BackupDir "C:\sms-backups" -WhatIf
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "PLANT\svc-sms" -Server "<host>,<port>" -BackupDir "C:\sms-backups" -WhatIf
 ```
 
 | Task | When | What | Runs as |

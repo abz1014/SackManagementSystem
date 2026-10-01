@@ -588,7 +588,7 @@ export interface RegisterRow {
   tube_inspect_code?: number | null;
   material_inspect_code?: number | null;
   reject_label?: string | null;
-  /** The code's pass flag, once a manager has set it; null until then. */
+  /** The code's pass flag, once an engineer or above has set it; null until then. */
   reject_is_pass?: boolean | null;
   production_ts_utc: string;
   shift_code: string;

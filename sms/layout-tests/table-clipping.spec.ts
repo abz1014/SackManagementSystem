@@ -15,7 +15,7 @@ import { measureHorizontalOverflow } from './support/overflow';
 
 const TARGETS = [
   { name: 'Weight station table', url: '/?s=weight' },
-  { name: 'Health epoch register', url: '/?s=health' },
+  { name: 'Health epoch register', url: '/?s=health', wrapper: '.tw:has(table.epoch-tbl)' },
   { name: 'Calibration report station table', url: '/?s=report&rt=calibration' },
   { name: 'Daily report by-shift table', url: '/?s=report&rt=daily' },
   { name: 'Sack report by-shift table', url: '/?s=report&rt=sack' },
@@ -38,7 +38,7 @@ for (const target of TARGETS) {
         await page.setViewportSize(vp);
         await page.goto(target.url);
 
-        const wrapper = page.locator('.tw').first();
+        const wrapper = page.locator('wrapper' in target ? target.wrapper : '.tw').first();
         await expect(wrapper).toBeVisible({ timeout: 15_000 });
 
         // The wrapper (`.tw { overflow-x: auto }`) is EXPECTED to be able to

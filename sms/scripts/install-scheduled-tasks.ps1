@@ -6,7 +6,7 @@
 # in the task XML by anyone who can list tasks.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 `
-#       -InstallDir "C:\sms" -RunAs "PLANT\svc-sms-backup" -WhatIf
+#       -InstallDir "C:\sms" -RunAs "PLANT\svc-sms-backup" -Server "<host>,<port>" -WhatIf
 #
 # Run as an administrator. -WhatIf prints exactly what would be registered
 # and registers nothing; drop it to register. Re-running replaces the tasks.
@@ -41,7 +41,7 @@
 param(
   [string]$InstallDir = "C:\sms",
   [Parameter(Mandatory = $true)][string]$RunAs,
-  [string]$Server     = "localhost,14330",
+  [Parameter(Mandatory = $true)][string]$Server,   # required, no default: "<host>,<port>" of the APP database (sms)
   [string]$Database   = "sms",
   [string]$BackupDir  = "C:\sms-backups",
   [string]$NodeExe    = "C:\Program Files\nodejs\node.exe",
