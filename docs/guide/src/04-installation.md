@@ -207,15 +207,15 @@ If any of these steps fails, see {{ref:troubleshooting}}.
    database maintenance, daily retention), previewing first with
    `-WhatIf`:
    ```powershell
-   powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "<domain>\<svc account>" -BackupDir "C:\sms-backups" -WhatIf
+   powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "<domain>\<svc account>" -Server "SERVER-SQL,<port>" -BackupDir "C:\sms-backups" -WhatIf
    ```
 1. Once the preview looks right, re-run the same command with `-WhatIf`
    removed to register the tasks for real.
 
-> **Note:** The script's own default for the app database is
-> `localhost,14330` (the `-Server` parameter) and `sms` (`-Database`). If the
-> app database on this server listens elsewhere, add `-Server "<host>,<port>"`
-> to the command, or the nightly backup will look at the wrong place. Run the
+> **Note:** `-Server` is a required parameter with no default; give it the
+> host and port of the app database on this server, as shown in the command
+> above. The script refuses to run without it, so the nightly backup cannot
+> silently look at the wrong place. `-Database` defaults to `sms`. Run the
 > command as an administrator.
 
 You should see: "SMS Nightly Backup", "SMS Weekly Maintenance" and "SMS

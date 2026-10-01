@@ -38,7 +38,7 @@
     },
     {
       "id": "S03",
-      "takenAt": "2026-09-30T08:44:12.919Z",
+      "takenAt": "2026-10-01T06:24:13.874Z",
       "url": "http://127.0.0.1:4100/?s=line",
       "viewport": {
         "width": 1680,
@@ -182,7 +182,7 @@
     },
     {
       "id": "S11",
-      "takenAt": "2026-09-30T08:44:35.790Z",
+      "takenAt": "2026-10-01T06:24:16.563Z",
       "url": "http://127.0.0.1:4100/?s=rejects",
       "viewport": {
         "width": 1680,
@@ -266,11 +266,11 @@
     },
     {
       "id": "D08",
-      "takenAt": "2026-09-30T08:40:36.872Z",
+      "takenAt": "2026-10-01T06:24:29.593Z",
       "url": "http://127.0.0.1:4100/?s=rejects",
       "viewport": {
-        "width": 1440,
-        "height": 900
+        "width": 1680,
+        "height": 1000
       },
       "dpr": 2,
       "pass": "pass",
@@ -302,7 +302,7 @@
     },
     {
       "id": "D09",
-      "takenAt": "2026-09-30T08:42:39.261Z",
+      "takenAt": "2026-10-01T06:24:32.577Z",
       "url": "http://127.0.0.1:4100/?s=rejects",
       "viewport": {
         "width": 1680,
@@ -386,7 +386,7 @@
     },
     {
       "id": "S21",
-      "takenAt": "2026-09-30T09:07:25.942Z",
+      "takenAt": "2026-10-01T06:24:19.197Z",
       "url": "http://127.0.0.1:4100/?s=health",
       "viewport": {
         "width": 1920,
@@ -398,7 +398,7 @@
     },
     {
       "id": "S22",
-      "takenAt": "2026-09-30T08:45:03.657Z",
+      "takenAt": "2026-10-01T06:24:21.635Z",
       "url": "http://127.0.0.1:4100/?s=health",
       "viewport": {
         "width": 1680,
@@ -410,7 +410,7 @@
     },
     {
       "id": "S23",
-      "takenAt": "2026-09-30T08:45:06.128Z",
+      "takenAt": "2026-10-01T06:24:24.269Z",
       "url": "http://127.0.0.1:4100/?s=health",
       "viewport": {
         "width": 1680,
@@ -494,7 +494,7 @@
     },
     {
       "id": "S30",
-      "takenAt": "2026-09-30T09:07:28.554Z",
+      "takenAt": "2026-10-01T06:15:26.766Z",
       "url": "http://127.0.0.1:4100/?s=setup",
       "viewport": {
         "width": 1680,
@@ -554,7 +554,7 @@
     },
     {
       "id": "S34",
-      "takenAt": "2026-09-30T08:49:52.144Z",
+      "takenAt": "2026-10-01T06:24:26.858Z",
       "url": "http://127.0.0.1:4100/?s=line",
       "viewport": {
         "width": 1680,
@@ -643,6 +643,30 @@
       "viewport": null,
       "pass": "skipped",
       "reason": "The People table shows no Reset button on the signed-in admin's own row (password change is via the account menu, D02), and the demo has only one account; creating a second account is forbidden for this pass. Text-only in the guide."
+    },
+    {
+      "id": "S30b",
+      "takenAt": "2026-10-01T06:15:29.441Z",
+      "url": "http://127.0.0.1:4100/?s=setup",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
+    },
+    {
+      "id": "S35",
+      "takenAt": "2026-10-01T06:25:01.104Z",
+      "url": "http://127.0.0.1:4100/?s=health",
+      "viewport": {
+        "width": 1680,
+        "height": 1000
+      },
+      "dpr": 2,
+      "pass": "pass",
+      "reason": null
     }
   ]
 }

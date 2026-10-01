@@ -47,7 +47,7 @@ Drop the databases first (the logins' users go with them). Also delete `C:\sms-d
 ## Known gaps
 
 - Screenshots are of the demo with simulator data, not real plant data; the demo has no backup, so Health reads "Something needs attention".
-- S02, S05, S07, S08, S12, S21 show only the top of the screen; lower blocks are described in the text but not pictured. S30 (Setup Rules) is still tall.
-- The Data batches table overprint seen at narrow widths (old S21) is a possible app layout defect; not re-tested.
+- S02, S05, S07, S08, S12, S21 show only the top of the screen; lower blocks are described in the text but not pictured.
+- The Data batches table (S35) scrolls sideways on narrow windows, so its Registered by column is cut off in the figure.
 - Nothing was verified against IFL's plant or a real installation; PDAS writes were not exercised.
-- The on-screen wording "A manager can name a code here" disagrees with the server rule (engineer): a copy question for the maintainer.
+- The on-screen wording on Rejects now reads "An engineer or manager can name a code here", matching the server rule (engineer, rank 2).

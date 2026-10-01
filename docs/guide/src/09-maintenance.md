@@ -117,7 +117,10 @@ by an engineer (see {{ref:troubleshooting}}).
 IFL has not yet sent the data between the July and September samples.
 When it arrives, do not run `epoch:accept` on it: it belongs to a
 generation SMS already holds. `epoch:backfill` adds it to the end of that
-generation's raw tables, and refuses everything if its checks fail. Run it
+generation's raw tables, and refuses everything if its checks fail. The
+`--i-know-this-is-a-new-generation` flag is not part of this procedure: it
+only bypasses `epoch:accept`'s data-vintage check, and `epoch:accept`'s
+chronology check refuses an older archive regardless. Run it
 first without `--confirm` to read the plan, then with it, then run
 `rebuild` for the same generation to derive the readings, then `verify`
 with `--source-db` and `--epoch`. This has been proven only on scratch

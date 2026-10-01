@@ -356,7 +356,7 @@ sheet components (`ReadingSheet.tsx`, `StationSheet.tsx`, `ReasonSheet.tsx`, `St
 | L-rejects-vitalFew | ${n}${g0}reason accounts${g1}for ${pct} of rejects in this period.${slash}${n}${g2}reasons account${g3}for ${pct} of rejects in this period. | Pareto note (two-branch, singular/plural) | sms/web/src/lib/words.ts:1017 (W.rejects.vitalFew) | pattern |
 | L-rejects-clickBarHint | Choose a reason to follow it through the trend and the days below. | Pareto hint | sms/web/src/lib/words.ts:1389 (W.rejectsMore.clickBarHint) | literal |
 | L-rejects-cumulativePct | Cumulative % | Pareto bar aria-label | sms/web/src/lib/words.ts:1018 (W.rejects.cumulativePct) | literal |
-| L-rejects-namesAwaited | Reason names have not been supplied yet. A manager can name a code here; the name applies to history. | Pareto note, no code names | sms/web/src/lib/words.ts:996 (W.rejects.namesAwaited) | literal |
+| L-rejects-namesAwaited | Reason names have not been supplied yet. An engineer or manager can name a code here; the name applies to history. | Pareto note, no code names | sms/web/src/lib/words.ts:999 (W.rejects.namesAwaited) | literal |
 | L-rejects-nameIt | Name it | inline "Name it" editor, open button | sms/web/src/lib/words.ts:997 (W.rejects.nameIt) | literal |
 | L-rejects-nameForCode | Name for this code | inline editor input aria-label | sms/web/src/screens/Rejects.tsx:787 | literal |
 | L-rejects-renameFailed | The name was not saved. Try again. | inline editor, save failure | sms/web/src/lib/words.ts:1425 (W.rejectsMore.renameFailed) | literal |

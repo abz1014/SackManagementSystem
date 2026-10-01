@@ -215,10 +215,10 @@ the current user plus `BUILTIN\Administrators`. Keeps the newest `-Keep` snapsho
 
 ### `install-scheduled-tasks.ps1` — registers the three production scheduled tasks
 ```
-powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "<domain>\<svc account>" -BackupDir "C:\sms-backups" -WhatIf
+powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "<domain>\<svc account>" -Server "SERVER-SQL,<port>" -BackupDir "C:\sms-backups" -WhatIf
 ```
 Params: `-InstallDir` (`C:\sms`), `-RunAs` (**mandatory, no default** — a Windows account
-holding `db_backupoperator`), `-Server` (`localhost,14330`), `-Database` (`sms`), `-BackupDir`
+holding `db_backupoperator`), `-Server` (**mandatory, no default** — `<host>,<port>` of the app database), `-Database` (`sms`), `-BackupDir`
 (`C:\sms-backups`), `-NodeExe` (`C:\Program Files\nodejs\node.exe`), `-BackupTime` (`02:00`),
 `-MaintenanceTime` (`03:00`), `-RetentionTime` (`04:00`). Supports `-WhatIf` (prints without
 registering). Registers exactly three tasks: "SMS Nightly Backup" (daily, runs
@@ -251,7 +251,7 @@ Pre-flight checks that `backup-appdb.ps1`, `db-maintenance.sql`, `cli\dist\index
 | Summary | `node cli/dist/index.js summary --date=YYYY-MM-DD [--shift=] [--epoch=N[,M]]` | DEPLOY.md:540-546 | No |
 | Rebuild one table | `node cli/dist/index.js rebuild --table=cone_event --snapshot-id=<id> --epoch=<generation> --confirm` | DEPLOY.md:718,450 | No |
 | Weekly DB maintenance | `sqlcmd -S .\SQLEXPRESS -E -d sms -b -i scripts\db-maintenance.sql` | DEPLOY.md:621 | No — matches the scheduled task's own invocation |
-| Register scheduled tasks | `powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "<domain>\<svc account>" -BackupDir "C:\sms-backups" -WhatIf` | DEPLOY.md:591 | No, but DEPLOY.md itself is internally inconsistent about the example account name (`<svc account>` vs. `<svc account>-backup` in different sections) — a documentation inconsistency, not a code bug |
+| Register scheduled tasks | `powershell -ExecutionPolicy Bypass -File scripts\install-scheduled-tasks.ps1 -InstallDir "C:\sms" -RunAs "<domain>\<svc account>" -Server "SERVER-SQL,<port>" -BackupDir "C:\sms-backups" -WhatIf` | DEPLOY.md:591 | No, but DEPLOY.md itself is internally inconsistent about the example account name (`<svc account>` vs. `<svc account>-backup` in different sections) — a documentation inconsistency, not a code bug |
 | Check/run a scheduled task | `schtasks /query /tn "SMS Nightly Backup" /v /fo LIST`, `schtasks /run /tn "SMS Nightly Backup"` | DEPLOY.md:600 | No — task name matches exactly |
 
 ### Contradictions found (summary)

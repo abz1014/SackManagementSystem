@@ -59,7 +59,9 @@ block below is a section of that same page.
 - [[Rules]] — the shift, weight and plausibility rules in force, and
   when they changed.
 
-![Setup, Rules block: weight basis and tube weight, shift start times and attribution, plausible-reading bounds, then the product limits history.](../images/S30.png)
+![Setup, Rules block, first part: weight basis with cone tube weight and sack tare, shift start times with night-shift and attribution choices, and the plausible-reading bounds for cones and sacks.](../images/S30.png)
+
+![Setup, Rules block, second part: the product limits history, one entry per material with its limits, when they came into force, their source, and a Change limits link.](../images/S30b.png)
 
 - [[Reject codes]] — every reject code with its type, tube code and
   material code, a Name box (the name applies to every reading, past and

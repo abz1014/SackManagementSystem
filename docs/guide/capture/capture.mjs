@@ -353,6 +353,23 @@ async function takeShotScreenshot(page, shot, outPath) {
     await screenshotBarStripUnion(page, outPath);
     return;
   }
+  if (shot.crop && shot.cropChildren) {
+    // cropChildren: [first, last] 1-based children of the block's grid div;
+    // shoots the union of those children (used to split tall blocks, e.g. S30/S30b).
+    const loc = page.locator(shot.crop).first();
+    await loc.waitFor({ state: 'visible', timeout: 8000 });
+    const box = await loc.evaluate((el, [a, z]) => {
+      const kids = el.querySelectorAll(':scope > div > div > *');
+      const f = kids[a - 1], l = kids[z - 1];
+      if (!f || !l) return null;
+      const fr = f.getBoundingClientRect(), lr = l.getBoundingClientRect();
+      const br = el.getBoundingClientRect(); const x = br.left, r = br.right;
+      return { x: x + window.scrollX, y: fr.top + window.scrollY, width: r - x, height: lr.bottom - fr.top };
+    }, shot.cropChildren);
+    if (!box) throw new Error('cropChildren not found for ' + shot.id);
+    await page.screenshot({ path: outPath, clip: box, fullPage: true });
+    return;
+  }
   if (shot.crop) {
     const loc = page.locator(shot.crop).first();
     await loc.waitFor({ state: 'visible', timeout: 8000 });

@@ -40,7 +40,7 @@ unless stated otherwise. Arguments use `--key=value`; a bare space-separated
 |---|---|
 | `backup-appdb.ps1 -Server <host,port> -Db sms -Pass <password> -OutDir <dir>` | Nightly checksummed backup of the app database only. `-User ""` uses a trusted Windows connection instead of a SQL login/password — what the scheduled task itself uses. Writes a `.verified.json` marker beside a backup that passes `RESTORE VERIFYONLY`, and renames one that fails to `.unverified`. Deletes `.bak` files (and markers) older than 30 days in `-OutDir` unless `-NoPrune` is given. |
 | `backup-config.ps1 -InstallDir C:\sms -BackupDir C:\sms-backups` | Copies `.env`, TLS material, service definitions and scheduled-task XML into an ACL-locked folder — never the database itself. Must run as administrator. |
-| `install-scheduled-tasks.ps1 -InstallDir C:\sms -RunAs <account> -BackupDir C:\sms-backups [-WhatIf]` | Registers the three production scheduled tasks: nightly backup, weekly database maintenance, daily retention. `-WhatIf` previews without registering. |
+| `install-scheduled-tasks.ps1 -InstallDir C:\sms -RunAs <account> -Server <host>,<port> -BackupDir C:\sms-backups [-WhatIf]` | Registers the three production scheduled tasks: nightly backup, weekly database maintenance, daily retention. `-WhatIf` previews without registering. |
 
 ## `sqlcmd` and Windows commands used during installation
 

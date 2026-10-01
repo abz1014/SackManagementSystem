@@ -1,8 +1,8 @@
 {
   "_readme": [
-    "Shot list for docs/guide/capture/capture.mjs \u00e2\u20ac\u201d encodes shot-list section 3 of the illustrated-guide plan (S01-S34, D01-D22).",
+    "Shot list for docs/guide/capture/capture.mjs â€” encodes shot-list section 3 of the illustrated-guide plan (S01-S34, D01-D22).",
     "Values wrapped {{LIKE_THIS}} are placeholders for demo-specific IDs (problem station number, a cone/sack/reject id, a stock day, the top reject code) that only exist once T5 runs the demo and writes docs/guide/demo/DEMO-STATE.md. `--dry` lists every remaining placeholder.",
-    "Every `crop` selector targets the shared `Block` component's rendered markup (`section.block` containing `p.h2` with the block's exact label \u00e2\u20ac\u201d see sms/web/src/ui/bits.tsx) or the shared `Sheet` dialog (`.sheet[role=dialog]` \u00e2\u20ac\u201d sms/web/src/ui/Sheet.tsx), both confirmed by reading the component source, not guessed.",
+    "Every `crop` selector targets the shared `Block` component's rendered markup (`section.block` containing `p.h2` with the block's exact label â€” see sms/web/src/ui/bits.tsx) or the shared `Sheet` dialog (`.sheet[role=dialog]` â€” sms/web/src/ui/Sheet.tsx), both confirmed by reading the component source, not guessed.",
     "`notCapturable: true` rows (D19, D20) are recorded for completeness and produce no PNG; `capture.mjs --dry` reports them as skipped, not as failures.",
     "Selectors marked with a `_uncertain` note are a best-effort reading of the source and must be eye-checked by whoever runs T7/T8 against the live demo; re-shoot with a corrected selector on failure rather than trusting the PNG blindly."
   ],
@@ -14,7 +14,7 @@
     },
     "dpr": 2,
     "uiScale": "1",
-    "loadingText": "Loading\u00e2\u20ac\u00a6"
+    "loadingText": "Loadingâ€¦"
   },
   "diagram": {
     "id": "F-architecture",
@@ -24,7 +24,7 @@
       "height": 620
     },
     "dpr": 2,
-    "note": "Architecture diagram (section 1.1). Rendered via page.setContent from a local HTML file, not a screenshot of the running app \u00e2\u20ac\u201d no host/login/denylist checks apply to it, only the loading-text and full-page save."
+    "note": "Architecture diagram (section 1.1). Rendered via page.setContent from a local HTML file, not a screenshot of the running app â€” no host/login/denylist checks apply to it, only the loading-text and full-page save."
   },
   "shots": [
     {
@@ -76,7 +76,7 @@
         ".bar",
         ".strip"
       ],
-      "note": "Nav, period buttons, Wall button, gear (admin), initials menu, plant clock, lag sentence with its \"details\" link. Cropped by unioning .bar and .strip (sms/web/src/ui/Bar.tsx) \u00e2\u20ac\u201d see capture.mjs's cropUnion helper.",
+      "note": "Nav, period buttons, Wall button, gear (admin), initials menu, plant clock, lag sentence with its \"details\" link. Cropped by unioning .bar and .strip (sms/web/src/ui/Bar.tsx) â€” see capture.mjs's cropUnion helper.",
       "mustBeVisible": [
         "nav: Line/Readings/Weight/Rejects/Sacks/Product/Report",
         "period buttons",
@@ -183,7 +183,7 @@
       "id": "S09",
       "section": "7.4",
       "url": "/?s=weight&p=week&wm=time",
-      "_note": "Plan text says \"use the real period parameter from lib/period.ts\" \u00e2\u20ac\u201d period key is `key=week` per PERIOD_KEYS/parsePeriodParams (sms/web/src/lib/period.ts), not `p=week`; kept both here so a stale key still resolves via the This week button click below.",
+      "_note": "Plan text says \"use the real period parameter from lib/period.ts\" â€” period key is `key=week` per PERIOD_KEYS/parsePeriodParams (sms/web/src/lib/period.ts), not `p=week`; kept both here so a stale key still resolves via the This week button click below.",
       "actions": [
         {
           "type": "click",
@@ -194,7 +194,7 @@
       ],
       "note": "Requires 7+ days of data in the demo generation.",
       "mustBeVisible": [
-        "over-time chart (X\u00cc\u201e line)"
+        "over-time chart (XÌ„ line)"
       ],
       "fullPage": true
     },
@@ -287,7 +287,7 @@
       "id": "S16",
       "section": "7.7",
       "url": "/?s=product&pt=history",
-      "note": "May legitimately be empty (words.ts product.changeover.noneYet: \"No changeover has been planned yet.\") \u00e2\u20ac\u201d caption must say so rather than imply a populated trail.",
+      "note": "May legitimately be empty (words.ts product.changeover.noneYet: \"No changeover has been planned yet.\") â€” caption must say so rather than imply a populated trail.",
       "mustBeVisible": [
         "product-change trail table, or the empty-state sentence"
       ],
@@ -438,8 +438,25 @@
       "section": "6.2",
       "url": "/?s=setup",
       "crop": "section.block:has(p.h2:text-is(\"Rules\"))",
+      "cropChildren": [
+        1,
+        3
+      ],
       "mustBeVisible": [
-        "Rules block, whole"
+        "Rules block: Weight, Shifts and Plausible readings forms"
+      ]
+    },
+    {
+      "id": "S30b",
+      "section": "6.2",
+      "url": "/?s=setup",
+      "crop": "section.block:has(p.h2:text-is(\"Rules\"))",
+      "cropChildren": [
+        4,
+        4
+      ],
+      "mustBeVisible": [
+        "Rules block: Product limits history"
       ]
     },
     {
@@ -468,7 +485,7 @@
       "mustBeVisible": [
         "Audit log block, whole"
       ],
-      "_note": "Plan's row 'S25-S32' names 8 blocks (Line, Machines, Stations, Sources, Rules, Reject codes, People, Audit log) but only 8 ids in a range S25-S32 inclusive is 8 slots and Sync health makes 9 blocks total on the page (Setup.tsx). Encoded here as S25=Sync health, S26=Line, S27=Machines, S28=Stations, S29=Sources, S30=Rules, S31=Reject codes, S32a=People, S32b=Audit log \u00e2\u20ac\u201d one extra id (S32b) rather than dropping a block; flag this numbering to T7/T9 rather than silently omitting Audit log."
+      "_note": "Plan's row 'S25-S32' names 8 blocks (Line, Machines, Stations, Sources, Rules, Reject codes, People, Audit log) but only 8 ids in a range S25-S32 inclusive is 8 slots and Sync health makes 9 blocks total on the page (Setup.tsx). Encoded here as S25=Sync health, S26=Line, S27=Machines, S28=Stations, S29=Sources, S30=Rules, S31=Reject codes, S32a=People, S32b=Audit log â€” one extra id (S32b) rather than dropping a block; flag this numbering to T7/T9 rather than silently omitting Audit log."
     },
     {
       "id": "S33",
@@ -545,7 +562,7 @@
           "key": "Escape"
         }
       ],
-      "note": "Do not type into the password fields \u00e2\u20ac\u201d capture the empty form only.",
+      "note": "Do not type into the password fields â€” capture the empty form only.",
       "mustBeVisible": [
         "password sheet form"
       ]
@@ -609,7 +626,7 @@
           "key": "Escape"
         }
       ],
-      "note": "First row of the cone register (sms/web/src/screens/Readings.tsx ReadingTable \u00e2\u20ac\u201d tr.click, onClick opens the sheet).",
+      "note": "First row of the cone register (sms/web/src/screens/Readings.tsx ReadingTable â€” tr.click, onClick opens the sheet).",
       "mustBeVisible": [
         "cone reading sheet"
       ]
@@ -707,7 +724,7 @@
           "key": "Escape"
         }
       ],
-      "note": "Inline editor (Rejects.tsx line ~749), not a Sheet \u00e2\u20ac\u201d no .sheet crop; capture the viewport or crop the row/table containing the open editor.",
+      "note": "Inline editor (Rejects.tsx line ~749), not a Sheet â€” no .sheet crop; capture the viewport or crop the row/table containing the open editor.",
       "mustBeVisible": [
         "inline reject-code name editor"
       ]
@@ -976,7 +993,7 @@
           "name": "Cancel"
         }
       ],
-      "note": "words.ts health.reset \u00e2\u20ac\u201d appears once per row in the People table; clicks the first.",
+      "note": "words.ts health.reset â€” appears once per row in the People table; clicks the first.",
       "mustBeVisible": [
         "reset-password form"
       ],
@@ -1000,14 +1017,24 @@
       "section": "8",
       "optional": true,
       "notCapturable": true,
-      "reason": "Requires stopping the demo API process for ~30s and restarting it \u00e2\u20ac\u201d an operational action outside capture.mjs's read-only scope. Left for T5/T8 to perform by hand with the demo.ps1 launcher if wanted; not automated here."
+      "reason": "Requires stopping the demo API process for ~30s and restarting it â€” an operational action outside capture.mjs's read-only scope. Left for T5/T8 to perform by hand with the demo.ps1 launcher if wanted; not automated here."
     },
     {
       "id": "D22",
       "section": "8",
       "optional": true,
       "notCapturable": true,
-      "reason": "Requires stopping the demo sync worker for more than 3 cadences and restarting it \u00e2\u20ac\u201d same reasoning as D21."
+      "reason": "Requires stopping the demo sync worker for more than 3 cadences and restarting it â€” same reasoning as D21."
+    },
+    {
+      "id": "S35",
+      "section": "5",
+      "url": "/?s=health",
+      "crop": "section.block:has(table.epoch-tbl)",
+      "mustBeVisible": [
+        "Last seen",
+        "Status"
+      ]
     }
   ]
 }

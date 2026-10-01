@@ -48,14 +48,9 @@ Once you are in, every screen shares the same bar along the top.
 | The sentence on the right, ending in [[details]] | How fresh the data is. Readings reach SMS about 18 minutes after the cone is weighed, so this sentence names the time of the newest reading and the delay. If it warns that nothing has arrived, the plant link may be down and no screen should be read as "the line is running". |
 
 To look at a stretch of time that is not a shift, day, week or month, press
-[[Pick dates]]. Two date boxes appear where the period buttons were.
+[[Pick dates]]. Two date boxes appear in the bar beside the period buttons.
 
-![Line screen with Pick dates chosen: the two date boxes (24 Sept to 30 Sept) appear over the top bar and cover part of the Report and Health tabs.](../images/S34.png)
-
-> **Note:** In the current release the date boxes are drawn over the top bar
-> and can hide the [[Report]] and [[Health]] names while they are open, as the
-> figure shows. Choose the dates, then press a screen name once the boxes
-> have closed.
+![Line screen with Pick dates chosen: the two date boxes (25 Sept to 1 Oct) appear in the top bar beside the period buttons, and every screen name stays visible.](../images/S34.png)
 
 1. Press [[Pick dates]].
 1. Enter the first and last day in the boxes.
@@ -221,8 +216,8 @@ getting worse, and where.
 
 The plant supplies only numeric codes such as "Code 10/1"; IFL has not yet
 said what they mean. An engineer or above can type a name for a code and it
-applies to all past and future readings. (The note on the Rejects screen says
-"A manager can name a code here"; the server allows engineers too.)
+applies to all past and future readings. (The note on the Rejects screen reads
+"An engineer or manager can name a code here", matching the server rule.)
 
 ![Rejects, This shift: the first reason's name box is open in the reasons list (an empty outlined box beside the bar). Nothing was saved.](../images/D09.png)
 
@@ -424,6 +419,8 @@ the service and the backups. Open it from the top bar.
 1. If something is red, follow {{ref:troubleshooting}}.
 
 ![The Sync health block: "The plant connection is healthy", last successful pass, oldest table, plant connection time and blocking findings, with Data quality findings and Per table folded away.](../images/S22.png)
+
+![The Data batches block: one row per source table batch, with Batch, Source, First seen, Last seen and Status in separate, readable columns. The table scrolls sideways on narrower windows to reach Registered by.](../images/S35.png)
 
 ![The PDAS write checking block: "PDAS writes: off. This installation is not writing to PDAS. There is nothing to check."](../images/S23.png)
 
