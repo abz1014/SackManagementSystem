@@ -61,10 +61,20 @@ export function SimulatorBanner({
   // resolves immediately with no network call otherwise, which still needs
   // `usePolling` to be called unconditionally (React hook rule) but costs
   // nothing on Setup, Health, or Product's other three tabs.
+  //
+  // C-143 (2 Oct 2026): a closed period cannot gain batches, so it is fetched
+  // once, not every 10 s. This component gets only from/to (not `Period`), so
+  // "live" is derived the way `resolvePeriod` does: the period reaches the
+  // plant's current production day. The fetch waits for /api/live (the plant
+  // day is unknown before it) and the key carries that, so there is exactly
+  // one first fetch rather than a refetch when `enabled` flips.
+  const plantDay = line?.shift.shiftDate ?? null;
+  const periodLive = plantDay != null && to >= plantDay;
   const period = usePolling<DataBatchData | null>(
-    () => (hasPeriodFigures ? getDataBatch(from, to).then((e) => e.data) : Promise.resolve(null)),
+    () => (hasPeriodFigures && plantDay != null ? getDataBatch(from, to).then((e) => e.data) : Promise.resolve(null)),
     LIVE_POLL_MS,
-    `simulator-banner:${hasPeriodFigures}:${from}:${to}`,
+    `simulator-banner:${hasPeriodFigures}:${from}:${to}:${plantDay != null}`,
+    { enabled: periodLive },
   );
   // Log at most once per outage, not once per render while the poll's own
   // backoff (see `usePolling` in `lib/live.tsx`) keeps retrying underneath —
