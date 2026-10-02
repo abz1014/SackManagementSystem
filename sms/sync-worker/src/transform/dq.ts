@@ -386,14 +386,16 @@ export async function persistFindings(
   findings: Finding[],
 ): Promise<void> {
   for (const f of findings) {
-    // Deduplicated on (check, table, detail). A finding that halts a pass is
+    // Deduplicated on (check, table, detail, subject_ref). A finding that halts a pass is
     // raised again on every retry — every 60 s — and a bare INSERT would grow
     // the table by thousands of identical rows a day (4 tables x 1,440 passes).
     // Migration 016 cleaned that up once; this stops it recurring. The
     // standing state is what the Operations screen shows, not a tally.
-    // subject_ref is written but NOT part of the dedupe key: the finding is
-    // about a standing condition ("rows behind their neighbours"), and the
-    // first row that raised it is a pointer, not a second identity.
+    // subject_ref (the first offending raw id) IS part of the dedupe key since
+    // C-030 (2 Oct 2026): the detail carries only a count, so a later batch of
+    // the same size was silently dropped. The same batch re-run has the same
+    // first raw id and is still recorded once; a standing state finding with a
+    // null ref dedupes on (check, table, detail) as before.
     await pool
       .request()
       .input('run', mssql.UniqueIdentifier, runId)
@@ -409,7 +411,8 @@ export async function persistFindings(
             SELECT 1 FROM sms.dq_finding
              WHERE check_name = @check
                AND ISNULL(subject_table, '') = ISNULL(@tbl, '')
-               AND ISNULL(detail, '') = ISNULL(@detail, ''))`,
+               AND ISNULL(detail, '') = ISNULL(@detail, '')
+               AND ISNULL(subject_ref, -1) = ISNULL(@ref, -1))`,
       );
   }
 }
