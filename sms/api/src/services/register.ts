@@ -886,7 +886,8 @@ export async function exportEventsCsv(
     // are numeric/boolean/timestamp/NULL, but lot_code will hold free text
     // from IFL once Q1 product attribution lands — prefix defensively now
     // rather than waiting for that to become exploitable.
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    // D-72: text only; a negative number is not a formula.
+    if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.join(','), ...rows.map((r) => headers.map((h) => esc(cell(r, h))).join(','))];

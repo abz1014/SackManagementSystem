@@ -341,7 +341,8 @@ describe('CSV escaping agrees with the register export', () => {
     expect(escapeCell('a,b')).toBe('"a,b"');
     expect(escapeCell('say "hi"')).toBe('"say ""hi"""');
     expect(escapeCell(null)).toBe('');
-    expect(escapeCell(-5)).toBe("'-5"); // a negative NUMBER is a string starting with '-' once serialised
+    expect(escapeCell(-5)).toBe('-5'); // C-112/D-72: a real negative NUMBER stays numeric, no text prefix
+    expect(escapeCell('-5')).toBe("'-5"); // the same digits as a STRING still get the formula guard
     expect(escapeCell(true)).toBe('true');
   });
   it('a document is one table, a blank line, then the attribution rows in a fixed order', async () => {

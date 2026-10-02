@@ -33,7 +33,8 @@ export type CsvRow = CsvCell[];
 export function escapeCell(v: CsvCell | Date): string {
   if (v == null) return '';
   let s = v instanceof Date ? v.toISOString() : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  // D-72: only TEXT is guarded; a number such as -7.51 is not a formula and must stay a number in the spreadsheet.
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
