@@ -191,7 +191,8 @@ export async function getCalibrationReport(
       'Drift is judged on daily station means against the line; a station is flagged when a pattern test fired inside a run ' +
       'of consecutive days on one side of the line, of at least the minimum length, at least the threshold away. Adjustments ' +
       'are those logged in this system from go-live; nothing before it is recorded. Weighing data cannot tell a heavy scale ' +
-      'from heavy cones, so no direction of adjustment is stated.',
+      'from heavy cones, so no direction of adjustment is stated. An adjustment logged for the whole line (no station) is listed ' +
+      'as such and is not counted in any single station figure.',
   };
 }
 

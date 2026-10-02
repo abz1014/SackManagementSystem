@@ -201,7 +201,7 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
         out.sentences.push(`The period covers ${plural(d.periodDays ?? 0, 'day')}; the drift rule needs a run of at least ${plural(d.minDaysHeld, 'day')}, so it cannot flag any station over a period this short. Choose a longer period to judge drift.`);
       } else if (d.flaggedStationCount === 0) out.sentences.push('No station met the drift rule, so no calibration action is indicated by this data.');
       else if (d.flaggedStationCount) out.sentences.push(`${plural(d.flaggedStationCount, 'station')} met the drift rule and should be checked.`);
-      out.sentences.push(d.adjustments.length === 0 ? 'No calibration adjustments were logged in the period.' : `${plural(d.adjustments.length, 'adjustment')} were logged in the period.`);
+      out.sentences.push(d.adjustments.length === 0 ? 'No calibration adjustments were logged in the period.' : `${plural(d.adjustments.length, 'adjustment')} were logged in the period${d.adjustments.some((a) => a.stationId == null) ? ` (${d.adjustments.filter((a) => a.stationId == null).length} for the whole line, not counted against any one station)` : ''}.`);
       out.weightCaveat = true;
       break;
     }

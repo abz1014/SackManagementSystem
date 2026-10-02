@@ -21,3 +21,11 @@ describe('calibration print — empty period', () => {
     expect(text).toMatch(/no assessment is possible/i);
   });
 });
+
+describe('calibration print — line-wide adjustments (C-136)', () => {
+  it('says how many adjustments were for the whole line', () => {
+    const adj = (id: number, stationId: number | null) => ({ adjustmentId: id, stationId, adjustedAtUtc: '2026-09-04T05:00:00Z', recordedAtUtc: '2026-09-04T05:01:00Z', recordedBy: 'e', reason: null, note: null, amountG: null });
+    const text = summarise('calibration', wrap({ ...base, stations: [{ station: 7, vsLineG: 1, flagged: false }], adjustments: [adj(1, 7), adj(2, null)] })).sentences.join(' ');
+    expect(text).toMatch(/2 adjustments were logged in the period \(1 for the whole line/);
+  });
+});

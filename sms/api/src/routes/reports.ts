@@ -56,6 +56,7 @@ import { TtlCache } from '../cache.js';
 import { envelope } from '../envelope.js';
 import { MAX_RANGE_DAYS } from '../config.js';
 import { plantNowMs } from '../services/plantClock.js';
+import { loadShiftRule, shiftWindowAt } from '../services/live.js';
 import { resolvePeriod, REPORT_PERIODS, type ReportPeriod, type ResolvedPeriod } from '../services/report.js';
 import {
   buildHeader, buildReport, buildXlsx, csvDocument, csvFilename, reportCsv, reportFilename, reportSheets, CSV_BOM,
@@ -152,7 +153,13 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     const r = await req.query<{ d: string | null }>(
       `SELECT CONVERT(varchar(10), MAX(shift_date), 120) AS d FROM sms.cone_event WHERE line_id=@line${f.sql ? ` AND ${f.sql}` : ''}`,
     );
-    return r.recordset[0]?.d ?? new Date().toISOString().slice(0, 10);
+    const newest = r.recordset[0]?.d;
+    if (newest) return newest;
+    // C-136 (2 Oct 2026): no real rows, so anchor on the plant production day
+    // of now (the line's own shift rule), not the server's UTC calendar date,
+    // which is a different day for part of every night.
+    const rule = await loadShiftRule(pool, cfg.lineId);
+    return shiftWindowAt(plantNowMs(), rule.nightBelongsTo, rule.boundaries).shiftDate;
   }
 
   /**
