@@ -105,8 +105,8 @@ export interface WeightStationRow {
   meanG: number;
   /** Median of the same population as meanG (Phase 9). */
   medianG: number | null;
-  /** Within-day standard deviation of the station's cone weights, pooled over the window (Phase 9). null (C-157) when no day holds two readings. */
-  sdG: number | null;
+  /** Within-day standard deviation of the station's cone weights, pooled over the window (Phase 9). */
+  sdG: number;
   /**
    * Signed grams against the line's own mean, over THE SAME POPULATION AS
    * `meanG` — the whole window. `meanG - lineMeanG` to within rounding, and
@@ -252,8 +252,8 @@ export interface WeightStationRow {
   restartedOn: string | null;
   /** The centreline the pattern test measured this station's days from (see calibration.ts). */
   centrelineG: number;
-  /** Day-to-day sigma of the daily mean, the width the pattern zones used. null (C-157) when fewer than two days. */
-  sigmaDayToDay: number | null;
+  /** Day-to-day sigma of the daily mean, the width the pattern zones used. */
+  sigmaDayToDay: number;
   /** Longest calendar-contiguous run of days the pattern rules had; rules needing more can never have fired. */
   longestRun: number;
   /** Only for a flagged station with product limits in force; see calibration.ts. */
@@ -696,7 +696,7 @@ export async function getWeightStations(
       n: st.n,
       meanG: round(st.grandMean),
       medianG: st.medianG == null ? null : round(st.medianG),
-      sdG: st.stdevWithin == null ? null : round(st.stdevWithin),
+      sdG: round(st.stdevWithin ?? 0),
       // F4: `st.grandMean`, the same population `meanG` above prints. The run
       // figure is below, under its own name.
       vsLineG: lineMeanG == null ? 0 : round(st.grandMean - lineMeanG),
@@ -720,7 +720,7 @@ export async function getWeightStations(
       lastAdjustedUtc: lastAdjusted.get(st.station) ?? null,
       restartedOn: st.restartedOn ?? null,
       centrelineG: round(st.centrelineG ?? st.grandMean),
-      sigmaDayToDay: st.sigmaDayToDay ?? null,
+      sigmaDayToDay: st.sigmaDayToDay ?? 0,
       longestRun: st.longestRun ?? 0,
       // Only a flagged station is projected, and only when it has a single
       // target to project toward: `projectDaysToLimit` must return null for

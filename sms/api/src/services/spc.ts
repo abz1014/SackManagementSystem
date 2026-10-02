@@ -401,7 +401,9 @@ export async function getSpec(
     if (v && lim) {
       const changed = catalogue
         .versionsAscending(productId)
-        .filter((x) => x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
+        // C-039 (2 Oct 2026): a change needs a predecessor — index 0 is the
+        // product's creation version, not an edit of anything.
+        .filter((x, i) => i > 0 && x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
       return {
         usl: lim.hiG,
         lsl: lim.loG,

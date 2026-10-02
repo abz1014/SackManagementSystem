@@ -183,7 +183,9 @@ export async function getProductReport(
       if (v && lim && pt.usable) {
         const changed = catalogue
           .versionsAscending(productId)
-          .filter((x) => x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
+          // C-039 (2 Oct 2026): a change needs a predecessor — index 0 is the
+          // product's creation version, not an edit of anything.
+          .filter((x, i) => i > 0 && x.effectiveFromMs > startMs && x.effectiveFromMs <= endMs).length;
         target = {
           setpointG: lim.targetG, loG: lim.loG, hiG: lim.hiG,
           inForceAtUtc: v.effectiveFromUtc, inForceIsLowerBound: pt.isLowerBound, limitsChangedInPeriod: changed,
