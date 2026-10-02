@@ -19,6 +19,22 @@ const TARGETS = [
   { name: 'Calibration report station table', url: '/?s=report&rt=calibration' },
   { name: 'Daily report by-shift table', url: '/?s=report&rt=daily' },
   { name: 'Sack report by-shift table', url: '/?s=report&rt=sack' },
+  // IFL's eight named reports (1 Oct 2026), on 2026-08-15 — a day of IFL's own September data that holds cones, sacks and a weight reject.
+  // The wide ones (the SPS matrix, the weight bands) scroll inside their `.tw`; the PAGE must never gain horizontal scroll.
+  // `ifl-reports.spec.ts` runs the same eight against mocked data at 1366 and 375 wide, with the label and print checks; this
+  // runs them against the real database.
+  ...(
+    [
+      ['Shift-wise CTS Loop Production table', 'shift-production'],
+      ['Rejected Sack Report daily table', 'rejected-sacks'],
+      ['SPS count-wise packing matrix', 'sps-packing'],
+      ['SPS sack weight band table', 'sack-weight-range'],
+      ['Sack Packing Weight Summary table', 'sack-weight-summary'],
+      ['List of Rejected Cones table', 'rejected-cones'],
+      ['Rejected Cone Hangers table', 'rejected-hangers'],
+      ['Rejected Unknown (Lifter) table', 'rejected-unknown-lifter'],
+    ] as const
+  ).map(([name, rt]) => ({ name, url: `/?s=report&rt=${rt}&p=pick&from=2026-08-15&to=2026-08-15` })),
 ] as const;
 
 const VIEWPORTS = [

@@ -17,6 +17,18 @@
  * TWO CLOCKS, deliberately different values, kept here for the same reason.
  */
 import type { Page } from '@playwright/test';
+// Type-only: erased at run time (Playwright never loads the app), but they pin every IFL-report fixture below to the app's own wire types.
+import type {
+  IflListCounts, IflReportBase, LifterRow, RejectedConeRow, RejectedConesReportData, RejectedHangerFlag, RejectedHangerReject,
+  RejectedHangerRow, RejectedHangersReportData, RejectedSackCounts, RejectedSackDayRow, RejectedSackRow, RejectedSackShiftRow,
+  RejectedSacksReportData, RejectedUnknownLifterReportData, SackBandCounts, SackBandKind, SackSpreadRow, SackSummaryFigures,
+  SackSummaryRow, SackWeightBand, SackWeightRangeReportData, SackWeightSummaryReportData, ShiftProductionDayTotal,
+  ShiftProductionFigures, ShiftProductionReportData, ShiftProductionRow, ShiftProductionShiftTotal, ShiftProductionSummaryRow,
+  ShiftProductionWinderTotal, SpsCell, SpsCountColumn, SpsCountTotal, SpsMatrixRow, SpsPackingReportData, UnknownLifterReject,
+  WeightRangeByWinder,
+} from '../../web/src/api';
+
+type ShiftCode = 'morning' | 'evening' | 'night';
 
 export const META = {
   generatedAtUtc: '2026-09-07T12:00:05Z',
@@ -756,7 +768,339 @@ function calibrationReport(): unknown {
   };
 }
 
-export type ReportKind = 'daily' | 'shift' | 'reject' | 'station' | 'cone-weight' | 'sack' | 'calibration';
+// ---------------------------------------------------------------------
+// IFL's eight named reports (their email of 29 Sep 2026; built 1 Oct 2026).
+// Each fixture is built to the wire contract api/src/services/reports/<type>.ts emits and web/src/api.ts mirrors — the types imported
+// above are checked by the vitest guard web/src/screens/report/layoutMocks.contract.test.tsx, which renders every one of these through
+// its REAL section component and the printed executive summary, so a fixture cannot drift from the contract unnoticed.
+//
+// The data is shaped to stress layout, not to be a plausible week: a wide matrix (SPS packing: eight yarn-count columns), eleven-column
+// tables (weight bands), fourteen winders and lifters, a long list, a "no limits on record" row, a null weight, and every
+// "Assumed until IFL confirms" line each report really carries, so the real widths and heights are what the browser lays out.
+// ---------------------------------------------------------------------
+const SHIFT_CODES: ShiftCode[] = ['morning', 'evening', 'night'];
+const IFL_DAYS = ['2026-09-01', '2026-09-02'];
+const GENERATION_NOTE = { generation: null, spansGenerations: false, otherGenerationExcluded: 0 };
+
+function iflBase(note: string, pendingIfl: string[]): IflReportBase {
+  return {
+    period: { period: 'custom', from: '2026-09-01', to: '2026-09-07' },
+    filters: {},
+    lineId: 1,
+    note,
+    pendingIfl,
+    generationNote: GENERATION_NOTE,
+  };
+}
+
+const iflList = (n: number): IflListCounts => ({ listTotal: n, listCap: 5000, excludedClockFault: 0 });
+const r1 = (n: number): number => Math.round(n * 10) / 10;
+const r2 = (n: number): number => Math.round(n * 100) / 100;
+const r3 = (n: number): number => Math.round(n * 1000) / 1000;
+const pctOf = (part: number, whole: number): number | null => (whole > 0 ? r2((100 * part) / whole) : null);
+
+/* -- 1. Shift-wise CTS Loop Production Report ---------------------------------------------- */
+
+function spFig(weighed: number, weightRejects: number): ShiftProductionFigures {
+  const pass = weighed - weightRejects;
+  const total = pass + weightRejects;
+  return { weighed, pass, weightRejects, total, efficiencyPct: pctOf(pass, total), weighedKg: r3(weighed * 1.95) };
+}
+
+function spSum(fs: ShiftProductionFigures[]): ShiftProductionFigures {
+  const g = spFig(fs.reduce((a, f) => a + f.weighed, 0), fs.reduce((a, f) => a + f.weightRejects, 0));
+  return { ...g, weighedKg: r3(fs.reduce((a, f) => a + (f.weighedKg ?? 0), 0)) };
+}
+
+const SP_WINDERS = [1, 7, 13];
+
+function shiftProductionReport(): ShiftProductionReportData {
+  const rows: ShiftProductionRow[] = [];
+  for (const date of IFL_DAYS) {
+    SHIFT_CODES.forEach((shift, si) => {
+      for (const winder of SP_WINDERS) {
+        // one weight reject in the whole period: winder 7, first evening
+        rows.push({ date, shift, winder, ...spFig(560 + winder * 4 + si * 30, date === IFL_DAYS[0] && si === 1 && winder === 7 ? 1 : 0) });
+      }
+    });
+  }
+  const only = (pick: (r: ShiftProductionRow) => boolean) => spSum(rows.filter(pick));
+  const shiftTotals: ShiftProductionShiftTotal[] = IFL_DAYS.flatMap((date) => SHIFT_CODES.map((shift) => ({ date, shift, ...only((r) => r.date === date && r.shift === shift) })));
+  const dayTotals: ShiftProductionDayTotal[] = IFL_DAYS.map((date) => ({ date, ...only((r) => r.date === date) }));
+  const summary: ShiftProductionSummaryRow[] = SHIFT_CODES.map((shift) => ({ shift, ...only((r) => r.shift === shift) }));
+  const winderTotals: ShiftProductionWinderTotal[] = SP_WINDERS.map((winder) => ({ winder, ...only((r) => r.winder === winder) }));
+  return {
+    ...iflBase(
+      'Each cone is counted once: a cone that was weighed and then rejected on weight is in the total as a reject, not also as a pass.',
+      [
+        'CTS loop: the line’s one hanger loop. IFL has not said what a CTS loop is, so the report is one group.',
+        'A cone counted in both the cone records and the weight-reject records is counted once, as a reject.',
+        'A weight rejection is a weight-reject record; the scale’s own in-range bit is shown apart and never merged with it.',
+      ],
+    ),
+    summary,
+    grandTotal: only(() => true),
+    rows,
+    shiftTotals,
+    dayTotals,
+    winderTotals,
+    withoutWinder: { pass: 0, weightRejects: 0 },
+    loop: { hangersSeen: 299 },
+    scaleRejectedCones: 49,
+    kgBasis: { basis: 'as_recorded', label: 'as the scale recorded them', implausible: 0 },
+  };
+}
+
+/* -- 6. List of Rejected Cones Against Weight --------------------------------------------- */
+
+function rejectedConesReport(): RejectedConesReportData {
+  const list: RejectedConeRow[] = [
+    {
+      date: '2026-09-01', shift: 'evening', winder: 7, hanger: 240, weightG: 2032, producedAtUtc: '2026-09-01T21:32:41Z',
+      productId: 12, productLabel: '201-IH0-SD', productSource: 'row',
+      limits: { label: '201-IH0-SD', targetG: 1960, loG: 1940, hiG: 1980, lowerBound: false }, outsideByG: 52, noLimitsReason: null,
+    },
+    {
+      date: '2026-09-02', shift: 'morning', winder: 3, hanger: 17, weightG: 1890, producedAtUtc: '2026-09-02T08:15:09Z',
+      productId: 231, productLabel: '205-IL0-SD', productSource: 'timeline',
+      limits: { label: '205-IL0-SD', targetG: 1955, loG: 1937, hiG: 1973, lowerBound: true }, outsideByG: -47, noLimitsReason: null,
+    },
+    {
+      date: '2026-09-02', shift: 'night', winder: null, hanger: null, weightG: null, producedAtUtc: '2026-09-02T23:40:55Z',
+      productId: null, productLabel: null, productSource: null, limits: null, outsideByG: null, noLimitsReason: 'No product recorded at that time',
+    },
+  ];
+  const byWinder: WeightRangeByWinder[] = Array.from({ length: 14 }, (_, i) => ({ winder: i + 1, minG: r1(1790 + i), maxG: r1(2090 - i), avgG: r1(1948 + i * 0.4), n: 700 + i * 3 }));
+  return {
+    ...iflBase('Every cone rejected on weight in the period, with the limits in force when it was weighed.', [
+      'Only weight rejects are listed; quality (inspection) rejects are not.',
+    ]),
+    ...iflList(list.length),
+    list,
+    total: list.length,
+    weightRange: {
+      line: { minG: 1710.4, maxG: 2098.6, avgG: 1951.3, n: byWinder.reduce((a, w) => a + w.n, 0) },
+      byWinder,
+      plausibility: { loG: 1500, hiG: 2100 },
+      excludedImplausible: 2,
+    },
+  };
+}
+
+/* -- 2. Rejected Sack Report, daily -------------------------------------------------------- */
+
+function rejectedSacksReport(): RejectedSacksReportData {
+  const counts = (sacks: number, rejected: number): RejectedSackCounts => ({ sacks, rejected, rejectedPct: pctOf(rejected, sacks) });
+  const byShift: RejectedSackShiftRow[] = IFL_DAYS.flatMap((date, di) => SHIFT_CODES.map((shift, si) => ({ date, shift, ...counts(180 + di * 10 + si * 4, si === 0 ? 20 - di * 3 : si === 1 ? 5 : 1) })));
+  const byDay: RejectedSackDayRow[] = IFL_DAYS.map((date) => {
+    const of = byShift.filter((r) => r.date === date);
+    return { date, ...counts(of.reduce((a, r) => a + r.sacks, 0), of.reduce((a, r) => a + r.rejected, 0)) };
+  });
+  const sacks = byDay.reduce((a, r) => a + r.sacks, 0);
+  const rejected = byDay.reduce((a, r) => a + r.rejected, 0);
+  const list: RejectedSackRow[] = [
+    { date: '2026-09-01', shift: 'morning', producedAtUtc: '2026-09-01T07:12:03Z', sackNum: 1204, productId: 12, productLabel: '201-IH0-SD', yarnCount: '36', weightKg: 46.8, implausible: false },
+    { date: '2026-09-01', shift: 'morning', producedAtUtc: '2026-09-01T09:41:30Z', sackNum: 1230, productId: 231, productLabel: '205-IL0-SD', yarnCount: '30', weightKg: 0, implausible: true },
+    { date: '2026-09-01', shift: 'evening', producedAtUtc: '2026-09-01T15:02:11Z', sackNum: 1271, productId: null, productLabel: null, yarnCount: null, weightKg: 47.9, implausible: false },
+    { date: '2026-09-02', shift: 'night', producedAtUtc: '2026-09-02T23:30:00Z', sackNum: null, productId: 12, productLabel: '201-IH0-SD', yarnCount: '36', weightKg: null, implausible: true },
+  ];
+  return {
+    ...iflBase('Rejected means the scale’s own in-range bit is off; no sack tolerance is applied. Days are production days (06:00 to 06:00).', [
+      'A rejected sack is a sack the scale marked out of range; IFL’s data holds no sack tolerance.',
+      '“Daily” means per production day, split into three shifts.',
+    ]),
+    ...iflList(rejected),
+    weightBasis: 'as_recorded',
+    plausibility: { loKg: 40, hiKg: 60 },
+    byShift,
+    byDay,
+    total: { ...counts(sacks, rejected), noFlag: 2 },
+    rejectedSplit: { implausible: 2, plausible: rejected - 2 },
+    passedRange: {
+      byProduct: [
+        { productId: 12, productLabel: '201-IH0-SD', yarnCount: '36', sacks: 640, minKg: 47.0, maxKg: 47.6 },
+        { productId: 231, productLabel: '205-IL0-SD', yarnCount: '30', sacks: 128, minKg: 47.0, maxKg: 47.5 },
+        { productId: null, productLabel: 'No product on the reading', yarnCount: null, sacks: 3, minKg: 47.1, maxKg: 47.2 },
+      ],
+      all: { sacks: 771, minKg: 47.0, maxKg: 47.6 },
+    },
+    list,
+  };
+}
+
+/* -- 3. SPS Production Report, count-wise packing ------------------------------------------ */
+
+function spsPackingReport(): SpsPackingReportData {
+  const columns: SpsCountColumn[] = [
+    ...['18', '20 Slub', '30', '36', '36 Slub', '50'].map((c) => ({ key: c, yarnCount: c, label: c, materialIds: [1000 + c.length] })),
+    { key: 'unknown', yarnCount: null, label: 'Count not on record', materialIds: [1999] },
+    { key: 'none', yarnCount: null, label: 'No product on the reading', materialIds: [] },
+  ];
+  const rows: SpsMatrixRow[] = IFL_DAYS.flatMap((date, di) =>
+    SHIFT_CODES.map((shift, si) => {
+      const cells: Record<string, SpsCell> = {};
+      columns.forEach((c, ci) => {
+        const sacks = (ci + si + di) % 3 === 0 ? 0 : 6 + ci * 7 + si * 3;
+        if (sacks > 0) cells[c.key] = { sacks, kg: r2(sacks * 47.3) };
+      });
+      const all = Object.values(cells);
+      return { date, shift, cells, total: { sacks: all.reduce((a, c) => a + c.sacks, 0), kg: r2(all.reduce((a, c) => a + c.kg, 0)) } };
+    }),
+  );
+  const grand = rows.reduce((a, r) => ({ sacks: a.sacks + r.total.sacks, kg: a.kg + r.total.kg }), { sacks: 0, kg: 0 });
+  const totals: SpsCountTotal[] = columns.map((c) => {
+    const cell = rows.map((r) => r.cells[c.key]).filter((x): x is SpsCell => x != null);
+    const sacks = cell.reduce((a, x) => a + x.sacks, 0);
+    return { key: c.key, yarnCount: c.yarnCount, label: c.label, materialIds: c.materialIds, sacks, kg: r2(cell.reduce((a, x) => a + x.kg, 0)), avgKg: sacks > 0 ? 47.3 : null, sharePct: pctOf(sacks, grand.sacks) };
+  });
+  return {
+    ...iflBase('Sacks packed per yarn count, date and shift. Yarn counts come from today’s product master.', [
+      'An SPS is assumed to be this line’s one sack scale (PLC_sack1); IFL has not confirmed what an SPS is or how many there are.',
+      'Yarn count comes from the sack’s MaterialId through today’s product master; sacks before 5 Aug 2026 carry no product.',
+    ]),
+    weightBasis: 'as_recorded',
+    sps: { number: 1, label: 'SPS 1 — this line’s one sack scale (PLC_sack1)', confirmed: false },
+    columns,
+    rows,
+    totals,
+    grandTotal: { sacks: grand.sacks, kg: r2(grand.kg), avgKg: grand.sacks > 0 ? 47.3 : null },
+    implausibleSacks: 1,
+  };
+}
+
+/* -- 4. SPS Sack Weight Range Report ------------------------------------------------------- */
+
+function sackWeightRangeReport(): SackWeightRangeReportData {
+  const counts = (passed: number, rejected: number): SackBandCounts => ({ passed, rejected, noFlag: 0, total: passed + rejected });
+  const mk = (kind: SackBandKind, label: string, fromKg: number | null, toKg: number | null, seed: number, passedShare: number): SackWeightBand => {
+    const byShift = { morning: counts(Math.round(seed * passedShare), seed - Math.round(seed * passedShare)), evening: counts(Math.round(seed * 0.6 * passedShare), 2), night: counts(Math.round(seed * 0.4 * passedShare), 1) };
+    const total = counts(byShift.morning.passed + byShift.evening.passed + byShift.night.passed, byShift.morning.rejected + byShift.evening.rejected + byShift.night.rejected);
+    return { kind, label, fromKg, toKg, byShift, total, sharePct: null };
+  };
+  const bands: SackWeightBand[] = [mk('below', 'Below 46.8 kg', null, 46.8, 6, 0)];
+  for (let i = 0; i < 10; i++) {
+    const from = r1(46.8 + i / 10);
+    bands.push(mk('band', `${from.toFixed(1)} - ${r1(from + 0.1).toFixed(1)} kg`, from, r1(from + 0.1), 30 + (i < 5 ? i * 22 : (9 - i) * 22), 1));
+  }
+  bands.push(mk('above', '47.8 kg and above', 47.8, null, 9, 0), mk('implausible', 'Implausible weight', null, null, 2, 0));
+  const all = bands.reduce((a, b) => a + b.total.total, 0);
+  for (const b of bands) b.sharePct = pctOf(b.total.total, all);
+  const spread = (date: string | null, shift: ShiftCode | null, n: number): SackSpreadRow => ({ date, shift, n, minKg: 46.8, maxKg: 47.9, rangeKg: 1.1, avgKg: 47.31, sdKg: 0.18 });
+  return {
+    ...iflBase('Sacks grouped by weight band, split by the scale’s own verdict and by shift. The bands are a grouping, not a tolerance.', [
+      'Bands are 0.1 kg wide (0.2 kg when the range is wide); IFL has not specified a band width.',
+      'No sack target or tolerance is shown: IFL’s data holds none.',
+    ]),
+    weightBasis: 'as_recorded',
+    plausibility: { loKg: 40, hiKg: 60 },
+    bandKg: 0.1,
+    passedRange: { minKg: 47.0, maxKg: 47.6 },
+    bands,
+    spreadByDayShift: IFL_DAYS.flatMap((d) => SHIFT_CODES.map((s) => spread(d, s, 190))),
+    spreadByShift: SHIFT_CODES.map((s) => spread(null, s, 380)),
+    spreadTotal: spread(null, null, 1140),
+    implausibleSacks: 2,
+  };
+}
+
+/* -- 5. Sack Packing Weight Summary -------------------------------------------------------- */
+
+function sackWeightSummaryReport(): SackWeightSummaryReportData {
+  const fig = (sacks: number, rejectedByScale: number): SackSummaryFigures => ({ sacks, kg: r2(sacks * 47.3), avgKg: 47.3, minKg: 46.8, maxKg: 47.9, sdKg: 0.18, rejectedByScale, implausible: 0 });
+  const rows: SackSummaryRow[] = IFL_DAYS.flatMap((date, di) => SHIFT_CODES.map((shift, si) => ({ date, shift, ...fig(180 + di * 10 + si * 4, si === 0 ? 20 : 3) })));
+  const sum = (rs: SackSummaryFigures[]): SackSummaryFigures => ({ ...fig(rs.reduce((a, r) => a + r.sacks, 0), rs.reduce((a, r) => a + r.rejectedByScale, 0)), implausible: rs.reduce((a, r) => a + r.implausible, 0) });
+  return {
+    ...iflBase('Sacks, kilograms and weight spread per date and shift; average, minimum, maximum and SD are over plausible sacks only.', [
+      'The plausible sack-weight window is the Setup default, 40–60 kg; IFL has not specified one.',
+      'The standard deviation is the sample standard deviation (divided by n − 1).',
+      'A net basis would subtract a sack tare set in Setup; IFL has not confirmed the tare.',
+    ]),
+    weightBasis: 'as_recorded',
+    plausibility: { loKg: 40, hiKg: 60 },
+    rows,
+    dayTotals: IFL_DAYS.map((date) => ({ date, ...sum(rows.filter((r) => r.date === date)) })),
+    shiftTotals: SHIFT_CODES.map((shift) => ({ shift, ...sum(rows.filter((r) => r.shift === shift)) })),
+    byYarnCount: [
+      { yarnCount: '30', label: '30', materialIds: [1002], ...fig(120, 4) },
+      { yarnCount: '36', label: '36', materialIds: [1001, 1003], ...fig(980, 40) },
+      { yarnCount: null, label: 'No product on the reading', materialIds: [], ...fig(3, 0) },
+    ],
+    total: sum(rows),
+  };
+}
+
+/* -- 7. Rejected Cone Hangers Report ------------------------------------------------------- */
+
+function rejectedHangersReport(): RejectedHangersReportData {
+  const hangerRow = (hanger: number | null, cones: number, q: number, w: number, flag: RejectedHangerFlag): RejectedHangerRow => {
+    const total = q + w;
+    const inspected = cones + (hanger == null ? total : 0);
+    return { hanger, cones, inspected, qualityRejects: q, weightRejects: w, total, ratePct: pctOf(total, inspected), flag };
+  };
+  const hangers: RejectedHangerRow[] = [
+    hangerRow(91, 471, 58, 0, 'stands_out'),
+    hangerRow(205, 468, 31, 1, 'stands_out'),
+    ...Array.from({ length: 22 }, (_, i) => hangerRow(10 + i * 11, 460 + i, 12 - Math.floor(i / 2), i % 7 === 0 ? 1 : 0, i < 20 ? null : 'too_few')),
+    hangerRow(null, 0, 3, 0, null),
+  ];
+  const sumOf = (pick: (h: RejectedHangerRow) => number): number => hangers.reduce((a, h) => a + pick(h), 0);
+  const total: RejectedHangerRow = { hanger: null, cones: sumOf((h) => h.cones), inspected: sumOf((h) => h.inspected), qualityRejects: sumOf((h) => h.qualityRejects), weightRejects: sumOf((h) => h.weightRejects), total: sumOf((h) => h.total), ratePct: null, flag: null };
+  total.ratePct = pctOf(total.total, total.inspected);
+  const reject = (i: number): RejectedHangerReject => ({
+    date: IFL_DAYS[i % 2]!, shift: SHIFT_CODES[i % 3]!, producedAtUtc: `2026-09-0${(i % 2) + 1}T0${6 + i}:1${i}:20Z`, hanger: i === 4 ? null : 91, winder: 1 + i, rejectType: i % 2 === 0 ? 'quality' : 'weight',
+    reason: i % 2 === 0 ? 'Tube 5 · material 3' : null, weightG: i % 2 === 0 ? null : 2031 + i,
+  });
+  const list = Array.from({ length: 6 }, (_, i) => reject(i));
+  return {
+    ...iflBase('Rejects by hanger. A hanger “stands out in this period” when its reject count is unlikely at the period’s own line rate.', [
+      'Quality (inspection) and weight rejects are both counted, in separate columns.',
+      'A hanger is marked by an exact binomial test at 5% across the hangers with at least 100 inspected cones; IFL has not said what counts as needing attention.',
+    ]),
+    ...iflList(list.length),
+    hangers,
+    total,
+    flagging: { canFlag: true, reason: null, lineRatePct: total.ratePct, hangersJudged: 22, hangersSeen: 24, minInspected: 100, alpha: 0.05 },
+    list,
+  };
+}
+
+/* -- 8. Rejected Unknown (Lifter) Report --------------------------------------------------- */
+
+function rejectedUnknownLifterReport(): RejectedUnknownLifterReportData {
+  const lifter = (n: number | null, cones: number, q: number, zero: number, w: number): LifterRow => ({ lifter: n, cones, inspected: cones, qualityRejects: q, zeroCodeRejects: zero, weightRejects: w, total: q + w, ratePct: pctOf(q + w, cones) });
+  const lifters: LifterRow[] = Array.from({ length: 14 }, (_, i) => lifter(i + 1, 690 + i * 2, 12 + (i % 4), i === 2 ? 1 : 0, i === 6 ? 1 : 0));
+  const sumOf = (pick: (l: LifterRow) => number): number => lifters.reduce((a, l) => a + pick(l), 0);
+  const total: LifterRow = { lifter: null, cones: sumOf((l) => l.cones), inspected: sumOf((l) => l.inspected), qualityRejects: sumOf((l) => l.qualityRejects), zeroCodeRejects: sumOf((l) => l.zeroCodeRejects), weightRejects: sumOf((l) => l.weightRejects), total: sumOf((l) => l.total), ratePct: null };
+  total.ratePct = pctOf(total.total, total.inspected);
+  const reject = (hanger: number, why: string[], date = '2026-09-02'): UnknownLifterReject => ({
+    date, shift: 'morning', producedAtUtc: `${date}T08:15:09Z`, hanger, winder: 3, lifter: 3, rejectType: 'quality', tubeCode: 0, materialCode: 0, weightG: null, why,
+  });
+  return {
+    ...iflBase('Rejected cones with no lifter number or no winder number recorded. A zero reason code is counted and listed apart.', [
+      '“Unknown” is assumed to mean a reject with no lifter number or no winder number recorded; IFL has not defined it.',
+      'A zero tube or material reason code is counted and listed apart; IFL has not said what a zero code means.',
+    ]),
+    ...iflList(0),
+    lifters,
+    total,
+    unknownCount: 0,
+    list: [],
+    zeroCodeList: [reject(27, ['Reason code is zero']), reject(188, ['Reason code is zero'], '2026-09-01')],
+    zeroCodeTotal: 2,
+    zeroedClock: { generation: 'September copy - cones', rows: [{ ...reject(14, ['Clock zeroed (1970)'], '1969-12-31'), producedAtUtc: '1970-01-01T00:00:00Z', lifter: null, winder: null }] },
+  };
+}
+
+export type ReportKind =
+  | 'daily' | 'shift' | 'reject' | 'station' | 'cone-weight' | 'sack' | 'calibration'
+  | 'shift-production' | 'rejected-cones' | 'rejected-sacks' | 'sps-packing' | 'sack-weight-range' | 'sack-weight-summary'
+  | 'rejected-hangers' | 'rejected-unknown-lifter';
+
+/** IFL's eight named reports, in THEIR numbering (their email of 29 Sep 2026). */
+export const IFL_REPORT_KINDS = [
+  'shift-production', 'rejected-sacks', 'sps-packing', 'sack-weight-range',
+  'sack-weight-summary', 'rejected-cones', 'rejected-hangers', 'rejected-unknown-lifter',
+] as const satisfies readonly ReportKind[];
 
 const REPORT_BUILDERS: Record<ReportKind, { title: string; body: () => unknown }> = {
   daily: { title: 'Daily production', body: dailyReport },
@@ -766,6 +1110,15 @@ const REPORT_BUILDERS: Record<ReportKind, { title: string; body: () => unknown }
   'cone-weight': { title: 'Cone weight', body: coneWeightReport },
   sack: { title: 'Sacks', body: sackReport },
   calibration: { title: 'Calibration', body: calibrationReport },
+  // IFL's own titles (REPORT_TITLES, api/src/services/reports/common.ts).
+  'shift-production': { title: 'Shift-wise CTS Loop Production Report', body: shiftProductionReport },
+  'rejected-cones': { title: 'List of Rejected Cones Against Weight', body: rejectedConesReport },
+  'rejected-sacks': { title: 'Rejected Sack Report - Daily', body: rejectedSacksReport },
+  'sps-packing': { title: 'SPS Production Report - Count-wise Packing at Each SPS', body: spsPackingReport },
+  'sack-weight-range': { title: 'SPS Sack Weight Range Report', body: sackWeightRangeReport },
+  'sack-weight-summary': { title: 'Sack Packing Weight Summary', body: sackWeightSummaryReport },
+  'rejected-hangers': { title: 'Rejected Cone Hangers Report', body: rejectedHangersReport },
+  'rejected-unknown-lifter': { title: 'Rejected Unknown (Lifter) Report', body: rejectedUnknownLifterReport },
 };
 
 export function reportEnvelope(kind: ReportKind): unknown {
