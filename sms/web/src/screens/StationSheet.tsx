@@ -237,7 +237,7 @@ function Body({
         <dd>{row.medianG == null ? '—' : fmtG(row.medianG)}</dd>
         <dt>{W.calibration.colSd}</dt>
         <dd>
-          {row.sdG.toFixed(1)} g<span className="mut"> · {W.calibration.sdNote}</span>
+          {row.sdG == null ? '—' : `${row.sdG.toFixed(1)} g`}<span className="mut"> · {W.calibration.sdNote}</span>
         </dd>
         <dt>{W.weight.colVsLine}</dt>
         <dd>{signed(row.vsLineG)}</dd>
@@ -355,7 +355,7 @@ function Body({
           above are measured over that run, not over the whole window, so they describe the change being reported.
         </p>
         <p>
-          {W.calibration.rulesRun} {W.calibration.centreline(fmtG(row.centrelineG), `${row.sigmaDayToDay.toFixed(2)} g`)}
+          {W.calibration.rulesRun} {W.calibration.centreline(fmtG(row.centrelineG), row.sigmaDayToDay == null ? '—' : `${row.sigmaDayToDay.toFixed(2)} g`)}
           {row.restartedOn ? `, ${W.calibration.restartedOn(short(row.restartedOn))}` : ''}.{' '}
           {cannot.length > 0
             ? W.calibration.cannotFire(ruleList(cannot), row.longestRun)

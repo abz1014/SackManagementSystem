@@ -85,11 +85,14 @@ export interface StationDrift {
   /** Median of the station's plausible cone weights over the window — same population as grandMean. */
   medianG: number | null;
   /** Informational only — the within-DAY spread of individual cone weights.
-   *  NOT what the Nelson zones are measured against; see sigmaDayToDay. */
-  stdevWithin: number;
+   *  NOT what the Nelson zones are measured against; see sigmaDayToDay.
+   *  null (C-157, 2 Oct 2026) when no day holds two or more readings: a
+   *  sample SD of one value is undefined, not 0. */
+  stdevWithin: number | null;
   /** The I-MR sigma actually used for Nelson zone widths in the NEWEST epoch —
-   *  how much this station's daily mean normally moves day to day. */
-  sigmaDayToDay: number;
+   *  how much this station's daily mean normally moves day to day.
+   *  null (C-157) when that epoch has fewer than two days. */
+  sigmaDayToDay: number | null;
   /** The centreline the Nelson zones were measured from in the newest epoch:
    *  the whole-window mean when no adjustment falls inside the window, else
    *  the mean of the days since the last one. */
@@ -268,7 +271,8 @@ export async function getStationDrift(
           pooledDen += x.n - 1;
         }
       }
-      const stdevWithin = pooledDen > 0 ? Math.sqrt(pooledNum / pooledDen) : 0;
+      // C-157 (2 Oct 2026): undefined (null), not 0, when no day has two readings.
+      const stdevWithin = pooledDen > 0 ? Math.sqrt(pooledNum / pooledDen) : null;
 
       // Nelson zones need the sigma of a DAY'S MEAN moving day to day, not
       // stdevWithin/√n — that sampling-error estimate shrinks toward zero as
@@ -287,13 +291,15 @@ export async function getStationDrift(
 
       const nelson: NelsonRuleId[][] = [];
       let centrelineG = grandMean;
-      let sigmaDayToDay = 0;
+      let sigmaDayToDay: number | null = null;
       for (const epoch of epochs) {
         const epochN = epoch.reduce((s, x) => s + x.n, 0);
         const centre = epochN > 0 ? epoch.reduce((s, x) => s + x.n * x.mean, 0) / epochN : grandMean;
         const sigma = individualsSigma(epoch.map((x) => x.mean));
         centrelineG = centre;
-        sigmaDayToDay = sigma;
+        // C-157: the zones still use `sigma` (0 for a lone day, as before); only
+        // the REPORTED figure is null where it is undefined (< 2 days).
+        sigmaDayToDay = epoch.length < 2 ? null : sigma;
 
         // Nelson's "N in a row" rules (2: nine on one side, 3: six trending)
         // assume consecutive DAYS. `epoch` holds only days with readings, so
@@ -330,8 +336,8 @@ export async function getStationDrift(
         n: totalN,
         grandMean: round(grandMean, 2),
         medianG: medianByStation.has(station) ? (medianByStation.get(station) == null ? null : round(medianByStation.get(station)!, 2)) : null,
-        stdevWithin: round(stdevWithin, 3),
-        sigmaDayToDay: round(sigmaDayToDay, 3),
+        stdevWithin: stdevWithin == null ? null : round(stdevWithin, 3),
+        sigmaDayToDay: sigmaDayToDay == null ? null : round(sigmaDayToDay, 3),
         centrelineG: round(centrelineG, 2),
         restartedOn,
         longestRun: longestContiguousRun(newest),

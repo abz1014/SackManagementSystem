@@ -970,8 +970,8 @@ export interface StationDrift {
   station: number;
   n: number;
   grandMean: number;
-  stdevWithin: number;
-  sigmaDayToDay: number;
+  stdevWithin: number | null;
+  sigmaDayToDay: number | null;
   days: StationDriftDay[];
   flagged: boolean;
 }
@@ -1940,6 +1940,17 @@ export interface ProductionData {
    * an older fixture, never a real response (the route always sets it).
    */
   dataIssues?: ProductionDataIssue[];
+  /**
+   * The source-generation disclosure `getProduction` always sets (production.ts
+   * `generationNote`); optional here for the same reason `dataIssues?` is.
+   * Line's headline reads it (C-015, 2 Oct 2026).
+   */
+  generationNote?: {
+    generation: unknown | null;
+    spansGenerations: boolean;
+    otherGenerationExcluded: number;
+    excludedSimulator?: number;
+  };
 }
 export interface ProductAtData {
   /** The plausibility window the state was judged with (roadmap Phase 4). */
@@ -2152,10 +2163,10 @@ export interface DriftProjection {
 export interface WeightStationRow {
   medianG: number | null;
   /** Within-day standard deviation, pooled over the window — rendered at last (it was computed and dropped). */
-  sdG: number;
+  sdG: number | null;
   restartedOn: string | null;
   centrelineG: number;
-  sigmaDayToDay: number;
+  sigmaDayToDay: number | null;
   /** Longest calendar-contiguous run of days the pattern rules had; a rule needing more could never have fired. */
   longestRun: number;
   projection: DriftProjection | null;
@@ -3387,10 +3398,29 @@ export function reportExportUrl(type: ReportType, q: ReportQuery, format?: 'csv'
  * `'daily'`/`'register'` and `batch` to the default generation, exactly as
  * before, when either is omitted.
  */
-export function getReportHeader(q: { from?: string; to?: string; at?: string | null; type?: ReportType; batch?: string }): Promise<{ header: ReportHeader }> {
+export function getReportHeader(q: {
+  from?: string;
+  to?: string;
+  at?: string | null;
+  type?: ReportType;
+  batch?: string;
+  /** C-174 (2 Oct 2026): a single shift (the period IS one shift); sent as the one-shift pair the route already decodes. */
+  shift?: string;
+  /** Encoded ShiftRef bounds (lib/period.ts periodQuery); both or neither. */
+  fromShift?: string;
+  toShift?: string;
+}): Promise<{ header: ReportHeader }> {
   const p = new URLSearchParams();
   if (q.from) p.set('from', q.from);
   if (q.to) p.set('to', q.to);
+  const one = q.shift && q.from && !q.fromShift && !q.toShift ? `${q.from}.${q.shift}` : null;
+  if (q.fromShift && q.toShift) {
+    p.set('fromShift', q.fromShift);
+    p.set('toShift', q.toShift);
+  } else if (one) {
+    p.set('fromShift', one);
+    p.set('toShift', one);
+  }
   if (q.at) p.set('at', q.at);
   if (q.type) p.set('type', q.type);
   if (q.batch) p.set('batch', q.batch);
