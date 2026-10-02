@@ -391,10 +391,12 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
       const standing = rows.filter((h) => h.flag === 'stands_out').map((h) => h.hanger).filter((n): n is number => n != null);
       const withRejects = rows.filter((h) => h.hanger != null && h.total > 0).length;
       const total = tt?.total ?? 0;
+      // C-134 (2 Oct 2026): with a station or product filter the rate is that population's, not the line's.
+      const hangersOnly = [d.filters?.station != null ? `station ${d.filters.station}` : null, d.filters?.product != null ? `product ${d.filters.product}` : null].filter((x): x is string => x != null);
       out.tiles = [
         { label: 'Hangers seen', value: fmtInt(f?.hangersSeen ?? rows.filter((h) => h.hanger != null).length) },
         { label: 'Rejected cones', value: fmtInt(total), attn: total > 0 },
-        { label: 'Line reject rate', value: fmtPct(f?.lineRatePct ?? tt?.ratePct), note: 'over cones plus rejects with no cone record' },
+        { label: hangersOnly.length > 0 ? `Reject rate, ${hangersOnly.join(' and ')} only` : 'Line reject rate', value: fmtPct(f?.lineRatePct ?? tt?.ratePct), note: 'over cones plus rejects with no cone record' },
         { label: 'Hangers that stand out', value: fmtInt(standing.length), attn: standing.length > 0, note: f?.canFlag === false ? 'too few cones per hanger to judge' : null },
       ];
       if (total === 0) {
