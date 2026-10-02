@@ -58,6 +58,7 @@ import {
   SESSION_COOKIE,
   type AuthedRequest,
 } from './auth.js';
+import { CSV_BOM } from './services/reports/csv.js';
 import { TtlCache } from './cache.js';
 import { securityHeaders } from './security.js';
 import { requestId, requestLog } from './log.js';
@@ -1348,7 +1349,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${q.type}-events.csv"`);
       if (truncated) res.setHeader('X-Export-Truncated', 'true');
-      res.send(csv);
+      res.send(CSV_BOM + csv);
       // Which register left the building, and for what window (roadmap Phase
       // 11, 14 Sep 2026). An event, not configuration: fire-and-forget.
       audit(req, 'export.csv', 'register', q.type, `${q.from ?? '…'} to ${q.to ?? '…'}${truncated ? ' (truncated)' : ''}`);
