@@ -126,7 +126,9 @@ export function SacksScreen({
 }) {
   const slow = period.live ? 60_000 : 10 * 60_000;
   const pq = periodQuery(period);
-  const key = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${period.tsTo}`;
+  // C-137 (2 Oct 2026): replay instant, not the moving period.tsTo.
+  const { asOf } = useLive();
+  const key = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${asOf ?? 'now'}`;
   const summary = usePolling(
     () => getSackSummary(pq),
     slow,

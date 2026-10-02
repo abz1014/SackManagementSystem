@@ -21,7 +21,7 @@
  * application's own database only.
  */
 import { useMemo, useState } from 'react';
-import { usePolling } from '../../lib/live';
+import { useAsOf, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import type { Period } from '../../lib/period';
 import { Block, Chevron, Empty, Failed, SkelLines, rowKeys } from '../../ui/bits';
@@ -46,9 +46,12 @@ export function RunningTab({
   onOpenStation: (station: number) => void;
   onSeeStationReadings: (station: number) => void;
 }) {
-  const productAt = usePolling(() => getProductAt(period.tsTo), 30_000, `product-at:${period.tsTo}`);
+  // C-137 (2 Oct 2026): keys carry the replay instant, not the moving period.tsTo.
+  const asOf = useAsOf();
+  const instantKey = asOf ?? 'now';
+  const productAt = usePolling(() => getProductAt(period.tsTo), 30_000, `product-at:${instantKey}`);
   const products = usePolling(() => getProducts(), 5 * 60_000, 'products');
-  const machines = usePolling(() => getMachinesRunning(period.tsTo), 30_000, `machines-running:${period.tsTo}`);
+  const machines = usePolling(() => getMachinesRunning(period.tsTo), 30_000, `machines-running:${instantKey}`);
   const names = usePolling(() => getStations(), 10 * 60_000, 'stations');
   // Who set the running product and why. `getProductAt` (above) does not
   // carry `changedBy`/`reason` — it answers "what was in force at this

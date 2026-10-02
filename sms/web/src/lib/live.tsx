@@ -247,6 +247,17 @@ export function LiveProvider({
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+/**
+ * C-137 (2 Oct 2026): the replay instant for a poll KEY. Reads the provider
+ * when there is one and the URL's `at` otherwise, so a screen rendered on its
+ * own still keys correctly. Poll keys use this, never a `tsTo` recomputed from
+ * the plant clock (that re-keys, refetches and blanks the figures every 10 s).
+ */
+export function useAsOf(): string | null {
+  const v = useContext(Ctx);
+  return v ? v.asOf : readAsOf();
+}
+
 export function useLive(): LiveCtx {
   const v = useContext(Ctx);
   if (!v) throw new Error('useLive() outside <LiveProvider>');

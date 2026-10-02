@@ -28,7 +28,7 @@
  *    is set to, and the table says so.
  */
 import { useRef, useState } from 'react';
-import { usePolling } from '../lib/live';
+import { useAsOf, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { TRAILING_DAYS, describePeriod, periodQuery, snapToShifts, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
@@ -116,6 +116,7 @@ export function WeightScreen({
 }) {
 
   const pq = periodQuery(period);
+  const asOf = useAsOf();
   const st = usePolling(
     () =>
       getWeightStations({
@@ -224,7 +225,7 @@ export function WeightScreen({
   const prod = usePolling(
     () => getProduction({ ...pq, groupBy: 'none' }),
     period.live ? 60_000 : 5 * 60_000,
-    `prod:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${period.tsTo}`,
+    `prod:${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${asOf ?? 'now'}`, // C-137: replay instant, not the moving period.tsTo
     { enabled: period.live },
   );
 

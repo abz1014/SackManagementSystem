@@ -174,7 +174,7 @@ export function RejectsScreen({
    *  snaps the WHOLE PAGE period to shift boundaries. */
   onSelectPeriod?: (p: PeriodParams) => void;
 }) {
-  const { line } = useLive();
+  const { line, asOf } = useLive();
   // Rarely changes (it moves once a day at most), so a slow heartbeat is
   // plenty. Finding H6 (Sep 2026 audit): without this, trailingWindow() below
   // always claimed the full 14 days regardless of how much history actually
@@ -206,7 +206,8 @@ export function RejectsScreen({
   // The narrowing every request shares. tsTo on the trend too: under a replay
   // the trailing window must not reach past the replayed instant either.
   const narrow: RejectFilters = { station: station ?? undefined, product: product ?? undefined, tsTo: period.tsTo };
-  const narrowKey = `${station ?? 'any'}:${product ?? 'any'}:${period.tsTo}`;
+  // C-137 (2 Oct 2026): keyed on the replay instant, not the moving `period.tsTo`.
+  const narrowKey = `${station ?? 'any'}:${product ?? 'any'}:${asOf ?? 'now'}`;
   // The period, exactly as Line sends it to /api/production. Chart overhaul
   // T8b: fromShift/toShift ride along too, so a zoomed shift range narrows
   // the reasons list, the period figures and the by-day table the same way

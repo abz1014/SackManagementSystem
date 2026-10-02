@@ -81,8 +81,12 @@ export function LineScreen({
    *  same `onSelectPeriod?` contract Weight/StationSheet already take. */
   onSelectPeriod?: (p: PeriodParams) => void;
 }) {
-  const { line, loading } = useLive();
+  const { line, loading, asOf } = useLive();
   const health = assessHealth(line);
+  // C-137 (2 Oct 2026): poll keys carry the replay instant, never `period.tsTo`
+  // (recomputed from the plant clock on every /api/live poll, it re-keyed every
+  // poll every 10 s). The request still sends the current tsTo.
+  const instantKey = asOf ?? 'now';
 
   const stations = usePolling(() => getStations(), 10 * 60_000, 'stations');
 
@@ -96,7 +100,7 @@ export function LineScreen({
   // up to the replayed moment — mid-shift, Line read roughly double Wall for
   // the same shift. period.ts documents tsTo as exactly this guard.
   const pq = periodQuery(period);
-  const periodKey = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${period.tsTo}`;
+  const periodKey = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${instantKey}`;
   const totals = usePolling(
     () => getProduction({ ...pq, groupBy: 'none' }),
     period.live ? REFRESH_MS : 5 * 60_000,
@@ -123,7 +127,7 @@ export function LineScreen({
   );
   // Same leak, same fix: with no argument this asked for the product running
   // NOW, so a July replay showed today's product beside July's readings.
-  const product = usePolling(() => getProductAt(period.tsTo), REFRESH_MS, `product-at:${period.tsTo}`, { enabled: period.live });
+  const product = usePolling(() => getProductAt(period.tsTo), REFRESH_MS, `product-at:${instantKey}`, { enabled: period.live });
   const attention = usePolling(
     () => getAttention({ from: period.from, to: period.to, shift: period.shift, fromShift: pq.fromShift, toShift: pq.toShift }),
     REFRESH_MS,
@@ -134,7 +138,7 @@ export function LineScreen({
   // on each station from its newest cones, in a two-hour window anchored on
   // the newest reading — never on the clock — and capped at the replay
   // instant, like everything else on this screen.
-  const machines = usePolling(() => getMachinesRunning(period.tsTo), REFRESH_MS, `machines-running:${period.tsTo}`, { enabled: period.live });
+  const machines = usePolling(() => getMachinesRunning(period.tsTo), REFRESH_MS, `machines-running:${instantKey}`, { enabled: period.live });
   // PDAS holds several materials sharing one description (six read
   // "205-IL0-SD" on this line) — machinesRunning's own SQL only ever
   // resolves that plain description, so the parts that make them
