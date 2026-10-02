@@ -82,6 +82,7 @@ import { fileURLToPath } from 'node:url';
 import type { ReportHeader, ReportType } from './common.js';
 import { attributionRows, periodText, type CsvCell, type CsvTable } from './csv.js';
 import { parsePlantWallClock } from './plantTime.js';
+import { toPlantIso } from '../plantClock.js';
 import type { AnyReportData, ReportDataByType } from './index.js';
 import type { MachineProductReportData } from './machineProduct.js';
 import type { SpsPackingReportData } from './spsPacking.js';
@@ -888,6 +889,22 @@ export function inferColumnType(key: string, values: readonly (CsvCell | Date)[]
   return 'text';
 }
 
+/**
+ * D-74 (2 Oct 2026): `*_utc` report columns that hold an APP-WRITTEN, genuine-UTC instant (TWO CLOCKS, plantClock.ts).
+ * Their header prints "(plant time)", so the cell is converted to the plant clock before it is written. Every other
+ * `*_utc` column (`first_utc`, `last_utc`, `target_in_force_at_utc`) is a production timestamp or a limit version already
+ * on the plant clock (labelled UTC) and is written as it is.
+ *  - `adjusted_at_utc`      — calibration.ts: sms.calibration_adjustment.adjusted_at_utc (SYSUTCDATETIME)
+ *  - `last_adjusted_utc`    — calibration.ts / station.ts: weightStations.ts `lastAdjustedUtc`, the latest adjusted_at_utc
+ */
+const GENUINE_UTC_KEYS: ReadonlySet<string> = new Set(['adjusted_at_utc', 'last_adjusted_utc']);
+
+function plantClockCell(key: string, v: CsvCell): CsvCell {
+  if (!GENUINE_UTC_KEYS.has(key) || typeof v !== 'string' || v === '') return v;
+  const ms = new Date(v).getTime();
+  return Number.isNaN(ms) ? v : toPlantIso(ms);
+}
+
 /** Words a header prints in capitals rather than title case ("sd_kg" is "SD (kg)", not "Sd (kg)"). */
 const HEADER_ACRONYMS: Record<string, string> = { sd: 'SD', sps: 'SPS', id: 'ID', ids: 'IDs' };
 
@@ -936,7 +953,7 @@ export function sheetsFromCsv(table: CsvTable, singleName: string, header: Repor
     sheets.push({
       name,
       columns,
-      rows: rows.map((r) => Object.fromEntries(keep.map((i) => [headers[i]!, r[i] ?? null]))),
+      rows: rows.map((r) => Object.fromEntries(keep.map((i) => [headers[i]!, plantClockCell(headers[i]!, r[i] ?? null)]))),
       titleRows: titleRowsFor(header, name),
     });
   }
