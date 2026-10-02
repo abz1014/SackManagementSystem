@@ -169,7 +169,8 @@ const CANONICAL: Record<TableDef['key'], { table: string; typeFilter: string }> 
   reject_weight: { table: 'sms.reject_event', typeFilter: "AND c.reject_type = 'weight'" },
 };
 
-/** A production-day window, EXCLUSIVE upper bound — `to` is the instant after
+/** (C-028, 2 Oct 2026: these are CALENDAR days, plant clock 00:00-24:00, not 06:00 production days.)
+ *  A day window, EXCLUSIVE upper bound — `to` is the instant after
  *  the last requested day ends. Plant wall clock (Two Clocks rule): these are
  *  compared to ProductionDate/Date verbatim, never converted. */
 interface Range {
@@ -245,21 +246,30 @@ const aggSql = (col: string) =>
 const readStats = (x: { n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown } | undefined): WeightStats =>
   x ? { n: Number(x.n), sum: num(x.s), avg: num(x.a), min: num(x.lo), max: num(x.hi) } : NO_WEIGHTS;
 
-async function sourceWeights(ifl: ConnectionPool, def: TableDef, col: string): Promise<WeightStats> {
-  const r = await ifl.request().query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
-    `SELECT ${aggSql(`[${col}]`)} FROM [${def.sourceTable}]`,
+// C-026 (D-69): `floor` is the archived floor (migration 037) — the same
+// `id >= floor` scope the count/checksum path applies to an open generation.
+async function sourceWeights(ifl: ConnectionPool, def: TableDef, col: string, floor: number | null = null): Promise<WeightStats> {
+  const req = ifl.request();
+  if (floor !== null) req.input('floor', mssql.BigInt, floor);
+  const r = await req.query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
+    `SELECT ${aggSql(`[${col}]`)} FROM [${def.sourceTable}]${floor !== null ? ' WHERE [id] >= @floor' : ''}`,
   );
   return readStats(r.recordset[0]);
 }
 
-async function rawWeights(app: ConnectionPool, def: TableDef, col: string, line: number, epoch: number): Promise<WeightStats> {
-  const r = await app
-    .request()
-    .input('line', mssql.Int, line)
-    .input('e', mssql.Int, epoch)
-    .query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
-      `SELECT ${aggSql(col)} FROM ${def.rawTable} WHERE line_id = @line AND source_epoch = @e`,
-    );
+async function rawWeights(
+  app: ConnectionPool,
+  def: TableDef,
+  col: string,
+  line: number,
+  epoch: number,
+  floor: number | null = null,
+): Promise<WeightStats> {
+  const req = app.request().input('line', mssql.Int, line).input('e', mssql.Int, epoch);
+  if (floor !== null) req.input('floor', mssql.BigInt, floor);
+  const r = await req.query<{ n: unknown; s: unknown; a: unknown; lo: unknown; hi: unknown }>(
+    `SELECT ${aggSql(col)} FROM ${def.rawTable} WHERE line_id = @line AND source_epoch = @e${floor !== null ? ' AND src_id >= @floor' : ''}`,
+  );
   return readStats(r.recordset[0]);
 }
 
@@ -298,7 +308,7 @@ const weightLine = (label: string, w: WeightStats) =>
 export async function verifyWeights(
   ctx: { app: ConnectionPool; ifl: ConnectionPool },
   def: TableDef,
-  epochs: { epoch_id: number; closed_utc: Date | null }[],
+  epochs: { epoch_id: number; closed_utc: Date | null; archived_below_id?: number | null }[],
   line: number,
   sourceReadable: boolean,
 ): Promise<number> {
@@ -315,10 +325,15 @@ export async function verifyWeights(
     console.log(`${IND}weights    epoch ${e.epoch_id} ${open ? 'OPEN' : 'closed'} — ${cols.src} → ${cols.raw} → ${cols.canon}`);
     console.log(`${IND}${''.padEnd(10)}${'count'.padStart(10)}${'sum'.padStart(14)}${'avg'.padStart(14)}${'min'.padStart(14)}${'max'.padStart(14)}`);
     if (open && sourceReadable) {
-      const src = await sourceWeights(ctx.ifl, def, cols.src);
+      // The source no longer holds ids below the archived floor, so both sides
+      // of THIS comparison are scoped to id >= floor; raw ⇄ canonical below
+      // stays whole-epoch.
+      const floor = e.archived_below_id == null ? null : Number(e.archived_below_id);
+      const src = await sourceWeights(ctx.ifl, def, cols.src, floor);
+      const rawCmp = floor === null ? raw : await rawWeights(ctx.app, def, cols.raw, line, e.epoch_id, floor);
       console.log(weightLine('source', src));
-      const ok = sameWeights(src, raw);
-      console.log(`${weightLine('raw', raw)}   ${ok ? 'OK' : 'MISMATCH'}`);
+      const ok = sameWeights(src, rawCmp);
+      console.log(`${weightLine(floor === null ? 'raw' : `raw ≥${floor}`, rawCmp)}   ${ok ? 'OK' : 'MISMATCH'}`);
       if (!ok) mismatches++;
     } else {
       console.log(weightLine('raw', raw) + (open ? '   (source not readable — not compared)' : ''));
@@ -332,7 +347,7 @@ export async function verifyWeights(
 
 export interface VerifyArgs {
   weights: boolean;
-  /** --from/--to: a production-day window (plant wall clock), given together
+  /** --from/--to: a calendar-day window (plant clock 00:00-24:00, C-028), given together
    *  or not at all. `to` is EXCLUSIVE — the instant after the last requested
    *  day ends — so a same-day window is `[from, from+1day)`. */
   from: Date | null;
@@ -362,7 +377,7 @@ export function parseVerifyArgs(args: string[]): VerifyArgs {
     if (v === undefined) return null;
     if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
       throw new Error(
-        `--${key} must be a production day as YYYY-MM-DD (the plant's wall clock, not a browser's local date), got "${String(v)}"`,
+        `--${key} must be a calendar day as YYYY-MM-DD (the plant's wall clock, not a browser's local date), got "${String(v)}"`,
       );
     }
     const d = new Date(`${v}T00:00:00.000Z`);
@@ -638,7 +653,7 @@ export async function verify(args: string[] = []): Promise<number> {
     console.log(`  app      ${ctx.cfg.app.server}/${ctx.cfg.app.database}   (line ${line})`);
     if (range) {
       console.log(
-        `  window   ${isoDay(range.from)} .. ${isoDay(new Date(range.to.getTime() - 1))} (production day, plant wall clock)`,
+        `  window   ${isoDay(range.from)} .. ${isoDay(new Date(range.to.getTime() - 1))} (calendar day, plant clock 00:00-24:00)`,
       );
       console.log(
         `           acquisition lag is ~18 min — a row from the final minutes of the window may not have`,
@@ -824,7 +839,7 @@ export async function verify(args: string[] = []): Promise<number> {
                   : raw;
               const same = src.n === cmp.n && src.lo === cmp.lo && src.hi === cmp.hi && src.sum === cmp.sum;
               const scope = range
-                ? `window ${isoDay(range.from)}..${isoDay(new Date(range.to.getTime() - 1))}`
+                ? `window ${isoDay(range.from)}..${isoDay(new Date(range.to.getTime() - 1))} (calendar days, plant clock 00:00-24:00)`
                 : floor !== null
                   ? `id ≥ ${floor} (archived floor)`
                   : 'whole table';
@@ -917,9 +932,17 @@ export async function verify(args: string[] = []): Promise<number> {
           : `Weights: ${weightMismatches} MISMATCH — a weight differs between source, raw and canonical; see above`,
       );
     }
+    // C-027 (D-70): a run scoped by --epoch (and so by --source-db, which requires it)
+    // checks only the named generations; the closing line and the recorded summary say so.
+    const scopeNote = epochIds !== null ? `scope: epoch ${epochIds.join(',')}${sourceDb ? ` against --source-db=${sourceDb}` : ''}` : '';
+    const windowNote = range
+      ? `; window ${isoDay(range.from)}..${isoDay(new Date(range.to.getTime() - 1))} calendar day (plant clock 00:00-24:00)`
+      : '';
     if (stops === 0 && weightMismatches === 0) {
       console.log(
-        `\n✓ every open generation reconciles with its source; raw ⇄ canonical clean on ${gapsChecked} epoch(s)`,
+        epochIds !== null
+          ? `\n✓ every generation checked in this run (epoch ${epochIds.join(',')}) reconciles; raw ⇄ canonical clean on ${gapsChecked} epoch(s)`
+          : `\n✓ every open generation reconciles with its source; raw ⇄ canonical clean on ${gapsChecked} epoch(s)`,
       );
       await recordVerifyRun(ctx, {
         startedAtUtc,
@@ -928,7 +951,7 @@ export async function verify(args: string[] = []): Promise<number> {
         weightsChecked: weights,
         range,
         summary: `${epochs.length} generation(s), ${gapsChecked} epoch check(s) clean, 0 STOP(s)` +
-          (weights ? `, weights OK` : ''),
+          (weights ? `, weights OK` : '') + (scopeNote ? `; ${scopeNote}` : '') + windowNote,
       });
       return 0;
     }
@@ -941,7 +964,9 @@ export async function verify(args: string[] = []): Promise<number> {
       weightsChecked: weights,
       range,
       summary: `${epochs.length} generation(s), ${gapsChecked} epoch check(s), ${stops} STOP(s)` +
-        (weights ? `, weights ${weightMismatches === 0 ? 'OK' : `${weightMismatches} MISMATCH`}` : ''),
+        (weights ? `, weights ${weightMismatches === 0 ? 'OK' : `${weightMismatches} MISMATCH`}` : '') +
+        (scopeNote ? `; ${scopeNote}` : '') +
+        windowNote,
     });
     return 1;
   } finally {
