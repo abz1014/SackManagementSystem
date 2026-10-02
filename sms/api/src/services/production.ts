@@ -591,7 +591,10 @@ export async function getProduction(
 
     const judged = readNum(s.judged);
     const passed = readNum(s.passed);
-    if (!judged.ok || !passed.ok) {
+    // C-158 (2 Oct 2026): with no sacks SQL SUM() is NULL — nothing is missing, the verdict is simply not stated.
+    if (n.ok && n.value === 0 && s.judged == null && s.passed == null) {
+      r.sacksPassedScalePct = null;
+    } else if (!judged.ok || !passed.ok) {
       issues.push({ field: 'sacksPassedScalePct', group: s.grp, reason: 'sack_event aggregate row is missing its scale-verdict counts (judged/passed)' });
       r.sacksPassedScalePct = null;
     } else {
