@@ -447,7 +447,7 @@ export async function getWeightStations(
    * and, just as importantly, what it deliberately is NOT (the drift/target
    * window, which stays `from`/`to`, untouched). Defaults to `{ from, to }`.
    */
-  period?: { from: string; to: string; shiftRange?: ShiftRange },
+  period?: { from: string; to: string; shiftRange?: ShiftRange; shift?: 'morning' | 'evening' | 'night' | null },
 ): Promise<WeightStationsData> {
   const periodWindow = period ?? { from, to };
   // No second resolve when the period coincides with the trailing window
@@ -459,7 +459,7 @@ export async function getWeightStations(
   // trailing scope's cached answer only when the dates AND shiftRange both
   // match keeps this condition honest rather than silently reusing a scope
   // that was never actually asked for the shift-narrowed window.
-  const periodIsTrailing = periodWindow.from === from && periodWindow.to === to && !periodWindow.shiftRange;
+  const periodIsTrailing = periodWindow.from === from && periodWindow.to === to && !periodWindow.shiftRange && !periodWindow.shift;
   // T3 (15 Sep 2026): bound the ledger fetch to `{ to }`, never `from`. This
   // used to call listCalibrationAdjustments with no window filter at all, so
   // TOP (500) ORDER BY adjusted_at_utc DESC returned the newest 500
@@ -571,7 +571,7 @@ export async function getWeightStations(
   // targetBasis 'line_product' — the same target those tests already expect.
   const [drift, rejectStats] = await Promise.all([
     getStationDrift(pool, lineId, from, to, plausibility, { restarts }),
-    rejectRatesByStation(pool, lineId, periodWindow.from, periodWindow.to, periodScope, periodWindow.shiftRange),
+    rejectRatesByStation(pool, lineId, periodWindow.from, periodWindow.to, periodScope, periodWindow.shiftRange, periodWindow.shift),
   ]);
   const rejects = rejectStats.rates;
   // stationMaterialCounts stays on the TRAILING window/scope — see this
@@ -886,6 +886,13 @@ export async function rejectRatesByStation(
    * Absent, behaviour is byte-identical to before this task.
    */
   shiftRange?: ShiftRange,
+  /**
+   * C-007 (D-60, 2 Oct 2026): an OPTIONAL single named shift, ANDed on all
+   * three queries below (and passed to `getUnmatchedRejects` as
+   * `RejectFilters.shift`). Before this, `/api/weight-stations?shift=night`
+   * printed the whole production day's reject rate.
+   */
+  shift?: 'morning' | 'evening' | 'night' | null,
 ): Promise<{
   rates: Map<number, number>;
   totalCones: number;
@@ -903,8 +910,10 @@ export async function rejectRatesByStation(
   // the SAME request `req`, so the params it binds (`srFrom` etc.) need
   // binding only once here, not once per subquery.
   const shiftFrag = shiftRange ? ` AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, req)}` : '';
-  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'cone_event', { prefix: 'wsc' }) + shiftFrag;
-  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'reject_event', { prefix: 'wsr' }) + shiftFrag;
+  const oneShiftFrag = shift ? ' AND shift_code = @shift' : '';
+  if (shift) req.input('shift', mssql.VarChar(10), shift);
+  const coneWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'cone_event', { prefix: 'wsc' }) + shiftFrag + oneShiftFrag;
+  const rejWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL', req, resolvedScope, 'reject_event', { prefix: 'wsr' }) + shiftFrag + oneShiftFrag;
   const r = await req.query<{ st: number; cones: number; rejects: number }>(`
       WITH c AS (
         SELECT source_station AS st, COUNT(*) AS n
@@ -935,8 +944,10 @@ export async function rejectRatesByStation(
    */
   const totalsReq = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const totalsShiftFrag = shiftRange ? ` AND ${shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, totalsReq)}` : '';
-  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'cone_event', { prefix: 'wstc' }) + totalsShiftFrag;
-  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'reject_event', { prefix: 'wstr' }) + totalsShiftFrag;
+  if (shift) totalsReq.input('shift', mssql.VarChar(10), shift);
+  const totalsOneShift = shift ? ' AND shift_code = @shift' : '';
+  const coneTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'cone_event', { prefix: 'wstc' }) + totalsShiftFrag + totalsOneShift;
+  const rejTotalsWhere = andEpoch('line_id = @line AND shift_date BETWEEN @from AND @to', totalsReq, resolvedScope, 'reject_event', { prefix: 'wstr' }) + totalsShiftFrag + totalsOneShift;
   const totals = await totalsReq.query<{ cones: number; rejects: number }>(`
       SELECT
         (SELECT COUNT(*) FROM sms.cone_event
@@ -966,7 +977,7 @@ export async function rejectRatesByStation(
   const unmatchedOf = await getUnmatchedRejects(
     pool,
     lineId,
-    { from, to, scope: resolvedScope, shiftRange },
+    { from, to, scope: resolvedScope, shiftRange, shift: shift ?? undefined },
     `ISNULL(CAST(re.source_station AS varchar(12)), '${NO_STATION}')`,
   );
   let totalUnmatchedRejects = 0;

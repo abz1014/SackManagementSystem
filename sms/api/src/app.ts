@@ -849,7 +849,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // decide whether WS-PERF4's scope-cache dedup still applies, so it is
       // safe to always pass it explicitly rather than omit it when equal.
       const [stations, disagreement] = await Promise.all([
-        getWeightStations(pool, cfg.lineId, from, to, resolveScope, { from: periodFrom, to: periodTo, shiftRange: shiftRangeResult }),
+        getWeightStations(pool, cfg.lineId, from, to, resolveScope, { from: periodFrom, to: periodTo, shiftRange: shiftRangeResult, shift: q.data.shift }),
         productDisagreement(
           pool,
           cfg.lineId,
