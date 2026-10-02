@@ -24,7 +24,7 @@
  * Nothing about the balance is worked out here: every figure is the server's
  * (services/sackStock.ts), and the screen only chooses the unit to show.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLive, usePolling, usePlantNow, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
@@ -65,10 +65,11 @@ export type SackUnit = 'sacks' | 'kg';
  * `Period`), name the shift, the same fact Line.tsx's own headline states
  * for its "into shift" branch. `describePeriod` already renders that as
  * "2 Sep, evening shift"; every other period keeps this screen's own
- * long-date wording, unchanged.
+ * long-date wording, unchanged. 2 Oct 2026 (C-138): a shift RANGE (fromShift/
+ * toShift set) is also named by describePeriod, not by the whole days it touches.
  */
 const periodLabel = (p: Period): string =>
-  p.shift ? describePeriod(p) : p.from === p.to ? fmtDayLong(p.from) : `${fmtDayLong(p.from)} to ${fmtDayLong(p.to)}`;
+  p.shift || p.fromShift || p.toShift ? describePeriod(p) : p.from === p.to ? fmtDayLong(p.from) : `${fmtDayLong(p.from)} to ${fmtDayLong(p.to)}`;
 
 /**
  * UX Phase WS-B2 (23 Sep 2026) — THE UNDIAGNOSED FAILURE MODE, established.
@@ -794,6 +795,18 @@ export function History({
   onPageChange: (p: number) => void;
   onOpenReading: (type: RegisterType, id: string | number) => void;
 }) {
+  // C-139: narrowing the period while parked on a later page used to leave
+  // an out-of-range page ("9 of 6", no rows). Reset on any period change, but
+  // not on first mount, so a deep-linked page (`sp`) is kept.
+  const pq = periodQuery(period);
+  const periodSig = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}`;
+  const seenSig = useRef(periodSig);
+  useEffect(() => {
+    if (seenSig.current === periodSig) return;
+    seenSig.current = periodSig;
+    if (page !== 1) onPageChange(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodSig]);
   const { line } = useLive();
   const health = assessHealth(line);
   const stale = health.kind !== 'ok';

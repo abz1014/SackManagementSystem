@@ -27,7 +27,7 @@ import { useEffect, useState } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
-import { periodQuery, type Period } from '../lib/period';
+import { periodQuery, describePeriod, type Period } from '../lib/period';
 import { Block, Chevron, Empty, Failed, rowKeys, SkelLines, Toolbar, Toggle } from '../ui/bits';
 import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
@@ -150,8 +150,9 @@ export function ReadingsScreen({
   // period change makes on the reader's behalf, not a choice of its own.
   useEffect(() => {
     if (page !== 1) onPageChange(1);
+    // C-139: a shift-range narrowing changes only fromShift/toShift, so they are deps too.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period.from, period.to, period.shift]);
+  }, [period.from, period.to, period.shift, periodQuery(period).fromShift, periodQuery(period).toShift]);
   // Task B (28 Sep 2026, owner decision): which data batch is listed. Local
   // state, not lifted to the URL — the default ('auto') is the answer for
   // every period, and the switch is a momentary "show me the other one"
@@ -230,6 +231,9 @@ export function ReadingsScreen({
         to={period.to}
         at={asOf}
         batch={batch}
+        shift={period.shift}
+        fromShift={periodQuery(period).fromShift}
+        toShift={periodQuery(period).toShift}
         title={`${W.nav.readings} · ${listingTitle(listing)}${station != null ? ` · ${stationLabel(stationList.find((s) => s.stationId === station), station)}` : ''}`}
       />
       <div className="page">
@@ -388,7 +392,11 @@ export function countLine(
   outsideOnly: boolean,
   states: ConeState[],
 ): string {
-  const what = fmtDayLong(period.from) === fmtDayLong(period.to) ? fmtDayLong(period.from) : `${period.from} to ${period.to}`;
+  // C-138 (2 Oct 2026): a shift or shift-range period is named by its shifts
+  // (describePeriod, the period control's own words), not by the whole days.
+  const what = period.shift || period.fromShift || period.toShift
+    ? describePeriod(period)
+    : fmtDayLong(period.from) === fmtDayLong(period.to) ? fmtDayLong(period.from) : `${period.from} to ${period.to}`;
   // The register itself failed to load: nothing below `total` can be
   // trusted, so the whole sentence is replaced rather than any of its
   // numbers — the body's own Failed block (rendered from the same
