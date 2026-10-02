@@ -28,7 +28,7 @@ import { useLive, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import { hasNewerElsewhere, quietBecauseGeneration } from '../lib/generationWords';
-import { periodQuery, dayToShiftRange, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
+import { periodQuery, dayToShiftRange, describePeriod, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
   SkelChart, SkelFigures, SkelLines, SkelStations, type FigureProps,
@@ -172,6 +172,18 @@ export function LineScreen({
             period={period}
           />
         </h1>
+        {/* C-015, 2 Oct 2026: a period that crossed the source-generation
+            boundary names the batch it left out, directly under the headline
+            that would otherwise imply the whole period is counted. */}
+        {totals.data?.data.generationNote?.spansGenerations && (
+          <p className="mut sm" style={{ marginTop: 10, maxWidth: '68ch' }}>
+            {W.state.periodGenerations(
+              totals.data.data.generationNote.otherGenerationExcluded > 0
+                ? fmtInt(totals.data.data.generationNote.otherGenerationExcluded)
+                : null,
+            )}
+          </p>
+        )}
         {/* D-11, 23 Sep 2026. Directly under the headline, because the
             headline is what it corrects. When the newest REAL source
             generation has ended while rows keep arriving under another one,
@@ -455,6 +467,9 @@ function Headline({ line, knowable, period }: { line: LiveLine; knowable: boolea
  * nothing in a range; the dates do.
  */
 function periodLabel(p: Period): string {
+  // C-138 (2 Oct 2026): a shift or shift-range period names its shifts, the
+  // same words the period control prints, never the whole day(s) it touches.
+  if (p.shift || p.fromShift || p.toShift) return describePeriod(p);
   return p.from === p.to ? fmtDayLong(p.from) : `${fmtDayShort(p.from)} to ${fmtDayShort(p.to)} ${p.to.slice(0, 4)}`;
 }
 
@@ -552,7 +567,8 @@ function periodFigures(
   const unmatchedRejects = r?.unmatchedRejects ?? rejected;
   const weighed = cones + unmatchedRejects;
   const rejectRatePct = weighed > 0 ? Math.round((10000 * rejected) / weighed) / 100 : null;
-  const rejectRateText = weighed > 0 ? fmtPct1(rejectRatePct) : '0%';
+  // C-155: nothing weighed has no rate; a dash, never "0%" (Rejects prints the same).
+  const rejectRateText = weighed > 0 ? fmtPct1(rejectRatePct) : '—';
   // A rate needs every field it depends on read correctly; a cones data
   // issue poisons the denominator even when rejectedCones itself is fine,
   // and a missing unmatchedRejects poisons it the same way.
