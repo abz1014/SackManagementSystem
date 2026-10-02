@@ -815,7 +815,7 @@ describe('cone weight report', () => {
     expect(d.note).toContain('first recorded on 2026-09-11');
     const t = coneWeightCsv(d);
     expect(t.rows.find((r) => r[1] === 'target_omitted_reason')![2]).toContain('2026-09-11');
-    expect(t.rows.find((r) => r[1] === 'target_in_force_at_utc')![2]).toBeNull();
+    expect(t.rows.find((r) => r[1] === 'target_in_force_at_plant_time')![2]).toBeNull();
   });
   it('F6: a lower-bound version that IS in force during the period is kept, and flagged as a lower bound', async () => {
     const SEEN = {

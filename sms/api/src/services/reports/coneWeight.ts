@@ -37,6 +37,7 @@ import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
+import { plantWallClock } from './plantTime.js';
 
 export interface ConeWeightReportData {
   period: ResolvedPeriod;
@@ -314,7 +315,8 @@ export function coneWeightCsv(d: ConeWeightReportData): CsvTable {
     kv('max_g', d.maxG),
     kv('target_g', d.target.setpointG),
     kv('target_source', d.target.source),
-    kv('target_in_force_at_utc', d.target.inForceAtUtc),
+    // C-119 (D-101, 2 Oct 2026): a plant-clock instant (labelled Z in the JSON) goes out as `*_plant_time`, YYYY-MM-DD HH:mm:ss, no zone (D-38).
+    kv('target_in_force_at_plant_time', plantWallClock(d.target.inForceAtUtc) || null),
     kv('target_in_force_is_lower_bound', d.target.inForceIsLowerBound),
     kv('target_omitted_reason', d.target.omittedReason),
     // RT-018: attribution as a trailing row, same convention every other

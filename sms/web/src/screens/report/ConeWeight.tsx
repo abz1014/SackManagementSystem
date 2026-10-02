@@ -1,7 +1,7 @@
 /** Cone weight report: mean, median, spread, states, the distribution and the stations. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
 import { Block, Empty } from '../../ui/bits';
-import { fmtAppInstant, fmtInt } from '../../lib/fmt';
+import { fmtClockSec, fmtDayLong, fmtInt } from '../../lib/fmt';
 import { stationLabel, type ConeWeightReportData, type StationRow } from '../../api';
 import { fmtG1, fmtSignedG, Histogram, statesLine } from './shared';
 
@@ -13,6 +13,12 @@ const targetOmittedReason = (t: ConeWeightReportData['target']): string | null =
 };
 const targetIsLowerBound = (t: ConeWeightReportData['target']): boolean =>
   (t as TargetExtras).inForceIsLowerBound === true;
+
+/**
+ * C-119 (2 Oct 2026): `inForceAtUtc` is the plant's wall clock labelled `Z` (productLimits.ts converts through `toPlantMs`), so it is
+ * printed with the UTC-pinned plant formatters, never `fmtAppInstant`, which would shift it into the viewer's zone (+5 h on a UTC+5 PC).
+ */
+const fmtInForce = (iso: string): string => `${fmtDayLong(iso)}, ${fmtClockSec(iso)}`;
 
 export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names: StationRow[] }) {
   if (d.cones === 0) {
@@ -58,8 +64,8 @@ export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names
                 {d.target.inForceAtUtc &&
                   ` · ${
                     targetIsLowerBound(d.target)
-                      ? W.reports.targetNoLaterThan(fmtAppInstant(d.target.inForceAtUtc))
-                      : W.reports.targetSince(fmtAppInstant(d.target.inForceAtUtc))
+                      ? W.reports.targetNoLaterThan(fmtInForce(d.target.inForceAtUtc))
+                      : W.reports.targetSince(fmtInForce(d.target.inForceAtUtc))
                   }`}
                 {d.target.productActive === false && <> · {W.retiredProduct.marker}</>}
               </span>

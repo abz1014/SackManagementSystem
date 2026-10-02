@@ -29,6 +29,7 @@ import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js
 import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
+import { plantWallClock } from './plantTime.js';
 import { getRuleChangeFlags } from '../ruleAsOf.js';
 
 export interface ProductReportRow extends ReportLine {
@@ -250,7 +251,8 @@ export const PRODUCT_CSV_HEADERS = [
   'target_g', 'vs_target_g', 'limits_changed_in_period',
   // F6 (23 Sep 2026): a target may never travel without the instant it was in
   // force at, and "no later than" is a different claim from "since".
-  'target_in_force_at_utc', 'target_in_force_is_lower_bound', 'target_omitted_reason',
+  // C-119 (D-101, 2 Oct 2026): a plant-clock instant (labelled Z in the JSON) goes out as `*_plant_time`, YYYY-MM-DD HH:mm:ss, no zone (D-38).
+  'target_in_force_at_plant_time', 'target_in_force_is_lower_bound', 'target_omitted_reason',
   // RT-018 (25 Sep 2026): this row's own product's retired flag, as a plain
   // column beside its other facts — never a header comment.
   'product_active',
@@ -262,7 +264,7 @@ export function productCsv(d: ProductReportData): CsvTable {
     r.sacks, r.sackWeightKg, r.weight.n, r.weight.avgG, r.weight.sdG, r.weight.minG, r.weight.maxG,
     r.states.within, r.states.low, r.states.high, r.states.rejected, r.states.unknown, r.implausible,
     r.target?.setpointG ?? null, r.vsTargetG, r.target?.limitsChangedInPeriod ?? null,
-    r.target?.inForceAtUtc ?? null, r.target?.inForceIsLowerBound ?? null, r.targetOmittedReason,
+    plantWallClock(r.target?.inForceAtUtc) || null, r.target?.inForceIsLowerBound ?? null, r.targetOmittedReason,
     r.productActive,
   ]);
   return { headers: PRODUCT_CSV_HEADERS, rows };

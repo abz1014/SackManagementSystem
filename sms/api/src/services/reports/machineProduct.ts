@@ -33,6 +33,7 @@ import type { ResolvedPeriod } from '../report.js';
 import type { ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import type { ShiftRange } from '../../shiftRange.js';
+import { plantWallClock } from './plantTime.js';
 
 export interface MachineProductColumn {
   day: string;
@@ -200,8 +201,10 @@ export async function getMachineProductReport(
 
 /* ------------------------------------------------------------------- CSV */
 
+// C-119 (D-101, 2 Oct 2026): first/last are production timestamps, i.e. the plant's wall clock, so the columns are `*_plant_time`
+// and the values `YYYY-MM-DD HH:mm:ss` with no zone (D-38). The JSON keys (`firstUtc`/`lastUtc`) are unchanged.
 export const MACHINE_PRODUCT_CSV_HEADERS = [
-  'section', 'station', 'machine', 'day', 'shift', 'material_id', 'product', 'cones', 'first_utc', 'last_utc',
+  'section', 'station', 'machine', 'day', 'shift', 'material_id', 'product', 'cones', 'first_plant_time', 'last_plant_time',
   'changed_during_shift', 'from_material_id', 'from_product', 'to_material_id', 'to_product', 'change_kind', 'machines', 'cells',
 ] as const;
 
@@ -213,7 +216,7 @@ export function machineProductCsv(d: MachineProductReportData): CsvTable {
       if (!cell) continue;
       for (const m of cell.materials) {
         rows.push([
-          'cell', r.station, r.machineName, cell.day, cell.shift, m.materialId, labelOf(m.materialId), m.cones, m.firstUtc, m.lastUtc,
+          'cell', r.station, r.machineName, cell.day, cell.shift, m.materialId, labelOf(m.materialId), m.cones, plantWallClock(m.firstUtc), plantWallClock(m.lastUtc),
           cell.changedDuringShift, null, null, null, null, null, null, null,
         ]);
       }
@@ -221,13 +224,13 @@ export function machineProductCsv(d: MachineProductReportData): CsvTable {
   }
   for (const c of d.changes) {
     rows.push([
-      'change', c.station, c.machineName, c.day, c.shift, null, null, null, c.firstUtc, null,
+      'change', c.station, c.machineName, c.day, c.shift, null, null, null, plantWallClock(c.firstUtc), null,
       null, c.fromMaterialId, labelOf(c.fromMaterialId), c.toMaterialId, labelOf(c.toMaterialId), c.kind, null, null,
     ]);
   }
   for (const p of d.products) {
     rows.push([
-      'product', null, null, null, null, p.materialId, p.label, p.cones, p.firstUtc, p.lastUtc,
+      'product', null, null, null, null, p.materialId, p.label, p.cones, plantWallClock(p.firstUtc), plantWallClock(p.lastUtc),
       null, null, null, null, null, null, p.machines, p.cells,
     ]);
   }

@@ -212,16 +212,17 @@ describe('machineProductCsv', () => {
     expect(t.rows.map((r) => r[0])).toEqual(['cell', 'change', 'product']);
     for (const row of t.rows) expect(row).toHaveLength(t.headers.length);
 
+    // C-119 (2 Oct 2026): plant-clock instants export as YYYY-MM-DD HH:mm:ss in *_plant_time columns (was ISO with Z in first_utc/last_utc).
     expect(t.rows[0]).toEqual([
-      'cell', 1, 'M1', '2026-09-10', 'morning', 5, 'Blend A', 10, '2026-09-10T01:00:00.000Z', '2026-09-10T02:00:00.000Z',
+      'cell', 1, 'M1', '2026-09-10', 'morning', 5, 'Blend A', 10, '2026-09-10 01:00:00', '2026-09-10 02:00:00',
       false, null, null, null, null, null, null, null,
     ]);
     expect(t.rows[1]).toEqual([
-      'change', 1, 'M1', '2026-09-10', 'evening', null, null, null, '2026-09-10T14:05:00.000Z', null,
+      'change', 1, 'M1', '2026-09-10', 'evening', null, null, null, '2026-09-10 14:05:00', null,
       null, 5, 'Blend A', 9, 'Product 9', 'within_shift', null, null,
     ]);
     expect(t.rows[2]).toEqual([
-      'product', null, null, null, null, 5, 'Blend A', 10, '2026-09-10T01:00:00.000Z', '2026-09-10T02:00:00.000Z',
+      'product', null, null, null, null, 5, 'Blend A', 10, '2026-09-10 01:00:00', '2026-09-10 02:00:00',
       null, null, null, null, null, null, 1, 1,
     ]);
   });
