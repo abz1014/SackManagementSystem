@@ -23,7 +23,10 @@
  * system most able to undo that defence quietly. Three specific costs, none of
  * which a wider `--table` scope makes obvious to whoever types it:
  *
- *   1. The transform is NOT a pure replay. `runTransform` resolves the shift
+ *   1. (Corrected 2 Oct 2026, C-029: since RT24-04 the shift and plausibility
+ *      rules are resolved as of each reading's own time, not "on file now"; the
+ *      station roster still is. The paragraph below is the pre-RT24-04 account.)
+ *      The transform is NOT a pure replay. `runTransform` resolves the shift
  *      rule, the plausibility rule and the station roster ON FILE NOW
  *      (runTransform.ts:403-409), so re-deriving a closed generation restamps
  *      its `shift_code` under today's rule rather than the one in force when
@@ -184,9 +187,9 @@ export function planLines(
     `  WILL RE-DERIVE   them from ${n(rawRows)} raw row(s); sms_raw.* is NOT touched by this command`,
     `  WILL LEAVE       ${n(keepRows)} row(s) of generation(s) ${untouched.map((g) => g.epochId).join(', ') || '(none)'} untouched`,
     '',
-    '  NOT a pure replay: the shift rule, plausibility rule and station roster ON FILE NOW are',
-    '  applied, so a re-derived row is stamped under TODAY\'s rules, not the ones in force when it',
-    '  was first transformed. That is the point when you meant it and silent when you did not.',
+    '  NOT a pure replay: the shift and plausibility rules in force at each reading\'s own time are',
+    '  applied (a rule edited since the rows were first transformed restamps them), and the station',
+    '  roster is the one on file now. That is the point when you meant it and silent when you did not.',
   );
   if (delRows > rawRows) {
     out.push(
