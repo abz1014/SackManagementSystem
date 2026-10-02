@@ -194,7 +194,10 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
       // Verification 25 Sep 2026 (C8): on a period shorter than the rule's
       // minimum run the rule cannot fire at all, so "no station flagged" is
       // a guaranteed result, not evidence.
-      if (d.driftRuleCanFire === false) {
+      // C-056 (2 Oct 2026): a period with no station-days supports no conclusion either way.
+      if (d.stations.length === 0) {
+        out.sentences.push('No readings were recorded in this period, so no assessment is possible.');
+      } else if (d.driftRuleCanFire === false) {
         out.sentences.push(`The period covers ${plural(d.periodDays ?? 0, 'day')}; the drift rule needs a run of at least ${plural(d.minDaysHeld, 'day')}, so it cannot flag any station over a period this short. Choose a longer period to judge drift.`);
       } else if (d.flaggedStationCount === 0) out.sentences.push('No station met the drift rule, so no calibration action is indicated by this data.');
       else if (d.flaggedStationCount) out.sentences.push(`${plural(d.flaggedStationCount, 'station')} met the drift rule and should be checked.`);

@@ -22,7 +22,8 @@ describe('R4 — reject days outside the limits count both sides and say which',
 });
 
 describe('C8 — a period shorter than the drift rule cannot be read as "no action indicated"', () => {
-  const base = { stations: [], lineMeanG: 1951.8, targetG: 1960, productLabel: 'x', flaggedStationCount: 0, adjustments: [], minDaysHeld: 3 };
+  // C-056: a real station row, so the empty-period sentence does not apply.
+  const base = { stations: [{ station: 1, vsLineG: 0.5, flagged: false }], lineMeanG: 1951.8, targetG: 1960, productLabel: 'x', flaggedStationCount: 0, adjustments: [], minDaysHeld: 3 };
   it('one day: says the period is too short', () => {
     const s = summarise('calibration', wrap({ ...base, periodDays: 1, driftRuleCanFire: false }));
     const text = s.sentences.join(' ');
