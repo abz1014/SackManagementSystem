@@ -21,7 +21,7 @@ import type { Server } from 'http';
 import argon2 from 'argon2';
 import { createApp } from '../app.js';
 import type { ApiConfig } from '../config.js';
-import { REPORT_TYPES } from '../services/reports/common.js';
+import { REPORT_TYPES, type ReportType } from '../services/reports/common.js';
 import { XLSX_CONTENT_TYPE } from '../services/reports/index.js';
 
 // format=pdf never launches a real browser here — that would make this file
@@ -292,7 +292,25 @@ describe('GET /api/reports/:type', () => {
  */
 describe('Task TD (29 Sep 2026) — a shift range narrows the report BODY, not just the header', () => {
   const RANGE_QS = `${Q}&fromShift=2026-09-01.morning&toShift=2026-09-07.night`;
-  const rangedTypes = REPORT_TYPES.filter((t) => t !== 'calibration');
+  /**
+   * IFL reports task W0 (1 Oct 2026): the six reports that complete IFL's list
+   * of eight were registered as SCAFFOLDS — a stub builder returns an empty,
+   * valid report and issues no SQL — until waves 1-2 write their queries. A
+   * stub has no body query to bind a shift range into, so the proof below
+   * cannot hold for it yet. Each worker that lands a real builder REMOVES its
+   * type from this list in the same change; the guard test right after the
+   * proof fails the moment a type listed here starts running SQL, so a type
+   * can never be left out of the proof by forgetting this edit.
+   *
+   * Wave 1 (1 Oct 2026): rejected-hangers, rejected-unknown-lifter and
+   * sack-weight-summary are real builders now and bind the shift range, so
+   * they are covered by the proof above. Wave 2 (1 Oct 2026, H-exports
+   * removed the last three): rejected-sacks, sps-packing and
+   * sack-weight-range are real builders too — all eighteen types are, so the
+   * list is EMPTY. It stays as the mechanism for the next scaffold.
+   */
+  const SCAFFOLD_ONLY: ReportType[] = [];
+  const rangedTypes = REPORT_TYPES.filter((t) => t !== 'calibration' && !SCAFFOLD_ONLY.includes(t));
 
   it.each(rangedTypes)('GET /api/reports/%s with fromShift/toShift binds the shift-range params into a body query', async (t) => {
     const role = t === 'management-summary' ? 'manager' : 'viewer';
@@ -304,6 +322,21 @@ describe('Task TD (29 Sep 2026) — a shift range narrows the report BODY, not j
     // parameters, not merely that the request was accepted.
     expect(r.json.data.header.periodLabel).toMatch(/morning shift.*night shift/);
     expect(db.statements.some((s) => s.inputs.has('srFrom') && s.inputs.has('srFromOrd'))).toBe(true);
+  });
+
+  it('a type still listed as a scaffold answers and binds no shift range because it runs no body query yet; the proof above covers every other type', async () => {
+    // Every type is in exactly one of the two lists: the proof above, or the scaffold guard here (calibration is the third, separate case).
+    expect(rangedTypes.length + SCAFFOLD_ONLY.length + 1).toBe(REPORT_TYPES.length);
+    for (const t of SCAFFOLD_ONLY) {
+      db.statements = [];
+      const r = await get(`/api/reports/${t}?${RANGE_QS}`, 'viewer');
+      expect(r.status, t).toBe(200);
+      expect(r.json.data.header.periodLabel, t).toMatch(/morning shift.*night shift/);
+      expect(
+        db.statements.some((s) => s.inputs.has('srFrom')),
+        `${t} now binds a shift range: remove it from SCAFFOLD_ONLY so the proof above covers it`,
+      ).toBe(false);
+    }
   });
 
   it('calibration has no shiftRange parameter to thread — the request still succeeds, plainly with no shift-range SQL bound', async () => {
@@ -343,7 +376,8 @@ describe('GET /api/reports/:type/export', () => {
     const r = await get(`/api/reports/reject/export?${Q}&shift=night`);
     expect(r.status).toBe(200);
     expect(r.headers.get('content-type')).toMatch(/^text\/csv/);
-    expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07.csv"');
+    // D6 (1 Oct 2026): the filter is in the file name, so the night shift's export cannot overwrite the whole day's.
+    expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07-night.csv"');
     const lines = r.text.split('\n');
     expect(lines[0]).toBe('section,day,reject_type,tube_code,material_code,label,count,pct,cumulative_pct,cones,inspected,rate_pct,ucl_pct,lcl_pct,out_of_control');
     expect(r.text).toContain('\n\nreport,Reject report\n');
@@ -382,7 +416,7 @@ describe('GET /api/reports/:type/export', () => {
       expect(r.status).toBe(200);
       expect(r.headers.get('content-type')).toMatch(new RegExp(`^${XLSX_CONTENT_TYPE.replace(/[.+]/g, '\\$&')}`));
       const disposition = r.headers.get('content-disposition')!;
-      expect(disposition).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07.xlsx"');
+      expect(disposition).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07-night.xlsx"');
       expect(disposition.endsWith('.xlsx"')).toBe(true);
       // The zip's local-file-header magic survives fetch's text() decoding for these leading ASCII/control bytes.
       expect(r.text.slice(0, 2)).toBe('PK');
@@ -425,7 +459,7 @@ describe('GET /api/reports/:type/export', () => {
       const r = await get(`/api/reports/reject/export?${Q}&shift=night&format=pdf`, 'manager');
       expect(r.status).toBe(200);
       expect(r.headers.get('content-type')).toMatch(/^application\/pdf/);
-      expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07.pdf"');
+      expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07-night.pdf"');
       expect(r.text).toBe(buffer.toString());
 
       // renderReportPdf was actually asked for the type/period/filters this
@@ -482,6 +516,153 @@ describe('GET /api/reports/:type/export', () => {
       expect(r.status).toBe(502);
       expect(r.json.error).toBe('pdf render failed');
       expect(r.json.detail).toMatch(/print-head/);
+    });
+  });
+});
+
+/**
+ * IFL reports, export hardening (task H-exports, 1 Oct 2026), over the real
+ * route: D5 (the CSV response starts with a UTF-8 BOM, nothing else does), D6
+ * (the file name carries the filters and the shift range; the header carries
+ * the report's own notes and the CSV trails them), D-49 (the PDF render is
+ * told the shift range).
+ */
+describe('H-exports (1 Oct 2026): BOM, file names, report notes and the PDF shift range', () => {
+  /** The bytes of a response: `Response.text()` strips a leading BOM while decoding, so the BOM can only be seen in the raw bytes. */
+  async function getBytes(path: string, role = 'manager'): Promise<{ status: number; bytes: Buffer; headers: Headers }> {
+    const res = await fetch(`${base}${path}`, { headers: { Cookie: cookies[role]! } });
+    return { status: res.status, bytes: Buffer.from(await res.arrayBuffer()), headers: res.headers };
+  }
+  const RANGE = 'fromShift=2026-09-01.morning&toShift=2026-09-07.night';
+
+  describe('D5: the BOM', () => {
+    it('the CSV response begins with the three bytes EF BB BF, and the text after them is the csvDocument', async () => {
+      const r = await getBytes(`/api/reports/reject/export?${Q}`);
+      expect(r.status).toBe(200);
+      expect([...r.bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+      expect(r.bytes.subarray(3, 10).toString('utf8')).toBe('section');
+      expect(r.headers.get('content-type')).toMatch(/^text\/csv; charset=utf-8/);
+    });
+
+    it('exactly one BOM, on every report type (the BOM is not part of any one report)', async () => {
+      for (const t of REPORT_TYPES) {
+        const r = await getBytes(`/api/reports/${t}/export?${Q}`);
+        expect(r.status, t).toBe(200);
+        expect([...r.bytes.subarray(0, 3)], t).toEqual([0xef, 0xbb, 0xbf]);
+        expect([...r.bytes.subarray(3, 6)], `${t}: a second BOM`).not.toEqual([0xef, 0xbb, 0xbf]);
+      }
+    });
+
+    it('the workbook does not get one: it starts with the zip magic', async () => {
+      const r = await getBytes(`/api/reports/reject/export?${Q}&format=xlsx`);
+      expect(r.bytes.subarray(0, 2).toString('latin1')).toBe('PK');
+    });
+  });
+
+  describe('D6: file names carry the filters and the shift range', () => {
+    const disposition = async (qs: string, format: 'csv' | 'xlsx') => (await get(`/api/reports/reject/export?${Q}${qs}&format=${format}`)).headers.get('content-disposition');
+
+    it('shift, then station, then product, in that order, after the period', async () => {
+      expect(await disposition('&shift=night&station=7&product=21', 'csv'))
+        .toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07-night-st7-pr21.csv"');
+      expect(await disposition('&station=7', 'xlsx')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07-st7.xlsx"');
+      expect(await disposition('&product=21', 'csv')).toBe('attachment; filename="sms-report-reject-2026-09-01_to_2026-09-07-pr21.csv"');
+    });
+
+    it('two exports of one report and one period under different filters get different names', async () => {
+      const names = new Set<string | null>();
+      for (const qs of ['', '&shift=morning', '&shift=night', '&station=7', '&product=21']) names.add(await disposition(qs, 'csv'));
+      expect(names.size).toBe(5);
+    });
+
+    it('a shift range writes its shifts into the period, for CSV and workbook alike', async () => {
+      const csv = await get(`/api/reports/daily/export?${Q}&${RANGE}`);
+      expect(csv.headers.get('content-disposition')).toBe('attachment; filename="sms-report-daily-2026-09-01-morning_to_2026-09-07-night.csv"');
+      const xlsx = await get(`/api/reports/daily/export?${Q}&${RANGE}&format=xlsx`);
+      expect(xlsx.headers.get('content-disposition')).toBe('attachment; filename="sms-report-daily-2026-09-01-morning_to_2026-09-07-night.xlsx"');
+    });
+
+    it('one shift is named once, and a range plus a filter carries both', async () => {
+      const one = await get('/api/reports/daily/export?from=2026-09-02&to=2026-09-02&fromShift=2026-09-02.evening&toShift=2026-09-02.evening');
+      expect(one.headers.get('content-disposition')).toBe('attachment; filename="sms-report-daily-2026-09-02-evening.csv"');
+      const both = await get(`/api/reports/reject/export?${Q}&shift=night&${RANGE}`);
+      expect(both.headers.get('content-disposition')).toBe('attachment; filename="sms-report-reject-2026-09-01-morning_to_2026-09-07-night-night.csv"');
+    });
+
+    it('the CSV\'s period row names the shifts too, so the attribution matches the figures it trails', async () => {
+      const ranged = await get(`/api/reports/daily/export?${Q}&${RANGE}`);
+      expect(ranged.text).toContain('\nperiod,2026-09-01 to 2026-09-07 (1 Sep morning shift \u2013 7 Sep night shift)\n');
+      const plain = await get(`/api/reports/daily/export?${Q}`);
+      expect(plain.text).toContain('\nperiod,2026-09-01 to 2026-09-07\n');
+    });
+
+    it('no filter and no range leaves the name as it always was', async () => {
+      const r = await get(`/api/reports/daily/export?${Q}`);
+      expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-daily-2026-09-01_to_2026-09-07.csv"');
+    });
+  });
+
+  describe("D6: the report's own notes", () => {
+    it("an IFL report's header carries them, led by its own note and ending in the \"Assumed until IFL confirms\" lines", async () => {
+      const r = await get(`/api/reports/rejected-cones?${Q}`, 'viewer');
+      expect(r.status).toBe(200);
+      const notes: string[] = r.json.data.header.reportNotes;
+      expect(Array.isArray(notes)).toBe(true);
+      expect(notes.length).toBeGreaterThan(1);
+      expect(notes[0]).toBe(r.json.data.report.note);
+      expect(notes.at(-1)).toMatch(/^Assumed until IFL confirms: /);
+      expect(notes.length).toBe(new Set(notes).size);
+    });
+
+    it('every pendingIfl line of an IFL report is in its header notes', async () => {
+      for (const t of ['shift-production', 'rejected-cones', 'rejected-sacks', 'sps-packing', 'sack-weight-range', 'sack-weight-summary', 'rejected-hangers', 'rejected-unknown-lifter']) {
+        const r = await get(`/api/reports/${t}?${Q}`, 'viewer');
+        expect(r.status, t).toBe(200);
+        const pending: string[] = r.json.data.report.pendingIfl;
+        expect(pending.length, `${t} states no assumption`).toBeGreaterThan(0);
+        for (const line of pending) expect(r.json.data.header.reportNotes, `${t}: ${line}`).toContain(`Assumed until IFL confirms: ${line}`);
+      }
+    });
+
+    it('an earlier report type carries no reportNotes at all (its notes print beside its figures)', async () => {
+      const r = await get(`/api/reports/daily?${Q}`, 'viewer');
+      expect(r.json.data.header.reportNotes).toBeUndefined();
+    });
+
+    it("the CSV trails the same notes as report_note rows after the blank line, after the report's own figures", async () => {
+      const csv = await get(`/api/reports/rejected-cones/export?${Q}`);
+      const json = await get(`/api/reports/rejected-cones?${Q}`, 'viewer');
+      const notes: string[] = json.json.data.header.reportNotes;
+      const blank = csv.text.indexOf('\n\n');
+      const noteRows = csv.text.slice(blank).split('\n').filter((l) => l.startsWith('report_note,'));
+      expect(noteRows.length).toBe(notes.length);
+      expect(csv.text.indexOf('report_note,')).toBeGreaterThan(blank);
+      expect(csv.text).toContain('Assumed until IFL confirms: ');
+    });
+  });
+
+  describe('D-49: the PDF render is told the shift range', () => {
+    beforeEach(async () => {
+      const { locateEdge } = await import('../services/reports/edge.js');
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      vi.mocked(locateEdge).mockReset();
+      vi.mocked(renderReportPdf).mockReset();
+      vi.mocked(locateEdge).mockReturnValue({ ok: true, path: 'C:\\fake\\msedge.exe', reason: null });
+      vi.mocked(renderReportPdf).mockResolvedValue({ buffer: Buffer.from('%PDF-1.4 fake'), pageCount: 1 });
+    });
+
+    it('a request with fromShift/toShift hands renderReportPdf the decoded ShiftRange, and the file name carries it', async () => {
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      const r = await get(`/api/reports/daily/export?${Q}&${RANGE}&format=pdf`);
+      expect(r.status).toBe(200);
+      expect(vi.mocked(renderReportPdf).mock.calls[0]![0].shiftRange).toEqual({ from: '2026-09-01', fromShift: 'morning', to: '2026-09-07', toShift: 'night' });
+      expect(r.headers.get('content-disposition')).toBe('attachment; filename="sms-report-daily-2026-09-01-morning_to_2026-09-07-night.pdf"');
+    });
+
+    it('a request without one hands it nothing, so the page is asked for the plain calendar days as before', async () => {
+      const { renderReportPdf } = await import('../services/reports/pdf.js');
+      await get(`/api/reports/daily/export?${Q}&format=pdf`);
+      expect(vi.mocked(renderReportPdf).mock.calls[0]![0].shiftRange).toBeUndefined();
     });
   });
 });

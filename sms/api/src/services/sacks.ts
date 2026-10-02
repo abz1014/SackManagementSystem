@@ -48,7 +48,7 @@ export interface SackSummaryQuery {
   product?: number;
   /**
    * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): a shift-bounded period,
-   * ANDed via `shiftRangeClause` into every sack/cone query `bindFilters`
+   * ANDed via `shiftRangeClause` into every sack/cone query `bindSackFilters`
    * builds, alongside `from`/`to`/`shift` above.
    */
   shiftRange?: ShiftRange;
@@ -116,8 +116,15 @@ interface GroupRow {
  * it must each name their own table's epoch — getting that wrong would make
  * cones-per-sack a ratio across two generations, which is precisely the
  * defect being closed.
+ *
+ * EXPORTED as `bindSackFilters` (1 Oct 2026, IFL reports) so the shared cell
+ * service (sackCells.ts) and every sack report bind the SAME predicate this
+ * summary does — one WHERE, not a second copy that could drift. Renamed from
+ * `bindFilters` because production.ts and register.ts each keep their own
+ * private `bindFilters`, and three functions of one name is a trap for the
+ * next import.
  */
-function bindFilters(
+export function bindSackFilters(
   req: SqlRequest,
   lineId: number,
   q: SackSummaryQuery,
@@ -154,7 +161,7 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
   // divided by, resolved once (generation.ts).
   const scope = await resolveGenerationScope(pool, lineId, { from: q.from, to: q.to }, ['cone_event', 'sack_event']);
   // RT24-04: judged as of the PERIOD END (tsTo, the replay cap, wins over
-  // `to` exactly as bindFilters gives it precedence below), not "whatever is
+  // `to` exactly as bindSackFilters gives it precedence below), not "whatever is
   // configured right now" — the same defect class product_limit_version was
   // built to close. Both queries are single SQL aggregates over the whole
   // period; per-row-in-JS is neither needed nor done anywhere in this file.
@@ -171,7 +178,7 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
 
   const aggregate = async (groupExpr: string | null, join = ''): Promise<GroupRow[]> => {
     const req = pool.request();
-    const where = bindFilters(req, lineId, q, 'e.', true, scope, 'sack_event');
+    const where = bindSackFilters(req, lineId, q, 'e.', true, scope, 'sack_event');
     const plausible = plausibleWhere(req, 'e.weight_kg', window, { prefix: 'sp' });
     const grp = groupExpr ?? `'total'`;
     const nameCol = join ? `, COALESCE(p.description, p.lot_code) AS product_name` : '';
@@ -220,14 +227,14 @@ export async function getSackSummary(pool: ConnectionPool, lineId: number, q: Sa
 
   // Cones in the same period and filters, for the approximate cones-per-sack.
   const coneReq = pool.request();
-  const coneWhere = bindFilters(coneReq, lineId, q, '', true, scope, 'cone_event');
+  const coneWhere = bindSackFilters(coneReq, lineId, q, '', true, scope, 'cone_event');
   const cones = await coneReq.query<{ n: number }>(`SELECT COUNT(*) n FROM sms.cone_event WHERE ${coneWhere}`);
   const coneN = Number(cones.recordset[0]?.n ?? 0);
 
   // Sacks with no product on the reading, of every sack in the period — the
   // product filter deliberately left off, as production.ts does for cones.
   const uReq = pool.request();
-  const uWhere = bindFilters(uReq, lineId, q, '', false, scope, 'sack_event');
+  const uWhere = bindSackFilters(uReq, lineId, q, '', false, scope, 'sack_event');
   const u = await uReq.query<{ n: number; no_attr: number }>(
     `SELECT COUNT(*) n, SUM(CASE WHEN material_id IS NULL THEN 1 ELSE 0 END) no_attr FROM sms.sack_event WHERE ${uWhere}`,
   );

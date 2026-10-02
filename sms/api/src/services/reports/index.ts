@@ -1,7 +1,9 @@
 /**
  * The dispatcher: one report type in, one composed report out, and the same
- * report as one CSV table — roadmap Phase 8 (15 Sep 2026). The route module
- * (routes/reports.ts) knows nothing about any individual report.
+ * report as one CSV table — roadmap Phase 8 (15 Sep 2026), now eighteen types
+ * (the six that complete IFL's own list of eight arrive as scaffolds on
+ * 1 Oct 2026). The route module (routes/reports.ts) knows nothing about any
+ * individual report.
  */
 import type { ConnectionPool } from 'mssql';
 import type { ResolvedPeriod } from '../report.js';
@@ -20,6 +22,12 @@ import { getManagementSummary, summaryCsv, type ManagementSummaryData } from './
 import { getMachineProductReport, machineProductCsv, type MachineProductReportData } from './machineProduct.js';
 import { getShiftProductionReport, shiftProductionCsv, type ShiftProductionReportData } from './shiftProduction.js';
 import { getRejectedConesReport, rejectedConesCsv, type RejectedConesReportData } from './rejectedCones.js';
+import { getRejectedSacksReport, rejectedSacksCsv, type RejectedSacksReportData } from './rejectedSacks.js';
+import { getSpsPackingReport, spsPackingCsv, type SpsPackingReportData } from './spsPacking.js';
+import { getSackWeightRangeReport, sackWeightRangeCsv, type SackWeightRangeReportData } from './sackWeightRange.js';
+import { getSackWeightSummaryReport, sackWeightSummaryCsv, type SackWeightSummaryReportData } from './sackWeightSummary.js';
+import { getRejectedHangersReport, rejectedHangersCsv, type RejectedHangersReportData } from './rejectedHangers.js';
+import { getRejectedUnknownLifterReport, rejectedUnknownLifterCsv, type RejectedUnknownLifterReportData } from './rejectedUnknownLifter.js';
 
 export interface ReportDataByType {
   daily: DailyReportData;
@@ -34,6 +42,12 @@ export interface ReportDataByType {
   'machine-product': MachineProductReportData;
   'shift-production': ShiftProductionReportData;
   'rejected-cones': RejectedConesReportData;
+  'rejected-sacks': RejectedSacksReportData;
+  'sps-packing': SpsPackingReportData;
+  'sack-weight-range': SackWeightRangeReportData;
+  'sack-weight-summary': SackWeightSummaryReportData;
+  'rejected-hangers': RejectedHangersReportData;
+  'rejected-unknown-lifter': RejectedUnknownLifterReportData;
 }
 
 export type AnyReportData = ReportDataByType[ReportType];
@@ -70,6 +84,12 @@ const BUILDERS: { [T in ReportType]: Builder<T> } = {
   'machine-product': getMachineProductReport,
   'shift-production': getShiftProductionReport,
   'rejected-cones': getRejectedConesReport,
+  'rejected-sacks': getRejectedSacksReport,
+  'sps-packing': getSpsPackingReport,
+  'sack-weight-range': getSackWeightRangeReport,
+  'sack-weight-summary': getSackWeightSummaryReport,
+  'rejected-hangers': getRejectedHangersReport,
+  'rejected-unknown-lifter': getRejectedUnknownLifterReport,
 };
 
 const CSV: { [T in ReportType]: (d: ReportDataByType[T]) => CsvTable } = {
@@ -85,6 +105,12 @@ const CSV: { [T in ReportType]: (d: ReportDataByType[T]) => CsvTable } = {
   'machine-product': machineProductCsv,
   'shift-production': shiftProductionCsv,
   'rejected-cones': rejectedConesCsv,
+  'rejected-sacks': rejectedSacksCsv,
+  'sps-packing': spsPackingCsv,
+  'sack-weight-range': sackWeightRangeCsv,
+  'sack-weight-summary': sackWeightSummaryCsv,
+  'rejected-hangers': rejectedHangersCsv,
+  'rejected-unknown-lifter': rejectedUnknownLifterCsv,
 };
 
 export function buildReport<T extends ReportType>(
@@ -107,8 +133,19 @@ export function reportCsv<T extends ReportType>(type: T, data: ReportDataByType[
 }
 
 export * from './common.js';
-export type { ShiftProductionReportData, ShiftProductionRow, ShiftProductionSummaryRow, ShiftProductionShiftTotal, ShiftProductionFigures } from './shiftProduction.js';
-export type { RejectedConesReportData, RejectedConeRow, WeightRangeRow, WeightRangeByWinder } from './rejectedCones.js';
+export type {
+  ShiftProductionReportData, ShiftProductionRow, ShiftProductionSummaryRow, ShiftProductionShiftTotal, ShiftProductionDayTotal,
+  ShiftProductionWinderTotal, ShiftProductionFigures,
+} from './shiftProduction.js';
+export type { RejectedConesReportData, RejectedConeRow, RejectedConeLimits, WeightRangeRow, WeightRangeByWinder } from './rejectedCones.js';
+export type { RejectedSacksReportData, RejectedSackRow, RejectedSackShiftRow, RejectedSackDayRow, RejectedSackPassedRange, RejectedSackCounts } from './rejectedSacks.js';
+export type { SpsPackingReportData, SpsCountColumn, SpsCell, SpsMatrixRow, SpsCountTotal, SpsBlock } from './spsPacking.js';
+export type { SackWeightRangeReportData, SackWeightBand, SackBandCounts, SackBandKind, SackSpreadRow } from './sackWeightRange.js';
+export type { SackWeightSummaryReportData, SackSummaryFigures, SackSummaryRow, SackSummaryDayTotal, SackSummaryShiftTotal, SackSummaryCountRow } from './sackWeightSummary.js';
+export type { RejectedHangersReportData, RejectedHangerRow, RejectedHangerReject, RejectedHangerFlag } from './rejectedHangers.js';
+export type { RejectedUnknownLifterReportData, LifterRow, UnknownLifterReject } from './rejectedUnknownLifter.js';
+export { plantWallClock, parsePlantWallClock } from './plantTime.js';
 export { buildHeader } from './header.js';
-export { csvDocument, csvFilename, reportFilename, attributionRows, toCsv, escapeCell } from './csv.js';
+export { csvDocument, csvFilename, reportFilename, attributionRows, toCsv, escapeCell, periodText, CSV_BOM } from './csv.js';
+export { reportNotesOf, PENDING_IFL_HEADING } from './notes.js';
 export { buildXlsx, reportSheets, XLSX_CONTENT_TYPE } from './xlsx.js';

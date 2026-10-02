@@ -1,5 +1,5 @@
 /**
- * Roadmap Phase 8 (15 Sep 2026): the nine report services.
+ * Roadmap Phase 8 (15 Sep 2026): the nine report services (the tenth, IFL's own pair and the six that complete IFL's list of eight are pinned in their own files; the dispatcher test at the end covers all 18).
  *
  * Each report is COMPOSED from the services that already compute its
  * figures, so the thing to prove is delegation — that a report's number is
@@ -27,7 +27,21 @@ vi.mock('../production.js', async (importOriginal) => {
 });
 vi.mock('../weights.js', () => ({ getWeights: vi.fn(), getConfiguredBasis: vi.fn() }));
 vi.mock('../weightStations.js', () => ({ getWeightStations: vi.fn() }));
-vi.mock('../rejects.js', () => ({ getRejectPareto: vi.fn(), getRejectsByDayCode: vi.fn() }));
+// IFL reports (1 Oct 2026): the shift-production, rejected-hangers and
+// rejected-unknown-lifter builders import the REAL coneMatchPredicate and
+// getUnmatchedRejects from here (the shared reject/cone merge-key rule), so only
+// the two reject-screen services this file stubs are replaced.
+vi.mock('../rejects.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../rejects.js')>();
+  return { ...actual, getRejectPareto: vi.fn(), getRejectsByDayCode: vi.fn() };
+});
+// IFL reports D-R5: the sack report's averages, scale-verdict share and weight
+// basis come from the shared cells (sackCells.ts). Their SQL and arithmetic are
+// pinned in sackCells.test.ts; here the cells are hand-built.
+vi.mock('../sackCells.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../sackCells.js')>();
+  return { ...actual, getSackCells: vi.fn() };
+});
 vi.mock('../rejectSpc.js', () => ({ getRejectSpc: vi.fn() }));
 vi.mock('../admin.js', () => ({ getPlausibilityRule: vi.fn() }));
 vi.mock('../productLimits.js', async (importOriginal) => {
@@ -46,6 +60,7 @@ import { getProduction } from '../production.js';
 import { getWeights, getConfiguredBasis } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { getRejectPareto, getRejectsByDayCode } from '../rejects.js';
+import { getSackCells, type SackCell, type SackCellsResult } from '../sackCells.js';
 import { getRejectSpc } from '../rejectSpc.js';
 import { getPlausibilityRule } from '../admin.js';
 import { loadProductCatalogue } from '../productLimits.js';
@@ -166,6 +181,29 @@ const fakeWeights = () => ({
   note: '',
 });
 
+/**
+ * A shared sack cell (sackCells.ts) of `n` sacks all weighing `w` kg, centred at
+ * 50 like the SQL. Two of them -- 23 sacks the scale passed and 17 it rejected,
+ * every one 47 kg -- give this file's fixture its 40 sacks, 57.5 % in range and
+ * 47 kg average.
+ */
+function sackCell(n: number, inRange: boolean | null, w = 47, over: Partial<SackCell> = {}): SackCell {
+  return {
+    date: '2026-09-02', shift: 'morning', materialId: 21, inRange,
+    sacks: n, kg: n * w, implausible: 0, plausible: n, plausKg: n * w,
+    sumD: n * (w - 50), sumD2: n * (w - 50) ** 2, centreKg: 50, minKg: w, maxKg: w,
+    ...over,
+  };
+}
+function cellsResult(cells: SackCell[], over: Partial<SackCellsResult> = {}): SackCellsResult {
+  return {
+    cells, weightBasis: 'as_recorded', tareKg: 0.5, plausibility: { loKg: 40, hiKg: 60 },
+    generationNote: { generation: null, spansGenerations: false, otherGenerationExcluded: 0, excludedSimulator: 0 },
+    weightRuleChangedInPeriod: false, plausibilityRuleChangedInPeriod: false,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.mocked(getReport).mockReset();
   vi.mocked(listEvents).mockReset();
@@ -175,6 +213,7 @@ beforeEach(() => {
   vi.mocked(getConfiguredBasis).mockReset();
   vi.mocked(getWeightStations).mockReset();
   vi.mocked(getRejectPareto).mockReset();
+  vi.mocked(getSackCells).mockReset();
   vi.mocked(getRejectsByDayCode).mockReset();
   vi.mocked(getRejectSpc).mockReset();
   vi.mocked(getPlausibilityRule).mockReset();
@@ -211,6 +250,7 @@ beforeEach(() => {
   vi.mocked(getWeights).mockResolvedValue(fakeWeights() as never);
   vi.mocked(getConfiguredBasis).mockResolvedValue('as_recorded');
   vi.mocked(getWeightStations).mockResolvedValue(fakeStations() as never);
+  vi.mocked(getSackCells).mockResolvedValue(cellsResult([sackCell(23, true), sackCell(17, false)]));
   vi.mocked(getRejectPareto).mockResolvedValue({
     total: 20,
     reasons: [{ rejectCodeId: 1, rejectType: 'quality', tubeCode: 1, materialCode: 3, label: null, displayLabel: 'Tube 1 · Mat 3', count: 15, pct: 75, cumulativePct: 75 },
@@ -322,7 +362,8 @@ describe('CSV escaping agrees with the register export', () => {
     expect(attributionRows(header).find(([k]) => k === 'filters')![1]).toBe('shift=night');
     expect(attributionRows(header).find(([k]) => k === 'generated_by')![1]).toBe('The GM');
     expect(attributionRows(header).find(([k]) => k === 'ifl_approval')![1]).toBe('awaiting');
-    expect(csvFilename(header)).toBe('sms-report-daily-2026-09-01_to_2026-09-07.csv');
+    // IFL reports D6 (1 Oct 2026): the filter set is part of the name — this header carries shift=night.
+    expect(csvFilename(header)).toBe('sms-report-daily-2026-09-01_to_2026-09-07-night.csv');
     expect(toCsv([], [['k', 'v']])).toBe('k,v');
   });
 });
@@ -832,10 +873,13 @@ describe('sack report', () => {
     expect(prodRow[1]).toBe('205-IL0-SD');
     expect(prodRow[SACK_CSV_HEADERS.indexOf('material_id')]).toBe(21);
   });
-  it('H8 (15 Sep 2026): weightBasis is whatever getWeights resolves, never a hardcoded literal', async () => {
-    vi.mocked(getWeights).mockResolvedValueOnce({ ...fakeWeights(), basis: 'net' } as never);
+  it('H8 (15 Sep 2026; D-S4, 1 Oct 2026): weightBasis is whatever the shared cells resolve for the period end, never a hardcoded literal', async () => {
+    vi.mocked(getSackCells).mockResolvedValueOnce(cellsResult([sackCell(23, true), sackCell(17, false)], { weightBasis: 'net' }));
     const d = await getSackReport(fakePool().pool, 1, PERIOD, {});
-    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to);
+    // The distribution is still asked for with NO basis argument, so getWeights
+    // resolves the one Setup has on file; the report's own basis label is the
+    // cells' (the rule in force at the period end), and "right now" is not read.
+    expect(getWeights).toHaveBeenCalledWith(expect.anything(), 1, undefined, PERIOD.from, PERIOD.to, undefined);
     expect(d.weightBasis).toBe('net');
     expect(getConfiguredBasis).not.toHaveBeenCalled();
   });
@@ -845,12 +889,12 @@ describe('sack report', () => {
     expect(d.distribution).toBeNull();
     for (const c of vi.mocked(getProduction).mock.calls) expect(c[2].shift).toBe('night');
   });
-  it('H8: under a shift filter, weightBasis still comes from the configured basis (getConfiguredBasis), not a hardcoded fallback', async () => {
-    vi.mocked(getConfiguredBasis).mockResolvedValueOnce('net');
-    const d = await getSackReport(fakePool().pool, 1, PERIOD, { shift: 'night' });
-    expect(getConfiguredBasis).toHaveBeenCalledWith(expect.anything(), 1);
-    expect(d.weightBasis).toBe('net');
-  });
+  // The old pin here ("under a shift filter weightBasis comes from
+  // getConfiguredBasis, the basis right now") IS defect D-S4: one period could
+  // name two bases depending on whether a shift was chosen. It is replaced, not
+  // kept: sack.fixes.test.ts "D-S4" pins that the same period names the same
+  // basis with or without a shift filter and that getConfiguredBasis is never
+  // consulted.
 });
 
 describe('calibration report', () => {

@@ -25,6 +25,19 @@
  * a database session — see auth.ts's RENDER TOKEN block for the full
  * reasoning and why it does not widen the auth surface.
  *
+ * EXPORT DETAILS (IFL reports, 1 Oct 2026):
+ *   - D5: the CSV response starts with a UTF-8 byte-order mark. Excel on Windows
+ *     opens a BOM-less UTF-8 file as the system code page and prints the report
+ *     notes' middle dots, dashes and curly quotes as mojibake; `csvDocument`
+ *     itself stays BOM-free (a script reading the file does not want one) and
+ *     the BOM is this route's to add, on this response only.
+ *   - D6: the three file names carry the report's filters and shift range
+ *     (`reportFilename`), so two exports of one report over one set of days
+ *     cannot overwrite each other in a downloads folder.
+ *   - D-49: the PDF render is told the shift range too; it used to be asked for
+ *     the plain calendar days, so a PDF could describe a wider period than the
+ *     CSV and workbook of the same request.
+ *
  * There is no per-type route: every type, including management-summary,
  * is served by the single parameterised handler. The gate lives in `parse()`,
  * which checks the caller's rank against `REPORT_RANK[type]` for EVERY type
@@ -45,7 +58,7 @@ import { MAX_RANGE_DAYS } from '../config.js';
 import { plantNowMs } from '../services/plantClock.js';
 import { resolvePeriod, REPORT_PERIODS, type ReportPeriod, type ResolvedPeriod } from '../services/report.js';
 import {
-  buildHeader, buildReport, buildXlsx, csvDocument, csvFilename, reportCsv, reportFilename, reportSheets,
+  buildHeader, buildReport, buildXlsx, csvDocument, csvFilename, reportCsv, reportFilename, reportSheets, CSV_BOM,
   EXPORT_RANK, FILTERS_BY_TYPE, REPORT_RANK, XLSX_CONTENT_TYPE, isReportType,
   type AnyReportData, type ReportFilters, type ReportHeader, type ReportType,
 } from '../services/reports/index.js';
@@ -83,16 +96,10 @@ const reportQuery = z.object({
   // ShiftRange and passed to buildHeader (header.ts's own `shiftRange`
   // field, Task TB2) so the header/CSV/XLSX/PDF attribution block and
   // `periodLabel` say "2 Sep morning shift – 3 Sep night shift" instead of
-  // the plain calendar range. NOT YET threaded into the report BODY:
-  // `buildReport`'s dispatcher (services/reports/index.ts, TB2-owned) calls
-  // each report builder with a fixed 4-argument `Builder<T>` signature that
-  // has no shiftRange parameter, even though every individual builder
-  // (daily.ts, shift.ts, product.ts, sack.ts, reject.ts, machineProduct.ts,
-  // and coneWeight.ts/station.ts partially) already accepts one as an
-  // optional 5th argument. Widening that dispatcher is out of this route
-  // file's ownership; until it happens, a report's own figures still
-  // describe the whole `[from, to]` window regardless of fromShift/toShift,
-  // while the header/period label above already reflects the narrower ask.
+  // the plain calendar range. Task TD (29 Sep 2026) threaded it into the
+  // report BODY as well (`buildReport`'s 5th argument), and IFL reports D-49
+  // (1 Oct 2026) into the PDF render URL and the export file names, so the
+  // four formats of one request describe one period.
   fromShift: shiftRefParam,
   toShift: shiftRefParam,
   product: z.coerce.number().int().positive().optional(),
@@ -385,13 +392,13 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
         try {
           const [rendered, data] = await Promise.all([
             renderReportPdf({
-              baseUrl, type: p.type, resolved: p.resolved, filters: p.filters, atMs: p.atMs, user, edgePath: edge.path,
+              baseUrl, type: p.type, resolved: p.resolved, filters: p.filters, atMs: p.atMs, shiftRange: p.shiftRange, user, edgePath: edge.path,
             }),
             reportDataFor(p),
           ]);
           const header = await headerFor(p, req, data);
           res.setHeader('Content-Type', PDF_CONTENT_TYPE);
-          res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'pdf')}"`);
+          res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'pdf', p.shiftRange)}"`);
           res.send(rendered.buffer);
           audit(req, 'export.pdf', 'report', p.type, `${detail} (${rendered.pageCount} pages)`);
         } catch (err) {
@@ -406,14 +413,15 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
       const table = reportCsv(p.type, data);
       if (fmt.data.format === 'xlsx') {
         res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
-        res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'xlsx')}"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${reportFilename(header, 'xlsx', p.shiftRange)}"`);
         res.send(buildXlsx(reportSheets(p.type, data, header, table)));
         audit(req, 'export.xlsx', 'report', p.type, detail);
         return;
       }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${csvFilename(header)}"`);
-      res.send(csvDocument(table.headers, table.rows, header));
+      res.setHeader('Content-Disposition', `attachment; filename="${csvFilename(header, p.shiftRange)}"`);
+      // D5: the BOM goes on the response, never into `csvDocument` — see this file's header.
+      res.send(CSV_BOM + csvDocument(table.headers, table.rows, header));
       audit(req, 'export.csv', 'report', p.type, detail);
     } catch (err) {
       next(err);

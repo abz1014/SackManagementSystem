@@ -1,12 +1,16 @@
 /**
- * The nine report types on one surface — roadmap Phase 8 (15 Sep 2026).
+ * The report types on one surface — roadmap Phase 8 (15 Sep 2026), grown to
+ * eighteen on 1 Oct 2026.
  *
- * Until this wave the application produced ONE of the nine reports IFL's
+ * Until Phase 8 the application produced ONE of the nine reports IFL's
  * quotation names (the daily production summary, `services/report.ts`). The
  * other eight had their figures computed somewhere — the station table, the
  * Pareto, the control chart, the ledger — but nowhere a manager could ask
  * for "the reject report for last month" and get one page, one CSV and one
- * printed sheet with the line, the period and who produced it on it.
+ * printed sheet with the line, the period and who produced it on it. Since
+ * then: the tenth (product by machine and shift), IFL's two SSRS-styled
+ * reports (30 Sep 2026), and the six that complete the eight reports IFL
+ * listed by email on 29 Sep 2026 (1 Oct 2026, below).
  *
  * WHAT THIS FOLDER IS, AND IS NOT. Each module here COMPOSES a report from
  * the services that already compute its figures (production, rejects,
@@ -42,6 +46,15 @@ export const REPORT_TYPES = [
   // IFL-SSRS-styled pair (30 Sep 2026), registered after the existing ten.
   'shift-production',
   'rejected-cones',
+  // The six that complete IFL's own list of eight (email of 29 Sep 2026),
+  // appended AFTER 'rejected-cones' so every earlier registry pin (chip order,
+  // saved URLs, the CSV/RBAC tests) holds: 18 types in all.
+  'rejected-sacks',
+  'sps-packing',
+  'sack-weight-range',
+  'sack-weight-summary',
+  'rejected-hangers',
+  'rejected-unknown-lifter',
 ] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
@@ -61,8 +74,15 @@ export const REPORT_TITLES: Record<ReportType, string> = {
   calibration: 'Calibration report',
   'management-summary': 'Management summary',
   'machine-product': 'Product by machine and shift',
-  'shift-production': 'Shift Production Report',
-  'rejected-cones': 'Rejected Cones Report',
+  // IFL's own report names (their email of 29 Sep 2026), not ours.
+  'shift-production': 'Shift-wise CTS Loop Production Report',
+  'rejected-cones': 'List of Rejected Cones Against Weight',
+  'rejected-sacks': 'Rejected Sack Report - Daily',
+  'sps-packing': 'SPS Production Report - Count-wise Packing at Each SPS',
+  'sack-weight-range': 'SPS Sack Weight Range Report',
+  'sack-weight-summary': 'Sack Packing Weight Summary',
+  'rejected-hangers': 'Rejected Cone Hangers Report',
+  'rejected-unknown-lifter': 'Rejected Unknown (Lifter) Report',
 };
 
 /**
@@ -85,6 +105,12 @@ export const REPORT_RANK: Record<ReportType, 1 | 3> = {
   'machine-product': 1,
   'shift-production': 1,
   'rejected-cones': 1,
+  'rejected-sacks': 1,
+  'sps-packing': 1,
+  'sack-weight-range': 1,
+  'sack-weight-summary': 1,
+  'rejected-hangers': 1,
+  'rejected-unknown-lifter': 1,
 };
 export const EXPORT_RANK = 3;
 
@@ -121,7 +147,46 @@ export const FILTERS_BY_TYPE: Record<ReportType, readonly ReportFilterName[]> = 
   'machine-product': ['shift', 'station'],
   'shift-production': ['shift'],
   'rejected-cones': ['shift', 'station'],
+  // The sack reports: a sack carries a product (MaterialId, since 5 Aug 2026)
+  // and a shift, never a winder/station — the plant's one sack scale records
+  // none — so no report on sacks accepts a station filter.
+  'rejected-sacks': ['shift', 'product'],
+  'sps-packing': ['shift'],
+  'sack-weight-range': ['shift', 'product'],
+  'sack-weight-summary': ['shift', 'product'],
+  // The hanger and lifter reports read cones AND rejects, both of which carry
+  // a station; the lifter report is about the lifter, so a station filter
+  // would contradict its own grouping.
+  'rejected-hangers': ['shift', 'station', 'product'],
+  'rejected-unknown-lifter': ['shift', 'product'],
 };
+
+/**
+ * The most rows any report LIST (a rejected-cone list, a rejected-sack list,
+ * a per-reject listing) carries in any output — screen, print, CSV, XLSX. A
+ * report that hits it states `listTotal` (what the period really holds) beside
+ * `listCap` (what was printed), so a truncated list can never read as the
+ * whole one. 5,000 rows is about 100 printed pages: past that nobody is
+ * reading a list, they are filtering a spreadsheet, and the filters exist.
+ */
+export const LIST_CAP = 5000;
+
+/**
+ * A CSV row built from a record keyed by column NAME and returned in the
+ * header's own order, every column the record leaves out an empty cell. A
+ * 16-column table written positionally (`[section, null, null, ..., x]`) is a
+ * misaligned file waiting for the next column to be inserted; this makes the
+ * row width the header's width by construction, and an unknown key a type
+ * error. The cell type is the CSV cell type (csv.ts), spelled out here so
+ * this module keeps importing no sibling.
+ */
+export function csvRowOf<const H extends readonly string[]>(
+  headers: H,
+  values: Partial<Record<H[number], string | number | boolean | null | undefined>>,
+): (string | number | boolean | null)[] {
+  const rec = values as Record<string, string | number | boolean | null | undefined>;
+  return headers.map((h) => rec[h] ?? null);
+}
 
 /** A production-day range, inclusive, as every day-grained endpoint takes it. */
 export interface DayRange {
@@ -182,6 +247,18 @@ export interface ReportHeader {
    * built before this field existed, so the CSV/XLSX row is never missing.
    */
   shiftNote?: string;
+  /**
+   * IFL reports (1 Oct 2026, D6): the report's own printable notes — what the
+   * figures mean, the plausibility window, and every "Assumed until IFL
+   * confirms" line (`pendingIfl`) — as plain sentences, composed by the pure
+   * `reportNotesOf(type, data)` (notes.ts) from the report DATA, never from
+   * the screen. The CSV's trailing attribution rows (as `report_note`), the
+   * XLSX header sheet and the printed closing block all read THIS field, so
+   * the three can never carry different caveats. Optional for the same
+   * back-compat reason `shiftNote`/`periodLabel` are: absent means "no notes
+   * were composed", never "no caveats".
+   */
+  reportNotes?: string[];
   /**
    * RT24-03 (24 Sep 2026): whether this report's period crosses IFL's
    * 2026-08-05 rebuild boundary and a source generation had to be excluded
