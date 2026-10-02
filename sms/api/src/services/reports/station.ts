@@ -25,6 +25,7 @@ import { loadProductCatalogue } from '../productLimits.js';
 import { describeRanTarget, productsRanInPeriod, type RanProduct } from './ranProducts.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
+import { getRuleChangeFlags } from '../ruleAsOf.js';
 
 export interface StationReportRow {
   station: number;
@@ -79,6 +80,9 @@ export interface StationReportData {
    * of `resolveGenerationScope`.
    */
   generationNote: GenerationNote;
+  /** C-036: a rule changed in VALUE inside the period — notes.ts prints the disclosure. Absent on a payload that predates it. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 export async function getStationReport(
@@ -106,12 +110,13 @@ export async function getStationReport(
   // land on the same generation as production.ts's own scoping of `prod`
   // below, without threading a scope through either signature. One extra
   // round trip, accepted per the remediation brief.
-  const [ws, prod, ctx, scope, catalogue] = await Promise.all([
+  const [ws, prod, ctx, scope, catalogue, ruleFlags] = await Promise.all([
     getWeightStations(pool, lineId, from, to, undefined, { from, to, shiftRange }),
     getProduction(pool, lineId, { from, to, groupBy: 'station', shiftRange }),
     loadStateContext(pool, lineId),
     resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
     loadProductCatalogue(pool),
+    getRuleChangeFlags(pool, lineId, from, to),
   ]);
   const ran = describeRanTarget(await productsRanInPeriod(pool, lineId, from, to, catalogue, scope));
   const useRan = ran.products.length > 0;
@@ -186,6 +191,7 @@ export async function getStationReport(
       'The mean and the bias are over readings inside the plausibility window; the cone count is every reading. ' +
       'The line-wide target names the products the readings themselves carried, with the setpoint in force for each at the end of the period. Weighing data cannot tell a heavy scale from heavy cones.',
     generationNote: noteOf(scope),
+    ...ruleFlags,
   };
 }
 

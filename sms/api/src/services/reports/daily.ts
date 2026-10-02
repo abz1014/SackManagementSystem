@@ -47,6 +47,7 @@ import { pct, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import type { GenerationNote } from '../generation.js';
 import type { ShiftRange } from '../../shiftRange.js';
+import { getRuleChangeFlags } from '../ruleAsOf.js';
 
 export interface RejectPopulations {
   /** cone_event rows the scale's own bit marked out of range — what Readings lists as "Rejected cones". */
@@ -63,6 +64,9 @@ export interface DailyReportData extends ReportData {
   rejectPopulations: RejectPopulations;
   /** RT-002/RT-029: the scope `byScale` (via `countEvents`) was resolved and bound to. */
   generationNote: GenerationNote;
+  /** C-036: a rule changed in VALUE inside the period — notes.ts prints the disclosure. Absent on a payload that predates it. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 export async function getDailyReport(
@@ -87,9 +91,10 @@ export async function getDailyReport(
   // own printed figure/CSV is a UI decision for whoever owns this report's
   // rendering, out of this pass's two-file (Sacks.tsx, daily.ts) scope —
   // flagged, not fixed, the way this file already flags other known gaps.
-  const [report, scaleCount] = await Promise.all([
+  const [report, scaleCount, ruleFlags] = await Promise.all([
     getReport(pool, lineId, resolved, shift, shiftRange),
     countEvents(pool, lineId, 'cone', { from, to, shift: shift ?? undefined, inRange: false, shiftRange }),
+    getRuleChangeFlags(pool, lineId, from, to),
   ]);
   const byScale = scaleCount.count;
   const cones = report.totals.cones;
@@ -97,6 +102,7 @@ export async function getDailyReport(
   return {
     ...report,
     generationNote: scaleCount.note,
+    ...ruleFlags,
     rejectPopulations: {
       byScale,
       byScalePct: pct(byScale, cones),

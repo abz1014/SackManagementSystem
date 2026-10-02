@@ -185,6 +185,9 @@ export interface ManagementSummaryData {
   note: string;
   /** RT-002/RT-029 follow-up (23 Sep 2026): the scope `cones_rejected_by_scale`'s own count was resolved and bound to, per period — see register.ts's countEvents. */
   generationNote: { current: GenerationNote; prior: GenerationNote };
+  /** C-036: a rule changed in VALUE inside the CURRENT period — notes.ts prints the disclosure. Absent on a payload that predates it. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 interface PeriodFigures {
@@ -196,6 +199,8 @@ interface PeriodFigures {
   /** F12: share of this period's cone readings carrying a product, 0..1; null when the period holds none. */
   attributedShare: number | null;
   generationNote: GenerationNote;
+  weightRuleChangedInPeriod: boolean;
+  plausibilityRuleChangedInPeriod: boolean;
 }
 
 /**
@@ -367,7 +372,10 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange,
   const mixCones = productMix.reduce((a, m) => a + m.cones, 0);
   const attributedCones = productMix.reduce((a, m) => a + (m.productId == null ? 0 : m.cones), 0);
   const attributedShare = mixCones > 0 ? attributedCones / mixCones : null;
-  return { coverage: report.coverage, values, totals: t, productMix, attributedShare, generationNote: scaleRejected.note };
+  return { coverage: report.coverage, values, totals: t, productMix, attributedShare, generationNote: scaleRejected.note,
+    weightRuleChangedInPeriod: weights.weightRuleChangedInPeriod === true,
+    plausibilityRuleChangedInPeriod: weights.plausibilityRuleChangedInPeriod === true,
+  };
 }
 
 export async function getManagementSummary(
@@ -465,6 +473,8 @@ export async function getManagementSummary(
     verdict: { cones: cur.totals.cones, sacks: cur.totals.sacks, sackWeightKg: cur.totals.sackWeightKg },
     approval: 'awaiting',
     generationNote: { current: cur.generationNote, prior: prev.generationNote },
+    weightRuleChangedInPeriod: cur.weightRuleChangedInPeriod,
+    plausibilityRuleChangedInPeriod: cur.plausibilityRuleChangedInPeriod,
     note:
       'Each figure is shown beside the same figure for the period of equal length immediately before it. A comparison is ' +
       'withheld — shown as “not comparable”, with the reason — when the two periods differ too much in how many days held ' +

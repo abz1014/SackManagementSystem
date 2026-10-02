@@ -55,6 +55,17 @@ export const IFL_NOTE_TYPES: readonly ReportType[] = [
 export const LIMITS_LOWER_BOUND_NOTE =
   'Limits marked “oldest on record” are the earliest version known; the reading is older than that record, so the limits in force at the time may have differed (they are “no later than” this version).';
 
+/**
+ * C-036 (D-100, 2 Oct 2026): the two rule-change disclosures. The sack reports (rejectedSacks, sackWeightRange,
+ * sackWeightSummary, spsPacking) build the same sentences in their own files, ending "applied to every sack"; these end "every
+ * reading" because the five earlier types below apply the rule to cones as well as sacks. Printed only when the rule's VALUE
+ * changed inside the period (ruleAsOf.ts `ruleChangesWithin`).
+ */
+export const WEIGHT_RULE_CHANGE_NOTE =
+  'Setup recorded a new weight-basis version during this period; the version in force at its end is applied to every reading.';
+export const PLAUSIBILITY_RULE_CHANGE_NOTE =
+  'Setup recorded a new plausible-weight-window version during this period; the version in force at its end is applied to every reading.';
+
 type Rec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is Rec => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -209,9 +220,13 @@ function caveatsOf(type: ReportType, d: Rec): (string | null)[] {
       const rate = num(f.lineRatePct);
       const judged = num(f.hangersJudged);
       const minInspected = num(f.minInspected);
+      // C-134 (2 Oct 2026): under a station or product filter the rate is that population's, not the line's.
+      const flt = rec(d.filters);
+      const only = [num(flt.station) != null ? `station ${num(flt.station)}` : null, num(flt.product) != null ? `product ${num(flt.product)}` : null].filter((x): x is string => x != null);
+      const rateWords = only.length > 0 ? `the rate of the filtered population (${only.join(' and ')} only)` : 'the period’s own line rate';
       return [
         canFlag && rate != null && judged != null && minInspected != null
-          ? `A hanger “stands out in this period” only when its reject count is unlikely at the period’s own line rate of ${rate}% (an exact binomial test at 5% across the ${n0(judged)} hangers with at least ${n0(minInspected)} inspected cones). It describes this period’s counts, not the hanger.`
+          ? `A hanger “stands out in this period” only when its reject count is unlikely at ${rateWords} of ${rate}% (an exact binomial test at 5% across the ${n0(judged)} hangers with at least ${n0(minInspected)} inspected cones). It describes this period’s counts, not the hanger.`
           : null,
         f.canFlag === false ? `No hanger is marked: ${str(f.reason) ?? 'too few cones per hanger in this period'}.` : null,
         clockFaultSentence(d.excludedClockFault, 'reject record'),
@@ -239,10 +254,18 @@ function caveatsOf(type: ReportType, d: Rec): (string | null)[] {
   }
 }
 
+/** The rule-change disclosures an earlier type owes, from the two flags on its data (an absent flag states nothing). */
+function ruleChangeNotes(d: Rec): (string | null)[] {
+  return [
+    d.weightRuleChangedInPeriod === true ? WEIGHT_RULE_CHANGE_NOTE : null,
+    d.plausibilityRuleChangedInPeriod === true ? PLAUSIBILITY_RULE_CHANGE_NOTE : null,
+  ];
+}
+
 /** The note strings each earlier report type's screen prints (web `screens/report/<Type>.tsx`), read from the same data fields. */
 function olderTypeNotes(type: ReportType, d: Rec): (string | null)[] {
   switch (type) {
-    case 'daily': return [str(rec(d.rejectPopulations).note)];
+    case 'daily': return [str(rec(d.rejectPopulations).note), ...ruleChangeNotes(d)];
     case 'shift': return [str(d.timeLostNote)];
     case 'sack': {
       const c = rec(d.caveats);
@@ -250,10 +273,11 @@ function olderTypeNotes(type: ReportType, d: Rec): (string | null)[] {
     }
     case 'product':
     case 'station':
-    case 'reject':
     case 'cone-weight':
-    case 'calibration':
     case 'management-summary':
+      return [str(d.note), ...ruleChangeNotes(d)];
+    case 'reject':
+    case 'calibration':
     case 'machine-product':
       return [str(d.note)];
     default:

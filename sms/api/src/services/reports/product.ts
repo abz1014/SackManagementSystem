@@ -29,6 +29,7 @@ import { toReportLine, type ReportLine, type ResolvedPeriod } from '../report.js
 import { resolvePeriodTarget, round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
+import { getRuleChangeFlags } from '../ruleAsOf.js';
 
 export interface ProductReportRow extends ReportLine {
   /** material_id, or null for readings that predate product recording. */
@@ -95,6 +96,9 @@ export interface ProductReportData {
    * scope threaded through either signature.
    */
   generationNote: GenerationNote;
+  /** C-036: a rule changed in VALUE inside the period — notes.ts prints the disclosure. Absent on a payload that predates it. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 export async function getProductReport(
@@ -106,7 +110,7 @@ export async function getProductReport(
   shiftRange?: ShiftRange,
 ): Promise<ProductReportData> {
   const { from, to } = resolved;
-  const [ctx, catalogue, prod, scope] = await Promise.all([
+  const [ctx, catalogue, prod, scope, ruleFlags] = await Promise.all([
     loadStateContext(pool, lineId),
     loadProductCatalogue(pool),
     getProduction(pool, lineId, { from, to, shift: filters.shift, station: filters.station, groupBy: 'product', shiftRange }),
@@ -114,6 +118,7 @@ export async function getProductReport(
     // to) key getProduction resolves internally — guaranteed to agree with
     // `prod` without threading a scope through either signature.
     resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']),
+    getRuleChangeFlags(pool, lineId, from, to),
   ]);
 
   const bind = (req: mssql.Request) => {
@@ -234,6 +239,7 @@ export async function getProductReport(
       'Each reading is grouped by the product recorded on it by the plant. Readings from before the source recorded a product ' +
       'are listed as "No product on the reading" and are never assigned one after the fact.',
     generationNote: noteOf(scope),
+    ...ruleFlags,
   };
 }
 

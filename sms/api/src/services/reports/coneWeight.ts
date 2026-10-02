@@ -117,6 +117,9 @@ export interface ConeWeightReportData {
    * own ran) rather than from a scope that was never resolved.
    */
   generationNote: GenerationNote | null;
+  /** C-036: a rule changed in VALUE inside the period — notes.ts prints the disclosure. Absent on a payload that predates it. */
+  weightRuleChangedInPeriod?: boolean;
+  plausibilityRuleChangedInPeriod?: boolean;
 }
 
 /**
@@ -289,6 +292,8 @@ export async function getConeWeightReport(
         ? ' Those limits were first SEEN at the instant stated, not known to have started then, so read it as "no later than".'
         : ''),
     generationNote: noteOf(scope),
+    weightRuleChangedInPeriod: w.weightRuleChangedInPeriod === true,
+    plausibilityRuleChangedInPeriod: w.plausibilityRuleChangedInPeriod === true,
   };
 }
 

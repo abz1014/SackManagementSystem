@@ -73,11 +73,17 @@ export function ruleAsOf<T>(history: readonly RuleVersion<T>[], atPlantMs: numbe
 /**
  * True when the rule changed at least once strictly inside
  * `(fromPlantMs, toPlantMs]` — i.e. a version dated after the period's start
- * and at or before its end. A report spanning such a period is not wrong,
+ * and at or before its end, whose value differs from the version before it. A report spanning such a period is not wrong,
  * but it owes the reader a disclosure that more than one rule applied.
  */
 export function ruleChangesWithin<T>(history: readonly RuleVersion<T>[], fromPlantMs: number, toPlantMs: number): boolean {
-  return history.some((v) => v.effectiveFromMs > fromPlantMs && v.effectiveFromMs <= toPlantMs);
+  // C-036 (2 Oct 2026): a version row that repeats the previous version's VALUES changed nothing, so it does not count; `history`
+  // is newest-first, so the previous version is the next index. A version with no predecessor still counts (the rule began then).
+  return history.some((v, i) => {
+    if (!(v.effectiveFromMs > fromPlantMs && v.effectiveFromMs <= toPlantMs)) return false;
+    const prev = history[i + 1];
+    return prev == null || JSON.stringify(prev.value) !== JSON.stringify(v.value);
+  });
 }
 
 /** `shift_date` (YYYY-MM-DD) at plant-clock 00:00, as plant-convention ms. */
@@ -193,6 +199,26 @@ export async function getWeightRuleAsOf(
     ruleChangedInPeriod: fromPlantMs != null ? ruleChangesWithin(history, fromPlantMs, atPlantMs) : false,
     versionCount: history.length,
   };
+}
+
+/**
+ * C-036 (2 Oct 2026): whether the weight-basis rule and the plausibility window each changed in VALUE inside the whole days
+ * `[from, to]`, for the report types that read neither rule themselves. Same bounds `getWeights` uses (period start, period end
+ * from `plantDayEndMs`), so the flag agrees with `/api/weights` for the same period.
+ */
+export async function getRuleChangeFlags(
+  pool: ConnectionPool,
+  lineId: number,
+  from: string,
+  to: string,
+): Promise<{ weightRuleChangedInPeriod: boolean; plausibilityRuleChangedInPeriod: boolean }> {
+  const endMs = plantDayEndMs(to);
+  const startMs = plantDayStartMs(from);
+  const [wr, pr] = await Promise.all([
+    getWeightRuleAsOf(pool, lineId, endMs, startMs),
+    getPlausibilityRuleAsOf(pool, lineId, endMs, startMs),
+  ]);
+  return { weightRuleChangedInPeriod: wr.ruleChangedInPeriod, plausibilityRuleChangedInPeriod: pr.ruleChangedInPeriod };
 }
 
 // ---------------------------------------------------------------- shift_rule
