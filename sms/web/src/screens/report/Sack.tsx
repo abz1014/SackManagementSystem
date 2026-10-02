@@ -19,7 +19,19 @@ import { fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
 import { getSackStock, type ProductOption, type SackReportData, type StockLedgerData } from '../../api';
 import { fmtDayDmy, Fig, Histogram, LineTable } from './shared';
 
-export function SackSection({ d, products }: { d: SackReportData; products: ProductOption[] }) {
+export function SackSection({
+  d,
+  products,
+  shiftRangeApplied = false,
+}: {
+  d: SackReportData;
+  products: ProductOption[];
+  /**
+   * The report was asked for a shift-bounded range (the page's chart zoom), which the report body honours and the stock ledger — a
+   * per-production-day running balance — does not. Together with `d.filters.shift` it decides whether the ledger says it is whole-day.
+   */
+  shiftRangeApplied?: boolean;
+}) {
   const t = d.totals;
   const labels = useMemo(() => distinctProductLabels(products), [products]);
   return (
@@ -46,11 +58,18 @@ export function SackSection({ d, products }: { d: SackReportData; products: Prod
             <div className="two-col">
               <div>
                 <p className="h2"><span>{W.report.byShift}</span></p>
-                <div className="tw"><LineTable rows={d.byShift} head={W.report.colShift} sackScale /></div>
+                <div className="tw"><LineTable rows={d.byShift} head={W.report.colShift} sackScale avgSack /></div>
               </div>
               <div>
                 <p className="h2"><span>{W.report.byDay}</span></p>
-                <div className="tw"><LineTable rows={d.byDay} head={W.report.colDay} sackScale /></div>
+                <div className="tw"><LineTable rows={d.byDay} head={W.report.colDay} sackScale avgSack /></div>
+                {/* D-S6: only days with a sack are listed; say how many days of
+                    cones alone were left out. Absent = not computed, never "none". */}
+                {typeof d.omittedConeOnlyDays === 'number' && d.omittedConeOnlyDays > 0 && (
+                  <p className="mut sm" style={{ marginTop: 8 }}>
+                    {W.reports.omittedConeOnlyDays(fmtInt(d.omittedConeOnlyDays), d.omittedConeOnlyDays === 1)}
+                  </p>
+                )}
               </div>
             </div>
           </Block>
@@ -90,13 +109,17 @@ export function SackSection({ d, products }: { d: SackReportData; products: Prod
         </>
       )}
 
-      <StockBlock from={d.period.from} to={d.period.to} />
+      <StockBlock from={d.period.from} to={d.period.to} shiftNarrowed={d.filters?.shift != null || shiftRangeApplied} />
     </>
   );
 }
 
-/** Roadmap Phase 7's ledger, for the period; "not started" until the route exists. */
-function StockBlock({ from, to }: { from: string; to: string }) {
+/**
+ * Roadmap Phase 7's ledger, for the period; "not started" until the route exists. The ledger is kept per PRODUCTION DAY (a running
+ * balance: `/api/sacks/stock` takes no shift), so when the report above is narrowed to a shift or a shift range it says so rather
+ * than letting a whole-day ledger sit under a one-shift report as though it were narrowed too.
+ */
+function StockBlock({ from, to, shiftNarrowed }: { from: string; to: string; shiftNarrowed: boolean }) {
   const s = usePolling(() => getSackStock({ from, to }), 5 * 60_000, `report-stock:${from}:${to}`);
   // usePolling keeps the error as its message; the API's JSON 404 handler
   // answers `{ error: 'not found' }`, which is what an unmounted route says.
@@ -115,7 +138,10 @@ function StockBlock({ from, to }: { from: string; to: string }) {
       ) : !s.data ? (
         <SkelLines n={4} />
       ) : (
-        <Ledger d={s.data.data} />
+        <>
+          <Ledger d={s.data.data} />
+          {shiftNarrowed && <p className="mut sm" style={{ marginTop: 10 }}>{W.reports.stockWholeDays}</p>}
+        </>
       )}
     </Block>
   );

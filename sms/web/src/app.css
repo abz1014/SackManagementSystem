@@ -428,6 +428,9 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
   .nav { height: auto; flex-wrap: wrap; row-gap: 6px; }
   .bar-right { flex-wrap: wrap; row-gap: 8px; }
   .picked { flex-wrap: wrap; }
+  /* The six period buttons are `nowrap` and 658px wide together: the bar wrapped but this control did not, so a 375px phone scrolled
+     sideways (1 Oct 2026, layout-tests/ifl-reports.spec.ts). It may wrap inside its own box and never grows past its row. */
+  .period { flex-wrap: wrap; max-width: 100%; }
   .strip { padding-left: 16px; padding-right: 16px; }
 }
 
@@ -577,7 +580,10 @@ h1 .acc, .headline .acc { color: var(--acc); }
 .block > .note { margin-top: 0; }
 @media (max-width: 860px) {
   .block { grid-template-columns: minmax(0, 1fr); }
-  .block > *, .block > .h2 { grid-column: 1; }
+  /* `.block > *:not(.h2)` above (specificity 0,2,0) out-ranked the bare `.block > *` that used to sit here (0,1,0), so below 860px every
+     block's content still asked for column 2: the grid grew a second 837px track, the label's own track collapsed to 0px, and the page
+     scrolled sideways (found 1 Oct 2026 by layout-tests/ifl-reports.spec.ts at 375px). Same specificity, later in the file: now column 1. */
+  .block > *:not(.h2), .block > .h2, .block > .note { grid-column: 1; }
   .h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
   .h2 .note, .block > .note { display: block; margin: -0.25em 0 10px; text-align: left; }
 }

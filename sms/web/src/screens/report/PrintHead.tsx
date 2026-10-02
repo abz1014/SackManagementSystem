@@ -80,13 +80,46 @@ function periodText(from: string, to: string): string {
   return from === to ? fmtDmy(from) : `${fmtDmy(from)} to ${fmtDmy(to)}`;
 }
 
-/** Logo + centred company line + underlined title: the IFL house-style masthead. */
-function Masthead({ title }: { title: string }) {
+/**
+ * The masthead's Period row: the calendar days, and — when the report was asked for a shift-bounded range — the shifts in plain words after
+ * them, "02-09-2026 to 03-09-2026 (2 Sep morning shift – 3 Sep night shift)". The body of such a report (and its PDF, CSV and workbook) is
+ * built from the shift-bounded figures, so a masthead naming only whole days would state a wider period than the page holds. The server's
+ * `periodLabel` is the plain `from to to` when there is no shift range (header.ts), which prints nothing extra; the same rule as csv.ts's
+ * `periodText`, which the CSV's period row and the workbook's banner use.
+ */
+export function mastheadPeriod(h: Pick<ReportHeader, 'period' | 'periodLabel'>): string {
+  const plain = periodText(h.period.from, h.period.to);
+  const label = h.periodLabel?.trim();
+  return label && label !== `${h.period.from} to ${h.period.to}` ? `${plain} (${label})` : plain;
+}
+
+/**
+ * The place line under the company name: plant, unit and line as the report
+ * header carries them (sms.plant / sms.unit / sms.line, read by the server's
+ * buildHeader), never a name typed into this file. A hard-coded "Textile
+ * Plant 4" used to be printed above reports of TP1 Line 3 / Unit 2 (D-48).
+ * A part that another part already contains ("TP1" inside "TP1 · Line 3 ·
+ * Unit 2", which is how the line's display name is stored) is dropped so
+ * nothing prints twice; a header with none of the three yields "".
+ */
+export function mastheadPlace(h: Pick<ReportHeader, 'plantName' | 'unitName' | 'lineName'> | null | undefined): string {
+  const parts = [h?.plantName, h?.unitName, h?.lineName]
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter((p) => p !== '');
+  const has = (outer: string, inner: string) => outer.toLowerCase().includes(inner.toLowerCase());
+  return parts
+    .filter((p, i) => !parts.some((q, j) => j !== i && has(q, p) && (q.length > p.length || (q.length === p.length && j < i))))
+    .join(' · ');
+}
+
+/** Logo + centred company line + place + underlined title: the IFL house-style masthead. */
+function Masthead({ title, place }: { title: string; place?: string }) {
   return (
     <div className="ph-mast">
       <img className="ph-logo" src="/ifl-logo.jpg" alt={W.printDoc.logoAlt} />
       <div className="ph-center">
-        <div className="ph-company">{W.printDoc.plantName}</div>
+        <div className="ph-company">{W.printDoc.company}</div>
+        {place ? <div className="ph-place" style={{ fontSize: '10pt', color: '#333', marginTop: 2 }}>{place}</div> : null}
         {title && <div className="ph-title">{title}</div>}
       </div>
     </div>
@@ -110,10 +143,10 @@ export function PrintHead({ header, title, inlineNotes = false }: { header: Repo
   const shift = header.filters.shift ? (W.printDoc.shiftHours[header.filters.shift] ?? header.filters.shift) : null;
   return (
     <div className="print-head">
-      <Masthead title={title ?? header.title} />
+      <Masthead title={title ?? header.title} place={mastheadPlace(header)} />
       <dl className="ph-meta">
         <div><dt>{W.printDoc.line}</dt><dd>{header.lineName}</dd></div>
-        <div><dt>{W.printDoc.period}</dt><dd>{periodText(header.period.from, header.period.to)}</dd></div>
+        <div><dt>{W.printDoc.period}</dt><dd>{mastheadPeriod(header)}</dd></div>
         {shift && <div><dt>{W.printDoc.shift}</dt><dd>{shift}</dd></div>}
         {other && <div><dt>{W.printDoc.filters}</dt><dd>{other}</dd></div>}
         <div><dt>{W.printDoc.generatedBy}</dt><dd>{header.generatedBy}</dd></div>

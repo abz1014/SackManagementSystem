@@ -22,7 +22,7 @@ import { renderWithLive } from '../../testkit/render';
 import { LIVE_FIXTURE } from '../../testkit/fixtures';
 import { W } from '../../lib/words';
 import type { ReportHeader } from '../../api';
-import { RegisterPrintHead, generatedLine } from './PrintHead';
+import { PrintHead, RegisterPrintHead, generatedLine, mastheadPeriod, mastheadPlace } from './PrintHead';
 
 // `fetchRouter.ts`'s own contract: "a test that installs its own router must
 // restore it itself ... or rely on Vitest's own vi.unstubAllGlobals() in a
@@ -134,7 +134,11 @@ describe('IFL house-style masthead', () => {
     const img = container.querySelector('img.ph-logo')!;
     expect(img.getAttribute('src')).toBe('/ifl-logo.jpg');
     expect(img.getAttribute('alt')).toBe('IFL');
-    expect(container.querySelector('.ph-company')?.textContent).toBe('Ibrahim Fibres Limited (Textile Plant 4)');
+    // D-48: the company line is the company, and the place under it comes from
+    // the header's own plant/unit/line — never a plant name typed into the app.
+    expect(container.querySelector('.ph-company')?.textContent).toBe('Ibrahim Fibres Limited');
+    expect(container.querySelector('.ph-place')?.textContent).toBe('TP1 Line 3 · Unit 2');
+    expect(container.querySelector('.print-head')?.textContent).not.toContain('Textile Plant 4');
     expect(container.querySelector('.ph-title')?.textContent).toBe('Readings · Cones');
     const meta = container.querySelector('.ph-meta')!.textContent!;
     expect(meta).toContain('10-09-2026 to 12-09-2026');
@@ -151,5 +155,55 @@ describe('IFL house-style masthead', () => {
     a.unmount();
     const b = renderWithLive(<PrintHead header={h} inlineNotes />);
     expect(b.queryByText('SHIFT NOTE X')).not.toBeNull();
+  });
+});
+
+describe('masthead place line (D-48: no hard-coded plant)', () => {
+  it('prints the header’s plant, unit and line, dropping a part another part already contains', () => {
+    expect(mastheadPlace({ plantName: 'TP1', unitName: 'Unit 2', lineName: 'TP1 · Line 3 · Unit 2' })).toBe('TP1 · Line 3 · Unit 2');
+    expect(mastheadPlace({ plantName: 'TP2', unitName: 'Unit 9', lineName: 'Line 4' })).toBe('TP2 · Unit 9 · Line 4');
+    expect(mastheadPlace({ plantName: null, unitName: null, lineName: 'TP1 Line 3 · Unit 2' })).toBe('TP1 Line 3 · Unit 2');
+  });
+  it('is blank when the header names nothing, and never invents a plant', () => {
+    expect(mastheadPlace({ plantName: null, unitName: null, lineName: '' })).toBe('');
+    expect(mastheadPlace(null)).toBe('');
+    expect(mastheadPlace({ plantName: '  ', unitName: '', lineName: 'Line 3' })).toBe('Line 3');
+  });
+  it('a header from another plant prints that plant, not Textile Plant 4', async () => {
+    const { PrintHead } = await import('./PrintHead');
+    const h = { ...HEADER, plantName: 'TP7', unitName: 'Unit 1', lineName: 'Line 9' };
+    const { container } = renderWithLive(<PrintHead header={h} />);
+    expect(container.querySelector('.ph-company')?.textContent).toBe('Ibrahim Fibres Limited');
+    expect(container.querySelector('.ph-place')?.textContent).toBe('TP7 · Unit 1 · Line 9');
+  });
+  it('the degraded register header still names the company and no plant', async () => {
+    installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/reports/header': () => { throw new Error('down'); } });
+    const { findByText, container } = renderWithLive(<RegisterPrintHead from="2026-09-10" to="2026-09-12" at={null} title="Readings · Cones" />);
+    await findByText(W.reports.generatedUnavailable);
+    expect(container.querySelector('.ph-company')?.textContent).toBe('Ibrahim Fibres Limited');
+    expect(container.querySelector('.ph-place')).toBeNull();
+  });
+});
+
+describe('mastheadPeriod — a shift-bounded report names its shifts, not just the days (IFL reports, H-exports)', () => {
+  const plain = { period: { period: 'custom', from: '2026-09-02', to: '2026-09-03', days: 2 }, periodLabel: '2026-09-02 to 2026-09-03' };
+  const ranged = { period: plain.period, periodLabel: '2 Sep morning shift – 3 Sep night shift' };
+
+  it('a plain period prints the days only (the plain label the server sends adds nothing)', () => {
+    expect(mastheadPeriod(plain)).toBe('02-09-2026 to 03-09-2026');
+    expect(mastheadPeriod({ period: plain.period })).toBe('02-09-2026 to 03-09-2026');
+    expect(mastheadPeriod({ period: { ...plain.period, to: '2026-09-02' }, periodLabel: '2026-09-02 to 2026-09-02' })).toBe('02-09-2026');
+  });
+
+  it('a shift range is printed after the days, in the words the CSV period row uses', () => {
+    expect(mastheadPeriod(ranged)).toBe('02-09-2026 to 03-09-2026 (2 Sep morning shift – 3 Sep night shift)');
+  });
+
+  it('the printed masthead carries it (and a blank label is ignored)', () => {
+    const header = { ...HEADER, period: plain.period, periodLabel: ranged.periodLabel };
+    const { container } = renderWithLive(<PrintHead header={header} />);
+    const row = [...container.querySelectorAll('.ph-meta > div')].find((d) => d.querySelector('dt')?.textContent === W.printDoc.period);
+    expect(row?.querySelector('dd')?.textContent).toBe('02-09-2026 to 03-09-2026 (2 Sep morning shift – 3 Sep night shift)');
+    expect(mastheadPeriod({ period: plain.period, periodLabel: '   ' })).toBe('02-09-2026 to 03-09-2026');
   });
 });

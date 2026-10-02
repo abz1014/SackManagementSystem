@@ -34,6 +34,15 @@ interface Summary {
 const plural = (n: number, one: string, many = `${one}s`) => `${fmtInt(n)} ${n === 1 ? one : many}`;
 const kg = (n: number) => `${fmtInt(Math.round(n))}`;
 
+/**
+ * The weight basis the server states a sack report under (`as_recorded` /
+ * `gross` / `net`) in words for a tile note — a printed page must never carry
+ * the raw code ("as_recorded"). An unknown code is printed as it came rather
+ * than guessed at; absent stays absent.
+ */
+const BASIS_WORDS: Record<string, string> = { as_recorded: 'as the scale recorded them', gross: 'gross', net: 'net of the sack tare' };
+const basisNote = (code: string | null | undefined): string | null => (code ? (BASIS_WORDS[code] ?? code) : null);
+
 /** Pure: the tiles and the verdict sentences for one report. Exported for tests. */
 export function summarise(type: ReportType, data: ReportResponse<ReportType>): Summary {
   const out: Summary = { tiles: [], sentences: [], coverage: null, weightCaveat: false, notes: [] };
@@ -163,7 +172,7 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
       const t = d.totals;
       out.tiles = [
         { label: 'Sacks weighed', value: fmtInt(t.sacks) },
-        { label: 'Sack weight', value: kg(t.sackWeightKg), unit: 'kg', note: d.weightBasis },
+        { label: 'Sack weight', value: kg(t.sackWeightKg), unit: 'kg', note: basisNote(d.weightBasis) },
         { label: 'Average sack', value: fmtKg(t.avgSackKg) },
         { label: 'In the scale’s range', value: fmtPct(d.inRangePct), note: `${fmtInt(d.rejectedByScale)} rejected by the scale`, attn: d.rejectedByScale > 0 },
       ];
@@ -231,32 +240,194 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
     case 'shift-production': {
       const d = (data as ReportResponse<'shift-production'>).report;
       const g = d.grandTotal;
+      const eff = g.efficiencyPct == null ? 'not available' : `${g.efficiencyPct.toFixed(2)}%`;
+      // The labels say what the figures ARE: a cone weighed and then rejected on weight is in the total as a reject, never also as a pass.
       out.tiles = [
-        { label: 'Pass packages', value: fmtInt(g.pass) },
-        { label: 'Weight rejections', value: fmtInt(g.weightRejects), attn: g.weightRejects > 0 },
-        { label: 'Total', value: fmtInt(g.total) },
+        { label: 'Pass (not weight-rejected)', value: fmtInt(g.pass) },
+        { label: 'Rejected on weight', value: fmtInt(g.weightRejects), attn: g.weightRejects > 0 },
+        { label: 'Total', value: fmtInt(g.total), note: 'pass plus rejected on weight' },
         { label: 'Efficiency', value: g.efficiencyPct == null ? '—' : `${g.efficiencyPct.toFixed(2)}%` },
       ];
+      // A server that predates the kg figure omits it: no tile, never a "0 kg".
+      if (typeof g.weighedKg === 'number') out.tiles.push({ label: 'Total weight', value: kg(g.weighedKg), unit: 'kg', note: d.kgBasis?.label ?? null });
       if (g.total > 0) {
-        out.sentences.push(`${fmtInt(g.pass)} packages passed and ${fmtInt(g.weightRejects)} were rejected on weight, an efficiency of ${g.efficiencyPct == null ? 'not available' : `${g.efficiencyPct.toFixed(2)}%`}.`);
-        const known = d.summary.filter((r) => r.efficiencyPct != null && r.total > 0);
+        // D1 (1 Oct 2026): each cone is counted ONCE. A cone weighed and then rejected on weight is in the total as a reject, not also as a pass,
+        // so the total is pass + rejected on weight; the sentence states it, and the plural follows the number ("1 was rejected", "2 were rejected").
+        const weighed = typeof g.weighed === 'number' ? `${fmtInt(g.weighed)} ${g.weighed === 1 ? 'cone was' : 'cones were'} weighed. ` : '';
+        out.sentences.push(`${weighed}${fmtInt(g.pass)} passed and ${fmtInt(g.weightRejects)} ${g.weightRejects === 1 ? 'was' : 'were'} rejected on weight: ${fmtInt(g.total)} in total, each cone counted once, an efficiency of ${eff}.`);
+        // The scale's own in-range bit and the weight-reject records are two
+        // separate records (SCHEMA.md): said once, never merged.
+        if (typeof d.scaleRejectedCones === 'number') out.sentences.push(W.iflReports.shiftProduction.scaleRejected(fmtInt(d.scaleRejectedCones), fmtInt(g.weightRejects)));
+        const known = (d.summary ?? []).filter((r) => r.efficiencyPct != null && r.total > 0);
         if (known.length > 1) {
           const low = known.reduce((a, b) => (b.efficiencyPct! < a.efficiencyPct! ? b : a));
           out.sentences.push(`The ${W.shiftName[low.shift].toLowerCase()} shift had the lowest efficiency, ${low.efficiencyPct!.toFixed(2)}%.`);
         }
+      } else {
+        out.sentences.push(W.iflReports.shiftProduction.empty);
       }
       break;
     }
     case 'rejected-cones': {
       const d = (data as ReportResponse<'rejected-cones'>).report;
-      const l = d.weightRange.line;
+      const l = d.weightRange?.line;
+      // The weight range is over EVERY weighed cone on the line (plausible weights, whatever the scale decided), not over the rejected ones:
+      // the tiles say so, or "Lightest" beside "Rejected cones" would read as the lightest rejected cone.
       out.tiles = [
-        { label: 'Rejected cones', value: fmtInt(d.total), attn: d.total > 0 },
-        { label: 'Lightest', value: l.minG == null ? '—' : fmtG1(l.minG) },
-        { label: 'Heaviest', value: l.maxG == null ? '—' : fmtG1(l.maxG) },
+        { label: 'Rejected on weight', value: fmtInt(d.total ?? 0), attn: (d.total ?? 0) > 0 },
+        { label: 'Lightest weighed cone', value: l?.minG == null ? '—' : fmtG1(l.minG), note: 'all cones on the line' },
+        { label: 'Heaviest weighed cone', value: l?.maxG == null ? '—' : fmtG1(l.maxG), note: 'all cones on the line' },
       ];
-      out.sentences.push(`${plural(d.total, 'cone')} ${d.total === 1 ? 'was' : 'were'} rejected on weight.`);
-      if (l.n > 0 && l.minG != null && l.maxG != null) out.sentences.push(`Line weights ranged from ${fmtG1(l.minG)} to ${fmtG1(l.maxG)}.`);
+      out.sentences.push(`${plural(d.total ?? 0, 'cone')} ${d.total === 1 ? 'was' : 'were'} rejected on weight.`);
+      if (l && l.n > 0 && l.minG != null && l.maxG != null) out.sentences.push(`Across all ${plural(l.n, 'weighed cone')} on the line, weights ranged from ${fmtG1(l.minG)} to ${fmtG1(l.maxG)}.`);
+      break;
+    }
+    case 'rejected-sacks': {
+      const d = (data as ReportResponse<'rejected-sacks'>).report;
+      const t = d.total;
+      const split = d.rejectedSplit;
+      const sacks = t?.sacks ?? 0;
+      const rejected = t?.rejected ?? 0;
+      out.tiles = [
+        { label: 'Sacks weighed', value: fmtInt(sacks) },
+        { label: 'Rejected by the scale', value: fmtInt(rejected), note: t?.rejectedPct != null ? `${fmtPct(t.rejectedPct, 2)} of sacks` : null, attn: rejected > 0 },
+        { label: 'Implausible weight', value: fmtInt(split?.implausible ?? 0), note: '0 kg or a fault reading' },
+        { label: 'No scale verdict', value: fmtInt(t?.noFlag ?? 0), note: 'not counted as passes' },
+      ];
+      if (sacks === 0) {
+        out.sentences.push('No sacks were weighed in this period.');
+      } else {
+        out.sentences.push(`The scale rejected ${fmtInt(rejected)} of ${plural(sacks, 'sack')}${t?.rejectedPct != null ? ` (${fmtPct(t.rejectedPct, 2)})` : ''}.`);
+        if (rejected > 0 && split) out.sentences.push(`Of the ${fmtInt(rejected)} rejected, ${fmtInt(split.implausible)} had an implausible weight (0 kg or a fault reading) and ${fmtInt(split.plausible)} a plausible one.`);
+        if (t && t.noFlag > 0) out.sentences.push(`${plural(t.noFlag, 'sack')} carried no scale verdict and ${t.noFlag === 1 ? 'is' : 'are'} not counted as passes.`);
+        const all = d.passedRange?.all;
+        if (all && all.sacks > 0 && all.minKg != null && all.maxKg != null) out.sentences.push(`The scale passed sacks from ${fmtKg(all.minKg)} to ${fmtKg(all.maxKg)}; that is the recorded pass range, not a tolerance.`);
+      }
+      break;
+    }
+    case 'sps-packing': {
+      const d = (data as ReportResponse<'sps-packing'>).report;
+      const packed = (d.totals ?? []).filter((c) => c.sacks > 0);
+      const named = packed.filter((c) => c.yarnCount != null);
+      // Two count-less columns: 'none' (no product on the reading) and 'unknown' (a product whose yarn count is not on record). They are different facts.
+      const noProduct = packed.find((c) => c.key === 'none');
+      const unknownCount = packed.find((c) => c.key === 'unknown');
+      const top = [...named].sort((a, b) => b.sacks - a.sacks)[0];
+      const total = d.grandTotal ?? { sacks: 0, kg: 0, avgKg: null };
+      out.tiles = [
+        { label: 'Sacks packed', value: fmtInt(total.sacks) },
+        { label: 'Sack weight', value: kg(total.kg), unit: 'kg', note: basisNote(d.weightBasis) },
+        { label: 'Yarn counts packed', value: fmtInt(named.length) },
+        { label: 'Largest count', value: top ? top.label : '—', note: top ? `${plural(top.sacks, 'sack')}${top.sharePct != null ? ` · ${fmtPct(top.sharePct)}` : ''}` : null },
+      ];
+      if (total.sacks === 0) {
+        out.sentences.push('No sacks were packed in this period.');
+      } else {
+        out.sentences.push(`${plural(total.sacks, 'sack')} ${total.sacks === 1 ? 'was' : 'were'} packed, ${kg(total.kg)} kg in all, across ${plural(named.length, 'yarn count')}.`);
+        if (top) out.sentences.push(`${top.label} was the largest count, with ${plural(top.sacks, 'sack')}${top.sharePct != null ? ` (${fmtPct(top.sharePct)} of sacks)` : ''}.`);
+        if (noProduct) out.sentences.push(`${plural(noProduct.sacks, 'sack')} ${noProduct.sacks === 1 ? 'carries' : 'carry'} no product on the reading and so ${noProduct.sacks === 1 ? 'has' : 'have'} no yarn count.`);
+        if (unknownCount) out.sentences.push(`${plural(unknownCount.sacks, 'sack')} ${unknownCount.sacks === 1 ? 'has' : 'have'} a product whose yarn count is not on record.`);
+        if (d.sps?.label) out.sentences.push(`Packing is stated for ${d.sps.label}.`);
+      }
+      break;
+    }
+    case 'sack-weight-range': {
+      const d = (data as ReportResponse<'sack-weight-range'>).report;
+      // The scale's verdict over every band, the implausible row included.
+      const sum = (pick: (b: ReportResponse<'sack-weight-range'>['report']['bands'][number]) => number) => (d.bands ?? []).reduce((a, b) => a + pick(b), 0);
+      const total = sum((b) => b.total.total);
+      const passed = sum((b) => b.total.passed);
+      const rejected = sum((b) => b.total.rejected);
+      const sp = d.spreadTotal;
+      const span = d.passedRange;
+      out.tiles = [
+        { label: 'Sacks weighed', value: fmtInt(total) },
+        { label: 'Passed by the scale', value: fmtInt(passed) },
+        { label: 'Rejected by the scale', value: fmtInt(rejected), attn: rejected > 0 },
+        { label: 'Passed range', value: span ? `${span.minKg.toFixed(2)}–${span.maxKg.toFixed(2)}` : '—', unit: span ? 'kg' : undefined, note: 'recorded, not a tolerance' },
+        { label: 'Spread (SD)', value: sp?.sdKg == null ? '—' : sp.sdKg.toFixed(2), unit: sp?.sdKg == null ? undefined : 'kg', note: sp && sp.n > 0 ? plural(sp.n, 'plausible sack') : null },
+      ];
+      if (total === 0) {
+        out.sentences.push('No sacks were weighed in this period.');
+      } else {
+        out.sentences.push(`${plural(total, 'sack')} ${total === 1 ? 'was' : 'were'} weighed: ${fmtInt(passed)} passed and ${fmtInt(rejected)} ${rejected === 1 ? 'was' : 'were'} rejected by the scale.`);
+        out.sentences.push(span
+          ? `The scale passed sacks from ${fmtKg(span.minKg)} to ${fmtKg(span.maxKg)}; that is the recorded pass range, not a tolerance.`
+          : 'The scale passed no sacks in this period.');
+        if (sp && sp.n > 0 && sp.avgKg != null) out.sentences.push(`Plausible sack weights averaged ${fmtKg(sp.avgKg)}${sp.sdKg != null ? ` with a standard deviation of ${fmtKg(sp.sdKg)}` : ''}${typeof d.bandKg === 'number' ? `, grouped in ${d.bandKg} kg bands` : ''}.`);
+      }
+      break;
+    }
+    case 'sack-weight-summary': {
+      const d = (data as ReportResponse<'sack-weight-summary'>).report;
+      const t = d.total;
+      const sacks = t?.sacks ?? 0;
+      out.tiles = [
+        { label: 'Sacks weighed', value: fmtInt(sacks) },
+        { label: 'Sack weight', value: kg(t?.kg ?? 0), unit: 'kg', note: basisNote(d.weightBasis) },
+        { label: 'Average sack', value: fmtKg(t?.avgKg), note: t && t.implausible > 0 ? `${fmtInt(t.implausible)} implausible left out` : null },
+        { label: 'Rejected by the scale', value: fmtInt(t?.rejectedByScale ?? 0), attn: (t?.rejectedByScale ?? 0) > 0 },
+      ];
+      if (sacks === 0 || !t) {
+        out.sentences.push('No sacks were weighed in this period.');
+      } else {
+        out.sentences.push(`${plural(sacks, 'sack')} ${sacks === 1 ? 'was' : 'were'} weighed, ${kg(t.kg)} kg in total${t.avgKg != null ? `, averaging ${fmtKg(t.avgKg)}` : ''}.`);
+        if (t.minKg != null && t.maxKg != null) out.sentences.push(`Plausible sack weights ranged from ${fmtKg(t.minKg)} to ${fmtKg(t.maxKg)}${t.sdKg != null ? `, with a standard deviation of ${fmtKg(t.sdKg)}` : ''}.`);
+        out.sentences.push(`${fmtInt(t.rejectedByScale)} ${t.rejectedByScale === 1 ? 'was' : 'were'} rejected by the scale.`);
+        if (t.implausible > 0) out.sentences.push(W.iflReports.sackWeightSummary.excludedNote(fmtInt(t.implausible)));
+      }
+      break;
+    }
+    case 'rejected-hangers': {
+      const d = (data as ReportResponse<'rejected-hangers'>).report;
+      const tt = d.total;
+      const f = d.flagging;
+      const rows = d.hangers ?? [];
+      const standing = rows.filter((h) => h.flag === 'stands_out').map((h) => h.hanger).filter((n): n is number => n != null);
+      const withRejects = rows.filter((h) => h.hanger != null && h.total > 0).length;
+      const total = tt?.total ?? 0;
+      out.tiles = [
+        { label: 'Hangers seen', value: fmtInt(f?.hangersSeen ?? rows.filter((h) => h.hanger != null).length) },
+        { label: 'Rejected cones', value: fmtInt(total), attn: total > 0 },
+        { label: 'Line reject rate', value: fmtPct(f?.lineRatePct ?? tt?.ratePct), note: 'over cones plus rejects' },
+        { label: 'Hangers that stand out', value: fmtInt(standing.length), attn: standing.length > 0, note: f?.canFlag === false ? 'too few cones per hanger to judge' : null },
+      ];
+      if (total === 0) {
+        out.sentences.push('No cone was rejected in this period.');
+      } else {
+        out.sentences.push(`${plural(total, 'cone')} ${total === 1 ? 'was' : 'were'} rejected, on ${plural(withRejects, 'hanger')}.`);
+        if (f?.canFlag === true) {
+          if (standing.length === 0) out.sentences.push('No hanger stands out in this period.');
+          else {
+            const shown = standing.slice(0, 6).join(', ');
+            const more = standing.length > 6 ? ` and ${standing.length - 6} more` : '';
+            out.sentences.push(`${standing.length === 1 ? 'Hanger' : 'Hangers'} ${shown}${more} ${standing.length === 1 ? 'stands' : 'stand'} out in this period; this describes the period’s counts, not the hanger itself.`);
+          }
+        } else if (f?.canFlag === false && f.reason) {
+          out.sentences.push(f.reason);
+        }
+      }
+      break;
+    }
+    case 'rejected-unknown-lifter': {
+      const d = (data as ReportResponse<'rejected-unknown-lifter'>).report;
+      const tt = d.total;
+      // The draft definition (1 Oct 2026): "unknown" = no lifter number or no winder number recorded, nothing else.
+      // A zero reason code is NOT unknown: it is counted and listed apart, because IFL has not said what a zero code means.
+      const listed = d.unknownCount ?? d.listTotal ?? d.list?.length ?? 0;
+      const zeroCoded = d.zeroCodeTotal ?? tt?.zeroCodeRejects ?? 0;
+      const zeroed = d.zeroedClock?.rows?.length ?? 0;
+      out.tiles = [
+        { label: 'Rejected cones', value: fmtInt(tt?.total ?? 0) },
+        { label: 'No lifter or winder recorded', value: fmtInt(listed), attn: listed > 0 },
+        { label: 'Reason code zero', value: fmtInt(zeroCoded), note: 'counted apart, not “unknown”', attn: zeroCoded > 0 },
+        { label: 'Zeroed-clock records', value: fmtInt(zeroed), note: 'reached by no period' },
+      ];
+      out.sentences.push(listed === 0
+        ? W.iflReports.rejectedUnknownLifter.allHaveLifter
+        : `${plural(listed, 'rejected cone')} ${listed === 1 ? 'has' : 'have'} no lifter number or no winder number recorded.`);
+      if (zeroCoded > 0) out.sentences.push(`${plural(zeroCoded, 'rejected cone')} ${zeroCoded === 1 ? 'carries' : 'carry'} a zero reason code; ${zeroCoded === 1 ? 'it is' : 'they are'} counted in the table and listed apart, because IFL has not confirmed what a zero code means.`);
+      if (zeroed > 0) out.sentences.push(`${plural(zeroed, 'record')} with a zeroed clock ${zeroed === 1 ? 'exists' : 'exist'} in this data batch; no period reaches ${zeroed === 1 ? 'it' : 'them'}.`);
       break;
     }
     case 'machine-product': {
@@ -364,14 +535,62 @@ export function ExecSummary({ type, data }: { type: ReportType; data: ReportResp
   );
 }
 
+/**
+ * The sentences an IFL report's SECTION already prints beside its tables, word for word — the method note every one of the eight shows
+ * under its first table, the Shift-wise CTS Loop report's loop and kg-basis lines, and the rejected-cone list's "oldest on record"
+ * sentence. The server composes the same sentences into `header.reportNotes` because the CSV and the workbook have no body to print them
+ * in; on PAPER the body already carries them, so the closing notes must not state them a second time. Pure; exported for tests.
+ */
+export function printedInBody(type: ReportType, data: ReportResponse<ReportType>): string[] {
+  const rep = (data?.report ?? {}) as { note?: unknown; loop?: { hangersSeen?: unknown }; kgBasis?: { label?: unknown; implausible?: unknown } | null };
+  const out: string[] = [];
+  if (typeof rep.note === 'string' && rep.note.trim() !== '' && IFL_PRINT_TYPES.has(type)) out.push(rep.note.trim());
+  if (type === 'shift-production') {
+    const S = W.iflReports.shiftProduction;
+    const hangers = rep.loop?.hangersSeen;
+    if (typeof hangers === 'number' && hangers > 0) out.push(S.loopLine(fmtInt(hangers), hangers === 1));
+    const kgb = rep.kgBasis;
+    if (kgb && typeof kgb.label === 'string' && typeof kgb.implausible === 'number') out.push(S.kgBasis(kgb.label, fmtInt(kgb.implausible)));
+  }
+  if (type === 'rejected-cones') out.push(W.iflReports.rejectedConesList.lowerBoundNote);
+  return out;
+}
+
+/** IFL's eight reports: the ones whose sections print the report's `note` in their body. */
+const IFL_PRINT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>([
+  'shift-production', 'rejected-sacks', 'sps-packing', 'sack-weight-range', 'sack-weight-summary', 'rejected-cones', 'rejected-hangers', 'rejected-unknown-lifter',
+]);
+
 /** Print-only: the closing notes — the report's own method note, caveats, definitions status, provenance. */
 export function PrintNotes({ type, data, header }: { type: ReportType; data: ReportResponse<ReportType>; header: ReportHeader }) {
   const s = safeSummarise(type, data);
+  const isLine = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+  // D6 (1 Oct 2026): the report's own notes — method, caveats, plausibility
+  // window and every assumption awaiting IFL — composed once by the server
+  // (header.reportNotes) so paper, CSV and XLSX agree. A server that predates
+  // the field would leave the assumptions off the page, so any `pendingIfl`
+  // line the notes do not already carry is added here, under its heading.
+  // A note the page already prints elsewhere — in the executive summary or
+  // beside the tables — is left out of this block: the CSV and the workbook
+  // need it in their notes, the paper does not need it three times.
+  const alreadyOnPage = new Set([...(s?.sentences ?? []), ...printedInBody(type, data)].map((t) => t.trim()).filter(Boolean));
+  const headerNotes = (Array.isArray(header.reportNotes) ? header.reportNotes : []).filter(isLine).filter((n) => !alreadyOnPage.has(n.trim()));
+  const pending = (() => {
+    const p = (data?.report as { pendingIfl?: unknown } | null | undefined)?.pendingIfl;
+    return Array.isArray(p) ? p.filter(isLine) : [];
+  })();
+  const pendingMissing = pending
+    .filter((line) => !headerNotes.some((n) => n.includes(line)))
+    .map((line) => `${W.iflReports.pendingHeading}: ${line}`);
   const items = [
     ...(s?.notes ?? []),
+    ...headerNotes,
+    ...pendingMissing,
     ...(s?.weightCaveat ? [W.printDoc.weightNote] : []),
     W.printDoc.clockNote,
-    W.printDoc.approvalNote,
+    // ONE line about the approval status, in the reader's words. This block used to print `W.printDoc.approvalNote` ("Figures follow
+    // KPI-DEFINITIONS.md, awaiting IFL's approval.") AND `W.reports.definitionsNote` ("Figure definitions are awaiting IFL's
+    // approval."): the same status twice, the first citing a file name of the repository that nobody reading a printed report can open.
     W.reports.definitionsNote,
     ...(header.shiftNote ? [header.shiftNote] : []),
     W.printDoc.sourceNote,

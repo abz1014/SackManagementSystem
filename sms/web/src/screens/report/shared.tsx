@@ -26,7 +26,7 @@ import {
   type Rect, type GutterLabelIn,
 } from '../../ui/chartLayout';
 import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
-import { fmtDayLong, fmtInt, fmtPct1 } from '../../lib/fmt';
+import { fmtDayLong, fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
 import { fmtDmy } from './PrintHead';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -105,8 +105,28 @@ export function StateHeads() {
  * Daily and Shift reports, which are about cones; a sack column on those
  * would be the "no two screens answer the same question" rule read
  * backwards. The Sack report passes it; nothing else does.
+ *
+ * `sackScale` IS "SACK MODE" (IFL reports, 1 Oct 2026): it also drops the
+ * cone-inspection column. "Rejected at inspection" counts rejected CONES; in a
+ * table headed by sack figures it read as a sack figure and put a cone number
+ * beside the scale's own sack verdict — two rejection populations in one row
+ * under one heading.
+ *
+ * `avgSack` adds the average sack weight. The server's average is over the
+ * plausible sacks only (the Sack report's D-S2 fix), so a 0 kg scale fault
+ * never drags a day's or a shift's figure down. Null prints a dash.
  */
-export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[]; head: string; sackScale?: boolean }) {
+export function LineTable({
+  rows,
+  head,
+  sackScale = false,
+  avgSack = false,
+}: {
+  rows: ReportLine[];
+  head: string;
+  sackScale?: boolean;
+  avgSack?: boolean;
+}) {
   const body = rows.filter((r) => r.group !== 'total');
   if (body.length === 0) return <Empty message={W.nothingHere} />;
   return (
@@ -117,8 +137,9 @@ export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[
           <th className="n">{W.report.colCones}</th>
           <th className="n">{W.report.colSacks}</th>
           <th className="n">{W.report.colSackWeight}</th>
+          {avgSack && <th className="n">{W.report.averageSack}</th>}
           {sackScale && <th className="n">{W.reports.colSacksPassedScale}</th>}
-          <th className="n">{W.reports.rejectedAtInspection}</th>
+          {!sackScale && <th className="n">{W.reports.rejectedAtInspection}</th>}
         </tr>
       </thead>
       <tbody>
@@ -128,11 +149,12 @@ export function LineTable({ rows, head, sackScale = false }: { rows: ReportLine[
             <td className="n">{fmtInt(r.cones)}</td>
             <td className="n">{fmtInt(r.sacks)}</td>
             <td className="n">{fmtInt(Math.round(r.sackWeightKg))} {W.fig.kg}</td>
+            {avgSack && <td className="n">{fmtKg(r.avgSackKg)}</td>}
             {/* An em dash, never 0 %: null means no sack here carried the
                 scale's verdict, which is not the same as the scale failing
                 every one of them. */}
             {sackScale && <td className="n">{r.sacksPassedScalePct == null ? '—' : fmtPct1(r.sacksPassedScalePct)}</td>}
-            <td className="n">{fmtInt(r.rejectedCones)}</td>
+            {!sackScale && <td className="n">{fmtInt(r.rejectedCones)}</td>}
           </tr>
         ))}
       </tbody>

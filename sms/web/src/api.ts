@@ -2490,12 +2490,22 @@ export function recordSackMovement(m: SackMovementInput): Promise<{ movementId: 
 // api/src/services/reports/common.ts REPORT_TYPES, so the nine existing
 // CSV/RBAC pins hold.
 
+//
+// IFL's eight named reports (their email of 29 Sep 2026): two already existed
+// as 'shift-production' and 'rejected-cones'; the other six are appended
+// AFTER 'rejected-cones' (1 Oct 2026) so every earlier index and pin holds —
+// eighteen types in all. The order below is the server's REPORT_TYPES order;
+// the order the CHIPS are shown in (IFL's own numbering) is
+// screens/report/model.ts REPORT_GROUPS, not this list.
+
 export type ReportType =
   | 'daily' | 'shift' | 'product' | 'station' | 'reject' | 'cone-weight' | 'sack' | 'calibration' | 'management-summary'
-  | 'machine-product' | 'shift-production' | 'rejected-cones';
+  | 'machine-product' | 'shift-production' | 'rejected-cones'
+  | 'rejected-sacks' | 'sps-packing' | 'sack-weight-range' | 'sack-weight-summary' | 'rejected-hangers' | 'rejected-unknown-lifter';
 export const REPORT_TYPES: readonly ReportType[] = [
   'daily', 'shift', 'product', 'station', 'reject', 'cone-weight', 'sack', 'calibration', 'management-summary',
   'machine-product', 'shift-production', 'rejected-cones',
+  'rejected-sacks', 'sps-packing', 'sack-weight-range', 'sack-weight-summary', 'rejected-hangers', 'rejected-unknown-lifter',
 ];
 
 export interface ReportFilters {
@@ -2512,6 +2522,12 @@ export interface ReportHeader {
   plantName: string | null;
   unitName: string | null;
   period: { period: string; from: string; to: string; days: number };
+  /**
+   * The period in plain words: `"<from> to <to>"` when the request was whole days, or the shift range ("2 Sep morning shift – 3 Sep night
+   * shift") when it was shift-bounded (header.ts `periodLabel`, chart-overhaul Task TB2). Optional: absent on a server built before the
+   * field, never itself a claim of "whole days". The printed masthead appends it to the days when it differs (PrintHead.tsx `mastheadPeriod`).
+   */
+  periodLabel?: string;
   filters: ReportFilters;
   /** Plant wall clock on the production-time convention — render in UTC, like every reading time. */
   generatedAtPlantUtc: string;
@@ -2529,6 +2545,16 @@ export interface ReportHeader {
   generationLine?: string | null;
   /** True when `sourceGeneration` names a plant-simulator generation. Optional: absent on a server built before this field, never itself a claim of "no". */
   simulatorSource?: boolean;
+  /**
+   * D6 (1 Oct 2026): the report's own closing notes, composed once on the
+   * server by `reportNotesOf(type, data)` (api/src/services/reports/notes.ts:
+   * the method note, caveats, the plausibility window and every
+   * `pendingIfl` line) so the printed page, the CSV's report_note rows and
+   * the XLSX header all say the same words. Optional: absent on a server
+   * built before this field, never itself a claim of "no notes" —
+   * PrintDoc.tsx's PrintNotes falls back to the report's own `pendingIfl`.
+   */
+  reportNotes?: string[];
 }
 
 export interface ReportQuery {
@@ -2738,7 +2764,14 @@ export interface SackReportData {
   inRangePct: number | null;
   conesPerSack: number | null;
   byShift: ReportLine[];
+  /** Lists only the days with at least one sack (D-S6, 1 Oct 2026); the cone-only days left out are counted in `omittedConeOnlyDays`. */
   byDay: ReportLine[];
+  /**
+   * How many days of the period had cones but no sack and so are not in
+   * `byDay` — stated beside the table so a shorter list never reads as a
+   * shorter period. Optional: absent means "not computed", never "none".
+   */
+  omittedConeOnlyDays?: number;
   byProduct: { productId: number | null; productLabel: string; sacks: number; sackWeightKg: number; avgSackKg: number | null }[];
   distribution: { count: number; implausible: number; avg: number | null; min: number | null; max: number | null; stdev: number | null; bucketSize: number; histogram: Bucket[] } | null;
   caveats: { time: string; machine: string; conesPerSack: string };
@@ -2912,43 +2945,111 @@ export interface MachineProductReportData {
   note: string;
 }
 
+/**
+ * Fields every one of IFL's eight reports carries (frozen contract, 1 Oct
+ * 2026; mirrors api/src/services/reports/*.ts field for field). `pendingIfl`
+ * is the list of things the report ASSUMES until IFL confirms them — each
+ * printed as an "Assumed until IFL confirms" line (screens/report/
+ * PendingIfl.tsx on screen, the closing notes on paper); empty when the
+ * report assumes nothing. `generationNote` is the same source-generation
+ * disclosure the header carries, per report.
+ */
+export interface ReportGenerationNote {
+  generation: unknown | null;
+  spansGenerations: boolean;
+  otherGenerationExcluded: number;
+  excludedSimulator?: number;
+}
+export interface IflReportBase {
+  period: { period: string; from: string; to: string };
+  filters: ReportFilters;
+  lineId: number;
+  note: string;
+  pendingIfl: string[];
+  generationNote: ReportGenerationNote;
+}
+/**
+ * What every LIST on an IFL report says about itself: how many rows the
+ * period really holds (`listTotal`), the most any output carries (`listCap`,
+ * 5000), and how many zeroed-clock records (production_ts_utc_ms <= 0, the
+ * 1969-12-31 sentinel) were left out because no period can reach them.
+ * `listTotal > listCap` means the list was cut, and every surface says so.
+ */
+export interface IflListCounts {
+  listTotal: number;
+  listCap: number;
+  excludedClockFault: number;
+}
+
 type ShiftCode = 'morning' | 'evening' | 'night';
-/** Shift Production report (IFL SSRS style, 30 Sep 2026); mirrors api/src/services/reports/shiftProduction.ts. */
+
+/**
+ * Shift-wise CTS Loop Production report (IFL report 1; IFL SSRS style, 30
+ * Sep 2026, rebuilt 1 Oct 2026); mirrors
+ * api/src/services/reports/shiftProduction.ts. Each physical cone is counted
+ * ONCE: `weighed` is the cone rows, `pass` the cones with no weight-reject
+ * record, `weightRejects` the weight-reject records, `total` = pass +
+ * weightRejects, `weighedKg` the plausible cone weights (null when none).
+ */
 export interface ShiftProductionFigures {
+  weighed: number;
   pass: number;
   weightRejects: number;
   total: number;
   efficiencyPct: number | null;
+  weighedKg: number | null;
 }
 export interface ShiftProductionSummaryRow extends ShiftProductionFigures { shift: ShiftCode }
 export interface ShiftProductionRow extends ShiftProductionFigures { date: string; shift: ShiftCode; winder: number }
 export interface ShiftProductionShiftTotal extends ShiftProductionFigures { date: string; shift: ShiftCode }
-export interface ShiftProductionReportData {
-  period: { period: string; from: string; to: string };
-  filters: ReportFilters;
-  lineId: number;
+export interface ShiftProductionDayTotal extends ShiftProductionFigures { date: string }
+export interface ShiftProductionWinderTotal extends ShiftProductionFigures { winder: number }
+export interface ShiftProductionReportData extends IflReportBase {
   summary: ShiftProductionSummaryRow[];
   grandTotal: ShiftProductionFigures;
   rows: ShiftProductionRow[];
   shiftTotals: ShiftProductionShiftTotal[];
+  dayTotals: ShiftProductionDayTotal[];
+  winderTotals: ShiftProductionWinderTotal[];
   withoutWinder: { pass: number; weightRejects: number };
-  note: string;
+  /** The line's one hanger loop: how many distinct hanger numbers this period saw (computed, never hard-coded). */
+  loop: { hangersSeen: number };
+  /** Cones the SCALE's own in-range bit marked; a separate record from the weight-reject table, never merged with it. */
+  scaleRejectedCones: number;
+  /** What `weighedKg` is a sum of, and how many readings the plausibility window left out of it; null until computed. */
+  kgBasis: { basis: 'as_recorded' | 'gross' | 'net'; label: string; implausible: number } | null;
 }
 
-/** Rejected Cones report; mirrors api/src/services/reports/rejectedCones.ts. */
+/**
+ * List of Rejected Cones Against Weight (IFL report 6); mirrors
+ * api/src/services/reports/rejectedCones.ts. One row per weight reject, with
+ * the product and the limits in force AT THAT INSTANT when the record has
+ * them (`limits` null otherwise, `noLimitsReason` saying why in words).
+ */
+export interface RejectedConeLimits { label: string; targetG: number; loG: number; hiG: number; lowerBound: boolean }
 export interface RejectedConeRow {
   date: string;
   shift: ShiftCode;
   winder: number | null;
-  weightG: number;
+  hanger: number | null;
+  /** The recorded weight; null when the weight-reject record carries none (prints "—"; it is still a weight reject). */
+  weightG: number | null;
+  /** Plant-clock instant of the reject (production time convention) — render in UTC. */
   producedAtUtc: string;
+  productId: number | null;
+  productLabel: string | null;
+  /** 'row' the plant's own MaterialId, 'timeline' the line-wide Current Product, null no product found. */
+  productSource: 'row' | 'timeline' | null;
+  /** Limits in force at this reading's own time; `lowerBound` when the OLDEST known version is used for a reading that predates it ("no later than"). */
+  limits: RejectedConeLimits | null;
+  /** Signed grams outside the limits; 0 when inside (the scale still rejected it); null when no limits were on record. */
+  outsideByG: number | null;
+  /** Why `limits` is null, in plain words ("No product recorded at that time"); null when limits are stated. */
+  noLimitsReason: string | null;
 }
 export interface WeightRangeRow { minG: number | null; maxG: number | null; avgG: number | null; n: number }
 export interface WeightRangeByWinder extends WeightRangeRow { winder: number }
-export interface RejectedConesReportData {
-  period: { period: string; from: string; to: string };
-  filters: ReportFilters;
-  lineId: number;
+export interface RejectedConesReportData extends IflReportBase, IflListCounts {
   list: RejectedConeRow[];
   total: number;
   weightRange: {
@@ -2957,7 +3058,283 @@ export interface RejectedConesReportData {
     plausibility: { loG: number; hiG: number };
     excludedImplausible: number;
   };
-  note: string;
+}
+
+/* ---- Rejected Sack Report, daily (IFL report 2) — rejectedSacks.ts ---- */
+/** Counts for one cell of the daily table: sacks weighed, those the SCALE rejected (in_range = 0), the share. */
+export interface RejectedSackCounts { sacks: number; rejected: number; rejectedPct: number | null }
+/** Table A, one production date and shift. */
+export interface RejectedSackShiftRow extends RejectedSackCounts { date: string; shift: ShiftCode }
+/** Table A, one production day (all shifts). */
+export interface RejectedSackDayRow extends RejectedSackCounts { date: string }
+/** Table C: what the scale PASSED, per product. A stated fact, never a tolerance. */
+export interface RejectedSackPassedRange {
+  productId: number | null;
+  /** The distinct product label, or "No product on the reading". */
+  productLabel: string;
+  /** Yarn count from today's product master; null when the sack carries no product. */
+  yarnCount: string | null;
+  /** Passed sacks with a plausible weight, the population the range is over. */
+  sacks: number;
+  minKg: number | null;
+  maxKg: number | null;
+}
+/** Table D: one rejected sack. */
+export interface RejectedSackRow {
+  date: string;
+  shift: ShiftCode;
+  /** The plant's INSERT time for the sack (sack rows carry no production time) — render in UTC. */
+  producedAtUtc: string;
+  sackNum: number | null;
+  productId: number | null;
+  productLabel: string | null;
+  yarnCount: string | null;
+  weightKg: number | null;
+  /** True when the weight is outside the plausibility window (a 0 kg or fault reading). */
+  implausible: boolean;
+}
+export interface RejectedSacksReportData extends IflReportBase, IflListCounts {
+  /** The weight basis every kg figure is stated under (as of the period end). */
+  weightBasis: string;
+  plausibility: { loKg: number; hiKg: number };
+  byShift: RejectedSackShiftRow[];
+  byDay: RejectedSackDayRow[];
+  /** The period. `noFlag` = sacks whose in-range flag is NULL, counted apart and never as passes. */
+  total: RejectedSackCounts & { noFlag: number };
+  /** B: of the rejected sacks, how many carry an implausible weight (0 kg / fault) versus a plausible one. */
+  rejectedSplit: { implausible: number; plausible: number };
+  /** C: the range of sacks the scale passed. */
+  passedRange: {
+    byProduct: RejectedSackPassedRange[];
+    all: { sacks: number; minKg: number | null; maxKg: number | null };
+  };
+  list: RejectedSackRow[];
+}
+
+/* ---- SPS Production Report, count-wise packing (IFL report 3) — spsPacking.ts ---- */
+/**
+ * One matrix column: a yarn count, or one of the two count-less buckets. `key` is the count text, `'unknown'` (a sack whose product is not
+ * in today's product master, or has no yarn count on record: `label` "Count not on record") or `'none'` (a sack that carries no product
+ * at all: `label` "No product on the reading"); `yarnCount` is null for both of the last two. They are different facts and are never merged.
+ */
+export interface SpsCountColumn {
+  /** Stable key for `SpsMatrixRow.cells`: the count text, `'unknown'` or `'none'`. */
+  key: string;
+  yarnCount: string | null;
+  /** What the column header prints: the count, "Count not on record" or "No product on the reading". */
+  label: string;
+  materialIds: number[];
+}
+export interface SpsCell { sacks: number; kg: number }
+/** One production date and shift: the cell per count that had sacks (absent = none), and the row total. */
+export interface SpsMatrixRow { date: string; shift: ShiftCode; cells: Record<string, SpsCell>; total: SpsCell }
+/** The period's figures for one count, or for one of the two count-less buckets (same `key` / `label` rule as `SpsCountColumn`). */
+export interface SpsCountTotal {
+  key: string;
+  yarnCount: string | null;
+  label: string;
+  materialIds: number[];
+  sacks: number;
+  kg: number;
+  avgKg: number | null;
+  sharePct: number | null;
+}
+export interface SpsBlock {
+  /** 1: the line's only sack scale. */
+  number: number;
+  /** "SPS 1 — this line's one sack scale (PLC_sack1)". */
+  label: string;
+  /** False until IFL confirms that an SPS is a sack scale and how many there are. */
+  confirmed: boolean;
+}
+export interface SpsPackingReportData extends IflReportBase {
+  weightBasis: string;
+  sps: SpsBlock;
+  /** The matrix columns, ascending by count, the no-product bucket last. */
+  columns: SpsCountColumn[];
+  rows: SpsMatrixRow[];
+  /** Period totals per count, in `columns` order. */
+  totals: SpsCountTotal[];
+  grandTotal: { sacks: number; kg: number; avgKg: number | null };
+  /** Sacks with an implausible weight, kept out of every average (still counted in sacks and kg). */
+  implausibleSacks: number;
+}
+
+/* ---- SPS Sack Weight Range Report (IFL report 4) — sackWeightRange.ts ---- */
+/** Sacks in one band, split by the scale's own verdict; a sack with no flag is in neither passed nor rejected. */
+export interface SackBandCounts { passed: number; rejected: number; noFlag: number; total: number }
+/** 'below'/'above' are the open-ended tails, 'implausible' the 0 kg / fault row. */
+export type SackBandKind = 'band' | 'below' | 'above' | 'implausible';
+export interface SackWeightBand {
+  kind: SackBandKind;
+  /** "47.1 - 47.2 kg", "Below 46.9 kg", "Above 47.7 kg", "Implausible weight". */
+  label: string;
+  /** Inclusive lower edge in kg; null for the 'below' tail and 'implausible'. */
+  fromKg: number | null;
+  /** Exclusive upper edge in kg; null for the 'above' tail and 'implausible'. */
+  toKg: number | null;
+  byShift: Record<ShiftCode, SackBandCounts>;
+  total: SackBandCounts;
+  sharePct: number | null;
+}
+/** Spread over the plausible sacks of one group; `date`/`shift` are null for the groups that span them. */
+export interface SackSpreadRow {
+  date: string | null;
+  shift: ShiftCode | null;
+  n: number;
+  minKg: number | null;
+  maxKg: number | null;
+  rangeKg: number | null;
+  avgKg: number | null;
+  /** Sample standard deviation; null when n < 2. */
+  sdKg: number | null;
+}
+export interface SackWeightRangeReportData extends IflReportBase {
+  weightBasis: string;
+  plausibility: { loKg: number; hiKg: number };
+  /** Band width actually used: 0.1, or 0.2 when 0.1 would have made more than 30 bands. */
+  bandKg: number;
+  /** The weight range of the sacks the scale PASSED (the bands' anchor); null when none passed. A fact, not a tolerance. */
+  passedRange: { minKg: number; maxKg: number } | null;
+  /** Table A: ascending by weight, tails and the implausible row last. */
+  bands: SackWeightBand[];
+  /** Table B: per production date and shift, chronological. */
+  spreadByDayShift: SackSpreadRow[];
+  /** Table B: per shift, morning / evening / night. */
+  spreadByShift: SackSpreadRow[];
+  /** Table B: the period. */
+  spreadTotal: SackSpreadRow;
+  implausibleSacks: number;
+}
+
+/* ---- Sack Packing Weight Summary (IFL report 5) — sackWeightSummary.ts ---- */
+export interface SackSummaryFigures {
+  sacks: number;
+  /** Kilograms over every sack, weight basis applied. */
+  kg: number;
+  /** avg / min / max / SD are over PLAUSIBLE sacks only; `implausible` says how many were left out. */
+  avgKg: number | null;
+  minKg: number | null;
+  maxKg: number | null;
+  sdKg: number | null;
+  rejectedByScale: number;
+  implausible: number;
+}
+export interface SackSummaryRow extends SackSummaryFigures { date: string; shift: ShiftCode }
+export interface SackSummaryDayTotal extends SackSummaryFigures { date: string }
+export interface SackSummaryShiftTotal extends SackSummaryFigures { shift: ShiftCode }
+/** One yarn count over the period (or the no-product bucket, `yarnCount` null). */
+export interface SackSummaryCountRow extends SackSummaryFigures {
+  yarnCount: string | null;
+  /** What the row prints: the count, or "No product on the reading". */
+  label: string;
+  materialIds: number[];
+}
+export interface SackWeightSummaryReportData extends IflReportBase {
+  weightBasis: string;
+  plausibility: { loKg: number; hiKg: number };
+  rows: SackSummaryRow[];
+  dayTotals: SackSummaryDayTotal[];
+  shiftTotals: SackSummaryShiftTotal[];
+  /** Per yarn count, ascending, the no-product bucket last. */
+  byYarnCount: SackSummaryCountRow[];
+  total: SackSummaryFigures;
+}
+
+/* ---- Rejected Cone Hangers Report (IFL report 7) — rejectedHangers.ts ---- */
+/** 'stands_out' = high this period by the exact binomial test; 'too_few' = under 100 inspected cones; null = judged and not flagged (or `canFlag` is false). */
+export type RejectedHangerFlag = 'stands_out' | 'too_few' | null;
+/** Table A, one hanger; `hanger` is null for the "No hanger recorded" bucket (always last). */
+export interface RejectedHangerRow {
+  hanger: number | null;
+  cones: number;
+  /** Cones on the hanger plus rejects that match no cone row. */
+  inspected: number;
+  qualityRejects: number;
+  weightRejects: number;
+  total: number;
+  ratePct: number | null;
+  flag: RejectedHangerFlag;
+}
+/** Table B, one reject. */
+export interface RejectedHangerReject {
+  date: string;
+  shift: ShiftCode;
+  /** Plant-clock instant of the reject (production time convention) — render in UTC. */
+  producedAtUtc: string;
+  hanger: number | null;
+  winder: number | null;
+  rejectType: 'quality' | 'weight';
+  /** The reason as a label, or the raw tube / material codes when no label exists; null for a weight reject. */
+  reason: string | null;
+  weightG: number | null;
+}
+export interface RejectedHangersReportData extends IflReportBase, IflListCounts {
+  /** A: sorted by total rejects descending, the "No hanger recorded" bucket last. */
+  hangers: RejectedHangerRow[];
+  /** A: every hanger together; `hanger` is null. */
+  total: RejectedHangerRow;
+  flagging: {
+    /** False when too few hangers had enough cones for a flag to mean anything; `reason` says why in words. */
+    canFlag: boolean;
+    reason: string | null;
+    /** p0: the line's reject rate over the period, %. */
+    lineRatePct: number | null;
+    /** H: hangers with at least `minInspected` inspected cones. */
+    hangersJudged: number;
+    /** Distinct hanger numbers seen in the period. */
+    hangersSeen: number;
+    minInspected: number;
+    /** The family-wise level the per-hanger threshold is derived from (0.05). */
+    alpha: number;
+  };
+  list: RejectedHangerReject[];
+}
+
+/* ---- Rejected Unknown (Lifter) Report (IFL report 8; definition DRAFT) — rejectedUnknownLifter.ts ---- */
+/** Table A, one lifter; `lifter` is null for the "No lifter recorded" bucket. */
+export interface LifterRow {
+  lifter: number | null;
+  cones: number;
+  inspected: number;
+  qualityRejects: number;
+  /** Of `qualityRejects`, how many carry a zero reason code (tube 0 or material 0). */
+  zeroCodeRejects: number;
+  weightRejects: number;
+  total: number;
+  ratePct: number | null;
+}
+/** One reject listed in B or C. */
+export interface UnknownLifterReject {
+  /** Production date (shift_date); 1969-12-31 for a zeroed-clock record. */
+  date: string;
+  shift: ShiftCode;
+  producedAtUtc: string;
+  hanger: number | null;
+  winder: number | null;
+  lifter: number | null;
+  rejectType: 'quality' | 'weight';
+  tubeCode: number | null;
+  materialCode: number | null;
+  weightG: number | null;
+  /** Why the draft definition lists it: "No lifter recorded", "No winder recorded", "Reason code is zero", "Clock zeroed (1970)". */
+  why: string[];
+}
+export interface RejectedUnknownLifterReportData extends IflReportBase, IflListCounts {
+  /** A: lifters 1..14 in order, then the "No lifter recorded" bucket when it has anything. */
+  lifters: LifterRow[];
+  /** A: every lifter together; `lifter` is null. */
+  total: LifterRow;
+  /** How many rejects in the period have no lifter or no winder recorded (the draft definition of "unknown"); 0 prints the empty-state sentence. */
+  unknownCount: number;
+  /** B: the rejects with no lifter or no winder recorded, chronological, at most `listCap` of them. */
+  list: UnknownLifterReject[];
+  /** B2: the rejects with a zero reason code — meaning not confirmed by IFL, so listed apart from B. At most `listCap` of them. */
+  zeroCodeList: UnknownLifterReject[];
+  /** What the period really holds in B2 (= `total.zeroCodeRejects`); `> listCap` means B2 was cut and every output says so. */
+  zeroCodeTotal: number;
+  /** C: independent of the period; the period's own source generation only. */
+  zeroedClock: { generation: string | null; rows: UnknownLifterReject[] };
 }
 
 export interface ReportDataByType {
@@ -2973,6 +3350,12 @@ export interface ReportDataByType {
   'machine-product': MachineProductReportData;
   'shift-production': ShiftProductionReportData;
   'rejected-cones': RejectedConesReportData;
+  'rejected-sacks': RejectedSacksReportData;
+  'sps-packing': SpsPackingReportData;
+  'sack-weight-range': SackWeightRangeReportData;
+  'sack-weight-summary': SackWeightSummaryReportData;
+  'rejected-hangers': RejectedHangersReportData;
+  'rejected-unknown-lifter': RejectedUnknownLifterReportData;
 }
 
 export interface ReportResponse<T extends ReportType> {

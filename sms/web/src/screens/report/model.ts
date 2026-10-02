@@ -29,14 +29,43 @@ export const FILTERS_BY_TYPE: Record<ReportType, readonly FilterName[]> = {
   'machine-product': ['shift', 'station'],
   'shift-production': ['shift'],
   'rejected-cones': ['shift', 'station'],
+  // IFL's other six (1 Oct 2026) — api/src/services/reports/common.ts
+  // FILTERS_BY_TYPE. The sack reports take no station (sack rows carry none,
+  // CLAUDE.md); the hanger report is the one that narrows by all three.
+  'rejected-sacks': ['shift', 'product'],
+  'sps-packing': ['shift'],
+  'sack-weight-range': ['shift', 'product'],
+  'sack-weight-summary': ['shift', 'product'],
+  'rejected-hangers': ['shift', 'station', 'product'],
+  'rejected-unknown-lifter': ['shift', 'product'],
 };
 
 /** The management summary is rank 3 on the server; every other report rank 1. */
 export const REPORT_MIN_RANK: Record<ReportType, number> = {
   daily: 1, shift: 1, product: 1, station: 1, reject: 1, 'cone-weight': 1, sack: 1, calibration: 1, 'management-summary': 3,
   'machine-product': 1, 'shift-production': 1, 'rejected-cones': 1,
+  'rejected-sacks': 1, 'sps-packing': 1, 'sack-weight-range': 1, 'sack-weight-summary': 1, 'rejected-hangers': 1, 'rejected-unknown-lifter': 1,
 };
 export const EXPORT_MIN_RANK = 3;
+
+/**
+ * The two chip rows on the Report screen, in the order they are shown.
+ * `ifl` is IFL's own eight, in THEIR numbering (their email of 29 Sep 2026:
+ * 1 shift-wise CTS loop production ... 8 rejected unknown lifter) so a
+ * reader holding that email finds report N at position N; `analysis` is the
+ * other ten the application already offered. Every type is in exactly one
+ * row — reportGroups.test.ts fails if a type is added to api.ts's
+ * REPORT_TYPES without being placed here.
+ */
+export const REPORT_GROUPS: { ifl: readonly ReportType[]; analysis: readonly ReportType[] } = {
+  ifl: [
+    'shift-production', 'rejected-sacks', 'sps-packing', 'sack-weight-range',
+    'sack-weight-summary', 'rejected-cones', 'rejected-hangers', 'rejected-unknown-lifter',
+  ],
+  analysis: [
+    'daily', 'shift', 'product', 'station', 'reject', 'cone-weight', 'sack', 'calibration', 'management-summary', 'machine-product',
+  ],
+};
 
 export function acceptsFilter(type: ReportType, f: FilterName): boolean {
   return FILTERS_BY_TYPE[type].includes(f);

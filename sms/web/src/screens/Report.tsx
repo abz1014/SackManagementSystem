@@ -6,8 +6,11 @@
  * types IFL's quotation names — Daily · Shift · Product · Machine/station ·
  * Rejects · Cone weight · Sacks · Calibration · Management summary — plus a
  * TENTH, Product by machine, added on IFL's 15 Sep 2026 answer to Q28 (the
- * per-machine, per-shift changeover view Hassan asked for by name). Each
- * one composed response from `/api/reports/<type>`, one section set under
+ * per-machine, per-shift changeover view Hassan asked for by name) — and, from
+ * 1 Oct 2026, IFL's own eight named reports (their email of 29 Sep 2026; two
+ * were already here as 'shift-production' and 'rejected-cones'), shown as a
+ * separate "IFL reports" chip row above the "Analysis" row: EIGHTEEN types
+ * in all. Each one composed response from `/api/reports/<type>`, one section set under
  * `screens/report/`, one CSV from the server (rank 3, audited), and one
  * printed page with a header naming the line, the period, when it was
  * generated on the plant's clock, by whom, and from which SMS version.
@@ -30,18 +33,18 @@
  * lets the shared station/product survive a type change instead of a report
  * silently wiping a selection Weight or Rejects still wants.
  */
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { usePolling, useLive } from '../lib/live';
 import { W } from '../lib/words';
 import type { Period, PeriodParams, ShiftCode } from '../lib/period';
 import { Block, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
 import { fmtDayLong, fmtInt } from '../lib/fmt';
 import {
-  getReportOf, reportExportUrl, getStations, getProducts, REPORT_TYPES, ROLE_RANK, rejectCodeParam,
+  getReportOf, reportExportUrl, getStations, getProducts, ROLE_RANK, rejectCodeParam,
   type AuthUser, type ProductOption, type RejectReason, type ReportFilters, type ReportHeader, type ReportResponse, type ReportType, type StationRow,
 } from '../api';
 import { distinctProductLabels } from '../lib/productLabel';
-import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_MIN_RANK } from './report/model';
+import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_GROUPS, REPORT_MIN_RANK } from './report/model';
 import { PrintHead, GenerationDisclosure, generatedLine } from './report/PrintHead';
 import { ExecSummary, PrintNotes } from './report/PrintDoc';
 import { fmtDayShort } from './report/shared';
@@ -57,6 +60,23 @@ import { SummarySection } from './report/Summary';
 import { MachineProductSection } from './report/MachineProduct';
 import { ShiftProductionSection } from './report/ShiftProduction';
 import { RejectedConesSection } from './report/RejectedCones';
+import { RejectedSacksSection } from './report/RejectedSacks';
+import { SpsPackingSection } from './report/SpsPacking';
+import { SackWeightRangeSection } from './report/SackWeightRange';
+import { SackWeightSummarySection } from './report/SackWeightSummary';
+import { RejectedHangersSection } from './report/RejectedHangers';
+import { RejectedUnknownLifterSection } from './report/RejectedUnknownLifter';
+
+/**
+ * A report-type chip is `nowrap` (app.css `.chip`), and IFL's own titles are long — "SPS Production Report - Count-wise Packing at Each SPS"
+ * is 54 characters, wider than a phone's 343px content column — so on a narrow screen a chip wider than the row pushed the whole PAGE
+ * sideways (IFL reports, layout finding L1/L3, 1 Oct 2026). The chip may wrap inside itself and never grows past its row; at desktop
+ * widths every title fits on one line and nothing changes.
+ */
+const CHIP_FITS_ROW: CSSProperties = { whiteSpace: 'normal', maxWidth: '100%', textAlign: 'left' };
+
+/** The select inside a filter chip: it may shrink below its longest option (a long product name) instead of widening the page. */
+const CHIP_SELECT: CSSProperties = { border: 0, background: 'none', padding: 0, font: 'inherit', minWidth: 0, maxWidth: '100%' };
 
 export function ReportScreen({
   period,
@@ -126,7 +146,10 @@ export function ReportScreen({
   return (
     <>
       <PrintHead header={header} />
-      <div className="page">
+      {/* The header page's own 64px bottom padding stacked on the first block's 34px + 26px top padding left ~124px of empty page under the
+          filter chips (layout finding L4, 1 Oct 2026). The first section supplies its own top spacing, so this page ends where its chips do.
+          Print already sets `.page { padding: 0 }`. */}
+      <div className="page" style={{ paddingBottom: 0 }}>
         <div className="head-row">
           <div>
             <p className="q no-print">{W.reports.question[type]}</p>
@@ -167,25 +190,35 @@ export function ReportScreen({
           </div>
         </div>
 
-        {/* The nine report types, as chips that wrap. Then the filters the
-            chosen type accepts — never one it would refuse. */}
-        <div className="row no-print" style={{ marginTop: 18 }} role="group" aria-label={W.reports.selectorLabel}>
-          {REPORT_TYPES.map((t) => (
-            <button key={t} type="button" className={`chip${t === type ? ' on' : ''}`} aria-pressed={t === type} onClick={() => onTypeChange(t)}>
-              {W.reports.type[t]}
-            </button>
+        {/* The report types, as chips that wrap, in two labelled rows: IFL's
+            own eight (in their numbering) and the analysis reports the
+            application already had. Then the filters the chosen type
+            accepts — never one it would refuse. The OUTER group keeps the
+            `aria-label` app.css keys its landscape @page rule off
+            (print.landscape.guard.test.ts); each row is a group of its own,
+            named by its label. */}
+        <div className="no-print" style={{ marginTop: 18 }} role="group" aria-label={W.reports.selectorLabel}>
+          {(['ifl', 'analysis'] as const).map((g, i) => (
+            <div key={g} className="row" style={{ marginTop: i === 0 ? 0 : 8 }} role="group" aria-label={W.iflReports.groups[g]}>
+              <span className="mut sm" aria-hidden="true" style={{ minWidth: 92 }}>{W.iflReports.groups[g]}</span>
+              {REPORT_GROUPS[g].map((t) => (
+                <button key={t} type="button" className={`chip${t === type ? ' on' : ''}`} style={CHIP_FITS_ROW} aria-pressed={t === type} onClick={() => onTypeChange(t)}>
+                  {W.reports.type[t]}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
         {allowed.length > 0 && (
           <div className="row no-print" style={{ marginTop: 10 }}>
             {allowed.includes('shift') && (
-              <label className="chip">
+              <label className="chip" style={CHIP_FITS_ROW}>
                 {W.reports.filterShift}
                 <select
                   value={filters.shift ?? ''}
                   aria-label={W.reports.filterShift}
                   onChange={(e) => onShiftChange((e.target.value || undefined) as ReportFilters['shift'])}
-                  style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+                  style={CHIP_SELECT}
                 >
                   <option value="">{period.shift ? W.shiftName[period.shift] : W.reports.all}</option>
                   <option value="morning">{W.shiftName.morning}</option>
@@ -201,13 +234,13 @@ export function ReportScreen({
             {allowed.includes('station') && (stations.error && !stations.data ? (
               <span className="chip mut">{W.reports.filterStationUnavailable}</span>
             ) : names.length > 0 && (
-              <label className="chip">
+              <label className="chip" style={CHIP_FITS_ROW}>
                 {W.reports.filterStation}
                 <select
                   value={filters.station ?? ''}
                   aria-label={W.reports.filterStation}
                   onChange={(e) => onStationChange(e.target.value === '' ? null : Number(e.target.value))}
-                  style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+                  style={CHIP_SELECT}
                 >
                   <option value="">{W.reports.all}</option>
                   {names.map((s) => (
@@ -219,13 +252,13 @@ export function ReportScreen({
             {allowed.includes('product') && (products.error && !products.data ? (
               <span className="chip mut">{W.reports.filterProductUnavailable}</span>
             ) : productList.length > 0 && (
-              <label className="chip">
+              <label className="chip" style={CHIP_FITS_ROW}>
                 {W.reports.filterProduct}
                 <select
                   value={filters.product ?? ''}
                   aria-label={W.reports.filterProduct}
                   onChange={(e) => onProductChange(e.target.value === '' ? null : Number(e.target.value))}
-                  style={{ border: 0, background: 'none', padding: 0, font: 'inherit' }}
+                  style={CHIP_SELECT}
                 >
                   <option value="">{W.reports.all}</option>
                   {productList.map((p) => (
@@ -251,7 +284,7 @@ export function ReportScreen({
       ) : (
         <>
           <div className="page print-only pd-host"><ExecSummary type={type} data={data} /></div>
-          <Sections type={type} data={data} names={names} products={productList} onOpenStation={onOpenStation} onOpenCode={onOpenCode} onSelectPeriod={onSelectPeriod} />
+          <Sections type={type} data={data} names={names} products={productList} shiftRangeApplied={q.fromShift != null} onOpenStation={onOpenStation} onOpenCode={onOpenCode} onSelectPeriod={onSelectPeriod} />
           <div className="page print-only"><PrintNotes type={type} data={data} header={data.header} /></div>
         </>
       )}
@@ -261,12 +294,14 @@ export function ReportScreen({
 
 /** One switch, so a new type is one line here and one file under report/. */
 function Sections({
-  type, data, names, products, onOpenStation, onOpenCode, onSelectPeriod,
+  type, data, names, products, shiftRangeApplied, onOpenStation, onOpenCode, onSelectPeriod,
 }: {
   type: ReportType;
   data: ReportResponse<ReportType>;
   names: StationRow[];
   products: ProductOption[];
+  /** The request carried a shift-bounded range (the page's chart zoom). */
+  shiftRangeApplied: boolean;
   onOpenStation: (station: number) => void;
   onOpenCode: (code: string) => void;
   onSelectPeriod?: (p: PeriodParams) => void;
@@ -278,12 +313,18 @@ function Sections({
     case 'station': return <StationSection d={(data as ReportResponse<'station'>).report} names={names} onOpen={onOpenStation} />;
     case 'reject': return <RejectSection d={(data as ReportResponse<'reject'>).report} onOpenCode={(r: RejectReason) => onOpenCode(rejectCodeParam(r))} onSelectPeriod={onSelectPeriod} />;
     case 'cone-weight': return <ConeWeightSection d={(data as ReportResponse<'cone-weight'>).report} names={names} />;
-    case 'sack': return <SackSection d={(data as ReportResponse<'sack'>).report} products={products} />;
+    case 'sack': return <SackSection d={(data as ReportResponse<'sack'>).report} products={products} shiftRangeApplied={shiftRangeApplied} />;
     case 'calibration': return <CalibrationSection d={(data as ReportResponse<'calibration'>).report} names={names} />;
     case 'management-summary': return <SummarySection d={(data as ReportResponse<'management-summary'>).report} products={products} />;
     case 'machine-product': return <MachineProductSection d={(data as ReportResponse<'machine-product'>).report} onOpen={onOpenStation} />;
     case 'shift-production': return <ShiftProductionSection d={(data as ReportResponse<'shift-production'>).report} />;
     case 'rejected-cones': return <RejectedConesSection d={(data as ReportResponse<'rejected-cones'>).report} />;
+    case 'rejected-sacks': return <RejectedSacksSection d={(data as ReportResponse<'rejected-sacks'>).report} />;
+    case 'sps-packing': return <SpsPackingSection d={(data as ReportResponse<'sps-packing'>).report} />;
+    case 'sack-weight-range': return <SackWeightRangeSection d={(data as ReportResponse<'sack-weight-range'>).report} />;
+    case 'sack-weight-summary': return <SackWeightSummarySection d={(data as ReportResponse<'sack-weight-summary'>).report} />;
+    case 'rejected-hangers': return <RejectedHangersSection d={(data as ReportResponse<'rejected-hangers'>).report} />;
+    case 'rejected-unknown-lifter': return <RejectedUnknownLifterSection d={(data as ReportResponse<'rejected-unknown-lifter'>).report} />;
   }
 }
 
