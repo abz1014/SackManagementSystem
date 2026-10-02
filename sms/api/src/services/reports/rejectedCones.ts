@@ -205,7 +205,18 @@ export async function getRejectedConesReport(
   const plaus = plausibleWhere(cn.req, 'weight_g', window);
   rj.req.input('cap', mssql.Int, LIST_CAP);
 
-  const [rejects, counts, ranges] = await Promise.all([
+  // C-133 (D-83, 2 Oct 2026): the zeroed-clock weight-reject records of the GENERATION(S) read, not of the date window. They carry
+  // shift_date 1969-12-31, which no period reaches, so the window-bound count in `rc` can never see them; a zeroed record cannot be
+  // placed in any period and belongs to its generation's disclosure. Only the station narrowing applies (a narrowed list is that winder's).
+  const zr = pool.request().input('line', mssql.Int, lineId);
+  let zeroedWhere = 'line_id = @line';
+  if (filters.station != null) {
+    zr.input('station', mssql.Int, filters.station);
+    zeroedWhere += ' AND source_station = @station';
+  }
+  zeroedWhere = andEpoch(zeroedWhere, zr, scope, 'reject_event');
+
+  const [rejects, counts, ranges, zeroed] = await Promise.all([
     // Every weight-reject RECORD is a row (no `weight_g IS NOT NULL`), except
     // IFL's zeroed-clock records, which no period can reach and which are
     // counted below instead. The list is cut in SQL at the cap.
@@ -233,11 +244,18 @@ export async function getRejectedConesReport(
         WHERE ${cn.where}
         GROUP BY source_station`,
     ),
+    zr.query<{ clock_fault: number | null }>(
+      `SELECT COUNT(*) AS clock_fault
+         FROM sms.reject_event
+        WHERE ${zeroedWhere} AND reject_type = 'weight' AND production_ts_utc_ms <= 0`,
+    ),
   ]);
 
   const countRow = counts.recordset[0];
-  const excludedClockFault = Number(countRow?.fault ?? 0);
-  const listTotal = Math.max(Number(countRow?.n ?? 0) - excludedClockFault, rejects.recordset.length);
+  const windowFault = Number(countRow?.fault ?? 0);
+  // The window count is a subset of the generation's, so the larger is the whole; `listTotal` removes only what the window held.
+  const excludedClockFault = Math.max(windowFault, Number(zeroed.recordset[0]?.clock_fault ?? 0));
+  const listTotal = Math.max(Number(countRow?.n ?? 0) - windowFault, rejects.recordset.length);
 
   // The product and the limits in force at each reject's own instant. The
   // timeline and the catalogue are a handful of rows each, loaded once and

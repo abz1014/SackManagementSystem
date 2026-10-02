@@ -51,7 +51,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import type { ShiftCode } from '@sms/shared';
 import { plausibleWhere } from './coneState.js';
-import { noteOf, resolveGenerationScope, type EventTable, type GenerationNote, type GenerationScope } from './generation.js';
+import { andEpoch, noteOf, resolveGenerationScope, type EventTable, type GenerationNote, type GenerationScope } from './generation.js';
 import { getPlausibilityRuleAsOf, getWeightRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 import { bindSackFilters, type SackSummaryQuery } from './sacks.js';
 
@@ -489,6 +489,14 @@ export async function listSacks(
             SUM(CASE WHEN e.production_ts_utc_ms <= 0 THEN 1 ELSE 0 END) AS clock
        FROM sms.sack_event e WHERE ${countWhere}`,
   );
+  // C-133 (D-83, 2 Oct 2026): zeroed-clock sacks of the GENERATION read, not of the date window. They carry shift_date 1969-12-31, which
+  // no period reaches, so the window-bound `clock` above can never see them; a zeroed sack cannot be placed in any period and belongs to
+  // its generation's disclosure. Only the scale-verdict clause narrows it, as it narrows the list.
+  const zeroedReq = pool.request().input('line', mssql.Int, lineId);
+  const zeroedWhere = andEpoch('e.line_id = @line AND e.production_ts_utc_ms <= 0', zeroedReq, c.scope, 'sack_event', { alias: 'e.' }) + verdictClause();
+  const zeroed = await zeroedReq.query<{ clock_fault: number | null }>(
+    `SELECT COUNT(*) AS clock_fault FROM sms.sack_event e WHERE ${zeroedWhere}`,
+  );
 
   const rowReq = pool.request();
   const rowWhere = bindSackFilters(rowReq, lineId, q, 'e.', true, c.scope, 'sack_event') + verdictClause();
@@ -521,7 +529,7 @@ export async function listSacks(
     }),
     total: Number(counts.recordset[0]?.listed ?? 0),
     cap,
-    excludedClockFault: Number(counts.recordset[0]?.clock ?? 0),
+    excludedClockFault: Math.max(Number(counts.recordset[0]?.clock ?? 0), Number(zeroed.recordset[0]?.clock_fault ?? 0)),
     weightBasis: c.weightBasis,
     plausibility: c.plausibility,
     generationNote: c.generationNote,

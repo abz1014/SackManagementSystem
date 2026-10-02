@@ -360,18 +360,19 @@ describe('getRejectedSacksReport — filters, basis, one generation', () => {
     const d = await getRejectedSacksReport(pool, 1, PERIOD, { shift: 'morning', product: 21 });
     expect(d.total).toEqual({ sacks: 3, rejected: 1, rejectedPct: 33.33, noFlag: 0 });
     expect(d.list.map((r) => r.sackNum)).toEqual([3]);
-    for (const s of statements.filter((x) => x.sql.includes('sms.sack_event'))) {
+    // C-133: the zeroed-clock count reads the whole generation (no date, shift or product), so it is not among the narrowed queries.
+    for (const s of statements.filter((x) => x.sql.includes('sms.sack_event') && !x.sql.includes('AS clock_fault'))) {
       expect(s.inputs.get('shift')).toBe('morning');
       expect(s.inputs.get('product')).toBe(21);
     }
-    expect(statements.filter((x) => x.sql.includes('sms.sack_event')).length).toBeGreaterThanOrEqual(3);
+    expect(statements.filter((x) => x.sql.includes('sms.sack_event') && !x.sql.includes('AS clock_fault')).length).toBeGreaterThanOrEqual(3);
   });
 
   it('a shift range reaches the cell query and both list queries', async () => {
     const { pool, statements } = datasetPool(fixture());
     await getRejectedSacksReport(pool, 1, PERIOD, {}, { from: '2026-09-01', fromShift: 'evening', to: '2026-09-02', toShift: 'morning' });
-    const sack = statements.filter((x) => x.sql.includes('sms.sack_event'));
-    expect(sack).toHaveLength(3); // cells, list count, list rows
+    const sack = statements.filter((x) => x.sql.includes('sms.sack_event') && !x.sql.includes('AS clock_fault'));
+    expect(sack).toHaveLength(3); // cells, list count, list rows (the generation-wide zeroed-clock count is not range-bound, C-133)
     for (const s of sack) {
       expect(s.sql).toContain('@srFrom');
       expect(s.inputs.get('srFromOrd')).toBe(2);
@@ -393,7 +394,7 @@ describe('getRejectedSacksReport — filters, basis, one generation', () => {
     const { pool, statements } = datasetPool(fixture(), { epochs: true });
     const d = await getRejectedSacksReport(pool, 1, PERIOD, {});
     const sack = statements.filter((x) => x.sql.includes('sms.sack_event'));
-    expect(sack).toHaveLength(3);
+    expect(sack).toHaveLength(4); // cells, list count, list rows, and the zeroed-clock count (C-133), all on the one epoch
     for (const s of sack) expect(s.inputs.get('ges0')).toBe(10);
     expect(statements.filter((s) => s.sql.includes('sms.plausibility_rule'))).toHaveLength(1);
     expect(statements.filter((s) => s.sql.includes('sms.weight_rule'))).toHaveLength(1);

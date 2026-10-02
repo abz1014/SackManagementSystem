@@ -53,7 +53,7 @@
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import type { ShiftCode } from '@sms/shared';
-import { noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
+import { andEpoch, noteOf, resolveGenerationScope, type GenerationNote } from '../generation.js';
 import { bindConeFilters, bindRejectFilters, getUnmatchedRejects, type RejectFilters } from '../rejects.js';
 import type { ResolvedPeriod } from '../report.js';
 import type { ShiftRange } from '../../shiftRange.js';
@@ -272,7 +272,22 @@ export async function getRejectedHangersReport(
   const listWhere = bindRejectFilters(listReq, lineId, f, 're.', false);
   listReq.input('cap', mssql.Int, LIST_CAP);
 
-  const [cones, rejects, unmatched, list] = await Promise.all([
+  // C-133 (D-83, 2 Oct 2026): the zeroed-clock reject records of the GENERATION(S) read. They carry shift_date 1969-12-31, which no
+  // period reaches, so the date-bound `rejects` query cannot see them; they belong to their generation's disclosure. The station and
+  // product narrowing apply (a narrowed report states only its own); the date, shift and code windows cannot.
+  const zeroedReq = pool.request().input('line', mssql.Int, lineId);
+  let zeroedWhere = 're.line_id = @line';
+  if (filters.station != null) {
+    zeroedReq.input('station', mssql.Int, filters.station);
+    zeroedWhere += ' AND re.source_station = @station';
+  }
+  if (filters.product != null) {
+    zeroedReq.input('product', mssql.Int, filters.product);
+    zeroedWhere += ' AND re.material_id = @product';
+  }
+  zeroedWhere = andEpoch(zeroedWhere, zeroedReq, scope, 'reject_event', { alias: 're.' });
+
+  const [cones, rejects, unmatched, list, zeroed] = await Promise.all([
     conesReq.query<{ hk: string; n: number }>(
       `SELECT ${hangerKey('')} AS hk, COUNT(*) AS n
          FROM sms.cone_event
@@ -302,6 +317,11 @@ export async function getRejectedHangersReport(
           AND ISNULL(rc.material_code, -999) = ISNULL(re.material_inspect_code, -999)
         WHERE ${listWhere} AND re.production_ts_utc_ms > 0
         ORDER BY re.production_ts_utc_ms, re.reject_event_id`,
+    ),
+    zeroedReq.query<{ clock_fault: number | null }>(
+      `SELECT COUNT(*) AS clock_fault
+         FROM sms.reject_event re
+        WHERE ${zeroedWhere} AND re.production_ts_utc_ms <= 0`,
     ),
   ]);
 
@@ -354,7 +374,8 @@ export async function getRejectedHangersReport(
     list: rows,
     listTotal,
     listCap: LIST_CAP,
-    excludedClockFault,
+    // the window-bound split above is a subset of the generation's zeroed records, so the larger is the whole
+    excludedClockFault: Math.max(excludedClockFault, Number(zeroed.recordset[0]?.clock_fault ?? 0)),
     note: noteFor(filters),
     pendingIfl: [...REJECTED_HANGERS_PENDING_IFL],
     generationNote: noteOf(scope),

@@ -163,7 +163,12 @@ describe('rejected-cones: report', () => {
     const range: ShiftRange = { from: '2026-09-01', fromShift: 'morning', to: '2026-09-01', toShift: 'evening' };
     const { pool, calls } = fakePool();
     await getRejectedConesReport(pool, 1, PERIOD, { shift: 'morning', station: 7 }, range);
-    const filtered = calls.filter((c) => c.sql.includes('FROM sms.reject_event') || c.sql.includes('FROM sms.cone_event'));
+    // C-133: the zeroed-clock count reads the whole generation, so it is bound to the station only, never to a date, shift or range.
+    const zeroed = calls.find((c) => c.sql.includes('AS clock_fault'))!;
+    expect(zeroed.params.get('station')).toBe(7);
+    expect(zeroed.params.has('shift')).toBe(false);
+    expect(zeroed.params.has('srFromOrd')).toBe(false);
+    const filtered = calls.filter((c) => (c.sql.includes('FROM sms.reject_event') || c.sql.includes('FROM sms.cone_event')) && !c.sql.includes('AS clock_fault'));
     expect(filtered).toHaveLength(3);
     for (const c of filtered) {
       expect(c.params.get('shift')).toBe('morning');
@@ -362,7 +367,7 @@ describe('rejected-cones: the zeroed-clock sentinel, the list cap and one genera
     const { pool, calls } = fakePool({ epochs, present });
     const r = await getRejectedConesReport(pool, 1, PERIOD, {});
     const bound = calls.filter((c) => c.sql.includes('FROM sms.reject_event') || c.sql.includes('FROM sms.cone_event'));
-    expect(bound).toHaveLength(3);
+    expect(bound).toHaveLength(4); // three window-bound queries and the generation-wide zeroed-clock count (C-133), all on the one epoch
     for (const c of bound) {
       const isCone = c.sql.includes('FROM sms.cone_event');
       expect(c.sql).toContain(isCone ? 'source_epoch = @gec0' : 'source_epoch = @ger0');
