@@ -140,6 +140,12 @@ export const W = {
        figures below actually cover. */
     rightNow: 'right now',
     figuresCover: (period: string) => `Figures below cover ${period}.`,
+    /* C-015 (2 Oct 2026): printed under a headline whose period crossed IFL's
+       5 Aug table rebuild. The figures read ONE data batch; the other batch's
+       readings are left out and the headline must say so. `excluded` is null
+       where the payload carries no count (Rejects). */
+    periodGenerations: (excluded: string | null) =>
+      `${excluded ? `${excluded} readings in this period belong` : 'Some readings in this period belong'} to a different data batch (IFL rebuilt its tables) and are not counted in these figures, because the two batches are not one continuous record.`,
   } as const,
   shift: { morning: 'morning shift', evening: 'evening shift', night: 'night shift' } as const,
   shiftName: { morning: 'Morning', evening: 'Evening', night: 'Night' } as const,
@@ -2168,7 +2174,7 @@ export const W = {
        `sacksPassedScalePct`. */
     colSacksPassedScale: 'Sacks passed by scale',
     ofConesWeighed: (p: string) => `${p} of cones weighed`,
-    ofInspected: (p: string) => `${p} of cones plus rejects`,
+    ofInspected: (p: string) => `${p} of cones plus rejects with no cone record`,
     timeLostNotSplit: 'Time lost is not split by shift.',
     /* Shift report. */
     shiftSection: (name: string) => `${name} shift`,

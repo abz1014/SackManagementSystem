@@ -134,7 +134,7 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
       const outside = ooc + below;
       out.tiles = [
         { label: 'Rejects', value: fmtInt(d.total) },
-        { label: 'Average reject rate', value: fmtPct(d.pBarPct), note: 'over cones plus rejects' },
+        { label: 'Average reject rate', value: fmtPct(d.pBarPct), note: 'over cones plus rejects with no cone record' },
         { label: 'Top reason', value: top ? top.displayLabel : '—', note: top ? `${fmtInt(top.count)} · ${fmtPct(top.pct)} of rejects` : null },
         { label: 'Days outside control limits', value: fmtInt(outside), unit: `of ${d.trend.length}`, note: `${fmtInt(ooc)} above · ${fmtInt(below)} below`, attn: ooc > 0 },
       ];
@@ -394,7 +394,7 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
       out.tiles = [
         { label: 'Hangers seen', value: fmtInt(f?.hangersSeen ?? rows.filter((h) => h.hanger != null).length) },
         { label: 'Rejected cones', value: fmtInt(total), attn: total > 0 },
-        { label: 'Line reject rate', value: fmtPct(f?.lineRatePct ?? tt?.ratePct), note: 'over cones plus rejects' },
+        { label: 'Line reject rate', value: fmtPct(f?.lineRatePct ?? tt?.ratePct), note: 'over cones plus rejects with no cone record' },
         { label: 'Hangers that stand out', value: fmtInt(standing.length), attn: standing.length > 0, note: f?.canFlag === false ? 'too few cones per hanger to judge' : null },
       ];
       if (total === 0) {

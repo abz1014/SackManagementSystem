@@ -111,7 +111,7 @@ export async function getDailyReport(
       note:
         'Two populations, counted separately: cones the scale itself marked out of range (still weighed, listed on Readings as ' +
         '"Rejected cones"), and cones the inspection stations rejected (the Rejects screen). ' +
-        'The scale share is over cones weighed; the inspection rate is over cones plus inspection rejects.',
+        'The scale share is over cones weighed; the inspection rate is over cones plus rejects with no cone record.',
     },
   };
 }
