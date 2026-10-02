@@ -14,7 +14,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { W } from '../lib/words';
-import { PERIOD_KEYS, describePeriod, type PeriodKey, type PeriodParams, type ShiftRef } from '../lib/period';
+import { PERIOD_KEYS, describePeriod, isRealDate, type PeriodKey, type PeriodParams, type ShiftRef } from '../lib/period';
 import type { Health } from '../lib/health';
 import { fmtClockSec, fmtClock, fmtClockOn, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
@@ -132,7 +132,7 @@ export function PeriodControl({
             aria-label="From"
             value={picked.from}
             max={picked.to}
-            onChange={(e) => onChange({ key: 'pick', picked: { ...picked, from: e.target.value } })}
+            onChange={(e) => { if (isRealDate(e.target.value)) onChange({ key: 'pick', picked: { ...picked, from: e.target.value } }); }}
           />
           <span className="q" style={{ margin: 0 }}>{W.periodTo}</span>
           <input
@@ -140,7 +140,7 @@ export function PeriodControl({
             aria-label="To"
             value={picked.to}
             min={picked.from}
-            onChange={(e) => onChange({ key: 'pick', picked: { ...picked, to: e.target.value } })}
+            onChange={(e) => { if (isRealDate(e.target.value)) onChange({ key: 'pick', picked: { ...picked, to: e.target.value } }); }}
           />
         </span>
       )}

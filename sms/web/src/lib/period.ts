@@ -127,6 +127,17 @@ function weekStart(date: string): string {
   return addDays(date, -back);
 }
 
+/**
+ * True only for a real YYYY-MM-DD calendar date (rejects '', partial text and
+ * impossible dates such as 2026-02-31, which `Date` would silently roll over).
+ * 2 Oct 2026 (C-016): a half-edited date input must never become a period.
+ */
+export function isRealDate(s: string | undefined | null): s is string {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 /** Inclusive day count between two YYYY-MM-DD dates. */
 export function daysBetween(from: string, to: string): number {
   const a = new Date(`${from}T12:00:00Z`).getTime();
@@ -204,8 +215,11 @@ export function resolvePeriod(
     case 'pick': {
       // A picked range is the one case the user can get backwards or push into
       // the future; both are corrected here rather than sent to the API.
-      const rawFrom = picked?.from ?? today;
-      const rawTo = picked?.to ?? rawFrom;
+      // An empty or invalid bound (C-016) is treated as no pick at all - the
+      // same default as a missing one - never as an open-ended window.
+      const ok = picked && isRealDate(picked.from) && isRealDate(picked.to) ? picked : undefined;
+      const rawFrom = ok?.from ?? today;
+      const rawTo = ok?.to ?? rawFrom;
       const lo = clip(rawFrom <= rawTo ? rawFrom : rawTo, today);
       const hi = clip(rawFrom <= rawTo ? rawTo : rawFrom, today);
       return {
@@ -448,7 +462,7 @@ export function parsePeriodParams(sp: URLSearchParams): PeriodParams {
   if (key !== 'pick') return { key };
   const from = sp.get('from');
   const to = sp.get('to');
-  if (from && to && DATE_RE.test(from) && DATE_RE.test(to)) return { key, picked: { from, to } };
+  if (from && to && DATE_RE.test(from) && DATE_RE.test(to) && isRealDate(from) && isRealDate(to)) return { key, picked: { from, to } };
   // A malformed pick is not an error worth a message; it falls back to the
   // default rather than rendering an empty screen.
   return { key: 'shift' };
