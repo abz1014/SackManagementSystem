@@ -231,6 +231,21 @@ const EMPTY_LINE: ReportLine = {
 /** Shift order as the plant runs them, not alphabetical. */
 const SHIFT_ORDER = ['morning', 'evening', 'night'];
 
+/** The report's shift-check block from a ShiftCheckData (null when no row had a plant shift to compare). */
+export function toReportShiftCheck(shiftCheck: Awaited<ReturnType<typeof getShiftCheck>>): ReportData['shiftCheck'] {
+  return shiftCheck.cones - shiftCheck.noLegacyShift > 0
+    ? {
+        compared: shiftCheck.cones - shiftCheck.noLegacyShift,
+        mismatched: shiftCheck.mismatched,
+        mismatchPct: shiftCheck.mismatchPct,
+        topHour: shiftCheck.topHours[0]?.hour ?? null,
+        // The distribution, not just its mode (verification 25 Sep 2026,
+        // D11): 39 of 99 is not "mostly".
+        hours: shiftCheck.topHours,
+      }
+    : null;
+}
+
 export async function getReport(
   pool: ConnectionPool,
   lineId: number,
@@ -282,7 +297,7 @@ export async function getReport(
           WHERE ${coverageWhere}`,
     ),
     shift ? Promise.resolve(null) : getStoppagePatterns(pool, lineId, from, to, REPORT_STOP_THRESHOLD_SECONDS, shiftRange),
-    getShiftCheck(pool, lineId, from, to),
+    getShiftCheck(pool, lineId, from, to, { shift: shiftArg, shiftRange }),
   ]);
 
   const cov = coverageRes.recordset[0];
@@ -325,18 +340,7 @@ export async function getReport(
             // product-tolerance figure should travel without its provenance.
             ...(totalRes.limitProvenance ? { provenance: totalRes.limitProvenance } : {}),
           },
-    shiftCheck:
-      shiftCheck.cones - shiftCheck.noLegacyShift > 0
-        ? {
-            compared: shiftCheck.cones - shiftCheck.noLegacyShift,
-            mismatched: shiftCheck.mismatched,
-            mismatchPct: shiftCheck.mismatchPct,
-            topHour: shiftCheck.topHours[0]?.hour ?? null,
-            // The distribution, not just its mode (verification 25 Sep 2026,
-            // D11): 39 of 99 is not "mostly".
-            hours: shiftCheck.topHours,
-          }
-        : null,
+    shiftCheck: toReportShiftCheck(shiftCheck),
     generationNote: noteOf(scope),
   };
 }

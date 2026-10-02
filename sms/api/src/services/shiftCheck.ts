@@ -22,6 +22,8 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
+import type { ShiftCode } from '@sms/shared';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 import { epochFragment, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 export interface ShiftCheckDay {
@@ -60,6 +62,11 @@ export async function getShiftCheck(
   lineId: number,
   from: string,
   to: string,
+  /**
+   * C-130 (2 Oct 2026): the report's own shift filter / shift-bounded range, so the
+   * sentence covers the same cones as the figures beside it. Absent = whole days.
+   */
+  scopeFilter: { shift?: ShiftCode; shiftRange?: ShiftRange } = {},
 ): Promise<ShiftCheckData> {
   // SOURCE GENERATIONS (generation.ts, 23 Sep 2026). `shift_code_legacy` is
   // the SOURCE table's own Shift column, and each generation is a different
@@ -68,22 +75,31 @@ export async function getShiftCheck(
   const scope = await resolveGenerationScope(pool, lineId, { from, to }, ['cone_event']);
   const gen0 = epochFragment(scope, 'cone_event');
   const genAnd = gen0.sql ? ' AND ' + gen0.sql : '';
+  const { shift, shiftRange } = scopeFilter;
+  // Same predicates getProduction uses (production.ts): shift_code = @shift and shiftRangeClause.
   const bind = () => {
     const r = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
     for (const q of gen0.params) r.input(q.name, mssql.Int, q.id);
-    return r;
+    let scopeAnd = '';
+    if (shift) {
+      r.input('shift', mssql.VarChar(10), shift);
+      scopeAnd += ' AND shift_code = @shift';
+    }
+    if (shiftRange) scopeAnd += ' AND ' + shiftRangeClause(shiftRange, { date: 'shift_date', code: 'shift_code' }, r);
+    return { r, scopeAnd };
   };
 
   // Per production day: cones, and how many the plant filed differently.
   // A NULL legacy shift is neither a match nor a mismatch; it is counted
   // apart so the percentage is over rows that could be compared.
-  const days = await bind().query<{ day: string; n: number; mm: number; nolegacy: number }>(
+  const b1 = bind();
+  const days = await b1.r.query<{ day: string; n: number; mm: number; nolegacy: number }>(
     `SELECT CONVERT(varchar(10), shift_date, 120) AS day,
             COUNT(*) AS n,
             SUM(CASE WHEN shift_code_legacy IS NOT NULL AND shift_code_legacy <> shift_code THEN 1 ELSE 0 END) AS mm,
             SUM(CASE WHEN shift_code_legacy IS NULL THEN 1 ELSE 0 END) AS nolegacy
        FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${genAnd}
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${genAnd}${b1.scopeAnd}
       GROUP BY shift_date
       ORDER BY shift_date`,
   );
@@ -91,10 +107,11 @@ export async function getShiftCheck(
   // The hour of the WEIGHING time, on the plant's clock as it is stored
   // (production_ts_utc is the wall clock labelled UTC — DATEPART reads it
   // back as the plant's hour without any conversion).
-  const hours = await bind().query<{ h: number; mm: number }>(
+  const b2 = bind();
+  const hours = await b2.r.query<{ h: number; mm: number }>(
     `SELECT DATEPART(HOUR, production_ts_utc) AS h, COUNT(*) AS mm
        FROM sms.cone_event
-      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${genAnd}
+      WHERE line_id = @line AND shift_date BETWEEN @from AND @to${genAnd}${b2.scopeAnd}
         AND shift_code_legacy IS NOT NULL AND shift_code_legacy <> shift_code
       GROUP BY DATEPART(HOUR, production_ts_utc)
       ORDER BY COUNT(*) DESC, DATEPART(HOUR, production_ts_utc)`,

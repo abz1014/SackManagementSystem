@@ -15,9 +15,10 @@
  */
 import type { ConnectionPool } from 'mssql';
 import { SHIFT_CODES, type ShiftCode } from '@sms/shared';
-import { getReport, type ReportCoverage, type ReportData, type ReportLine, type ResolvedPeriod } from '../report.js';
+import { getReport, toReportShiftCheck, type ReportCoverage, type ReportData, type ReportLine, type ResolvedPeriod } from '../report.js';
 import type { ReportFilters } from './common.js';
 import type { GenerationNote } from '../generation.js';
+import { getShiftCheck } from '../shiftCheck.js';
 import { dailyLine, DAILY_CSV_HEADERS } from './daily.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import type { ShiftRange } from '../../shiftRange.js';
@@ -50,7 +51,12 @@ export async function getShiftReport(
   shiftRange?: ShiftRange,
 ): Promise<ShiftReportData> {
   const wanted: ShiftCode[] = filters.shift ? [filters.shift] : [...SHIFT_CODES];
-  const reports = await Promise.all(wanted.map((s) => getReport(pool, lineId, resolved, s, shiftRange)));
+  const [reports, lineCheck] = await Promise.all([
+    Promise.all(wanted.map((s) => getReport(pool, lineId, resolved, s, shiftRange))),
+    // C-130 (2 Oct 2026): scoped to the chosen shift / range, or line-wide (all shifts) when none is chosen —
+    // each per-shift report's own shiftCheck would otherwise be that one shift's only.
+    filters.shift ? Promise.resolve(null) : getShiftCheck(pool, lineId, resolved.from, resolved.to, { shiftRange }),
+  ]);
   return {
     period: resolved,
     shift: filters.shift ?? null,
@@ -61,8 +67,8 @@ export async function getShiftReport(
       byDay: r.byDay,
       readings: r.readings,
     })),
-    // The same check for every shift (it is a line-wide, per-day comparison).
-    shiftCheck: reports[0]?.shiftCheck ?? null,
+    // The same check for every shift (it is a line-wide, per-day comparison); a chosen shift's own check when one is chosen.
+    shiftCheck: lineCheck ? toReportShiftCheck(lineCheck) : (reports[0]?.shiftCheck ?? null),
     // Every shift's getReport resolves the same (line, from, to) window, so
     // they share one generation; the first one's note describes all three.
     generationNote: reports[0]?.generationNote,
