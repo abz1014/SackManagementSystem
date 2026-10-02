@@ -197,17 +197,24 @@ export function RegisterPrintHead({
    *  the printed header must name the SAME batch the screen shows, never a
    *  second, independently-resolved default. */
   batch,
+  shift,
+  fromShift,
+  toShift,
 }: {
   from: string;
   to: string;
   at: string | null;
   title: string;
   batch?: string;
+  /** C-174 (2 Oct 2026): a shift-bounded register's masthead names its shifts, not whole days. */
+  shift?: string;
+  fromShift?: string;
+  toShift?: string;
 }) {
   const h = usePolling(
-    () => getReportHeader({ from, to, at, batch }),
+    () => getReportHeader({ from, to, at, batch, shift, fromShift, toShift }),
     5 * 60_000,
-    `print-head:${from}:${to}:${at ?? ''}:${batch ?? 'auto'}`,
+    `print-head:${from}:${to}:${at ?? ''}:${batch ?? 'auto'}:${shift ?? ''}:${fromShift ?? ''}:${toShift ?? ''}`,
   );
   const { line } = useLive();
   if (h.data?.header) return <PrintHead header={h.data.header} title={title} inlineNotes />;
@@ -219,8 +226,12 @@ export function RegisterPrintHead({
           {line?.lineName ? `${line.lineName} · ` : ''}
           {title}
           {' · '}
-          {from}
-          {to !== from ? ` to ${to}` : ''}
+          {/* C-174: never state whole days for a shift-bounded register. */}
+          {fromShift && toShift
+            ? `${fromShift} to ${toShift}`
+            : shift
+              ? `${from} (${shift} shift)`
+              : `${from}${to !== from ? ` to ${to}` : ''}`}
         </b>
         <div className="mut sm">{W.reports.generatedUnavailable}</div>
         <div className="mut sm">{W.reports.printedSelectionNote}</div>
