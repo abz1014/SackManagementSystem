@@ -86,8 +86,8 @@ describe('countLine never states a count it was not given', () => {
     expect(line(ok(1000), ok(402))).toContain(W.readings.countLine('1,000', '402', '40.2%'));
   });
 
-  it('both real and genuinely empty: zero is a legitimate answer', () => {
-    expect(line(ok(0), ok(0))).toContain(W.readings.countLine('0', '0', '0%'));
+  it('both real and genuinely empty: zero is a legitimate answer, stated without a rate (C-156)', () => {
+    expect(line(ok(0), ok(0))).toContain(W.readings.countLineNoRate('0', '0'));
   });
 
   it('both real but none weighed and some rejected: states both, claims no rate', () => {

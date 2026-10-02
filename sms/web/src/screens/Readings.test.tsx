@@ -145,7 +145,7 @@ describe('Readings — the headline (countLine)', () => {
     const h1 = await findByRole('heading', { level: 1 });
 
     await waitFor(() =>
-      expect(h1.textContent).toContain(W.readings.countLine(fmtInt(0), fmtInt(0), '0%')),
+      expect(h1.textContent).toContain(W.readings.countLineNoRate(fmtInt(0), fmtInt(0))), // C-156: no rate over 0 weighed
     );
     // Two-sided: this must NOT read as either failure sentence above.
     expect(h1.textContent).not.toBe(W.readings.countLineFailed);

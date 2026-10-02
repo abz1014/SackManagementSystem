@@ -435,10 +435,11 @@ export function countLine(
   // Both counts are real from here down. A rate between them needs a
   // non-zero denominator; "402 out of 0" is not 0%, so when the register
   // genuinely returns none weighed the two numbers are stated without one.
-  if (total.n === 0 && rejected.n > 0) {
+  // C-156: also when both are zero — "(0%)" over nothing weighed is not a rate.
+  if (total.n === 0) {
     return `${what}: ${W.readings.countLineNoRate(fmtInt(total.n), fmtInt(rejected.n))}`;
   }
-  const pct = total.n > 0 ? `${Math.round((1000 * rejected.n) / total.n) / 10}%` : '0%';
+  const pct = `${Math.round((1000 * rejected.n) / total.n) / 10}%`;
   return `${what}: ${W.readings.countLine(fmtInt(total.n), fmtInt(rejected.n), pct)}`;
 }
 
