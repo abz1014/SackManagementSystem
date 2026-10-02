@@ -31,7 +31,7 @@ import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
 import { classifyConeDetail, isPlausibleWeight, type ConeState } from '@sms/shared';
 import { toPlantMs } from './plantClock.js';
-import { getPlausibilityRule } from './admin.js';
+import { getPlausibilityRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 import type { ProductCatalogue } from './productLimits.js';
 import { resolveGenerationScope, epochWhere, noteOf, type GenerationNote, type ScopeResolver } from './generation.js';
 import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
@@ -529,7 +529,8 @@ export async function productDisagreement(
   // Fetched even when `windows` came from the legacy (no-catalogue) branch:
   // the plausibility bound is not a product-limits concept and applies to
   // the base population regardless of where the windows came from.
-  const plausibility = await getPlausibilityRule(pool, lineId);
+  // C-018 (2 Oct 2026): as of the period's end, not "right now" (RT24-04).
+  const plausibility = (await getPlausibilityRuleAsOf(pool, lineId, plantDayEndMs(range.to), plantDayStartMs(range.from))).rule;
   // Resolved on line and day range only — never on `range.shift` — so the
   // shift breakdown and the period total land on the same generation.
   const scope = await resolveScope(lineId, { from: range.from, to: range.to }, ['cone_event']);

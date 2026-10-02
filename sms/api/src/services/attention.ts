@@ -48,7 +48,7 @@ import type { ConnectionPool } from 'mssql';
 import type { CalibrationData, DriftProjection } from './calibration.js';
 import { adjustmentRestarts, getStationDrift, latestRestart, listCalibrationAdjustments, projectDaysToLimit } from './calibration.js';
 import { getRejectSpc, type RejectSpcData, type RejectTypeFilter } from './rejectSpc.js';
-import { getPlausibilityRule } from './admin.js';
+import { getPlausibilityRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 import { loadProductTimeline, limitsOf, productDisagreement, type DayRange } from './productAt.js';
 import { loadProductCatalogue, limitsFromVersion } from './productLimits.js';
 import { consecutiveProductionDays } from './plantClock.js';
@@ -274,7 +274,8 @@ export async function getAttention(
   // and app.ts's `GET /api/calibration` so all three read the ledger the
   // same way.
   const [plausibility, timeline, adjustments, catalogue] = await Promise.all([
-    getPlausibilityRule(pool, lineId),
+    // C-018 (2 Oct 2026): as of the trailing window's end, not "right now" (RT24-04).
+    getPlausibilityRuleAsOf(pool, lineId, plantDayEndMs(trailing.to), plantDayStartMs(trailing.from)).then((r) => r.rule),
     loadProductTimeline(pool, lineId),
     listCalibrationAdjustments(pool, lineId, { to: trailing.to }),
     loadProductCatalogue(pool),

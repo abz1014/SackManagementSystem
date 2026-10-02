@@ -32,6 +32,7 @@ import type { ConnectionPool, Request as SqlRequest } from 'mssql';
 import mssql from 'mssql';
 import { CONE_STATES, type ConeState } from '@sms/shared';
 import { getPlausibilityRule } from './admin.js';
+import { getPlausibilityRuleAsOf, plantDayEndMs, plantDayStartMs } from './ruleAsOf.js';
 import { loadProductTimeline, limitWindowsFor, type LimitWindow } from './productAt.js';
 import { loadProductCatalogue } from './productLimits.js';
 
@@ -117,10 +118,24 @@ export function limitProvenance(ctx: StateContext): LimitProvenance {
   };
 }
 
-/** Everything the CASE needs, loaded once per request. */
-export async function loadStateContext(pool: ConnectionPool, lineId: number): Promise<StateContext> {
+/**
+ * Everything the CASE needs, loaded once per request.
+ *
+ * C-018 (2 Oct 2026): pass `period` when the context judges a period — the
+ * plausibility rule is then read as of that period's end (RT24-04, ruleAsOf.ts)
+ * rather than "in force right now", so a Setup edit made after the period does
+ * not re-judge it. Without `period` (a caller with no period of its own) the
+ * latest rule answers, exactly as before.
+ */
+export async function loadStateContext(
+  pool: ConnectionPool,
+  lineId: number,
+  period?: { from: string; to: string },
+): Promise<StateContext> {
   const [plaus, timeline, catalogue] = await Promise.all([
-    getPlausibilityRule(pool, lineId),
+    period
+      ? getPlausibilityRuleAsOf(pool, lineId, plantDayEndMs(period.to), plantDayStartMs(period.from)).then((r) => r.rule)
+      : getPlausibilityRule(pool, lineId),
     loadProductTimeline(pool, lineId),
     loadProductCatalogue(pool),
   ]);

@@ -1263,9 +1263,11 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
    * state column and the state filter from it. Sacks and rejects have no
    * classification and get none.
    */
-  async function registerClassification(q: { type: string; state?: string; outsideProductLimits?: 'true' }) {
+  async function registerClassification(q: { type: string; from?: string; to?: string; state?: string; outsideProductLimits?: 'true' }) {
     if (q.type !== 'cone') return { classification: undefined, states: undefined };
-    const classification = await loadStateContext(pool, cfg.lineId);
+    // C-018 (2 Oct 2026): the listed period's own plausibility rule (as of its
+    // end), not "right now". An open-ended listing has no period end to read it at.
+    const classification = await loadStateContext(pool, cfg.lineId, q.from && q.to ? { from: q.from, to: q.to } : undefined);
     const states = parseStates(q.state) ?? (q.outsideProductLimits ? (['low', 'high'] as const) : null);
     return { classification, states: states == null ? undefined : [...states] };
   }
@@ -2291,7 +2293,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
           return { result: undefined };
         },
       );
-      res.json({ ok: true, note: 'applies immediately to every SPC/weight query — read-time, not a rebuild' });
+      res.json({ ok: true, note: 'applies to periods that end after this edit, read at query time with no rebuild; earlier periods keep the rule in force at their own end, and cached answers refresh within a few seconds' });
     } catch (e) { next(e); }
   });
 

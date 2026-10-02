@@ -25,7 +25,7 @@
  */
 import type { ConnectionPool } from 'mssql';
 import mssql from 'mssql';
-import { getPlausibilityRule } from '../admin.js';
+import { getPlausibilityRuleAsOf, plantDayEndMs, plantDayStartMs } from '../ruleAsOf.js';
 import { plausibleWhere, type StateCounts } from '../coneState.js';
 import { andEpoch, noteOf, resolveGenerationScope, UNSCOPED, type GenerationNote, type GenerationScope } from '../generation.js';
 import { getProduction } from '../production.js';
@@ -187,7 +187,8 @@ export async function getConeWeightReport(
     // `[from, to]` window, unchanged by this task, per that file's own F4/F6
     // population contract.
     getWeightStations(pool, lineId, from, to, undefined, { from, to, shiftRange }),
-    getPlausibilityRule(pool, lineId),
+    // C-018 (2 Oct 2026): as of the period's end, not "right now" (RT24-04).
+    getPlausibilityRuleAsOf(pool, lineId, plantDayEndMs(to), plantDayStartMs(from)).then((r) => r.rule),
     // F6 (23 Sep 2026): the versioned limits history, read HERE rather than
     // taken on trust from getWeightStations, which resolves the same version
     // and then drops its `effectiveIsLowerBound` flag

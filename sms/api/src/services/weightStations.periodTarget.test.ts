@@ -76,6 +76,17 @@ vi.mock('./calibration.js', async (importOriginal) => ({
 vi.mock('./admin.js', () => ({
   getPlausibilityRule: async () => ({ coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 }),
 }));
+// C-018 (2 Oct 2026): the service now reads the rule as of the window's end
+// through ruleAsOf.js; stubbed to the same fixed rule so this positional
+// fake pool is not asked an extra (slot-consuming) plausibility query.
+vi.mock('./ruleAsOf.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./ruleAsOf.js')>()),
+  getPlausibilityRuleAsOf: async () => ({
+    rule: { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 },
+    ruleChangedInPeriod: false,
+    versionCount: 1,
+  }),
+}));
 
 /**
  * THE LINE-WIDE PRODUCT IS SWITCHABLE, because the two cases this file
