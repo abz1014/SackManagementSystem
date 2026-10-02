@@ -82,7 +82,7 @@ export async function getRejectReport(
   lineId: number,
   resolved: ResolvedPeriod,
   filters: ReportFilters,
-  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026); not yet threaded into `getRejectSpc` (rejectSpc.ts, TB1-owned). */
+  /** Chart overhaul wave 2 (Task TB2, 28 Sep 2026); threaded into `getRejectSpc` too since 2 Oct 2026 (C-003). */
   shiftRange?: ShiftRange,
 ): Promise<RejectReportData> {
   // One scope for all three sections — the same resolution every other
@@ -98,6 +98,7 @@ export async function getRejectReport(
       station: filters.station,
       product: filters.product,
       scope,
+      shiftRange,
     }),
   ]);
   return {

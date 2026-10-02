@@ -149,7 +149,8 @@ describe('R9 — the reject trend matches unmatched rejects against the SAME gen
     const src = readFileSync(fileURLToPath(new URL('../rejectSpc.ts', import.meta.url)), 'utf8');
     expect(src).toMatch(/unmatchedConeEpoch = filters\.scope\s*\n?\s*\? epochWhere\(unmatchedReq, filters\.scope, 'cone_event'/);
     const rep = readFileSync(fileURLToPath(new URL('./reject.ts', import.meta.url)), 'utf8');
-    expect(rep).toMatch(/scope,\s*\n\s*\}\),\s*\n\s*\]\);/);
+    // C-003 (2 Oct 2026): shiftRange now follows scope in the getRejectSpc filter bag.
+    expect(rep).toMatch(/scope,\s*\n\s*shiftRange,\s*\n\s*\}\),\s*\n\s*\]\);/);
   });
 });
 
