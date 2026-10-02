@@ -117,6 +117,8 @@ interface Weighted {
   source_station?: number | null;
   /** Present on transform rows; the first offender's is written as subject_ref. */
   raw_id?: number;
+  /** The source generation of the row; the stale-clock running maximum is kept per generation (C-024). */
+  source_epoch?: number;
 }
 
 /**
@@ -143,8 +145,10 @@ export function computeFindings<T extends Weighted>(
   /** Newest production_ts_utc_ms already in canonical for this stream. Seeds
    *  the stale-clock running maximum so a lagging row at the START of an
    *  incremental batch is still caught against history, not just against
-   *  rows that happen to share its batch. -Infinity = no history (backfill). */
-  initialMaxMs = -Infinity,
+   *  rows that happen to share its batch. -Infinity = no history (backfill).
+   *  A Map seeds each source generation separately (C-024, 2 Oct 2026): a
+   *  genuine July row arriving after a September tail is not "behind" it. */
+  initialMaxMs: number | ReadonlyMap<number, number> = -Infinity,
   /**
    * The plausibility window: either one bounds object applied to every row
    * (the historical behaviour — still the default, and what every existing
@@ -171,7 +175,13 @@ export function computeFindings<T extends Weighted>(
   let future = 0;
   let stale = 0;
   let noStation = 0;
-  let runningMaxMs = initialMaxMs;
+  // Stale is a per-stream, per-generation notion: one running maximum per source_epoch.
+  const runningMaxByEpoch = new Map<number, number>();
+  const runningMaxOf = (epoch: number): number => {
+    const have = runningMaxByEpoch.get(epoch);
+    if (have !== undefined) return have;
+    return typeof initialMaxMs === 'number' ? initialMaxMs : (initialMaxMs.get(epoch) ?? -Infinity);
+  };
   let worstLagMs = 0;
   let nonPositive = 0;
   let outlier = 0;
@@ -200,12 +210,15 @@ export function computeFindings<T extends Weighted>(
     }
     // rows arrive in source-id order, so a reading far behind the running
     // maximum is a clock fault rather than ordinary buffering jitter
+    const epoch = r.source_epoch ?? 0;
+    const runningMaxMs = runningMaxOf(epoch);
     if (runningMaxMs > -Infinity && runningMaxMs - r.production_ts_utc_ms > STALE_TS_LAG_MS) {
       stale++;
       worstLagMs = Math.max(worstLagMs, runningMaxMs - r.production_ts_utc_ms);
       note('stale_timestamp', r);
     }
-    if (r.production_ts_utc_ms > runningMaxMs) runningMaxMs = r.production_ts_utc_ms;
+    if (r.production_ts_utc_ms > runningMaxMs) runningMaxByEpoch.set(epoch, r.production_ts_utc_ms);
+    else if (!runningMaxByEpoch.has(epoch)) runningMaxByEpoch.set(epoch, runningMaxMs);
     if (r.merge_key_is_unique === false) {
       collision++;
       note('merge_key_collision', r);
@@ -625,25 +638,80 @@ export async function loadNewestConeMs(pool: ConnectionPool, lineId: number): Pr
   return r.recordset[0]?.m == null ? null : Number(r.recordset[0].m);
 }
 
+/** The newest canonical sack of each generation in a batch, as gap anchors (C-024, 2 Oct 2026). */
+export async function loadNewestSackByEpoch(
+  pool: ConnectionPool,
+  lineId: number,
+  epochs: Iterable<number>,
+): Promise<Map<number, SackAnchor>> {
+  const out = new Map<number, SackAnchor>();
+  for (const epoch of new Set(epochs)) {
+    const r = await pool
+      .request()
+      .input('line', mssql.Int, lineId)
+      .input('epoch', mssql.Int, epoch)
+      .query<{ ms: number; raw_id: number | null; source_row_id: number | null }>(
+        `SELECT TOP 1 production_ts_utc_ms AS ms, raw_id, source_row_id FROM sms.sack_event
+          WHERE line_id = @line AND source_epoch = @epoch ORDER BY production_ts_utc_ms DESC`,
+      );
+    const row = r.recordset[0];
+    if (row) {
+      out.set(epoch, {
+        ms: Number(row.ms),
+        rawId: row.raw_id == null ? null : Number(row.raw_id),
+        sourceRowId: row.source_row_id == null ? null : Number(row.source_row_id),
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * The whole check for one pass: the batch's sacks (may be empty — the open
  * gap is what catches a total blackout, and it needs no new sack row),
  * anchored on the newest canonical sack BEFORE this batch was persisted.
+ *
+ * C-024 (2 Oct 2026): when `priorByEpoch` is given, each source generation in
+ * the batch is measured from its OWN newest canonical sack, never from another
+ * generation's — a July sack arriving after a September tail is not a gap
+ * from September. The open gap (newest cone against the last sack) applies
+ * only to the group that reaches the newest sack on file (`priorSack`).
  */
-export async function detectSackBlackouts<T extends { production_ts_utc_ms: number; raw_id?: number; source_row_id: number }>(
+export async function detectSackBlackouts<
+  T extends { production_ts_utc_ms: number; raw_id?: number; source_row_id: number; source_epoch?: number },
+>(
   pool: ConnectionPool,
   lineId: number,
   batch: T[],
   priorSack: SackAnchor | null,
   thresholdHours: number,
+  priorByEpoch?: ReadonlyMap<number, SackAnchor>,
 ): Promise<Finding[]> {
   const newestConeMs = await loadNewestConeMs(pool, lineId);
-  const sacks: SackAnchor[] = batch.map((r) => ({
+  const toAnchor = (r: T): SackAnchor => ({
     ms: r.production_ts_utc_ms,
     rawId: r.raw_id == null ? null : Number(r.raw_id),
     sourceRowId: r.source_row_id,
-  }));
-  const gaps = sackGaps(sacks, priorSack, newestConeMs, thresholdHours * 3_600_000);
+  });
+  const thresholdMs = thresholdHours * 3_600_000;
+  let gaps: SackGap[];
+  if (priorByEpoch && batch.length > 0) {
+    gaps = [];
+    const byEpoch = new Map<number, SackAnchor[]>();
+    for (const r of batch) {
+      const e = r.source_epoch ?? 0;
+      const list = byEpoch.get(e) ?? [];
+      list.push(toAnchor(r));
+      byEpoch.set(e, list);
+    }
+    for (const [e, sacks] of byEpoch) {
+      const newest = Math.max(...sacks.map((a) => a.ms), priorByEpoch.get(e)?.ms ?? -Infinity);
+      const reachesNewest = priorSack == null || newest >= priorSack.ms;
+      gaps.push(...sackGaps(sacks, priorByEpoch.get(e) ?? null, reachesNewest ? newestConeMs : null, thresholdMs));
+    }
+  } else {
+    gaps = sackGaps(batch.map(toAnchor), priorSack, newestConeMs, thresholdMs);
+  }
   if (gaps.length === 0) return [];
   const cones = await countConesInGaps(pool, lineId, gaps);
   return sackBlackoutFindings(gaps, cones, thresholdHours);

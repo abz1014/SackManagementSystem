@@ -96,6 +96,7 @@ import {
   PER_SUBJECT_CHECKS,
   detectSackBlackouts,
   loadNewestSack,
+  loadNewestSackByEpoch,
   loadPriorSackNums,
   sackNumResetFindings,
   type Finding,
@@ -328,11 +329,28 @@ async function readRawSince(pool: ConnectionPool, table: string, watermark: numb
 
 const maxRawId = (rows: Raw[]): number => rows.reduce((m, r) => Math.max(m, Number(r.raw_id)), 0);
 
-async function maxCanonicalTs(pool: ConnectionPool, table: string): Promise<number> {
-  const r = await pool
-    .request()
-    .query<{ m: number | null }>(`SELECT MAX(production_ts_utc_ms) m FROM ${table}`);
-  return r.recordset[0]?.m == null ? -Infinity : Number(r.recordset[0].m);
+/**
+ * Newest canonical production time PER source generation, for the generations
+ * present in the batch (C-024, 2 Oct 2026). The stale-clock check is a
+ * per-stream, per-generation notion; seeding it from the whole table measured
+ * a July backfill against the September tail and flagged every row.
+ */
+async function maxCanonicalTsByEpoch(
+  pool: ConnectionPool,
+  table: string,
+  epochs: Iterable<number>,
+): Promise<Map<number, number>> {
+  const list = [...new Set(epochs)];
+  const out = new Map<number, number>();
+  if (list.length === 0) return out;
+  const req = pool.request();
+  list.forEach((e, i) => req.input(`e${i}`, mssql.Int, e));
+  const inList = list.map((_, i) => `@e${i}`).join(', ');
+  const r = await req.query<{ source_epoch: number; m: number | null }>(
+    `SELECT source_epoch, MAX(production_ts_utc_ms) m FROM ${table} WHERE source_epoch IN (${inList}) GROUP BY source_epoch`,
+  );
+  for (const x of r.recordset) if (x.m != null) out.set(Number(x.source_epoch), Number(x.m));
+  return out;
 }
 
 /**
@@ -483,7 +501,7 @@ export async function runTransform(
         assignMergeKeys(raw.map((r) => mapCone(r, rulesForRow(rules, r, true, TABLE_SHAPES.cone.rawTable))), coneKey),
       );
       await seedExistingCollisions(appPool, 'sms.cone_event', rows, coneKey, CONE_KEY_SQL);
-      const priorMaxMs = await maxCanonicalTs(appPool, 'sms.cone_event');
+      const priorMaxMs = await maxCanonicalTsByEpoch(appPool, 'sms.cone_event', rows.map((r) => r.source_epoch));
       const findings = [
         ...computeFindings(rows, 'cone', 'cone_event', (r) => r.weight_g, priorMaxMs, plausibilityAt),
         ...stationRosterFindings(rows, roster, rawShortName(TABLE_SHAPES.cone.rawTable), streams.cone.sourceTable),
@@ -521,7 +539,7 @@ export async function runTransform(
         assignMergeKeys(raw.map((r) => mapSack(r, rulesForRow(rules, r, false, TABLE_SHAPES.sack.rawTable))), sackKey),
       );
       await seedExistingCollisions(appPool, 'sms.sack_event', rows, sackKey, SACK_KEY_SQL);
-      const priorMaxMs = await maxCanonicalTs(appPool, 'sms.sack_event');
+      const priorMaxMs = await maxCanonicalTsByEpoch(appPool, 'sms.sack_event', rows.map((r) => r.source_epoch));
       // No roster check: sack rows carry no machine number (iflTables.ts).
       // The two sack checks (Phase 7): a SackNum reset within a generation,
       // seeded from each generation's newest canonical row; and a gap in the
@@ -530,7 +548,10 @@ export async function runTransform(
       const findings = [
         ...computeFindings(rows, 'sack', 'sack_event', (r) => r.weight_kg, priorMaxMs, plausibilityAt),
         ...sackNumResetFindings(rows, priorSackNums),
-        ...(await detectSackBlackouts(appPool, cfg.lineId, rows, priorSack, cfg.sackBlackoutHours)),
+        ...(await detectSackBlackouts(
+          appPool, cfg.lineId, rows, priorSack, cfg.sackBlackoutHours,
+          await loadNewestSackByEpoch(appPool, cfg.lineId, rows.map((r) => r.source_epoch)),
+        )),
       ];
       const res = await persistCanonical(appPool, 'sms.sack_event', SACK_COLS, rows, {
         sourceSystem: rules.sourceSystem,
@@ -577,7 +598,7 @@ export async function runTransform(
       const rows = [...qFresh, ...wFresh];
       await seedExistingCollisions(appPool, 'sms.reject_event', rows, rejectKey, REJECT_KEY_SQL);
       // prior max BEFORE persisting, or the batch would be measured against itself
-      const priorMaxMs = await maxCanonicalTs(appPool, 'sms.reject_event');
+      const priorMaxMs = await maxCanonicalTsByEpoch(appPool, 'sms.reject_event', rows.map((r) => r.source_epoch));
       const q = qFresh;
       const w = wFresh;
       const rq = await persistCanonical(appPool, 'sms.reject_event', REJECT_COLS, q, {
