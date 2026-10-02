@@ -18,7 +18,7 @@ import { useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
 import { Block, Details, Failed, SkelFigures, SkelLines } from '../ui/bits';
 import { fmtAppInstant, fmtClock, fmtG, fmtInt, fmtSpan } from '../lib/fmt';
-import { parsePeriodParams, resolvePeriod } from '../lib/period';
+import { encodeShiftRef, parsePeriodParams, resolvePeriod } from '../lib/period';
 import { getHealth, getReconciliation, type ConeState, type WeightAggregate } from '../api';
 import { SyncHealthBlock } from './health/SyncHealthBlock';
 import { SystemHistoryBlock } from './health/SystemHistoryBlock';
@@ -51,13 +51,18 @@ function ReconciliationBlock() {
           dataAsOfUtc: line.dataAsOfUtc,
         },
         params.picked,
+        params.range,
       )
     : null;
 
   const rec = usePolling(
-    () => (period ? getReconciliation(period.from, period.to, period.shift ?? null) : Promise.resolve(null)),
+    () => (period ? getReconciliation(
+        period.from, period.to, period.shift ?? null,
+        period.fromShift ? encodeShiftRef(period.fromShift) : undefined,
+        period.toShift ? encodeShiftRef(period.toShift) : undefined,
+      ) : Promise.resolve(null)),
     5 * 60_000,
-    `reconciliation:${period?.from ?? 'none'}:${period?.to ?? 'none'}:${period?.shift ?? 'all'}`,
+    `reconciliation:${period?.from ?? 'none'}:${period?.to ?? 'none'}:${period?.shift ?? 'all'}:${period?.fromShift ? encodeShiftRef(period.fromShift) : ''}:${period?.toShift ? encodeShiftRef(period.toShift) : ''}`,
   );
   const d = rec.data?.data ?? null;
 
