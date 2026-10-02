@@ -368,6 +368,11 @@ confirm they are moot rather than assuming it.
   it is not something a future version of our software can route around, because the refusal
   happens inside the vendor's own procedure before our software is even involved.
 
+  *(Corrected 2 Oct 2026, audit C-191, wording only: the first of the four refusals, at 10:35,
+  came **before** your engineer retired the product. The log reads: one refusal at 10:35,
+  retire at 10:39:01, three refusals at 10:39, 10:40 and 10:41, reactivate at 10:43:17. The
+  conclusion is unchanged. Source: `nhs_events` EventIds 23204, 23206, 23207, 23208.)*
+
   The supported way to change a running product's setpoint is to **edit the existing material
   in place**, which our software already offers as a single guarded update that writes to your
   own event log exactly as your other procedures do — this is the changeover screen Hassan sb
@@ -735,6 +740,90 @@ words and may not be the report you meant.
 
 ---
 
+## Tier 6 — Raised by the data-trust audit of 2 October 2026
+
+**Draft, 2 Oct 2026 — not sent.** On 2 October 2026 we audited every figure SMS stores, calculates and prints against independent read-only SQL on the development copy of your databases (the June–July and August–September samples, to 7 September 2026). The stored history and the plain counts, sums and means agree with your data. The twelve questions below are what the audit could not settle from your data alone. **None stops a report from printing:** each item says what we built or left as it is, and a different answer changes a definition or a caveat, not whether the report exists. They were written by an agent and **have not been sent by anyone**; the project owner decides whether and when. Numbers were measured on 2 October 2026 and are re-measurable with `handover/DATA-TRUST-RECOMPUTE-2026-10-02.md`.
+
+*(Numbered 30–41 so items 1–29 keep the numbers other files cite. This tier is not in the covering note at the top; send it with that note or as a second message. `QUESTIONS.md` and `SCHEMA.md` §4 are not renumbered: this tier is the technical-and-plain version in one place. **Internal, delete before sending:** the owner-side decisions that go with each answer are in `DECISIONS-PENDING.md` §14 and `DEFECTS.md` Part 15.)*
+
+### 30. Was quality inspection off between 14 and 18 August?
+*(Draft, 2 Oct 2026 — not sent. Audit C-001.)* Between **14 Aug 13:11 and 18 Aug 06:38** the quality-reject table (`rejectQCS1_TP1U2`) holds only **2 records**, while 2,500 to 5,700 cones a day were weighed:
+
+| Day | Cones weighed | Quality rejects |
+|---|---|---|
+| 14 Aug | 5,679 | 51 |
+| 15 Aug | 4,855 | 1 |
+| 16 Aug | 3,981 | 0 |
+| 17 Aug | 2,533 | 1 |
+| 18 Aug | 3,268 | 152 |
+
+The longest silence anywhere else in the data is 3.2 hours; this one is about 93 hours. Was the quality inspection switched off, bypassed or disconnected, or were rejects recorded somewhere else — and did rejects occur on those days? It matters because every September reject rate we print is lower for it: **4.59 %** with the window, **5.01 %** without it, and no screen says so.
+**Built meanwhile:** nothing changes; the figure is printed as recorded. We have not added a "no rejects recorded for N hours" check yet.
+**Blocked without it:** nothing. **Cost of staying blocked:** the September reject rate and every control band built on it are understated by an amount we cannot state.
+
+### 31. What is an "average sack"?
+*(Draft, 2 Oct 2026 — not sent. Audit C-017.)* Our reports give two different "average sack" figures. IFL's sack reports average the **plausible** sacks only (40–60 kg), so a 0 kg or fault reading is not divided into the mean. The older daily and management-summary reports average **every** sack. On 20 August the two differ: **46.89 kg** (every sack) against **47.29 kg** (plausible sacks). Which does IFL mean by "average sack", and should a 0 kg or fault reading ever count in it?
+**Built meanwhile:** both, each labelled where it appears.
+**Blocked without it:** nothing. **Cost of staying blocked:** two reports can print different averages for the same day and both are right by their own definition.
+
+### 32. Are the weights gross or net — for cones as well as sacks?
+*(Draft, 2 Oct 2026 — not sent. Audit C-019. Complements item 6.)* You told us on 15 September that sack weights are gross. We set the weight basis in Setup to **gross** from that date and it applies to cones as a placeholder. A change of basis in Setup is currently honoured by some figures (the sack kilograms, the reports) but not by the control chart, the station table, the attention list or the calibration report, which read the weight as recorded. Today that makes no difference, because gross is the same as as-recorded. If IFL wants net (tube or tare subtracted), we need to know what the tube weight is for each product and whether it is the same for cones and sacks.
+**Built meanwhile:** gross, printed on every weight figure.
+**Blocked without it:** nothing today. **Cost of staying blocked:** the day a net basis is chosen, a few figures would still show gross until we change them.
+
+### 33. What exactly is a stop, and how is one counted across 06:00 or a shift change?
+*(Draft, 2 Oct 2026 — not sent. Audit C-020, C-064, C-067. KPI-DEFINITIONS row 17.)* We count a stop as a gap of **120 seconds or longer** between two consecutive cone readings inside one production day. Two details change the numbers:
+
+- Our SQL counts whole-second boundaries, so a gap of 119.05 seconds counts as 120. Measured against "at least 120.000 seconds": July **461 against 458** stops; September **2,242 against 2,237** (1,094,406 against 1,093,790 seconds lost).
+- A stop that begins before 06:00 and ends after it is counted in **neither** day (July: 20.2 % of lost time, one 9.7-hour stop; September 1.83 %). A stop that crosses a shift boundary is clipped at the boundary in the shift reports.
+
+Is 120 seconds your threshold (changing it to 90 or 150 seconds moves September's stop count by +17 % or −27 %)? Is a stop a gap of at least 120 seconds elapsed? And how should a stop that crosses 06:00 or a shift change be counted: on the day it began, split at the boundary, or in the shift it began in?
+**Built meanwhile:** 120 s, whole-second boundaries, no splitting; printed on the sheet.
+**Blocked without it:** nothing. **Cost of staying blocked:** stop counts differ by up to about 1 % from a hand count and daily lost-time totals do not add up across 06:00.
+
+### 34. Are a "weight reject" and a "cone the scale marked out of range" the same thing?
+*(Draft, 2 Oct 2026 — not sent. Audit C-032, C-131. Complements items 24 and 25.)* The weight-reject table and the scale's own in-range bit are not the same set. In September, **all 41** weight-reject records match a weighed cone whose in-range bit is 0, but the scale marked **53** cones out of range (41 of them carry a weight-reject record). In July, 239 of the 244 matched weight rejects sit on an out-of-range cone, but the scale marked 419 cones out of range and the table holds 246 records. Reading it from the scale's side, only **57 % (July: 239 of 419) to 77 % (September: 41 of 53)** of the out-of-range cones carry a weight-reject record. Are the 41 and the 53 two records of one event, or are the 12 other cones out of range for a different reason? And on your reports, which one should be called a weight rejection?
+**Built meanwhile:** both are printed, side by side, never merged; the word "rejected" on the older reports covers inspection rejects and weight rejects together, and says so.
+**Blocked without it:** nothing. **Cost of staying blocked:** "rejected" can mean two different populations on two screens.
+
+### 35. Has the sack scale's upper limit changed?
+*(Draft, 2 Oct 2026 — not sent. Audit C-034. Complements item 27.)* Passed sacks sit between **47.0 and 47.4 kg**, except **17 passed sacks up to 47.6 kg** (15 of them on 24 August between 17:28 and 19:26, product 20; 4,824 of 4,841 passes are inside 47.0–47.4). Was the scale's upper limit changed that evening, or does the window depend on the product?
+**Built meanwhile:** the scale's own pass/fail bit is shown as recorded; we draw no sack tolerance of our own.
+**Blocked without it:** nothing. **Cost of staying blocked:** the draft wording of item 27 ("the scale passes 47.0–47.4 kg") may be slightly wrong.
+
+### 36. Should a cone the scale marked out of range, with an absurd weight, count as rejected?
+*(Draft, 2 Oct 2026 — not sent. Audit C-035.)* Five of our screens say **49** cones were rejected by the scale in September, and the Shift-wise CTS report says **53**. The 4 cones in between are cones the scale marked out of range whose recorded weight is outside any plausible cone (1,419, 939, 2,360 and 2,953 g): the five-state rule calls those "not judged" before it looks at the scale's bit, the CTS report counts every cone with the bit at 0. In July the same difference is 196 against 417: **219 of the 221 cones were rejected in one 34-minute block (7 July, 23:11–23:45; 2,156–2,354 g)**. Should a cone with an absurd weight count as a scale rejection, or as a reading to ignore?
+**Built meanwhile:** both populations are printed and labelled; the CTS report counts the bit, the five-state screens count the plausible ones.
+**Blocked without it:** nothing. **Cost of staying blocked:** "rejected by the scale" reads 49 on one report and 53 on another for the same September.
+
+### 37. Which sacks belong in the standard deviation?
+*(Draft, 2 Oct 2026 — not sent. Audit C-076. Complements item 27.)* The sack weight spread depends on which sacks are included. Over every plausible sack (40–60 kg, the window we assumed) the September standard deviation is **0.19 kg** (5,431 sacks); without the single scale-rejected 55.48 kg sack of 7 August it is **0.154 kg**; over sacks between 46 and 49 kg it is **0.104 kg**. The mean barely moves (47.2852 against 47.2864 kg). July: 0.121 kg against 0.099 kg. Which sacks does your "standard deviation" mean, and would a robust spread be more useful than a sample standard deviation on weights that include a few transfers or double sacks?
+**Built meanwhile:** sample standard deviation over the plausible window, stated on the report.
+**Blocked without it:** nothing. **Cost of staying blocked:** the spread we print can be nearly twice what your engineers expect.
+
+### 38. Are cone records meant to be missing from the wide table?
+*(Draft, 2 Oct 2026 — not sent. Audit C-084.)* About **0.2 to 0.3 %** of cone records written to your acquisition tables have no row in `pack1_TP1U2` (462 cones in July, at least 265 in September); the raw rows are there but the wide-table trigger left them out, apparently because the same record was re-sent. We previously wrote that the trigger does not drop records; that is true of the wide table against its own source, not of the raw layer against the wide table. Is this expected? Should those records count as cones?
+**Built meanwhile:** we count only cones that appear in the wide table, as every report always has.
+**Blocked without it:** nothing. **Cost of staying blocked:** cone counts may be low by up to 0.3 %.
+
+### 39. Why do some cone records arrive hours after they were weighed?
+*(Draft, 2 Oct 2026 — not sent. Audit C-095.)* Our "stale timestamp" check treats a cone whose insert time is far behind its production time as a clock fault. In July, **22 rows lag by 3.6 to 16.4 hours**; the largest number we see is the 1970 sentinel (a zeroed clock). Do stations buffer their writes when the network is down, or are those rows from a wrong station clock? (Related: some quality-reject rows are stamped 3.5 to 50 hours **before** their insert time.)
+**Built meanwhile:** the check is worded as "clock fault" for every such row.
+**Blocked without it:** nothing. **Cost of staying blocked:** the message on the Health screen may name the wrong cause.
+
+### 40. Should the weight-outlier check apply to weight rejects?
+*(Draft, 2 Oct 2026 — not sent. Audit C-102.)* Our outlier check raises a data-quality finding for a weight outside the cone window (1,500–2,100 g). A weight reject is, by definition, a cone outside tolerance, so **67 of 286** weight rejects trip the check without anything being wrong. Should the check look at weighed cones only?
+**Built meanwhile:** the check applies to every weight, rejects included.
+**Blocked without it:** nothing. **Cost of staying blocked:** Health carries findings that are really just rejects.
+
+### 41. Is a sack's time its insert time — and by how much does that move a shift?
+*(Draft, 2 Oct 2026 — not sent. Audit C-075. Same subject as item 15.)* The sack scale records no event time, so a sack's shift is the shift of its **insert** time. On cones the insert time lags the weighing time by a few minutes; for sacks we cannot measure the lag. If a sack's lag is no longer than a cone's, **at most 19 sacks (0.35 %) in September and 136 (2.5 %) in July** could sit in the wrong shift or day. Do you know the typical delay between a sack being weighed and its record being written, and does the PLC write an event time we are not reading?
+**Built meanwhile:** insert time, stated on four reports.
+**Blocked without it:** nothing. **Cost of staying blocked:** a shift-wise sack count can be off by a few sacks in a shift (largest single shift: 3 of 94 in September, 7 of 98 in July).
+
+**Also asked in the same message, not numbered here:** please send the 10 Jul – 5 Aug archive (item 9) and tell us the **SQL Server instance default collation** on the plant PC. A backfill compares checksums of text columns, and until 2 October 2026 a collation difference between the archive and our copy made a byte-identical archive refuse to load; the code is fixed, but we would like to know the collation rather than assume it.
+
+---
 ## What IFL has already answered — do not ask these again
 
 Recorded 15 September 2026, from Hassan sb via the project owner. The full text and what each
