@@ -31,7 +31,8 @@ import { getWeights } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { loadProductCatalogue } from '../productLimits.js';
 import { delta, pct, priorPeriod, round, type DayRange, type Delta, type ReportFilters } from './common.js';
-import type { CsvRow, CsvTable } from './csv.js';
+import { periodText, type CsvRow, type CsvTable } from './csv.js';
+import { describeShiftRangePeriod } from './header.js';
 import { shiftOrd, type ShiftName, type ShiftRange } from '../../shiftRange.js';
 
 export type KpiUnit = 'cones' | 'sacks' | 'kg' | 'g' | '%' | 'days' | 'stations' | 'seconds' | 'stops' | 'readings';
@@ -152,6 +153,15 @@ export interface ProductMixRow {
 export interface ManagementSummaryData {
   period: ResolvedPeriod;
   prior: DayRange;
+  /**
+   * C-127 (D-76): the plain-words shift range of the current / prior period,
+   * set ONLY when the report is shift-bounded (`describeShiftRangePeriod`, the
+   * same wording the header's `periodLabel` uses), so the CSV/XLSX `period` and
+   * `prior_period` columns can name the shifts instead of whole calendar days.
+   * Absent on a plain-day report.
+   */
+  periodLabel?: string;
+  priorPeriodLabel?: string;
   coverage: { current: ReportData['coverage']; prior: ReportData['coverage'] };
   /**
    * F12: the share of each period's cone readings that carry a product at
@@ -442,6 +452,9 @@ export async function getManagementSummary(
   return {
     period: resolved,
     prior,
+    ...(shiftRange && priorRange
+      ? { periodLabel: describeShiftRangePeriod(shiftRange), priorPeriodLabel: describeShiftRangePeriod(priorRange) }
+      : {}),
     coverage: { current: cur.coverage, prior: prev.coverage },
     attribution: { current: cur.attributedShare, prior: prev.attributedShare },
     kpis,
@@ -467,8 +480,9 @@ export const SUMMARY_CSV_HEADERS = [
 ] as const;
 
 export function summaryCsv(d: ManagementSummaryData): CsvTable {
-  const period = `${d.period.from} to ${d.period.to}`;
-  const priorPeriodLabel = `${d.prior.from} to ${d.prior.to}`;
+  // C-127: same wording as the trailing `period` attribution row (periodText).
+  const period = periodText({ period: { period: d.period.period, from: d.period.from, to: d.period.to, days: 0 }, periodLabel: d.periodLabel });
+  const priorPeriodLabel = periodText({ period: { period: 'prior', from: d.prior.from, to: d.prior.to, days: 0 }, periodLabel: d.priorPeriodLabel });
   const sharePct = (s: number | null) => (s == null ? null : Math.round(s * 1000) / 10);
   const rows: CsvRow[] = d.kpis.map((k) => [
     k.key, k.label, k.unit, k.current, k.prior, k.delta?.abs ?? null, k.delta?.pct ?? null, k.betterWhen, period, priorPeriodLabel, k.approval,
