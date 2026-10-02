@@ -88,6 +88,11 @@ export async function cutover(argv: string[]): Promise<number> {
     }
     const total = counts.reduce((n, c) => n + c.rows, 0);
     const gens = await ctx.app.request().query<{ n: number }>(`SELECT COUNT(*) n FROM sms.source_epoch`);
+    // C-021 (D-67): sms.dq_acknowledgement references sms.dq_finding (FK_dq_ack_finding,
+    // migration 042), so the finding DELETE below fails unless these go first.
+    const acks = Number(
+      (await ctx.app.request().query<{ n: number }>(`SELECT COUNT(*) n FROM sms.dq_acknowledgement`)).recordset[0]?.n ?? 0,
+    );
 
     console.log('cutover — clears the reproducible layers, keeps everything app-owned\n');
     console.log(`  line ${ctx.cfg.lineId} reads: ${tables.map((t) => t.sourceTable).join(', ')}`);
@@ -95,6 +100,10 @@ export async function cutover(argv: string[]): Promise<number> {
     console.log(`  ${'TOTAL'.padEnd(28)} ${String(total).padStart(9)} rows`);
     console.log(
       `  ${'sms.source_epoch'.padEnd(28)} ${String(Number(gens.recordset[0]?.n ?? 0)).padStart(9)} generation(s) — ALL deleted, including archived ones\n`,
+    );
+    console.log(
+      `  ${'sms.dq_acknowledgement'.padEnd(28)} ${String(acks).padStart(9)} acknowledgement(s) — ALL deleted with the findings they answer
+`,
     );
     console.log('  preserved:');
     for (const p of PRESERVED) console.log(`    - ${p}`);
@@ -115,6 +124,7 @@ export async function cutover(argv: string[]): Promise<number> {
       return 2;
     }
 
+    let acksCleared = 0;
     // Under the transform lock (finding C1's fix, extended here): the
     // worker's transform pass and a rebuild cannot run while this deletes.
     await withTransformLock(ctx.cfg.app, async () => {
@@ -143,6 +153,10 @@ export async function cutover(argv: string[]): Promise<number> {
       console.log(`  cleared ${ep.rowsAffected[0] ?? 0} source generation(s) — registry now empty`);
 
       // 4. DQ findings are ingest-scoped: they describe rows that no longer exist.
+      //    Acknowledgements go first: they hold an FK to the findings.
+      const ack = await ctx.app.request().query(`DELETE FROM sms.dq_acknowledgement`);
+      acksCleared = ack.rowsAffected[0] ?? 0;
+      console.log(`  cleared ${acksCleared} DQ acknowledgement(s)`);
       const dq = await ctx.app.request().query(`DELETE FROM sms.dq_finding`);
       console.log(`  cleared ${dq.rowsAffected[0] ?? 0} DQ findings (they described deleted rows)`);
     });
@@ -165,7 +179,7 @@ export async function cutover(argv: string[]): Promise<number> {
       .input('action', mssql.VarChar(40), 'cutover.run')
       .input('type', mssql.VarChar(40), 'database')
       .input('target', mssql.NVarChar(64), 'sms')
-      .input('detail', mssql.NVarChar(1000), `by the CLI (sms cutover), no signed-in actor; ${total} rows cleared; backup named: ${backup.path}`)
+      .input('detail', mssql.NVarChar(1000), `by the CLI (sms cutover), no signed-in actor; ${total} rows cleared; ${acksCleared} acknowledgement(s) cleared; backup named: ${backup.path}`)
       .query(
         `INSERT INTO sms.audit_log (actor_id, action, target_type, target_id, detail)
          VALUES (NULL, @action, @type, @target, @detail)`,
