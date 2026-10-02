@@ -580,6 +580,14 @@ ALTER ROLE db_backupoperator ADD MEMBER sms_backup;
   CRITICAL finding is never deleted by a rebuild — `transform_zero_write` is
   the alarm saying rows were *not* written, and losing it is how a real loss
   becomes invisible.
+  **Corrected 2 Oct 2026 (audit C-029, fix D-66, commit `68f8b46`):** the
+  statement above that a re-derived row is stamped under *today's* shift and
+  plausibility rules is wrong for those two rules. Both are read **as of each
+  reading's own time** (the time-versioned `sms.shift_rule` and
+  `sms.plausibility_rule`, `ruleAsOf.ts`), so a rebuild does not restamp
+  history with a rule that began later. Only the station roster is the one on
+  file now. `sms rebuild` now prints exactly that in its plan. Verified by unit
+  test (`rebuild` plan text), not by running a rebuild: no agent may run one.
 - **Rebuild and the sync-worker service are now mutually exclusive** (Sep 2026
   audit fix, C1): `sms rebuild` and the service's own 60s transform pass take
   the same `sp_getapplock`, so running `sms rebuild` with the service still
@@ -982,6 +990,14 @@ There is no `SESSION_SECRET`: sessions are server-side random UUIDs (`sms.sessio
 
 No redeploy needed — an **admin sets it once in the UI** (`ARCHITECTURE §4`):
 - **Q4/Q5 weights (gross/net):** Admin → Interpretation rules → Weight basis. Applies immediately.
+  **Corrected 2 Oct 2026 (audit C-148, C-043, C-019):** "applies immediately" is
+  too strong. A rule edit is read at query time with no rebuild and applies to
+  periods that **end after** the edit; an earlier period keeps the rule in
+  force at its own end. Response caches can outlive an edit by up to
+  `CACHE_TTL_SECONDS` (default 5 s; measured: HIT up to 4.88 s, MISS 5.40 s).
+  A weight-basis edit is **not yet honoured by every service** (the control
+  chart, station table, attention list and calibration read the recorded
+  basis; audit C-019, awaiting IFL), so check the figures after an edit.
 - **Q7 shift (fix/reproduce):** Admin → Shift basis, then `sms rebuild --table=cone_event --snapshot-id=<id> --epoch=<the generation you mean> --confirm` to apply to stored data. Name the generation: restamping every generation under the new rule is `--all-generations`, and it is a decision, not a side effect. `sms epoch:list` first.
 - **Q10 reject codes:** Rejects view → type labels (manager+).
 - **Q11 station names:** Admin → Station labels.

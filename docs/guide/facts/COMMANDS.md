@@ -22,11 +22,22 @@ Unknown/empty command prints help; exit 1 if a command word was given and unreco
 - `--weights` — adds COUNT/SUM/AVG/MIN/MAX weight reconciliation per source generation.
 - `--from`/`--to` — must both be given together, `YYYY-MM-DD`, plant-wall-clock production day;
   errors if only one given, not a real date, or `from > to`.
+  **Corrected 2 Oct 2026 (audit C-028, fix D-71, commit `d20b108`):** the window is a
+  **calendar day on the plant clock (00:00-24:00)**, not the 06:00-06:00
+  production day the line above implies. Measured 3 Jul: calendar day 7,861 cones,
+  production day 7,923. The printed window line and `verify_run` summary now say
+  "calendar day". Whether verify should switch to production days is an owner
+  decision (DECISIONS-PENDING §14).
 - `--source-db=<name>` (added 29 Sep 2026) reconciles a CLOSED, backfilled generation against a
   named archive database on the same server instead of the live source. It **requires**
   `--epoch=<id>[,<id>]` alongside it (a usage error otherwise). With `--epoch`, only the named
   generations are checked; any other generation is listed as "not named by --epoch — skipped" and
   cannot cause a STOP.
+  **Corrected 2 Oct 2026 (audit C-027, D-70):** an `--epoch`-scoped run now closes with
+  "every generation checked in this run (epoch N) reconciles" and records
+  `scope: epoch N` in the `verify_run` summary, instead of the unscoped
+  "every generation reconciles". `--weights` now respects the archived floor
+  (audit C-026, D-69).
 - Reconciles per source generation, then per-table (identity check, id-checksum, raw⇄canonical
   key gaps), then merge-key collisions and DQ-finding counts.
 - Writes one row to `sms.verify_run` per run regardless of verdict (write failure logged only).
