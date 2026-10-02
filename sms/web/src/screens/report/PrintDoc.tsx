@@ -232,7 +232,9 @@ export function summarise(type: ReportType, data: ReportResponse<ReportType>): S
         const rr = k('inspection_reject_rate_pct');
         if (rr?.current != null) out.sentences.push(`The inspection reject rate was ${fmtPct(rr.current)}.`);
         const sf = k('stations_flagged');
-        if (sf?.current != null) out.sentences.push(sf.current === 0 ? 'No station was flagged for drift.' : `${plural(sf.current, 'station')} were flagged for drift.`);
+        // C-128 (D-77): null = the period is shorter than the drift rule's minimum run, so it cannot flag any station.
+        if (sf && sf.current == null) out.sentences.push('The period is shorter than the drift rule needs, so it cannot flag any station over a period this short. Choose a longer period to judge drift.');
+        else if (sf?.current != null) out.sentences.push(sf.current === 0 ? 'No station was flagged for drift.' : `${plural(sf.current, 'station')} were flagged for drift.`);
       }
       out.weightCaveat = true;
       break;

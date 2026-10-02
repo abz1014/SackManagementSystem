@@ -22,6 +22,10 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
     );
   }
   const nameOf = (n: number) => stationLabel(names.find((s) => s.stationId === n), n);
+  // C-128 (D-77): the drift rule needs a run of `minDaysHeld` days; over a shorter period it cannot flag anything, so
+  // an unflagged row is not evidence — say so instead of "no" (same condition as the calibration report's driftRuleCanFire).
+  const periodDays = Math.round((Date.parse(`${d.period.to}T00:00:00Z`) - Date.parse(`${d.period.from}T00:00:00Z`)) / 86_400_000) + 1;
+  const ruleCannotFire = Number.isFinite(periodDays) && periodDays < d.minDaysHeld;
   // RT-018: the line-wide target may be a product PDAS has retired while
   // still carrying production — say so beside the figure this report leads
   // with, the same convention Weight.tsx and ConeWeight.tsx use.
@@ -93,7 +97,7 @@ export function StationSection({ d, names, onOpen }: { d: StationReportData; nam
                   <td className="n">{fmtSignedG(r.vsLineG)}</td>
                   <td className="n">{fmtSignedG(r.vsTargetG)}</td>
                   <td className="n">{r.daysHeld}</td>
-                  <td>{r.flagged ? W.reports.flaggedYes : W.reports.flaggedNo}</td>
+                  <td>{r.flagged ? W.reports.flaggedYes : ruleCannotFire ? 'rule cannot fire (period too short)' : W.reports.flaggedNo}</td>
                   <td className="n">{fmtInt(r.rejectedAtInspection)}</td>
                   <td className="n">{fmtPct1(r.rejectRatePct)}</td>
                   <StateCells s={r.states} />

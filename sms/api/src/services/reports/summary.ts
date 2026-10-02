@@ -30,7 +30,8 @@ import { getProduction, NO_PRODUCT_GROUP } from '../production.js';
 import { getWeights } from '../weights.js';
 import { getWeightStations } from '../weightStations.js';
 import { loadProductCatalogue } from '../productLimits.js';
-import { delta, pct, priorPeriod, round, type DayRange, type Delta, type ReportFilters } from './common.js';
+import { MIN_DAYS_HELD } from '../attention.js';
+import { daysIn, delta, pct, priorPeriod, round, type DayRange, type Delta, type ReportFilters } from './common.js';
 import { periodText, type CsvRow, type CsvTable } from './csv.js';
 import { describeShiftRangePeriod } from './header.js';
 import { shiftOrd, type ShiftName, type ShiftRange } from '../../shiftRange.js';
@@ -344,7 +345,9 @@ async function figuresFor(pool: ConnectionPool, lineId: number, range: DayRange,
     cones_per_sack: t.conesPerSack,
     time_lost_seconds: report.downtime?.stoppedSeconds ?? null,
     stoppages: report.downtime?.stoppageCount ?? null,
-    stations_flagged: empty ? null : stations.stations.filter((s) => s.flagged).length,
+    // C-128 (D-77): a period shorter than the drift rule's minimum run cannot
+    // flag any station, so 0 there is a guaranteed result, not a measurement.
+    stations_flagged: empty || daysIn(range.from, range.to) < MIN_DAYS_HELD ? null : stations.stations.filter((s) => s.flagged).length,
     days_with_data: report.coverage.daysWithData,
   };
   // A period with no readings has no figures, only zeros the services print
