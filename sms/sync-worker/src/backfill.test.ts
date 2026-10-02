@@ -84,7 +84,7 @@ function fakeSourcePool(opts: {
               })),
             };
           }
-          if (/CHECKSUM_AGG\(CHECKSUM\(/.test(sql)) {
+          if (/SUM\(CAST\(CHECKSUM\(/.test(sql)) {
             const r = opts.checksum ?? { n: 0, agg: 0 };
             return { recordset: [{ n: r.n, agg: r.agg }] };
           }
@@ -122,7 +122,7 @@ function fakeAppPool(opts: {
         },
         query: async (sql: string) => {
           log.push({ sql, params: { ...params } });
-          if (/CHECKSUM_AGG\(CHECKSUM\(/.test(sql)) {
+          if (/SUM\(CAST\(CHECKSUM\(/.test(sql)) {
             const r = opts.checksum ?? { n: 0, agg: 0 };
             return { recordset: [{ n: r.n, agg: r.agg }] };
           }

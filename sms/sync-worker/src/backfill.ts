@@ -218,8 +218,13 @@ export async function overlapChecksum(
   }
   const sampleEvery = opts.sampleEvery ?? 50;
   const cols = def.columns.filter((c) => c.raw !== 'src_id');
-  const srcExpr = ['[id]', ...cols.map((c) => `[${c.src}]`)].join(', ');
-  const rawExpr = ['src_id', ...cols.map((c) => c.raw)].join(', ');
+  // C-010/C-023 (2 Oct 2026): character columns are hashed as the same type
+  // under one binary collation on both sides (CHECKSUM of a string depends on
+  // collation, and the archive and sms_raw collations differ), and the
+  // per-row checksums are SUMmed, not XORed (CHECKSUM_AGG cancels an even
+  // number of identical changes).
+  const srcExpr = ['[id]', ...cols.map((c) => (c.type === 'varchar' ? `CAST([${c.src}] AS nvarchar(255)) COLLATE Latin1_General_BIN2` : `[${c.src}]`))].join(', ');
+  const rawExpr = ['src_id', ...cols.map((c) => (c.type === 'varchar' ? `CAST(${c.raw} AS nvarchar(255)) COLLATE Latin1_General_BIN2` : c.raw))].join(', ');
   const sampleSrc = mode === 'sampled' ? 'AND [id] % @every = 0' : '';
   const sampleRaw = mode === 'sampled' ? 'AND src_id % @every = 0' : '';
 
@@ -228,7 +233,7 @@ export async function overlapChecksum(
     .input('hi', mssql.Int, maxOverlapId)
     .input('every', mssql.Int, sampleEvery)
     .query<{ n: number; agg: number | null }>(
-      `SELECT COUNT(*) AS n, CHECKSUM_AGG(CHECKSUM(${srcExpr})) AS agg
+      `SELECT COUNT(*) AS n, SUM(CAST(CHECKSUM(${srcExpr}) AS bigint)) AS agg
          FROM [${def.sourceTable}] WHERE [id] <= @hi ${sampleSrc}`,
     );
   const rawQ = await appPool
@@ -238,7 +243,7 @@ export async function overlapChecksum(
     .input('hi', mssql.Int, maxOverlapId)
     .input('every', mssql.Int, sampleEvery)
     .query<{ n: number; agg: number | null }>(
-      `SELECT COUNT(*) AS n, CHECKSUM_AGG(CHECKSUM(${rawExpr})) AS agg
+      `SELECT COUNT(*) AS n, SUM(CAST(CHECKSUM(${rawExpr}) AS bigint)) AS agg
          FROM ${def.rawTable} WHERE line_id = @line AND source_epoch = @epoch AND src_id <= @hi ${sampleRaw}`,
     );
 
