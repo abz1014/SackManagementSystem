@@ -1191,8 +1191,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         res.setHeader('X-Cache', 'HIT').json(cached);
         return;
       }
+      // C-009 (D-61, 2 Oct 2026): resolve the period's generation scope the way
+      // reports/reject.ts does. With no scope rejectSpc.ts takes the newest real
+      // generation present, which for a July period is the September
+      // generation's one stray July cone. A function of from/to, so the cache
+      // key above needs nothing new.
+      const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.data.from, to: q.data.to });
       const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter, {
-        shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult,
+        shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult, scope,
       });
       const env = await envelope(pool, cfg.lineId, data);
       // Same RT-014 interaction as /api/events below: never cache a payload
