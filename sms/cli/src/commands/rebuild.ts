@@ -397,6 +397,34 @@ export async function rebuild(argv: string[]): Promise<number> {
       console.log(l);
     }
 
+    // C-011 (D-65): migration 042's FK_dq_ack_finding makes the dq_finding
+    // DELETE below fail (547) once any finding in its scope is acknowledged —
+    // after canonical has already been emptied. Refuse up front instead,
+    // before anything is written. How a rebuild should carry acknowledgements
+    // is an owner decision, so this command neither deletes them nor reorders.
+    if (allGenerations) {
+      const acked = (
+        await ctx.app
+          .request()
+          .input('tbl2', mssql.VarChar(40), table)
+          .query<{ id: number }>(
+            `SELECT f.id FROM sms.dq_finding f
+               JOIN sms.dq_acknowledgement a ON a.finding_id = f.id
+              WHERE f.subject_table = @tbl2 AND f.severity <> 'CRITICAL'
+              ORDER BY f.id`,
+          )
+      ).recordset;
+      if (acked.length > 0) {
+        console.error(
+          `\nREFUSED: ${acked.length} finding(s) for sms.${table} have been acknowledged by an engineer ` +
+            `(finding id ${acked.map((r) => r.id).join(', ')}) and --all-generations would delete them, which the ` +
+            `database refuses part-way through. Resolve the acknowledgements with an engineer first, ` +
+            `or rebuild with --epoch=N. Nothing has been changed.`,
+        );
+        return 2;
+      }
+    }
+
     if (args.confirm !== true) {
       console.log('\nREFUSED: re-run with --confirm to proceed. Nothing has been changed.');
       return 2;
