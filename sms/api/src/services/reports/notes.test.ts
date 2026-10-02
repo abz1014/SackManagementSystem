@@ -85,11 +85,13 @@ const FIXTURES: Record<string, any> = {
 };
 
 describe('which reports carry notes', () => {
-  it('exactly IFL\'s eight, and every other type returns nothing (their notes print beside their figures)', () => {
+  it('IFL\'s eight compose method note, caveats and pendingIfl; every other type returns only the strings its screen prints (C-114: not pendingIfl)', () => {
     expect([...IFL_NOTE_TYPES].sort()).toEqual(Object.keys(FIXTURES).sort());
     for (const t of REPORT_TYPES) {
       if ((IFL_NOTE_TYPES as readonly string[]).includes(t)) continue;
-      expect(reportNotesOf(t, { note: 'x', pendingIfl: ['y'] }), t).toEqual([]);
+      const notes = reportNotesOf(t, { note: 'x', pendingIfl: ['y'] });
+      expect(notes.join('\n'), t).not.toContain('y');
+      expect(notes.length, t).toBeLessThanOrEqual(1);
     }
   });
 

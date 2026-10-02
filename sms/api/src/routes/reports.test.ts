@@ -624,9 +624,10 @@ describe('H-exports (1 Oct 2026): BOM, file names, report notes and the PDF shif
       }
     });
 
-    it('an earlier report type carries no reportNotes at all (its notes print beside its figures)', async () => {
+    it('an earlier report type carries exactly the note its screen prints (C-114), and no pendingIfl lines', async () => {
       const r = await get(`/api/reports/daily?${Q}`, 'viewer');
-      expect(r.json.data.header.reportNotes).toBeUndefined();
+      const printed = r.json.data.report?.rejectPopulations?.note;
+      expect(r.json.data.header.reportNotes).toEqual(typeof printed === 'string' && printed.trim() !== '' ? [printed.trim()] : undefined);
     });
 
     it("the CSV trails the same notes as report_note rows after the blank line, after the report's own figures", async () => {

@@ -287,12 +287,13 @@ describe('D6: the report\'s notes are composed once and every surface carries th
     for (const line of data.pendingIfl as string[]) expect(h.reportNotes).toContain(`${PENDING_IFL_HEADING}: ${line}`);
   });
 
-  it('a header built with no report data, or for one of the earlier ten types, carries no reportNotes key at all', async () => {
+  it('a header built with no report data, or for an earlier type whose data carries no note, has no reportNotes key at all (C-114: an earlier type WITH a note now carries it)', async () => {
     expect('reportNotes' in (await headerFor('rejected-cones'))).toBe(false);
-    expect('reportNotes' in (await headerFor('daily', { note: 'x', pendingIfl: ['y'] }))).toBe(false);
+    expect('reportNotes' in (await headerFor('daily', { pendingIfl: ['y'] }))).toBe(false);
     for (const t of REPORT_TYPES.filter((x) => !IFL_NOTE_TYPES.includes(x))) {
-      expect('reportNotes' in (await headerFor(t, { note: 'x', pendingIfl: ['y'] })), t).toBe(false);
+      expect('reportNotes' in (await headerFor(t, { pendingIfl: ['y'] })), t).toBe(false);
     }
+    expect((await headerFor('cone-weight', { note: 'x' })).reportNotes).toEqual(['x']);
   });
 
   it.each(TIMED)('$type: the CSV trails exactly those notes, as report_note rows after the blank line', async ({ type, table, data }) => {

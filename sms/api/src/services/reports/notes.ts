@@ -27,9 +27,9 @@
  *      it already carries and not state it twice.
  *
  * PURE: no clock, no database, no I/O, the input is never mutated. A type that
- * is not one of IFL's eight returns `[]`: the earlier ten reports already print
- * their own notes beside their figures (PrintDoc's `summarise`), and giving them
- * a second copy here would print every caveat twice. A payload with a field
+ * is not one of IFL's eight returns only the note strings its screen already
+ * prints (C-114, 2 Oct 2026: it used to return `[]`, which left them out of the CSV
+ * and the workbook). A payload with a field
  * missing (an older server, a fixture) yields the notes it CAN state rather than
  * throwing: notes are decoration over figures the report states anyway.
  */
@@ -239,18 +239,46 @@ function caveatsOf(type: ReportType, d: Rec): (string | null)[] {
   }
 }
 
+/** The note strings each earlier report type's screen prints (web `screens/report/<Type>.tsx`), read from the same data fields. */
+function olderTypeNotes(type: ReportType, d: Rec): (string | null)[] {
+  switch (type) {
+    case 'daily': return [str(rec(d.rejectPopulations).note)];
+    case 'shift': return [str(d.timeLostNote)];
+    case 'sack': {
+      const c = rec(d.caveats);
+      return [str(c.time), str(c.machine), str(c.conesPerSack)];
+    }
+    case 'product':
+    case 'station':
+    case 'reject':
+    case 'cone-weight':
+    case 'calibration':
+    case 'management-summary':
+    case 'machine-product':
+      return [str(d.note)];
+    default:
+      return [];
+  }
+}
+
 /**
  * The printable notes of one report, as plain sentences in a fixed order: the
  * method note, then the caveats computed from the figures, then every
  * "Assumed until IFL confirms" line. Repeated sentences are printed once.
  */
 export function reportNotesOf(type: ReportType, data: unknown): string[] {
-  if (!IFL_NOTE_TYPES.includes(type) || !isRec(data)) return [];
+  if (!isRec(data)) return [];
   const out: string[] = [];
   const add = (s: string | null | undefined): void => {
     const t = s?.trim();
     if (t && !out.includes(t)) out.push(t);
   };
+  if (!IFL_NOTE_TYPES.includes(type)) {
+    // C-114 (D-82, 2 Oct 2026): the ten earlier types state their caveats in the report data and the screen prints them; the
+    // CSV and the workbook have no body, so the same existing strings travel here. No new wording, nothing the screen omits.
+    for (const s of olderTypeNotes(type, data)) add(s);
+    return out;
+  }
   add(str(data.note));
   for (const c of caveatsOf(type, data)) add(c);
   for (const p of pendingLines(data)) add(p);
