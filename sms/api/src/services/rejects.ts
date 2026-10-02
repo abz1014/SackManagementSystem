@@ -474,7 +474,8 @@ export async function getRejectsByDayCode(
       count: n,
       cones: dayCones,
       inspected,
-      ratePct: inspected > 0 ? Math.round((1000 * n) / inspected) / 10 : null,
+      // 2 dp (C-110, 2 Oct 2026): 1 dp turned 0.041 % into 0.
+      ratePct: inspected > 0 ? Math.round((10000 * n) / inspected) / 100 : null,
     };
   });
   // Day ascending, then the biggest reason first within the day.

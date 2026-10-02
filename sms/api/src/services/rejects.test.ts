@@ -295,7 +295,7 @@ describe('getRejectsByDayCode — rate uses that day\'s own population', () => {
     expect(sixth.ratePct).toBe(7); // 70 / 1000
     expect(seventh.cones).toBe(400);
     expect(seventh.inspected).toBe(420);
-    expect(seventh.ratePct).toBe(4.8); // 20 / 420 = 4.76
+    expect(seventh.ratePct).toBe(4.76); // 20 / 420 = 4.76 (2 dp since C-110; was pinned 4.8)
     // Not the range-wide 90 / 1420 = 6.3 on both.
     expect(sixth.ratePct).not.toBe(seventh.ratePct);
   });

@@ -46,6 +46,11 @@ import { W } from '../lib/words';
 import { periodQuery, trailingWindow, daysWithReadings, type Period, type PeriodParams } from '../lib/period';
 import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, Toolbar, rowKeys } from '../ui/bits';
 import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
+
+/** A reject rate: two decimals under 1 % so a non-zero rate never reads 0.0% (C-110, D-89); one decimal otherwise. */
+function fmtRate(n: number | null | undefined): string {
+  return n != null && n > 0 && n < 1 ? `${n.toFixed(2)}%` : fmtPct1(n);
+}
 import { vitalFew } from '../lib/pareto';
 import { RejectTrendChart } from './report/shared';
 // The SAME type Readings.tsx's headline uses, imported rather than restated,
@@ -443,12 +448,17 @@ export function RejectsScreen({
           ? '—'
           : rejectCount.kind === 'pending' || q == null || w == null
             ? '…'
-            : `${W.rejects.headline(fmtInt(rejectCount.n), fmtPct1(ratePct), q.totalRejects, w.totalRejects)}${
+            : `${W.rejects.headline(fmtInt(rejectCount.n), fmtRate(ratePct), q.totalRejects, w.totalRejects)}${
                 verdictKnown
                   ? ` — ${rising ? W.rejects.risingSince(dayLabel(rising.startTs), risingKind) : settledTail}`
                   : ''
               }.`}
       </h1>
+      {/* C-015, 2 Oct 2026: the headline's counts are one data batch's when
+          the period crosses the rebuild; say so directly under it. */}
+      {(periodQ.data?.data.spansGenerations || periodW.data?.data.spansGenerations) && (
+        <p className="mut sm" style={{ marginTop: 10, maxWidth: '68ch' }}>{W.state.periodGenerations(null)}</p>
+      )}
       </div>
 
       <Block first>
@@ -470,7 +480,7 @@ export function RejectsScreen({
               ) : (
                 <>
                   <b className="fig-val">{fmtInt(rejectCount.n)}<span className="fig-unit">{W.fig.rejected}</span></b>
-                  <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtPct1(ratePct))}</span>
+                  <span className="fig-note">{ratePct == null ? '—' : W.ofEverything(fmtRate(ratePct))}</span>
                 </>
               )}
             </div>
@@ -846,7 +856,7 @@ function ByDayTable({ rows, onOpen }: { rows: RejectDayCodeRow[]; onOpen: (r: Re
               <td className={r.label ? '' : 'g'}>{reasonName(r)}</td>
               <td className="n">{fmtInt(r.count)}</td>
               <td className="n">{fmtInt(r.cones)}</td>
-              <td className="n">{r.ratePct == null ? '—' : fmtPct1(r.ratePct)}</td>
+              <td className="n">{r.ratePct == null ? '—' : fmtRate(r.ratePct)}</td>
               <td className="n"><Chevron label={W.openRecord} /></td>
             </tr>
           );
