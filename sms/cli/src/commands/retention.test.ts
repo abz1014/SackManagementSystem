@@ -73,7 +73,8 @@ describe('the predicates', () => {
     expect(SYNC_RUN_WHERE).toMatch(/r\.rn > 1 AND r\.started_at_utc < DATEADD\(DAY, -@syncDays, SYSUTCDATETIME\(\)\)/);
   });
   it('dq_finding spares CRITICAL', () => {
-    expect(DQ_FINDING_WHERE).toBe(`severity <> 'CRITICAL' AND detected_at_utc < DATEADD(DAY, -@dqDays, SYSUTCDATETIME())`);
+    // C-022: the acknowledged-finding exclusion is appended; the original predicate is unchanged.
+    expect(DQ_FINDING_WHERE).toContain(`severity <> 'CRITICAL' AND detected_at_utc < DATEADD(DAY, -@dqDays, SYSUTCDATETIME())`);
   });
   it('sessions: expired only', () => {
     expect(SESSION_WHERE).toBe('expires_at_utc <= SYSUTCDATETIME()');

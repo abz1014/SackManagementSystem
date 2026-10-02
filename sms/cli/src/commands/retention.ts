@@ -77,7 +77,12 @@ export const SYNC_RUN_WHERE =
      ) r
      WHERE r.rn > 1 AND r.started_at_utc < DATEADD(DAY, -@syncDays, SYSUTCDATETIME()))`;
 
-export const DQ_FINDING_WHERE = `severity <> 'CRITICAL' AND detected_at_utc < DATEADD(DAY, -@dqDays, SYSUTCDATETIME())`;
+// C-022 (D-68): a finding an engineer has acknowledged is kept (the FK from
+// sms.dq_acknowledgement would refuse its DELETE with 547 and stop every later
+// night's prune). Whether acknowledgements should themselves expire is an owner decision.
+export const DQ_FINDING_WHERE =
+  `severity <> 'CRITICAL' AND detected_at_utc < DATEADD(DAY, -@dqDays, SYSUTCDATETIME()) ` +
+  `AND NOT EXISTS (SELECT 1 FROM sms.dq_acknowledgement a WHERE a.finding_id = sms.dq_finding.id)`;
 
 export const SESSION_WHERE = `expires_at_utc <= SYSUTCDATETIME()`;
 
@@ -109,7 +114,7 @@ export async function retention(argv: string[]): Promise<number> {
     const policy = retentionPolicy();
     console.log(`retention${dryRun ? ' — DRY RUN, nothing will be deleted' : ''}\n`);
     console.log(`  sms.sync_run     older than ${policy.syncRunDays} days, keeping the newest row per (line, table)`);
-    console.log(`  sms.dq_finding   older than ${policy.dqFindingDays} days, except CRITICAL`);
+    console.log(`  sms.dq_finding   older than ${policy.dqFindingDays} days, except CRITICAL and acknowledged`);
     console.log(`  sms.session      already expired\n`);
 
     const counts: Record<string, number> = {};
