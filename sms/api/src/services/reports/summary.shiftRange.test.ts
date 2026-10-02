@@ -148,7 +148,11 @@ describe('getManagementSummary — shift-range wiring (Task TD, 29 Sep 2026)', (
     // `prior` (the DayRange on the response) is the shift range's own
     // calendar span — 1 Sep to 2 Sep — never priorPeriod's 2-calendar-day
     // rule (which would have said 2026-08-31 to 2026-09-01, pinned above).
-    expect(d.prior).toEqual({ from: PRIOR_RANGE.from, to: PRIOR_RANGE.to });
+    // C-167 (2 Oct 2026): the shifts the span starts and ends on travel beside it.
+    expect(d.prior).toEqual({
+      from: PRIOR_RANGE.from, to: PRIOR_RANGE.to,
+      fromShift: `${PRIOR_RANGE.from}.${PRIOR_RANGE.fromShift}`, toShift: `${PRIOR_RANGE.to}.${PRIOR_RANGE.toShift}`,
+    });
 
     const reportCalls = vi.mocked(getReport).mock.calls;
     const curReportCall = reportCalls.find((c) => c[2].from === CURRENT_RESOLVED.from)!;

@@ -2863,7 +2863,8 @@ export interface ProductMixRow {
 
 export interface ManagementSummaryData {
   period: ReportData['period'];
-  prior: { from: string; to: string };
+  /** C-167: `fromShift`/`toShift` (`YYYY-MM-DD.shift`) are set only when the report is shift-bounded; the caption then names the shifts. */
+  prior: { from: string; to: string; fromShift?: string; toShift?: string };
   coverage: { current: ReportData['coverage']; prior: ReportData['coverage'] };
   kpis: KpiRow[];
   /** Which products each period actually ran (UX Phase 5 Brief 1, unit U5) — a KPI marked comparable can still be comparing different products. */

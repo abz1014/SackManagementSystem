@@ -153,7 +153,11 @@ export interface ProductMixRow {
 
 export interface ManagementSummaryData {
   period: ResolvedPeriod;
-  prior: DayRange;
+  /**
+   * The prior period's calendar span. C-167 (2 Oct 2026): for a shift-bounded report it also carries the shifts the span starts and
+   * ends on, `YYYY-MM-DD.shift` (the URL encoding), so a caption can say "31 Aug evening shift" rather than two bare dates.
+   */
+  prior: DayRange & { fromShift?: string; toShift?: string };
   /**
    * C-127 (D-76): the plain-words shift range of the current / prior period,
    * set ONLY when the report is shift-bounded (`describeShiftRangePeriod`, the
@@ -391,15 +395,17 @@ export async function getManagementSummary(
    * days — rather than `priorPeriod`'s calendar-day rule. `prior` (the
    * `DayRange` on the response) is set to that shift range's own calendar
    * span either way, so every existing reader of `prior.from`/`prior.to`
-   * (the CSV, the printed caption) needs no change.
+   * (the CSV) needs no change; C-167 adds `fromShift`/`toShift` beside them.
    */
   shiftRange?: ShiftRange,
 ): Promise<ManagementSummaryData> {
   const priorRange = shiftRange ? priorShiftRange(shiftRange) : undefined;
-  const prior = priorRange ? { from: priorRange.from, to: priorRange.to } : priorPeriod(resolved.from, resolved.to);
+  const prior = priorRange
+    ? { from: priorRange.from, to: priorRange.to, fromShift: `${priorRange.from}.${priorRange.fromShift}`, toShift: `${priorRange.to}.${priorRange.toShift}` }
+    : priorPeriod(resolved.from, resolved.to);
   const [cur, prev, catalogue] = await Promise.all([
     figuresFor(pool, lineId, { from: resolved.from, to: resolved.to }, shiftRange),
-    figuresFor(pool, lineId, prior, priorRange),
+    figuresFor(pool, lineId, { from: prior.from, to: prior.to }, priorRange),
     loadProductCatalogue(pool),
   ]);
   // A count-shaped KPI's delta is only presented as a trend when the two

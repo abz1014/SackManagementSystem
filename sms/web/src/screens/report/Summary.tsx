@@ -12,6 +12,7 @@ import { Block, Empty } from '../../ui/bits';
 import { fmtDayLong, fmtInt, fmtSpan } from '../../lib/fmt';
 import type { KpiRow, ManagementSummaryData, ProductMixRow, ProductOption } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';
+import { describePeriod, type ShiftCode } from '../../lib/period';
 import { digitsFor, fmtDelta } from './model';
 
 function fmtValue(v: number | null, unit: KpiRow['unit']): string {
@@ -20,6 +21,29 @@ function fmtValue(v: number | null, unit: KpiRow['unit']): string {
   const digits = digitsFor(unit);
   const s = v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return unit === '%' ? `${s}%` : `${s} ${unit}`;
+}
+
+const SHIFT_REF = /^(\d{4}-\d{2}-\d{2})\.(morning|evening|night)$/;
+const ONE_END = '\u0000';
+
+/**
+ * The "compared with ..." caption. C-167 (2 Oct 2026): a shift-bounded summary's prior period is a SHIFT range, so when the server
+ * sends `prior.fromShift`/`toShift` the caption names those shifts in the period control's own words (`describePeriod`), split at its
+ * " – " into the two ends `priorSpan` takes; a one-shift or one-day prior has no second end and is named once. Otherwise the
+ * calendar days, as before.
+ */
+function priorCaption(prior: ManagementSummaryData['prior']): string {
+  const a = SHIFT_REF.exec(prior.fromShift ?? '');
+  const b = SHIFT_REF.exec(prior.toShift ?? '');
+  if (!a || !b) return W.reports.priorSpan(fmtDayLong(prior.from), fmtDayLong(prior.to));
+  const words = describePeriod({
+    key: 'range', from: prior.from, to: prior.to, tsTo: '', live: false, days: 1,
+    fromShift: { date: a[1]!, shift: a[2] as ShiftCode }, toShift: { date: b[1]!, shift: b[2] as ShiftCode },
+  });
+  const ends = words.split(' – ');
+  if (ends.length === 2) return W.reports.priorSpan(ends[0]!, ends[1]!);
+  const once = W.reports.priorSpan(words, ONE_END).replace(` to ${ONE_END}`, '');
+  return once.includes(ONE_END) ? W.reports.priorSpan(words, words) : once;
 }
 
 export function SummarySection({ d, products }: { d: ManagementSummaryData; products: ProductOption[] }) {
@@ -70,7 +94,7 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
     <>
       <Block first>
         <p className="g">
-          {W.reports.priorSpan(fmtDayLong(d.prior.from), fmtDayLong(d.prior.to))}
+          {priorCaption(d.prior)}
           {' · '}
           {W.reports.priorCoverage(d.coverage.prior.daysWithData, d.coverage.prior.daysInPeriod)}.
         </p>
