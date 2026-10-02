@@ -849,11 +849,14 @@ export function ddmmyyyyHm(iso: string): string {
 
 /** W4: the three-row IFL banner: company line (company, plant, unit), report title (with this sheet's role), then the metadata line. */
 export function titleRowsFor(header: ReportHeader, sheetTitle: string | null): string[] {
-  const shift = header.filters.shift ?? 'All shifts';
+  // D-75: a shift-bounded period already names its shifts in the period text (periodText), so "Shift: All shifts" would contradict it.
+  const label = header.periodLabel?.trim();
+  const hasShiftRange = Boolean(label) && label !== `${header.period.from} to ${header.period.to}`;
+  const shiftPart = header.filters.shift == null && hasShiftRange ? '' : ` \u00b7 Shift: ${header.filters.shift ?? 'All shifts'}`;
   return [
     companyLineFor(header),
     sheetTitle ? `${header.title} - ${sheetTitle}` : header.title,
-    `Line: ${header.lineName} \u00b7 Period: ${periodText(header, ddmmyyyy)} \u00b7 Shift: ${shift} \u00b7 Generated: ${ddmmyyyyHm(header.generatedAtPlantUtc)} (plant time) \u00b7 SMS v${header.smsVersion.replace(/^v/i, '')}`,
+    `Line: ${header.lineName} \u00b7 Period: ${periodText(header, ddmmyyyy)}${shiftPart} \u00b7 Generated: ${ddmmyyyyHm(header.generatedAtPlantUtc)} (plant time) \u00b7 SMS v${header.smsVersion.replace(/^v/i, '')}`,
   ];
 }
 
