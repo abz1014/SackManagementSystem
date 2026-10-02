@@ -15,12 +15,22 @@ one shared period control and one line stating how old the data is.
 - **Product changeover per machine per shift** — your own stated key
   requirement: plan a product change, see every blocker PDAS would raise,
   before anything is written.
-- **Ten report types**, daily and per shift, exported as a formatted Excel
-  workbook (with real charts, not a bare grid) or a PDF — both generated on
-  the server, both tested end to end against a running copy of this software.
-- **Sack production per machine, by shift and by day** — not a per-machine
-  stock ledger. Your own data has no machine or station column on the sack
-  table, so a ledger is not computable from it by anyone; production is.
+- **Eighteen report types**, daily and per shift, including the eight reports
+  you listed on 29 September 2026, under your own names: Shift-wise CTS Loop
+  Production; Rejected Sack Report - Daily; SPS Production Report - Count-wise
+  Packing at Each SPS; SPS Sack Weight Range; Sack Packing Weight Summary; List
+  of Rejected Cones Against Weight; Rejected Cone Hangers; Rejected Unknown
+  (Lifter). Each is exported as a formatted Excel workbook (with real charts,
+  not a bare grid) or a PDF, both generated on the server. That export path was
+  tested end to end on the first ten types; the eight added for your list use
+  the same path, and each prints the assumptions it rests on under "Assumed
+  until IFL confirms" (questions 22–29 in `IFL-OPEN-QUESTIONS.md`).
+- **Cone production per machine, by shift and by day** (the "Product by machine
+  and shift" report), and **sack production at line level, by shift, day,
+  product and yarn count.** The sack scale records no machine, so a sack cannot
+  be attributed to a machine by anyone, and there is no per-machine sack stock
+  ledger. Your data holds no sack tolerance either, so the sack reports state
+  what the scale itself passed and rejected, never "under" or "over" weight.
 
 ## Three things we measured on your own data, not assumed
 

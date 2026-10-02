@@ -2,7 +2,10 @@
 
 **Prepared 23 September 2026, re-verified the same day against the running databases
 (sidecar and both attached IFL copies, read-only) rather than re-quoted from earlier
-drafts. Fifteen asks, in the order of what they unblock.**
+drafts. Extended 29 September 2026 (items 16–21) and 1 October 2026 (items 22–29, the eight
+reports). Twenty-nine asks in all — fifteen when first prepared — in the order of what they
+unblock.** Items 1–15 keep their 23 September numbers; items 22–29 (Tier 5) are drafted and not
+yet sent.
 
 ## Covering note
 
@@ -62,7 +65,10 @@ and saying so is what makes the two that are not stand out.
 below.** Nothing in this software has ever run against IFL's live plant systems; every
 measurement quoted here comes from the two database copies IFL sent (June–July and
 August–September 2026) attached to a development machine. And no PDAS stored procedure has
-ever been executed against any database, live or local.
+ever been executed against any database, live or local. *(Corrected 1 October 2026: that last
+sentence is out of date. Authorised passes on 23 September executed the product procedures
+against the local copy of PDAS only, and by 28 September all nine write rights had been
+exercised through our own code against that copy. None has ever run against IFL's live PDAS.)*
 
 ---
 
@@ -493,6 +499,242 @@ confirmation is item 12 above, not repeated here.
 
 ---
 
+## Tier 5 — The eight reports you asked for on 29 September
+
+**DRAFT — written 1 October 2026, NOT SENT.** On 29 September 2026 IFL listed eight reports by
+email. All eight are built, under IFL's own titles. Each one rests on a few readings of your words
+and on defaults we applied because your data or your email did not settle them. **Every one of
+those is printed on the report itself** — screen, paper, CSV and workbook — under the heading
+**"Assumed until IFL confirms"**, and every one is asked below. Numbers quoted here were
+re-measured on 1 October 2026, read-only, against the development copy of your databases (the
+June–July and August–September samples), not copied from an earlier draft. **Nothing in this tier
+stops a report from printing:** each item says what we built meanwhile, and a different answer
+changes a definition, not whether the report exists. The definitions themselves are
+`KPI-DEFINITIONS.md` §2.2 (rows 33–64).
+
+*(Numbered 22–29 so items 1–21 keep the numbers other files cite. This tier is not in the covering
+note at the top; send it with that note or as a second message. **Internal, delete before sending:**
+this replaces a first draft of items 22–29 written earlier on 1 October that put one question under
+each report. The numbers are the same, the subjects are regrouped by theme, so the "Asked in"
+column of `KPI-DEFINITIONS.md` §2.2 must be re-pointed to the map below.)*
+
+| Your report | Settled by questions |
+|---|---|
+| Shift-wise CTS Loop Production Report | 22, 23, 24 |
+| Rejected Sack Report - Daily | 22, 26, 28 |
+| SPS Production Report - Count-wise Packing at Each SPS | 22, 23, 28 |
+| SPS Sack Weight Range Report | 27 |
+| Sack Packing Weight Summary | 22, 27, 28 |
+| List of Rejected Cones Against Weight | 25 |
+| Rejected Cone Hangers Report | 23 |
+| Rejected Unknown (Lifter) Report | 29 |
+
+### 22. What do "SPS", "CTS loop" and "count" mean on your report titles?
+*(Added 1 October 2026, DRAFT. Reports: Shift-wise CTS Loop, SPS Production, Rejected Sack, Sack
+Packing Weight Summary.)* Three words in your email are not in your database, so we read them from
+context and say so on the page:
+
+1. **SPS.** Your data holds **one** sack scale (`PLC_sack1`) and one cone PLC (`PLC_pack1`). We
+   take "each SPS" to mean each sack scale, so the SPS report shows a single block, "SPS 1 — this
+   line's one sack scale (PLC_sack1)", marked unconfirmed. The archives you sent us were also named
+   "SPS…": is SPS the name of the whole weighing-and-packing system, rather than a machine?
+2. **CTS loop.** We take it to be the conveyor loop that carries the cone hangers: one loop,
+   hangers numbered 1–299, shared by all 14 winders (see item 23 for a wrinkle in those numbers).
+   The Shift-wise report is therefore one block that states how many hanger numbers the period
+   saw. What does CTS stand for, and is there more than one loop?
+3. **Count**, as in "count-wise packing". We read it as the **yarn count**. A sack carries a
+   product number; we turn it into a yarn count through today's product master (PDAS), so a count
+   edited in PDAS later would change how older sacks print. Is one product exactly one yarn count,
+   and is today's master acceptable — or should a sack keep the count it had when it was packed?
+   For 5 August – 7 September 2026 the result is: count 36 — 2,197 sacks; 18 — 2,013; 30 — 862;
+   50 — 243; 20 Slub — 79; 36 Slub — 40; and one sack with no product. Are those the counts you ran?
+
+**Built meanwhile:** all three readings above, printed on the reports. A sack with no product on
+its record (every July sack — see item 28) goes under "No product on the reading"; we never guess
+a count for it.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** if an SPS is something else, the SPS
+report shows one block where you expect several, or groups by the wrong thing.
+
+### 23. How many sack scales and hanger loops does TP1 have — and at what reject rate should a hanger be looked at?
+*(Added 1 October 2026, DRAFT. Reports: SPS Production, Shift-wise CTS Loop, Rejected Cone
+Hangers. The sack-scale half is item 13 asked again in report terms.)*
+
+- **Sack scales.** One is recorded (`PLC_sack1`). Is that every sack-packing machine on TP1, or
+  are there others whose sacks do not reach this database?
+- **Hanger loops, and a wrinkle in the numbers.** We find one loop, hangers 1–299, shared by all 14
+  winders (one lifter each). But the two samples differ. In July all 299 positions carry cones
+  (hanger 299 carried 414 of them). Since 5 August the data holds hangers 1–298 only: hanger 299
+  appears once, on a record stamped 12 July 2026, which is a clock fault. And five hangers — **78,
+  106, 117, 268 and 297** — do not appear at all between 5 and 29 August; they first appear on
+  30 August (293 distinct hanger numbers on 5–29 August, 298 from 30 August). Is the loop now 298
+  positions or 299? Were five hangers out of the loop for those 25 days, and is hanger 299 gone?
+- **A reject rate worth acting on.** The Rejected Cone Hangers report needs a rule for "look at this
+  hanger". For 5 August – 7 September the line as a whole rejected 4.59% of the cones inspected;
+  hanger 91 had 58 rejects on 471 cones, about 12%. Our default flags a hanger as **"stands out in
+  this period"** only when its reject count is unlikely at the line's own rate (an exact binomial
+  test at 5%, allowing for the number of hangers tested), and judges only hangers with at least 100
+  inspected cones — below that the page says "too few cones to judge". The page never says a hanger
+  is "bad" or "faulty": a count shows where rejects were, not why. **Do you have your own rule — a
+  rate, a count, a number in a row — and do you count quality and weight rejects together?** We
+  count both; we would rather use yours.
+
+**Built meanwhile:** the default flag above, and the 298/299 question stated on the report when a
+period shows it.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** the flagged hangers may not be the
+ones your engineers already watch, and a five-hanger gap in August may be read as a data fault when
+it was a physical change.
+
+### 24. Shift-wise CTS loop production: what is "Total", what is a "weight rejection", and is the weight gross or net?
+*(Added 1 October 2026, DRAFT. Report: Shift-wise CTS Loop Production.)* Three one-line answers
+settle this report. Shifts are by production time, not by your `Shift` column (item 20).
+
+1. **Total.** A cone rejected on weight appears in your data **twice**: once as a weighed cone and
+   once as a weight-reject record, with the same time and hanger (all 41 in the September
+   generation; 244 of the 246 in July). We count each such cone **once, as a reject**:
+   *Pass* = weighed cones with no weight-reject record, *Total* = Pass + Weight rejects,
+   *Efficiency* = Pass ÷ Total. For 3 July 2026: 7,923 cones weighed, one of them weight-rejected,
+   so Pass 7,922, Total 7,923, Efficiency 99.99%. On your own sheet, does such a cone count under
+   Pass, under Weight rejects, or under both? (Under both, that day's Total would be 7,924.)
+2. **"Weight rejection".** We use the weight-reject records. The scale also sets its own in-range
+   bit on each cone, and that marks a different, larger set: 419 cones in July against 246 records,
+   53 in the September generation against 41. We print the bit's count beside the records as a
+   separate fact and never merge them. Which one does your sheet mean?
+3. **Kilograms.** The weighed-kg figure is the total of the cone weights on the basis set in Setup
+   — currently **gross** (the cone with its tube), which was set from your 15 September answer
+   about sacks and extended to cones as a placeholder (item 6) — leaving out readings outside
+   1,500–2,100 g, whose number is printed. Do you want gross, or net of the tube?
+
+**Built meanwhile:** all three defaults, printed on the report; a Total that equals the number of
+physical cones plus the weight rejects that have no cone row.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** the first parallel run against your
+own sheet differs by exactly the cones in question and has to be re-explained each time.
+
+### 25. List of rejected cones against weight: which columns, what "over/under" means, and do quality rejects belong?
+*(Added 1 October 2026, DRAFT. Report: List of Rejected Cones Against Weight.)*
+
+The list holds **weight rejects only** — cones the weighing scale rejected — one row each: date,
+shift, time (plant clock), winder, hanger, weight, product, the product's limits as they stood at
+that moment, and how far outside them: a signed number of grams, minus below the lower limit, plus
+above the upper. A cone the scale rejected that is *inside* its product's own limits is marked
+"inside the product's limits" — the scale's flag and the product's limits are different things and
+can disagree. Where we cannot date the limits we say "recorded no later than" and the date. A
+record stamped 1 January 1970 (weight id 153, 0 g) is left off and counted in a footnote.
+
+Questions: are those the columns you expect, and is "over/under" wanted in grams or in percent? Are
+the limits the product limits held in PDAS (what we use), or the scale's own? And **should quality
+(inspection) rejects be on this list** — a far larger population (6,049 in the September generation
+against 41 weight rejects; 2,900 against 246 in July) that today lives on the Rejects screen and the
+Rejects report — on the same list, on a second list, or not at all?
+
+**Built meanwhile:** weight rejects only, with the reason printed under the list.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** a list that is shorter than the one
+you expected.
+
+### 26. Rejected sack report, daily: what counts as a rejected sack, and what does "daily" mean?
+*(Added 1 October 2026, DRAFT. Report: Rejected Sack Report - Daily.)* Your data holds **no sack
+tolerance anywhere**, so we cannot call a sack under- or over-weight, and we do not. We call a sack
+*rejected* when **the sack scale itself marked it out of range**. That includes a reading of 0 kg
+or another fault value: 594 of 5,435 sacks in the September generation (four of them outside
+40–60 kg, listed apart as "implausible weight") and 231 of 5,462 in July (three). Every sack has the
+scale's flag, so none is counted as a pass by default. "Daily" we take to mean **per production day
+(06:00 to 06:00, plant clock), split into the three shifts**; a sack's time is when the plant
+*saved* the record (item 15), because the sack scale keeps no time of its own. We print the range
+the scale *passed* as a plain fact — 47.0–47.6 kg since 5 August — never as a limit.
+
+Is that the meaning you want? Does a 0 kg or fault reading belong on the list (see item 16), and do
+you apply a sack tolerance on paper that we should be using instead?
+
+**Built meanwhile:** the scale's own verdict, said to be the scale's, with a day-by-shift table, a
+split between implausible and plausible rejected weights, and a list of every rejected sack.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** if you hold a tolerance we do not
+know of, a "rejected" sack here may not be one on your own sheet.
+
+### 27. Sack weight: is there a target and tolerance per product, which bands do you want, and which conventions?
+*(Added 1 October 2026, DRAFT. Reports: SPS Sack Weight Range, Sack Packing Weight Summary.)*
+
+- **Target and tolerance.** No target or tolerance is held anywhere in your data. All we see is what
+  the scale passed: **47.0–47.4 kg in July and 47.0–47.6 kg since 5 August**. The heaviest sack the
+  scale passed was 47.4 kg on count 36, 47.5 on count 30 and 47.6 on count 18, which may mean it
+  applies a different upper limit per product, or may only reflect what was packed. Is there a
+  target weight and a tolerance for each product, and what are they?
+- **Bands.** The range report groups sacks in **0.1 kg bands** from just below the lightest sack
+  the scale passed to just above the heaviest (0.2 kg if that would make more than 30 bands), with
+  open-ended rows at both ends and a row for implausible weights; each band is split by the scale's
+  verdict and by shift. **No band is marked as a target.** Is 0.1 kg the width you want, or do you
+  work to fixed bands of your own?
+- **The summary's conventions.** (a) We print the *sample* standard deviation (divided by n − 1);
+  does your sheet divide by n? (b) Average, lightest, heaviest and standard deviation leave out
+  sacks outside 40–60 kg (scale faults, 0 kg readings), and the number left out is printed; is
+  40–60 kg right for a filled sack? (c) Weights are **gross**, as you told us on 15 September; if
+  you also want net, what does an empty sack weigh? (Our 0.5 kg is a placeholder you have never
+  seen, item 6.)
+
+**Built meanwhile:** all of the above as defaults, printed on both reports.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** low — a range report with no target
+line on it, and a spread that differs from yours in the third decimal if your convention is
+dividing by n.
+
+### 28. Did sacks carry a product number before 5 August — and is it really the product?
+*(Added 1 October 2026, DRAFT. Reports: SPS Production, Rejected Sack, Sack Packing Weight Summary.
+Related: items 9 and 17.)* The yarn-count columns depend on the product being on the sack record.
+**None of July's 5,462 sacks has one; 5,434 of the September generation's 5,435 do.** The column
+appeared in the 5 August rebuild, and the tag that feeds it is named `S1_Sack_Quality`. Its values
+are exactly your product numbers (20, 21, 1021–1024), so we treat it as the product — but the
+tag's name says "quality". Please confirm it is the product the sack was packed from, not a
+quality grade. And for the period before 5 August: was the product recorded for sacks anywhere
+else (another table, the PLC, a paper record), or did the column simply not exist until the
+rebuild? The 10 July – 5 August data asked for in items 9 and 17 would show which. If it was not
+recorded, may we assign earlier sacks to the product PDAS says was running, clearly labelled as
+inferred? We have **not** done so.
+
+**Built meanwhile:** earlier sacks print under "No product on the reading" in every count-wise
+figure; the reports say how many sacks that affects.
+
+**Blocked without it:** nothing. **Cost of staying blocked:** every July count-wise figure is one
+undivided "No product" column.
+
+### 29. Rejected unknown (lifter): what does "unknown" mean?
+*(Added 1 October 2026, DRAFT. Report: Rejected Unknown (Lifter) Report. This is the one report
+whose definition is ours, not yours.)* We could not find a rejected cone in your data whose lifter
+is "unknown" in any ordinary period:
+
+- On TP1 the lifter number equals the winder number on all but four of the 275,063 cones we hold
+  (99.9985%): two zeroed-clock records with no winder number, and two ordinary cones where the two
+  differ (winder 1 with lifter 9 on 23 June; winder 3 with lifter 5 on 7 August). On a rejected cone
+  they never differ. **Is a lifter the same thing as a winder on this line, and what are those two
+  ordinary cones?**
+- The only real rejects with no lifter number are three records stamped 1 January 1970, a zeroed
+  clock: July quality id 81 and weight id 153, September quality id 1248. No period picker can
+  reach them, so the report shows them in a separate block that ignores the period.
+- **Reason code 0.** Thirteen quality rejects (five in July, eight in the September generation)
+  carry a 0 in the tube or material reason code, six of them in both. Is 0 "no reason recorded",
+  or a real reason?
+- **No reject code has a name.** You told us on 15 September that the codes have no fixed list and
+  would be named in Setup. None of the twenty codes there has a name yet, so every reason shows as
+  a raw number.
+
+Our **draft** definition is: *a reject with no lifter number or no winder number recorded, and
+nothing else.* A reject with a zero reason code is counted and listed apart, not called unknown.
+What did you mean — no lifter recorded, a zero reason code, a lifter that could not be identified,
+something your own screen shows? A screenshot of the report you have in mind would settle it.
+
+**Built meanwhile:** per lifter 1–14 and "No lifter recorded": cones, cones inspected, quality
+rejects (of which with a zero code), weight rejects, total and rate; a list of the qualifying
+rejects with the reason each qualifies; the zeroed-clock block (two records for July, one for
+September); and, when nothing qualifies, one sentence — "Every rejected cone in this period
+carries a lifter number."
+
+**Blocked without it:** nothing. **Cost of staying blocked:** the report is correct to its own
+words and may not be the report you meant.
+
+---
+
 ## What IFL has already answered — do not ask these again
 
 Recorded 15 September 2026, from Hassan sb via the project owner. The full text and what each
@@ -505,7 +747,7 @@ one changed in the software is in `IFL-QUESTIONS-STATUS.md` Part 1.
 | Who sets the weight limits? | No fixed limit — editable in the software's settings |
 | What do the reject codes mean? | No predefined list — named in the software's settings |
 | Is sack weight gross or net? | Gross — the total weight of the sack |
-| "Sack stock per machine"? | Sack production per machine, by shift and by day |
+| "Sack stock per machine"? | Sack production per machine, by shift and by day *(what the data allows, built: cone production per machine by shift and day, and sack production at line level; the sack scale records no machine, so there is no per-machine sack figure)* |
 | Which reports, how often? | Every report, daily and per shift |
 | Excel or PDF? | Both, with graphics, and they must look good |
 | Email reports automatically? | No |

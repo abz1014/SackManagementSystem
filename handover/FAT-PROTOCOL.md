@@ -6,7 +6,9 @@ documentation deliverable ("FAT protocol", `IFL_SMS_Claude_Code_Development_Road
 line 473) and the roadmap's own Definition of Done (lines 519–541), against evidence
 in this repository as of commit `HEAD` on `floor-first-rework` at the time of writing.
 This is a protocol to run, not a claim that it has been run — every row below states
-plainly whether it has been exercised, against what, and by whom.
+plainly whether it has been exercised, against what, and by whom. **Updated 1 Oct 2026:**
+RP15–RP22 added for the eight reports IFL listed on 29 September 2026 (§3.3); the report count
+was corrected from "nine" to eighteen wherever it appeared.
 
 **This document does not itself constitute a FAT.** It is the checklist IFL and the
 supplier execute together, at IFL's premises or against IFL's own data, before go-live.
@@ -30,8 +32,8 @@ development roadmap's own scope and not covered by this document).
 ### 1.2 Scope
 
 Covered: the seven navigation screens (Line, Readings, Weight, Rejects, Sacks, Product,
-Report — `sms/web/src/ui/Bar.tsx` `SCREENS`), Health, Setup, all nine report types and
-their export formats, the product changeover / PDAS write-back path, rule editing and
+Report — `sms/web/src/ui/Bar.tsx` `SCREENS`), Health, Setup, all eighteen report types
+(corrected 1 Oct 2026; this line said "nine") and their export formats, the product changeover / PDAS write-back path, rule editing and
 its as-of-time behaviour, backup/restore, and the security controls (login, rank gates,
 malformed-session handling).
 
@@ -149,8 +151,8 @@ they are blank here by design.
 | R4 | "History logs and trend graphs for rejected cones" | Open Rejects; view trend chart and per-day-per-code breakdown | Trend chart renders without plotting a missing bucket as a false zero (RT-011, fixed); reject rate matches Line/Report for the same period (RT-001/004/009, fixed 23 Sep 2026) | | |
 | R5 | "AI-based analytics recommending calibration adjustments" | Open Weight; view station drift flag and the "reaches the action limit in about N days" projection | Statistical advisory (Nelson rules, station drift, X̄ chart), explicitly **not AI** — must never be presented to IFL as AI until agreed (`CLAUDE.md`, IFL 15 Sep answer Q46-48) | | Projection has **no confidence interval shown** (RT-020, open) — note this to IFL |
 | R6 | "Collection and logging of all sack data" | Open Sacks; view sack register and per-shift/day production report | All sacks logged, gross weight (IFL confirmed Q24), no machine attribution (sacks carry none — R7 below) | | |
-| R7 | "Sack stock tracking per machine" | Attempt to view per-machine sack stock | **Not computable** — sacks carry no machine/station column in IFL's data, in either sample (§6.1). SMS instead reports sack production per shift/day/product (IFL's own reframing, Q28) | | Known limitation — do not fail FAT on this; confirm IFL accepts the reframing |
-| R8 | "Comprehensive reporting, analytics, graphical dashboards" | Run all nine report types (§3.3); view Line/Weight/Rejects dashboards | Reports render with graphics per IFL's Q30/Q36 answer ("beautiful, Excel AND PDF, with graphics") | | Excel/PDF "beautiful… with graphics" is a requirement gap tracked as D-6, not fully closed — confirm with IFL at FAT |
+| R7 | "Sack stock tracking per machine" | Attempt to view per-machine sack stock | **Not computable** — sacks carry no machine/station column in IFL's data, in either sample (§6.1). SMS instead reports cone production per machine by shift and day (Product by machine and shift) and sack production at line level by shift, day, product and yarn count (IFL's own reframing, Q28; corrected 1 Oct 2026 — this row used to say only "sack production per shift/day/product") | | Known limitation — do not fail FAT on this; confirm IFL accepts the reframing |
+| R8 | "Comprehensive reporting, analytics, graphical dashboards" | Run all eighteen report types (§3.3; corrected 1 Oct 2026, was "nine"); view Line/Weight/Rejects dashboards | Reports render with graphics per IFL's Q30/Q36 answer ("beautiful, Excel AND PDF, with graphics") | | Excel/PDF "beautiful… with graphics" is a requirement gap tracked as D-6, not fully closed — confirm with IFL at FAT |
 | R9 | "User-friendly interface, access control, data security" | Sign in at each rank (§2.3); attempt a write above/below gate | Nav open to all ranks (one audience — `CLAUDE.md`); writes gated server-side per rank; malformed cookie → 401 (§3.9) | | |
 | R10 | "Scalable to more machines and data points" | Inspect `line_id` filtering throughout the schema | Present throughout; multi-line UI not built (single line, `LINE_ID`, in scope for this contract) | | Code-inspection only, not exercised live |
 
@@ -167,16 +169,21 @@ they are blank here by design.
 | S7 | Product › Changeover | Plan then execute a changeover (see §3.7) | Plan is rank 1 read-only; execute is rank ≥ 2, gated by `PDAS_WRITE_ENABLED` | | |
 | S8 | Product › Catalogue | View PDAS catalogue (blends/counts/tube types/materials/pallets) | Renders vendor seed-filtered rows (`MaterialId > 10` etc.) | | |
 | S9 | Product › History | View `sms.product_change` trail | Includes `outcome='disabled'` rows labelled as attempts that never reached PDAS | | |
-| S10 | Report | Run each of the nine report types (§3.3) | See §3.3 | | |
+| S10 | Report | Run each of the eighteen report types (§3.3; corrected 1 Oct 2026, was "nine") | See §3.3 | | |
 | S11 | Health | View DQ findings, sync health, system history, reconciliation | A failed fetch states in words that a count could not be read, never renders as "none"/zero (RT-005/012/013, fixed); System History states plainly it is a manual-run record, not a live check | | |
 | S12 | Setup | View/edit Line, Machines, Reject codes, Sources, Rules (rank ≥ 4) | Setup restricted to rank 4; edits create versioned rows (see §3.6) | | |
 | S13 | Wall | Load `?v=wall` fullscreen mode | No navigation, viewport-unit type, session renews without logging out | | |
 
 ### 3.3 Reports and exports
 
-Nine report types (`sms/api/src/services/reports/*.ts`, `sms/web/src/screens/report/`):
-Summary, Daily, Shift, Product, Station, Sack, Reject, Cone Weight, Calibration,
-MachineProduct.
+**Corrected 1 October 2026: eighteen report types** (`REPORT_TYPES` in
+`sms/api/src/services/reports/common.ts`; screens in `sms/web/src/screens/report/`). This
+paragraph used to say "nine" while listing ten: Summary, Daily, Shift, Product, Station, Sack,
+Reject, Cone Weight, Calibration, MachineProduct — RP1–RP14 cover those. The other eight are the
+reports IFL listed in its email of 29 September 2026, built under IFL's own titles: Shift-wise CTS
+Loop Production, List of Rejected Cones Against Weight, Rejected Sack Report - Daily, SPS
+Production Report - Count-wise Packing at Each SPS, SPS Sack Weight Range Report, Sack Packing
+Weight Summary, Rejected Cone Hangers Report, Rejected Unknown (Lifter) Report — RP15–RP22.
 
 | ID | Requirement traced | Steps | Expected result | Pass/Fail | Witness |
 |---|---|---|---|---|---|
@@ -194,6 +201,24 @@ MachineProduct.
 | RP12 | XLSX export | Export any report as XLSX | Generation-scope disclosure present (RT24-03, fixed) | | |
 | RP13 | PDF export | Export any report as PDF | Renders with the landscape/portrait rule intact (Report screen landscape, Readings register portrait) | | **[UNVERIFIED end-to-end]** — `COMMISSIONING-GAPS.md` §4: "PDF export has never been invoked end to end outside a script" |
 | RP14 | Generation-warning on export | Export a report covering a period with more than one source generation | Report states which generation(s) it excluded, in the exported file itself, not only the on-screen version | | Confirm exported (not just on-screen) generation disclosure at FAT — this is the specific gap RT24-03 closed for CSV/XLSX; re-confirm for PDF |
+| RP15 | IFL report 1 — Shift-wise CTS Loop Production Report | Run for 3 Jul 2026, for 15 Aug 2026, and for 22 Jun – 10 Jul; read the per-shift and per-day subtotals, the per-winder totals and the grand total; export CSV and XLSX | 3 Jul: Pass 7,922 · Weight rejects 1 · Total 7,923 · Efficiency 99.99; 15 Aug: 4,854 · 1 · 4,855 · 99.98; 22 Jun – 10 Jul: Total = cones weighed (142,508) + weight rejects with no cone row (1) = 142,509. Every cone counted once. The "CTS loop" block states how many hanger numbers the period saw (computed, never a fixed 299). The scale's own out-of-range count is printed beside the weight-reject count, not merged into it. "Assumed until IFL confirms" lists the CTS-loop, Total, weight-rejection and kilogram defaults | | Figures measured on the dev copy 1 Oct 2026; **re-measure on the live source at FAT.** The definitions are IFL-open (`IFL-OPEN-QUESTIONS.md` items 22–24): IFL compares against its own sheet on the day |
+| RP16 | IFL report 6 — List of Rejected Cones Against Weight | Run for 3 Jul and 15 Aug 2026 and for a range with several rejects; export CSV | 3 Jul: one row — evening shift, 21:32:41 plant clock, winder 13, hanger 240, 2,032 g. 15 Aug: one row — morning shift, 10:02:27, winder 6, hanger 178, 2,035 g, material 1021, with the limits that were in force at that instant (the same limits Readings uses for that cone). Row count equals RP15's weight-reject count for the same period. The record stamped 1 Jan 1970 (weight id 153) is left off and counted in a footnote. Times are plant clock, never browser-local. Quality rejects are not on this list, and the page says so | | Hanger numbers verified by SQL on the dev copy 1 Oct 2026; **IFL to decide whether quality rejects belong** (item 25) |
+| RP17 | IFL report 2 — Rejected Sack Report - Daily | Run for 15 Aug 2026, for 5 Aug – 7 Sep and for 22 Jun – 10 Jul; read the day-by-shift table, the implausible-weight split and the list | 15 Aug: 25 rejected sacks of 228 — 20 morning, 5 evening, 0 night. 5 Aug – 7 Sep: 594 of 5,435 (4 implausible, e.g. 0 kg). 22 Jun – 10 Jul: 231 of 5,462 (3 implausible). The range the scale passed is stated as a fact (47.0–47.6 kg for September), never as a limit; no sack is called under- or over-weight; each time is labelled the plant's insert time | | **IFL to confirm** what "rejected" and "daily" mean (item 26) |
+| RP18 | IFL report 3 — SPS Production Report - Count-wise Packing at Each SPS | Run for 5 Aug – 7 Sep and 15 Aug 2026; print (landscape) and export CSV | 5 Aug – 7 Sep, sacks by yarn count: 36 → 2,197 · 18 → 2,013 · 30 → 862 · 50 → 243 · 20 Slub → 79 · 36 Slub → 40 · No product on the reading → 1 (total 5,435). 15 Aug: 18 → 60 · 30 → 100 · 36 → 68. Every July sack falls under "No product on the reading". One block, "SPS 1 — this line's one sack scale", marked unconfirmed; the page says the count comes from today's product master. Prints landscape with no clipped column | | **IFL to confirm** SPS, count and the product-to-count rule (items 22, 23, 28) |
+| RP19 | IFL report 4 — SPS Sack Weight Range Report | Run for 5 Aug – 7 Sep; read the 0.1 kg band table and the per-shift spread table | Band totals plus the implausible-weight row add up to 5,435; each band is split passed / rejected by the scale and by shift; no band is marked as a target. Over the plausible sacks (5,431): average 47.285 kg and sample standard deviation 0.190 kg on the as-recorded weights | | **IFL to confirm** band width and any target or tolerance (item 27) |
+| RP20 | IFL report 5 — Sack Packing Weight Summary (and the existing Sack report, RP6) | Run for 5 Aug – 7 Sep; compare with the Sacks screen's summary and with a direct `STDEV` on the plausible sacks | 5,435 sacks, 594 rejected by the scale, 4 implausible (left out of average, lightest, heaviest and standard deviation, and counted). Average equals the Sacks screen's; standard deviation equals SQL `STDEV` within 0.001 kg. The by-yarn-count block adds up to the shift totals. RP6's Sack report agrees on sacks and average, honours a shift range, and lists only days that have sacks, stating how many cone-only days it left out | | **IFL to confirm** n − 1 versus n, the 40–60 kg window and any net basis (item 27) |
+| RP21 | IFL report 7 — Rejected Cone Hangers Report | Run for 5 Aug – 7 Sep and for 22 Jun – 10 Jul; then for one shift; time the screen load | 5 Aug – 7 Sep: hanger 91 shows 58 rejects on 471 cones and "stands out in this period" against a line rate of 4.59%. July: hanger 70 (52 rejects on 486 cones) stands out. Hangers with fewer than 100 inspected cones read "too few cones to judge"; "No hanger recorded" is last. For one shift the page says no hanger can be judged ("choose a longer period"). Nothing is called "bad" or "faulty". Loads in under one second on the dev copy | | **IFL to confirm** which rejects count and its own rule for a hanger to be looked at (item 23) |
+| RP22 | IFL report 8 — Rejected Unknown (Lifter) Report | Run for 3 Jul and 15 Aug 2026 and for a July and a September range | Per-lifter table for lifters 1–14 plus "No lifter recorded"; no rejected cone lacking a lifter or winder number appears in any ordinary period, and the page then says "Every rejected cone in this period carries a lifter number". The zeroed-clock block shows 2 records for the July generation (quality id 81, weight id 153) and 1 for the September generation (quality id 1248, codes 0 and 0), whatever period was picked. The page states the definition is a draft | | **The definition is ours, not IFL's** — IFL to say what "unknown" means (item 29); ask for a screenshot of the report IFL has in mind |
+
+**For all eight (RP15–RP22), on every format.** View needs rank 1 and export rank 3. Print/PDF is
+portrait with the executive summary and closing notes (the SPS Production report is landscape),
+with one page footer. CSV and XLSX carry the same notes; percent columns keep their precision (99.96
+never shows as 100.0); winder, hanger, lifter, shift, date and sack-number columns are identifiers,
+not figures (no data bar, no thousands separator); timestamps are plant wall clock written
+`YYYY-MM-DD HH:mm:ss` in `*_plant_time` columns. Every default the report rests on appears under
+**"Assumed until IFL confirms"** on screen, on paper, as `report_note` rows in the CSV and on the
+workbook's header sheet, each pointing at one of `IFL-OPEN-QUESTIONS.md` items 22–29. Sign-off of
+those lines is a FAT-day decision for IFL, like RP1's KPI sign-off.
 
 ### 3.4 Print / PDF layout
 
@@ -267,7 +292,7 @@ MachineProduct.
 
 - §3.1 Requirement coverage: **10**
 - §3.2 Screen-by-screen: **13**
-- §3.3 Reports/exports: **14**
+- §3.3 Reports/exports: **22** (was 14; RP15–RP22 added 1 Oct 2026)
 - §3.4 Print/PDF layout: **3**
 - §3.5 Changeover/PDAS write-back: **10**
 - §3.6 Rules/as-of: **5**
@@ -275,7 +300,7 @@ MachineProduct.
 - §3.8 Health/degraded: **5**
 - §3.9 Security: **8**
 
-**Total: 73 test rows.**
+**Total: 81 test rows** (was 73 before RP15–RP22).
 
 **Rows marked [UNVERIFIED] or naming a specific open defect that would fail the row
 as written: 14, corrected 24 Sep 2026 (later the same day) — PW10/RT24-05, H3/RT24-12
@@ -285,7 +310,9 @@ dropped entirely** (R7 known-limitation, R8, S2, S3, S6/RT-018, RP1, RP9, RP10, 
 RP14, PL1, PW2, PW6, PW10 [unverified live only, defect itself fixed], H4/RT24-08,
 SEC6 — count includes rows citing an open defect as well as rows never yet exercised
 under the FAT condition; several rows carry more than one caveat, counted once each by
-row).
+row). **RP15–RP22 are not in that tally of 14:** none names an open defect, but all eight rest
+on assumptions IFL has not confirmed (`IFL-OPEN-QUESTIONS.md` items 22–29), and the figures in
+them were measured on the dev copy, so each must be re-measured on the live source at FAT.
 
 ---
 
@@ -296,8 +323,10 @@ already found and recorded:
 
 1. **Sack stock per machine is not computable** from IFL's own data — `sack1_TP1U2`
    carries no machine/station column in either sample supplied. IFL's own 15 Sep 2026
-   answer reframed the requirement as a per-shift/day/product production report
-   instead (Q28) — SMS builds that, not a per-machine stock ledger.
+   answer reframed the requirement as a production report instead (Q28). SMS builds cone
+   production per machine by shift and day (Product by machine and shift) and sack production
+   at line level by shift, day, product and yarn count — **not** a per-machine sack figure and
+   not a stock ledger (corrected 1 Oct 2026; this item used to say only "per-shift/day/product").
 2. **"AI" is statistics, not AI.** The calibration advisory (Nelson rules, station
    drift, days-to-limit projection) is real, defensible statistical analysis of real
    data — never present it to IFL as AI/ML until IFL and the supplier explicitly agree

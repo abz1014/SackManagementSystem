@@ -2214,3 +2214,61 @@ off "Registered by"; spec in `sms/layout-tests/health-and-bar.spec.ts` (no sidew
 and 1920). (2) Rejects "Name it" editor: input now has the placeholder "Name, then Enter"
 (`words.ts` `nameHint`, `Rejects.tsx`); spec proves placeholder and no overlap at 1280. Gate:
 vitest 292 files / 3025 tests passed, typecheck and build clean, `test:layout` 104 passed vs demo.
+
+
+## Part 14 — 1 Oct 2026: IFL's eight reports (their email of 29 Sep 2026) — defects found, fixed or parked
+
+Programme built 1 Oct 2026; its final gate and the live verification below were run on the dev PC on the 2 Oct 2026 clock. **Nothing here is committed** ("fixed (uncommitted)" means the fix is in the working tree on `floor-first-rework` and nowhere else). Everything was verified against the local development copy only (the `sms` sidecar frozen at 29 Sep, `DATA_TP1U2` July real, `DATA_TP1U2_SEP07` September real); IFL's plant, the real 10 Jul – 5 Aug data and a signed-in below-rank session were not touched. The highest D- number before this Part was D-34 (Part 10), so D-35 onward were free and nothing was renumbered.
+
+| ID | Sev | Defect | Status / evidence |
+|---|---|---|---|
+| D-35 | **HIGH** | **D1 — the shift-production report counted every weight-rejected cone twice.** In IFL's real data every weight reject also appears as a cone row (same plant timestamp and hanger: July 244 of 245, September 31 of 31 on the first audit), so `pass = cones the scale passed` plus `weight rejects` counted those cones twice. The simulator writes the two streams disjointly, which hid it on every demo. | **fixed (uncommitted).** Pass = cones that carry no weight-reject record (`coneMatchPredicate`, both sides epoch-scoped, driven from the reject side because SQL Server cannot put EXISTS inside `SUM(CASE)`); Total = pass + weight rejects; each cone once. Live: 2026-07-03 pass 7,922 / weight rejects 1 / total 7,923 / efficiency 99.99 %; 2026-08-15 4,854 / 1 / 4,855 / 99.98 %; July range total 142,509 = 142,508 cones + the 1 weight reject with no cone row. All agree with direct SQL on `DATA_TP1U2` / `DATA_TP1U2_SEP07`. Regression tests `shiftProduction.ifl.test.ts`, `shiftProduction.dataset.test.ts`. |
+| D-36 | LOW | D2 — workbook percent columns showed 99.96 % as "100.0 %" (one 0.0 % format for every column). | **fixed (uncommitted).** 0.00 % when any value in the column has two decimals, else 0.0 %. Seen live: 0.00 % on efficiency and rate columns, 0.0 % on share columns. `exportFormats.test.ts`. |
+| D-37 | LOW | D3 — identifier-like columns (winder, hanger, lifter, shift, date, sack_num, yarn_count, material_ids, scope) were formatted as quantities and given data bars. | **fixed (uncommitted).** `ID_LIKE_COLUMNS` extended; data bars only on numeric columns; explicit bar keys for the eight IFL types. |
+| D-38 | MED | D4 — CSV and workbook timestamps were ISO strings ending in `Z`, although production timestamps are the plant's own wall clock (TWO CLOCKS rule). | **fixed (uncommitted).** `*_plant_time` columns, `YYYY-MM-DD HH:mm:ss`, no zone; workbook cells are real dates (`dd-mm-yyyy hh:mm:ss`); `generated_at_plant_time` likewise. Live: 0 ISO-`Z` cells in all eight 2026-08-15 CSVs. |
+| D-39 | LOW | D5 — the CSV had no UTF-8 BOM, so Excel mangled the middle dot and dashes. | **fixed (uncommitted)** on the route's response only (`csvDocument` stays BOM-free). Live: all eight 2026-08-15 CSVs begin EF BB BF. |
+| D-40 | MED | D6 — a report's caveats, plausibility window and "Assumed until IFL confirms" lines reached the screen but not the CSV, workbook or PDF. | **fixed (uncommitted).** `ReportHeader.reportNotes` from the pure `reportNotesOf` (`notes.ts`); CSV trailing `report_note` rows, workbook header sheet, print notes. Live: every export carries as many notes as the JSON (R1 8, R6 3, R2 7, R7 4, R8 5, ...). |
+| D-41 | MED | D-S1 — the Sack report ignored a shift range (`sack.ts` did not pass `shiftRange` to `getWeights`). | **fixed (uncommitted).** `sack.fixes.test.ts`. |
+| D-42 | MED | D-S2 — Sack report averages were over every sack, a 0 kg or fault reading included. | **fixed (uncommitted).** Plausible population only; the excluded count is printed. Live, September: average 47.29 kg against a SQL plausible average of 47.285. |
+| D-43 | LOW | D-S4 — the weight basis applied to sack kilograms was not always the rule in force at the period end. | **fixed (uncommitted).** |
+| D-44 | LOW | D-S5 — "sacks in range %" divided by all sacks, not by the sacks that carry a flag. | **fixed (uncommitted).** |
+| D-45 | LOW | D-S6 — the Sack report listed days that held only cones. | **fixed (uncommitted).** Only days with at least one sack are listed; the cone-only days left out are counted (`omittedConeOnlyDays`). |
+| D-46 | LOW | D7 — `KPI-DEFINITIONS.md` still said "nine reports", described the sack distribution bucket as 1 kg, and had no rows for any figure of IFL's eight reports. | **fixed (uncommitted)** — "eighteen", rows 33–64 added (all "IFL approval: awaiting"), row 29 now describes the real adaptive bucket width (0.05 kg on the September sacks). |
+| D-47 | LOW | The rejected-cones list could include the 1969-12-31 zeroed-clock sentinel rows. | **fixed (uncommitted).** `production_ts_utc_ms > 0`; the number left out is `excludedClockFault`. |
+| D-48 | MED | The two IFL report types added 30 Sep printed a hard-coded "Textile Plant 4" masthead; TP4 is a different plant. | **fixed (uncommitted).** Masthead = "Ibrahim Fibres Limited" plus plant / unit / line from the report header config. Live: 0 occurrences of "Textile Plant 4" in all ten rendered PDFs; "Ibrahim Fibres Limited" and "TP1 · Line 3 · Unit 2" present in all ten. |
+| D-49 | MED | The PDF render URL carried only a calendar range, so a shift-bounded request rendered whole days. | **fixed (uncommitted)** — `pdf.ts` `buildRenderUrl` passes `p=range&from=<date>.<shift>&to=…`; export filenames also gain shift / station / product / shift-range markers. Unit-tested; **not exercised live with a shift range** by this gate (the PDFs were rendered for plain days). |
+| D-50 | LOW | `registerQuery` is not a strict schema: an unknown query parameter is silently ignored. | **PARKED** — outside the report programme; no behaviour depends on it. |
+| D-51 | LOW | The plant simulator writes the cone and weight-reject streams disjointly, unlike IFL's real data (D-35's blind spot). | **PARKED** by owner decision (simulator change parked). Until it changes, a demo on simulator data cannot reveal a reject-matching defect; the real-data days above can. |
+| D-52 | MED | Documentation (`IFL-WHAT-SMS-IS.md`) still promised sack production "per machine". The sack scale records no machine or station, ever. | **fixed (documentation, uncommitted).** Cone production per machine; sack production at line level by shift, day, product and yarn count. |
+| D-53 | LOW | `DATA-DICTIONARY.md` / `db/dictionary.json` called the hanger "a position on the winder". There is ONE hanger loop (1–299) shared by all 14 winders. | **fixed (documentation, uncommitted).** |
+| D-54 | LOW | **New, found by this gate.** The Rejected Cone Hangers executive-summary tile "Line reject rate" prints one decimal (`fmtPct`, `PrintDoc.tsx` near line 392), so the 2026-08-15 rate of 0.04 % prints "0.0 %" while the table beside it correctly prints 0.04. | **OPEN, not fixed** (not this task's file; handed back). One-line fix: two decimals on that tile, as the table does. |
+| D-55 | LOW | **New, found by this gate.** A cold `GET /api/reports/rejected-hangers` over the 34-day September range took 1.27 s (897 KB, 6,089-row list); July (19 days) 0.86 s; repeat calls 0.20 s (cache). The acceptance target was under 1 s. | **OPEN, noted.** Cold SQL Server Express on the dev box; the screen shows 500 rows. Not a correctness defect. |
+| D-56 | LOW | **New, found by this gate.** The Vite dev server on :5173 and the dev API preview were not running when the gate began, so `npm run test:layout` was pointed at the built web served by the API on :4000 (`SMS_WEB_URL`). | Not a product defect; recorded so the layout result is read as "against the production build served by the API", not "against Vite". |
+
+**Narrow-width layout defects** found during the programme are already recorded in Part 13's addenda (A1 top-bar "Pick dates" overlap, A5 Health data-batches overprint, the S35 / D09 follow-up) and are not renumbered here.
+
+### Live verification, 2 Oct 2026
+
+Read-only. One in-process API on :4200 built from the freshly built `dist`, authenticated by an in-process render token (no account created, no login), plus direct SQL on the source databases.
+
+| Report | Figure | Report said | Direct SQL said |
+|---|---|---|---|
+| R1 shift production | 2026-07-03 pass / weight rej. / total / eff. | 7,922 / 1 / 7,923 / 99.99 % | cones 7,923; weight reject 1 (matched); hangers 296 |
+| R1 | 2026-08-15 | 4,854 / 1 / 4,855 / 99.98 % | cones 4,855; weight reject 1 (matched); hangers 283 |
+| R1 | 2026-06-22 → 07-10, total | 142,509 (cones 142,508 + 1) | cones 142,508; weight rejects 245, 1 with no cone row; scale-marked cones 417 |
+| R1 | September 08-05 → 09-07 | weighed 132,550; weight rejects 41; scale-marked 53 | 132,550 / 41 / 53 |
+| R6 rejected cones | 07-03 | 1 row: winder 13, hanger 240, 2,032 g, 21:32:41, "No product recorded at that time" | id 167, same |
+| R6 | 08-15 | winder 6, hanger 178, 2,035 g, material 1021, limits 1,960 ± 50 (1,910–2,010), outside by +25 | id 20, same; `product_limit_version` 26: 1,960 ± 50 in force since 2026-08-11 |
+| R6 against R1 | weight rejects | September 41 = 41; July 245 = 245 | — |
+| R2 rejected sacks | 08-15 / September / July / 07-03 | 25 (20 morning, 5 evening) / 594 (4 implausible) / 231 / 2 | 25 (20 / 5 / 0) / 594 (4) / 231 / — |
+| R3 SPS packing | September by count | 36 = 2,197; 18 = 2,013; 30 = 862; 50 = 243; 20 Slub = 79; 36 Slub = 40; no product = 1 | by MaterialId 21 / 20 / 1021 / 1022 / 1023 / 1024 / 0: the same |
+| R3 | 08-15 | 18 = 60; 30 = 100; 36 = 68 | the same |
+| R4 sack weight range | sum of all bands | September 5,435; 08-15 228; July 5,462 (= every sack) | — |
+| R5 sack weight summary | September | 5,435 sacks, 594 rejected, 4 implausible, 256,871.24 kg, average 47.29, SD 0.19 | average 47.285, SD 0.19014 (difference under 0.001 kg) |
+| R7 rejected hangers | September hanger 91 | 58 rejects on 471 cones, inspected 472 | 471 cones, 58 quality rejects, 1 unmatched |
+| R7 | September "stands out" | {91, 32, 105, 205, 199}, exactly the audit's set | — |
+| R7 | July "stands out" | {70, 207, 206}. Hanger 70 = 7 quality + 45 weight rejects on 486 cones (the 7 July night shift). 207 (5.69 %) and 206 (5.11 %) are in addition to the audit note and clear the test at July's line rate of 2.21 % | hanger 70: 486 cones, 7 quality rejects |
+| R8 unknown lifter | normal periods | 0 unknown-lifter rows | — |
+| R8 | zeroed-clock block | July 2 (quality id 81, hanger 105, codes 1·11; weight id 153); September 1 (quality id 1248, hanger 270, codes 0·0) | the same three records |
+
+**Exports (2026-08-15, all eight types, via the real route):** CSV 8 of 8 begin with the UTF-8 BOM, 0 ISO-`Z` cells, `*_plant_time` columns where timestamps exist, `report_note` rows present; workbook 8 of 8 open in openpyxl, percent columns 0.00 % or 0.0 %, timestamps are dates; PDF 10 of 10 (eight types on 08-15 plus R1 and R6 on 07-03) A4, **portrait except SPS packing (landscape)**, exactly one "Page X of Y" footer per page, masthead, title, period and executive-summary sentence correct, "Assumed until IFL confirms" lines printed. **Only the PDF text was checked; nobody has looked at the printed page.**

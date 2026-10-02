@@ -61,7 +61,7 @@ Verbatim copy of IFL's pack1_TP1U2 (one row per cone weighing), append-only, nev
 | `src_Shift` | varchar(8) | yes |  | IFL's own shift label, derived from insert time and therefore wrong for many rows (SCHEMA.md). Kept verbatim; the transform recomputes. |
 | `src_Area` | varchar(10) | yes |  | IFL's area code as sent by the PLC. |
 | `src_ProductionDate` | datetime | yes |  | The weighing time, plant wall clock. The event time canonical uses. |
-| `src_HangerNum` | int | yes |  | The hanger position on the winder that carried the cone. |
+| `src_HangerNum` | int | yes |  | The conveyor (CTS) loop position that carried the cone: one hanger loop shared by all winders, numbered 1–299. It is not a position on a winder. |
 | `src_MachineNo` | int | yes |  | The machine (winder, 1..14) that weighed the cone. Was named `Source` until IFL's 2026-08-05 rebuild; renamed here by migration 024, values unchanged. |
 | `src_Lifter` | int | yes |  | The lifter station number as sent by the PLC. |
 | `src_Weight` | decimal(6,2) | yes |  | Cone weight in grams, as the scale recorded it. Never mutated; the weight basis (gross/net, Q4/Q5) is applied at read time. |
@@ -106,7 +106,7 @@ Verbatim copy of IFL's rejectQCS1_TP1U2 — cones rejected by the quality inspec
 | `src_Shift` | varchar(8) | yes |  | IFL's own shift label. Kept verbatim. |
 | `src_Area` | varchar(10) | yes |  | IFL's area code. |
 | `src_ProductionDate` | datetime | yes |  | The inspection time, plant wall clock. The event time canonical uses. |
-| `src_HangerNum` | int | yes |  | The hanger position that carried the cone. |
+| `src_HangerNum` | int | yes |  | The conveyor (CTS) loop position that carried the cone: one hanger loop shared by all winders, numbered 1–299. It is not a position on a winder. |
 | `src_MachineNo` | int | yes |  | The machine (winder) the cone came from. Was `Source` before 2026-08-05. |
 | `src_Lifter` | int | yes |  | The lifter station number. |
 | `src_TubeInspectResult` | int | yes |  | IFL's tube inspection result code, verbatim. Meaning pending Q10; labelled in sms.reject_code. |
@@ -130,7 +130,7 @@ Verbatim copy of IFL's rejectWeight1_TP1U2 — cones rejected on weight, one row
 | `src_Shift` | varchar(8) | yes |  | IFL's own shift label. Kept verbatim. |
 | `src_Area` | varchar(10) | yes |  | IFL's area code. |
 | `src_ProductionDate` | datetime | yes |  | The weighing time, plant wall clock. The event time canonical uses. |
-| `src_HangerNum` | int | yes |  | The hanger position that carried the cone. |
+| `src_HangerNum` | int | yes |  | The conveyor (CTS) loop position that carried the cone: one hanger loop shared by all winders, numbered 1–299. It is not a position on a winder. |
 | `src_MachineNo` | int | yes |  | The machine (winder) the cone came from. Was `Source` before 2026-08-05. |
 | `src_Lifter` | int | yes |  | The lifter station number. |
 | `src_Weight` | decimal(6,2) | yes |  | The rejected cone's weight in grams, as recorded. |
@@ -152,7 +152,7 @@ One row per cone weighing, transformed from sms_raw.cone_raw (migrations 003, 02
 | `shift_code` | varchar(10) | no |  | morning \| evening \| night, recomputed from production_ts_utc under the sms.shift_rule in force at transform time. |
 | `shift_date` | date | no |  | The production day the shift belongs to. A night shift after midnight belongs to the day it started when night_belongs_to = 'start_day'. |
 | `shift_code_legacy` | varchar(10) | yes |  | IFL's own Shift value, normalised to lower case. Derived by IFL from insert time, so wrong for many rows; kept so the difference can be shown (Q7). |
-| `hanger_num` | int | yes |  | The hanger position on the winder. Part of the merge key. |
+| `hanger_num` | int | yes |  | The conveyor (CTS) loop position: one hanger loop shared by all winders, numbered 1–299 (not a position on a winder). Part of the merge key. |
 | `source_station` | int | yes |  | IFL's MachineNo — the winder (1..14) that weighed the cone; joins sms.station.station_id. NULL when the source sent 0 (the PLC's zero value, not a position). |
 | `lifter_station` | int | yes |  | IFL's Lifter; NULL when 0. |
 | `weight_g` | decimal(10,2) | yes |  | Grams, exactly as the scale recorded. The weight basis (as_recorded / gross / net, sms.weight_rule) is applied when read, never here. |
@@ -224,7 +224,7 @@ One row per rejected cone, from BOTH reject tables: reject_type 'quality' rows c
 | `shift_code` | varchar(10) | no |  | morning \| evening \| night under the shift rule in force at transform time. |
 | `shift_date` | date | no |  | The production day the shift belongs to. |
 | `shift_code_legacy` | varchar(10) | yes |  | IFL's own Shift value, normalised; kept for comparison (Q7). |
-| `hanger_num` | int | yes |  | The hanger position; part of the merge key. |
+| `hanger_num` | int | yes |  | The conveyor (CTS) loop position: one hanger loop shared by all winders, numbered 1–299 (not a position on a winder); part of the merge key. |
 | `source_station` | int | yes |  | IFL's MachineNo — the winder the cone came from; NULL when the source sent 0. |
 | `lifter_station` | int | yes |  | IFL's Lifter; NULL when 0. |
 | `tube_inspect_code` | int | yes |  | Raw TubeInspectResult, quality rejects only; NULL for weight rejects. Labelled via sms.reject_code (meaning pending Q10). |

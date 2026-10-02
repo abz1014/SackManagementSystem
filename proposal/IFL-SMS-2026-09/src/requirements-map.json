@@ -1,0 +1,68 @@
+[
+  {
+    "requirement": "Connectivity with PLCs, HMIs, machines, databases",
+    "status": "Covered-differently",
+    "note": "SQL Server database connectivity is fully covered (read-only sync from the plant's acquisition and product-master databases). Direct PLC/HMI protocol connectivity is not implemented and is explicitly out of scope per IFL's own confirmation; a disabled, dependency-free configuration stub exists for a possible future direct PLC connection but performs no function today.",
+    "source": "CLAUDE.md (requirement mapping table; Q22/Q63/Q64 resolutions); sms/.env.example:202-207"
+  },
+  {
+    "requirement": "Cone weight collection, flag weights outside limits",
+    "status": "Covered",
+    "note": "Cone weight readings are synced from the source database, compared against the product's weight limits in force at the time of the reading, and flagged when outside limits, shown on Readings/Weight screens and reports.",
+    "source": "sms/web/src/screens/Readings.tsx; sms/web/src/screens/Weight.tsx; sms/db/migrations/027_product_limit_history.sql"
+  },
+  {
+    "requirement": "Screens to view and update product details on machines",
+    "status": "Covered-differently",
+    "note": "Viewing and updating product details in SMS and in the plant's product-master database (create/retire/change limits) is built, via the Product screen and the PDAS write path through the vendor's own stored procedures. This writes to the product-master database only, never to a machine/PLC directly; the feature is present in code but disabled by a configuration flag pending a completed end-to-end proof, and whether the PLC itself reads these values live is a separate open question for IFL.",
+    "source": "sms/web/src/screens/product/Changeover.tsx; sms/api/src/services/pdasWrite.ts; sms/.env.example:59-64"
+  },
+  {
+    "requirement": "History logs and trend graphs for rejected cones",
+    "status": "Covered",
+    "note": "Reject history and trend graphs by reject code exist on the Rejects screen and in the Reject report.",
+    "source": "sms/web/src/screens/Rejects.tsx; sms/api/src/services/reports/reject.ts"
+  },
+  {
+    "requirement": "AI-based analytics recommending calibration adjustments",
+    "status": "Covered-differently",
+    "note": "Implemented as classical statistics — control-chart analysis, Nelson rules, per-station drift detection, and a days-to-action-limit projection — producing a comparable recommendation ('this station is drifting, expect to reach its action limit in about N days') without a machine-learning/AI model. IFL confirmed the deliverable should be a recommendation only, with no automatic machine adjustment; whether this statistical approach satisfies the RFQ's specific 'AI' wording has not been explicitly agreed with IFL.",
+    "source": "sms/api/src/services/spc.ts; sms/api/src/services/nelson.ts; sms/api/src/services/calibration.ts; IFL-QUESTIONS-STATUS.md Q46-48 section"
+  },
+  {
+    "requirement": "Collection and logging of all sack data",
+    "status": "Covered",
+    "note": "All sack records available in the source (sack number, weight, pass/fail, timestamp) are synced and logged; a sack register and a line-level sack production ledger by shift/day exist.",
+    "source": "sms/web/src/screens/Sacks.tsx; sms/db/migrations/004_sack_event.sql; sms/db/migrations/033_sack_stock_ledger.sql"
+  },
+  {
+    "requirement": "Sack stock tracking per machine",
+    "status": "Covered-differently",
+    "note": "The plant's sack records carry no machine/station identifier in any data sample examined, so a true per-machine sack stock/ledger cannot be computed from the source data as supplied. IFL's own clarification (15 Sep 2026) reinterpreted this requirement as production per machine by shift and day. SMS delivers cone production per machine by shift and day (the 'Product by machine and shift' report) and sack production at line level by shift, day, product and yarn count; the sack scale records no machine, so sack output cannot be attributed to a machine. A manual, line-level receipts/issues ledger also exists as an optional secondary feature. Per-machine sack stock specifically remains not computable without a data or process change at IFL's end.",
+    "source": "IFL-QUESTIONS-STATUS.md Q5/Q28/Q29 sections; sms/api/src/services/reports/machineProduct.ts"
+  },
+  {
+    "requirement": "Comprehensive reporting, analytics, graphical dashboards",
+    "status": "Covered",
+    "note": "Eighteen report types exist: the original ten (daily, shift, cone-weight, reject, sack, station, product, machine/product-by-shift, summary, calibration) and the eight IFL listed in its 29 Sep 2026 email, under IFL's own names (Shift-wise CTS Loop Production; List of Rejected Cones Against Weight; Rejected Sack Report - Daily; SPS Production Report - Count-wise Packing at Each SPS; SPS Sack Weight Range Report; Sack Packing Weight Summary; Rejected Cone Hangers Report; Rejected Unknown (Lifter) Report), each generated on both a daily and a shift basis, exportable as CSV, formatted Excel with charts, and rendered PDF; live/period dashboards exist on the Line/Weight/Rejects/Wall screens.",
+    "source": "sms/api/src/services/reports/common.ts (REPORT_TYPES, REPORT_TITLES); sms/api/src/services/reports/ (report type files); sms/api/src/services/reports/xlsx.ts; sms/api/src/services/reports/pdf.ts; KPI-DEFINITIONS.md §2.2 and §4"
+  },
+  {
+    "requirement": "User-friendly interface, access control, data security",
+    "status": "Covered",
+    "note": "Access control (four roles, write actions gated by rank, all reads open to every signed-in account per IFL's own stated audience) and data security (argon2 password hashing, server-side sessions, append-only audit log, no reuse of the vendor's own plaintext user table) are built. IFL's 'user-friendly' feedback on an earlier interface iteration drove a full interface redesign; the current interface is a later iteration responding to that feedback, and has not yet been reviewed live by IFL.",
+    "source": "sms/api/src/auth.ts; sms/db/migrations/035_roles_and_answers.sql; CLAUDE.md ('UI redesign — BUILT AND LIVE')"
+  },
+  {
+    "requirement": "Scalable to more machines and data points",
+    "status": "TBC",
+    "note": "The data model carries a line identifier on every canonical record, which is the intended mechanism for future multi-line/multi-machine scaling, but only a single production line's configuration has been built and exercised; extending to additional lines has not been implemented or tested.",
+    "source": "CLAUDE.md (requirement mapping table, 'line_id throughout, multi-line not built')"
+  },
+  {
+    "requirement": "Dispatch tracking",
+    "status": "Not in scope",
+    "note": "No dispatch data exists anywhere in IFL's source systems (confirmed by IFL). If dispatch tracking is wanted it would be a new module built on newly supplied data, not part of the current proposal.",
+    "source": "CLAUDE.md (Known constraints: 'No dispatch data exists anywhere'; Q12 resolution)"
+  }
+]
