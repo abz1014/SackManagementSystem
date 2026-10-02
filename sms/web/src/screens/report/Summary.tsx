@@ -15,10 +15,10 @@ import { distinctProductLabels } from '../../lib/productLabel';
 import { describePeriod, type ShiftCode } from '../../lib/period';
 import { digitsFor, fmtDelta } from './model';
 
-function fmtValue(v: number | null, unit: KpiRow['unit']): string {
+function fmtValue(v: number | null, unit: KpiRow['unit'], key?: string): string {
   if (v == null) return '—';
   if (unit === 'seconds') return fmtSpan(v);
-  const digits = digitsFor(unit);
+  const digits = digitsFor(unit, key);
   const s = v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
   return unit === '%' ? `${s}%` : `${s} ${unit}`;
 }
@@ -123,13 +123,13 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
                       <span className="mut sm"> · {k.betterWhen === 'higher' ? W.reports.betterHigher : W.reports.betterLower}</span>
                     )}
                   </td>
-                  <td className="n">{fmtValue(k.current, k.unit)}</td>
-                  <td className="n">{fmtValue(k.prior, k.unit)}</td>
+                  <td className="n">{fmtValue(k.current, k.unit, k.key)}</td>
+                  <td className="n">{fmtValue(k.prior, k.unit, k.key)}</td>
                   <td className="n">
                     {k.comparable ? (
                       k.unit === 'seconds' && k.delta
                         ? `${k.delta.abs > 0 ? '+' : k.delta.abs < 0 ? '−' : ''}${fmtSpan(Math.abs(k.delta.abs))}`
-                        : fmtDelta(k.delta, digitsFor(k.unit))
+                        : fmtDelta(k.delta, digitsFor(k.unit, k.key))
                     ) : (
                       <span title={k.incomparableReason ?? undefined}>{W.reports.notComparable}</span>
                     )}

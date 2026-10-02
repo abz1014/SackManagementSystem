@@ -124,8 +124,12 @@ export function fmtDelta(d: { abs: number; pct: number | null } | null, digits =
   return `${sign}${abs} (${sign}${pct} %)`;
 }
 
-/** Decimal places a KPI's unit is printed with. */
-export function digitsFor(unit: string): number {
+/**
+ * Decimal places a KPI's unit is printed with. C-117 (2 Oct 2026): cones per sack shares the unit `cones` with the cone totals but is a
+ * ratio, so it is chosen by KPI key and keeps one decimal (24.2 / 22.7 / +1.5); the unit alone cannot tell the two apart.
+ */
+export function digitsFor(unit: string, key?: string): number {
+  if (key === 'cones_per_sack') return 1;
   switch (unit) {
     case '%': return 1;
     case 'g': return 1;
