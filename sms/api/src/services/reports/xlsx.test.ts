@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { inflateRawSync } from 'node:zlib';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { buildXlsx, columnLetter, excelSerial, sheetName, crc32, reportSheets, dataBarTarget, chartSpecFor, type Sheet } from './xlsx.js';
+import { buildXlsx, columnLetter, excelSerial, sheetName, crc32, reportSheets, dataBarTarget, chartSpecFor, companyLineFor, spsPackingSheets, COMPANY_NAME, type Sheet } from './xlsx.js';
 import type { ReportHeader, ReportType } from './common.js';
 import type { CsvTable } from './csv.js';
 import { dailyCsv } from './daily.js';
@@ -27,6 +27,12 @@ import { summaryCsv } from './summary.js';
 import { machineProductCsv } from './machineProduct.js';
 import { shiftProductionCsv } from './shiftProduction.js';
 import { rejectedConesCsv } from './rejectedCones.js';
+import { rejectedSacksCsv } from './rejectedSacks.js';
+import { spsPackingCsv } from './spsPacking.js';
+import { sackWeightRangeCsv } from './sackWeightRange.js';
+import { sackWeightSummaryCsv } from './sackWeightSummary.js';
+import { rejectedHangersCsv } from './rejectedHangers.js';
+import { rejectedUnknownLifterCsv } from './rejectedUnknownLifter.js';
 
 /**
  * A minimal zip reader for the shape `buildZip` writes: local file header +
@@ -192,7 +198,7 @@ describe('excelSerial', () => {
  * serialiser for that type (so the sheets these tests build are exactly
  * what routes/reports.ts would send), then through reportSheets/buildXlsx.
  *
- * Fixture data is typed `any`: the ten report interfaces are large and
+ * Fixture data is typed `any`: the eighteen report interfaces are large and
  * mostly irrelevant here (coverage objects, shift checks, …) — what matters
  * is that each fixture carries the handful of fields `chartSpecFor` and the
  * report's own `*Csv()` function actually read, which is checked by running
@@ -417,13 +423,15 @@ const machineProductData: any = {
   ],
 };
 
-const f = (pass: number, rej: number) => ({ pass, weightRejects: rej, total: pass + rej, efficiencyPct: Math.round((10000 * pass) / (pass + rej)) / 100 });
+const f = (pass: number, rej: number) => ({ weighed: pass, pass, weightRejects: rej, total: pass + rej, efficiencyPct: Math.round((10000 * pass) / (pass + rej)) / 100, weighedKg: null });
 const shiftProductionData: any = {
   period: dailyData.period,
   summary: [{ shift: 'morning', ...f(90, 10) }],
   grandTotal: f(90, 10),
   rows: [{ date: '2026-09-01', shift: 'morning', winder: 1, ...f(90, 10) }],
   shiftTotals: [{ date: '2026-09-01', shift: 'morning', ...f(90, 10) }],
+  dayTotals: [{ date: '2026-09-01', ...f(90, 10) }],
+  winderTotals: [{ winder: 1, ...f(90, 10) }],
   withoutWinder: { pass: 0, weightRejects: 0 },
 };
 const rejectedConesData: any = {
@@ -431,6 +439,80 @@ const rejectedConesData: any = {
   list: [{ date: '2026-09-01', shift: 'morning', winder: 1, weightG: 1200, producedAtUtc: '2026-09-01T07:00:00.000Z' }],
   total: 1,
   weightRange: { line: { n: 90, minG: 1900, maxG: 2000, avgG: 1950 }, byWinder: [{ winder: 1, n: 90, minG: 1900, maxG: 2000, avgG: 1950 }], plausibility: { loG: 1500, hiG: 2100 }, excludedImplausible: 0 },
+};
+
+/* The six reports that complete IFL's list of eight (task W0, 1 Oct 2026): hand-built data in the frozen shapes, serialised by the real CSV functions. */
+const sackCounts = (sacks: number, rejected: number) => ({ sacks, rejected, rejectedPct: Math.round((1000 * rejected) / sacks) / 10 });
+const rejectedSacksData: any = {
+  period: dailyData.period,
+  byShift: [{ date: '2026-09-01', shift: 'morning', ...sackCounts(20, 2) }, { date: '2026-09-01', shift: 'evening', ...sackCounts(18, 1) }],
+  byDay: [{ date: '2026-09-01', ...sackCounts(38, 3) }, { date: '2026-09-02', ...sackCounts(40, 1) }],
+  total: { ...sackCounts(78, 4), noFlag: 0 },
+  rejectedSplit: { implausible: 1, plausible: 3 },
+  passedRange: {
+    byProduct: [{ productId: 7, productLabel: 'Product A', yarnCount: '36', sacks: 70, minKg: 47.0, maxKg: 47.6 }],
+    all: { sacks: 74, minKg: 47.0, maxKg: 47.6 },
+  },
+  list: [{ date: '2026-09-01', shift: 'morning', producedAtUtc: '2026-09-01T07:10:00.000Z', sackNum: 12, productId: 7, productLabel: 'Product A', yarnCount: '36', weightKg: 0, implausible: true }],
+  listTotal: 1, listCap: 5000, excludedClockFault: 0,
+};
+const spsPackingData: any = {
+  period: dailyData.period,
+  sps: { number: 1, label: 'SPS 1 \u2014 this line\u2019s one sack scale (PLC_sack1)', confirmed: false },
+  columns: [{ key: '36', yarnCount: '36', label: '36', materialIds: [7] }, { key: 'none', yarnCount: null, label: 'No product on the reading', materialIds: [] }],
+  rows: [{ date: '2026-09-01', shift: 'morning', cells: { '36': { sacks: 20, kg: 940 }, none: { sacks: 1, kg: 47 } }, total: { sacks: 21, kg: 987 } }],
+  totals: [
+    { key: '36', yarnCount: '36', label: '36', materialIds: [7], sacks: 20, kg: 940, avgKg: 47, sharePct: 95.2 },
+    { key: 'none', yarnCount: null, label: 'No product on the reading', materialIds: [], sacks: 1, kg: 47, avgKg: 47, sharePct: 4.8 },
+  ],
+  grandTotal: { sacks: 21, kg: 987, avgKg: 47 },
+};
+const bandCounts = (passed: number, rejected: number) => ({ passed, rejected, noFlag: 0, total: passed + rejected });
+const sackWeightRangeData: any = {
+  period: dailyData.period,
+  bands: [
+    { kind: 'band', label: '47.0 - 47.1 kg', fromKg: 47.0, toKg: 47.1, byShift: { morning: bandCounts(9, 0), evening: bandCounts(6, 0), night: bandCounts(0, 0) }, total: bandCounts(15, 0), sharePct: 60 },
+    { kind: 'band', label: '47.1 - 47.2 kg', fromKg: 47.1, toKg: 47.2, byShift: { morning: bandCounts(5, 1), evening: bandCounts(3, 0), night: bandCounts(0, 0) }, total: bandCounts(8, 1), sharePct: 36 },
+    { kind: 'implausible', label: 'Implausible weight', fromKg: null, toKg: null, byShift: { morning: bandCounts(0, 1), evening: bandCounts(0, 0), night: bandCounts(0, 0) }, total: bandCounts(0, 1), sharePct: 4 },
+  ],
+  spreadByDayShift: [{ date: '2026-09-01', shift: 'morning', n: 14, minKg: 47.0, maxKg: 47.2, rangeKg: 0.2, avgKg: 47.07, sdKg: 0.06 }],
+  spreadByShift: [
+    { date: null, shift: 'morning', n: 14, minKg: 47.0, maxKg: 47.2, rangeKg: 0.2, avgKg: 47.07, sdKg: 0.06 },
+    { date: null, shift: 'evening', n: 9, minKg: 47.0, maxKg: 47.1, rangeKg: 0.1, avgKg: 47.04, sdKg: 0.05 },
+  ],
+  spreadTotal: { date: null, shift: null, n: 23, minKg: 47.0, maxKg: 47.2, rangeKg: 0.2, avgKg: 47.06, sdKg: 0.06 },
+};
+const sackFigures = (sacks: number, kg: number) => ({ sacks, kg, avgKg: kg / sacks, minKg: 46.9, maxKg: 47.3, sdKg: 0.12, rejectedByScale: 1, implausible: 0 });
+const sackWeightSummaryData: any = {
+  period: dailyData.period,
+  rows: [{ date: '2026-09-01', shift: 'morning', ...sackFigures(20, 940) }],
+  dayTotals: [{ date: '2026-09-01', ...sackFigures(38, 1786) }, { date: '2026-09-02', ...sackFigures(40, 1880) }],
+  shiftTotals: [{ shift: 'morning', ...sackFigures(20, 940) }],
+  byYarnCount: [{ yarnCount: '36', label: '36', materialIds: [7], ...sackFigures(60, 2820) }],
+  total: sackFigures(78, 3666),
+};
+const hangerRow = (hanger: number | null, cones: number, q: number, w: number, flag: string | null) => ({
+  hanger, cones, inspected: cones, qualityRejects: q, weightRejects: w, total: q + w, ratePct: Math.round((10000 * (q + w)) / cones) / 100, flag,
+});
+const rejectedHangersData: any = {
+  period: dailyData.period,
+  hangers: [hangerRow(91, 471, 58, 0, 'stands_out'), hangerRow(12, 300, 5, 1, null), hangerRow(null, 10, 2, 0, null)],
+  total: hangerRow(null, 781, 65, 1, null),
+  flagging: { canFlag: true, reason: null, lineRatePct: 8.45, hangersJudged: 2, hangersSeen: 3, minInspected: 100, alpha: 0.05 },
+  list: [{ date: '2026-09-01', shift: 'morning', producedAtUtc: '2026-09-01T07:00:00.000Z', hanger: 91, winder: 4, rejectType: 'quality', reason: 'Tube 3', weightG: null }],
+  listTotal: 1, listCap: 5000, excludedClockFault: 0,
+};
+const lifterRow = (lifter: number | null, cones: number, q: number, z: number, w: number) => ({
+  lifter, cones, inspected: cones, qualityRejects: q, zeroCodeRejects: z, weightRejects: w, total: q + w, ratePct: Math.round((10000 * (q + w)) / cones) / 100,
+});
+const rejectedUnknownLifterData: any = {
+  period: dailyData.period,
+  lifters: [lifterRow(1, 400, 8, 0, 0), lifterRow(2, 380, 6, 1, 1), lifterRow(null, 5, 1, 1, 0)],
+  total: lifterRow(null, 785, 15, 2, 1),
+  unknownCount: 1,
+  list: [{ date: '2026-09-01', shift: 'morning', producedAtUtc: '2026-09-01T07:00:00.000Z', hanger: 12, winder: 3, lifter: null, rejectType: 'quality', tubeCode: 0, materialCode: 0, weightG: null, why: ['No lifter recorded', 'Reason code is zero'] }],
+  listTotal: 1, listCap: 5000, excludedClockFault: 0,
+  zeroedClock: { generation: 'batch 1', rows: [{ date: '1969-12-31', shift: 'evening', producedAtUtc: '1970-01-01T00:00:00.000Z', hanger: null, winder: null, lifter: null, rejectType: 'quality', tubeCode: 0, materialCode: 0, weightG: null, why: ['Clock zeroed (1970)'] }] },
 };
 
 const FIXTURES: Record<ReportType, { data: any; table: CsvTable }> = {
@@ -446,6 +528,12 @@ const FIXTURES: Record<ReportType, { data: any; table: CsvTable }> = {
   'machine-product': { data: machineProductData, table: machineProductCsv(machineProductData) },
   'shift-production': { data: shiftProductionData, table: shiftProductionCsv(shiftProductionData) },
   'rejected-cones': { data: rejectedConesData, table: rejectedConesCsv(rejectedConesData) },
+  'rejected-sacks': { data: rejectedSacksData, table: rejectedSacksCsv(rejectedSacksData) },
+  'sps-packing': { data: spsPackingData, table: spsPackingCsv(spsPackingData) },
+  'sack-weight-range': { data: sackWeightRangeData, table: sackWeightRangeCsv(sackWeightRangeData) },
+  'sack-weight-summary': { data: sackWeightSummaryData, table: sackWeightSummaryCsv(sackWeightSummaryData) },
+  'rejected-hangers': { data: rejectedHangersData, table: rejectedHangersCsv(rejectedHangersData) },
+  'rejected-unknown-lifter': { data: rejectedUnknownLifterData, table: rejectedUnknownLifterCsv(rejectedUnknownLifterData) },
 };
 
 const TYPES = Object.keys(FIXTURES) as ReportType[];
@@ -495,7 +583,7 @@ describe('U4a/U4b: every report type gets a well-formed workbook with its one ch
       const entries = readZipEntries(buf);
       const byName = new Map(entries.map((e) => [e.name, e]));
 
-      // Check 1: chart1.xml present for every one of the ten types.
+      // Check 1: chart1.xml present for every one of the 18 types.
       expect(byName.has('xl/charts/chart1.xml'), `${type}: no chart1.xml — fixture produced no chartable series`).toBe(true);
 
       // Check 2: every part is well-formed XML.
@@ -624,6 +712,31 @@ describe('U4b: chartSpecFor prefers a deviation series and falls back to raw cou
   });
 });
 
+describe('D-48: the masthead company line comes from the header config', () => {
+  it('names the company, then the plant and unit the header carries', () => {
+    expect(companyLineFor({ plantName: 'TP1', unitName: 'Unit 2' })).toBe('Ibrahim Fibres Limited (TP1 \u00b7 Unit 2)');
+    expect(companyLineFor({ plantName: 'TP1', unitName: null })).toBe('Ibrahim Fibres Limited (TP1)');
+    expect(companyLineFor({ plantName: null, unitName: 'Unit 2' })).toBe('Ibrahim Fibres Limited (Unit 2)');
+  });
+
+  it('is just the company when the header carries neither, and never another plant\'s name', () => {
+    expect(companyLineFor({ plantName: null, unitName: null })).toBe(COMPANY_NAME);
+    expect(companyLineFor({ plantName: '  ', unitName: '' })).toBe('Ibrahim Fibres Limited');
+    for (const h of [{ plantName: 'TP1', unitName: 'Unit 2' }, { plantName: null, unitName: null }]) {
+      expect(companyLineFor(h)).not.toMatch(/Textile Plant 4/);
+    }
+  });
+
+  it('every report type\'s sheets open with the line built from its own header', () => {
+    for (const type of TYPES) {
+      const header = { ...makeHeader(type, `${type} report`), plantName: 'TP1', unitName: 'Unit 2' };
+      const { data, table } = FIXTURES[type];
+      const sheets = reportSheets(type, data, header, table);
+      for (const s of sheets) expect(s.titleRows![0], `${type}/${s.name}`).toBe('Ibrahim Fibres Limited (TP1 \u00b7 Unit 2)');
+    }
+  });
+});
+
 describe('U4c: styling — title bands, header fill, auto-width, print titles', () => {
   it('every sheet carries the three-line IFL banner above the header row', () => {
     const header = makeHeader('daily', 'Daily production report');
@@ -633,7 +746,9 @@ describe('U4c: styling — title bands, header fill, auto-width, print titles', 
 
     const daySheet = sheets.find((s) => s.name === 'Day')!;
     expect(daySheet.titleRows?.length).toBe(3);
-    expect(daySheet.titleRows![0]).toBe('Ibrahim Fibres Limited (Textile Plant 4)');
+    // D-48 (1 Oct 2026): the masthead comes from the header's own plant/unit, never a hard-coded plant.
+    expect(daySheet.titleRows![0]).toBe('Ibrahim Fibres Limited (IFL \u00b7 Unit 2)');
+    expect(daySheet.titleRows![0]).not.toContain('Textile Plant 4');
     expect(daySheet.titleRows![1]).toContain('Daily production report');
     expect(daySheet.titleRows![1]).toContain('Day');
     expect(daySheet.titleRows![2]).toContain('TP1 Line 3');
@@ -776,10 +891,14 @@ describe('W4: IFL house style in the workbook', () => {
     expect(text(entries, '[Content_Types].xml')).not.toContain('jpeg');
   });
 
-  it('prints shift-production and rejected-cones portrait, every other type landscape, fitted one page wide', () => {
+  it('prints IFL\'s own reports portrait except the SPS packing matrix, every earlier type landscape, fitted one page wide', () => {
+    const portrait = new Set<ReportType>([
+      'shift-production', 'rejected-cones', 'rejected-sacks', 'sack-weight-range', 'sack-weight-summary', 'rejected-hangers', 'rejected-unknown-lifter',
+    ]);
+    expect(portrait.has('sps-packing')).toBe(false);
     for (const type of TYPES) {
       const { sheets, entries } = build(type);
-      const want = type === 'shift-production' || type === 'rejected-cones' ? 'portrait' : 'landscape';
+      const want = portrait.has(type) ? 'portrait' : 'landscape';
       sheets.forEach((_, i) => {
         const xml = text(entries, `xl/worksheets/sheet${i + 1}.xml`);
         expect(xml, `${type} sheet ${i + 1}`).toContain(`orientation="${want}"`);
@@ -827,5 +946,66 @@ describe('W4: IFL house style in the workbook', () => {
   it('keeps every zip entry CRC valid', () => {
     const { entries } = build('shift-production');
     for (const e of entries) expect(crc32(e.data)).toBe(e.crc);
+  });
+});
+
+describe('H-exports (1 Oct 2026): the SPS packing matrix sheet, built from the frozen contract', () => {
+  const header = makeHeader('sps-packing', 'SPS Production Report');
+  const twoRows = {
+    ...spsPackingData,
+    rows: [
+      { date: '2026-09-01', shift: 'morning', cells: { '36': { sacks: 20, kg: 940 }, none: { sacks: 1, kg: 47 } }, total: { sacks: 21, kg: 987 } },
+      { date: '2026-09-01', shift: 'evening', cells: { '36': { sacks: 5, kg: 235.5 } }, total: { sacks: 5, kg: 235.5 } },
+    ],
+  };
+
+  it('one row per date and shift, two numeric columns per yarn count, then the row totals', () => {
+    const [m] = spsPackingSheets(twoRows, header);
+    expect(m!.name).toBe('Matrix');
+    expect(m!.columns.map((c) => c.header)).toEqual([
+      'Date', 'Shift', '36 · sacks', '36 · kg', 'No product on the reading · sacks', 'No product on the reading · kg', 'Total sacks', 'Total kg',
+    ]);
+    expect(m!.columns.filter((c) => /^s\d+$/.test(c.key)).every((c) => c.type === 'integer')).toBe(true);
+    expect(m!.columns.filter((c) => /^k\d+$/.test(c.key)).every((c) => c.type === 'number')).toBe(true);
+    expect(m!.rows[0]).toMatchObject({ date: '2026-09-01', shift: 'morning', s0: 20, k0: 940, s1: 1, k1: 47, sacks: 21, kg: 987 });
+  });
+
+  it('a count with no sacks in a row is an EMPTY cell, never a zero', () => {
+    const [m] = spsPackingSheets(twoRows, header);
+    expect(m!.rows[1]).toMatchObject({ shift: 'evening', s0: 5, k0: 235.5, s1: null, k1: null });
+  });
+
+  it('closes with a Total row carrying the period figures per count and the grand total', () => {
+    const [m] = spsPackingSheets(twoRows, header);
+    expect(m!.rows.at(-1)).toMatchObject({ date: 'Total', s0: 20, k0: 940, s1: 1, k1: 47, sacks: 21, kg: 987 });
+    // The writer's own total-row rule recognises it (bold-italic styles), so it reads as a total on the page.
+    const xml = readZipEntries(buildXlsx([m!], { logo: null })).find((e) => e.name === 'xl/worksheets/sheet1.xml')!.data.toString('utf8');
+    expect(xml).toMatch(/<c r="A8" t="inlineStr" s="8"><is><t xml:space="preserve">Total<\/t><\/is><\/c>/);
+  });
+
+  it('states the SPS block on the banner, as not confirmed by IFL while it is not', () => {
+    const [m] = spsPackingSheets(twoRows, header);
+    expect(m!.titleRows).toHaveLength(4);
+    expect(m!.titleRows![3]).toBe('SPS 1 — this line’s one sack scale (PLC_sack1) (not confirmed by IFL)');
+    const [c] = spsPackingSheets({ ...twoRows, sps: { ...twoRows.sps, confirmed: true } }, header);
+    expect(c!.titleRows![3]).not.toContain('not confirmed');
+  });
+
+  it('a report with no sacks has no matrix, and the generic section sheets still follow the matrix when there is one', () => {
+    expect(spsPackingSheets({ ...spsPackingData, rows: [] }, header)).toEqual([]);
+    const sheets = reportSheets('sps-packing', twoRows, header, spsPackingCsv(twoRows));
+    expect(sheets.map((s) => s.name).slice(0, 2)).toEqual(['Report', 'Matrix']);
+    expect(sheets.map((s) => s.name)).toEqual(expect.arrayContaining(['Cell', 'Shift total', 'Count total', 'Grand total']));
+  });
+
+  it('the matrix is a workbook sheet like any other: well-formed, landscape, and the data bar stays on the Count total sheet', () => {
+    const sheets = reportSheets('sps-packing', twoRows, header, spsPackingCsv(twoRows));
+    const entries = readZipEntries(buildXlsx(sheets, { logo: null }));
+    const i = sheets.findIndex((s) => s.name === 'Matrix');
+    const xml = entries.find((e) => e.name === `xl/worksheets/sheet${i + 1}.xml`)!.data.toString('utf8');
+    assertWellFormedXml(xml, 'Matrix sheet');
+    expect(xml).toContain('orientation="landscape"');
+    expect(xml).not.toContain('dataBar');
+    expect(dataBarTarget('sps-packing', sheets)).toEqual({ sheetName: 'Count total', key: 'sacks' });
   });
 });

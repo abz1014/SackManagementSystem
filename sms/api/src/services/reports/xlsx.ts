@@ -35,14 +35,23 @@
  * number with the integer or one-decimal style (thousands-separated: a
  * weight reads "1,960", not "1960"). A percent column holds the FRACTION
  * (12.3 % is stored as 0.123 with the 0.0% format), so the sheet reads
- * "12.3%" and a formula over it is right. A date column holds the Excel
- * serial (days since 1899-12-30) of the ISO instant's UTC fields —
- * production times are the plant's wall clock labelled UTC, app-written
- * instants are genuine UTC, and this file converts neither: it renders
- * exactly the UTC calendar fields it is given, so whichever clock a caller
- * fed in is the clock the sheet shows (report.ts / plantClock.ts decide
- * which is right for a given column; this file must not guess). A boolean
- * is TRUE/FALSE (t="b"). Null is an empty cell, not the string "null".
+ * "12.3%" and a formula over it is right; the values are PERCENT POINTS
+ * (`efficiency_pct` 99.96 means 99.96 %), and a column where any value has a
+ * second decimal place uses 0.00% instead, so 99.96 never reads "100.0%"
+ * (IFL reports D2, 1 Oct 2026). An IDENTIFIER (winder, hanger, lifter, sack
+ * number, material id, a reason code) is a plain number with no thousands
+ * separator and never the target of a data bar: sack number 1,234 is not a
+ * quantity. A date column holds the Excel serial (days since 1899-12-30) of
+ * the instant's UTC fields — production times are the plant's wall clock
+ * labelled UTC, app-written instants are genuine UTC, and this file converts
+ * neither: it renders exactly the UTC calendar fields it is given, so
+ * whichever clock a caller fed in is the clock the sheet shows (report.ts /
+ * plantClock.ts decide which is right for a given column; this file must not
+ * guess). A plant-clock string "YYYY-MM-DD HH:mm:ss" (an export column named
+ * `*_plant_time`, reports/plantTime.ts) is read back with `Date.UTC`, never
+ * `new Date(string)`, which would take the host's own zone for the plant's
+ * (D4). A boolean is TRUE/FALSE (t="b"). Null is an empty cell, not the
+ * string "null".
  *
  * Sheet 1 is always the report header — line, period, filters, generated at
  * (plant time) and by, SMS version, the definitions sheet and the IFL
@@ -71,13 +80,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ReportHeader, ReportType } from './common.js';
-import { attributionRows, type CsvCell, type CsvTable } from './csv.js';
+import { attributionRows, periodText, type CsvCell, type CsvTable } from './csv.js';
+import { parsePlantWallClock } from './plantTime.js';
 import type { AnyReportData, ReportDataByType } from './index.js';
 import type { MachineProductReportData } from './machineProduct.js';
+import type { SpsPackingReportData } from './spsPacking.js';
 
 /* ------------------------------------------------------------------ types */
 
-export type ColumnType = 'text' | 'number' | 'integer' | 'percent' | 'date' | 'boolean';
+/** `id`: a numeric identifier (winder, hanger, sack number, reason code) — written as a plain number, no thousands separator. */
+export type ColumnType = 'text' | 'number' | 'integer' | 'percent' | 'date' | 'boolean' | 'id';
 
 export interface SheetColumn {
   header: string;
@@ -276,18 +288,34 @@ export function excelSerial(d: Date): number {
 const STYLE = {
   plain: 0, bold: 1, integer: 2, number: 3, percent: 4, date: 5, headerFill: 6, text: 7,
   totalText: 8, totalInteger: 9, totalNumber: 10, totalPercent: 11, company: 12, title: 13,
+  // D2: written only when a percent column holds a value with a second decimal place (see `needsPercent2`).
+  percent2: 14, totalPercent2: 15,
 } as const;
 
 /** W4: IFL's own report style (owner-approved 30 Sep 2026). */
 const IFL_HEADER_FILL = 'ADD8E6';
 const IFL_BORDER = 'D3D3D3';
-export const COMPANY_LINE = 'Ibrahim Fibres Limited (Textile Plant 4)';
+export const COMPANY_NAME = 'Ibrahim Fibres Limited';
+
+/**
+ * The masthead's company line (IFL reports task W0, 1 Oct 2026, defect D-48):
+ * the company name followed by the plant and unit from the report header's own
+ * config (`sms.plant` / `sms.plant_unit`, via `getLineIdentity`), e.g.
+ * "Ibrahim Fibres Limited (TP1 · Unit 2)". It used to be the constant
+ * "Ibrahim Fibres Limited (Textile Plant 4)", which printed another plant's
+ * name on TP1's reports. The line itself is on the banner's third row
+ * ("Line: ..."), so the three together carry plant, unit and line.
+ */
+export function companyLineFor(h: Pick<ReportHeader, 'plantName' | 'unitName'>): string {
+  const where = [h.plantName, h.unitName].filter((x): x is string => x != null && x.trim() !== '');
+  return where.length ? `${COMPANY_NAME} (${where.join(' \u00b7 ')})` : COMPANY_NAME;
+}
 const LOGO_PX = 80;
 const TITLE_ROW_PT = 22;
 const EMU_PX = 9525;
 const EMU_PT = 12700;
 
-const DEFAULT_WIDTH: Record<ColumnType, number> = { text: 18, number: 12, integer: 10, percent: 10, date: 18, boolean: 10 };
+const DEFAULT_WIDTH: Record<ColumnType, number> = { text: 18, number: 12, integer: 10, percent: 10, date: 20, boolean: 10, id: 10 };
 
 /** Excel refuses a sheet name over 31 characters or containing []:*?/\ — and no two may match. */
 export function sheetName(raw: string, taken: Set<string>): string {
@@ -301,10 +329,20 @@ export function sheetName(raw: string, taken: Set<string>): string {
   return name;
 }
 
+/**
+ * A date cell's instant from a string: the plant-clock form "YYYY-MM-DD HH:mm:ss" (or an ISO instant) is read with
+ * `Date.UTC` so the host's own zone can never move it (D4); anything else falls back to the Date parser.
+ */
+function dateFromText(s: string): Date {
+  const ms = parsePlantWallClock(s);
+  return ms != null ? new Date(ms) : new Date(s);
+}
+
 function cellXml(ref: string, v: CsvCell | Date, type: ColumnType, styleIndex?: number): string {
   if (v == null || v === '') return styleIndex != null && styleIndex !== STYLE.plain ? `<c r="${ref}" s="${styleIndex}"/>` : '';
+  if (type === 'id' && typeof v === 'number' && Number.isFinite(v)) return `<c r="${ref}" s="${styleIndex ?? STYLE.text}"><v>${v}</v></c>`;
   if (v instanceof Date || type === 'date') {
-    const d = v instanceof Date ? v : new Date(String(v));
+    const d = v instanceof Date ? v : dateFromText(String(v));
     if (Number.isNaN(d.getTime())) return `<c r="${ref}" t="inlineStr"><is><t>${xmlText(String(v))}</t></is></c>`;
     return `<c r="${ref}" s="${styleIndex ?? STYLE.date}"><v>${excelSerial(d)}</v></c>`;
   }
@@ -313,7 +351,8 @@ function cellXml(ref: string, v: CsvCell | Date, type: ColumnType, styleIndex?: 
     return `<c r="${ref}" t="b" s="${styleIndex ?? STYLE.text}"><v>${b ? 1 : 0}</v></c>`;
   }
   if (typeof v === 'number' && Number.isFinite(v)) {
-    if (type === 'percent') return `<c r="${ref}" s="${styleIndex ?? STYLE.percent}"><v>${v / 100}</v></c>`;
+    // v is percent POINTS; the cell stores the fraction. toPrecision(15) drops the binary noise (99.96 / 100 is 0.9995999999999999).
+    if (type === 'percent') return `<c r="${ref}" s="${styleIndex ?? STYLE.percent}"><v>${Number((v / 100).toPrecision(15))}</v></c>`;
     const s = styleIndex ?? (type === 'integer' || Number.isInteger(v) ? STYLE.integer : STYLE.number);
     return `<c r="${ref}" s="${s}"><v>${v}</v></c>`;
   }
@@ -331,6 +370,23 @@ function autoWidth(col: SheetColumn, rows: Sheet['rows']): number {
     if (len > max) max = len;
   }
   return Math.min(Math.max(max + 2, DEFAULT_WIDTH[col.type]), 60);
+}
+
+/**
+ * D2: how many decimals a percent column needs. Values are PERCENT POINTS (99.96 = 99.96 %). The column is written 0.0% unless some value
+ * has a second decimal place, in which case it is 0.00% — otherwise 99.96 reads "100.0%" and 0.04 reads "0.0%".
+ */
+export function percentDecimals(col: SheetColumn, rows: Sheet['rows']): 1 | 2 {
+  for (const row of rows) {
+    const v = row[col.key];
+    if (typeof v === 'number' && Number.isFinite(v) && Math.abs(v * 10 - Math.round(v * 10)) > 1e-7) return 2;
+  }
+  return 1;
+}
+
+/** True when any sheet has a percent column that needs the two-decimal format (so styles.xml has to carry it). */
+function needsPercent2(sheets: readonly Sheet[]): boolean {
+  return sheets.some((s) => s.columns.some((c) => c.type === 'percent' && percentDecimals(c, s.rows) === 2));
 }
 
 /** Where a sheet's header row, and its last used row/column, land — shared by the worksheet body and the workbook's print-area/print-titles defined names. */
@@ -375,6 +431,8 @@ function worksheetXml(sheet: Sheet, hasDrawing: boolean, hasLogo: boolean): stri
     : '';
 
   const head = sheet.columns.map((c, i) => cellXml(`${columnLetter(i)}${headerRowNum}`, c.header, 'text', STYLE.headerFill)).join('');
+  // D2: a percent column with a second decimal place anywhere in it is written 0.00% for every row of the column.
+  const percent2 = new Set(sheet.columns.filter((c) => c.type === 'percent' && percentDecimals(c, sheet.rows) === 2).map((c) => c.key));
   const body = sheet.rows
     .map((row, r) => {
       const rowNum = headerRowNum + 1 + r;
@@ -386,10 +444,13 @@ function worksheetXml(sheet: Sheet, hasDrawing: boolean, hasLogo: boolean): stri
           let style: number | undefined;
           if (total) {
             style =
-              c.type === 'percent' ? STYLE.totalPercent
+              c.type === 'percent' ? (percent2.has(c.key) ? STYLE.totalPercent2 : STYLE.totalPercent)
               : c.type === 'date' || v instanceof Date ? undefined
+              : c.type === 'id' && typeof v === 'number' ? STYLE.totalText
               : typeof v === 'number' ? (c.type === 'integer' || Number.isInteger(v) ? STYLE.totalInteger : STYLE.totalNumber)
               : STYLE.totalText;
+          } else if (c.type === 'percent' && percent2.has(c.key)) {
+            style = STYLE.percent2;
           }
           if (empty) style = total ? STYLE.totalText : STYLE.text;
           return cellXml(`${columnLetter(i)}${rowNum}`, v, c.type, style);
@@ -442,17 +503,23 @@ function worksheetXml(sheet: Sheet, hasDrawing: boolean, hasLogo: boolean): stri
   );
 }
 
-function stylesXml(): string {
+/**
+ * `percent2` adds the 0.00% number format and its two cell styles (percent, and percent in a total row) — only when a workbook
+ * holds a percent column that needs them, so a workbook without one is byte-for-byte what it was.
+ */
+function stylesXml(percent2 = false): string {
   const right = `<alignment horizontal="right"/>`;
   const xf = (numFmt: number, font: number, inner = '') =>
     `<xf numFmtId="${numFmt}" fontId="${font}" fillId="0" borderId="1" xfId="0" applyBorder="1"${numFmt ? ' applyNumberFormat="1"' : ''}${font ? ' applyFont="1"' : ''}${inner ? ' applyAlignment="1">' + inner + '</xf>' : '/>'}`;
   return (
     `${XML_HEAD}<styleSheet xmlns="${NS_MAIN}">` +
-    `<numFmts count="4">` +
+    `<numFmts count="${percent2 ? 5 : 4}">` +
     `<numFmt numFmtId="164" formatCode="#,##0"/>` +
     `<numFmt numFmtId="165" formatCode="#,##0.00"/>` +
     `<numFmt numFmtId="166" formatCode="0.0%"/>` +
-    `<numFmt numFmtId="167" formatCode="dd\-mm\-yyyy\ hh:mm"/>` +
+    // Plant times carry seconds ("03-07-2026 21:32:41"): two cones weighed in one minute must stay distinguishable.
+    `<numFmt numFmtId="167" formatCode="dd\-mm\-yyyy\ hh:mm:ss"/>` +
+    (percent2 ? `<numFmt numFmtId="168" formatCode="0.00%"/>` : '') +
     `</numFmts>` +
     `<fonts count="5">` +
     `<font><sz val="11"/><name val="Calibri"/></font>` +
@@ -470,7 +537,7 @@ function stylesXml(): string {
     ['left', 'right', 'top', 'bottom'].map((e) => `<${e} style="thin"><color rgb="FF${IFL_BORDER}"/></${e}>`).join('') +
     `<diagonal/></border></borders>` +
     `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
-    `<cellXfs count="14">` +
+    `<cellXfs count="${percent2 ? 16 : 14}">` +
     /* 0 plain   */ `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
     /* 1 bold    */ `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
     /* 2 integer */ xf(164, 0, right) +
@@ -485,6 +552,9 @@ function stylesXml(): string {
     /* 11 tot pct*/ xf(166, 2, right) +
     /* 12 company*/ `<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
     /* 13 title  */ `<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
+    (percent2
+      ? /* 14 percent 2dp */ xf(168, 0, right) + /* 15 tot pct 2dp */ xf(168, 2, right)
+      : '') +
     `</cellXfs>` +
     `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
     `</styleSheet>`
@@ -708,7 +778,7 @@ export function buildXlsx(sheets: readonly Sheet[], meta: WorkbookMeta = {}, sta
     { name: '_rels/.rels', data: Buffer.from(rootRelsXml(), 'utf8') },
     { name: 'xl/workbook.xml', data: Buffer.from(workbookXml(names, sheets), 'utf8') },
     { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(workbookRelsXml(sheets.length), 'utf8') },
-    { name: 'xl/styles.xml', data: Buffer.from(stylesXml(), 'utf8') },
+    { name: 'xl/styles.xml', data: Buffer.from(stylesXml(needsPercent2(sheets)), 'utf8') },
     ...sheets.map((s, i) => ({
       name: `xl/worksheets/sheet${i + 1}.xml`,
       data: Buffer.from(worksheetXml(s, i === chartIdx || (i === 0 && hasLogo), i === 0 && hasLogo), 'utf8'),
@@ -741,9 +811,11 @@ export function buildXlsx(sheets: readonly Sheet[], meta: WorkbookMeta = {}, sta
 
 /** Sheet 1: the attribution, as key/value rows — the same rows the CSV trails with. No title band of its own: this sheet already IS one. */
 export function headerSheet(h: ReportHeader): Sheet {
-  const rows: Record<string, CsvCell>[] = [];
+  const rows: Record<string, CsvCell | Date>[] = [];
   for (const [item, value] of attributionRows(h)) {
-    rows.push({ item, value });
+    // D4: the plant-clock "generated at" is a real date cell, read with Date.UTC (never the host's zone).
+    const ms = item === 'generated_at_plant_time' ? parsePlantWallClock(value) : null;
+    rows.push({ item, value: ms != null ? new Date(ms) : value });
     // The plant and the unit sit under the line, where a reader looks for them.
     if (item === 'line') {
       if (h.plantName) rows.push({ item: 'plant', value: h.plantName });
@@ -774,30 +846,61 @@ export function ddmmyyyyHm(iso: string): string {
   return m ? `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}` : ddmmyyyy(iso);
 }
 
-/** W4: the three-row IFL banner: company, report title (with this sheet's role), then the metadata line. */
+/** W4: the three-row IFL banner: company line (company, plant, unit), report title (with this sheet's role), then the metadata line. */
 export function titleRowsFor(header: ReportHeader, sheetTitle: string | null): string[] {
   const shift = header.filters.shift ?? 'All shifts';
   return [
-    COMPANY_LINE,
+    companyLineFor(header),
     sheetTitle ? `${header.title} - ${sheetTitle}` : header.title,
-    `Line: ${header.lineName} \u00b7 Period: ${ddmmyyyy(header.period.from)} to ${ddmmyyyy(header.period.to)} \u00b7 Shift: ${shift} \u00b7 Generated: ${ddmmyyyyHm(header.generatedAtPlantUtc)} (plant time) \u00b7 SMS v${header.smsVersion.replace(/^v/i, '')}`,
+    `Line: ${header.lineName} \u00b7 Period: ${periodText(header, ddmmyyyy)} \u00b7 Shift: ${shift} \u00b7 Generated: ${ddmmyyyyHm(header.generatedAtPlantUtc)} (plant time) \u00b7 SMS v${header.smsVersion.replace(/^v/i, '')}`,
   ];
 }
 
 /**
- * A column's type from its CSV header name, for the generic path: `*_utc`
- * is an instant, `*_pct` a percentage, everything else decided per cell
- * (numbers as numbers, booleans as booleans, the rest as text).
+ * A column's type from its CSV header name, for the generic path: `*_utc` and
+ * `*_plant_time` are instants (the second is the plant-clock string
+ * "YYYY-MM-DD HH:mm:ss", reports/plantTime.ts — IFL reports D4), `*_pct` a
+ * percentage in percent points, an identifier (`isIdLike`) an `id`, and
+ * everything else is left to `inferColumnType`, which looks at the values.
  */
 export function columnTypeFor(key: string): ColumnType {
-  if (/_utc$/.test(key)) return 'date';
+  if (/_(utc|plant_time)$/.test(key)) return 'date';
   if (/_pct$/.test(key)) return 'percent';
+  if (isIdLike(key)) return 'id';
   return 'number';
 }
 
+/**
+ * The generic path's column type from its name AND its values (IFL reports D3): a column named like a date, a
+ * percentage or an identifier keeps that type (an identifier holding text, such as a shift name, is plain text);
+ * any other column is boolean when every value is, a number when every value is (integer when every one is a
+ * whole number) and text when any value is text. An empty column stays `number`, as before.
+ */
+export function inferColumnType(key: string, values: readonly (CsvCell | Date)[]): ColumnType {
+  const byName = columnTypeFor(key);
+  if (byName === 'date' || byName === 'percent') return byName;
+  const present = values.filter((v) => v != null && v !== '');
+  const allNumbers = present.every((v) => typeof v === 'number' && Number.isFinite(v));
+  if (byName === 'id') return allNumbers ? 'id' : 'text';
+  if (present.length === 0) return 'number';
+  if (present.every((v) => typeof v === 'boolean')) return 'boolean';
+  if (allNumbers) return present.every((v) => Number.isInteger(v)) ? 'integer' : 'number';
+  return 'text';
+}
+
+/** Words a header prints in capitals rather than title case ("sd_kg" is "SD (kg)", not "Sd (kg)"). */
+const HEADER_ACRONYMS: Record<string, string> = { sd: 'SD', sps: 'SPS', id: 'ID', ids: 'IDs' };
+
 /** `mean_g` → "Mean (g)", `sack_weight_kg` → "Sack weight (kg)" — the unit parenthesised rather than buried as a trailing word. */
 function titleCase(key: string): string {
-  const base = key.replace(/_/g, ' ').replace(/\butc\b/g, '(plant time)').replace(/\bpct\b/g, '%');
+  const base = key
+    .replace(/_/g, ' ')
+    .replace(/\butc\b/g, '(plant time)')
+    .replace(/ plant time$/, ' (plant time)')
+    .replace(/\bpct\b/g, '%')
+    .split(' ')
+    .map((w) => HEADER_ACRONYMS[w] ?? w)
+    .join(' ');
   const withUnit = base.replace(/ kg$/, ' (kg)').replace(/ g$/, ' (g)');
   return withUnit.replace(/^./, (c) => c.toUpperCase());
 }
@@ -824,7 +927,11 @@ export function sheetsFromCsv(table: CsvTable, singleName: string, header: Repor
     const keep = headers
       .map((h, i) => i)
       .filter((i) => i !== sectionAt && (rows.length === 0 || rows.some((r) => r[i] != null && r[i] !== '')));
-    const columns: SheetColumn[] = keep.map((i) => ({ header: titleCase(headers[i]!), key: headers[i]!, type: columnTypeFor(headers[i]!) }));
+    const columns: SheetColumn[] = keep.map((i) => ({
+      header: titleCase(headers[i]!),
+      key: headers[i]!,
+      type: inferColumnType(headers[i]!, rows.map((r) => r[i])),
+    }));
     const name = sectionAt >= 0 ? titleCase(section) : singleName;
     sheets.push({
       name,
@@ -862,15 +969,74 @@ export function machineProductSheets(d: MachineProductReportData, header: Report
   return [{ name: 'Matrix', columns, rows, titleRows: titleRowsFor(header, 'Matrix') }];
 }
 
+/**
+ * IFL's SPS packing matrix as a sheet of its own (report 3 of 8, 1 Oct 2026):
+ * one row per production date and shift, and for each yarn count TWO columns —
+ * the sacks packed and their kilograms — then the row's totals, closed by a
+ * "Total" row of the period. IFL asked for the sacks with the kilograms on a
+ * second line of one cell; a cell with a line break is text, so it could not be
+ * summed, charted or sorted, and two numeric columns keep both figures
+ * numbers. A count that packed nothing in a row is an EMPTY cell, never a
+ * zero: nothing was recorded there, which is not the same as none packed.
+ * The SPS block's own label is the fourth banner row, with the words "not
+ * confirmed by IFL" while `sps.confirmed` is false, so the sheet states the
+ * assumption it was built under. The generic section sheets (Cell · Shift
+ * total · Count total · Grand total) follow it, so the workbook has the page
+ * AND the rows behind it. A report with no sacks has no matrix to show.
+ */
+export function spsPackingSheets(d: SpsPackingReportData, header: ReportHeader): Sheet[] {
+  if (d.rows.length === 0) return [];
+  const columns: SheetColumn[] = [
+    { header: 'Date', key: 'date', type: 'text' },
+    { header: 'Shift', key: 'shift', type: 'text' },
+    ...d.columns.flatMap((c, i): SheetColumn[] => [
+      { header: `${c.label} · sacks`, key: `s${i}`, type: 'integer' },
+      { header: `${c.label} · kg`, key: `k${i}`, type: 'number' },
+    ]),
+    { header: 'Total sacks', key: 'sacks', type: 'integer' },
+    { header: 'Total kg', key: 'kg', type: 'number' },
+  ];
+  const rows: Record<string, CsvCell>[] = d.rows.map((r) => {
+    const row: Record<string, CsvCell> = { date: r.date, shift: r.shift, sacks: r.total.sacks, kg: r.total.kg };
+    d.columns.forEach((c, i) => {
+      const cell = r.cells[c.key];
+      row[`s${i}`] = cell ? cell.sacks : null;
+      row[`k${i}`] = cell ? cell.kg : null;
+    });
+    return row;
+  });
+  const total: Record<string, CsvCell> = { date: 'Total', shift: null, sacks: d.grandTotal.sacks, kg: d.grandTotal.kg };
+  d.columns.forEach((c, i) => {
+    const t = d.totals.find((x) => x.key === c.key);
+    total[`s${i}`] = t ? t.sacks : null;
+    total[`k${i}`] = t ? t.kg : null;
+  });
+  rows.push(total);
+  return [{
+    name: 'Matrix',
+    columns,
+    rows,
+    titleRows: [...titleRowsFor(header, 'Matrix'), `${d.sps.label}${d.sps.confirmed ? '' : ' (not confirmed by IFL)'}`],
+  }];
+}
+
 /* -------------------------------------------------------- U4a: data bars */
 
-/** Column keys that are identifiers, not metrics — never the target of a data bar even when numeric. */
-const ID_LIKE_COLUMNS = new Set(['station']);
+/**
+ * Column keys that are identifiers or labels, not metrics — never the target of a data bar even when numeric, and
+ * written without a thousands separator (IFL reports D3: a winder, a hanger, a lifter, a sack number).
+ */
+const ID_LIKE_COLUMNS = new Set([
+  'station', 'winder', 'hanger', 'lifter', 'shift', 'date', 'day', 'sack_num', 'yarn_count', 'material_ids', 'scope',
+]);
+
+/** An identifier column by name: the set above, or any `*_id` / `*_code` (a material id, a tube code). */
+export function isIdLike(key: string): boolean {
+  return ID_LIKE_COLUMNS.has(key) || key.endsWith('_id') || key.endsWith('_code');
+}
 
 function firstNumericColumn(sheet: Sheet): string | null {
-  const col = sheet.columns.find(
-    (c) => (c.type === 'integer' || c.type === 'number') && !ID_LIKE_COLUMNS.has(c.key) && !c.key.endsWith('_id') && !c.key.endsWith('_code'),
-  );
+  const col = sheet.columns.find((c) => (c.type === 'integer' || c.type === 'number') && !isIdLike(c.key));
   return col ? col.key : null;
 }
 
@@ -890,6 +1056,8 @@ function byName(sheets: readonly Sheet[], n: string): Sheet | undefined {
  */
 export function dataBarTarget(type: ReportType, sheets: readonly Sheet[]): { sheetName: string; key: string } | null {
   let sheet: Sheet | undefined;
+  /** A column the type names outright, ahead of the "first numeric column" rule. */
+  let preferred: string | undefined;
   switch (type) {
     case 'daily':
       sheet = byName(sheets, 'Day');
@@ -925,15 +1093,47 @@ export function dataBarTarget(type: ReportType, sheets: readonly Sheet[]): { she
       break;
     case 'shift-production':
       sheet = byName(sheets, 'Summary');
+      preferred = 'total';
       break;
     case 'rejected-cones':
-      sheet = byName(sheets, 'Weight range winder');
+      // Two sections since 1 Oct 2026: `rejected_cone` and `weight_range` (scope line / winder).
+      sheet = byName(sheets, 'Weight range');
+      preferred = 'n';
+      break;
+    // The six reports that complete IFL's list of eight (1 Oct 2026). The key
+    // each prefers is the metric the sheet is about; when a later change drops
+    // it the first numeric non-identifier column is used instead.
+    case 'rejected-sacks':
+      sheet = byName(sheets, 'Day total');
+      preferred = 'rejected';
+      break;
+    case 'sps-packing':
+      sheet = byName(sheets, 'Count total');
+      preferred = 'sacks';
+      break;
+    case 'sack-weight-range':
+      sheet = byName(sheets, 'Spread shift');
+      preferred = 'n';
+      break;
+    case 'sack-weight-summary':
+      sheet = byName(sheets, 'Day total');
+      preferred = 'sacks';
+      break;
+    case 'rejected-hangers':
+      sheet = byName(sheets, 'Hanger');
+      preferred = 'total_rejects';
+      break;
+    case 'rejected-unknown-lifter':
+      sheet = byName(sheets, 'Lifter');
+      preferred = 'total_rejects';
       break;
     default:
       sheet = undefined;
   }
   if (!sheet || sheet.rows.length === 0) return null;
-  const key = firstNumericColumn(sheet);
+  // A named column wins only when it is a quantity: a data bar over an identifier or a text column is a bar over nothing.
+  const named = preferred ? sheet.columns.find((c) => c.key === preferred) : undefined;
+  const key = named && (named.type === 'integer' || named.type === 'number') && !isIdLike(named.key) ? named.key : firstNumericColumn(sheet);
   return key ? { sheetName: sheet.name, key } : null;
 }
 
@@ -1073,17 +1273,64 @@ export function chartSpecFor(type: ReportType, data: unknown): ChartSpecResult |
       const points = d.weightRange.byWinder.filter((r) => isNum(r.avgG)).map((r) => ({ category: `Winder ${r.winder}`, value: r.avgG as number }));
       return points.length ? { title: 'Average cone weight by winder', categoryLabel: 'Winder', valueLabel: 'Average (g)', points } : null;
     }
+    case 'rejected-sacks': {
+      const d = data as ReportDataByType['rejected-sacks'];
+      const points = d.byDay.filter((r) => isNum(r.rejected)).map((r) => ({ category: r.date, value: r.rejected }));
+      return points.length ? { title: 'Rejected sacks by day', categoryLabel: 'Day', valueLabel: 'Rejected sacks', points } : null;
+    }
+    case 'sps-packing': {
+      const d = data as ReportDataByType['sps-packing'];
+      const points = d.totals.filter((t) => isNum(t.sacks)).map((t) => ({ category: t.label, value: t.sacks }));
+      return points.length ? { title: 'Sacks packed by yarn count', categoryLabel: 'Yarn count', valueLabel: 'Sacks', points } : null;
+    }
+    case 'sack-weight-range': {
+      const d = data as ReportDataByType['sack-weight-range'];
+      // The bands are the headline; the implausible-weight row is not a weight and is left off the chart.
+      const points = d.bands.filter((b) => b.kind !== 'implausible' && isNum(b.total.total)).map((b) => ({ category: b.label, value: b.total.total }));
+      return points.length ? { title: 'Sacks by weight band', categoryLabel: 'Weight band', valueLabel: 'Sacks', points } : null;
+    }
+    case 'sack-weight-summary': {
+      const d = data as ReportDataByType['sack-weight-summary'];
+      const points = d.dayTotals.filter((r) => isNum(r.sacks)).map((r) => ({ category: r.date, value: r.sacks }));
+      return points.length ? { title: 'Sacks packed by day', categoryLabel: 'Day', valueLabel: 'Sacks', points } : null;
+    }
+    case 'rejected-hangers': {
+      const d = data as ReportDataByType['rejected-hangers'];
+      // The worst twenty, as the table already ranks them; the no-hanger bucket is a gap in the records, not a hanger.
+      const points = d.hangers
+        .filter((h) => h.hanger != null && isNum(h.total) && h.total > 0)
+        .slice(0, 20)
+        .map((h) => ({ category: `Hanger ${h.hanger}`, value: h.total }));
+      return points.length ? { title: 'Rejects by hanger (top 20)', categoryLabel: 'Hanger', valueLabel: 'Rejects', points } : null;
+    }
+    case 'rejected-unknown-lifter': {
+      const d = data as ReportDataByType['rejected-unknown-lifter'];
+      const points = d.lifters
+        .filter((l) => isNum(l.total) && l.total > 0)
+        .map((l) => ({ category: l.lifter == null ? 'No lifter recorded' : `Lifter ${l.lifter}`, value: l.total }));
+      return points.length ? { title: 'Rejects by lifter', categoryLabel: 'Lifter', valueLabel: 'Rejects', points } : null;
+    }
     default:
       return null;
   }
 }
 
-/** The two IFL SSRS-style report types print portrait; the rest landscape. */
-const PORTRAIT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>(['shift-production', 'rejected-cones']);
+/**
+ * IFL's own reports print portrait, like their SSRS pages, except the SPS
+ * packing matrix (one column per yarn count is wider than a portrait page);
+ * the ten earlier types stay landscape.
+ */
+const PORTRAIT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>([
+  'shift-production', 'rejected-cones', 'rejected-sacks', 'sack-weight-range', 'sack-weight-summary', 'rejected-hangers',
+  'rejected-unknown-lifter',
+]);
 
 /** Every sheet of a report: the header, any type-specific sheet, the CSV's sections, then — when the data has one — the one chart sheet. The data bar lands last, on whichever of those sheets `dataBarTarget` names. */
 export function reportSheets<T extends ReportType>(type: T, data: ReportDataByType[T], header: ReportHeader, table: CsvTable): Sheet[] {
-  const own = type === 'machine-product' ? machineProductSheets(data as MachineProductReportData, header) : [];
+  const own =
+    type === 'machine-product' ? machineProductSheets(data as MachineProductReportData, header)
+    : type === 'sps-packing' ? spsPackingSheets(data as SpsPackingReportData, header)
+    : [];
   const sheets = [headerSheet(header), ...own, ...sheetsFromCsv(table, header.title.slice(0, 31), header)];
 
   const spec = chartSpecFor(type, data as AnyReportData);

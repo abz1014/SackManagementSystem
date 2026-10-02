@@ -18,6 +18,7 @@ import { SERVICE_VERSION } from '../health.js';
 import { plantNowMs } from '../plantClock.js';
 import type { ShiftRange } from '../../shiftRange.js';
 import { daysIn, generationDisclosureLines, REPORT_TITLES, SHIFT_SOURCE_NOTE, type ReportFilters, type ReportHeader, type ReportType } from './common.js';
+import { reportNotesOf } from './notes.js';
 
 /**
  * Chart overhaul wave 2 (Task TB2, 28 Sep 2026): the plain-words form of a
@@ -144,6 +145,11 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
     : simulatorSource
       ? `Data batch: ${genLabel ?? 'unknown'}.`
       : null;
+  // D6 (1 Oct 2026): the report's own printable notes, composed once from the report DATA (notes.ts) so the CSV's trailing rows, the
+  // workbook's header sheet and the printed closing block read one list. Set only when there is something to state: a caller with
+  // no report data (the register's standalone header route), or one of the earlier ten types whose notes print beside their
+  // figures, carries no `reportNotes` at all — absent means "none composed", never "no caveats".
+  const reportNotes = input.reportData != null ? reportNotesOf(input.reportType, input.reportData) : [];
   return {
     reportType: input.reportType,
     title: REPORT_TITLES[input.reportType],
@@ -159,6 +165,7 @@ export async function buildHeader(pool: ConnectionPool, lineId: number, input: H
     definitions: 'KPI-DEFINITIONS.md',
     approval: 'awaiting',
     shiftNote: SHIFT_SOURCE_NOTE,
+    ...(reportNotes.length > 0 ? { reportNotes } : {}),
     ...disclosure,
     generationLine,
     simulatorSource,

@@ -17,6 +17,15 @@
  */
 import { generationDisclosureLines, SHIFT_SOURCE_NOTE, type ReportHeader } from './common.js';
 import { batchName } from '../batchName.js';
+import { plantWallClock } from './plantTime.js';
+import type { ShiftRange } from '../../shiftRange.js';
+
+/**
+ * The UTF-8 byte-order mark. Excel on Windows opens a BOM-less UTF-8 CSV as the system code page and mangles every
+ * non-ASCII character (the middle dots, the dashes and the curly quotes of the notes below). The ROUTE's CSV response
+ * prefixes this; `csvDocument` itself stays BOM-free, because a script reading the file does not want one (IFL reports D5).
+ */
+export const CSV_BOM = '\uFEFF';
 
 export type CsvCell = string | number | boolean | null | undefined;
 export type CsvRow = CsvCell[];
@@ -64,6 +73,22 @@ function simulatorDisclosureText(h: Pick<ReportHeader, 'generationLine' | 'sourc
   return `Data batch: ${name} (plant simulator, synthetic data)`;
 }
 
+/**
+ * The period as the attribution states it: the calendar days, and — when the
+ * request was shift-bounded — the shifts in plain words after them
+ * ("2026-09-02 to 2026-09-03 (2 Sep morning shift – 3 Sep night shift)").
+ * `buildHeader` sets `periodLabel` to the plain `from to to` when there is no
+ * shift range, so an ordinary report reads exactly as it always did. The CSV,
+ * the workbook's header sheet and its banner are built from the shift-bounded
+ * figures, and a label naming only whole days over them would misstate what
+ * the file holds (IFL reports H-exports, 1 Oct 2026, D-49's sibling).
+ */
+export function periodText(h: Pick<ReportHeader, 'period' | 'periodLabel'>, fmt: (isoDay: string) => string = (d) => d): string {
+  const plain = `${fmt(h.period.from)} to ${fmt(h.period.to)}`;
+  const label = h.periodLabel?.trim();
+  return label && label !== `${h.period.from} to ${h.period.to}` ? `${plain} (${label})` : plain;
+}
+
 /** The trailing attribution rows, in a fixed order a test can pin. */
 export function attributionRows(h: ReportHeader): [string, string][] {
   const filters = Object.entries(h.filters)
@@ -73,9 +98,11 @@ export function attributionRows(h: ReportHeader): [string, string][] {
   const rows: [string, string][] = [
     ['report', h.title],
     ['line', h.lineName],
-    ['period', `${h.period.from} to ${h.period.to}`],
+    ['period', periodText(h)],
     ['filters', filters || 'none'],
-    ['generated_at_plant_time', h.generatedAtPlantUtc],
+    // D4: the plant's wall clock as "YYYY-MM-DD HH:mm:ss", no zone marker — the ISO form's trailing "Z" invited a conversion
+    // that moves the time five hours away from what the plant's own clock said. An unparseable value is kept as it came.
+    ['generated_at_plant_time', plantWallClock(h.generatedAtPlantUtc) || h.generatedAtPlantUtc],
     ['generated_by', h.generatedBy],
     ['sms_version', h.smsVersion],
     ['definitions', h.definitions],
@@ -107,34 +134,66 @@ export function attributionRows(h: ReportHeader): [string, string][] {
     // `simulatorDisclosureText` above.
     rows.push([simulatorDisclosureText(h), '']);
   }
+  // D6 (1 Oct 2026): the report's own notes — method, caveats, plausibility window and every "Assumed until IFL confirms"
+  // line — one row each, last. The same list the printed page and the workbook's header sheet carry (`ReportHeader.reportNotes`,
+  // composed once by notes.ts), so the three can never state different assumptions.
+  for (const note of h.reportNotes ?? []) {
+    if (typeof note === 'string' && note.trim() !== '') rows.push(['report_note', note]);
+  }
   return rows;
 }
 
 /**
  * A complete CSV document: the table, a blank line, then the attribution.
- * A BOM is NOT prepended here — the route sends `charset=utf-8` and the web
- * client's downloads add one for Excel on Windows; the server file is what a
- * script consumes and a script does not want a BOM.
+ * A BOM is NOT prepended here — the web client's downloads add one for Excel
+ * on Windows and the route's CSV response prefixes `CSV_BOM` (above); this
+ * string is what a script consumes, and a script does not want a BOM.
  */
 export function csvDocument(headers: readonly string[], rows: readonly CsvRow[], header: ReportHeader): string {
   return `${toCsv(headers, rows)}\n\n${toCsv([], attributionRows(header))}`;
 }
 
 /**
- * `sms-report-<type>-<from>[_to_<to>][-partial-generation].<ext>` — the
+ * `sms-report-<type>-<from>[_to_<to>][-<shift>][-st<N>][-pr<N>][-partial-generation].<ext>` — the
  * filename does the everyday attribution work. RT24-03 (24 Sep 2026): the
  * `-partial-generation` marker is appended whenever `spansGenerations` is
  * true, so a file that left the building with readings excluded says so
  * before anyone opens it.
+ *
+ * IFL reports D6 (1 Oct 2026): the report's FILTERS and SHIFT RANGE are in
+ * the name too. Two exports of the same report and days — the night shift and
+ * the whole day, winder 7 and the whole line — used to land in a downloads
+ * folder under one name and overwrite each other, or be told apart only by
+ * opening them. `-night`, `-st7` (winder / station 7) and `-pr21` (product 21)
+ * come right after the period, in that order. A shift-bounded period
+ * (`shiftRange`, the route's decoded `fromShift`/`toShift`) writes its own
+ * shifts into the period: `2026-09-02-morning_to_2026-09-03-night` for a range
+ * across days and `2026-09-02-morning` for one shift, the same wording the
+ * report's own period label uses ("2 Sep morning shift – 3 Sep night shift").
+ * The range is a parameter, not a header field, because `ReportHeader` carries
+ * only the plain-words label; every caller that has the request has the range.
  */
-export function reportFilename(h: ReportHeader, ext: 'csv' | 'xlsx' | 'pdf'): string {
-  const span = h.period.from === h.period.to ? h.period.from : `${h.period.from}_to_${h.period.to}`;
+export function reportFilename(h: ReportHeader, ext: 'csv' | 'xlsx' | 'pdf', shiftRange?: ShiftRange | null): string {
+  const span = shiftRange
+    ? shiftRange.from === shiftRange.to && shiftRange.fromShift === shiftRange.toShift
+      ? `${shiftRange.from}-${shiftRange.fromShift}`
+      : `${shiftRange.from}-${shiftRange.fromShift}_to_${shiftRange.to}-${shiftRange.toShift}`
+    : h.period.from === h.period.to
+      ? h.period.from
+      : `${h.period.from}_to_${h.period.to}`;
+  const f = h.filters ?? {};
+  // A filter value is a validated enum or integer upstream; the clean-up keeps a stray character out of a file name regardless.
+  const part = (prefix: string, v: unknown): string => {
+    const t = String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return v == null || t === '' ? '' : `-${prefix}${t}`;
+  };
+  const filters = part('', f.shift) + part('st', f.station) + part('pr', f.product);
   const marker = h.spansGenerations ? '-partial-generation' : '';
-  return `sms-report-${h.reportType}-${span}${marker}.${ext}`;
+  return `sms-report-${h.reportType}-${span}${filters}${marker}.${ext}`;
 }
 
-export function csvFilename(h: ReportHeader): string {
-  return reportFilename(h, 'csv');
+export function csvFilename(h: ReportHeader, shiftRange?: ShiftRange | null): string {
+  return reportFilename(h, 'csv', shiftRange);
 }
 
 /**

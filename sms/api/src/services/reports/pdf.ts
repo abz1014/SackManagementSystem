@@ -45,6 +45,7 @@ import puppeteer, { type Browser } from 'puppeteer-core';
 import { mintRenderToken, revokeRenderToken, RENDER_TOKEN_COOKIE, type AuthUser } from '../../auth.js';
 import type { ReportFilters, ReportType } from './common.js';
 import type { ResolvedPeriod } from '../report.js';
+import type { ShiftRange } from '../../shiftRange.js';
 
 /** One page load must complete (network-idle, then the header actually rendering) within this long, or the render fails loudly. */
 export const RENDER_TIMEOUT_MS = 30_000;
@@ -63,6 +64,17 @@ export const PRINT_VIEWPORT_WIDTH_PX = Math.round(((297 - 28) / 25.4) * 96);
  * (`s`, `rt`, `rsh`, `st`, `pr`, `at`) — there is no second parser to drift
  * out of step with; a change to that file's key names would need a matching
  * change here, same as any other consumer of that URL contract.
+ *
+ * A SHIFT-BOUNDED period (D-49, 1 Oct 2026). A request that carried
+ * `fromShift`/`toShift` (the route decodes them into `shiftRange`) is a period
+ * of its own, "2 Sep morning shift – 3 Sep night shift", narrower than the
+ * calendar days `resolved` holds. This URL used to drop it: the PDF loaded
+ * `p=pick&from=…&to=…`, so the page fetched the whole calendar days and
+ * printed those figures, while the CSV and workbook of the same request DID
+ * honour the range — three files, one request, two different periods. It is now written the way
+ * the SPA writes it itself (web/src/lib/period.ts `writePeriodParams`):
+ * `p=range&from=YYYY-MM-DD.shift&to=YYYY-MM-DD.shift`, which the page decodes
+ * and sends back to the server as `fromShift`/`toShift`.
  */
 export function buildRenderUrl(
   baseUrl: string,
@@ -70,13 +82,20 @@ export function buildRenderUrl(
   resolved: ResolvedPeriod,
   filters: ReportFilters,
   atMs: number | null,
+  shiftRange?: ShiftRange | null,
 ): string {
   const u = new URL('/', baseUrl);
   u.searchParams.set('s', 'report');
   u.searchParams.set('rt', type);
-  u.searchParams.set('p', 'pick');
-  u.searchParams.set('from', resolved.from);
-  u.searchParams.set('to', resolved.to);
+  if (shiftRange) {
+    u.searchParams.set('p', 'range');
+    u.searchParams.set('from', `${shiftRange.from}.${shiftRange.fromShift}`);
+    u.searchParams.set('to', `${shiftRange.to}.${shiftRange.toShift}`);
+  } else {
+    u.searchParams.set('p', 'pick');
+    u.searchParams.set('from', resolved.from);
+    u.searchParams.set('to', resolved.to);
+  }
   if (filters.shift) u.searchParams.set('rsh', filters.shift);
   if (filters.station != null) u.searchParams.set('st', String(filters.station));
   if (filters.product != null) u.searchParams.set('pr', String(filters.product));
@@ -156,6 +175,8 @@ export interface RenderReportPdfInput {
   resolved: ResolvedPeriod;
   filters: ReportFilters;
   atMs: number | null;
+  /** D-49: the shift-bounded period the request named, when it named one — see `buildRenderUrl`. */
+  shiftRange?: ShiftRange | null;
   /** The already-authenticated exporter — a fresh render token is minted for them, used once, and revoked in `finally`. */
   user: AuthUser;
   edgePath: string;
@@ -197,7 +218,7 @@ export async function renderReportPdf(input: RenderReportPdfInput): Promise<Rend
     // axis ticks at nearly twice their intended size.
     await page.setViewport({ width: PRINT_VIEWPORT_WIDTH_PX, height: 1400 });
     await page.emulateMediaType('print');
-    const url = buildRenderUrl(input.baseUrl, input.type, input.resolved, input.filters, input.atMs);
+    const url = buildRenderUrl(input.baseUrl, input.type, input.resolved, input.filters, input.atMs, input.shiftRange);
     await page.goto(url, { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
     await page.evaluate('document.fonts.ready.then(() => true)');
     // The print header (`PrintHead.tsx`) renders nothing at all until the
