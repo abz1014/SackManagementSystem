@@ -111,14 +111,30 @@ function retryAfterOf(res: Response): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
+/** C-141 (D-105): a GET that never answers used to leave its screen on a
+ *  skeleton forever. After this long it aborts and surfaces as an ApiError
+ *  (408), which the existing error/retry path already renders and re-polls. */
+export const GET_TIMEOUT_MS = 30_000;
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: 'application/json' } });
-  if (!res.ok) {
-    handleStatus(res, path);
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`, null, detailOf(body));
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), GET_TIMEOUT_MS);
+  try {
+    const res = await fetch(path, { headers: { Accept: 'application/json' }, signal: ctl.signal });
+    if (!res.ok) {
+      handleStatus(res, path);
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, (body as { error?: string }).error ?? `HTTP ${res.status}`, null, detailOf(body));
+    }
+    return (await res.json()) as T;
+  } catch (e) {
+    if (ctl.signal.aborted && !(e instanceof ApiError)) {
+      throw new ApiError(408, 'request timed out', null, null);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
