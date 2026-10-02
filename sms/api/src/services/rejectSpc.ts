@@ -451,7 +451,8 @@ export async function getRejectSpc(
     const inspected = g.produced + g.unmatched;
     pBarOf.set(generation, inspected > 0 ? g.rejects / inspected : null);
   }
-  const spansGenerations = perGen.size > 1;
+  // C-015 (D-79, 2 Oct 2026): a scoped read holds one generation, so the series alone can never show a boundary; the scope knows another generation was present and dropped.
+  const spansGenerations = perGen.size > 1 || filters.scope?.spansGenerations === true;
   // Within one generation this IS the pooled p̄, exactly as before. Across a
   // boundary it is the PREFERRED generation's — see the file header's 23 Sep
   // 2026 correction. Prefer a REAL generation over a simulator one
