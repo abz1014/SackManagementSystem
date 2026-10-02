@@ -258,6 +258,13 @@ export function WeightScreen({
       <div className="page">
         <p className="q">{W.question.weight}</p>
         <h1 className="wide">{headline(d, sLine, coneLine.error, coneLine.loading)}</h1>
+        {/* C-015, 2 Oct 2026: the headline's mean is read from ONE data batch
+            (`sLine`); say so under it when the period crossed the boundary. */}
+        {sLine?.spansGenerations && (
+          <p className="mut sm" style={{ marginTop: 10, maxWidth: '68ch' }}>
+            {W.state.periodGenerations(sLine.otherGenerationExcluded > 0 ? fmtInt(sLine.otherGenerationExcluded) : null)}
+          </p>
+        )}
       </div>
 
       <Block first>
@@ -278,7 +285,7 @@ export function WeightScreen({
                 {/* count === 0, not just `!s`: an empty period comes back as a
                     real SpcData with mean 0, which printed a confident "0 g
                     average" for a period in which nothing was weighed. */}
-                {sLine && sLine.count > 0 ? fmtInt(Math.round(sLine.mean)) : '—'}
+                {sLine && sLine.count > 0 && sLine.mean != null ? fmtInt(Math.round(sLine.mean)) : '—'}
                 <span className="fig-unit">{W.fig.gAverage}</span>
               </b>
               <span className="fig-note">
@@ -359,7 +366,7 @@ export function WeightScreen({
             </div>
             <div>
               <b className="fig-val small">
-                {sLine && sLine.count > 0
+                {sLine && sLine.count > 0 && sLine.mean != null && sLine.stdevOverall != null
                   ? W.weight.spread(fmtInt(Math.round(sLine.mean - 2 * sLine.stdevOverall)), fmtInt(Math.round(sLine.mean + 2 * sLine.stdevOverall)))
                   : '—'}
               </b>
@@ -575,7 +582,9 @@ export function WeightScreen({
             })()}
           </>
         )}
-        {s && (
+        {/* C-049 (2 Oct 2026): at count 0 there is no mean or spread to state; the
+            working paragraph is not drawn (the headline already says nothing was weighed). */}
+        {s && s.count > 0 && s.mean != null && s.stdevOverall != null && s.stdevWithin != null && (
           <p>
             {/* UX Phase 5 Brief 3 unit U6 (16 Sep 2026): `s` follows the
                 chart toggle now, so its population word and its unit (spc.ts's

@@ -917,13 +917,14 @@ export interface SpcData {
   type: SpcType;
   unit: 'g' | 'kg';
   count: number;
-  mean: number;
-  stdevOverall: number;
-  stdevWithin: number;
+  /** null when count is 0 (C-049, 2 Oct 2026): an empty period has no mean or spread. */
+  mean: number | null;
+  stdevOverall: number | null;
+  stdevWithin: number | null;
   bucketMinutes: number;
   bucketLabel: string;
-  grandMean: number;
-  sChartCenter: number;
+  grandMean: number | null;
+  sChartCenter: number | null;
   xbarOutOfControl: number;
   nelsonFlagged: number;
   subgroups: Subgroup[];

@@ -175,17 +175,18 @@ export interface SpcData {
   /** True iff `otherGenerationExcluded` > 0 — the requested window touched
    *  more than one physical source generation. */
   spansGenerations: boolean;
-  mean: number;
+  /** null (C-049, 2 Oct 2026) when `count` is 0: an empty period has no mean, not a mean of 0. */
+  mean: number | null;
   /** Median of the same population as `mean` (roadmap Phase 9 item 1, 15 Sep
    *  2026) — the Weight screen prints the two side by side, so they must come
    *  from one query surface with one predicate. Null for an empty period. */
   median: number | null;
-  stdevOverall: number; // long-term σ (all points) → Pp/Ppk
-  stdevWithin: number; // short-term σ (pooled within-subgroup) → Cp/Cpk
+  stdevOverall: number | null; // long-term σ (all points) → Pp/Ppk; null at count 0 (C-049)
+  stdevWithin: number | null; // short-term σ (pooled within-subgroup) → Cp/Cpk; null at count 0 (C-049)
   bucketMinutes: number;
   bucketLabel: string;
-  grandMean: number;
-  sChartCenter: number; // = stdevWithin
+  grandMean: number | null; // null at count 0 (C-049)
+  sChartCenter: number | null; // = stdevWithin; null at count 0 (C-049)
   xbarOutOfControl: number;
   /** Subgroups with at least one Nelson rule 2-8 violation (rule 1 is
    *  xbarOutOfControl above) — a non-random pattern with no single point ever
@@ -989,14 +990,16 @@ export async function getWeightSpc(
     generation,
     otherGenerationExcluded,
     spansGenerations,
-    mean: round(mean, 2),
+    // C-049 (2 Oct 2026): at count 0 there is no mean and no spread — null,
+    // not the 0 the internal arithmetic above defaults to.
+    mean: count > 0 ? round(mean, 2) : null,
     median: median == null ? null : round(median, 2),
-    stdevOverall: round(stdevOverall, 3),
-    stdevWithin: round(stdevWithin, 3),
+    stdevOverall: count > 0 ? round(stdevOverall, 3) : null,
+    stdevWithin: count > 0 ? round(stdevWithin, 3) : null,
     bucketMinutes,
     bucketLabel,
-    grandMean: round(grandMean, 2),
-    sChartCenter: round(stdevWithin, 3),
+    grandMean: count > 0 ? round(grandMean, 2) : null,
+    sChartCenter: count > 0 ? round(stdevWithin, 3) : null,
     xbarOutOfControl,
     nelsonFlagged: subgroups.filter((g) => g.nelson.length > 0).length,
     subgroups,
