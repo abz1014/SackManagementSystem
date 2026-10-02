@@ -285,6 +285,7 @@ export function SacksScreen({
             unit={unit}
             onUnit={onUnitChange}
             canRecord={canRecord}
+            shiftNarrowed={!!(period.shift || period.fromShift || period.toShift)}
             onRecorded={() => { ledger.refresh(); summary.refresh(); }}
             onOpenDay={onOpenDay}
           />
@@ -562,6 +563,7 @@ function Ledger({
   unit,
   onUnit,
   canRecord,
+  shiftNarrowed,
   onRecorded,
   onOpenDay,
 }: {
@@ -569,6 +571,8 @@ function Ledger({
   unit: SackUnit;
   onUnit: (u: SackUnit) => void;
   canRecord: boolean;
+  /** C-170: the period is a shift or shift range, but the ledger is whole production days. */
+  shiftNarrowed: boolean;
   onRecorded: () => void;
   onOpenDay: (day: string) => void;
 }) {
@@ -592,12 +596,14 @@ function Ledger({
         />
       )}
 
+      {shiftNarrowed && <p className="mut sm" style={{ marginTop: 10 }}>{W.sacks.ledgerWholeDays}</p>}
+
       {nothing ? (
         <p className="state">{W.sacks.ledgerEmpty}</p>
       ) : (
         <>
           <p style={{ marginTop: 14 }}>
-            {W.sacks.openingBefore(unitWord(unit === 'sacks' ? d.opening.sacks : d.opening.kg, unit))}{' '}
+            {(shiftNarrowed ? W.sacks.openingBeforeDays : W.sacks.openingBefore)(unitWord(unit === 'sacks' ? d.opening.sacks : d.opening.kg, unit))}{' '}
             {W.sacks.closingNow(unitWord(unit === 'sacks' ? d.closing.sacks : d.closing.kg, unit))}
           </p>
           <div className="tw" style={{ marginTop: 14 }}>

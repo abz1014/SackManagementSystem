@@ -2018,6 +2018,10 @@ export const W = {
     ledgerEmpty: 'No sacks and no movements in this period.',
     openingBefore: (n: string) => `${n} in stock before this period.`,
     closingNow: (n: string) => `${n} in stock at the end of it.`,
+    /* C-170 (2 Oct 2026): /api/sacks/stock takes no shift, so under a shift or shift range the ledger is still whole production days. */
+    ledgerWholeDays:
+      'This ledger is kept per production day (06:00 to 06:00): it covers every shift of each day the period touches, so its figures are larger than the shift named above. The opening line is the stock before the first of those days.',
+    openingBeforeDays: (n: string) => `${n} in stock before the first production day shown.`,
     kgIncomplete: (n: number) =>
       n === 1
         ? 'The kg column is short by one recorded movement that had no weight.'
