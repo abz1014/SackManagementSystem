@@ -21,6 +21,8 @@ commits ahead of origin/main" figure elsewhere in this file (85, 90 ["80" below]
 251, 303, ...) is a historical snapshot taken on the date its own passage states, left as
 written rather than rewritten in place. Still unpushed; only the owner pushes.
 
+**Measured 2 Oct 2026:** `git rev-list --count origin/main..HEAD` = **411** (before the five `docs:` commits of the data-trust audit). Still unpushed; only the owner pushes.
+
 **Kept under roadmap rule 15:** completed · in progress · blocked · IFL dependency · test status. Updated at the end of every phase or wave; `BASELINE.md` is the frozen Phase 0 picture and is not.
 
 Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the evidence behind every status is in `ROADMAP-GAP-ANALYSIS.md` (§2–§13 per phase, §15 waves, §17 defect register, §18 IFL clarifications).
@@ -51,9 +53,26 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 | 13 — Documentation | **PARTIAL — corrected 24 Sep 2026, later the same day: three manuals now exist that this row used to list as absent.** `handover/FAT-PROTOCOL.md` (`d772d4b`), `handover/OPERATOR-MANUAL.md` (`eb36ddb`) and `handover/ADMIN-DEPLOY-MANUAL.md` (`4513d40`) are all in the tree. Still absent, and the reason this row stays PARTIAL rather than COMPLETE: SAT protocol, a data dictionary in the form IFL would recognise (`DATA-DICTIONARY.md` exists but was never checked against IFL's own expectation), and none of the three manuals has been read or exercised by anyone at IFL. `BASELINE.md`, `PROJECT_STATUS.md`, `DEPLOY.md` (corrected — the font claim in its "Internet access is not required" section was itself wrong until this pass, see §6/CLAUDE.md), credentials statement, technical history, questions status. |
 | 14 — Site commissioning | out of scope until a host exists | — |
 
+**Phase board note, 2 Oct 2026 (data-trust audit, §2's first entry):** no phase row changes status. The audit's verdicts bear on Phases 4, 5, 7, 8, 9 and 12 (figures verified against an independent oracle on the dev copy; 44 defects fixed; statistical-method and IFL-definition decisions still open) but it is evidence, not a phase. Phase 12's test counts are superseded by §6's wave-5 gate (386 files / 4,077 tests, 0 failed).
+
 ---
 
 ## 2. Completed
+
+### 2 October 2026 — data-trust audit (Phase 1) and its fix stage: 44 items fixed in 41 commits; six not committed; decisions open
+
+Roadmap rule 15 record. **Completed:** a read-only audit of whether the figures SMS stores, calculates, prints and exports can be trusted (19 discovery tasks, 50 refuters, an independent oracle that never read the app code: 1,535 figure comparisons across 17 periods, 0 unexplained mismatches), then a fix stage in five waves with an independent re-verifier, a serial gate and a serial committer. 175 verdicts; the stored history and plain counts are right on both real generations; one HIGH (C-003, a shift-range wiring error) and the narrower misleading outputs. **50 of the 58 fix-eligible items are fixed in 47 commits** (`08cfe07`..`becc956`, `DEFECTS.md` D-57 to D-105). Full account: `DATA-TRUST-AUDIT-2026-10-02.md`; register `DEFECTS.md` Part 15; incident `handover/INCIDENT-2026-10-02.md` (an audit agent's script ran the real CLI against the live dev `sms` database and emptied it, and a repo-wide `grep` raced a SQL open and left `DATA_TP1U2_SEP07` RECOVERY_PENDING; both restored and verified, nothing real lost, refutation re-run on the read-only copy `sms_audit`); recompute guide `handover/DATA-TRUST-RECOMPUTE-2026-10-02.md`.
+
+**In progress / not committed.** Nothing from the fix stage. The last six items were committed at the close-out (C-133 `99caf8c`, C-015 `f64bf85`, C-138 `dfabc1e`, C-174 `f4f00f0`, C-134 `a929512`, C-117 `becc956`); they were unit-proven and not re-measured by the independent harness. Committed HEAD typechecks on its own (`DEFECTS.md` D-106 resolved). Eight items were dropped from fixing with a reason (C-074, C-099, C-109, C-115, C-123, C-148, C-072, C-037).
+
+**Blocked on IFL (drafted, not sent):** `IFL-OPEN-QUESTIONS.md` items 30-41 — the quality-inspection silence 14-18 Aug (September reject rate 4.59 % with the window, 5.01 % without), the average-sack definition, weight basis, the stop-time rule, the weight-reject definition, the sack window, implausible scale rejects, the sack SD window, cone records missing from the wide table, the stale-timestamp cause, the outlier rule on rejects, sack time. **Owner decisions pending:** `DECISIONS-PENDING.md` §14 (56 entries: 50 owner decisions and 6 follow-ups of the narrowed fixes; the largest are the reject control band C-012/C-013, the per-station flags C-014, whole-day figures under a shift range C-004, and the live-state lag C-008).
+
+**Test status (close-out gate on HEAD `becc956`, 2 Oct 2026, from `sms/`).** `npm run typecheck` clean; `npx vitest run` twice, identical: **388 files passed / 1 skipped (389), 4,081 tests passed / 4 skipped, 0 failed** (wave 5: 386 / 4,077; baseline 321 / 1 and 3,912 / 4); web build clean to a scratch directory (one chunk 631.43 kB over the 500 kB warning, pre-existing); `npm run test:layout` not re-run (wave 5: 106 passed, 38 skipped, 0 failed). RV-final (wave 5, before the close-out items): harness self-test 39 of 39, A32 62,582 comparisons (20 fixed, 44 intended changes, 0 unintended regressions), A41 3,520 checks (19 fixed, 0 regressions).
+
+**NOT verified:** the live plant and IFL's server; the 10 Jul - 5 Aug month (never sent); any printed page or Excel rendering (nobody has looked); signed-in viewer, engineer or manager sessions; PLC and scale behaviour; the plant PC's time zone; real rule edits; the live running/stopped rates (an emulation); **the operator-tool fixes (D-62 to D-71) by unit test and read-only SQL demo only, never by running the CLI**; the owner's API on :4000 still runs the old code until restarted after `npm run build`.
+
+**Corrections to earlier text in this file (old text kept; audit C-180, C-181, C-183, C-186, C-187).** (1) The IFL eight-reports entry below, and §3, describe the work as uncommitted and the tree as clean: it **is committed** (`7b9fc3d`, `9271bd5`, `188d3b2`, `94197b8`, `f829d30`, all 2 Oct 2026), the audit found the tree was **not** clean when those lines were written, and the current test figures are the wave-5 gate above. (2) References in this file to "32 KPI definitions" and "TEN report types" are stale: `KPI-DEFINITIONS.md` holds **64 rows** and `REPORT_TYPES` holds **eighteen** types. (3) Lines that call RT24-05 and RT24-12 open are stale: both are fixed (`25b02bc`, `45bdba8`). (4) Lines that say product limits are unknown before 11 Sep 2026 are stale in one respect: a limit history exists (migration 040, 14 `pdas_created` versions, each a bootstrap whose true start is unknown), as `KPI-DEFINITIONS.md` §3 states.
+
 
 ### 1 October 2026 — IFL's eight reports (their email of 29 September 2026): built, gated, verified live on the dev copy
 
@@ -865,6 +884,8 @@ These are not done unilaterally. Each is one action.
 | 9 | Whether the Report screen should state which **weight basis** produced its numbers (currently: two separate facts, mean and target, per `DEFECTS.md` D-13) | Presentation choice, not blocked on IFL — `gross`/`as_recorded` already agree numerically. |
 | 10 | **Create two local logins, owner only** (agents may not create accounts, per standing project rule): a rank-1/rank-2 account pair to close the "viewer/engineer role never signed in live" gap, and an EXECUTE-only `sms_pdas_writer`-shaped login to rehearse cutover against a login shape narrower than `db_owner` | Credential creation. **Kits ready (25 Sep 2026):** `handover/REHEARSAL-RBAC-BELOW-RANK.md` and `handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` (+ `sms/scripts/rehearse-rt24-05.mjs`) give the exact commands; running them closes RBAC-live and RT24-05's live firing. |
 | 11 | `sms.product_change` row `change_id=3` — described by this pass's brief as an audit-probe artefact that self-identifies in its own `reason` field and renders on Product › History; **not independently re-queried this pass** — remove or keep as a labelled test row, owner's call, same shape as item 5 above | Owner's data; not re-verified against the live table by this worker. |
+| 12 | **Restart the dev API on :4000 after `npm run build`** (the remaining working-tree changes of the 2 Oct 2026 audit are now committed and the gate re-run on HEAD, `DEFECTS.md` D-106 resolved) | The owner's running process; agents never restart it. |
+| 13 | Read **`DECISIONS-PENDING.md` §14** (data-trust audit decisions: 50 owner entries, 6 follow-ups) and decide; decide whether to send `IFL-OPEN-QUESTIONS.md` items 30-41 (drafted 2 Oct 2026, **not sent**) | Statistical-method and scope choices, and outward communication to IFL. |
 
 ---
 
@@ -908,6 +929,8 @@ Rule 17 applies: nothing above is guessed past. Work proceeds on whatever does n
 ---
 
 ## 6. Test status
+
+> **Re-captured 2 October 2026 (superseding every note below — kept, not deleted), wave-5 gate of the data-trust fix stage.** `npx vitest run` from `sms/`, twice, identical: **386 test files passed / 1 skipped (387), 4,077 tests passed / 4 skipped, 0 failed**; `npm run typecheck` (`tsc -b shared sync-worker cli api web`) clean; `npm run test:layout` 106 passed / 38 skipped / 0 failed. Measured on the working tree, which then included uncommitted C-133, C-134 and C-174 edits (since committed; the close-out gate on HEAD `becc956` is 388 files / 4,081 tests, 0 failed, typecheck clean; `DEFECTS.md` D-106 resolved). Source: `scratchpad/gate/W5/gate.json`. The 24 Sep "2 tests failed" figure in the table below is long superseded (audit C-187).
 
 > **Re-captured 24 September 2026, later the same day (superseding the note immediately below —
 > kept, not deleted), HEAD `22d7440`.** `npx vitest run` from `sms/`, this pass, directly:
