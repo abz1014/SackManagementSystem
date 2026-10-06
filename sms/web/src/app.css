@@ -1057,7 +1057,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   .nav-link { height: 40px; }
   /* [CSS-001, 5 Oct 2026] .nav was `height: 40px` here, which beat the `height: auto` of the 900px rule above
      (this rule comes later) and froze the box at one row, so wrapped links were painted under the period strip. */
-  .nav { height: auto; }
+  .nav { height: auto; flex-wrap: wrap; row-gap: 6px; } /* [CSS-028] wrap too, or Health sits past the right edge at 901-945px at the Wall text size */
   .strip, .page { padding-left: 20px; padding-right: 20px; }
   /* [SPEC 6] The hairline between figures becomes a hairline between rows
      once they wrap, or the second row hangs off nothing. */
