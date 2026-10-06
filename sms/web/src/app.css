@@ -1269,9 +1269,11 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
      already guards the Report aria-label coupling above. */
   .chart-tip, .chart-resize { display: none !important; }
   body { font-size: 11pt; }
-  .page { max-width: none; padding: 0; }
+  /* [CSS-005, 5 Oct 2026] 8px on the left, not 0: the deviation chart's left-most y-axis label ("+10.0 g") starts ~6px left of its svg, so with
+     zero padding it began outside the printable area and its "+" was cut off (printed as "-10.0 g"). */
+  .page { max-width: none; padding: 0 0 0 8px; }
   .band { border-top: 0; }
-  .band > .page { padding: 0; }
+  .band > .page { padding: 0 0 0 8px; }
   .block { break-inside: avoid; }
   /* [SPEC 5] The hanging label would waste 180px of a sheet of A4. On paper
      the label goes back above its content. */
