@@ -232,15 +232,21 @@ function Body({
       {data.rows.length === 0 ? (
         <p className="state">{M.sheetEmpty}</p>
       ) : (
+        /* CSS-051/CSS-023: four columns, not six. Six columns have a combined
+           minimum width (nowrap headers, nowrap figures) of ~400px, wider than
+           the 460px sheet's 396px of content and far wider than a phone's
+           311px, so the Record column was cut off. Station sits under the time
+           and the record id under the product, each in the one cell, so no
+           fact is dropped and a row is at most two or three short lines. */
         <table style={{ marginTop: 22 }}>
           <thead>
             <tr>
-              <th style={{ width: '7em' }}>{M.colTime}</th>
-              <th style={{ width: '8em' }}>{M.colStation}</th>
-              <th>{M.colProduct}</th>
-              <th className="n" style={{ width: '6em' }}>{M.colWeight}</th>
-              <th style={{ paddingLeft: 24 }}>{M.colRecord}</th>
-              <th className="n" style={{ width: '2em' }} />
+              {/* Stacked like the cells under them, so a header's widest line
+                  is one word and does not claim the width of both. */}
+              <th>{M.colTime}<span style={{ display: 'block' }}>{M.colStation}</span></th>
+              <th>{M.colProduct}<span style={{ display: 'block' }}>{M.colRecord}</span></th>
+              <th className="n" style={{ paddingLeft: 8 }}>{M.colWeight}</th>
+              <th className="n" style={{ width: '1em', paddingLeft: 4 }} />
             </tr>
           </thead>
           <tbody>
@@ -252,20 +258,26 @@ function Body({
                 onClick={() => onOpenReading('reject', r.eventId)}
                 onKeyDown={rowKeys(() => onOpenReading('reject', r.eventId))}
               >
-                <td>{fmtClock(r.productionTsUtc)}</td>
-                <td>{r.station == null ? '—' : stationLabel(stations.find((x) => x.stationId === r.station), r.station)}</td>
-                <td className={r.productLabel ? '' : 'g'}>{r.productLabel ?? M.noProductThen}</td>
-                <td className="n">{r.weightG == null ? <span className="g">{M.notWeighed}</span> : fmtG(r.weightG)}</td>
-                {/* One id, labelled with its generation: the number alone names two rows since 5 Aug 2026. */}
-                <td style={{ paddingLeft: 24 }}>
-                  {r.sourceRowId == null ? '—' : String(r.sourceRowId)}
-                  {/* Task B (28 Sep 2026): a plain batch name, not the raw
-                      table label ("pack1_TP1U2 gen 4"). */}
-                  {r.epochOrdinal != null && (
-                    <span className="mut sm"> · {batchName({ ordinal: r.epochOrdinal, simulator: r.epochSimulator })}</span>
-                  )}
+                <td>
+                  <span style={{ whiteSpace: 'nowrap' }}>{fmtClock(r.productionTsUtc)}</span>
+                  <span className="mut sm" style={{ display: 'block' }}>
+                    {r.station == null ? '—' : stationLabel(stations.find((x) => x.stationId === r.station), r.station)}
+                  </span>
                 </td>
-                <td className="n"><Chevron label={W.openRecord} /></td>
+                <td>
+                  <span className={r.productLabel ? '' : 'g'}>{r.productLabel ?? M.noProductThen}</span>
+                  {/* One id, labelled with its generation: the number alone names two rows since 5 Aug 2026. */}
+                  <span className="mut sm" style={{ display: 'block' }}>
+                    {r.sourceRowId == null ? '—' : String(r.sourceRowId)}
+                    {/* Task B (28 Sep 2026): a plain batch name, not the raw
+                        table label ("pack1_TP1U2 gen 4"). */}
+                    {r.epochOrdinal != null && (
+                      <> · {batchName({ ordinal: r.epochOrdinal, simulator: r.epochSimulator })}</>
+                    )}
+                  </span>
+                </td>
+                <td className="n" style={{ paddingLeft: 8 }}>{r.weightG == null ? <span className="g" style={{ whiteSpace: 'normal' }}>{M.notWeighed}</span> : fmtG(r.weightG)}</td>
+                <td className="n" style={{ paddingLeft: 4 }}><Chevron label={W.openRecord} /></td>
               </tr>
             ))}
           </tbody>
