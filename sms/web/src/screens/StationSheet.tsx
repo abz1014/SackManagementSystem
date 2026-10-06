@@ -284,8 +284,8 @@ function Body({
           <tbody>
             {flaggedDays.map((d) => (
               <tr key={d.date}>
-                <td style={{ width: '7em' }}>{short(d.date)}</td>
-                <td className="n" style={{ width: '6em' }}>{fmtG(d.mean)}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{short(d.date)}</td>
+                <td className="n">{fmtG(d.mean)}</td>
                 <td>{d.nelson.map((id) => ruleLabel(id, data.rules ?? [])).join(' · ')}</td>
               </tr>
             ))}
