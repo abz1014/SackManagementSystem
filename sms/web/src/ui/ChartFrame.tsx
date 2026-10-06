@@ -50,7 +50,7 @@
  * AT THE LAST SIZE CHANGE — never a live one. That is deliberate, not a bug:
  * it is what keeps a hover from re-running whatever `children` does.
  */
-import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Readout } from './chart';
 import { useChartSize } from './useChartSize';
 import { placeTip, type Rect } from './chartLayout';
@@ -263,6 +263,21 @@ export function ChartFrame(props: ChartFrameProps) {
     [active, activate, hit, pinned, size.print, wrapperPoint],
   );
 
+  /* CSS-038 (6 Oct 2026): a tooltip pinned with the arrow keys used to stay
+     on the chart after Tab moved focus on (only Escape or a pointer gesture
+     cleared it). It follows the keyboard, so it goes when the keyboard
+     leaves: the wrapper itself losing focus (to the resize handle or
+     elsewhere) clears a pinned tip. Bubbling blurs from the handle are
+     ignored; a hover-only tip (not pinned) is untouched. */
+  const onWrapperBlur = useCallback(
+    (e: ReactFocusEvent<HTMLDivElement>) => {
+      if (e.target !== e.currentTarget || !pinned) return;
+      setPinned(false);
+      setActive(null);
+    },
+    [pinned],
+  );
+
   const onWrapperPointerLeave = useCallback(() => {
     if (pinned) return;
     setActive(null);
@@ -426,6 +441,7 @@ export function ChartFrame(props: ChartFrameProps) {
         onPointerLeave={onWrapperPointerLeave}
         onDoubleClick={onWrapperDoubleClick}
         onKeyDown={onWrapperKeyDown}
+        onBlur={onWrapperBlur}
       >
         {child}
 
