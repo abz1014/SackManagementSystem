@@ -170,9 +170,9 @@ function TrailBlock() {
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: '13em' }}>{W.product.historyTrail.colWhen}</th>
+                  <th>{W.product.historyTrail.colWhen}</th>
                   <th>{W.product.historyTrail.colProduct}</th>
-                  <th>{W.product.historyTrail.colOutcome}</th>
+                  <th style={{ width: '40%' }}>{W.product.historyTrail.colOutcome}</th>
                   <th>{W.product.historyTrail.colBy}</th>
                   <th>{W.product.historyTrail.colReason}</th>
                 </tr>
