@@ -130,7 +130,7 @@ export function ProductLimitsBlock() {
       ) : res.data.products.length === 0 ? (
         <p className="mut sm">{W.cone.limitsNoProducts}</p>
       ) : (
-        <div style={{ display: 'grid', gap: 18, marginTop: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 18, marginTop: 12 }}>
           {res.data.products.map((p) => (
             <ProductHistory
               key={p.productId}
