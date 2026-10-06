@@ -609,7 +609,7 @@ function Ledger({
             {W.sacks.closingNow(unitWord(unit === 'sacks' ? d.closing.sacks : d.closing.kg, unit))}
           </p>
           <div className="tw" style={{ marginTop: 14 }}>
-            <table>
+            <table className="tw-span">
               <thead>
                 <tr>
                   <th>{W.sacks.colDay}</th>
