@@ -359,7 +359,7 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
 .nav-link.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
 .nav-link:focus-visible { outline-offset: -4px; }
 
-.bar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.bar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-left: auto; } /* [CSS-002] stays at the right when it wraps onto a row alone: space-between left-aligned a lone item, so the user menu (right-anchored, 232px wide) opened up to 107px past the window's left edge */
 
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
