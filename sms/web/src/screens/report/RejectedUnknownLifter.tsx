@@ -80,7 +80,7 @@ function RejectTable({ rows }: { rows: UnknownLifterReject[] }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={`${r.producedAtUtc}-${i}`}>
-              <td>{fmtDmy(r.date)}</td>
+              <td style={{ whiteSpace: 'nowrap' }}>{fmtDmy(r.date)}</td>
               <td>{fmtClockSec(r.producedAtUtc)}</td>
               <td>{W.shiftName[r.shift]}</td>
               <td className="n">{r.hanger ?? '—'}</td>
@@ -90,7 +90,7 @@ function RejectTable({ rows }: { rows: UnknownLifterReject[] }) {
               <td className="n">{r.tubeCode ?? '—'}</td>
               <td className="n">{r.materialCode ?? '—'}</td>
               <td className="n">{r.weightG == null ? '—' : fmtInt(r.weightG)}</td>
-              <td>{(r.why ?? []).join('; ') || '—'}</td>
+              <td style={{ minWidth: '14em' }}>{(r.why ?? []).join('; ') || '—'}</td>
             </tr>
           ))}
         </tbody>
