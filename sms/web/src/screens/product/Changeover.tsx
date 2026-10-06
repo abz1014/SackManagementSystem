@@ -473,14 +473,14 @@ function PickersForm({
         <input type="number" step="1" min="0" value={offsetPlusG} onChange={(e) => setOffsetPlusG(e.target.value)} />
       </label>
       <label className="field"><span>{W.product.desc1}</span>
-        <input value={lot} onChange={(e) => setLot(e.target.value)} />
+        <input type="text" value={lot} onChange={(e) => setLot(e.target.value)} />
       </label>
       <label className="field"><span>{W.product.ppColour}</span>
-        <input value={ppColour} onChange={(e) => setPpColour(e.target.value)} />
+        <input type="text" value={ppColour} onChange={(e) => setPpColour(e.target.value)} />
       </label>
 
       <label className="field"><span>{W.product.sackColour}</span>
-        <input value={sackColour} onChange={(e) => setSackColour(e.target.value)} />
+        <input type="text" value={sackColour} onChange={(e) => setSackColour(e.target.value)} />
       </label>
 
       {(products.filter((p) => p.activeFlag !== false).length > 0 || refs.pallets.length > 0) && (
@@ -535,7 +535,7 @@ function PickersForm({
 
       <label className="field">
         <span>{W.product.whyRequired}</span>
-        <input value={reason} onChange={(e) => setReason(e.target.value)} />
+        <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} />
         {reason.trim().length < MIN_REASON_CHARS && <span className="mut sm">{W.product.reasonTooShort}</span>}
       </label>
     </div>
