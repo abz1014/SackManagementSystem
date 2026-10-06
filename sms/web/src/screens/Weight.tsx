@@ -1057,7 +1057,29 @@ function OverTime({
         // as `StationSheet.tsx`'s `DailyMeans` does: their text does not
         // depend on the margin's own width, only the margin's width depends
         // on the widest of them.
-        const labels = overTimeGutterLabels(spc.spec, target, [lo, hi], T, b0, size.fontPx, spc.unit);
+        const fullLabels = overTimeGutterLabels(spc.spec, target, [lo, hi], T, b0, size.fontPx, spc.unit);
+        const fullWidest = fullLabels.reduce((m, l) => Math.max(m, l.text.length), 0);
+        // CSS-071 (5 Oct 2026): the gutter is capped at 30% of the chart, so
+        // on a narrow chart the long text ("↑ upper limit 1,970 g · off
+        // scale") ran past the svg edge and the reader lost the value and
+        // the off-scale fact. When the full text does not fit, fall back to
+        // the Distribution chart's own short form ("upper"/"target"/"lower",
+        // `shortDistRefLabel`), keeping the off-scale arrow, with the full
+        // text in a native `<title>` — nothing is lost, only restated
+        // compactly. Same width-gated rule as Distribution, no new wording.
+        // The test uses the label's measured advance (about 0.45em per
+        // character, rounded up to 0.46) against the room the capped gutter
+        // leaves, not `textPx`'s deliberately conservative 0.6em: on a
+        // 768px window the full text already fits with 28px to spare and
+        // must keep its full wording.
+        const shortForm = fullWidest > 0 && fullWidest * size.fontPx * 0.46 > Wd * 0.3 - 8;
+        const labels = shortForm
+          ? fullLabels.map((l) => ({
+              ...l,
+              full: l.text,
+              text: /^[↑↓]/.test(l.text) ? `${l.text[0]} ${shortDistRefLabel(l.kind)}` : shortDistRefLabel(l.kind),
+            }))
+          : fullLabels.map((l) => ({ ...l, full: null as string | null }));
         const widest = labels.reduce((m, l) => Math.max(m, l.text.length), 0);
         const R = widest > 0 ? Math.min(Math.max(60, Math.ceil(textPx(widest, size.fontPx)) + 16), Wd * 0.3) : 8;
 
@@ -1086,6 +1108,7 @@ function OverTime({
                   fill={l.tone === 'ink' ? 'var(--graphite)' : 'var(--muted)'}
                 >
                   {l.text}
+                  {l.full && <title>{l.full}</title>}
                 </text>
               </g>
             ))}
