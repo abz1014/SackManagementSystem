@@ -827,7 +827,7 @@ function AttentionList({
           return (
             <li key={i}>
               <span className="say">{sentence(f, byId)}</span>{' '}
-              <button type="button" className="linkish" onClick={onClick}>
+              <button type="button" className="linkish no-print" onClick={onClick}>
                 {label}
               </button>
             </li>
@@ -940,7 +940,7 @@ function ProductFooter({
           </>
         )}
       </div>
-      <div className="row" style={{ gap: 16 }}>
+      <div className="row no-print" style={{ gap: 16 }}>
         {/* Fixed alongside H3 (Sep 2026 audit): this used to link to a
             #history anchor that existed nowhere on the page. It opens the
             same product sheet Change does, available to every reader. */}

@@ -526,7 +526,7 @@ export function RejectsScreen({
                 {code && (
                   <span className="chip on">
                     {M.codeChip(activeReason ? reasonName(activeReason) : code)}{' '}
-                    <button type="button" className="linkish x" onClick={() => onCodeChange(null)} aria-label={`${M.clearCode} ${M.codeChip('')}`}>
+                    <button type="button" className="linkish x no-print" onClick={() => onCodeChange(null)} aria-label={`${M.clearCode} ${M.codeChip('')}`}>
                       ×
                     </button>
                   </span>
@@ -610,11 +610,11 @@ export function RejectsScreen({
       </Block>
 
       <Block tight>
-        <p>
+        <p className="no-print">
           <button type="button" className="linkish" onClick={onSeeCones}>{W.rejects.seeTheCones}</button>{' '}
           <span className="mut">· {W.rejects.seeTheConesNote}</span>
         </p>
-        <p style={{ marginTop: 8 }}>
+        <p className="no-print" style={{ marginTop: 8 }}>
           <button type="button" className="linkish" onClick={onSeeStations}>{W.rejects.byStation}</button>{' '}
           <span className="mut">· {W.rejects.byStationNote}</span>
         </p>
@@ -810,7 +810,7 @@ function Reasons({
                     />
                   </span>
                 ) : (
-                  <button type="button" className="linkish sm" onClick={() => { setEditing(r.rejectCodeId!); setDraft(r.label ?? ''); setSaveError(null); }}>
+                  <button type="button" className="linkish sm no-print" onClick={() => { setEditing(r.rejectCodeId!); setDraft(r.label ?? ''); setSaveError(null); }}>
                     {W.rejects.nameIt}
                   </button>
                 )
