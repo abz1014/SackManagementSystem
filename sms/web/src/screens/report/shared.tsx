@@ -1171,7 +1171,19 @@ export function RejectTrendChart({
     else bandRuns.push([i]);
   }
 
-  const grid = [1, 2, 3, 4].filter((v) => v < max);
+  // CSS-029 (6 Oct 2026): the gridlines were a fixed 1-4 %, so a line running
+  // to 14.6 % had no scale above 4 % and, squeezed into the plot, the labelled
+  // gridlines sat under 14 px apart. Still 1 % steps where they are at least
+  // MIN_TICK_PX apart (every chart whose peak is a few percent: unchanged);
+  // otherwise the smallest of 2/5/10/20/50 % that is, up to the data.
+  const MIN_TICK_PX = 20;
+  const gridFor = (plotPx: number): number[] => {
+    const pxPerPct = plotPx / max;
+    const step = [1, 2, 5, 10, 20, 50].find((s) => s * pxPerPct >= MIN_TICK_PX) ?? 50;
+    const out: number[] = [];
+    for (let v = step; v < max; v += step) out.push(v);
+    return out;
+  };
   const qName = singleName ?? W.rejects.quality;
 
   // Tooltip content: the UCL beside each series' own rate, so the tooltip/
@@ -1286,7 +1298,7 @@ export function RejectTrendChart({
             {firstIn >= 0 && (
               <rect x={x(firstIn) - 4} y={T} width={Math.max(8, x(lastIn) - x(firstIn) + 8)} height={fsize.height - T - B} fill="var(--paper-2)" />
             )}
-            {grid.map((v) => (
+            {gridFor(fsize.height - T - B).map((v) => (
               <g key={v}>
                 <line x1={L} x2={fsize.width - R} y1={y(v)} y2={y(v)} stroke="var(--rule)" />
                 <text x={L - 8} y={y(v) + 4} fontSize={fsize.fontPx} fill="var(--muted)" textAnchor="end">{v}%</text>
