@@ -589,6 +589,24 @@ export function Pager({
 
 /* -------------------------------------------------------------- the table */
 
+/** CSS-066: the fixed column widths below stole room from the other columns
+ *  and wrapped every cell onto two lines up to 860px wide (the app.css
+ *  breakpoint). They apply from 861px up only; true when matchMedia is
+ *  unavailable (jsdom) so the desktop widths stay the default. */
+const WIDE_TABLE_QUERY = '(min-width: 861px)';
+function useWideTable(): boolean {
+  const [wide, setWide] = useState(() => typeof matchMedia !== 'function' || matchMedia(WIDE_TABLE_QUERY).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const m = matchMedia(WIDE_TABLE_QUERY);
+    const on = () => setWide(m.matches);
+    on();
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  return wide;
+}
+
 export function ReadingTable({
   rows,
   listing,
@@ -601,14 +619,15 @@ export function ReadingTable({
   const isSack = listing === 'sacks';
   const isInspectionReject = listing === 'inspectionRejects';
   const type: RegisterType = isSack ? 'sack' : isInspectionReject ? 'reject' : 'cone';
+  const wide = useWideTable();
 
   return (
     <table>
       <thead>
         <tr>
-          <th style={{ width: '9em' }}>{W.readings.time}</th>
-          <th style={{ width: '11em' }}>{isSack ? W.readings.sackNo : W.readings.record}</th>
-          <th className="n" style={{ width: '7em' }}>{W.readings.weight}</th>
+          <th style={wide ? { width: '9em' } : undefined}>{W.readings.time}</th>
+          <th style={wide ? { width: '11em' } : undefined}>{isSack ? W.readings.sackNo : W.readings.record}</th>
+          <th className="n" style={wide ? { width: '7em' } : undefined}>{W.readings.weight}</th>
           <th style={{ paddingLeft: 32 }}>{isSack ? W.readings.status : W.cone.colState}</th>
           {!isSack && <th style={{ paddingLeft: 24 }}>{W.cone.colProduct}</th>}
           <th className="n" style={{ width: '2em' }} />
