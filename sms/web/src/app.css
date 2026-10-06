@@ -742,6 +742,8 @@ tbody tr:last-child td { border-bottom: 0; }
    widening the table past its container. */
 .station-tbl, .calib-tbl { table-layout: fixed; }
 .station-tbl th, .calib-tbl th, .epoch-tbl th { white-space: normal; }
+/* [CSS-049, 6 Oct 2026] A mixed-material station's vs-target cell holds a sentence, not a number; `td.n`'s nowrap printed it over the cells beside it. */
+.station-tbl td.n.wrap { white-space: normal; }
 /* [CSS-004, 5 Oct 2026] Below the 860px layout the ten fixed percentage columns of the calibration table are narrower than their own
    numbers and header words, which were printed over each other (70px at 375, 19px at 700, 5px at 860). Auto layout lets every column
    take at least its own text; the .tw wrapper scrolls the rest sideways, as it does for every wide table. Screen only (print and 861px+ keep fixed). */

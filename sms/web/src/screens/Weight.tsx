@@ -1603,7 +1603,7 @@ function StationTable({
               <td className="n">{fmtG(r.meanG)}</td>
               <td className="n">{r.medianG == null ? '—' : fmtG(r.medianG)}</td>
               <td className="n">{r.sdG == null ? '—' : `${r.sdG.toFixed(1)} g`}</td>
-              <td className="n">{vsTargetCell(r)}</td>
+              <td className={r.targetBasis === 'mixed' ? 'n wrap' : 'n'}>{vsTargetCell(r)}</td>
               <td style={{ paddingLeft: 14 }}>
                 <Sparkline days={r.days} domain={sparkDomain} lineMeanG={data.lineMeanG} />
               </td>
