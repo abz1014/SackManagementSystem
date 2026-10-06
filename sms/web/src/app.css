@@ -1513,6 +1513,7 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
   /* One compact numbered footnote block at the END of the document. */
   .pd-notes { margin-top: 12pt; }
   .pd-notes .pd-h { font-size: 8pt; border-bottom: 0.5pt solid #999; margin-bottom: 4pt; }
-  .pd-notes ol.pd-footnotes { columns: 1; font-size: 8pt; color: #666; padding-left: 14pt; line-height: 1.35; }
+  /* [CSS-006, 5 Oct 2026] `columns: auto` (was `columns: 1`): a one-column multicol box overprinted its lines when the first footnote straddled a page break. */
+  .pd-notes ol.pd-footnotes { columns: auto; font-size: 8pt; color: #666; padding-left: 14pt; line-height: 1.35; }
   .pd-notes .pd-conf { font-size: 8pt; color: #666; }
 }
