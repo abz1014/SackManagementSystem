@@ -174,6 +174,7 @@ function UserMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }
   // the shell carries no route for it.
   const [account, setAccount] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [scale, setScale] = useState<string>(() => {
     try {
       const saved = localStorage.getItem('sms.uiScale');
@@ -197,7 +198,13 @@ function UserMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }
     const away = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // CSS-039: the menu unmounts on close; if focus is inside it, hand focus
+      // back to the trigger so a keyboard user keeps their place.
+      if (box.current && box.current.contains(document.activeElement) && document.activeElement !== trigger.current) trigger.current?.focus();
+      setOpen(false);
+    };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);
     return () => {
@@ -212,6 +219,7 @@ function UserMenu({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }
   return (
     <div className="menu-wrap" ref={box}>
       <button
+        ref={trigger}
         type="button"
         className="icon-btn initials"
         aria-haspopup="menu"
