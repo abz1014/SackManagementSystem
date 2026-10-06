@@ -812,6 +812,7 @@ tr.rej.click:hover td { background: #f8ded7; }
 .chip:hover { background: var(--paper-3); }
 .chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 .chip .x { color: inherit; opacity: 0.75; }
+.chip.on :focus-visible { outline-color: var(--paper); } /* [CSS-080, 6 Oct 2026] the default dark focus ring was drawn on the dark ink chip, so keyboard focus on the clear button was invisible */
 
 .toggle { display: inline-flex; border: 1px solid var(--rule-2); border-radius: var(--radius); overflow: hidden; }
 .toggle button {
