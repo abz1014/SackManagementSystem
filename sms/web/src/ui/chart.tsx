@@ -90,6 +90,19 @@ export function edgeAnchor(i: number, len: number): 'start' | 'middle' | 'end' {
   return 'middle';
 }
 
+/**
+ * CSS-032 (6 Oct 2026): RULE 2's edge anchoring is for TIME ticks, where a
+ * label at x=0 would hang off the plot. A CATEGORY label belongs under its own
+ * bar, so it is centred on the bar; it only anchors to an edge when centring
+ * would run it past the svg (a very narrow chart).
+ */
+export function categoryLabelAnchor(centreX: number, text: string, fontPx: number, svgWidth: number): 'start' | 'middle' | 'end' {
+  const half = textPx(text.length, fontPx) / 2;
+  if (centreX - half < 0) return 'start';
+  if (centreX + half > svgWidth) return 'end';
+  return 'middle';
+}
+
 /* ---------------------------------------------------------------- readout */
 
 /**

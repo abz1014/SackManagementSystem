@@ -17,7 +17,7 @@ import { useRef } from 'react';
 import { W } from '../../lib/words';
 import { Empty } from '../../ui/bits';
 import {
-  edgeAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
+  edgeAnchor, categoryLabelAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
   linePath, fittingTicks, tickIndices, CategoryBars, type BarDatum,
 } from '../../ui/chart';
 import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../../ui/ChartFrame';
@@ -907,7 +907,7 @@ export function DeviationBars({
                     y={H - B + 16}
                     fontSize={fsize.fontPx}
                     fill="var(--muted)"
-                    textAnchor={edgeAnchor(i, rows.length)}
+                    textAnchor={categoryLabelAnchor(cx(i), tickOf(r), fsize.fontPx, fsize.width)}
                   >
                     {tickOf(r)}
                   </text>
