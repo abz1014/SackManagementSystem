@@ -696,6 +696,8 @@ th.n, td.n { text-align: right; padding-right: 0; padding-left: 18px; white-spac
    Restored only when the `.n` cell has a sibling after it, so a genuinely
    trailing one (Sacks' register, Weight's KPI rows) keeps its flush edge. */
 th.n:not(:last-child), td.n:not(:last-child) { padding-right: 12px; }
+/* [CSS-065, 6 Oct 2026] The Sacks stock ledger (the one `table.tw-span` with clickable day rows) has seven numeric columns; at the 18px left padding above its table was 8px wider than its box at 768 in kg mode, cutting the last digits of Closing behind an unmarked sideways scroll. 12px (the gap every other numeric column already keeps on its right) is scoped to this table only: the same change on every table reflows the whole app. */
+@media screen { table.tw-span:has(tr.click) th.n, table.tw-span:has(tr.click) td.n { padding-left: 12px; } }
 tr.on td, tr.hl td { background: var(--paper-3); }
 tr.click { cursor: pointer; }
 tr.click:hover td { background: var(--paper-3); }
