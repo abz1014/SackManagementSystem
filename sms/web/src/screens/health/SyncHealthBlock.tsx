@@ -337,6 +337,7 @@ export function SyncHealthBlock({
               <p className="mut sm" style={{ marginBottom: 8 }}>{HW.dqAck.summary(acknowledgedCount)}</p>
             )}
             <div className="tw">
+              {/* CSS-067: the check name cannot break on its own (no spaces), so it held ~150px and left the two prose columns ~127px and ~175px; it now wraps and the prose columns take the room. */}
               <table>
                 <thead>
                   <tr>
@@ -353,7 +354,7 @@ export function SyncHealthBlock({
                     findings.map((f, i) => (
                       <tr key={`${table}:${f.checkName}:${f.findingId}`}>
                         <td>{i === 0 ? table : ''}</td>
-                        <td>{f.checkName}</td>
+                        <td style={{ overflowWrap: 'anywhere' }}>{f.checkName}</td>
                         <td className={f.severity === 'ERROR' || f.severity === 'CRITICAL' ? 'acc' : ''}>{f.severity}</td>
                         <td>{f.detail ?? '—'}</td>
                         <td>
