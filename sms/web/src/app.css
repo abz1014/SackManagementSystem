@@ -753,8 +753,11 @@ tbody tr:last-child td { border-bottom: 0; }
 /* A5 (1 Oct 2026): the epoch register's fixed percentage columns let "Last seen"
    and "Status" timestamps spill into each other. Auto layout + a floor width +
    nowrap on the timestamp cells; the .tw wrapper scrolls if it still cannot fit. */
-.epoch-tbl { min-width: 960px; }
-.epoch-tbl td:nth-child(4), .epoch-tbl td:nth-child(5), .epoch-tbl td:nth-child(6) { white-space: nowrap; padding-right: 16px; }
+/* [CSS-017, 6 Oct 2026] The 960px floor and the nowrap on all three of First seen / Last seen / Status made the table 1050px (1141 with real text) in a 1036px box, so "Registered by" and "Rows held" were reachable only by an unmarked sideways scroll. The floor is gone and Status (a phrase such as "Closed 10 Jul 2026, 12:00") may wrap between words; the two instants stay on one line. At the 1.3 text size the two instants alone still need more than the box (about 1314px on real data, was 1443px): the box does not grow with the text size (owner call, R3-B-r3-08). */
+.epoch-tbl td:nth-child(4), .epoch-tbl td:nth-child(5), .epoch-tbl td:nth-child(6) { white-space: nowrap; }
+.epoch-tbl th:nth-child(n+3):not(:last-child), .epoch-tbl td:nth-child(n+3):not(:last-child) { padding-right: 8px; } /* [CSS-017] the 16px gap after the instants (12px elsewhere) was the last 30px the real table (timestamps with seconds) was over its box */
+.epoch-tbl td:nth-child(6) { white-space: normal; }
+.epoch-tbl td:nth-child(7) { white-space: nowrap; } /* [CSS-017] "cli:epoch-accept" is an identifier: it broke after the colon and the hyphen in a 106px column */
 /* Report tables too wide for the content column (25 Sep 2026): Calibration's
    ten columns in the ~816px column beside the 180px hanging label overprinted
    "Adjustments" onto "Last adjusted" and wrapped "Station 11". A block whose
