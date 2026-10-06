@@ -836,6 +836,10 @@ function ByDayTable({ rows, onOpen }: { rows: RejectDayCodeRow[]; onOpen: (r: Re
   const M = W.rejectsMore;
   if (rows.length === 0) return <Empty message={M.noneForFilters} />;
   return (
+    /* CSS-008: scroll inside the block, never the page. `position: relative`
+       contains the absolutely-positioned .sr-only spans in each row, which
+       otherwise escape the overflow clip and still widen the page. */
+    <div className="tw" style={{ position: 'relative' }}>
     <table>
       <thead>
         <tr>
@@ -864,5 +868,6 @@ function ByDayTable({ rows, onOpen }: { rows: RejectDayCodeRow[]; onOpen: (r: Re
         })}
       </tbody>
     </table>
+    </div>
   );
 }
