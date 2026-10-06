@@ -816,6 +816,9 @@ tr.rej.click:hover td { background: #f8ded7; }
 .toggle button:last-child { border-right: 0; }
 .toggle button:hover { background: var(--paper-3); color: var(--ink); }
 .toggle button.on { background: var(--ink); color: #fff; }
+/* [CSS-058, 6 Oct 2026] .toggle's overflow:hidden clipped the outside focus ring, so keyboard focus drew nothing; draw it inside the button (paper-coloured on the ink fill of the selected one). */
+.toggle button:focus-visible { outline-offset: -4px; }
+.toggle button.on:focus-visible { outline-color: var(--paper); }
 
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
