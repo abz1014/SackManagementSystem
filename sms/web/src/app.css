@@ -839,6 +839,12 @@ tr.rej.click:hover td { background: #f8ded7; }
 /* [CSS-058, 6 Oct 2026] .toggle's overflow:hidden clipped the outside focus ring, so keyboard focus drew nothing; draw it inside the button (paper-coloured on the ink fill of the selected one). */
 .toggle button:focus-visible { outline-offset: -4px; }
 .toggle button.on:focus-visible { outline-color: var(--paper); }
+/* [CSS-007, 6 Oct 2026] A toggle is inline-flex with nowrap buttons, so a long one (Readings' listing, Product's tabs) was wider than a phone and the page scrolled sideways: it may now wrap onto a second row inside its own box. flex-wrap, not overflow-x:auto, which would clip the CSS-058 focus ring again. */
+.toggle { flex-wrap: wrap; max-width: 100%; }
+/* [CSS-007, 6 Oct 2026] The listing tables sit in `.tw` (overflow-x: auto) but hold position:absolute `.sr-only` spans, and an absolute box is clipped only by an ancestor that is its containing block: `.tw` was not one, so the spans past the right edge widened the whole page (Readings' rejected listing, 71px sideways at 375). */
+.tw { position: relative; }
+/* [CSS-007, 7 Oct 2026] A positioned `.tw` that follows a chart is painted after it and so covered the 6px of the chart's resize handle that hang below the chart (Station and Calibration reports: 390 of 1300 sample points of the handle reachable). The handle is lifted above the table with z-index: 1, below .chart-tip (5); .chart-frame sets no z-index, so it is no stacking context and the 1 competes with the table directly. Chosen over scoping the rule to `.tw:has(.sr-only)` (measured: Station's table holds .sr-only spans too, the handle stayed at 390/1300) and over dropping `position: relative` (the sideways page scroll returns). */
+.chart-resize { z-index: 1; }
 /* [CSS-059, 6 Oct 2026] Under forced colours (Windows high contrast) the browser replaces the ink fill that marks the selected toggle button, report chip and period button, so selected looked identical to unselected. Keep the mark in system colours; no effect in normal rendering. */
 @media (forced-colors: active) {
   .toggle button.on, .chip.on, .period button.on { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
