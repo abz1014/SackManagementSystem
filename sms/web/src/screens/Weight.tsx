@@ -35,7 +35,7 @@ import {
   Block, Chevron, Details, Empty, Failed, rowKeys, Toggle,
   SkelChart, SkelFigures, SkelLines,
 } from '../ui/bits';
-import { edgeAnchor, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
+import { dropCollidingTicks, edgeAnchor, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../ui/ChartFrame';
 import { placeGutterLabels, placeTip, packRow, textPx, bandHit, nearestIndex, type Rect } from '../ui/chartLayout';
 import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
@@ -1091,7 +1091,15 @@ function OverTime({
 
         // Width-aware for the same reason as Rejects: a multi-day window
         // labels ticks "2 Sept 06:00", twice as wide as a bare time.
-        const ticks = tickIndices(g.length, fittingTicks(Wd - L - R, multiDay ? 13 : 6, size.fontPx, g.length, 4));
+        // CSS-070 (6 Oct 2026): `fittingTicks` floors at two, so on a narrow
+        // chart (320 wide at the Wall text size) the two end times overprinted.
+        const ticks = dropCollidingTicks(
+          tickIndices(g.length, fittingTicks(Wd - L - R, multiDay ? 13 : 6, size.fontPx, g.length, 4)),
+          x,
+          (i) => tickLabel(g[i]!.ts, multiDay),
+          size.fontPx,
+          (i) => edgeAnchor(i, g.length),
+        );
 
         return (
           <svg className="chart" viewBox={`0 0 ${Wd} ${Hd}`} height={Hd} role="presentation" aria-hidden="true">

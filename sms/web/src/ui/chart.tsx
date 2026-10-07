@@ -103,6 +103,73 @@ export function categoryLabelAnchor(centreX: number, text: string, fontPx: numbe
   return 'middle';
 }
 
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+/**
+ * The rendered width of a short axis label. Measured with the page's own font
+ * when a canvas is available (so a label that really fits is never dropped on
+ * an over-cautious estimate), else 0.55em per character (measured: the app's
+ * date labels run 0.49-0.55em).
+ */
+function labelWidthPx(text: string, fontPx: number): number {
+  if (measureCtx === undefined) {
+    measureCtx = null;
+    try {
+      if (typeof document !== 'undefined' && !/jsdom/i.test(navigator.userAgent)) {
+        measureCtx = document.createElement('canvas').getContext('2d');
+      }
+    } catch {
+      measureCtx = null;
+    }
+  }
+  if (measureCtx) {
+    const family = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    measureCtx.font = `${fontPx}px ${family}`;
+    const w = measureCtx.measureText(text).width;
+    if (w > 0) return Math.ceil(w * 1.03);
+  }
+  return Math.ceil(text.length * fontPx * 0.55);
+}
+
+/**
+ * CSS-070 (6 Oct 2026): `fittingTicks` floors at two labels, so on a narrow
+ * chart the two end dates were drawn on top of each other. Given the chosen
+ * tick indices, drop labels until none touches its neighbour (less than
+ * `minGap` px apart), interior labels first; if only the two ends are left
+ * and still collide, keep the LAST one (the newest date; the chart's caption
+ * and table state the first). Labels that already fit are left exactly as they
+ * were. `anchorOf` is the anchor each label is drawn with.
+ */
+export function dropCollidingTicks(
+  idx: number[],
+  xOf: (i: number) => number,
+  textOf: (i: number) => string,
+  fontPx: number,
+  anchorOf: (i: number) => 'start' | 'middle' | 'end',
+  minGap = 6,
+): number[] {
+  const box = (i: number): [number, number] => {
+    const w = labelWidthPx(textOf(i), fontPx);
+    const a = anchorOf(i);
+    const x = xOf(i);
+    return a === 'start' ? [x, x + w] : a === 'end' ? [x - w, x] : [x - w / 2, x + w / 2];
+  };
+  let cur = [...idx];
+  while (cur.length > 1) {
+    let bad = -1;
+    for (let k = 1; k < cur.length; k++) {
+      if (box(cur[k]!)[0] - box(cur[k - 1]!)[1] < minGap) { bad = k; break; }
+    }
+    if (bad < 0) break;
+    if (cur.length === 2) cur = [cur[1]!];
+    else {
+      // Drop the interior member of the colliding pair (the right one when both are interior).
+      const dropAt = bad === cur.length - 1 ? bad - 1 : bad;
+      cur = cur.filter((_, k) => k !== dropAt);
+    }
+  }
+  return cur;
+}
+
 /* ---------------------------------------------------------------- readout */
 
 /**
@@ -632,7 +699,15 @@ export function CategoryBars({
         const labelPx = Math.ceil(textPx(widest, size.fontPx)) + 12;
         const perTick = Math.max(1, Math.ceil(labelPx / Math.max(1, layout.slot)));
         const tickCount = Math.max(2, Math.min(data.length, Math.ceil(data.length / perTick)));
-        const ticks = new Set(tickIndices(data.length, tickCount));
+        const ticks = new Set(
+          dropCollidingTicks(
+            tickIndices(data.length, tickCount),
+            cx,
+            (i) => data[i]!.label,
+            size.fontPx,
+            (i) => edgeAnchor(i, data.length),
+          ),
+        );
 
         // `role="img" aria-label` here duplicates ChartFrame's own wrapper div
         // (also `role="img"`, same label) — a nested accessible-image is not

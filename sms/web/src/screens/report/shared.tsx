@@ -17,7 +17,7 @@ import { useRef } from 'react';
 import { W } from '../../lib/words';
 import { Empty } from '../../ui/bits';
 import {
-  edgeAnchor, categoryLabelAnchor, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
+  edgeAnchor, categoryLabelAnchor, dropCollidingTicks, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
   linePath, fittingTicks, tickIndices, CategoryBars, type BarDatum,
 } from '../../ui/chart';
 import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../../ui/ChartFrame';
@@ -1287,7 +1287,15 @@ export function RejectTrendChart({
         // How many day labels actually FIT. Four were hardcoded, which
         // collided the moment this chart moved into a half-width column:
         // "Wed 26 Aug" printed on top of "Sat 29 Aug".
-        const ticks = tickIndices(series.length, fittingTicks(fsize.width - L - R, 11, fsize.fontPx, series.length, 4));
+        // CSS-070 (6 Oct 2026): `fittingTicks` floors at two, so on a narrow
+        // chart the two end dates overprinted each other; drop whatever collides.
+        const ticks = dropCollidingTicks(
+          tickIndices(series.length, fittingTicks(fsize.width - L - R, 11, fsize.fontPx, series.length, 4)),
+          x,
+          (i) => labelFmt(series[i]!.ts),
+          fsize.fontPx,
+          (i) => edgeAnchor(i, series.length),
+        );
         // The two end labels ("Quality x%", "Weight y%") de-collide
         // vertically via the same pure helper every other chart uses, rather
         // than being drawn at their literal y and left to overprint each
