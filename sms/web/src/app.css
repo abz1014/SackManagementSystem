@@ -826,6 +826,10 @@ tr.rej.click:hover td { background: #f8ded7; }
 .chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 .chip .x { color: inherit; opacity: 0.75; }
 .chip.on :focus-visible { outline-color: var(--paper); } /* [CSS-080, 6 Oct 2026] the default dark focus ring was drawn on the dark ink chip, so keyboard focus on the clear button was invisible */
+/* [CSS-079, 7 Oct 2026] A filter chip holding a long product name was 407px wide in a 335px row (nowrap + the select's own min-content), so the select ran off the right edge and the page scrolled sideways at phone width. The row, the chip and the select may now shrink to the space they are given, as Report's chips already do inline (Report.tsx CHIP_FITS_ROW / CHIP_SELECT). The row rule is narrowed to rows that hold no .toggle: the Readings row with the listing tabs also holds a station chip, and constraining it cut the tab "Rejected by inspection" to "Reject" at 375 (measured on the first version; the toggle's own flex-wrap, [CSS-007], now keeps the tabs whole either way, so this narrowing is the independent guarantee). */
+.row:has(> label.chip):not(:has(> .toggle)) { min-width: 0; max-width: 100%; }
+label.chip { white-space: normal; max-width: 100%; }
+label.chip select { min-width: 0; max-width: 100%; }
 
 .toggle { display: inline-flex; border: 1px solid var(--rule-2); border-radius: var(--radius); overflow: hidden; }
 .toggle button {
