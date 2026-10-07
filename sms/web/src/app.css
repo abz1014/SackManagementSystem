@@ -1528,6 +1528,9 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
 .ifl-table td.eff-low { font-weight: 700; background: rgba(200, 120, 0, 0.12); }
 @media print { .ifl-table td.eff-low { background: rgba(200, 120, 0, 0.12) !important; } }
 .ifl-table th, .ifl-table td { border: 0.75pt solid #D3D3D3; }
+/* [CSS-035, 6 Oct 2026] Cell text sat 0.5px from the vertical gridlines (left padding 0 on text cells, right padding 0 on the last numeric column). Text cells now keep 6px each side, the same 12px per column as before (0 + 12), and the last numeric column 6px each side (it had 12 + 0), so no table gets wider. Other numeric cells keep their own padding. */
+.ifl-table th:not(.n), .ifl-table td:not(.n) { padding-left: 6px; padding-right: 6px; }
+.ifl-table th.n:last-child, .ifl-table td.n:last-child { padding-left: 6px; padding-right: 6px; }
 .ifl-table th { background: #ADD8E6; color: var(--ink); font-weight: 700; text-align: center; } /* [CSS-013] --muted on this fill was 3.86:1; --ink is 12:1+ */
 .ifl-table td.n, .ifl-table th.n { text-align: right; font-variant-numeric: tabular-nums; }
 .ifl-table tr.total td, .ifl-table tfoot td, .ifl-table tfoot th { font-weight: 700; font-style: italic; }
