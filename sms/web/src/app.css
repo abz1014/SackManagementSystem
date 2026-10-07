@@ -207,6 +207,7 @@
   /* ink */
   --ink: #16191c;        /* body text, primary marks                        */
   --graphite: #4a5057;   /* secondary text, second chart series   8.15:1 ↑  */
+  /* [CSS-041, 7 Oct 2026] The 6.61:1 below is wrong: measured 5.89:1 on white and 5.25:1 on --paper-2 (still above AA 4.5:1). */
   --muted: #5f656c;      /* labels, captions, axis ticks          6.61:1 ↑  */
   --grid: #8c9298;       /* GRAPHICS ONLY — gridlines, chevrons, dimmed     */
 
