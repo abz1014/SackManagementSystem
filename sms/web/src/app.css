@@ -799,7 +799,7 @@ tr.rej.click:hover td { background: #f8ded7; }
    one that may shrink — computed to ZERO, so every reason painted over its own
    bar. A breakpoint belongs to the narrowest content in the column, not to the
    page. Two columns therefore exist only at the full 1100px page width. */
-@media (max-width: 1100px) { .two-col { grid-template-columns: 1fr; gap: 28px; } }
+@media (max-width: 1100px) { .two-col { grid-template-columns: minmax(0, 1fr); gap: 28px; } } /* [CSS-011, 6 Oct 2026] plain 1fr cannot shrink below its table's min-content, so a half's table pushed the page sideways at phone width; minmax(0, 1fr) lets the .tw box scroll instead */
 .print-only { display: none; }
 @media print { .print-only { display: block !important; } }
 
