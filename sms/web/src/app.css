@@ -596,6 +596,8 @@ h1 .acc, .headline .acc { color: var(--acc); }
    under the sentence, where they read as body content rather than controls. */
 .head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .head-actions { flex: none; padding-top: 26px; }
+/* [CSS-075, 7 Oct 2026] the Print/Export row sat flush on the black verdict box, so the bottom of a button's focus ring ran into the ink fill. 10px is the row's own gap. */
+.head-actions .row { margin-bottom: 10px; }
 @media (max-width: 620px) { .head-row { flex-direction: column; } .head-actions { padding-top: 0; } }
 
 /* ---- figures ------------------------------------------------------------ */
