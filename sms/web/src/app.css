@@ -639,7 +639,8 @@ h1 .acc, .headline .acc { color: var(--acc); }
    plain button reset so it reads exactly like the static .fig-val div next
    to it, with only the cursor and a hover cue marking it as a control. */
 .fig-link {
-  display: block; width: 100%; text-align: left; background: none; border: 0; padding: 0;
+  /* [CSS-048, 7 Oct 2026] a <button> centres its content vertically, so in a grid cell stretched to the tallest (wrapping) figure the clickable figures sat 23px lower than the static one. A top-aligned flex column keeps the cell's full height and puts every figure on one top. */
+  display: flex; flex-direction: column; justify-content: flex-start; width: 100%; text-align: left; background: none; border: 0; padding: 0;
   font: inherit; color: inherit; cursor: pointer;
 }
 .fig-link:hover .fig-val { color: var(--acc); }
