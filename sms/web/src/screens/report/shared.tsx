@@ -1085,11 +1085,11 @@ export function RejectTrendChart({
 }) {
   const H = 250;
   const L = 44;
-  const R = 130;
+  const R_MIN = 130;
   const T = 18;
   const B = 30;
 
-  interface Layout { width: number; height: number; x: (i: number) => number; y: (v: number) => number }
+  interface Layout { width: number; height: number; R: number; x: (i: number) => number; y: (v: number) => number }
   const layoutRef = useRef<Layout | null>(null);
 
   const days = quality;
@@ -1134,10 +1134,39 @@ export function RejectTrendChart({
   const numericExtents = series.flatMap((s) => [s.q, s.w, s.qUcl, s.wUcl].filter((v): v is number => v != null));
   const max = Math.max(...numericExtents, 1);
 
-  const computeLayout = (width: number, height: number): Layout => {
+  // The two end labels ("<reason> 3.2%") sit in the right gutter. CSS-050
+  // (5 Oct 2026): a fixed 130px gutter let a long reason name run out of the
+  // chart and over the reason list beside it. The gutter now grows to the
+  // label (never under 130), capped at 45% of the chart so the plot stays
+  // readable; past the cap `fitEnd` shortens the NAME (the full name stays
+  // in the tooltip).
+  const endLabelTexts = (): string[] => {
+    const out: string[] = [];
+    if (lastQIdx != null) out.push(`${qName} ${series[lastQIdx]!.q!.toFixed(1)}%`);
+    if (weight && lastWIdx != null) out.push(`${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%`);
+    return out;
+  };
+  const rightFor = (width: number, fontPx: number): number => {
+    const widest = Math.max(0, ...endLabelTexts().map((t) => t.length));
+    const need = Math.ceil(widest * fontPx * 0.52) + 12;
+    return Math.min(Math.max(R_MIN, need), Math.max(R_MIN, Math.floor(width * 0.45)));
+  };
+  /** `text` shortened with an ellipsis (keeping its trailing " 3.2%") so it fits `maxPx`. */
+  const fitEnd = (text: string, maxPx: number, fontPx: number): string => {
+    const perChar = fontPx * 0.52;
+    if (text.length * perChar <= maxPx) return text;
+    const m = /^(.*?)( [\d.]+%)$/.exec(text);
+    const name = m ? m[1]! : text;
+    const tail = m ? m[2]! : '';
+    const room = Math.max(1, Math.floor((maxPx - tail.length * perChar) / perChar) - 1);
+    return `${name.slice(0, room).trimEnd()}…${tail}`;
+  };
+
+  const computeLayout = (width: number, height: number, fontPx = 13): Layout => {
+    const R = rightFor(width, fontPx);
     const x = (i: number) => L + (i / Math.max(1, series.length - 1)) * (width - L - R);
     const y = (v: number) => T + ((max - v) / max) * (height - T - B);
-    return { width, height, x, y };
+    return { width, height, R, x, y };
   };
   // 1036 mirrors `useChartSize.ts`'s own fallback width, the same device
   // `CategoryBars` uses so `hit`/`markRect`, called before `ChartFrame`'s
@@ -1275,9 +1304,17 @@ export function RejectTrendChart({
       zoom={zoomProp}
     >
       {(fsize) => {
-        const layout = computeLayout(fsize.width, fsize.height);
+        const layout = computeLayout(fsize.width, fsize.height, fsize.fontPx);
         layoutRef.current = layout;
-        const { x, y } = layout;
+        const { x, y, R } = layout;
+        const endMaxPx = R - 12;
+        // The label is only re-written when it had to be shortened; an
+        // unshortened one keeps its original text nodes so nothing about
+        // its rendering changes.
+        const qEndFull = lastQIdx != null ? `${qName} ${series[lastQIdx]!.q!.toFixed(1)}%` : '';
+        const wEndFull = weight && lastWIdx != null ? `${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%` : '';
+        const qEndText = fitEnd(qEndFull, endMaxPx, fsize.fontPx);
+        const wEndText = fitEnd(wEndFull, endMaxPx, fsize.fontPx);
         const bandPath = (run: number[]) => {
           const upper = run.map((i) => ({ x: x(i), y: y(series[i]!.qUcl!) }));
           const lower = [...run].reverse().map((i) => ({ x: x(i), y: y(series[i]!.qLcl ?? 0) }));
@@ -1301,8 +1338,8 @@ export function RejectTrendChart({
         // than being drawn at their literal y and left to overprint each
         // other when the two rates land close together.
         const endItems: GutterLabelIn[] = [];
-        if (lastQIdx != null) endItems.push({ y: y(series[lastQIdx]!.q!), text: `${qName} ${series[lastQIdx]!.q!.toFixed(1)}%`, prio: 1 });
-        if (weight && lastWIdx != null) endItems.push({ y: y(series[lastWIdx]!.w!), text: `${W.rejects.weightKind} ${series[lastWIdx]!.w!.toFixed(1)}%`, prio: 0 });
+        if (lastQIdx != null) endItems.push({ y: y(series[lastQIdx]!.q!), text: qEndText, prio: 1 });
+        if (weight && lastWIdx != null) endItems.push({ y: y(series[lastWIdx]!.w!), text: wEndText, prio: 0 });
         // `lineH` must come from the MEASURED font size, not a guessed
         // constant: a fixed `14` under-stated the real line box whenever
         // `fsize.fontPx` scaled above ~10.7px (the Wall's 1.3x UI scale,
@@ -1390,12 +1427,12 @@ export function RejectTrendChart({
                 a real line apart. */}
             {lastQIdx != null && qEndLabel?.text && (
               <text x={fsize.width - R + 10} y={qEndLabel.y + 4} fontSize={fsize.fontPx} fill="var(--ink)">
-                {qName} {series[lastQIdx]!.q!.toFixed(1)}%
+                {qEndText === qEndFull ? <>{qName} {series[lastQIdx]!.q!.toFixed(1)}%</> : qEndText}
               </text>
             )}
             {weight && lastWIdx != null && wEndLabel?.text && (
               <text x={fsize.width - R + 10} y={wEndLabel.y + 4} fontSize={fsize.fontPx} fill="var(--graphite)">
-                {W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%
+                {wEndText === wEndFull ? <>{W.rejects.weightKind} {series[lastWIdx]!.w!.toFixed(1)}%</> : wEndText}
               </text>
             )}
             {ticks.map((i) => (
