@@ -1224,6 +1224,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 @page {
   size: A4;
   margin: 14mm 12mm;
+  /* [CSS-031, 6 Oct 2026] The "Page X of Y" running footer existed only on the two report pages below, so a multi-page printout of Readings, Sacks or Line had no page numbers. Same footer, same wording and type as theirs. */
+  @bottom-left {
+    content: "IFL internal · Sack Management System · Page " counter(page) " of " counter(pages);
+    font-family: 'Instrument Sans', 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #5f656c;
+  }
 }
 
 /* [PHASE 9 PRINT P6] Landscape for REPORTS ONLY, owner decision 21 Sep 2026.
