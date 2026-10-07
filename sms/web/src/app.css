@@ -845,6 +845,10 @@ tr.rej.click:hover td { background: #f8ded7; }
 }
 
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* [CSS-010, 6 Oct 2026] In a checklist row (Changeover's Retire list) the wrap let a long label push its checkbox onto its own line above the text; the text now wraps beside the box, and the box stays beside the first line (flex-start) rather than centred against a three-line label. */
+label.row:has(input[type=checkbox]) { flex-wrap: nowrap; align-items: flex-start; }
+/* [CSS-010 rework, 7 Oct 2026] flex-start alone lifted a one-line label's checkbox 3px above the text it had been centred on; the margin puts the box back on the centre of the FIRST line (0.75em = half the 1.5 line height, minus the box's own half-height and the UA margin), so single-line rows are unchanged and a wrapped label keeps its box beside line one. font-size inherits so the em is the label's, not the UA 13.33px. */
+label.row:has(input[type=checkbox]) > input[type=checkbox] { font-size: inherit; margin-top: calc(0.75em - 6.5px); }
 .row.between { justify-content: space-between; }
 .row.top { align-items: flex-start; }
 
