@@ -839,6 +839,10 @@ tr.rej.click:hover td { background: #f8ded7; }
 /* [CSS-058, 6 Oct 2026] .toggle's overflow:hidden clipped the outside focus ring, so keyboard focus drew nothing; draw it inside the button (paper-coloured on the ink fill of the selected one). */
 .toggle button:focus-visible { outline-offset: -4px; }
 .toggle button.on:focus-visible { outline-color: var(--paper); }
+/* [CSS-059, 6 Oct 2026] Under forced colours (Windows high contrast) the browser replaces the ink fill that marks the selected toggle button, report chip and period button, so selected looked identical to unselected. Keep the mark in system colours; no effect in normal rendering. */
+@media (forced-colors: active) {
+  .toggle button.on, .chip.on, .period button.on { forced-color-adjust: none; background: Highlight; border-color: Highlight; color: HighlightText; }
+}
 
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
