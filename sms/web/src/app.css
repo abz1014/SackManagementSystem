@@ -705,6 +705,8 @@ th.n:not(:last-child), td.n:not(:last-child) { padding-right: 12px; }
 @media screen { table.tw-span:has(tr.click) th.n, table.tw-span:has(tr.click) td.n { padding-left: 12px; } }
 tr.on td, tr.hl td { background: var(--paper-3); }
 tr.click { cursor: pointer; }
+/* [CSS-062, 7 Oct 2026] a clickable row is exactly as wide as its `.tw` scroll wrapper, which clips an outline drawn outside it, so keyboard focus showed no ring on the row's left and right edges. Drawing it inside the row keeps all four sides visible. */
+tr.click:focus-visible { outline-offset: -2px; }
 tr.click:hover td { background: var(--paper-3); }
 tbody tr:last-child td { border-bottom: 0; }
 /* [CSS-026, 6 Oct 2026] A row header (`<th scope="row">`) took the global `th` padding (0 12px 8px 0), so its text sat 9px (one td padding) above the text of the cells beside it, and its inline `border-bottom` kept a rule under the name column alone on the last row, where the cells' own rule is removed above. Same top padding as `td`; the last-row rule needs !important because the rule is an inline style on each of these headers. */
