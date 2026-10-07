@@ -779,14 +779,19 @@ export function DeviationBars({
   // (never under the 48px it always was), not a fixed 48 — at the Wall text
   // size "-0.10 kg" overran it and the screen edge cut the sign off.
   const leftFor = (fontPx: number) => leftGutterFor(gridValues([lo, hi]).map(valueFmt), fontPx);
+  // One decision for "legend instead of a gutter", shared by the plot and the
+  // footer (CSS-069) so they can never disagree.
+  const gutterLabels = [zeroLabel, thresholdLabel].filter((s): s is string => !!s);
+  const gutterAt = (width: number, fontPx: number) =>
+    gutterFor(gutterLabels, fontPx, Math.max(1, width - leftFor(fontPx) - 8));
+
   const computeLayout = (width: number, fontPx: number, h: number): Layout => {
     const L = leftFor(fontPx);
     // The right margin comes from what the zero/threshold labels actually
     // need (`gutterFor`), not a fixed 8px — that fixed figure is the
     // screenshot defect this task exists to close: "row median" drawn over
     // the bars because the chart reserved no room for it at all.
-    const gutterLabels = [zeroLabel, thresholdLabel].filter((s): s is string => !!s);
-    const gutter = gutterFor(gutterLabels, fontPx, Math.max(1, width - L - 8));
+    const gutter = gutterAt(width, fontPx);
     const legend = gutter === 'legend';
     const R = legend ? 8 : gutter;
     const y = linear([lo, hi], [h - B, T]);
@@ -849,6 +854,13 @@ export function DeviationBars({
       markRect={markRect}
       onActivate={onActivate}
       zoom={zoomProp}
+      footer={(fsize) =>
+        gutterAt(fsize.width, fsize.fontPx) === 'legend' && (zeroLabel || thresholdLabel) ? (
+          <p className="mut sm" style={{ marginTop: 4 }}>
+            {[zeroLabel, thresholdLabel].filter(Boolean).join(' · ')}
+          </p>
+        ) : null
+      }
     >
       {(fsize) => {
         // `fsize.height` is `ChartFrame`'s live, possibly drag-resized
@@ -918,11 +930,6 @@ export function DeviationBars({
                 ) : null,
               )}
             </svg>
-            {legend && (zeroLabel || thresholdLabel) && (
-              <p className="mut sm" style={{ marginTop: 4 }}>
-                {[zeroLabel, thresholdLabel].filter(Boolean).join(' · ')}
-              </p>
-            )}
           </RefLineGutterProvider>
         );
       }}

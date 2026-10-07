@@ -123,6 +123,13 @@ export interface ChartFrameProps {
    *  `onActivate` is also given. */
   zoom?: ChartFrameZoom;
   onBack?: () => void;
+  /**
+   * Rendered under the chart body, OUTSIDE its fixed-height box (CSS-069,
+   * 5 Oct 2026): a legend line drawn inside `children` hung below the fixed
+   * body and was painted over the table that follows. The frame grows by the
+   * footer's own height only where a footer exists.
+   */
+  footer?: (size: ChartFrameSize) => ReactNode;
   children: (size: ChartFrameSize, state: ChartFrameState) => ReactNode;
 }
 
@@ -487,6 +494,7 @@ export function ChartFrame(props: ChartFrameProps) {
           />
         )}
       </div>
+      {props.footer?.(frameSize)}
       {caption && <p className="chart-frame-caption">{caption}</p>}
     </div>
   );
