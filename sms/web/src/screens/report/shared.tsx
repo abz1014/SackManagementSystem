@@ -22,7 +22,7 @@ import {
 } from '../../ui/chart';
 import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../../ui/ChartFrame';
 import {
-  gutterFor, textPx, bandHit, rowHit, nearestIndex, placeGutterLabels,
+  gutterFor, leftGutterFor, textPx, bandHit, rowHit, nearestIndex, placeGutterLabels,
   type Rect, type GutterLabelIn,
 } from '../../ui/chartLayout';
 import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
@@ -751,7 +751,6 @@ export function DeviationBars({
 }) {
   if (rows.length < MIN_MULTIROW) return null;
 
-  const L = 48;
   const T = 18;
   const B = 40;
 
@@ -764,7 +763,7 @@ export function DeviationBars({
   const tickOf = (r: DeviationRow) => r.tick ?? r.label;
 
   interface Layout {
-    H: number; R: number; y: (v: number) => number; slot: number; bw: number;
+    L: number; H: number; R: number; y: (v: number) => number; slot: number; bw: number;
     cx: (i: number) => number; zeroY: number; legend: boolean; step: number;
   }
   const layoutRef = useRef<Layout | null>(null);
@@ -776,7 +775,12 @@ export function DeviationBars({
   // the chart-frame container while the SVG inside it stayed the original
   // fixed size. `height` (the prop) now serves only as `ChartFrame`'s
   // `defaultH`, the initial value before any drag.
+  // CSS-077 (5 Oct 2026): the left margin comes from the widest y tick label
+  // (never under the 48px it always was), not a fixed 48 — at the Wall text
+  // size "-0.10 kg" overran it and the screen edge cut the sign off.
+  const leftFor = (fontPx: number) => leftGutterFor(gridValues([lo, hi]).map(valueFmt), fontPx);
   const computeLayout = (width: number, fontPx: number, h: number): Layout => {
+    const L = leftFor(fontPx);
     // The right margin comes from what the zero/threshold labels actually
     // need (`gutterFor`), not a fixed 8px — that fixed figure is the
     // screenshot defect this task exists to close: "row median" drawn over
@@ -796,13 +800,13 @@ export function DeviationBars({
     // overprinted each other (seen on Sacks, 23 Sep 2026).
     const labelPx = Math.ceil(textPx(Math.max(...rows.map((r) => tickOf(r).length)), fontPx)) + 16;
     const step = Math.max(1, Math.ceil(rows.length / Math.max(2, Math.floor((width - L - R) / labelPx))));
-    return { H: h, R, y, slot, bw, cx, zeroY, legend, step };
+    return { L, H: h, R, y, slot, bw, cx, zeroY, legend, step };
   };
 
   const hit = (px: number, py: number): number | null => {
     const layout = layoutRef.current;
     if (!layout || py < T || py > layout.H - B) return null;
-    return bandHit(px, L, layout.slot, rows.length);
+    return bandHit(px, layout.L, layout.slot, rows.length);
   };
 
   const markRect = (i: number): Rect | null => {
@@ -855,7 +859,7 @@ export function DeviationBars({
         const H = fsize.height;
         const layout = computeLayout(fsize.width, fsize.fontPx, H);
         layoutRef.current = layout;
-        const { R, y, bw, cx, zeroY, legend, step } = layout;
+        const { L, R, y, bw, cx, zeroY, legend, step } = layout;
         const plotRight = fsize.width - R;
         return (
           <RefLineGutterProvider top={T} bottom={H - B} fontPx={fsize.fontPx}>
@@ -950,13 +954,13 @@ export function deviationBarsGeometry(
 ): { bars: Rect[]; labels: { text: string; y: number; gutterX: number }[] } {
   const { width, height = 220, fontPx = 12, threshold, thresholdLabel, zeroLabel, minHalfSpan } = opts;
   const H = height;
-  const L = 48;
   const T = 18;
   const B = 40;
   const values = rows.map((r) => r.value);
   const withThreshold = threshold != null ? [threshold, -threshold] : [];
   const floor = minHalfSpan != null ? [minHalfSpan, -minHalfSpan] : [];
   const [lo, hi] = niceDomain([...values, 0, ...withThreshold, ...floor], { pad: 0.15 });
+  const L = leftGutterFor(gridValues([lo, hi]).map(opts.valueFmt ?? fmtSignedG), fontPx);
   const gutterLabels = [zeroLabel, thresholdLabel].filter((s): s is string => !!s);
   const gutter = gutterFor(gutterLabels, fontPx, Math.max(1, width - L - 8));
   const legend = gutter === 'legend';

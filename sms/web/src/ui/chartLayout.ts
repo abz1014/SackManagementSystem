@@ -234,6 +234,25 @@ export function gutterFor(labels: string[], fontPx: number, plotWidth: number): 
   return w;
 }
 
+/**
+ * The left-margin width (px) a column of y-axis tick labels needs when each
+ * label is end-anchored 8px left of the plot edge, never less than `min`
+ * (the 48px the deviation charts always used). CSS-077 (5 Oct 2026): a fixed
+ * 48 clipped "-0.10 kg" at the Wall text size, losing the sign. This is an
+ * estimate of the rendered width (0.52em per character, measured against the
+ * app's font at 13px: "+0.10 kg" is 51.8px), not `textPx`'s deliberately
+ * conservative 0.6em, so labels that already read fine do not gain a wider gutter.
+ */
+export function leftGutterFor(labels: string[], fontPx: number, min = 48, hang = 16): number {
+  const widest = labels.reduce((m, s) => Math.max(m, s.length), 0);
+  // `hang`: a label may hang this far left of the svg, into the page's own
+  // 16px side gutter, so labels that overhang by a few px today (and read
+  // fine) keep exactly the gutter they have; only a label that would reach
+  // the screen edge widens it.
+  const w = Math.ceil(widest * fontPx * 0.52) + 8 - hang;
+  return Math.max(min, w);
+}
+
 /* ------------------------------------------------------------------ hit tests */
 
 /** Which of `n` equal-width bars/bands (left edge `left`, each `slot` wide)
