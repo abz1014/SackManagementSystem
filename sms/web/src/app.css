@@ -1489,6 +1489,9 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
  *     element; no attribute means landscape (existing behaviour).
  * The footer (Page X of Y) is an @page margin box (Chromium); the server's
  * PDF export sets its own footerTemplate (pdf.ts, handled elsewhere).
+ * [CSS-042, 7 Oct 2026] Correction: the line above is false. pdf.ts leaves
+ * Chromium's header/footer off and pdf.test.ts asserts footerTemplate is
+ * undefined; the page footer comes from the @page margin box described here.
  * ------------------------------------------------------------------------- */
 .ifl-table { border-collapse: collapse; }
 /* Efficiency below 100: tint AND bold so it survives black-and-white print. */
