@@ -1010,6 +1010,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   .bars div { grid-template-columns: 1fr minmax(6em, 9em) 5em; }
   .bars i { display: none; }
 }
+@media (max-width: 620px) {
+  /* [CSS-024, 6 Oct 2026] The row above is one line of `1fr minmax(6em, 9em) 5em`: the count track grows to its 9em maximum first, so on a phone the reason name was left ~65px (four to five lines, rows ~117px at 375). Here the name takes the full width on its own line and the count and "Name it" sit beneath it. Above 620px the name column is wide enough as it was. */
+  .bars div { grid-template-columns: 1fr auto; gap: 2px 16px; }
+  .bars div > :first-child { grid-column: 1 / -1; }
+}
 
 /* ---- the details disclosure -------------------------------------------- */
 
