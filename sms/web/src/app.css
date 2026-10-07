@@ -735,6 +735,8 @@ tbody tr:last-child th { border-bottom: 0 !important; }
   position: sticky; left: 0; background: var(--paper); z-index: 1;
 }
 .mp-scroll thead th:first-child { z-index: 3; }
+/* [CSS-040, 6 Oct 2026] A header cell sits flush against the top edge of this scrolling box (and the last one against its right edge), and `overflow: auto` clips anything outside it, so the global focus ring (2px line, 2px outside the box) lost its top edge, and its right edge on the last column. Drawn 2px inside the cell it is whole. Padding on the box instead would let rows show through a 4px strip above the pinned header row. */
+.mp-scroll thead th:focus-visible { outline-offset: -2px; }
 /* UX overflow sweep (23 Sep 2026): a `.two-col` half is 498px at the desktop
    width both Daily's and Sack's "by shift"/"by day" LineTable live at — `th`'s
    global `white-space: nowrap` (above) forced "Rejected at inspection" onto
