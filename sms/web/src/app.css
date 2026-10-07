@@ -327,7 +327,8 @@ a:hover { color: var(--acc); text-decoration-color: var(--acc); }
    table. Use this on `<th scope="col">` cells; `.sr-only` is still correct
    for non-table content. */
 .sr-only-th {
-  width: 1px; height: 1px; padding: 0; margin: 0;
+  /* [CSS-047, 6 Oct 2026] width was 1px: in an auto-layout table a 1px width on every header cell makes the browser share the table width by the cells' content proportions, so the name column took over half the table and the limits text wrapped (Catalogue rows 70px instead of 44px). `auto` leaves the column widths to the body cells, as if the header row were absent. */
+  width: auto; height: 1px; padding: 0; margin: 0;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap;
   border: 0; font-size: 0; line-height: 0;
 }
