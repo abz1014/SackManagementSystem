@@ -570,7 +570,6 @@ export function RankBars({
 }) {
   if (rows.length < MIN_MULTIROW) return null;
 
-  const L = labelWidth; // label gutter
   const T = 6;
   const rowH = rowHeight;
   // 14px at the default 28px row, thicker (to 18) on a taller one.
@@ -579,7 +578,7 @@ export function RankBars({
 
   const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
 
-  interface Layout { R: number; x: (v: number) => number }
+  interface Layout { L: number; R: number; x: (v: number) => number }
   const layoutRef = useRef<Layout | null>(null);
 
   const computeLayout = (width: number, fontPx: number): Layout => {
@@ -587,12 +586,17 @@ export function RankBars({
     // fixed 60px (the old figure) clips a five/six-digit count.
     const widest = Math.max(...rows.map((r) => valueFmt(Math.abs(r.value)).length));
     const R = Math.max(40, Math.ceil(textPx(widest, fontPx)) + 16);
+    // The label gutter, capped at a share of the chart's own width (CSS-003,
+    // 5 Oct 2026): a fixed 330/420px gutter left a 1px bar on a phone and
+    // pushed the value labels off the chart. Labels are already truncated to
+    // the gutter (`truncateLabel`), the full name stays in the tooltip.
+    const L = Math.max(0, Math.min(labelWidth, Math.floor(width * 0.55)));
     // Domain anchored at exactly 0 (not `niceDomain`'s padded lo) so every
     // bar's length stays exactly proportional to its own value — a rank list
     // is read by comparing bar lengths to each other, and any padding that
     // shifts the zero point breaks that comparison.
     const x = linear([0, max], [L, Math.max(L + 1, width - R)]);
-    return { R, x };
+    return { L, R, x };
   };
 
   // Truncates `text` with an ellipsis so it fits in `maxPx` at `fontPx` —
@@ -617,8 +621,8 @@ export function RankBars({
     if (!layout || !r) return null;
     const rowY = T + i * rowH;
     const barY = rowY + (rowH - barH) / 2;
-    const bw = Math.max(0, layout.x(Math.abs(r.value)) - L);
-    return { x: L, y: barY, w: bw, h: barH };
+    const bw = Math.max(0, layout.x(Math.abs(r.value)) - layout.L);
+    return { x: layout.L, y: barY, w: bw, h: barH };
   };
 
   const tipFor = (i: number): ChartTip | null => {
@@ -643,7 +647,7 @@ export function RankBars({
       {(fsize) => {
         const layout = computeLayout(fsize.width, fsize.fontPx);
         layoutRef.current = layout;
-        const { x } = layout;
+        const { x, L } = layout;
         return (
           <svg className="chart" viewBox={`0 0 ${fsize.width} ${H}`} height={H} role="img" aria-label={ariaLabel}>
             {rows.map((r, i) => {
