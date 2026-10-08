@@ -395,7 +395,9 @@ function ReportSkeleton() {
   return (
     <>
       <Block first>
-        <SkelFigures n={4} />
+        <div className="skel-figs-tall skel-figs-r"><SkelFigures n={4} /></div>
+        {/* the daily totals' "Rejected by the scale" sentence sits under the figures */}
+        <div className="skel line sm short" style={{ marginTop: 14 }} aria-hidden="true" />
       </Block>
       <Block label={W.report.conesPerDay}>
         <SkelChart />

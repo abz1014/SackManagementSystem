@@ -238,7 +238,7 @@ export function LineScreen({
             {kpiNote && <p className="mut sm" style={{ marginTop: 8 }}>{kpiNote}</p>}
           </>
         ) : (
-          <SkelFigures n={4} />
+          <div className="skel-figs-tall"><SkelFigures n={4} /></div>
         )}
       </Block>
 

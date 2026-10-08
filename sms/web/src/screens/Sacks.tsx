@@ -177,7 +177,7 @@ export function SacksScreen({
         {summary.error && !s ? (
           <Failed error={summary.error} onRetry={summary.refresh} />
         ) : !s ? (
-          <SkelFigures n={4} />
+          <div className={period.from === period.to ? 'skel-figs-tall' : 'skel-figs-tall skel-figs-s7'}><SkelFigures n={4} /></div>
         ) : (
           <>
             <SummaryFigures s={s} />

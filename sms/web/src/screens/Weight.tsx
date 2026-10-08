@@ -1661,7 +1661,7 @@ function ScreenSkeleton({ question, figures, table }: { question: string; figure
         <div className="skel line" style={{ height: 'var(--fs-head)', maxWidth: '34ch' }} />
       </div>
       <Block first>
-        <SkelFigures n={figures} />
+        <div className="skel-figs-tall skel-figs-w"><SkelFigures n={figures} /></div>
       </Block>
       <Block>
         <SkelChart />
