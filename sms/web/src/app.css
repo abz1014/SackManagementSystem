@@ -1064,7 +1064,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   padding: 26px 32px 48px; overflow-y: auto; animation: slide 160ms ease;
 }
 @keyframes slide { from { transform: translateX(16px); opacity: 0; } }
-.sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 4px; }
+.sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: -26px 0 4px; padding-top: 26px; position: sticky; top: -42px; background: var(--paper); z-index: 2; }
+/* [CSS-060, 8 Oct 2026] In a long sheet (the Rejects reason sheet lists hundreds of readings) the Close button scrolled out of sight, and on a phone the scrim is hidden, so the only visible way out was to scroll back to the top. The head now pins. `top: 0` held it at y = 26 (sticky offsets are measured from the sheet's content box, inside its 26px top padding), so scrolled rows showed through the band above it; here the head starts at the sheet's top edge (margin-top: -26px, the padding moved inside it so the unscrolled layout is unchanged) and pins at top: -42px, i.e. its box begins 16px above the screen, leaving 10px of its padding visible above the title and no gap above it. */
 .sheet h2 { font-size: calc(26px * var(--ui-scale)); font-weight: 500; line-height: 1.25; letter-spacing: -0.01em; text-wrap: pretty; }
 /* [SPEC 10] The sheet's weight takes the display step: it is the answer to the
    question that opened the sheet, and at 40px it tied with the h2 above it. */
