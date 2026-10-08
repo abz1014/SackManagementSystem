@@ -783,6 +783,10 @@ tbody tr:last-child th { border-bottom: 0 !important; }
    path collapses the label gutter by its own rules. */
 @media screen and (min-width: 861px) {
   .block > div:has(.tw-span) { grid-column: 1 / -1; margin-top: 14px; }
+  /* [CSS-018, 8 Oct 2026] IFL's own eight reports (the roots that carry data-report-orientation, whether the root holds the block or sits inside it) have tables up to 1000px wide that overflowed the 816px column behind an unmarked sideways scroll, so they take the block's full width as the .tw-span tables do. Scoped to those roots: the daily, cone-weight and management-summary tables fit the column and keep their hanging label (the first, unscoped rule moved them for no measured defect). Full width alone left Rejected unknown (lifter)'s two reject lists at 1224px / 1200px in 1036px (their reason column alone is 14em), so inside these roots headers may wrap and a numeric cell keeps a 12px left gap, as the ledger's does ([CSS-065]). */
+  .block > div:has([data-report-orientation] .ifl-table), [data-report-orientation] .block > div:has(.ifl-table) { grid-column: 1 / -1; margin-top: 14px; }
+  [data-report-orientation] .ifl-table th { white-space: normal; }
+  [data-report-orientation] .ifl-table th.n, [data-report-orientation] .ifl-table td.n { padding-left: 12px; }
 }
 .tw-span th, .tw-span th.n { white-space: normal; vertical-align: bottom; }
 .chev { color: var(--grid); margin-left: 8px; }
