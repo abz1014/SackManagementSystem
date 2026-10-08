@@ -599,6 +599,8 @@ h1 .acc, .headline .acc { color: var(--acc); }
 /* [CSS-075, 7 Oct 2026] the Print/Export row sat flush on the black verdict box, so the bottom of a button's focus ring ran into the ink fill. 10px is the row's own gap. */
 .head-actions .row { margin-bottom: 10px; }
 @media (max-width: 620px) { .head-row { flex-direction: column; } .head-actions { padding-top: 0; } }
+/* [CSS-012, 8 Oct 2026] `flex: none` kept the actions (Print/Export + verdict box, ~500px with a real operator name) at full width beside the headline, which on a tablet in portrait squeezed the headline into a ~200-280px column (six to nine lines) or scrolled the page sideways. Letting the actions shrink only moved the squeeze onto the verdict box (146-195px, a word per line). At 900px and below (an existing breakpoint) the row stacks instead, the same shape as the 620px rule above: the headline takes the width, the actions sit under it at their natural size. Above 900px the desktop layout is unchanged. */
+@media (max-width: 900px) { .head-row { flex-direction: column; } .head-actions { padding-top: 0; } }
 
 /* ---- figures ------------------------------------------------------------ */
 
