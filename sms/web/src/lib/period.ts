@@ -259,6 +259,32 @@ export function snapToShifts(first: ShiftRef, last: ShiftRef, current?: PeriodPa
   return { key: 'range', range: { from, to } };
 }
 
+/**
+ * S3 X-3 (9 Oct 2026): true only when the WHOLE period lies after the newest
+ * reading on record, so an empty screen can say "the newest reading is X"
+ * instead of implying the line made nothing. `newestUtc` is the plant clock
+ * (`/api/live` `dataAsOfUtc`), the same clock as the period's bounds.
+ *
+ * Certain or false: a period with an instant start (`tsFrom`: a shift or a
+ * shift range) is after the newest reading when it starts later than it; a
+ * day-grained period only when its first production day is a later CALENDAR
+ * day than the newest reading, so a night shift that crosses midnight falls
+ * back to the old sentence rather than make a claim it cannot prove.
+ */
+export function periodAfterNewest(
+  period: Pick<Period, 'from' | 'tsFrom'>,
+  newestUtc: string | null | undefined,
+): boolean {
+  if (!newestUtc) return false;
+  const newest = new Date(newestUtc).getTime();
+  if (Number.isNaN(newest)) return false;
+  if (period.tsFrom) {
+    const start = new Date(period.tsFrom).getTime();
+    return !Number.isNaN(start) && start > newest;
+  }
+  return period.from > newestUtc.slice(0, 10);
+}
+
 /** The full-day span D1.morning .. D2.night for two production days, in
  *  whichever order they were given — the shift-range equivalent of a plain
  *  day picker's [from, to]. Feed the result to snapToShifts to get a

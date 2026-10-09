@@ -28,9 +28,9 @@
  *    is set to, and the table says so.
  */
 import { useRef, useState } from 'react';
-import { useAsOf, usePolling } from '../lib/live';
+import { useAsOf, useLive, usePolling } from '../lib/live';
 import { W } from '../lib/words';
-import { TRAILING_DAYS, describePeriod, periodQuery, snapToShifts, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
+import { TRAILING_DAYS, describePeriod, periodAfterNewest, periodQuery, snapToShifts, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, rowKeys, Toggle,
   SkelChart, SkelFigures, SkelLines,
@@ -38,7 +38,7 @@ import {
 import { dropCollidingTicks, edgeAnchor, linePath, linear, niceDomain, fittingTicks, tickIndices } from '../ui/chart';
 import { ChartFrame, type ChartTip, type ChartTipRow, type ChartFrameZoom } from '../ui/ChartFrame';
 import { placeGutterLabels, placeTip, packRow, textPx, bandHit, nearestIndex, type Rect } from '../ui/chartLayout';
-import { fmtAppInstant, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
+import { fmtAppInstant, fmtClockOn, fmtG, fmtInt, fmtKg, fmtPct1 } from '../lib/fmt';
 import {
   getSpc, getWeightStations, getStations, getProduction, stationLabel, NELSON_RULE_LABEL,
   type SpcData, type SpcType, type StationRow, type Subgroup, type WeightStationRow, type WeightStationsData,
@@ -117,6 +117,7 @@ export function WeightScreen({
 
   const pq = periodQuery(period);
   const asOf = useAsOf();
+  const afterNewestText = useAfterNewestText(period);
   const st = usePolling(
     () =>
       getWeightStations({
@@ -258,7 +259,7 @@ export function WeightScreen({
     <>
       <div className="page">
         <p className="q">{W.question.weight}</p>
-        <h1 className="wide">{headline(d, sLine, coneLine.error, coneLine.loading)}</h1>
+        <h1 className="wide">{headline(d, sLine, coneLine.error, coneLine.loading, afterNewestText)}</h1>
         {/* C-015, 2 Oct 2026: the headline's mean is read from ONE data batch
             (`sLine`); say so under it when the period crossed the boundary. */}
         {sLine?.spansGenerations && (
@@ -639,11 +640,34 @@ export function WeightScreen({
 
 /* --------------------------------------------------------------- headline */
 
+/**
+ * S3 X-3 (9 Oct 2026): the sentence that replaces "No cones were weighed in
+ * this period." when the period starts after the newest reading on record,
+ * or null when it does not. Weight's tests mount the screen without a
+ * LiveProvider (`useLive` throws there, after reading its context), so a
+ * missing provider reads as "no newest reading known" and the old sentence
+ * stays.
+ */
+function useAfterNewestText(period: Period): string | null {
+  let newest: string | null = null;
+  let plantNow: string | null = null;
+  try {
+    const { line } = useLive();
+    newest = line?.dataAsOfUtc ?? null;
+    plantNow = line?.plantNowUtc ?? null;
+  } catch {
+    return null;
+  }
+  if (!newest || !plantNow || !periodAfterNewest(period, newest)) return null;
+  return W.periodAfterNewest(fmtClockOn(newest, plantNow));
+}
+
 function headline(
   d: WeightStationsData | null,
   s: SpcData | null,
   coneLineError?: string | null,
   coneLineLoading?: boolean,
+  afterNewestText?: string | null,
 ): string {
   // UX Phase 7 Brief 1: a FAILED /api/spc fetch used to fall through to the
   // `!s` branch below and print "No cones were weighed in this period" — the
@@ -691,7 +715,7 @@ function headline(
   // headline stated "Average cone weight is 0 g" and "Every station is
   // steady" about a period in which nothing was weighed — three false
   // sentences, and the honest one below was unreachable.
-  if (!s || s.count === 0) return d == null ? W.weight.headlineStationDataFailed : 'No cones were weighed in this period.';
+  if (!s || s.count === 0) return d == null ? W.weight.headlineStationDataFailed : (afterNewestText ?? 'No cones were weighed in this period.');
   const mean = fmtG(s.mean);
   // UX Phase 7 Brief 5 (21 Sep 2026): `d` (getWeightStations) is a separate
   // fetch from `s`/`coneLine` above — the average can be known while the

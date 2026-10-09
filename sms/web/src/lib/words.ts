@@ -1375,6 +1375,10 @@ export const W = {
   stationNotFound: 'This station has no readings in the window this sheet looks at, or the number in the link no longer matches a station.',
   retry: 'Try again',
   nothingHere: 'Nothing recorded in this period.',
+  /* S3 X-3 (9 Oct 2026): used in place of the empty sentence of a screen whose
+     period starts after the newest reading on record (`periodAfterNewest`,
+     lib/period.ts). `when` is "12:00 PM, 7 Sep" (fmtClockOn). */
+  periodAfterNewest: (when: string) => `No readings in this period — the newest reading is ${when}.`,
   /* WS-B1 (23 Sep 2026 red-team remediation): the KPI block's OWN empty-
      state note (`kpiBlockNote`, Line.tsx) used to be reachable from a data
      issue too — a malformed row's forced-0 cones/sacks/rejects summed to

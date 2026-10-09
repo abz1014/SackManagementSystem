@@ -36,9 +36,9 @@
 import { useMemo, type CSSProperties } from 'react';
 import { usePolling, useLive } from '../lib/live';
 import { W } from '../lib/words';
-import type { Period, PeriodParams, ShiftCode } from '../lib/period';
+import { periodAfterNewest, type Period, type PeriodParams, type ShiftCode } from '../lib/period';
 import { Block, Failed, SkelChart, SkelFigures, SkelLines } from '../ui/bits';
-import { fmtDayLong, fmtInt } from '../lib/fmt';
+import { fmtClockOn, fmtDayLong, fmtInt } from '../lib/fmt';
 import {
   getReportOf, reportExportUrl, getStations, getProducts, ROLE_RANK, rejectCodeParam,
   type AuthUser, type ProductOption, type RejectReason, type ReportFilters, type ReportHeader, type ReportResponse, type ReportType, type StationRow,
@@ -115,6 +115,11 @@ export function ReportScreen({
   onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const { line, asOf } = useLive();
+  // S3 X-3 (9 Oct 2026): a period that starts after the newest reading on
+  // record says so, instead of only "nothing ..." (see lib/period.ts).
+  const afterNewest = line?.dataAsOfUtc && periodAfterNewest(period, line.dataAsOfUtc)
+    ? W.periodAfterNewest(fmtClockOn(line.dataAsOfUtc, line.plantNowUtc))
+    : null;
   const rank = ROLE_RANK[user.role] ?? 1;
   const allowed = FILTERS_BY_TYPE[type];
 
@@ -153,7 +158,7 @@ export function ReportScreen({
         <div className="head-row">
           <div>
             <p className="q no-print">{W.reports.question[type]}</p>
-            <h1 className="wide">{headline(type, data, period)}</h1>
+            <h1 className="wide">{headline(type, data, period, afterNewest)}</h1>
             <GenerationDisclosure header={header} />
           </div>
           <div className="head-actions">
@@ -335,7 +340,7 @@ function Sections({
  * Reports without a coverage block of their own (rejects, stations, cone
  * weight, calibration) say the period and their headline count.
  */
-function headline(type: ReportType, data: ReportResponse<ReportType> | null, period: Period): string {
+function headline(type: ReportType, data: ReportResponse<ReportType> | null, period: Period, afterNewest: string | null): string {
   const label = `${fmtDayLong(period.from)} to ${fmtDayLong(period.to)}`;
   const short = period.from === period.to ? fmtDayLong(period.from) : label;
   if (!data) return short;
@@ -347,7 +352,7 @@ function headline(type: ReportType, data: ReportResponse<ReportType> | null, per
         ? (data as ReportResponse<'shift'>).report.shifts[0]?.coverage
         : rep.coverage;
   if (!c) return `${W.reports.type[type]} · ${short}`;
-  if (c.daysWithData === 0) return W.report.coverageNone(short);
+  if (c.daysWithData === 0) return afterNewest ?? W.report.coverageNone(short);
   if (c.complete) return W.report.coverageAll(short, c.daysInPeriod);
   return W.report.coveragePartial(
     short, c.daysWithData, c.daysInPeriod,

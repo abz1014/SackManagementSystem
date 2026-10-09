@@ -43,9 +43,9 @@ import { useEffect, useState, useMemo } from 'react';
 import { useLive, usePolling } from '../lib/live';
 import { distinctProductLabels, productLabel } from '../lib/productLabel';
 import { W } from '../lib/words';
-import { periodQuery, trailingWindow, daysWithReadings, type Period, type PeriodParams } from '../lib/period';
+import { periodQuery, trailingWindow, daysWithReadings, periodAfterNewest, type Period, type PeriodParams } from '../lib/period';
 import { Block, Chevron, Details, Empty, Failed, Loading, SkelChart, SkelLines, Toolbar, rowKeys } from '../ui/bits';
-import { fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
+import { fmtClockOn, fmtDay, fmtInt, fmtPct1 } from '../lib/fmt';
 
 /** A reject rate: two decimals under 1 % so a non-zero rate never reads 0.0% (C-110, D-89); one decimal otherwise. */
 function fmtRate(n: number | null | undefined): string {
@@ -175,6 +175,11 @@ export function RejectsScreen({
   onSelectPeriod?: (p: PeriodParams) => void;
 }) {
   const { line, asOf } = useLive();
+  // S3 X-3 (9 Oct 2026): a period that starts after the newest reading on
+  // record says so, instead of only "nothing ..." (see lib/period.ts).
+  const afterNewest = line?.dataAsOfUtc && periodAfterNewest(period, line.dataAsOfUtc)
+    ? W.periodAfterNewest(fmtClockOn(line.dataAsOfUtc, line.plantNowUtc))
+    : null;
   // Rarely changes (it moves once a day at most), so a slow heartbeat is
   // plenty. Finding H6 (Sep 2026 audit): without this, trailingWindow() below
   // always claimed the full 14 days regardless of how much history actually
@@ -501,7 +506,7 @@ export function RejectsScreen({
                     {topReason.row && finiteOrNull(topReason.row.pct) != null ? `${Math.round(topReason.row.pct)}%` : '—'}
                   </b>
                   <span className="fig-note">
-                    {topReason.row ? M.topReasonThisPeriod(reasonName(topReason.row)) : W.rejects.none}
+                    {topReason.row ? M.topReasonThisPeriod(reasonName(topReason.row)) : (afterNewest ?? W.rejects.none)}
                   </span>
                 </>
               )}
@@ -590,6 +595,7 @@ export function RejectsScreen({
                 rows={reasonRows}
                 loading={reasons.loading && !reasons.data}
                 canName={canName}
+                emptyText={afterNewest}
                 active={code}
                 onChoose={(r) => onCodeChange(code === rejectCodeParam(r) ? null : rejectCodeParam(r))}
                 onNamed={reasons.refresh}
@@ -720,6 +726,7 @@ function Reasons({
   rows,
   loading,
   canName,
+  emptyText,
   active,
   onChoose,
   onNamed,
@@ -727,6 +734,8 @@ function Reasons({
   rows: RejectReason[];
   loading: boolean;
   canName: boolean;
+  /** S3 X-3: replaces "No cones were rejected" when the period starts after the newest reading. */
+  emptyText?: string | null;
   active: string | null;
   onChoose: (r: RejectReason) => void;
   onNamed: () => void;
@@ -736,7 +745,7 @@ function Reasons({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   if (loading) return <SkelLines n={6} short />;
-  if (rows.length === 0) return <Empty message={W.rejects.none} />;
+  if (rows.length === 0) return <Empty message={emptyText ?? W.rejects.none} />;
   const max = Math.max(...rows.map((r) => r.count), 1);
   // UX Phase 5 Brief 4, unit U4 (16 Sep 2026): the "vital few" — the smallest
   // leading run of reasons whose cumulative share already reaches 80%. Pure

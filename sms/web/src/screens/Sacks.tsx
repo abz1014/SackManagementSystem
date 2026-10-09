@@ -28,9 +28,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useLive, usePolling, usePlantNow, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
-import { periodQuery, dayToShiftRange, describePeriod, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
+import { periodQuery, dayToShiftRange, describePeriod, periodAfterNewest, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import { Block, Details, Empty, Failed, Figures, SkelChart, SkelFigures, SkelLines, Toggle, Toolbar } from '../ui/bits';
-import { fmtClock, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
+import { fmtClock, fmtClockOn, fmtDayLong, fmtInt, fmtKg, fmtPct1, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
 import { CategoryBars, type BarDatum } from '../ui/chart';
 import { distinctProductLabels } from '../lib/productLabel';
@@ -127,7 +127,12 @@ export function SacksScreen({
   const slow = period.live ? 60_000 : 10 * 60_000;
   const pq = periodQuery(period);
   // C-137 (2 Oct 2026): replay instant, not the moving period.tsTo.
-  const { asOf } = useLive();
+  const { line, asOf } = useLive();
+  // S3 X-3 (9 Oct 2026): a period that starts after the newest reading on
+  // record says so, instead of only "nothing ..." (see lib/period.ts).
+  const afterNewest = line?.dataAsOfUtc && periodAfterNewest(period, line.dataAsOfUtc)
+    ? W.periodAfterNewest(fmtClockOn(line.dataAsOfUtc, line.plantNowUtc))
+    : null;
   const key = `${period.from}:${period.to}:${pq.fromShift ?? ''}:${pq.toShift ?? ''}:${period.shift ?? 'all'}:${asOf ?? 'now'}`;
   const summary = usePolling(
     () => getSackSummary(pq),
@@ -163,7 +168,7 @@ export function SacksScreen({
   const headline = !s
     ? null
     : s.totals.sacks === 0
-      ? W.sacks.headlineNone(periodLabel(period))
+      ? (afterNewest ?? W.sacks.headlineNone(periodLabel(period)))
       : W.sacks.headline(periodLabel(period), fmtInt(s.totals.sacks), fmtInt(finiteOrNull(Math.round(s.totals.kg))), s.totals.inRangePct == null ? null : fmtPct1(s.totals.inRangePct));
 
   return (

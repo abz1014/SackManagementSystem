@@ -27,9 +27,9 @@ import { useEffect, useState } from 'react';
 import { useLive, usePolling, LIST_POLL_MS } from '../lib/live';
 import { W } from '../lib/words';
 import { batchName } from '../lib/batchName';
-import { periodQuery, describePeriod, type Period } from '../lib/period';
+import { periodQuery, describePeriod, periodAfterNewest, type Period } from '../lib/period';
 import { Block, Chevron, Empty, Failed, rowKeys, SkelLines, Toolbar, Toggle } from '../ui/bits';
-import { fmtClock, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
+import { fmtClock, fmtClockOn, fmtDayLong, fmtG, fmtInt, fmtKg, fmtSpan } from '../lib/fmt';
 import { assessHealth } from '../lib/health';
 import type { ReadingsFilter } from '../ui/Bar';
 import {
@@ -165,6 +165,11 @@ export function ReadingsScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period.from, period.to, period.shift]);
   const { line, asOf } = useLive();
+  // S3 X-3 (9 Oct 2026): a period that starts after the newest reading on
+  // record says so, instead of only "nothing ..." (see lib/period.ts).
+  const afterNewest = line?.dataAsOfUtc && periodAfterNewest(period, line.dataAsOfUtc)
+    ? W.periodAfterNewest(fmtClockOn(line.dataAsOfUtc, line.plantNowUtc))
+    : null;
   const health = assessHealth(line);
   const stale = health.kind !== 'ok';
   const lagText =
@@ -315,7 +320,7 @@ export function ReadingsScreen({
       ) : rows.loading && !rows.data ? (
         <SkelLines n={12} />
       ) : total === 0 ? (
-        <Empty message={outsideOnly ? W.readings.nothingOutside : W.readings.nothing} />
+        <Empty message={afterNewest ?? (outsideOnly ? W.readings.nothingOutside : W.readings.nothing)} />
       ) : (
         <>
           <div className="tw">

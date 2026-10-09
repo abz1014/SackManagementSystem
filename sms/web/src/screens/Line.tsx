@@ -28,7 +28,7 @@ import { useLive, usePolling } from '../lib/live';
 import { assessHealth, stateIsKnowable } from '../lib/health';
 import { W } from '../lib/words';
 import { hasNewerElsewhere, quietBecauseGeneration } from '../lib/generationWords';
-import { periodQuery, dayToShiftRange, describePeriod, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
+import { periodQuery, dayToShiftRange, describePeriod, periodAfterNewest, type Period, type PeriodParams, type ShiftRef } from '../lib/period';
 import {
   Block, Chevron, Details, Empty, Failed, Figures, Loading, rowKeys,
   SkelChart, SkelFigures, SkelLines, SkelStations, type FigureProps,
@@ -664,6 +664,8 @@ function kpiBlockNote(
   if (period.live && line.ingestLagSeconds != null && line.ingestLagSeconds > 0) {
     return W.fig.notCaughtUp(fmtSpan(line.ingestLagSeconds));
   }
+  // S3 X-3 (9 Oct 2026): a period that starts after the newest reading says so.
+  if (periodAfterNewest(period, line.dataAsOfUtc)) return W.periodAfterNewest(fmtClockOn(line.dataAsOfUtc, line.plantNowUtc));
   return W.nothingHere;
 }
 
