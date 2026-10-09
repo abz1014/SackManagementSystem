@@ -50,7 +50,7 @@
  * AT THE LAST SIZE CHANGE — never a live one. That is deliberate, not a bug:
  * it is what keeps a hover from re-running whatever `children` does.
  */
-import { useCallback, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Readout } from './chart';
 import { useChartSize } from './useChartSize';
 import { placeTip, type Rect } from './chartLayout';
@@ -172,6 +172,23 @@ export function zoomHint(p: PeriodParams | null): string {
   return W.chart.clickToShowRange;
 }
 
+/**
+ * CSS-053 (owner decision 6 Oct 2026, option B). A click-zoom changes the whole page's period, and the only control that undoes it
+ * is "Back to previous range" in the top bar, which is out of view when the chart is far down the page. The chart that caused the
+ * zoom therefore shows its own "Zoomed in · Back" beside itself while the page is zoomed. `zoomOrigin` is the chartId of the chart
+ * whose click last zoomed the page: module-level so it survives the chart re-mounting when its data reloads for the new period.
+ * "Zoomed" is read from `history.state.zoomFrom`, the same signal App.tsx's `canGoBack` is derived from, and Back is
+ * `history.back()`, exactly what the top bar's control calls, so the two can never disagree.
+ */
+let zoomOrigin: string | null = null;
+function pageIsZoomed(): boolean {
+  try {
+    return (window.history.state as { zoomFrom?: unknown } | null)?.zoomFrom != null;
+  } catch {
+    return false;
+  }
+}
+
 export function ChartFrame(props: ChartFrameProps) {
   const {
     chartId,
@@ -211,8 +228,28 @@ export function ChartFrame(props: ChartFrameProps) {
    * replaced by a page-wide zoom. */
   const activate = onActivate ?? (zoom ? (i: number) => {
     const p = zoom.periodFor(i);
-    if (p) zoom.onZoom(p);
+    if (p) {
+      zoom.onZoom(p);
+      zoomOrigin = chartId;
+    }
   } : undefined);
+
+  /* CSS-053: re-read the history state when the reader goes back by any route (top bar, browser Back). */
+  const [, setHistoryTick] = useState(0);
+  useEffect(() => {
+    const onPop = () => setHistoryTick((n) => n + 1);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const zoomedHere = zoomOrigin === chartId && pageIsZoomed();
+  useEffect(() => {
+    if (zoomOrigin === chartId && !pageIsZoomed()) zoomOrigin = null;
+  });
+  /* The page can re-flow when the new period's data lands, moving the chart out of view: bring the control back into view when it first appears. */
+  const zoomBackRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (zoomedHere) zoomBackRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [zoomedHere]);
 
   const wrapperPoint = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -434,6 +471,11 @@ export function ChartFrame(props: ChartFrameProps) {
   return (
     <div className="chart-frame">
       {title && <p className="h2">{title}</p>}
+      {zoomedHere && !size.print && (
+        <p className="no-print" style={{ margin: '0 0 6px' }}>
+          <button type="button" className="linkish" ref={zoomBackRef} style={{ scrollMargin: '48px 0' }} onClick={() => window.history.back()}>{W.chart.zoomedBack}</button>
+        </p>
+      )}
       <Readout hovered={hoveredReadout} resting={resting ?? caption ?? ''} />
       <div
         ref={wrapRef}

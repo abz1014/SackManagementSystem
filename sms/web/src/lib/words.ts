@@ -2723,6 +2723,8 @@ export const W = {
      that can be zoomed to. */
   chart: {
     backToPreviousRange: 'Back to previous range',
+    /* CSS-053 (owner decision 6 Oct 2026, option B): shown beside the chart a reader click-zoomed, so the way back is in view; the top bar's own control above keeps its wording. */
+    zoomedBack: 'Zoomed in · Back',
     /* Task T8a (29 Sep 2026): StationSheet's daily-means tooltip currently
        pushes the bare string 'adjustment logged here' into its context list
        (screens/StationSheet.tsx ~line 576) — reported here so that screen's
