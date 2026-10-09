@@ -738,11 +738,12 @@ tbody tr:last-child th { border-bottom: 0 !important; }
    across sheets and is untouched by this. */
 .mp-scroll { max-height: 70vh; overflow: auto; position: relative; }
 .mp-scroll table { border-collapse: separate; border-spacing: 0; }
-.mp-scroll thead th { position: sticky; top: 0; background: var(--paper); z-index: 2; }
+/* [CSS-036, 9 Oct 2026] owner decision 6 Oct 2026 (option B): the pinned header uses IFL's light blue (#ADD8E6, the literal `.ifl-table th` already uses; text stays --ink, CSS-013), opaque so rows scrolling under it never show through. The first header cell needs its own line: `.mp-scroll th:first-child` (paper, for the pinned body column) is more specific than the row rule. The pinned body column stays paper. */
+.mp-scroll thead th { position: sticky; top: 0; background: #ADD8E6; z-index: 2; }
 .mp-scroll td:first-child, .mp-scroll th:first-child {
   position: sticky; left: 0; background: var(--paper); z-index: 1;
 }
-.mp-scroll thead th:first-child { z-index: 3; }
+.mp-scroll thead th:first-child { z-index: 3; background: #ADD8E6; }
 /* [CSS-040, 6 Oct 2026] A header cell sits flush against the top edge of this scrolling box (and the last one against its right edge), and `overflow: auto` clips anything outside it, so the global focus ring (2px line, 2px outside the box) lost its top edge, and its right edge on the last column. Drawn 2px inside the cell it is whole. Padding on the box instead would let rows show through a 4px strip above the pinned header row. */
 .mp-scroll thead th:focus-visible { outline-offset: -2px; }
 /* UX overflow sweep (23 Sep 2026): a `.two-col` half is 498px at the desktop
