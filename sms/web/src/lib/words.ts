@@ -913,6 +913,12 @@ export const W = {
        this file. A station that ran more than one material in the window has
        no single target: say so, not "unknown". */
     mixedTarget: (n: number) => `No single target applies — ${n} materials ran here.`,
+    /* S3 X-1 (9 Oct 2026): the station table's vs-target column is narrow, so it
+       carries this short marker; the full reason is printed once under the table
+       (`mixedTargetNote`) and as the cell's tooltip (`mixedTarget`, above). */
+    mixedTargetShort: (n: number) => (n >= 2 ? `${n}\u00A0products` : 'several\u00A0products'),
+    mixedTargetNote:
+      'Stations marked with a number of products: no single target applies, because more than one product ran on that station in this window.',
     /* Sibling of `limitsChanged` above, for underneath the STATION TABLE
        rather than the chart. */
     limitsChangedTable: (n: number) =>

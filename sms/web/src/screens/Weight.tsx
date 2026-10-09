@@ -1542,7 +1542,13 @@ function StationTable({
       </span>
     );
     if (r.targetBasis === 'mixed') {
-      return <span className="mut">{W.weight.mixedTarget(r.materialsInWindow ?? 0)}</span>;
+      // S3 X-1: a short marker in the narrow column; the full sentence is the
+      // tooltip here and is printed once under the table.
+      return (
+        <span className="mut" title={W.weight.mixedTarget(r.materialsInWindow ?? 0)}>
+          {W.weight.mixedTargetShort(r.materialsInWindow ?? 0)}
+        </span>
+      );
     }
     if (r.targetBasis === 'line_product') {
       return <span title={W.weight.targetLineProduct}>{signed(r.vsTargetG)}{retired}</span>;
@@ -1627,6 +1633,9 @@ function StationTable({
       <p className="mut sm" style={{ marginTop: 10 }}>
         {W.weight.trendScale(fmtG(sparkDomain[0]), fmtG(sparkDomain[1]))}
       </p>
+      {rows.some((r) => r.targetBasis === 'mixed') && (
+        <p className="mut sm" style={{ marginTop: 6 }}>{W.weight.mixedTargetNote}</p>
+      )}
     </>
   );
 }
