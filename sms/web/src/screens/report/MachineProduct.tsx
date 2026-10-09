@@ -20,6 +20,7 @@
  * so every count here is cones, never sacks — the same caveat the Sacks
  * report and screen carry.
  */
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { W } from '../../lib/words';
 import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
 import { fmtClock, fmtInt } from '../../lib/fmt';
@@ -83,7 +84,41 @@ export function MachineProductSection({ d, onOpen }: { d: MachineProductReportDa
   return <MachineProductTables d={d} onOpen={onOpen} />;
 }
 
+/**
+ * CSS-019 (owner decision 6 Oct 2026, option A): the screen matrix scrolls sideways inside its box when it is wider than
+ * the box. This line says so and names the machines out of view, and exists only while the table is wider than its box
+ * (measured on mount, on resize and on scroll). Not printed: a sheet cannot scroll, and the print version paginates.
+ */
+function MatrixScrollCue({ boxRef, d }: { boxRef: RefObject<HTMLDivElement | null>; d: MachineProductReportData }) {
+  const [cue, setCue] = useState<{ first: string | null; last: string | null } | null>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return undefined;
+    const measure = () => {
+      if (box.scrollWidth <= box.clientWidth + 1) { setCue(null); return; }
+      const right = box.getBoundingClientRect().right;
+      const heads = Array.from(box.querySelectorAll('thead th.click'));
+      const hidden: string[] = [];
+      heads.forEach((th, i) => {
+        const r = d.rows[i];
+        if (r && th.getBoundingClientRect().right > right + 0.5) hidden.push(machineLabel(r.station, r.machineName, r.stationName));
+      });
+      const next = hidden.length ? { first: hidden[0]!, last: hidden[hidden.length - 1]! } : { first: null, last: null };
+      setCue((prev) => (prev && prev.first === next.first && prev.last === next.last ? prev : next));
+    };
+    measure();
+    box.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    ro?.observe(box);
+    return () => { box.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); ro?.disconnect(); };
+  }, [boxRef, d]);
+  if (!cue) return null;
+  return <p className="mut sm no-print mp-cue" style={{ marginBottom: 6 }}>{W.reports.machineScrollCue(cue.first, cue.last)}</p>;
+}
+
 function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
+  const boxRef = useRef<HTMLDivElement>(null);
   return (
     <>
       <Block first>
@@ -102,7 +137,8 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
             column. See the `.mp-scroll` comment in app.css for the
             measurement that showed the old layout losing the machine label
             off-screen. Same `d`, same cells, only the axes are swapped. */}
-        <div className="tw mp-scroll no-print">
+        <MatrixScrollCue boxRef={boxRef} d={d} />
+        <div className="tw mp-scroll no-print" ref={boxRef}>
           <table className="ifl-table">
             <thead>
               <tr>

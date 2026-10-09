@@ -2355,6 +2355,9 @@ export const W = {
     colMachinesCount: 'Machines',
     machineProductSummary: (machines: string, products: string) => `${machines} machines, ${products} products this period.`,
     conesWithoutStation: (n: string) => `${n} cones carry no machine and are not on this matrix.`,
+    /* CSS-019 (owner decision 6 Oct 2026, option A): the machine matrix scrolls sideways inside its box; this line says so and names the machines out of view. With nothing hidden to the right the reader has scrolled to the end. */
+    machineScrollCue: (first: string | null, last: string | null) =>
+      first == null ? '← Scroll back to see the earlier machines' : first === last ? `Scroll sideways to see machine ${first} →` : `Scroll sideways to see machines ${first} to ${last} →`,
     changeovers: 'Changeovers',
     noChangeovers: 'No changeovers were read in this period.',
     /* UX Phase 9 Brief D (21 Sep 2026) suppressed this matrix from print
