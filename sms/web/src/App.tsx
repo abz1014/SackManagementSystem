@@ -571,6 +571,7 @@ function Chrome({
         plantNowUtc={plantNow}
         health={health}
         period={route.period}
+        currentPeriod={period}
         user={user}
         isAdmin={rank >= 4}
         onNavigate={(s) => go({ view: s, sheet: null, readingsFilter: null })}

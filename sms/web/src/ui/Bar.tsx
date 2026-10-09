@@ -14,7 +14,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { W } from '../lib/words';
-import { PERIOD_KEYS, describePeriod, isRealDate, type PeriodKey, type PeriodParams, type ShiftRef } from '../lib/period';
+import { PERIOD_KEYS, describePeriod, isRealDate, dayToShiftRange, samePeriodParams, type Period, type PeriodKey, type PeriodParams, type ShiftRef } from '../lib/period';
 import type { Health } from '../lib/health';
 import { fmtClockSec, fmtClock, fmtClockOn, fmtSpan } from '../lib/fmt';
 import type { AuthUser } from '../api';
@@ -100,9 +100,15 @@ export function PeriodControl({
   value,
   onChange,
   plantNowUtc,
+  current,
 }: {
   value: PeriodParams;
   onChange: (p: PeriodParams) => void;
+  /** The period as it is resolved and shown right now (X-2, 8 Oct 2026).
+   *  "Pick dates" and "Custom range" start from THIS, so switching never
+   *  jumps to the plant clock's today. Optional: without it, "Pick dates"
+   *  falls back to the last week on the plant clock, as before. */
+  current?: Period;
   /** Finding M11 (Sep 2026 audit): defaulting "Pick dates" from the browser's
    *  clock reintroduces the exact browser-vs-plant-clock bug class this app
    *  otherwise avoids everywhere else — a laptop in another timezone, or one
@@ -110,6 +116,31 @@ export function PeriodControl({
   plantNowUtc: string | null;
 }) {
   const picked = value.picked;
+  const choose = (k: PeriodKey) => {
+    if (k === 'pick') {
+      const seed = picked ?? (current ? { from: current.from, to: current.to } : todayRange(plantNowUtc));
+      const next: PeriodParams = { key: 'pick', picked: seed };
+      if (value.key === 'pick' && samePeriodParams(value, next)) return;
+      onChange(next);
+      return;
+    }
+    if (k === 'range') {
+      // Never send a bare range: it has no dates and the page falls back to
+      // the current shift. Start from the period that is on screen.
+      let range = value.key === 'range' ? value.range : undefined;
+      if (!range && current) {
+        range = current.key === 'shift' && current.shift
+          ? { from: { date: current.from, shift: current.shift }, to: { date: current.from, shift: current.shift } }
+          : dayToShiftRange(current.from, current.to);
+      }
+      if (!range) { onChange({ key: 'range' }); return; }
+      const next: PeriodParams = { key: 'range', range };
+      if (value.key === 'range' && samePeriodParams(value, next)) return;
+      onChange(next);
+      return;
+    }
+    onChange({ key: k });
+  };
   return (
     <div className="row">
       <div className="period" role="group" aria-label="Period">
@@ -119,7 +150,7 @@ export function PeriodControl({
             type="button"
             className={value.key === k ? 'on' : ''}
             aria-pressed={value.key === k}
-            onClick={() => onChange(k === 'pick' ? { key: 'pick', picked: picked ?? todayRange(plantNowUtc) } : { key: k })}
+            onClick={() => choose(k)}
           >
             {k === 'range' ? rangeButtonLabel(value.key === 'range' ? value.range : undefined) : W.period[k as Exclude<PeriodKey, 'range'>]}
           </button>
@@ -330,6 +361,7 @@ export function Bar({
   plantNowUtc,
   health,
   period,
+  currentPeriod,
   user,
   isAdmin,
   onNavigate,
@@ -351,6 +383,8 @@ export function Bar({
   plantNowUtc: string | null;
   health: Health;
   period: PeriodParams;
+  /** The resolved period on screen; seeds "Pick dates" / "Custom range" (X-2). */
+  currentPeriod?: Period;
   user: AuthUser;
   isAdmin: boolean;
   onNavigate: (s: Screen) => void;
@@ -395,7 +429,7 @@ export function Bar({
           ))}
         </nav>
 
-        <PeriodControl value={period} onChange={onPeriod} plantNowUtc={plantNowUtc} />
+        <PeriodControl value={period} onChange={onPeriod} plantNowUtc={plantNowUtc} current={currentPeriod} />
 
         {/* Task T8a (29 Sep 2026): undoes the most recent chart zoom
             (`history.back()`), present only while there is one to undo —
