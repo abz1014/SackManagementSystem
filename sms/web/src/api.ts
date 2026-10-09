@@ -2648,7 +2648,12 @@ export interface ShiftReportData {
   timeLostNote: string;
 }
 
-export interface ProductReportRow extends ReportLine {
+export interface ProductReportRow extends Omit<ReportLine, 'sacks' | 'sackWeightKg' | 'avgSackKg' | 'conesPerSack'> {
+  /** C-005: null on every row when the report is narrowed to one station (sacks carry no winder); see ProductReportData.sacksOmitted. */
+  sacks: number | null;
+  sackWeightKg: number | null;
+  avgSackKg: number | null;
+  conesPerSack: number | null;
   productId: number | null;
   productLabel: string;
   weight: { n: number; avgG: number | null; sdG: number | null; minG: number | null; maxG: number | null };
@@ -2670,8 +2675,11 @@ export interface ProductReportData {
   period: ReportData['period'];
   filters: ReportFilters;
   rows: ProductReportRow[];
-  unattributed: { cones: number; rejects: number; sacks: number; ofCones: number; ofRejects: number; ofSacks: number };
+  unattributed: { cones: number; rejects: number; sacks: number | null; ofCones: number; ofRejects: number; ofSacks: number | null };
   note: string;
+  /** C-005: set when a station filter is applied; the Sacks column is then left out and `sackNote` printed instead. */
+  sacksOmitted?: boolean;
+  sackNote?: string | null;
 }
 
 export interface StationReportRow {

@@ -32,7 +32,17 @@ import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
 import { plantWallClock } from './plantTime.js';
 import { getRuleChangeFlags } from '../ruleAsOf.js';
 
-export interface ProductReportRow extends ReportLine {
+/**
+ * C-005 (owner option A, 7 Oct 2026): under a station filter the five sack figures are null. The sack scale
+ * records no winder, so a sack figure cannot be narrowed to one — see `sacksOmitted` on the report.
+ */
+type SackFields = 'sacks' | 'sackWeightKg' | 'avgSackKg' | 'conesPerSack' | 'sacksPassedScalePct';
+export interface ProductReportRow extends Omit<ReportLine, SackFields> {
+  sacks: number | null;
+  sackWeightKg: number | null;
+  avgSackKg: number | null;
+  conesPerSack: number | null;
+  sacksPassedScalePct?: number | null;
   /** material_id, or null for readings that predate product recording. */
   productId: number | null;
   productLabel: string;
@@ -84,8 +94,11 @@ export interface ProductReportData {
   filters: ReportFilters;
   rows: ProductReportRow[];
   /** Readings in the period with no product at all, out of every reading in it. */
-  unattributed: { cones: number; rejects: number; sacks: number; ofCones: number; ofRejects: number; ofSacks: number };
+  unattributed: { cones: number; rejects: number; sacks: number | null; ofCones: number; ofRejects: number; ofSacks: number | null };
   note: string;
+  /** C-005: true when a station filter is set — every sack figure in this report is null and `sackNote` says why. */
+  sacksOmitted?: boolean;
+  sackNote?: string | null;
   /**
    * RT-002/RT-029 (23 Sep 2026 red-team audit): this report's own weight and
    * state queries below carried no epoch predicate and pooled the plant's
@@ -170,7 +183,8 @@ export async function getProductReport(
   const startMs = new Date(`${from}T00:00:00Z`).getTime();
   const endMs = new Date(`${to}T23:59:59Z`).getTime();
 
-  const rows: ProductReportRow[] = prod.rows.map((r) => {
+  const stationFiltered = filters.station != null;
+  const built: ProductReportRow[] = prod.rows.map((r) => {
     const line = toReportLine(r);
     const w = weightOf.get(r.group);
     const productId = r.group === NO_PRODUCT_GROUP ? null : Number(r.group);
@@ -200,6 +214,8 @@ export async function getProductReport(
     }
     return {
       ...line,
+      // C-005: sacks carry no winder, so under a station filter the line-wide sack figures are blanked, never narrowed.
+      ...(stationFiltered ? { sacks: null, sackWeightKg: null, avgSackKg: null, conesPerSack: null, sacksPassedScalePct: null } : {}),
       productId,
       // F7 (23 Sep 2026): the DISTINCT label, not the bare description. Six
       // PDAS materials on this line are all called "205-IL0-SD"; this row's
@@ -222,6 +238,8 @@ export async function getProductReport(
     };
   });
 
+  // C-005: a product that ran no cone on this winder is in the list only because its (line-wide) sacks exist — drop it.
+  const rows = stationFiltered ? built.filter((r) => r.cones > 0 || r.rejectedCones > 0 || r.weight.n > 0) : built;
   const none = rows.find((r) => r.productId == null);
   const sum = (f: (r: ProductReportRow) => number) => rows.reduce((a, r) => a + f(r), 0);
   return {
@@ -231,14 +249,20 @@ export async function getProductReport(
     unattributed: {
       cones: none?.cones ?? 0,
       rejects: none?.rejectedCones ?? 0,
-      sacks: none?.sacks ?? 0,
+      sacks: stationFiltered ? null : (none?.sacks ?? 0),
       ofCones: sum((r) => r.cones),
       ofRejects: sum((r) => r.rejectedCones),
-      ofSacks: sum((r) => r.sacks),
+      ofSacks: stationFiltered ? null : sum((r) => r.sacks ?? 0),
     },
     note:
       'Each reading is grouped by the product recorded on it by the plant. Readings from before the source recorded a product ' +
       'are listed as "No product on the reading" and are never assigned one after the fact.',
+    ...(stationFiltered
+      ? {
+          sacksOmitted: true,
+          sackNote: `Sacks are not shown: the sack scale records no winder, so sack figures cannot be narrowed to station ${filters.station}.`,
+        }
+      : {}),
     generationNote: noteOf(scope),
     ...ruleFlags,
   };

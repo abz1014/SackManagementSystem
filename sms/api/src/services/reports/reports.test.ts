@@ -501,7 +501,8 @@ describe('product report', () => {
     expect(d.rows[0]!.vsTargetG).toBeCloseTo(1958.4 - 1960, 5);
     expect(d.rows[1]!.target).toBeNull();
     expect(d.rows[1]!.vsTargetG).toBeNull();
-    expect(d.unattributed).toEqual({ cones: 300, rejects: 6, sacks: 12, ofCones: 1000, ofRejects: 20, ofSacks: 40 });
+    // C-005 (7 Oct 2026): this call has a station filter (7), and sacks carry no winder, so the sack counts are null (they were the line-wide 12 and 40).
+    expect(d.unattributed).toEqual({ cones: 300, rejects: 6, sacks: null, ofCones: 1000, ofRejects: 20, ofSacks: null });
     // Both own queries bind the plausibility window and the same filters.
     const own = calls.filter((c) => c.sql.includes('FROM sms.cone_event'));
     expect(own).toHaveLength(2);

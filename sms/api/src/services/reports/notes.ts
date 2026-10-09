@@ -272,6 +272,8 @@ function olderTypeNotes(type: ReportType, d: Rec): (string | null)[] {
       return [str(c.time), str(c.machine), str(c.conesPerSack)];
     }
     case 'product':
+      // C-005: under a station filter the sack figures are blank; the reason travels with the CSV, workbook and PDF.
+      return [str(d.note), str(d.sackNote), ...ruleChangeNotes(d)];
     case 'station':
     case 'cone-weight':
     case 'management-summary':

@@ -15,7 +15,8 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
   // its known counts is non-zero, when any of those counts is itself
   // unreadable (missing), or when it carries real weight readings.
   const rows = d.rows.filter((r) => {
-    const counts = [r.cones, r.rejectedCones, r.sacks];
+    // C-005: with a station filter the sack figures are blank by design, so they say nothing about the row.
+    const counts = d.sacksOmitted ? [r.cones, r.rejectedCones] : [r.cones, r.rejectedCones, r.sacks];
     const knownNonZero = counts.some((c) => c != null && c > 0);
     const anyUnknown = counts.some((c) => c == null);
     const hasWeightData = r.weight.n > 0;
@@ -41,6 +42,7 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
           {W.reports.unattributedSentence(fmtInt(u.cones), fmtInt(u.ofCones), fmtInt(u.rejects), fmtInt(u.ofRejects))}
         </p>
         <p className="mut sm" style={{ marginTop: 6 }}>{d.note}</p>
+        {d.sacksOmitted && d.sackNote && <p className="mut sm" style={{ marginTop: 6 }}>{d.sackNote}</p>}
       </Block>
       <Block label={W.reports.colProduct}>
         <div className="tw tw-span">
@@ -52,7 +54,7 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
                 <th className="n">{W.reports.colInRange}</th>
                 <th className="n">{W.reports.rejectedAtInspection}</th>
                 <th className="n">{W.reports.colRate}</th>
-                <th className="n">{W.report.colSacks}</th>
+                {!d.sacksOmitted && <th className="n">{W.report.colSacks}</th>}
                 <th className="n">{W.reports.colWeighed}</th>
                 <th className="n">{W.reports.colMean}</th>
                 <th className="n">{W.reports.colSpread}</th>
@@ -76,7 +78,7 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
                   <td className="n">{fmtPct1(r.conesInRangePct)}</td>
                   <td className="n">{fmtInt(r.rejectedCones)}</td>
                   <td className="n">{fmtPct1(r.rejectRatePct)}</td>
-                  <td className="n">{fmtInt(r.sacks)}</td>
+                  {!d.sacksOmitted && <td className="n">{fmtInt(r.sacks)}</td>}
                   <td className="n">{fmtInt(r.weight.n)}</td>
                   <td className="n">{fmtG1(r.weight.avgG)}</td>
                   <td className="n">{fmtG1(r.weight.sdG)}</td>
