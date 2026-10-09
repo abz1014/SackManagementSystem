@@ -716,6 +716,14 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody th { padding-top: 9px; }
 tbody tr:last-child th { border-bottom: 0 !important; }
 .tw { overflow-x: auto; }                 /* wide tables scroll, the page never does */
+/* [CSS-073, 9 Oct 2026] owner decision 6 Oct 2026 (option A): a table wider than its box keeps scrolling sideways, now with a soft fade on each edge that has content out of view. CSS only ("scroll shadows"): the two 14px solid paper-coloured covers are `local` (they travel with the content, so they hide the fades at the scroll ends; solid rather than a gradient so a table that fits is pixel-identical to before, a gradient dithers by one level) and the two 12px --grid fades are `scroll` (fixed to the box edges); no positioned element, which would let a table paint over a chart's resize handle (CSS-007). The fade is a background, so a cell with its own opaque fill hides it where it passes behind: the shaded rows (`tr.on`, `tr.hl`, `tr.rej`), IFL report header cells and the machine matrix's pinned header and first column. Nothing shows where a table fits. */
+.tw {
+  background:
+    linear-gradient(var(--paper), var(--paper)) 0 0 / 14px 100% no-repeat local,
+    linear-gradient(var(--paper), var(--paper)) 100% 0 / 14px 100% no-repeat local,
+    linear-gradient(to right, var(--grid), transparent) 0 0 / 12px 100% no-repeat scroll,
+    linear-gradient(to left, var(--grid), transparent) 100% 0 / 12px 100% no-repeat scroll;
+}
 /* [CSS-043, 7 Oct 2026] Correction to the "~14 columns, fits without horizontal scroll" claim below: measured 15+ columns, 1476px wide in an 816px box at 1366 and 1920 (1816px at scale 1.3), scrolling inside .tw. Whether to change that is CSS-019, awaiting an owner decision.
    [CSS-019, 9 Oct 2026] owner decision 6 Oct 2026: option A, scroll plus a visible cue. */
 /* RT-017 (ENGINEERING-RED-TEAM-AUDIT-2026-09-23.md), fixed 25 Sep 2026:
@@ -1397,7 +1405,7 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
      period that is over 100 columns no font size makes legible on one A4
      sheet in either orientation. That is a real physical limit, not
      something this rule can silently paper over; see the Phase 9 report. */
-  .tw { overflow-x: visible !important; }
+  .tw { overflow-x: visible !important; background: none; } /* [CSS-073] the on-screen scroll fade is not printed */
   .tw table { width: 100%; table-layout: auto; font-size: 8pt; }
   .tw th, .tw td { padding-right: 4px; padding-top: 4px; padding-bottom: 4px; }
   .tw th.n, .tw td.n { padding-left: 8px; }
