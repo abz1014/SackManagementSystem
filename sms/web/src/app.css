@@ -680,7 +680,8 @@ h1 .acc, .headline .acc { color: var(--acc); }
    a station has one, so the row never reflows as stations go quiet. */
 .st-tag { display: block; font-size: var(--fs-tick); color: var(--grid); min-height: 1.4em; }
 .st.quiet { border-style: dashed; }
-.st.quiet .st-val, .st.quiet .st-name { color: var(--grid); }
+/* [CSS-015, 9 Oct 2026] owner decision 6 Oct 2026 (option B): a quiet tile keeps its dashed border and "quiet" tag (the design spec asks for dimming) but its name and count use the normal secondary grey (--muted, 5.89:1 on white) instead of the graphics-only --grid (3.14:1), so the station a supervisor most needs to read stays readable. */
+.st.quiet .st-val, .st.quiet .st-name { color: var(--muted); }
 .st.flag { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
 .st.flag .st-val { color: var(--acc); }
 
