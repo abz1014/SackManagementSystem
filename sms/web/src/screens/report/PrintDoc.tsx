@@ -560,6 +560,11 @@ export function printedInBody(type: ReportType, data: ReportResponse<ReportType>
     if (kgb && typeof kgb.label === 'string' && typeof kgb.implausible === 'number') out.push(S.kgBasis(kgb.label, fmtInt(kgb.implausible)));
   }
   if (type === 'rejected-cones') out.push(W.iflReports.rejectedConesList.lowerBoundNote);
+  // C-005: a station-filtered Product report prints its sack sentence under the table (Product.tsx).
+  if (type === 'product') {
+    const p = (data?.report ?? {}) as { sacksOmitted?: unknown; sackNote?: unknown };
+    if (p.sacksOmitted === true && typeof p.sackNote === 'string' && p.sackNote.trim() !== '') out.push(p.sackNote.trim());
+  }
   return out;
 }
 
