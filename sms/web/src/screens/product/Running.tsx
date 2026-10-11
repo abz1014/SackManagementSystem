@@ -457,12 +457,28 @@ function ByProduct({
                   </th>
                   <td>
                     <span className="mut">{machineStateText(m, asOfUtc)}</span>
+                    {/* F-1: what this winder last stamped. Read from its cones, so the time is that of a cone. */}
+                    <span className="mut sm" style={{ display: 'block' }}>
+                      {m.lastMaterialId != null && m.lastStampedUtc != null
+                        ? W.machineState.lastProduct(
+                            `${labels.get(m.lastMaterialId) ?? m.lastProductName ?? W.cone.noProductName(m.lastMaterialId)}${
+                              m.lastProductActive === false || productById.get(m.lastMaterialId)?.activeFlag === false
+                                ? ` ${W.retiredProduct.marker}`
+                                : ''
+                            }`,
+                            `${fmtClock(m.lastStampedUtc)}, ${fmtDay(m.lastStampedUtc)}`,
+                          )
+                        : W.machineState.lastProductNone}
+                    </span>
                     <Chevron />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="mut sm" style={{ marginTop: 6 }}>
+            {W.machineState.thresholds(`${fmtClock(asOfUtc)}, ${fmtDay(asOfUtc)}`)}
+          </p>
         </div>
       )}
     </div>

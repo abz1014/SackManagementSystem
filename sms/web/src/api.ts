@@ -2029,6 +2029,12 @@ export interface MachineRunning {
   /** The newest reading EVER at this station (this generation), independent of the window. Null when never seen. */
   lastSeenUtc: string | null;
   state: MachineState;
+  /** F-1: the product on the newest cone that carries one, for a winder that is not running. Null for a running winder, or when none was ever stamped. Optional so older fixtures still type-check. */
+  lastMaterialId?: number | null;
+  lastProductName?: string | null;
+  lastProductActive?: boolean | null;
+  /** That cone's time, plant clock labelled UTC. */
+  lastStampedUtc?: string | null;
 }
 export interface MachinesRunningData {
   asOfUtc: string | null;

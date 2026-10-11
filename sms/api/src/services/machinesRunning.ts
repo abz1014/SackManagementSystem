@@ -106,6 +106,21 @@ export interface MachineRunning {
   /** The newest reading EVER recorded at this station (this generation), independent of the 2 h window. Null when never seen. Plant clock labelled UTC. */
   lastSeenUtc: string | null;
   state: MachineState;
+  /**
+   * F-1 (Stage 3, Oct 2026): for a winder that is NOT running (quiet, stale or
+   * silent), the product on its newest cone that carries one, so the screen
+   * can say what a stopped winder last stamped. Derived at read time from
+   * sms.cone_event alone (material_id, attribution_method = 'source_column'),
+   * this generation, up to the anchor; July rows carry no material and give
+   * null. Null for a running winder (its product is `materialId`) and when no
+   * stamped cone exists. `lastStampedUtc` is that cone's time, plant clock
+   * labelled UTC: the first/last cone is the only evidence of a product, never
+   * "when it was selected".
+   */
+  lastMaterialId: number | null;
+  lastProductName: string | null;
+  lastProductActive: boolean | null;
+  lastStampedUtc: string | null;
 }
 
 export interface MachinesRunningData {
@@ -220,6 +235,10 @@ export async function getMachinesRunning(
     quiet: true,
     lastSeenUtc: lastSeenUtcOf(Number(r.station_id)),
     state: 'silent',
+    lastMaterialId: null,
+    lastProductName: null,
+    lastProductActive: null,
+    lastStampedUtc: null,
   }));
 
   if (asOfMs == null) {
@@ -301,6 +320,7 @@ export async function getMachinesRunning(
         station: st, stationName: null, machineName: null, materialId: null, productName: null, productActive: null,
         cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false, quiet: true,
         lastSeenUtc: lastSeenUtcOf(st), state: 'silent',
+        lastMaterialId: null, lastProductName: null, lastProductActive: null, lastStampedUtc: null,
       };
       machines.push(m);
       byStation.set(st, m);
@@ -355,6 +375,41 @@ export async function getMachinesRunning(
   const newer = scope.spansGenerations
     ? await findNewerElsewhere(pool, lineId, asOfMs, opts.asOfMs ?? Number.MAX_SAFE_INTEGER, self)
     : emptyNewer;
+
+  // 5. F-1: what each winder that is not running last stamped. One grouped
+  // read, only for those winders, bounded by the same generation and anchor.
+  // Runs last so the positional order of the queries above is unchanged.
+  const notRunning = machines.filter((m) => m.quiet).map((m) => m.station);
+  if (notRunning.length > 0) {
+    const stReq = bindCone(pool.request().input('line', mssql.Int, lineId).input('end', mssql.BigInt, asOfMs));
+    notRunning.forEach((st, i) => stReq.input(`st${i}`, mssql.Int, st));
+    const stList = notRunning.map((_, i) => `@st${i}`).join(', ');
+    const stamped = await stReq.query<{
+      st: number; material_id: number; product_name: string | null; product_active: boolean | number | null; ms: string | number;
+    }>(
+      `WITH c AS (
+         SELECT source_station, material_id, production_ts_utc_ms,
+                ROW_NUMBER() OVER (PARTITION BY source_station ORDER BY production_ts_utc_ms DESC, cone_event_id DESC) AS rn
+           FROM sms.cone_event
+          WHERE line_id = @line AND source_station IN (${stList})
+            AND production_ts_utc_ms > 0 AND production_ts_utc_ms <= @end
+            AND material_id IS NOT NULL AND attribution_method = 'source_column'${andCone}
+       )
+       SELECT c.source_station AS st, c.material_id, COALESCE(p.description, p.lot_code) AS product_name,
+              p.active_flag AS product_active, c.production_ts_utc_ms AS ms
+         FROM c
+         LEFT JOIN sms.product p ON p.product_id = c.material_id
+        WHERE c.rn = 1`,
+    );
+    for (const row of stamped.recordset) {
+      const m = byStation.get(Number(row.st));
+      if (!m || !m.quiet) continue;
+      m.lastMaterialId = Number(row.material_id);
+      m.lastProductName = row.product_name ?? `Product ${m.lastMaterialId}`;
+      m.lastProductActive = row.product_active == null ? null : Boolean(row.product_active);
+      m.lastStampedUtc = new Date(Number(row.ms)).toISOString();
+    }
+  }
   return {
     asOfUtc: new Date(asOfMs).toISOString(),
     windowMs,

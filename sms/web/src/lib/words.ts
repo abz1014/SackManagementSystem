@@ -2396,6 +2396,13 @@ export const W = {
     /** Product › Running's new section heading for the machines
      *  `groupByProduct` does not list (no cone in the current window). */
     notRunning: 'Not currently running',
+    /** F-1: the product on the winder's newest cone that carries one. The time is that cone's, never "when it was selected" — the panel's choice is only known through the cones. */
+    lastProduct: (label: string, when: string) => `Last product it stamped: ${label}, last cone ${when}.`,
+    /** F-1: a winder whose cones carry no product (all July rows, or none ever seen). */
+    lastProductNone: 'No product recorded on its cones.',
+    /** F-1: what the four words above mean, stated once under the list. `when` is the newest reading on record. */
+    thresholds: (when: string) =>
+      `Running means a cone within 2 hours of the newest reading (${when}). Quiet means none for 2 to 24 hours, stale up to 7 days, and silent longer than that.`,
   } as const,
   /* RT-014 (ENGINEERING-RED-TEAM-AUDIT-2026-09-24.md): the API now caps
      oversized results server-side and answers 413 {error, limit, hint}
