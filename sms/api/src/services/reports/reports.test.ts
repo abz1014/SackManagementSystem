@@ -504,7 +504,8 @@ describe('product report', () => {
     // C-005 (7 Oct 2026): this call has a station filter (7), and sacks carry no winder, so the sack counts are null (they were the line-wide 12 and 40).
     expect(d.unattributed).toEqual({ cones: 300, rejects: 6, sacks: null, ofCones: 1000, ofRejects: 20, ofSacks: null });
     // Both own queries bind the plausibility window and the same filters.
-    const own = calls.filter((c) => c.sql.includes('FROM sms.cone_event'));
+    // F-2 (11 Oct 2026): the product-change read adds its own cell query (`FROM sms.cone_event c`), so match this report's two.
+    const own = calls.filter((c) => c.sql.includes('FROM sms.cone_event WHERE'));
     expect(own).toHaveLength(2);
     for (const c of own) {
       expect(c.params.get('shift')).toBe('morning');

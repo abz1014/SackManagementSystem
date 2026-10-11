@@ -6,6 +6,7 @@ import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ProductOption, ProductReportData } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';
 import { fmtG1, fmtSignedG, StateCells, StateHeads } from './shared';
+import { ProductChangesBlock } from './ProductChanges';
 
 export function ProductSection({ d, products }: { d: ProductReportData; products: ProductOption[] }) {
   // A missing count (a stripped field on an otherwise-real row) is UNKNOWN,
@@ -96,6 +97,7 @@ export function ProductSection({ d, products }: { d: ProductReportData; products
           </table>
         </div>
       </Block>
+      <ProductChangesBlock d={d} />
     </>
   );
 }

@@ -2370,6 +2370,14 @@ export const W = {
       first == null ? '← Scroll back to see the earlier machines' : first === last ? `Scroll sideways to see machine ${first} →` : `Scroll sideways to see machines ${first} to ${last} →`,
     changeovers: 'Changeovers',
     noChangeovers: 'No changeovers were read in this period.',
+    /* F-2 (Stage 3, 11 Oct 2026): product changes on the product, daily, shift and shift-production reports, and the machine report's own table.
+       PDAS is a catalogue and the operator picks on the panel, so every time is that of the first cone of the new product, never the selection. */
+    productChanges: 'Product changes',
+    noProductChanges: 'No product change was read on any winder in this period.',
+    productChangesUnread: 'Product changes could not be read for this period.',
+    productChangeTimeNote: 'Each change is timed at the first cone of the new product on that winder, not at the moment the panel selection was made.',
+    colFirstConeOfNew: 'First cone of the new product',
+    fromBeforePeriod: '(before this period)',
     /* UX Phase 9 Brief D (21 Sep 2026) suppressed this matrix from print
        entirely — over 100 columns on a month-long range, a structural limit
        no type size or orientation fixes on one sheet. Owner overruled the

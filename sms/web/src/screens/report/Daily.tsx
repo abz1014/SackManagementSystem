@@ -10,6 +10,7 @@ import { fmtInt, fmtKg, fmtPct1, fmtSpan, describeMismatchHours } from '../../li
 import type { PeriodParams } from '../../lib/period';
 import type { DailyReportData, ReportLine } from '../../api';
 import { DayBars, Fig, LineTable } from './shared';
+import { ProductChangesBlock } from './ProductChanges';
 
 export function DailySection({ d, onSelectPeriod }: { d: DailyReportData; onSelectPeriod?: (p: PeriodParams) => void }) {
   if (d.totals.cones === 0) {
@@ -65,6 +66,7 @@ export function DailySection({ d, onSelectPeriod }: { d: DailyReportData; onSele
           </div>
         </div>
       </Block>
+      <ProductChangesBlock d={d} />
     </>
   );
 }

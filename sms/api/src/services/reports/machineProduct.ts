@@ -99,9 +99,14 @@ export const NO_PRODUCT_LABEL = 'No product on the reading';
  * The label per material: the product name, with " #id" appended only when
  * the same name belongs to more than one material in this data.
  */
-export function labelMaterials(cells: readonly MachineShiftCell[]): Record<string, string> {
+export function labelMaterials(
+  cells: readonly MachineShiftCell[],
+  /** F-2: materials named only by a change (the cone before the period began), so a label can be built for them too. */
+  extra: readonly { materialId: number | null; productName: string | null }[] = [],
+): Record<string, string> {
   const nameOf = new Map<string, string | null>();
   for (const c of cells) for (const m of c.materials) nameOf.set(String(m.materialId ?? 'none'), m.productName);
+  for (const e of extra) if (!nameOf.has(String(e.materialId ?? 'none'))) nameOf.set(String(e.materialId ?? 'none'), e.productName);
   const owners = new Map<string, number>();
   for (const name of nameOf.values()) if (name != null) owners.set(name, (owners.get(name) ?? 0) + 1);
   const labels: Record<string, string> = {};

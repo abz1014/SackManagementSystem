@@ -58,6 +58,7 @@ import { getPlausibilityRuleAsOf, getWeightRuleAsOf, plantDayEndMs, plantDayStar
 import { csvRowOf, round, type ReportFilters } from './common.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import { shiftRangeClause, type ShiftRange } from '../../shiftRange.js';
+import { readProductChanges, type ReportProductChanges } from './productChanges.js';
 
 export interface ShiftProductionFigures {
   /** Cones weighed: every cone row, whatever its result. */
@@ -149,6 +150,12 @@ export interface ShiftProductionReportData {
   /** "Assumed until IFL confirms" lines: each a plain sentence naming a default this report applied because IFL has not answered. */
   pendingIfl: string[];
   generationNote: GenerationNote;
+  /**
+   * F-2: the product changes the readings show on any winder in this window (null = could not be read), with the labels the
+   * notes print. Absent on a payload that predates it.
+   */
+  productChanges?: ReportProductChanges['productChanges'];
+  productChangeLabels?: ReportProductChanges['productChangeLabels'];
 }
 
 export const SHIFT_PRODUCTION_NOTE =
@@ -419,6 +426,8 @@ export async function getShiftProductionReport(
     .map(([winder, a]) => ({ winder, ...figuresOf(a) }));
   const summary: ShiftProductionSummaryRow[] = SHIFT_CODES.filter((s) => byShift.has(s)).map((s) => ({ shift: s, ...figuresOf(byShift.get(s)!) }));
 
+  // F-2: read last, so the counts above are untouched by it.
+  const productChanges = await readProductChanges(pool, lineId, resolved, filters, shiftRange);
   return {
     period: resolved,
     filters,
@@ -436,6 +445,7 @@ export async function getShiftProductionReport(
     note: SHIFT_PRODUCTION_NOTE + (plausR.ruleChangedInPeriod || weightR.ruleChangedInPeriod ? RULE_CHANGED_NOTE : ''),
     pendingIfl: [...SHIFT_PRODUCTION_PENDING_IFL],
     generationNote: noteOf(scope),
+    ...productChanges,
   };
 }
 

@@ -5,6 +5,7 @@ import { fmtInt, fmtKg, fmtPct1, describeMismatchHours } from '../../lib/fmt';
 import type { PeriodParams } from '../../lib/period';
 import type { ShiftReportData, ShiftSection as ShiftSectionData } from '../../api';
 import { Fig, LineTable, DayBars } from './shared';
+import { ProductChangesBlock } from './ProductChanges';
 
 // A missing total (a stripped field on an otherwise-real payload) is UNKNOWN,
 // not zero: `undefined > 0` is false, so treating a hole the same as a real
@@ -30,6 +31,7 @@ export function ShiftSection({ d, onSelectPeriod }: { d: ShiftReportData; onSele
       {d.shifts.map((s, i) => (
         <OneShift key={s.shift} s={s} first={i === 0} onSelectPeriod={onSelectPeriod} />
       ))}
+      <ProductChangesBlock d={d} />
       <Block plain>
         <p className="mut sm">{d.timeLostNote}</p>
         {d.shiftCheck && (

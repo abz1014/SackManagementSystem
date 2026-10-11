@@ -34,10 +34,14 @@
  * throwing: notes are decoration over figures the report states anyway.
  */
 import type { ReportType } from './common.js';
+import { PRODUCT_CHANGE_TIME_NOTE, productChangeNotes } from './productChanges.js';
 import { shiftProductionCaveats, type ShiftProductionReportData } from './shiftProduction.js';
 
 /** The heading over every "assumed until IFL confirms" line. The screen prints the same words (web `W.iflReports.pendingHeading`). */
 export const PENDING_IFL_HEADING = 'Assumed until IFL confirms';
+
+/** F-2: the report types whose notes state the product changes the readings show (machine-product lists them as rows instead). */
+const PRODUCT_CHANGE_TYPES: readonly ReportType[] = ['product', 'daily', 'shift', 'shift-production'];
 
 /** The reports that carry notes: IFL's eight, by report type. */
 export const IFL_NOTE_TYPES: readonly ReportType[] = [
@@ -303,10 +307,16 @@ export function reportNotesOf(type: ReportType, data: unknown): string[] {
     // C-114 (D-82, 2 Oct 2026): the ten earlier types state their caveats in the report data and the screen prints them; the
     // CSV and the workbook have no body, so the same existing strings travel here. No new wording, nothing the screen omits.
     for (const s of olderTypeNotes(type, data)) add(s);
+    // F-2: product changes in the notes. machine-product already lists its changes as rows, so it carries only the time note.
+    if (PRODUCT_CHANGE_TYPES.includes(type)) for (const c of productChangeNotes(data)) add(c);
+    if (type === 'machine-product' && Array.isArray(data.changes)) add(PRODUCT_CHANGE_TIME_NOTE);
     return out;
   }
   add(str(data.note));
   for (const c of caveatsOf(type, data)) add(c);
+  // F-2: the product changes the readings show (shift-production only among IFL's eight; the helper states nothing for a
+  // payload with no `productChanges` field).
+  if (PRODUCT_CHANGE_TYPES.includes(type)) for (const c of productChangeNotes(data)) add(c);
   for (const p of pendingLines(data)) add(p);
   return out;
 }

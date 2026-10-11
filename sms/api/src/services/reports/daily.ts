@@ -48,6 +48,7 @@ import type { CsvRow, CsvTable } from './csv.js';
 import type { GenerationNote } from '../generation.js';
 import type { ShiftRange } from '../../shiftRange.js';
 import { getRuleChangeFlags } from '../ruleAsOf.js';
+import { readProductChanges, type ReportProductChanges } from './productChanges.js';
 
 export interface RejectPopulations {
   /** cone_event rows the scale's own bit marked out of range — what Readings lists as "Rejected cones". */
@@ -67,6 +68,12 @@ export interface DailyReportData extends ReportData {
   /** C-036: a rule changed in VALUE inside the period — notes.ts prints the disclosure. Absent on a payload that predates it. */
   weightRuleChangedInPeriod?: boolean;
   plausibilityRuleChangedInPeriod?: boolean;
+  /**
+   * F-2: the product changes the readings show on any winder in this window (null = could not be read), with the labels the
+   * notes print. Absent on a payload that predates it.
+   */
+  productChanges?: ReportProductChanges['productChanges'];
+  productChangeLabels?: ReportProductChanges['productChangeLabels'];
 }
 
 export async function getDailyReport(
@@ -97,12 +104,15 @@ export async function getDailyReport(
     getRuleChangeFlags(pool, lineId, from, to),
   ]);
   const byScale = scaleCount.count;
+  // F-2: read last, so the figures above are untouched by it.
+  const changes = await readProductChanges(pool, lineId, resolved, filters, shiftRange);
   const cones = report.totals.cones;
   const atInspection = report.totals.rejectedCones;
   return {
     ...report,
     generationNote: scaleCount.note,
     ...ruleFlags,
+    ...changes,
     rejectPopulations: {
       byScale,
       byScalePct: pct(byScale, cones),

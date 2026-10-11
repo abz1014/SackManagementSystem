@@ -24,18 +24,9 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { W } from '../../lib/words';
 import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
 import { fmtClock, fmtInt } from '../../lib/fmt';
-import type { MachineProductChange, MachineProductReportData, MachineShiftCell } from '../../api';
+import type { MachineProductReportData, MachineShiftCell } from '../../api';
 import { fmtDayDmy } from './shared';
-
-/** The row/change label: the machine's own name, then the station's, then a plain numbered fallback. */
-function machineLabel(station: number, machineName: string | null, stationName?: string | null): string {
-  return machineName?.trim() || stationName?.trim() || `${W.reports.colMachine} ${station}`;
-}
-
-/** materialId → the label the report prints, as the server's own CSV serialiser resolves it (machineProduct.ts labelOf). */
-function labelOf(id: number | null, name: string | null, labels: Record<string, string>): string {
-  return labels[String(id ?? 'none')] ?? name ?? (id == null ? W.cone.noMaterial : W.cone.noProductName(id));
-}
+import { ChangesTable, labelOf, machineLabel } from './ProductChanges';
 
 /**
  * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.3
@@ -187,23 +178,10 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
         {d.changes.length === 0 ? (
           <p className="mut">{W.reports.noChangeovers}</p>
         ) : (
-          <div className="tw">
-            <table className="ifl-table">
-              <thead>
-                <tr>
-                  <th>{W.reports.colWhen}</th>
-                  <th>{W.reports.colMachine}</th>
-                  <th>{W.reports.colFrom}</th>
-                  <th>{W.reports.colTo}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.changes.map((c, i) => (
-                  <ChangeRow key={i} c={c} labels={d.labels} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <ChangesTable changes={d.changes} labels={d.labels} />
+            <p className="mut sm no-print" style={{ marginTop: 6 }}>{W.reports.productChangeTimeNote}</p>
+          </>
         )}
       </Block>
 
@@ -307,16 +285,5 @@ function Cell({ cell, labels }: { cell: MachineShiftCell; labels: Record<string,
         </span>
       ))}
     </>
-  );
-}
-
-function ChangeRow({ c, labels }: { c: MachineProductChange; labels: Record<string, string> }) {
-  return (
-    <tr>
-      <td>{fmtDayDmy(c.day)} {W.shiftName[c.shift]}{' · '}{fmtClock(c.firstUtc)}</td>
-      <td>{machineLabel(c.station, c.machineName)}</td>
-      <td>{labelOf(c.fromMaterialId, c.fromProductName, labels)}</td>
-      <td>{labelOf(c.toMaterialId, c.toProductName, labels)}</td>
-    </tr>
   );
 }

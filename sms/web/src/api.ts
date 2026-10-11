@@ -2634,7 +2634,7 @@ export interface RejectPopulations {
 export interface ReportData {
   shift: 'morning' | 'evening' | 'night' | null;
 }
-export interface DailyReportData extends Omit<ReportData, 'downtime'> {
+export interface DailyReportData extends Omit<ReportData, 'downtime'>, ReportProductChanges {
   downtime: ReportData['downtime'] | null;
   rejectPopulations: RejectPopulations;
 }
@@ -2646,7 +2646,7 @@ export interface ShiftSection {
   byDay: ReportLine[];
   readings: ReportData['readings'];
 }
-export interface ShiftReportData {
+export interface ShiftReportData extends ReportProductChanges {
   period: ReportData['period'];
   shift: 'morning' | 'evening' | 'night' | null;
   shifts: ShiftSection[];
@@ -2677,7 +2677,7 @@ export interface ProductReportRow extends Omit<ReportLine, 'sacks' | 'sackWeight
   /** RT-018: PDAS's own MaterialActive as last mirrored. Null/absent for the "No product on the reading" row, or an older fixture. */
   productActive?: boolean | null;
 }
-export interface ProductReportData {
+export interface ProductReportData extends ReportProductChanges {
   period: ReportData['period'];
   filters: ReportFilters;
   rows: ProductReportRow[];
@@ -2961,6 +2961,16 @@ export interface MachineProductChange {
   /** First reading of the new material at this station. */
   firstUtc: string;
   kind: 'within_shift' | 'between_shifts';
+  /** F-2: the FROM side is the winder's last cone before the period began. Absent on a payload that predates it. */
+  fromBeforePeriod?: boolean;
+}
+/**
+ * F-2: the product changes the readings show on any winder in a report's window, with the labels the notes print.
+ * `productChanges` null = could not be read (never "none"); absent = an older server.
+ */
+export interface ReportProductChanges {
+  productChanges?: MachineProductChange[] | null;
+  productChangeLabels?: Record<string, string>;
 }
 export interface MachineProductTotal {
   materialId: number | null;
@@ -3047,7 +3057,7 @@ export interface ShiftProductionRow extends ShiftProductionFigures { date: strin
 export interface ShiftProductionShiftTotal extends ShiftProductionFigures { date: string; shift: ShiftCode }
 export interface ShiftProductionDayTotal extends ShiftProductionFigures { date: string }
 export interface ShiftProductionWinderTotal extends ShiftProductionFigures { winder: number }
-export interface ShiftProductionReportData extends IflReportBase {
+export interface ShiftProductionReportData extends IflReportBase, ReportProductChanges {
   summary: ShiftProductionSummaryRow[];
   grandTotal: ShiftProductionFigures;
   rows: ShiftProductionRow[];

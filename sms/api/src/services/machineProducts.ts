@@ -36,6 +36,12 @@
  * material differed from the previous shift's. `dominantMaterialId` is still
  * on every cell for a screen that wants one name per cell.
  *
+ * - AT THE PERIOD'S START (F-2, Stage 3): a winder whose first cone in the period carries a different material from the cone
+ *   it weighed just before the period began is a changeover too, and the cells inside the period cannot show it. One extra
+ *   read per call finds each winder's newest stamped cone strictly before its first in-period cone (same generation, any
+ *   date) and `foldCells` emits a `between_shifts` change with `fromBeforePeriod: true`, timed at that first in-period cone.
+ *   Nothing is written; July (no material on any cone) gives none.
+ *
  * `tsTo` caps the production INSTANT for a replay (`?at=`), as production.ts
  * does; without it the newest reading is the natural bound.
  *
@@ -110,6 +116,12 @@ export interface MachineProductChange {
   /** First reading of the new material at this station. */
   firstUtc: string;
   kind: 'within_shift' | 'between_shifts';
+  /**
+   * F-2 (Stage 3, Oct 2026): true when the FROM side is the winder's last stamped cone BEFORE the period began, not a cell
+   * inside it — the changeover happened at the start of the period and the cells alone could not see it. Optional so a
+   * payload that predates it reads as false.
+   */
+  fromBeforePeriod?: boolean;
 }
 
 export interface MachineProductShiftsData {
@@ -252,12 +264,48 @@ export async function getMachineProductShifts(
         `SELECT COUNT(*) AS n FROM sms.cone_event WHERE ${andEpoch(noStWhere.join(' AND '), noSt, scope, 'cone_event')}`,
       );
 
+  // 4. F-2: each winder's newest stamped cone strictly before its first cone in the period, so a changeover that happened
+  //    just before the period began is still reported. Read-only, same generation, not bounded by the period.
+  const firstMsOf = new Map<number, number>();
+  for (const row of r.recordset) {
+    const st = Number(row.st);
+    const ms = Number(row.first_ms);
+    const cur = firstMsOf.get(st);
+    if (cur == null || ms < cur) firstMsOf.set(st, ms);
+  }
+  const lookback = new Map<number, { materialId: number; productName: string | null }>();
+  if (firstMsOf.size > 0) {
+    const lreq = pool.request().input('line', mssql.Int, lineId);
+    const ors: string[] = [];
+    let i = 0;
+    for (const [st, ms] of firstMsOf) {
+      lreq.input(`ls${i}`, mssql.Int, st).input(`lf${i}`, mssql.BigInt, ms);
+      ors.push(`(c.source_station = @ls${i} AND c.production_ts_utc_ms < @lf${i})`);
+      i += 1;
+    }
+    const lwhere = `c.line_id = @line AND c.production_ts_utc_ms > 0 AND c.material_id IS NOT NULL AND (${ors.join(' OR ')})`;
+    const lr = await lreq.query<{ st: number; material_id: number; product_name: string | null }>(
+      `SELECT x.st, x.material_id, COALESCE(p.description, p.lot_code) AS product_name
+         FROM (
+           SELECT c.source_station AS st, c.material_id,
+                  ROW_NUMBER() OVER (PARTITION BY c.source_station ORDER BY c.production_ts_utc_ms DESC, c.cone_event_id DESC) AS rn
+             FROM sms.cone_event c
+            WHERE ${andEpoch(lwhere, lreq, scope, 'cone_event', { alias: 'c.' })}
+         ) x
+         LEFT JOIN sms.product p ON p.product_id = x.material_id
+        WHERE x.rn = 1`,
+    );
+    for (const row of lr.recordset) {
+      lookback.set(Number(row.st), { materialId: Number(row.material_id), productName: row.product_name ?? `Product ${Number(row.material_id)}` });
+    }
+  }
+
   return {
     from: p.from,
     to: p.to,
     shift: p.shift ?? null,
     stations,
-    ...foldCells(r.recordset, byStation),
+    ...foldCells(r.recordset, byStation, lookback),
     conesWithoutStation: Number(noStation.recordset[0]?.n ?? 0),
     generationNote: noteOf(scope),
   };
@@ -270,6 +318,11 @@ export async function getMachineProductShifts(
 export function foldCells(
   rows: readonly RawRow[],
   roster: Map<number, { station: number; stationName: string | null; machineName: string | null }>,
+  /**
+   * F-2: per winder, the newest stamped cone before its first cone in the period (read by the caller; empty by default so a
+   * caller with no lookback behaves exactly as before).
+   */
+  lookback: ReadonlyMap<number, { materialId: number; productName: string | null }> = new Map(),
 ): { cells: MachineShiftCell[]; changes: MachineProductChange[] } {
   const cellOf = new Map<string, MachineShiftCell>();
   for (const row of rows) {
@@ -320,6 +373,20 @@ export function foldCells(
   let prev: MachineShiftCell | null = null;
   for (const cell of cells) {
     const sameStation = prev != null && prev.station === cell.station;
+    // The winder's first cell in the period: compare its first cone with the cone just before the period (F-2). A side with no
+    // material (July, or an unattributed cone) is never a product change.
+    if (!sameStation) {
+      const before = lookback.get(cell.station);
+      const started = cell.materials[0]!;
+      if (before && started.materialId != null && before.materialId !== started.materialId) {
+        changes.push({
+          station: cell.station, machineName: cell.machineName, day: cell.day, shift: cell.shift,
+          fromMaterialId: before.materialId, fromProductName: before.productName,
+          toMaterialId: started.materialId, toProductName: started.productName,
+          firstUtc: started.firstUtc, kind: 'between_shifts', fromBeforePeriod: true,
+        });
+      }
+    }
     // Between shifts: the material that ended the previous cell against the
     // one that started this cell.
     if (sameStation && prev) {

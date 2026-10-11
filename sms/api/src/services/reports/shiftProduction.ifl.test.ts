@@ -287,9 +287,10 @@ describe('shift-production: report', () => {
     const range: ShiftRange = { from: '2026-09-01', fromShift: 'evening', to: '2026-09-02', toShift: 'morning' };
     const { pool, calls } = fakePool(spAnswer);
     await getShiftProductionReport(pool, 1, PERIOD, { shift: 'night' }, range);
-    // cones, weight rejects, matched cones, hangers
-    expect(calls).toHaveLength(4);
-    for (const c of calls) {
+    // cones, weight rejects, matched cones, hangers. F-2 (11 Oct 2026): the product-change derivation then reads four more
+    // (roster, cells, no-station count, cone before the period); they are asserted in machineProducts.lookback.test.ts.
+    expect(calls).toHaveLength(8);
+    for (const c of calls.slice(0, 4)) {
       expect(c.sql).toContain('shift_code = @shift');
       expect(c.params.get('shift')).toBe('night');
       expect(c.sql).toContain('@srFrom');

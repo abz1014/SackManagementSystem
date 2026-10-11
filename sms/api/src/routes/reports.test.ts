@@ -627,7 +627,10 @@ describe('H-exports (1 Oct 2026): BOM, file names, report notes and the PDF shif
     it('an earlier report type carries exactly the note its screen prints (C-114), and no pendingIfl lines', async () => {
       const r = await get(`/api/reports/daily?${Q}`, 'viewer');
       const printed = r.json.data.report?.rejectPopulations?.note;
-      expect(r.json.data.header.reportNotes).toEqual(typeof printed === 'string' && printed.trim() !== '' ? [printed.trim()] : undefined);
+      // F-2 (11 Oct 2026): the daily report now also states its product changes (here: none were read) after its own note.
+      expect(r.json.data.header.reportNotes).toEqual(
+        typeof printed === 'string' && printed.trim() !== '' ? [printed.trim(), 'No product change was read on any winder in this period.'] : undefined,
+      );
     });
 
     it("the CSV trails the same notes as report_note rows after the blank line, after the report's own figures", async () => {

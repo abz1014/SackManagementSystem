@@ -16,6 +16,7 @@ import { fmtInt } from '../../lib/fmt';
 import type { ShiftProductionFigures, ShiftProductionReportData } from '../../api';
 import { fmtDmy } from './PrintHead';
 import { PendingIfl } from './PendingIfl';
+import { ProductChangesBlock } from './ProductChanges';
 
 const T = W.iflReports;
 const S = T.shiftProduction;
@@ -190,6 +191,7 @@ export function ShiftProductionSection({ d }: { d: ShiftProductionReportData }) 
           </div>
         </Block>
       )}
+      <ProductChangesBlock d={d} />
       <PendingIfl lines={d.pendingIfl} />
     </div>
   );

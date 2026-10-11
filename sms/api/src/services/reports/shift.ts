@@ -22,6 +22,7 @@ import { getShiftCheck } from '../shiftCheck.js';
 import { dailyLine, DAILY_CSV_HEADERS } from './daily.js';
 import type { CsvRow, CsvTable } from './csv.js';
 import type { ShiftRange } from '../../shiftRange.js';
+import { readProductChanges, type ReportProductChanges } from './productChanges.js';
 
 export interface ShiftSection {
   shift: ShiftCode;
@@ -40,6 +41,12 @@ export interface ShiftReportData {
   timeLostNote: string;
   /** Verification 25 Sep 2026: which source generation the figures were read from (same resolution as the daily report). */
   generationNote?: GenerationNote;
+  /**
+   * F-2: the product changes the readings show on any winder in this window (null = could not be read), with the labels the
+   * notes print. Absent on a payload that predates it.
+   */
+  productChanges?: ReportProductChanges['productChanges'];
+  productChangeLabels?: ReportProductChanges['productChangeLabels'];
 }
 
 export async function getShiftReport(
@@ -57,6 +64,8 @@ export async function getShiftReport(
     // each per-shift report's own shiftCheck would otherwise be that one shift's only.
     filters.shift ? Promise.resolve(null) : getShiftCheck(pool, lineId, resolved.from, resolved.to, { shiftRange }),
   ]);
+  // F-2: read last, so the figures above are untouched by it.
+  const changes = await readProductChanges(pool, lineId, resolved, filters, shiftRange);
   return {
     period: resolved,
     shift: filters.shift ?? null,
@@ -72,6 +81,7 @@ export async function getShiftReport(
     // Every shift's getReport resolves the same (line, from, to) window, so
     // they share one generation; the first one's note describes all three.
     generationNote: reports[0]?.generationNote,
+    ...changes,
     timeLostNote:
       'Time lost is not split by shift: a stoppage is a gap between consecutive cones over the whole day, ' +
       'and a gap across a shift boundary belongs to neither shift. The daily report carries the whole-day figure.',
