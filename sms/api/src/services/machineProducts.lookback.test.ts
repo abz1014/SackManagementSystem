@@ -73,4 +73,17 @@ describe('getMachineProductShifts - the lookback read', () => {
     expect(data.changes).toHaveLength(1);
     expect(data.changes[0]).toMatchObject({ fromMaterialId: 1022, toMaterialId: 20, fromBeforePeriod: true });
   });
+
+  it('ignores a lone stray cone: the lookback candidate must have a neighbouring cone of the same winder within a day before it', async () => {
+    // Real case: the September generation holds one clock-fault cone for winder 7 dated 2026-07-12 (24 days before the first real
+    // cone, no cone near it). Taken as 'the product before the period' it printed a changeover that never happened (STR-RED #17 -> #21).
+    const station = [{ station_id: 7, name: 'S7', machine_name: 'M7', is_active: true }];
+    const cells = [{ ...row(7, '2026-08-05', 'evening', 21, '2026-08-05T14:52:50.597', '2026-08-05T20:00:00.000', 80) }];
+    const { pool, calls } = fakePositionalPool(ONE_REAL_GENERATION, [station, cells, [{ n: 0 }], []]);
+    const data = await getMachineProductShifts(pool as ConnectionPool, 1, { from: '2026-08-05', to: '2026-09-07' });
+    const look = calls[calls.length - 1]!;
+    expect(look.sql).toContain('LAG(');
+    expect(look.sql).toContain('86400000');
+    expect(data.changes).toHaveLength(0);
+  });
 });

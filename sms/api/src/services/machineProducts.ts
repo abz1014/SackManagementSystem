@@ -266,6 +266,8 @@ export async function getMachineProductShifts(
 
   // 4. F-2: each winder's newest stamped cone strictly before its first cone in the period, so a changeover that happened
   //    just before the period began is still reported. Read-only, same generation, not bounded by the period.
+  //    A candidate needs another cone of the same winder within the day before it: a lone clock-fault cone (the September
+  //    copy holds one dated 12 Jul, 24 days before its real data) is not a product the winder was running.
   const firstMsOf = new Map<number, number>();
   for (const row of r.recordset) {
     const st = Number(row.st);
@@ -287,10 +289,15 @@ export async function getMachineProductShifts(
     const lr = await lreq.query<{ st: number; material_id: number; product_name: string | null }>(
       `SELECT x.st, x.material_id, COALESCE(p.description, p.lot_code) AS product_name
          FROM (
-           SELECT c.source_station AS st, c.material_id,
-                  ROW_NUMBER() OVER (PARTITION BY c.source_station ORDER BY c.production_ts_utc_ms DESC, c.cone_event_id DESC) AS rn
-             FROM sms.cone_event c
-            WHERE ${andEpoch(lwhere, lreq, scope, 'cone_event', { alias: 'c.' })}
+           SELECT y.st, y.material_id,
+                  ROW_NUMBER() OVER (PARTITION BY y.st ORDER BY y.ts DESC, y.id DESC) AS rn
+             FROM (
+               SELECT c.source_station AS st, c.material_id, c.production_ts_utc_ms AS ts, c.cone_event_id AS id,
+                      LAG(c.production_ts_utc_ms) OVER (PARTITION BY c.source_station ORDER BY c.production_ts_utc_ms, c.cone_event_id) AS prev_ts
+                 FROM sms.cone_event c
+                WHERE ${andEpoch(lwhere, lreq, scope, 'cone_event', { alias: 'c.' })}
+             ) y
+            WHERE y.prev_ts IS NOT NULL AND y.ts - y.prev_ts <= 86400000
          ) x
          LEFT JOIN sms.product p ON p.product_id = x.material_id
         WHERE x.rn = 1`,
