@@ -23,7 +23,8 @@
  */
 import { Fragment } from 'react';
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt } from '../../lib/fmt';
 import type { SackBandCounts, SackSpreadRow, SackWeightBand, SackWeightRangeReportData } from '../../api';
 import { fmtDmy } from './PrintHead';

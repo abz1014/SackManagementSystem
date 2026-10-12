@@ -8,7 +8,8 @@
  */
 import { useMemo } from 'react';
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtDayLong, fmtInt, fmtSpan } from '../../lib/fmt';
 import type { KpiRow, ManagementSummaryData, ProductMixRow, ProductOption } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';

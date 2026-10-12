@@ -22,7 +22,8 @@
  * payload that omits a field must not take the screen down.
  */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtClockSec, fmtInt } from '../../lib/fmt';
 import type { RejectedSackCounts, RejectedSackShiftRow, RejectedSacksReportData } from '../../api';
 import { fmtDmy } from './PrintHead';

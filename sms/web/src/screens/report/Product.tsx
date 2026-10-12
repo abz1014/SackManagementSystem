@@ -1,7 +1,8 @@
 /** Product report: one row per product, and the unattributed sentence first. Roadmap Phase 8 (15 Sep 2026). */
 import { useMemo } from 'react';
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { ProductOption, ProductReportData } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';

@@ -13,7 +13,8 @@
  * a separate fact from the product's tolerance (one status vocabulary).
  */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtClockSec, fmtInt } from '../../lib/fmt';
 import type { RejectedConeRow, RejectedConesReportData } from '../../api';
 import { fmtDmy } from './PrintHead';

@@ -47,7 +47,7 @@ import { distinctProductLabels } from '../lib/productLabel';
 import { EXPORT_MIN_RANK, FILTERS_BY_TYPE, pollKey, queryFor, REPORT_GROUPS, REPORT_MIN_RANK } from './report/model';
 import { PrintHead, GenerationDisclosure, generatedLine } from './report/PrintHead';
 import { ExecSummary, PrintNotes } from './report/PrintDoc';
-import { fmtDayShort } from './report/shared';
+import { fmtDayShort, AfterNewestProvider } from './report/shared';
 import { DailySection } from './report/Daily';
 import { ShiftSection } from './report/Shift';
 import { ProductSection } from './report/Product';
@@ -289,7 +289,9 @@ export function ReportScreen({
       ) : (
         <>
           <div className="page print-only pd-host"><ExecSummary type={type} data={data} /></div>
-          <Sections type={type} data={data} names={names} products={productList} shiftRangeApplied={q.fromShift != null} onOpenStation={onOpenStation} onOpenCode={onOpenCode} onSelectPeriod={onSelectPeriod} />
+          <AfterNewestProvider sentence={afterNewest}>
+            <Sections type={type} data={data} names={names} products={productList} shiftRangeApplied={q.fromShift != null} onOpenStation={onOpenStation} onOpenCode={onOpenCode} onSelectPeriod={onSelectPeriod} />
+          </AfterNewestProvider>
           <div className="page print-only"><PrintNotes type={type} data={data} header={data.header} /></div>
         </>
       )}

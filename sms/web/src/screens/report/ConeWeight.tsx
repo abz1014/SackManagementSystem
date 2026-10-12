@@ -1,6 +1,7 @@
 /** Cone weight report: mean, median, spread, states, the distribution and the stations. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtClockSec, fmtDayLong, fmtInt } from '../../lib/fmt';
 import { stationLabel, type ConeWeightReportData, type StationRow } from '../../api';
 import { fmtG1, fmtSignedG, Histogram, statesLine } from './shared';

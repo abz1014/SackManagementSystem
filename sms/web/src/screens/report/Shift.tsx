@@ -1,6 +1,7 @@
 /** Shift report: one section per shift, its totals and its day-by-day rows. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt, fmtKg, fmtPct1, describeMismatchHours } from '../../lib/fmt';
 import type { PeriodParams } from '../../lib/period';
 import type { ShiftReportData, ShiftSection as ShiftSectionData } from '../../api';

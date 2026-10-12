@@ -1,6 +1,7 @@
 /** Machine / station report: the one station ranking, on paper. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
-import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
+import { Block, Chevron, rowKeys } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import { stationLabel, type StationReportData, type StationRow } from '../../api';
 import { DeviationBars, fmtAppInstantDmy, fmtG1, fmtSignedG, StateCells, StateHeads, type DeviationRow } from './shared';

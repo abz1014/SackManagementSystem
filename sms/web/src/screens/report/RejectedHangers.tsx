@@ -19,7 +19,8 @@
  * crash (IflScaffold.test.tsx feeds it exactly that).
  */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtClockSec, fmtInt } from '../../lib/fmt';
 import type { RejectedHangerRow, RejectedHangersReportData } from '../../api';
 import { PendingIfl } from './PendingIfl';

@@ -5,7 +5,8 @@
  * which the old page printed under one word (gap analysis §10).
  */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt, fmtKg, fmtPct1, fmtSpan, describeMismatchHours } from '../../lib/fmt';
 import type { PeriodParams } from '../../lib/period';
 import type { DailyReportData, ReportLine } from '../../api';

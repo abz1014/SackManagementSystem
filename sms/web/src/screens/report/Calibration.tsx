@@ -12,7 +12,8 @@
  */
 import { usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
-import { Block, Empty, SkelLines } from '../../ui/bits';
+import { Block, SkelLines } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt } from '../../lib/fmt';
 import { listAdjustments, stationLabel, type CalibrationAdjustment, type CalibrationReportData, type StationRow } from '../../api';
 import { DeviationBars, fmtAppInstantDmy, fmtG1, fmtSignedG, type DeviationRow } from './shared';

@@ -1,6 +1,7 @@
 /** Reject report: reasons, the per-day-per-reason table and the daily rate with its band. Roadmap Phase 8 (15 Sep 2026). */
 import { W } from '../../lib/words';
-import { Block, Empty } from '../../ui/bits';
+import { Block } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { PeriodParams } from '../../lib/period';
 import type { RejectReason, RejectReportData } from '../../api';

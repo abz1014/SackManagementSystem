@@ -22,7 +22,8 @@
  */
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { W } from '../../lib/words';
-import { Block, Chevron, Empty, rowKeys } from '../../ui/bits';
+import { Block, Chevron, rowKeys } from '../../ui/bits';
+import { Empty } from './shared';
 import { fmtClock, fmtInt } from '../../lib/fmt';
 import type { MachineProductReportData, MachineShiftCell } from '../../api';
 import { fmtDayDmy } from './shared';

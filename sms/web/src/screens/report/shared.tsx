@@ -13,9 +13,9 @@
  * a number the report already prints — no new statistic, so no new
  * KPI-DEFINITIONS.md row and no new IFL approval.
  */
-import { useRef } from 'react';
+import { createContext, useContext, useRef, type ReactNode } from 'react';
 import { W } from '../../lib/words';
-import { Empty } from '../../ui/bits';
+import { Empty as BaseEmpty } from '../../ui/bits';
 import {
   edgeAnchor, categoryLabelAnchor, dropCollidingTicks, linear, niceDomain, gridValues, RefLine, RefLineGutterProvider,
   linePath, fittingTicks, tickIndices, CategoryBars, type BarDatum,
@@ -97,6 +97,22 @@ export function StateHeads() {
 }
 
 /* ------------------------------------------------------------- the tables */
+
+/**
+ * S3 X-3b (12 Oct 2026): Report.tsx sets this to the sentence "No readings in
+ * this period - the newest reading is <when>." when the whole period lies after
+ * the newest reading (`periodAfterNewest`, lib/period.ts), else null. Every
+ * report section's empty line goes through `Empty` below, so one place covers
+ * all report types. Certain or nothing: null keeps each section's own sentence.
+ */
+const AfterNewestContext = createContext<string | null>(null);
+export function AfterNewestProvider({ sentence, children }: { sentence: string | null; children: ReactNode }) {
+  return <AfterNewestContext.Provider value={sentence}>{children}</AfterNewestContext.Provider>;
+}
+export function Empty({ message = W.nothingHere }: { message?: string }) {
+  const afterNewest = useContext(AfterNewestContext);
+  return <BaseEmpty message={afterNewest ?? message} />;
+}
 
 /**
  * `sackScale` adds the share of each group's sacks the SCALE passed — the
