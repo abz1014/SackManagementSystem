@@ -50,7 +50,7 @@
  * AT THE LAST SIZE CHANGE — never a live one. That is deliberate, not a bug:
  * it is what keeps a hover from re-running whatever `children` does.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Readout } from './chart';
 import { useChartSize } from './useChartSize';
 import { placeTip, type Rect } from './chartLayout';
@@ -180,7 +180,20 @@ export function zoomHint(p: PeriodParams | null): string {
  * "Zoomed" is read from `history.state.zoomFrom`, the same signal App.tsx's `canGoBack` is derived from, and Back is
  * `history.back()`, exactly what the top bar's control calls, so the two can never disagree.
  */
-let zoomOrigin: string | null = null;
+/* Stage 3 follow-up (12 Oct 2026): a zoom can change which chart the page draws (Line's cones per day becomes cones per shift,
+   Weight's over-time chart becomes the distribution), so the chart that comes back has another id. The origin therefore also
+   remembers the chart's place on the screen (its position among the page's chart frames), and the frame in that place shows the
+   control when no mounted chart still has the remembered id. `mountedChartIds` is how a frame knows that. */
+interface ZoomOrigin { id: string; slot: number; screen: string | null }
+let zoomOrigin: ZoomOrigin | null = null;
+const mountedChartIds = new Map<string, number>();
+function currentScreen(): string | null {
+  try {
+    return new URLSearchParams(window.location.search).get('s');
+  } catch {
+    return null;
+  }
+}
 function pageIsZoomed(): boolean {
   try {
     return (window.history.state as { zoomFrom?: unknown } | null)?.zoomFrom != null;
@@ -230,7 +243,8 @@ export function ChartFrame(props: ChartFrameProps) {
     const p = zoom.periodFor(i);
     if (p) {
       zoom.onZoom(p);
-      zoomOrigin = chartId;
+      const frames = Array.from(document.querySelectorAll('.chart-frame'));
+      zoomOrigin = { id: chartId, slot: frames.indexOf(rootRef.current as Element), screen: currentScreen() };
     }
   } : undefined);
 
@@ -241,10 +255,26 @@ export function ChartFrame(props: ChartFrameProps) {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const zoomedHere = zoomOrigin === chartId && pageIsZoomed();
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    mountedChartIds.set(chartId, (mountedChartIds.get(chartId) ?? 0) + 1);
+    return () => {
+      const n = (mountedChartIds.get(chartId) ?? 1) - 1;
+      if (n <= 0) mountedChartIds.delete(chartId);
+      else mountedChartIds.set(chartId, n);
+    };
+  }, [chartId]);
+  const [slotMatch, setSlotMatch] = useState(false);
   useEffect(() => {
-    if (zoomOrigin === chartId && !pageIsZoomed()) zoomOrigin = null;
+    if (zoomOrigin && !pageIsZoomed()) zoomOrigin = null;
+    const o = zoomOrigin;
+    let match = false;
+    if (o && o.id !== chartId && o.slot >= 0 && !mountedChartIds.has(o.id) && o.screen === currentScreen()) {
+      match = Array.from(document.querySelectorAll('.chart-frame'))[o.slot] === rootRef.current;
+    }
+    setSlotMatch(match);
   });
+  const zoomedHere = (zoomOrigin?.id === chartId || slotMatch) && pageIsZoomed();
   /* The page can re-flow when the new period's data lands, moving the chart out of view: bring the control back into view when it first appears. */
   const zoomBackRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -469,7 +499,7 @@ export function ChartFrame(props: ChartFrameProps) {
     : null;
 
   return (
-    <div className="chart-frame">
+    <div className="chart-frame" ref={rootRef}>
       {title && <p className="h2">{title}</p>}
       {zoomedHere && !size.print && (
         <p className="no-print" style={{ margin: '0 0 6px' }}>
