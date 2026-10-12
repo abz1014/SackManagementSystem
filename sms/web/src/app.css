@@ -1577,6 +1577,8 @@ main:has([data-report-orientation="portrait"][data-report-orientation]) { page: 
 .ifl-table td.eff-low { font-weight: 700; background: rgba(200, 120, 0, 0.12); }
 @media print { .ifl-table td.eff-low { background: rgba(200, 120, 0, 0.12) !important; } }
 .ifl-table th, .ifl-table td { border: 0.75pt solid #D3D3D3; }
+/* [CSS-033, 6 Oct 2026] A date in the first column of an IFL table broke across two lines ("01-09-" / "2026") and doubled every row. Scoped to the tables whose first column is a merged date cell (SPS packing, Shift-wise production, Sack weight range/summary). nowrap on EVERY IFL first column was tried and rejected: it also stopped the long first-column labels of Product and Station from wrapping, widening those tables up to 258px past their box and hiding columns behind the sideways scroll. Daily/Sack by-day, Rejected sacks/hangers/cones date cells still wrap when squeezed: no CSS selector tells those date cells from a long label (owner decision, DEFECTS.md). */
+.ifl-table:has(td[rowspan]:first-child) td:first-child { white-space: nowrap; }
 /* [CSS-035, 6 Oct 2026] Cell text sat 0.5px from the vertical gridlines (left padding 0 on text cells, right padding 0 on the last numeric column). Text cells now keep 6px each side, the same 12px per column as before (0 + 12), and the last numeric column 6px each side (it had 12 + 0), so no table gets wider. Other numeric cells keep their own padding. */
 .ifl-table th:not(.n), .ifl-table td:not(.n) { padding-left: 6px; padding-right: 6px; }
 .ifl-table th.n:last-child, .ifl-table td.n:last-child { padding-left: 6px; padding-right: 6px; }
