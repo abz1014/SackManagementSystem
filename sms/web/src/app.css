@@ -753,6 +753,8 @@ tbody tr:last-child th { border-bottom: 0 !important; }
   position: sticky; left: 0; background: var(--paper); z-index: 1;
 }
 .mp-scroll thead th:first-child { z-index: 3; background: #ADD8E6; }
+/* [CSS-036 follow-up, 12 Oct 2026] The open arrow in a machine header cell is --grid (a graphics grey, 3.14:1 on white); on the IFL blue it fell to 2.06:1, so it uses --graphite there (5.3:1). Arrows in white rows keep --grid. */
+.mp-scroll thead th .chev { color: var(--graphite); }
 /* [CSS-040, 6 Oct 2026] A header cell sits flush against the top edge of this scrolling box (and the last one against its right edge), and `overflow: auto` clips anything outside it, so the global focus ring (2px line, 2px outside the box) lost its top edge, and its right edge on the last column. Drawn 2px inside the cell it is whole. Padding on the box instead would let rows show through a 4px strip above the pinned header row. */
 .mp-scroll thead th:focus-visible { outline-offset: -2px; }
 /* UX overflow sweep (23 Sep 2026): a `.two-col` half is 498px at the desktop
