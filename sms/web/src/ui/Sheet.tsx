@@ -14,7 +14,7 @@
  * screen reader, for whom an untrapped "dialog" is just content that appeared
  * somewhere unannounced.
  */
-import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { W } from '../lib/words';
 
 const FOCUSABLE =
@@ -46,6 +46,24 @@ export function Sheet({
       const back = opener.current;
       if (back instanceof HTMLElement && document.contains(back)) back.focus();
     };
+  }, []);
+
+  // The head is pinned (CSS-060), so the browser's own "scroll the focused row into view" has to stop short of it, or Shift+Tab up a
+  // long sheet leaves focus hidden behind the head. `scroll-padding-top` on the sheet does that; its size is the pinned head's
+  // bottom edge, measured here so it follows the head when the title wraps or the text size changes.
+  useLayoutEffect(() => {
+    const el = panel.current;
+    const head = el?.querySelector<HTMLElement>('.sheet-head');
+    if (!el || !head) return;
+    const apply = () => {
+      const stuck = parseFloat(getComputedStyle(el).paddingTop) + parseFloat(getComputedStyle(head).top) + head.offsetHeight;
+      if (Number.isFinite(stuck) && stuck > 0) el.style.setProperty('--sheet-head-bottom', `${Math.ceil(stuck) + 4}px`);
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(apply);
+    ro.observe(head);
+    return () => ro.disconnect();
   }, []);
 
   const onKeyDown = useCallback(
