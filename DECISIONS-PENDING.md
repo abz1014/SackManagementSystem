@@ -303,6 +303,7 @@ Recorded only so the fixes are not mistaken for taste and undone later.
 - **Options the audit named.** Blank sack columns with sentence; or remove station filter for Product.
 - **Recommended.** Blank the sack columns when a station is chosen and say why, or remove the station filter from the Product report.
 - **Who decides.** Owner.
+- **Decided 7 Oct 2026 by the owner: option A; built as D-300 (ea16464).**
 
 **14.2.3 "This shift" silently becomes a whole day on four reports** (C-129; `DEFECTS.md` D-221)
 
