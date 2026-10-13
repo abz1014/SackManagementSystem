@@ -21,7 +21,17 @@ export interface SheetProps {
   children: ReactNode;
 }
 
-const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+/* CSS-074: `summary` is focusable (a Disclosure's toggle) and must be in the trap, or Tab skips it and Shift+Tab from the
+   first control after it wraps past it. Controls inside a closed <details> are not focusable and are left out. */
+export const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+
+export function focusablesIn(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => {
+    const closed = el.closest('details:not([open])');
+    if (!closed || !root.contains(closed)) return true;
+    return el.parentElement === closed && el.tagName === 'SUMMARY';
+  });
+}
 
 export function Sheet({ sheet, kind, open, onClose, title, status, width = 480, footer, children }: SheetProps) {
   const isOpen = open ?? (!!sheet && (kind === undefined || sheet.kind === kind));
@@ -32,7 +42,7 @@ export function Sheet({ sheet, kind, open, onClose, title, status, width = 480, 
     if (!isOpen) return;
     /* the trigger had focus when the effect runs: the panel is not focused yet */
     returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const first = panel.current?.querySelector<HTMLElement>(FOCUSABLE);
+    const first = panel.current ? focusablesIn(panel.current)[0] : undefined;
     (first ?? panel.current)?.focus();
     return () => {
       const t = returnTo.current;
@@ -49,7 +59,7 @@ export function Sheet({ sheet, kind, open, onClose, title, status, width = 480, 
       return;
     }
     if (e.key !== 'Tab' || !panel.current) return;
-    const els = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const els = focusablesIn(panel.current);
     if (els.length === 0) {
       e.preventDefault();
       panel.current.focus();

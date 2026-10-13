@@ -20,7 +20,7 @@
 .ui-sheet__close:hover { background: var(--surface-sunk); }
 .ui-sheet__close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 @media (pointer: coarse) { .ui-sheet__close { width: var(--tap-min); height: var(--tap-min); } }
-.ui-sheet__body { flex: 1; overflow-y: auto; padding: var(--space-5); color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.ui-sheet__body { flex: 1; overflow-y: auto; scroll-padding-block: var(--space-5); /* CSS-060: a focused control scrolls clear of the edges, never under the head */ padding: var(--space-5); color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
 .ui-sheet__foot { display: flex; justify-content: flex-end; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-top: 1px solid var(--line); }
 @keyframes ui-sheet-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 
