@@ -17,7 +17,7 @@ import {
   type ReportType,
   type StationRow,
 } from '../../bridge/api';
-import { fmt, live, period as P } from '../../bridge/lib';
+import { fmt, period as P } from '../../bridge/lib';
 import { NextDateFmt } from '../../bridge/dateFmt';
 import { fmtDate, fmtDateTime, fmtRange } from '../../lib/fmt';
 import { W } from '../../bridge/words';
@@ -53,6 +53,7 @@ import { ErrorState } from '../../ui/ErrorState';
 import { Skeleton } from '../../ui/Skeleton';
 import { coverageOf, isEmptyReport, variantOf } from './model';
 import type { ReportState } from './useReport';
+import { useLive } from '../../data';
 const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
 type Data = ReportResponse<ReportType>;
@@ -176,10 +177,12 @@ export interface ReportDocumentProps {
   onOpenStation: (station: number) => void;
   onOpenCode: (code: string) => void;
   onSelectPeriod?: (p: P.PeriodParams) => void;
+  /** The part that failed when there is no period because the plant clock could not be read (named, never a spinner). */
+  periodFailed?: string | null;
 }
 
-export function ReportDocument({ type, period, state, names, products, onOpenStation, onOpenCode, onSelectPeriod }: ReportDocumentProps) {
-  const { line } = live.useLive();
+export function ReportDocument({ type, period, state, periodFailed = null, names, products, onOpenStation, onOpenCode, onSelectPeriod }: ReportDocumentProps) {
+  const { line } = useLive();
   const paper = useRef<HTMLElement>(null);
   useOneLineCells(paper);
   const variant = variantOf(type);
@@ -195,6 +198,8 @@ export function ReportDocument({ type, period, state, names, products, onOpenSta
     body = <p className="rp-note" role="status">{R.preview.notAllowed}</p>;
   } else if (error !== null && !data) {
     body = <ErrorState part={R.preview.failed(variant.title)} onRetry={fetch.refresh} />;
+  } else if (!period && periodFailed !== null) {
+    body = <ErrorState part={periodFailed} cause={R.preview.needsClock} />;
   } else if (!data || !period) {
     body = <Skeleton part={`the ${variant.title} report`} height={320} lines={6} onRetry={fetch.refresh} />;
   } else if (isEmptyReport(type, data)) {

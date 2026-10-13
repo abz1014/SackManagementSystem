@@ -45,14 +45,14 @@ export function ReasonSheet({ route, rank, go, onClose }: SheetProps) {
 
 function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: SheetProps['route']; go: SheetProps['go'] }) {
   const code = codeOf(id);
-  const { period } = usePeriod();
+  const { period, status: periodStatus, failed: periodFailed } = usePeriod();
   const reason = useData('this reason', () => getRejectReason({ day: id.day, code, pageSize: 200 }), `reason:${id.day}:${code}`, { live: false });
   const stations = useData('station list', () => getStations(), 'stations', { live: false });
   const pq = period ? P.periodQuery(period) : null;
   const days = useData(
     'days for this reason',
-    () => (pq ? getRejectsByDayCode({ ...pq, code }) : new Promise<never>(() => {})),
-    `reason-days:${code}:${pq ? [pq.from, pq.to, pq.shift ?? '', pq.fromShift ?? '', pq.toShift ?? ''].join('|') : 'wait'}`,
+    () => (pq ? getRejectsByDayCode({ ...pq, code }) : periodStatus === 'error' ? Promise.reject(new Error(`${periodFailed[0] ?? 'The plant clock'} could not be read, so the days cannot be listed.`)) : new Promise<never>(() => {})),
+    `reason-days:${code}:${pq ? [pq.from, pq.to, pq.shift ?? '', pq.fromShift ?? '', pq.toShift ?? ''].join('|') : `wait:${periodStatus}`}`,
     { live: false },
   );
 

@@ -135,10 +135,6 @@ const ALLOW_LIST: Record<string, string> = {
   'ui/PeriodChip.tsx:range': RANGE_OMITS,
   'App.tsx:{period}':
     'only used to mount the simulator banner when a period exists (`period && <SimulatorBanner/>`); a failed plant clock means no banner, and PeriodChip (same shell) names the failure.',
-  'screens/Reports/ReportsScreen.tsx:periodState':
-    'the whole PeriodState is handed to Builder and PeriodChip names a failed plant clock ("unavailable"). OBSERVATION for the owner of Reports: with no period the preview stays on its loading skeleton and does not itself say why.',
-  'sheets/ReasonSheet/ReasonSheet.tsx:{period}':
-    'OBSERVATION for the owner of sheets: when the plant clock fails, the "days for this reason" part waits forever on a skeleton (the request is a never-settling promise) and the sheet does not say why; the shell PeriodChip behind the sheet names the failure. Degrades to a perpetual skeleton, never to a false figure.',
 };
 
 describe('GUARD 1: every useData/useMulti/usePeriod result has its failure read', () => {

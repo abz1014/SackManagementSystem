@@ -3,9 +3,9 @@
  * (queryFor, the same one the exports use), so Preview, Print and every download describe the same report.
  */
 import { getReportOf, type ReportFilters, type ReportQuery, type ReportResponse, type ReportType } from '../../bridge/api';
-import { live, type period as PeriodNs } from '../../bridge/lib';
+import { type period as PeriodNs } from '../../bridge/lib';
 import { pollKey, queryFor } from '../../bridge/report';
-import { useData, type DataState } from '../../data';
+import { useData, type DataState, useLive } from '../../data';
 import { canRead } from './model';
 
 type Period = PeriodNs.Period;
@@ -27,7 +27,7 @@ export interface ReportState {
 }
 
 export function useReport(type: ReportType, period: Period | null, filters: ReportFilters, rank: number, title: string): ReportState {
-  const { asOf } = live.useLive();
+  const { asOf } = useLive();
   const readable = canRead(type, rank);
   const q = period ? queryFor(type, period, filters, asOf) : null;
   const key = q ? `${pollKey(type, q)}:${readable ? 'ok' : 'no'}` : 'rp:wait';

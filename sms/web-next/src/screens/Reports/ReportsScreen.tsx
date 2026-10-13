@@ -15,9 +15,9 @@
 import { C, withFragments, FRAGMENTS } from '../../copy';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { getProducts, getStations, type ReportFilters } from '../../bridge/api';
-import { useData, useRange } from '../../data';
+import { useData, useRange, useLive } from '../../data';
 import { usePeriod } from '../../data/usePeriod';
-import { live, type period as PeriodNs } from '../../bridge/lib';
+import { type period as PeriodNs } from '../../bridge/lib';
 import { routeFor } from '../../ui/nav';
 import type { Route } from '../../route';
 import type { ScreenProps } from '../registry';
@@ -41,7 +41,7 @@ export function ReportsScreen({ route, rank, user, go }: ScreenProps) {
   const previewRef = useRef<HTMLElement>(null);
   const periodState = usePeriod();
   const { period } = periodState;
-  const { line } = live.useLive();
+  const { line } = useLive();
   const range = useRange();
 
   const type = typeFromKeys(route.keys, rank);
@@ -132,6 +132,7 @@ export function ReportsScreen({ route, rank, user, go }: ScreenProps) {
           onOpenStation={openStation}
           onOpenCode={openCode}
           onSelectPeriod={periodState.setParams}
+          periodFailed={period === null && periodState.status === 'error' ? (periodState.failed[0] ?? 'the plant clock') : null}
         />
       </section>
     </div>

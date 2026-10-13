@@ -1334,6 +1334,7 @@ export const C = {
       empty: 'No cones were weighed on any station in this period.',
       iflNote: 'Figure definitions are awaiting IFL approval.',
       pageNote: 'Print it, or download it in the format you need.',
+      needsClock: 'The report needs the plant clock to know which period to show.',
     },
     shiftMorning: 'Morning 06-14',
     shiftEvening: 'Evening 14-22',
