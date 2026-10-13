@@ -41,6 +41,7 @@ const toPosix = (p: string) => p.replace(/\\/g, '/');
 const WEB_SRC = toPosix(fileURLToPath(new URL('.', import.meta.url))).replace(/\/*$/, '/'); // .../sms/web/src/
 const API_SRC = toPosix(fileURLToPath(new URL('../../api/src', import.meta.url))).replace(/\/*$/, '/'); // .../sms/api/src/
 const REPO_ROOT = toPosix(fileURLToPath(new URL('../..', import.meta.url))).replace(/\/*$/, '/'); // .../sms/
+const WEB_NEXT_SRC = toPosix(fileURLToPath(new URL('../../web-next/src', import.meta.url))).replace(/\/*$/, '/'); // .../sms/web-next/src/
 const REPORTS_DIR = `${API_SRC}services/reports`;
 
 /**
@@ -152,7 +153,14 @@ const ALLOW_LIST: Record<string, { identifiers: readonly string[]; reason: strin
 };
 
 describe('the U1 fallback/current-product identifiers stay out of reports and the web app', () => {
-  const allFiles = [...listSourceFiles(API_SRC), ...listSourceFiles(WEB_SRC)];
+  // web-next (the redesign) is scanned too: same identifiers, same rule.
+  const allFiles = [...listSourceFiles(API_SRC), ...listSourceFiles(WEB_SRC), ...listSourceFiles(WEB_NEXT_SRC)];
+
+  it('canary: web-next/src was scanned (the extension would pass on an empty tree)', () => {
+    const rels = allFiles.map(relPath);
+    expect(rels.some((r) => r.startsWith('web-next/src/'))).toBe(true);
+    expect(rels).toContain('web-next/src/App.tsx');
+  });
 
   it('sanity: the scan actually found the home file and its identifiers (canary on the scan itself)', () => {
     const home = allFiles.find((f) => f.endsWith(`/${HOME_FILE}`) && !f.includes('/reports/'));

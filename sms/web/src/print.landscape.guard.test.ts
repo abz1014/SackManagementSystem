@@ -33,7 +33,7 @@
  * scan — this guard's subject (a print CSS selector keyed to a UI label) is
  * unrelated to that scan and does not belong inside it.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -89,4 +89,31 @@ describe('the print-landscape CSS hook and the Report aria-label it keys off sta
         "selector in app.css's [PHASE 9 PRINT P6] rule to match words.ts's new value.",
     ).toBe(wordsLabel);
   });
+});
+
+/**
+ * web-next (the redesign) must carry the same landscape rule, keyed to the
+ * stable class hook `main.report-print` (decision E-6) rather than to a
+ * translatable aria-label. It has no print CSS yet, so the gap is a visible
+ * todo owned by the E-reports print task, not a silent pass.
+ */
+const WEB_NEXT_STYLES = fileURLToPath(new URL('../../web-next/src/styles', import.meta.url));
+const WEB_NEXT_CSS_SRC = readdirSync(WEB_NEXT_STYLES)
+  .filter((f) => f.endsWith('.css'))
+  .map((f) => readFileSync(`${WEB_NEXT_STYLES}/${f}`, 'utf8'))
+  .join('\n');
+
+describe('web-next print-landscape hook (web-next/src/styles/*.css)', () => {
+  it('canary: web-next stylesheets were read', () => {
+    expect(WEB_NEXT_CSS_SRC.length).toBeGreaterThan(0);
+  });
+
+  if (!NAMED_PAGE_RE.test(WEB_NEXT_CSS_SRC)) {
+    it.todo('web-next print CSS: @page report-landscape + main.report-print { page: report-landscape } (owner: E-reports print, decision E-6: stable class hook main.report-print)');
+  } else {
+    it('the named page is bound to the stable class hook, not to an aria-label', () => {
+      expect(/main\.report-print\s*\{[^}]*page:\s*report-landscape/.test(WEB_NEXT_CSS_SRC)).toBe(true);
+      expect(/aria-label/.test(WEB_NEXT_CSS_SRC.match(/[^{}]*\{[^}]*page:\s*report-landscape[^}]*\}/)?.[0] ?? '')).toBe(false);
+    });
+  }
 });

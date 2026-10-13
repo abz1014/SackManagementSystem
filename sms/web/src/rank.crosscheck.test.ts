@@ -670,3 +670,144 @@ describe('client write-gate vs server write-gate crosscheck (the GET-only gap ap
     expect(gates.length).toBe(PAIRINGS.length + EXEMPTIONS.length);
   });
 });
+
+/* ------------------------------------------------------------------ web-next */
+
+/**
+ * The redesign (sms/web-next) names its ranks in `web-next/src/ranks.ts`. Checks:
+ * (1) each name there equals the web app's gate for the same action;
+ * (2) web-next never writes a rank number of its own for a gate;
+ * (3) a `<WriteGate minRank={...}>` uses a named rank and, when it states the
+ * route it guards (`route="POST /api/..."`), equals that route's `requireRole`.
+ */
+const WEB_NEXT_SRC = `${REPO_ROOT}web-next/src`;
+const RANKS_TS = `${WEB_NEXT_SRC}/ranks.ts`;
+const NAV_TS = `${WEB_NEXT_SRC}/ui/nav.ts`;
+
+function listWebNextSources(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (entry.name === 'bridge' || entry.name === 'testkit' || entry.name === 'node_modules') continue;
+      out.push(...listWebNextSources(full));
+    } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/** Named ranks web-next may use, resolved to numbers from their real definitions. */
+function webNextRankNames(): Record<string, number> {
+  return {
+    ENGINEER_RANK: readIntConst(readCode(RANKS_TS), 'ENGINEER_RANK', 'web-next/src/ranks.ts'),
+    ADMIN_RANK: readIntConst(readCode(NAV_TS), 'ADMIN_RANK', 'web-next/src/ui/nav.ts'),
+    EXPORT_MIN_RANK: CLIENT_GATES.EXPORT_MIN_RANK(),
+  };
+}
+
+/** Problems with one `<WriteGate ...>` opening tag; pure so the scan can be proven on synthetic input. */
+function writeGateProblems(tag: string, names: Record<string, number>, serverRank: (method: string, path: string) => number | null): string[] {
+  const problems: string[] = [];
+  const m = /minRank=\{\s*([A-Za-z_]\w*|\d+)\s*\}/.exec(tag) ?? /minRank="(\d+)"/.exec(tag);
+  if (!m) return ['no minRank prop'];
+  const token = m[1]!;
+  let value: number;
+  if (/^\d+$/.test(token)) {
+    value = Number(token);
+    if (value !== 1) problems.push(`literal minRank ${value}: use a name from web-next/src/ranks.ts`);
+  } else if (token in names) {
+    value = names[token]!;
+  } else {
+    return [`minRank={${token}} is not a name exported by web-next/src/ranks.ts`];
+  }
+  const r = /route="(GET|POST|PUT|PATCH|DELETE)\s+([^"]+)"/.exec(tag);
+  if (r) {
+    const server = serverRank(r[1]!.toLowerCase(), r[2]!);
+    if (server === null) problems.push(`route ${r[1]} ${r[2]} has no requireRole registration under api/src`);
+    else if (server !== value) problems.push(`client minRank ${value} but server requireRole(${server}) on ${r[1]} ${r[2]}`);
+  }
+  return problems;
+}
+
+function serverRankOf(method: string, path: string): number | null {
+  const g = discoverRouteGates().find((x) => x.method === method && x.path === path);
+  if (!g) return null;
+  const constFile = g.file.endsWith('/reports.ts') ? REPORTS_COMMON_FILE : undefined;
+  return readRouteRank(g.file, g.needle, constFile);
+}
+
+describe('web-next ranks vs the web app and the server', () => {
+  const files = listWebNextSources(WEB_NEXT_SRC);
+
+  it('canary: web-next/src was scanned and ranks.ts resolves', () => {
+    expect(files.length).toBeGreaterThan(5);
+    expect(files.some((f) => f.endsWith('/ranks.ts'))).toBe(true);
+    const n = webNextRankNames();
+    expect(n.ENGINEER_RANK).toBeGreaterThan(0);
+    expect(n.ADMIN_RANK).toBeGreaterThan(0);
+    expect(n.EXPORT_MIN_RANK).toBeGreaterThan(0);
+  });
+
+  it('ranks.ts equals the web app gates (ENGINEER_RANK, ADMIN_GATE) and re-exports the report constants rather than redefining them', () => {
+    const n = webNextRankNames();
+    expect(n.ENGINEER_RANK, 'web-next ENGINEER_RANK differs from App.tsx ENGINEER_RANK').toBe(CLIENT_GATES.ENGINEER_RANK());
+    expect(n.ADMIN_RANK, 'web-next ADMIN_RANK differs from the App.tsx Setup gate').toBe(CLIENT_GATES.ADMIN_GATE());
+    const ranksSrc = readCode(RANKS_TS);
+    expect(/export\s*\{[^}]*EXPORT_MIN_RANK[^}]*\}\s*from/.test(ranksSrc), 'ranks.ts must re-export EXPORT_MIN_RANK, not define it').toBe(true);
+    expect(/export\s*\{[^}]*ADMIN_RANK[^}]*\}\s*from/.test(ranksSrc), 'ranks.ts must re-export ADMIN_RANK from ui/nav').toBe(true);
+  });
+
+  it("ENGINEER_RANK equals the server's requireRole on every pairing the web app gates with ENGINEER_RANK; EXPORT_MIN_RANK on the export pairing", () => {
+    const n = webNextRankNames();
+    const mismatches: string[] = [];
+    let checked = 0;
+    for (const p of PAIRINGS) {
+      const want = p.clientConstName === 'ENGINEER_RANK' ? n.ENGINEER_RANK : p.clientConstName === 'EXPORT_MIN_RANK' ? n.EXPORT_MIN_RANK : null;
+      if (want === null) continue;
+      checked++;
+      const server = readRouteRank(p.routeFile, p.routeNeedle, p.constFile);
+      if (server !== want) mismatches.push(`${p.control}: web-next ${p.clientConstName}=${want}, server ${server}`);
+    }
+    expect(checked, 'no pairing was compared').toBeGreaterThan(3);
+    expect(mismatches).toEqual([]);
+  });
+
+  it('web-next defines no rank number of its own (rank >= N, minRank literals, *RANK constants) outside ranks.ts', () => {
+    const names = webNextRankNames();
+    const violations: string[] = [];
+    for (const f of files) {
+      if (f === RANKS_TS) continue;
+      const src = readCode(f);
+      const rel = relPath(f);
+      for (const m of src.matchAll(/\brank\s*>=?\s*(\d+)/g)) violations.push(`${rel}: literal "rank >= ${m[1]}"`);
+      for (const m of src.matchAll(/\bminRank\s*[:=]\s*(\d+)/g)) if (m[1] !== '1') violations.push(`${rel}: literal minRank ${m[1]}`);
+      for (const m of src.matchAll(/\b(?:const|let)\s+([A-Z_]*RANK[A-Z_]*)\s*=\s*(\d+)/g)) {
+        const name = m[1]!;
+        const num = Number(m[2]);
+        if (!(name in names) || names[name] !== num) violations.push(`${rel}: ${name} = ${num} (not a ranks.ts name or a different value)`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('every <WriteGate> uses a named rank and agrees with the server route it states', () => {
+    const names = webNextRankNames();
+    const problems: string[] = [];
+    for (const f of files) {
+      for (const m of readCode(f).matchAll(/<WriteGate\b[^>]*>/g)) {
+        for (const p of writeGateProblems(m[0], names, serverRankOf)) problems.push(`${relPath(f)}: ${p}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('canary: the WriteGate checker flags a wrong literal, an unknown name and a client/server mismatch, and passes a correct tag', () => {
+    const names = webNextRankNames();
+    expect(writeGateProblems('<WriteGate minRank={3}>', names, serverRankOf).length).toBeGreaterThan(0);
+    expect(writeGateProblems('<WriteGate minRank={MY_RANK}>', names, serverRankOf).length).toBeGreaterThan(0);
+    expect(writeGateProblems('<WriteGate minRank={ADMIN_RANK} route="POST /api/current-product">', names, serverRankOf).length).toBeGreaterThan(0);
+    expect(writeGateProblems('<WriteGate minRank={ENGINEER_RANK} route="POST /api/current-product">', names, serverRankOf)).toEqual([]);
+  });
+});
