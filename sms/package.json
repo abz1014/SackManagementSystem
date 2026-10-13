@@ -12,17 +12,18 @@
     "sync-worker",
     "cli",
     "api",
-    "web"
+    "web",
+    "web-next"
   ],
   "scripts": {
     "build:shared": "npm run build --workspace @sms/shared",
     "dev": "echo \"Run per workspace: 'npm run dev --workspace @sms/web' (Vite on :5173) and 'node api/dist/index.js' after a build. See DEPLOY.md.\" && exit 0",
-    "typecheck": "tsc -b shared sync-worker cli api web",
+    "typecheck": "tsc -b shared sync-worker cli api web web-next",
     "test": "vitest run",
     "test:layout": "playwright test -c playwright.config.ts",
     "db:migrate": "node scripts/migrate.mjs",
     "dictionary": "node scripts/data-dictionary.mjs",
-    "build": "npm run build --workspace @sms/shared && npm run build --workspace @sms/sync-worker && npm run build --workspace @sms/cli && npm run build --workspace @sms/api && npm run build --workspace @sms/web",
+    "build": "npm run build --workspace @sms/shared && npm run build --workspace @sms/sync-worker && npm run build --workspace @sms/cli && npm run build --workspace @sms/api && npm run build --workspace @sms/web && npm run build --workspace @sms/web-next",
     "verify:release": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
