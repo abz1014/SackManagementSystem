@@ -2,6 +2,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AuthUser } from '../bridge/api';
 import { C } from '../copy';
 import { Icon } from './Icon';
+import { A11Y } from './a11yCopy';
+import { TextSizeControl, useUiScale } from './TextSize';
+import { useZoomed, zoomBack } from '../charts/zoomMarker';
 
 export interface TopBarProps {
   title: string;
@@ -21,6 +24,9 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
   const [open, setOpen] = useState(false);
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [scale, setScale] = useUiScale();
+  const zoomed = useZoomed();
 
   useEffect(() => {
     if (!open) return;
@@ -28,7 +34,10 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
       if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape') return;
+      /* CSS-039: the menu unmounts on close; focus inside it would drop to <body>, so hand it back to the button. */
+      if (root.current?.contains(document.activeElement) && document.activeElement !== trigger.current) trigger.current?.focus();
+      setOpen(false);
     };
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);
@@ -43,11 +52,17 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
     <header className="sh-top">
       <div className="sh-top-title">{title}</div>
       <div className="sh-top-right">
+        {zoomed && (
+          <button type="button" className="sh-zoomback" onClick={zoomBack}>
+            {A11Y.zoomedBack}
+          </button>
+        )}
         {periodChip}
         {healthDot}
         {user && (
           <div className="sh-user" ref={root}>
             <button
+              ref={trigger}
               type="button"
               className="sh-user-btn"
               aria-expanded={open}
@@ -77,6 +92,7 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
                   <Icon name="close" />
                   {C.signOut}
                 </button>
+                <TextSizeControl scale={scale} onChange={setScale} />
                 {signOutError && (
                   <p className="sh-menu-err" role="alert">
                     {signOutError}

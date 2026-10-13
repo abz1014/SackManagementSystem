@@ -12,6 +12,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { ErrorState } from '../ui/ErrorState';
 import { TableView, type TableData } from './TableView';
 import type { ChartStatus } from './types';
+import { markingZoom } from './zoomMarker';
 
 export interface LegendItem {
   name: string;
@@ -60,6 +61,8 @@ export function Frame(p: FrameProps) {
   const h = p.defaultH ?? 260;
   const [asTable, setAsTable] = useState(false);
   const tid = useId();
+  /* CSS-053: a click-zoom marks its history entry so "Zoomed in - Back" (here and in the top bar) knows the page is zoomed. */
+  const frame = p.frame.zoom ? { ...p.frame, zoom: { ...p.frame.zoom, onZoom: markingZoom(p.frame.zoom.onZoom) } } : p.frame;
   return (
     <section className="ck-frame" aria-labelledby={`${tid}-t`}>
       <header className="ck-head">
@@ -79,7 +82,7 @@ export function Frame(p: FrameProps) {
         (asTable ? (
           <TableView caption={C.chart.tableCaption(p.title)} data={p.table} />
         ) : (
-          <ChartFrame chartId={p.chartId} defaultH={h} caption={p.caption} ariaLabel={`${p.title}, ${p.unit}`} {...p.frame} />
+          <ChartFrame chartId={p.chartId} defaultH={h} caption={p.caption} ariaLabel={`${p.title}, ${p.unit}`} {...frame} />
         ))}
       {status === 'ready' && asTable && p.caption && <p className="ck-caption">{p.caption}</p>}
     </section>
