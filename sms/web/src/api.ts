@@ -16,6 +16,8 @@ export interface ProductionRow {
   sacks: number | null;
   sackWeightKg: number | null;
   conesInRangePct: number | null;
+  /** Every cone the scale's in-range bit flagged (in_range = 0); not `states.rejected`. Absent = not stated. */
+  conesFailedScale?: number;
   /** Share of the group's sacks the SCALE passed (api production.ts `sacksPassedScalePct`). */
   sacksPassedScalePct?: number | null;
 }
@@ -1944,7 +1946,7 @@ export interface ProductionRow {
 }
 /** Which numeric field a data issue is about — mirrors production.ts's own `ProductionField`. */
 export type ProductionField =
-  | 'cones' | 'conesInRangePct' | 'rejectedCones'
+  | 'cones' | 'conesInRangePct' | 'conesFailedScale' | 'rejectedCones'
   | 'sacks' | 'sackWeightKg' | 'sacksPassedScalePct'
   | 'unattributed.cones' | 'unattributed.rejects'
   | 'implausible';

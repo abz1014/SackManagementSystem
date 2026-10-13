@@ -87,6 +87,15 @@ export interface ProductionRow {
   sackWeightKg: number | null;
   conesInRangePct: number | null;
   /**
+   * Every cone the SCALE's own in-range bit flagged (`in_range = 0`), a plain
+   * non-exclusive count in the same query, filters and generation as `cones`.
+   * It is the same population as the summary's `cones_rejected_by_scale`. It
+   * is NOT `states.rejected`: the five-way states count a scale-flagged cone
+   * with an implausible weight as 'unknown', so `states.rejected` can be
+   * smaller. Optional: absent means "not stated", never 0.
+   */
+  conesFailedScale?: number;
+  /**
    * THE SACK EQUIVALENT of `conesInRangePct`, and named at length on purpose
    * (23 Sep 2026). Until this existed the sack report's per-day rows carried
    * `conesInRangePct` and nothing else — a CONE figure on a SACK report — so
@@ -130,7 +139,7 @@ export interface ProductionRow {
  * `implausible`) carry `group: null`.
  */
 export type ProductionField =
-  | 'cones' | 'conesInRangePct' | 'rejectedCones'
+  | 'cones' | 'conesInRangePct' | 'conesFailedScale' | 'rejectedCones'
   | 'sacks' | 'sackWeightKg' | 'sacksPassedScalePct'
   | 'unattributed.cones' | 'unattributed.rejects'
   | 'implausible';
@@ -424,8 +433,9 @@ export async function getProduction(
   // cones (with in-range %)
   const coneReq = pool.request();
   const coneWhere = bindFilters(coneReq, p, lineId, true, scope, 'cone_event');
-  const cones = await coneReq.query<{ grp: string; n: number; inr: number }>(
-    `SELECT ${g} AS grp, COUNT(*) n, SUM(CASE WHEN in_range=1 THEN 1 ELSE 0 END) inr
+  const cones = await coneReq.query<{ grp: string; n: number; inr: number; failed?: number }>(
+    `SELECT ${g} AS grp, COUNT(*) n, SUM(CASE WHEN in_range=1 THEN 1 ELSE 0 END) inr,
+            SUM(CASE WHEN in_range = 0 THEN 1 ELSE 0 END) failed
      FROM sms.cone_event WHERE ${coneWhere} ${groupClause}`,
   );
 
@@ -544,6 +554,11 @@ export async function getProduction(
       issues.push({ field: 'conesInRangePct', group: c.grp, reason: 'cone_event aggregate row is missing its count (n); in-range % unknowable' });
       r.conesInRangePct = null;
       continue;
+    }
+    if (c.failed != null) {
+      const f = readNum(c.failed);
+      if (f.ok) r.conesFailedScale = f.value;
+      else issues.push({ field: 'conesFailedScale', group: c.grp, reason: 'cone_event aggregate row is missing its scale-flagged sum (failed)' });
     }
     if (n.value === 0) {
       r.conesInRangePct = null; // a REAL zero: no cones this group, nothing to rate
