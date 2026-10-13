@@ -76,6 +76,12 @@
   /* ---- Sequential ramp (magnitude, one hue, light -> dark) */
   --seq-1: #e3eaff;  --seq-2: #bccaf8;  --seq-3: #8aa5f2;  --seq-4: #2b59e0;  --seq-5: #1b3a9c;
 
+  /* IFL's own report table header blue (CSS-036, owner decision 6 Oct 2026: exactly #ADD8E6, the light blue of IFL's sheets).
+     Use ONLY for IFL report table headers and the machine-product matrix header (legacy-report.css), never as a data colour.
+     Ink on it: --ink-1 (about 11.7:1) and --ink-2 (about 6.2:1) pass 4.5:1; --ink-3 (about 3.8:1) does NOT, so headings and chevrons use --ink-1/--ink-2. */
+  --ifl-header: #add8e6;
+
+
   /* ---- Chart anatomy */
   --bar-from:       #2b59e0;       /* single-series bar gradient, top (data end) */
   --bar-to:         #8aa5f2;       /* ... bottom (baseline end); multi-series bars stay flat cat-n */

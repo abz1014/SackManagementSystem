@@ -88,6 +88,11 @@ export const ALLOW: Array<{ rule: string; file: RegExp; text?: RegExp; why: stri
   },
   {
     rule: 'gradient',
+    file: /^screens\/Reports\/legacy-report\.css$/,
+    why: 'Scroll-edge fade mask on wide report tables (CSS-073, owner decision A). Opaque ink token to transparent; no colour of its own.',
+  },
+  {
+    rule: 'gradient',
     file: /^charts\/(BarChart|Histogram|Pareto|Frame)\.tsx$/,
     text: /--bar-(from|to)|linearGradient/,
     why: 'The single-series bar gradient (--bar-from to --bar-to), explicitly approved by DESIGN-SYSTEM 7.13.',

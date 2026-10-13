@@ -146,17 +146,33 @@
 .rp-doc tbody th { padding-top: 9px; }
 .rp-doc tbody tr:last-child th { border-bottom: 0 !important; }
 .rp-doc .tw { overflow-x: auto; }
-.rp-doc .tw {
-  
+/* [CSS-073, owner decision 6 Oct 2026, option A] A table wider than its box keeps scrolling sideways and fades out at each edge that has
+   more beyond it. A mask on the scroller (not a background behind the cells) so the fade also shows over the opaque IFL header cells and
+   shaded rows. Driven by the scroller's own scroll position (scroll-driven animation), so a table that fits shows no fade at all; a
+   browser without it simply shows none. */
+@property --tw-fade-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --tw-fade-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes tw-fade-in-left { from { --tw-fade-l: 0px; } to { --tw-fade-l: 28px; } }
+@keyframes tw-fade-out-right { from { --tw-fade-r: 28px; } to { --tw-fade-r: 0px; } }
+@media screen and (prefers-reduced-motion: no-preference), screen and (prefers-reduced-motion: reduce) {
+  .rp-doc .tw:not(.mp-scroll) {
+    --tw-fade-l: 0px; --tw-fade-r: 0px;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, var(--ink-1) var(--tw-fade-l), var(--ink-1) calc(100% - var(--tw-fade-r)), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, var(--ink-1) var(--tw-fade-l), var(--ink-1) calc(100% - var(--tw-fade-r)), transparent 100%);
+    animation: tw-fade-in-left linear both, tw-fade-out-right linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range: 0 28px, calc(100% - 28px) 100%;
+  }
 }
 .rp-doc .mp-scroll { max-height: 70vh; overflow: auto; position: relative; }
 .rp-doc .mp-scroll table { border-collapse: separate; border-spacing: 0; }
-.rp-doc .mp-scroll thead th { position: sticky; top: 0; background: var(--seq-2); z-index: 2; }
+.rp-doc .mp-scroll thead th { position: sticky; top: 0; background: var(--ifl-header); z-index: 2; }
 .rp-doc .mp-scroll td:first-child, .rp-doc .mp-scroll th:first-child {
   position: sticky; left: 0; background: var(--paper); z-index: 1;
 }
-.rp-doc .mp-scroll thead th:first-child { z-index: 3; background: var(--seq-2); }
-.rp-doc .mp-scroll thead th .chev { color: var(--graphite); }
+.rp-doc .mp-scroll thead th:first-child { z-index: 3; background: var(--ifl-header); }
+.rp-doc .mp-scroll thead th { color: var(--ink-1); }
+.rp-doc .mp-scroll thead th .chev { color: var(--ink-2); } /* CSS-036: chevron on the IFL blue, >= 4.5:1 */
 .rp-doc .mp-scroll thead th:focus-visible { outline-offset: -2px; }
 .rp-doc .two-col .tw th { white-space: normal; }
 .rp-doc .calib-tbl { table-layout: fixed; }
@@ -414,13 +430,13 @@
 .rp-doc .ifl-table:has(td[rowspan]:first-child) td:first-child { white-space: nowrap; }
 .rp-doc .ifl-table th:not(.n), .rp-doc .ifl-table td:not(.n) { padding-left: 6px; padding-right: 6px; }
 .rp-doc .ifl-table th.n:last-child, .rp-doc .ifl-table td.n:last-child { padding-left: 6px; padding-right: 6px; }
-.rp-doc .ifl-table th { background: var(--seq-2); color: var(--ink); font-weight: 700; text-align: center; }
+.rp-doc .ifl-table th { background: var(--ifl-header); color: var(--ink); font-weight: 700; text-align: center; }
 .rp-doc .ifl-table td.n, .rp-doc .ifl-table th.n { text-align: right; font-variant-numeric: tabular-nums; }
 .rp-doc .ifl-table tr.total td, .rp-doc .ifl-table tfoot td, .rp-doc .ifl-table tfoot th { font-weight: 700; font-style: italic; }
 @media print {
   .rp-doc .ifl-table { width: 100%; font-size: var(--pt-9) !important; }
   .rp-doc .ifl-table th, .rp-doc .ifl-table td { font-size: var(--pt-9) !important; text-transform: none; letter-spacing: 0; padding: 2.5pt 5pt !important; border: 0.75pt solid var(--line-strong) !important; }
-  .rp-doc .ifl-table th { background: var(--seq-2) !important; color: var(--ink-1); font-weight: 700; text-align: center; vertical-align: middle; }
+  .rp-doc .ifl-table th { background: var(--ifl-header) !important; color: var(--ink-1); font-weight: 700; text-align: center; vertical-align: middle; }
   .rp-doc .ifl-table tbody tr:nth-child(even) td { background: none; }
   .rp-doc .ifl-table tr.total td, .rp-doc .ifl-table tfoot td { font-weight: 700; font-style: italic; }
   .rp-doc .ifl-table thead { display: table-header-group; }

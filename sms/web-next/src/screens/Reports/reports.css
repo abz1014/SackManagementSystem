@@ -112,7 +112,7 @@
 .rp-doc .block > * { grid-column: auto; }
 .rp-doc .fig-val { color: var(--ink-1); font-weight: var(--fw-bold); }
 .rp-doc th { color: var(--ink-3); background: var(--surface-sunk); }
-.rp-doc .ifl-table th { background: var(--seq-2); color: var(--ink-1); }
+.rp-doc .ifl-table th { background: var(--ifl-header); color: var(--ink-1); }
 .rp-doc .btn { height: auto; min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); box-shadow: none; font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .rp-doc .btn:hover { background: var(--surface-sunk); }
 .rp-doc .verdict { border-radius: var(--radius-ctl); }
