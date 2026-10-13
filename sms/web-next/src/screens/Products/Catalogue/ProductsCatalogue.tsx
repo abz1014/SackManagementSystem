@@ -33,9 +33,6 @@ import '../products.css';
 import './catalogue.css';
 const PC = withFragments(C.products, FRAGMENTS.productsParts);
 
-/** COPY-REQUEST (fix-wave T3, D23): the placeholder was cut off in its own box; T7 folds this into copy.ts as catalogue.searchHint. */
-const COPY_REQUEST_T3 = { searchHint: 'Code, colour or tube' }; // COPY-REQUEST
-
 const K = PC.catalogue;
 const REASON_ID = 'pds-reason';
 
@@ -263,7 +260,7 @@ export function ProductsCatalogueScreen({ route, rank, go }: ScreenProps) {
                 className="wr-input"
                 type="search"
                 value={query}
-                placeholder={COPY_REQUEST_T3.searchHint}
+                placeholder={K.searchHint}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>

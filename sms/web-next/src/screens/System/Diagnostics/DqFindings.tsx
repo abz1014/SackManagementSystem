@@ -20,10 +20,6 @@ const D = SY.diag.checks;
 
 /** The list shows this many checks, then a button for the rest, so the page does not run to thousands of pixels. */
 const SHOW_FIRST = 6;
-const COPY_REQUEST_dqShow = {
-  showAll: (n: number) => `Show all ${n} checks`,
-  showFewer: 'Show fewer',
-}; // COPY-REQUEST
 
 const title = (name: string) => {
   const t = name.replace(/_/g, ' ').trim();
@@ -156,7 +152,7 @@ export function DqFindings({
       </ul>
       {findings.length > SHOW_FIRST && (
         <button type="button" className="ui-link sy-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
-          {all ? COPY_REQUEST_dqShow.showFewer : COPY_REQUEST_dqShow.showAll(findings.length)}
+          {all ? D.showFewer : D.showAll(findings.length)}
         </button>
       )}
     </>
