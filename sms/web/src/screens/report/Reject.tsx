@@ -5,7 +5,7 @@ import { Empty } from './shared';
 import { fmtInt, fmtPct1 } from '../../lib/fmt';
 import type { PeriodParams } from '../../lib/period';
 import type { RejectReason, RejectReportData } from '../../api';
-import { fmtDayDmy, fmtDayShort, fmtPct, RejectTrendChart, type TrendBucket } from './shared';
+import { fmtDayDmy, fmtPct, RejectTrendChart, type TrendBucket } from './shared';
 
 /**
  * Roadmap Phase 2b guided-navigation pass (16 Sep 2026, IA-PROPOSAL.md §6.5
@@ -90,7 +90,6 @@ export function RejectSection({
               }))}
               singleName={W.nav.rejects}
               ariaLabel={W.reports.trend}
-              labelFmt={fmtDayShort}
               onSelect={onSelectPeriod}
             />
             {/*

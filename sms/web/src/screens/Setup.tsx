@@ -22,7 +22,7 @@
 import { useEffect, useState } from 'react';
 import { W } from '../lib/words';
 import { Block, Empty, Failed, SkelLines } from '../ui/bits';
-import { fmtAppInstant } from '../lib/fmt';
+import { useDateFmt } from '../lib/fmtContext';
 import {
   adminListUsers, adminCreateUser, adminUpdateUser, adminResetPassword, adminGetAuditPage, ApiError,
   ROLE_RANK,
@@ -345,6 +345,7 @@ function ResetPassword({ user }: { user: AdminUser }) {
 /* -------------------------------------------------------------- audit log */
 
 export function AuditLog() {
+  const df = useDateFmt();
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -400,7 +401,7 @@ export function AuditLog() {
           <tbody>
             {rows.map((e) => (
               <tr key={e.auditId}>
-                <td>{fmtAppInstant(e.atUtc)}</td>
+                <td>{df.appInstant(e.atUtc)}</td>
                 {/* No actor: a failed login, or the CLI (retention, cutover,
                     user:password) — the detail says which. */}
                 <td>{e.actorName ?? <span className="mut">{e.actorId == null ? W.health.noActor : '—'}</span>}</td>

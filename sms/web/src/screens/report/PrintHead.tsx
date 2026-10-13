@@ -16,6 +16,7 @@
 import { useLive, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import { getReportHeader, type ReportHeader } from '../../api';
+import { useDateFmt } from '../../lib/fmtContext';
 
 /** "15 Sep 2026, 14:03" on the plant's clock (rendered in UTC, like every reading time). */
 export function fmtPlantInstant(iso: string): string {
@@ -25,8 +26,8 @@ export function fmtPlantInstant(iso: string): string {
 }
 
 /** One line of attribution, the same words on the page, the verdict mark and the print header. */
-export function generatedLine(h: ReportHeader): string {
-  return `${W.reports.generated} ${fmtPlantInstant(h.generatedAtPlantUtc)} ${W.reports.generatedBy} ${h.generatedBy} · ${W.reports.version} ${h.smsVersion}`;
+export function generatedLine(h: ReportHeader, instant: (iso: string) => string = fmtPlantInstant): string {
+  return `${W.reports.generated} ${instant(h.generatedAtPlantUtc)} ${W.reports.generatedBy} ${h.generatedBy} · ${W.reports.version} ${h.smsVersion}`;
 }
 
 /**
@@ -135,6 +136,7 @@ function Masthead({ title, place }: { title: string; place?: string }) {
  * has no closing block. "Generated" is the PLANT clock (TWO CLOCKS).
  */
 export function PrintHead({ header, title, inlineNotes = false }: { header: ReportHeader | null; title?: string; inlineNotes?: boolean }) {
+  const df = useDateFmt();
   if (!header) return null;
   const other = Object.entries(header.filters)
     .filter(([k, v]) => v != null && k !== 'shift')
@@ -153,7 +155,7 @@ export function PrintHead({ header, title, inlineNotes = false }: { header: Repo
         <div><dt>{W.printDoc.generatedAt}</dt><dd>{fmtPlantDmyTime(header.generatedAtPlantUtc)}</dd></div>
       </dl>
       <div className="ph-foot">
-        <span>{generatedLine(header)}</span>
+        <span>{generatedLine(header, df.plantInstant)}</span>
         {inlineNotes && <span>{W.reports.definitionsNote}</span>}
       </div>
       {inlineNotes && header.shiftNote && <div className="ph-foot mut">{header.shiftNote}</div>}

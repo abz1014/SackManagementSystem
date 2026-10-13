@@ -7,6 +7,7 @@
 import { C, withFragments, FRAGMENTS } from '../../../copy';
 import { useState } from 'react';
 import { ApiError, changePassword, logout } from '../../../bridge/api';
+import { PageHead } from '../../../ui/PageHead';
 import { SystemTabs } from '../SystemTabs';
 import type { ScreenProps } from '../../registry';
 import '../system.css';
@@ -18,10 +19,7 @@ export function AccountScreen({ route, rank, user, go }: ScreenProps) {
   return (
     <div className="sy-page">
       <SystemTabs route={route} rank={rank} go={go} />
-      <header className="sy-head">
-        <h1 className="sy-title">{A.title}</h1>
-        <p className="sy-sentence">{A.sentence}</p>
-      </header>
+      <PageHead title={A.title} sentence={A.sentence} />
       <div className="sy-two">
         <section className="card sy-card" aria-labelledby="ac-who">
           <div className="sy-card__head"><h2 id="ac-who" className="sy-card__title">{A.who}</h2></div>

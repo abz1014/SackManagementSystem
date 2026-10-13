@@ -23,11 +23,13 @@ import type { Route } from '../../route';
 import type { ScreenProps } from '../registry';
 import { Builder } from './Builder';
 import { Cards } from './Cards';
+import { PageHead } from '../../ui/PageHead';
 import { ReportDocument } from './ReportDocument';
-import { cardOf, typeFromKeys, variantOf } from './model';
+import { typeFromKeys, variantOf } from './model';
 import { useReport } from './useReport';
 import './reports.css';
 import './legacy-report.css';
+import './report-style-c.css';
 import './print.css';
 const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
@@ -93,9 +95,8 @@ export function ReportsScreen({ route, rank, user, go }: ScreenProps) {
 
   return (
     <div className="rp-root" ref={rootRef}>
-      <div className="rp-title no-print">
-        <h1>{R.pageTitle}</h1>
-        <p className="rp-title__sentence">{R.intro}</p>
+      <div className="no-print rp-title">
+        <PageHead title={R.pageTitle} sentence={R.intro} />
       </div>
 
       <div className="rp-grid no-print">
@@ -119,7 +120,7 @@ export function ReportsScreen({ route, rank, user, go }: ScreenProps) {
       <section className="rp-preview" id="rp-preview" ref={previewRef} tabIndex={-1} aria-labelledby="rp-preview-h">
         <div className="rp-preview__hd no-print">
           <h2 id="rp-preview-h">{R.preview.heading}</h2>
-          <span className="rp-preview__cap">{cardOf(type).title}, {variant.title}. {R.preview.pageNote}</span>
+          <span className="rp-preview__cap">{R.preview.pageNote}</span>
         </div>
         <ReportDocument
           type={type}

@@ -16,6 +16,8 @@ import { WriteGate } from '../../../ui/WriteGate';
 import { ADMIN_RANK } from '../../../ranks';
 import { AuditLog, LineBlock, MachinesBlock, People, RejectCodesBlock, RulesBlock, SourcesBlock, StationsBlock } from '../../../bridge/system';
 import type { ScreenProps } from '../../registry';
+import { NextDateFmt } from '../../../bridge/dateFmt';
+import { PageHead } from '../../../ui/PageHead';
 import { SystemTabs } from '../SystemTabs';
 import '../system.css';
 import './legacy.css';
@@ -38,12 +40,10 @@ function Section({ id, title, rank, own, children }: { id: string; title: string
 export function SetupScreen({ route, rank, user, go }: ScreenProps) {
   const limitsHref = hrefFor(routeFor(route, { s: 'products', t: 'limits' }));
   return (
+    <NextDateFmt>
     <div className="sy-page">
       <SystemTabs route={route} rank={rank} go={go} />
-      <header className="sy-head">
-        <h1 className="sy-title">{S.title}</h1>
-        <p className="sy-sentence">{rank >= ADMIN_RANK ? S.sentence : S.notAllowed}</p>
-      </header>
+      <PageHead title={S.title} sentence={rank >= ADMIN_RANK ? S.sentence : S.notAllowed} />
       <Section id="setup-line" title={S.sections.line} rank={rank}><LineBlock /></Section>
       <Section id="setup-machines" title={S.sections.machines} rank={rank}><MachinesBlock /></Section>
       <Section id="setup-stations" title={S.sections.stations} rank={rank}><StationsBlock /></Section>
@@ -63,5 +63,6 @@ export function SetupScreen({ route, rank, user, go }: ScreenProps) {
       <Section id="setup-people" title={S.sections.people} rank={rank}><People currentUsername={user.username} /></Section>
       <Section id="setup-audit" title={S.sections.audit} rank={rank}><AuditLog /></Section>
     </div>
+    </NextDateFmt>
   );
 }

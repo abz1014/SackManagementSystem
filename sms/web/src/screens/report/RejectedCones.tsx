@@ -15,7 +15,8 @@
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtClockSec, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { RejectedConeRow, RejectedConesReportData } from '../../api';
 import { fmtDmy } from './PrintHead';
 import { PendingIfl } from './PendingIfl';
@@ -49,6 +50,7 @@ function LimitsCell({ r }: { r: RejectedConeRow }) {
 }
 
 export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
+  const df = useDateFmt();
   const wr = d.weightRange;
   const station = d.filters?.station ?? null;
   const fault = d.excludedClockFault ?? 0;
@@ -96,7 +98,7 @@ export function RejectedConesSection({ d }: { d: RejectedConesReportData }) {
                   <tr key={`${r.producedAtUtc}-${i}`}>
                     <td>{fmtDmy(r.date)}</td>
                     <td>{W.shiftName[r.shift]}</td>
-                    <td>{fmtClockSec(r.producedAtUtc)}</td>
+                    <td>{df.clockSec(r.producedAtUtc)}</td>
                     <td className="n">{r.winder ?? '—'}</td>
                     <td className="n">{r.hanger ?? '—'}</td>
                     <td className="n">{fmtG2(r.weightG)}</td>

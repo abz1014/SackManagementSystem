@@ -15,11 +15,13 @@ import { fmt, healthWords, live, period as P } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
 import { C, formatClock, formatDate, FRAGMENTS, withFragments } from '../../../copy';
 import { useData, usePeriod, type DataState } from '../../../data';
+import { fmtAppDateTime, fmtAppTime, fmtTime } from '../../../lib/fmt';
 import { Disclosure } from '../../../ui/Disclosure';
 import { ErrorState } from '../../../ui/ErrorState';
 import { Skeleton } from '../../../ui/Skeleton';
 import { StatusPill } from '../../../ui/StatusPill';
 import type { ScreenProps } from '../../registry';
+import { PageHead } from '../../../ui/PageHead';
 import { SystemTabs } from '../SystemTabs';
 import { DqFindings } from './DqFindings';
 import { backupState, dbState, feedKind, feedName, feedRowState, feedState, feedVerdict, groupSources, headline } from './model';
@@ -30,6 +32,8 @@ const TECH = FRAGMENTS.systemTech;
 const D = SY.diag;
 const STATES: ConeState[] = ['within', 'low', 'high', 'rejected', 'unknown'];
 
+/** Keeps a date's day, month and year together on one line while the time may wrap after it. */
+const nb = (s: string) => s.replace(/(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})/, '$1 $2 $3');
 const gb = (mb: number) => `${(mb / 1024).toFixed(0)} GB`;
 const plain = (iso: string) => `${formatDate(iso)} ${formatClock(iso)}`;
 
@@ -48,10 +52,7 @@ export function DiagnosticsScreen(props: ScreenProps) {
   return (
     <div className="sy-page">
       <SystemTabs route={route} rank={rank} go={go} />
-      <header className="sy-head">
-        <h1 className="sy-title">{SY.title}</h1>
-        {sentence && <p className="sy-sentence">{sentence}</p>}
-      </header>
+      <PageHead title={SY.title} sentence={sentence} />
 
       <div className="sy-lights">
         <FeedLight kind={kind} line={line} />
@@ -67,35 +68,34 @@ export function DiagnosticsScreen(props: ScreenProps) {
         <FeedsTable state={ops} />
       </section>
 
-      <div className="sy-two">
-        <section className="card sy-card" aria-labelledby="sy-src">
-          <div className="sy-card__head"><h2 id="sy-src" className="sy-card__title">{D.sources.title}</h2></div>
-          <SourcesList state={history} />
-        </section>
-        <section className="card sy-card" aria-labelledby="sy-dq">
-          <div className="sy-card__head">
-            <h2 id="sy-dq" className="sy-card__title">{D.checks.title}</h2>
-            <span className="caption">{D.checks.caption}</span>
-          </div>
-          {ops.status === 'loading' ? (
-            <Skeleton part={D.parts.checks} height={160} onRetry={ops.refresh} />
-          ) : ops.data == null ? (
-            <ErrorState part={D.parts.checks} cause={ops.error ?? undefined} onRetry={ops.refresh} />
-          ) : (
-            <DqFindings
-              findings={ops.data.data.dq.findings}
-              rank={rank}
-              onChanged={ops.refresh}
-              onOpenReading={(type, id) => go({ ...route, sheet: { kind: type, id: String(id) } })}
-            />
-          )}
-        </section>
-      </div>
+      <section className="card sy-card" aria-labelledby="sy-src">
+        <div className="sy-card__head"><h2 id="sy-src" className="sy-card__title">{D.sources.title}</h2></div>
+        <SourcesList state={history} />
+      </section>
 
       <div className="sy-two">
         <VerifyCard history={history} health={health} readingIso={line?.dataAsOfUtc ?? null} />
         <ServiceCard state={health} />
       </div>
+
+      <section className="card sy-card" aria-labelledby="sy-dq">
+        <div className="sy-card__head">
+          <h2 id="sy-dq" className="sy-card__title">{D.checks.title}</h2>
+          <span className="caption">{D.checks.caption}</span>
+        </div>
+        {ops.status === 'loading' ? (
+          <Skeleton part={D.parts.checks} height={160} onRetry={ops.refresh} />
+        ) : ops.data == null ? (
+          <ErrorState part={D.parts.checks} cause={ops.error ?? undefined} onRetry={ops.refresh} />
+        ) : (
+          <DqFindings
+            findings={ops.data.data.dq.findings}
+            rank={rank}
+            onChanged={ops.refresh}
+            onOpenReading={(type, id) => go({ ...route, sheet: { kind: type, id: String(id) } })}
+          />
+        )}
+      </section>
 
       <Counts />
 
@@ -197,7 +197,7 @@ function BackupLight({ state }: { state: Health }) {
             <small>{D.backups.daysSince}</small>
           </div>
           <p className="sy-light__d">
-            {b.newestAtUtc ? (b.verified ? D.backups.verified(fmt.fmtAppInstant(b.newestAtUtc)) : D.backups.unverified(fmt.fmtAppInstant(b.newestAtUtc))) : D.backups.none}
+            {b.newestAtUtc ? (b.verified ? D.backups.verified(fmtAppDateTime(b.newestAtUtc)) : D.backups.unverified(fmtAppDateTime(b.newestAtUtc))) : D.backups.none}
           </p>
         </>
       )}
@@ -232,7 +232,7 @@ function FeedsTable({ state }: { state: Ops }) {
             {sync.map((s) => (
               <tr key={s.targetTable}>
                 <td className="sy-strong">{feedName(s.targetTable)}</td>
-                <td>{s.finishedAtUtc ? fmt.fmtAppInstant(s.finishedAtUtc) : D.feeds.neverChecked}</td>
+                <td>{s.finishedAtUtc ? fmtAppDateTime(s.finishedAtUtc) : D.feeds.neverChecked}</td>
                 <td className="sy-num">{fmt.fmtInt(s.rowsWritten)}</td>
                 <td><StatusPill state={feedRowState(s)} noun={feedRowState(s) === 'ok' ? D.feeds.stateOk : D.feeds.stateStopped} /></td>
               </tr>
@@ -276,10 +276,12 @@ function SourcesList({ state }: { state: History }) {
   const d = state.data.data;
   const groups = groupSources(d.generations);
   if (groups.length === 0) return <p className="sy-note">{D.sources.none}</p>;
+  const kindCount = (k: string) => groups.filter((x) => x.kind === k).length;
   const sentence = (g: (typeof groups)[number]): [string, string] => {
     const n = g.cones == null ? null : fmt.fmtInt(g.cones);
     if (g.kind === 'current') return [D.sources.current, n ? D.sources.currentLine(n) : D.sources.currentLineNoCount];
-    if (g.kind === 'older') return [D.sources.older, n ? D.sources.olderLine(n) : D.sources.olderLineNoCount];
+    // Two older databases get the batch name each one carries, so the two titles never read the same.
+    if (g.kind === 'older') return [kindCount('older') > 1 ? `${D.sources.older}: ${g.members[0]?.label ?? g.key}` : D.sources.older, n ? D.sources.olderLine(n) : D.sources.olderLineNoCount];
     return [D.sources.practice, D.sources.practiceLine];
   };
   return (
@@ -300,24 +302,28 @@ function SourcesList({ state }: { state: History }) {
           <table className="sy-table sy-table--small">
             <thead>
               <tr>
-                <th>{TECH.colGeneration}</th><th>{TECH.colDatabase}</th><th>{TECH.colTable}</th>
-                <th>{TECH.colSource}</th><th>{TECH.colStatus}</th><th className="sy-num">{TECH.colRows}</th>
+                <th>{TECH.batchCol.table}</th><th className="sy-num">{TECH.batchCol.batch}</th><th>{TECH.batchCol.source}</th>
+                <th>{TECH.batchCol.firstSeen}</th><th>{TECH.batchCol.status}</th><th>{TECH.batchCol.registeredBy}</th>
+                <th className="sy-num">{TECH.batchCol.rows}</th>
               </tr>
             </thead>
             <tbody>
               {d.generations.map((g) => (
                 <tr key={g.epochId}>
-                  <td className="sy-strong">{g.label}</td>
-                  <td>{g.sourceDb}</td>
-                  <td>{g.sourceTable}</td>
-                  <td>{g.provenance}</td>
-                  <td>{g.closedUtc == null ? TECH.open : TECH.closed(fmt.fmtAppInstant(g.closedUtc))}</td>
-                  <td className="sy-num">{fmt.fmtInt(g.rawRowCount)}</td>
+                  <td className="sy-strong">{g.sourceTable}</td>
+                  <td className="sy-num">{g.generationOrdinal}</td>
+                  <td>{W.health.epochRegister.provenanceLabel(g.provenance, g.sourceDb)}</td>
+                  <td>{nb(fmtAppDateTime(g.firstSeenUtc))}</td>
+                  <td>{g.closedUtc == null ? TECH.open : TECH.closed(nb(fmtAppDateTime(g.closedUtc)))}</td>
+                  <td>{W.health.epochRegister.registeredBy(g.registeredBy)}</td>
+                  <td className="sy-num">{g.rawRowCount == null ? '—' : fmt.fmtInt(g.rawRowCount)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <p className="sy-note">{TECH.batchesNote}</p>
+        <p className="sy-note">{TECH.batchLastSeenNote}</p>
         <p className="sy-note">{D.sources.detailNote}</p>
         <p className="sy-note sy-strong">{TECH.rebuildsTitle}</p>
         {d.rebuilds.length === 0 ? (
@@ -326,7 +332,7 @@ function SourcesList({ state }: { state: History }) {
           <ul className="sy-plain">
             {d.rebuilds.map((rb) => (
               <li key={rb.rebuildId}>
-                {fmt.fmtAppInstant(rb.startedAtUtc)}: {TECH.rebuildRow(rb.targetTable, rb.fromTransformVersion, rb.toTransformVersion)}
+                {fmtAppDateTime(rb.startedAtUtc)}: {TECH.rebuildRow(rb.targetTable, rb.fromTransformVersion, rb.toTransformVersion)}
                 {rb.outcome !== 'success' && ` (${rb.outcome}${rb.errorMessage ? `: ${rb.errorMessage}` : ''})`}
               </li>
             ))}
@@ -360,7 +366,7 @@ function VerifyCard({
         <p className="sy-note">{D.verify.none}</p>
       ) : (
         <>
-          <p>{D.verify.ranAt(fmt.fmtAppInstant(v.startedAtUtc), ago(v.startedAtUtc))}</p>
+          <p>{D.verify.ranAt(fmtAppDateTime(v.startedAtUtc), ago(v.startedAtUtc))}</p>
           <p>{v.verdict === 'clean' ? D.verify.matched : D.verify.mismatch}</p>
           <p className="sy-note">{D.verify.manual}</p>
           <details className="sy-tech">
@@ -375,8 +381,8 @@ function VerifyCard({
           {r.workerLastPassUtc == null
             ? D.verify.recorderNever
             : readingIso
-              ? D.verify.recorderBoth(healthWords.fmtAppClock(r.workerLastPassUtc), fmt.fmtClock(readingIso))
-              : D.verify.recorder(healthWords.fmtAppClock(r.workerLastPassUtc))}
+              ? D.verify.recorderBoth(fmtAppTime(r.workerLastPassUtc), fmtTime(readingIso))
+              : D.verify.recorder(fmtAppTime(r.workerLastPassUtc))}
         </p>
       )}
     </section>
@@ -397,7 +403,7 @@ function ServiceCard({ state }: { state: Health }) {
       ) : (
         <>
           <p>
-            {D.service.version(r.service.version)}, {D.service.upFor(fmt.fmtSpan(r.service.uptimeSeconds))} (since {fmt.fmtAppInstant(r.service.startedAtUtc)})
+            {D.service.version(r.service.version)}, {D.service.upFor(fmt.fmtSpan(r.service.uptimeSeconds))} (since {fmtAppDateTime(r.service.startedAtUtc)})
           </p>
           <p className="sy-note">{D.service.restarted}</p>
           {r.disk && (

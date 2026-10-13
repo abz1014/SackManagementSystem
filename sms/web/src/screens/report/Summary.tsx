@@ -10,7 +10,8 @@ import { useMemo } from 'react';
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtDayLong, fmtInt, fmtSpan } from '../../lib/fmt';
+import { fmtInt, fmtSpan } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { KpiRow, ManagementSummaryData, ProductMixRow, ProductOption } from '../../api';
 import { distinctProductLabels } from '../../lib/productLabel';
 import { describePeriod, type ShiftCode } from '../../lib/period';
@@ -33,10 +34,10 @@ const ONE_END = '\u0000';
  * " – " into the two ends `priorSpan` takes; a one-shift or one-day prior has no second end and is named once. Otherwise the
  * calendar days, as before.
  */
-function priorCaption(prior: ManagementSummaryData['prior']): string {
+function priorCaption(prior: ManagementSummaryData['prior'], dayLong: (day: string) => string): string {
   const a = SHIFT_REF.exec(prior.fromShift ?? '');
   const b = SHIFT_REF.exec(prior.toShift ?? '');
-  if (!a || !b) return W.reports.priorSpan(fmtDayLong(prior.from), fmtDayLong(prior.to));
+  if (!a || !b) return W.reports.priorSpan(dayLong(prior.from), dayLong(prior.to));
   const words = describePeriod({
     key: 'range', from: prior.from, to: prior.to, tsTo: '', live: false, days: 1,
     fromShift: { date: a[1]!, shift: a[2] as ShiftCode }, toShift: { date: b[1]!, shift: b[2] as ShiftCode },
@@ -48,6 +49,7 @@ function priorCaption(prior: ManagementSummaryData['prior']): string {
 }
 
 export function SummarySection({ d, products }: { d: ManagementSummaryData; products: ProductOption[] }) {
+  const df = useDateFmt();
   // Defect fix (16 Sep 2026): several PDAS materials on this line share one
   // plain description ("205-IL0-SD" is six of them), which is all the
   // server's labelFor can print, so the product-mix table could show the
@@ -95,7 +97,7 @@ export function SummarySection({ d, products }: { d: ManagementSummaryData; prod
     <>
       <Block first>
         <p className="g">
-          {priorCaption(d.prior)}
+          {priorCaption(d.prior, df.dayLong)}
           {' · '}
           {W.reports.priorCoverage(d.coverage.prior.daysWithData, d.coverage.prior.daysInPeriod)}.
         </p>

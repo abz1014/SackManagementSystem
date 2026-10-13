@@ -24,7 +24,8 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { W } from '../../lib/words';
 import { Block, Chevron, rowKeys } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtClock, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { MachineProductReportData, MachineShiftCell } from '../../api';
 import { fmtDayDmy } from './shared';
 import { ChangesTable, labelOf, machineLabel } from './ProductChanges';
@@ -113,6 +114,7 @@ function MatrixScrollCue({ boxRef, d }: { boxRef: RefObject<HTMLDivElement | nul
 }
 
 function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
+  const df = useDateFmt();
   const boxRef = useRef<HTMLDivElement>(null);
   return (
     <>
@@ -207,8 +209,8 @@ function MachineProductTables({ d, onOpen }: { d: MachineProductReportData; onOp
                   <td>{p.label}</td>
                   <td className="n">{fmtInt(p.cones)}</td>
                   <td className="n">{fmtInt(p.machines)}</td>
-                  <td>{fmtDayDmy(p.firstUtc)} {fmtClock(p.firstUtc)}</td>
-                  <td>{fmtDayDmy(p.lastUtc)} {fmtClock(p.lastUtc)}</td>
+                  <td>{fmtDayDmy(p.firstUtc)} {df.clock(p.firstUtc)}</td>
+                  <td>{fmtDayDmy(p.lastUtc)} {df.clock(p.lastUtc)}</td>
                 </tr>
               ))}
             </tbody>

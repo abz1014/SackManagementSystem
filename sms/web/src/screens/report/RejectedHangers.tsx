@@ -21,7 +21,8 @@
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtClockSec, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { RejectedHangerRow, RejectedHangersReportData } from '../../api';
 import { PendingIfl } from './PendingIfl';
 import { fmtDmy } from './PrintHead';
@@ -43,6 +44,7 @@ function FlagCell({ flag }: { flag: RejectedHangerRow['flag'] }) {
 }
 
 export function RejectedHangersSection({ d }: { d: RejectedHangersReportData }) {
+  const df = useDateFmt();
   const hangers = d.hangers ?? [];
   const list = d.list ?? [];
   const listTotal = d.listTotal ?? list.length;
@@ -150,7 +152,7 @@ export function RejectedHangersSection({ d }: { d: RejectedHangersReportData }) 
                 {shown.map((r, i) => (
                   <tr key={`${r.producedAtUtc}-${i}`}>
                     <td>{fmtDmy(r.date)}</td>
-                    <td>{fmtClockSec(r.producedAtUtc)}</td>
+                    <td>{df.clockSec(r.producedAtUtc)}</td>
                     <td>{W.shiftName[r.shift]}</td>
                     <td className="n">{r.hanger ?? '—'}</td>
                     <td className="n">{r.winder ?? '—'}</td>

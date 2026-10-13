@@ -25,7 +25,8 @@
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtClockSec, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { LifterRow, RejectedUnknownLifterReportData, UnknownLifterReject } from '../../api';
 import { fmtDmy } from './PrintHead';
 import { PendingIfl } from './PendingIfl';
@@ -60,6 +61,7 @@ function LifterCells({ r }: { r: LifterRow }) {
 
 /** The one table B and C share: a reject per row, with the reasons it is listed. */
 function RejectTable({ rows }: { rows: UnknownLifterReject[] }) {
+  const df = useDateFmt();
   return (
     <div className="tw">
       <table className="ifl-table">
@@ -82,7 +84,7 @@ function RejectTable({ rows }: { rows: UnknownLifterReject[] }) {
           {rows.map((r, i) => (
             <tr key={`${r.producedAtUtc}-${i}`}>
               <td style={{ whiteSpace: 'nowrap' }}>{fmtDmy(r.date)}</td>
-              <td>{fmtClockSec(r.producedAtUtc)}</td>
+              <td>{df.clockSec(r.producedAtUtc)}</td>
               <td>{W.shiftName[r.shift]}</td>
               <td className="n">{r.hanger ?? '—'}</td>
               <td className="n">{r.lifter ?? '—'}</td>

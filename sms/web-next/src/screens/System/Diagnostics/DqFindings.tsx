@@ -7,7 +7,7 @@ import { C, FRAGMENTS, withFragments } from '../../../copy';
 import { useState } from 'react';
 import { ackDqFinding, ApiError, getDqDestination, type DqFinding } from '../../../bridge/api';
 import { dqRawTableFor } from '../../../bridge/system';
-import { fmt } from '../../../bridge/lib';
+import { fmtAppDateTime } from '../../../lib/fmt';
 import { reasonValid, ReasonField } from '../../../ui/Field';
 import { WriteGate } from '../../../ui/WriteGate';
 import { StatusPill } from '../../../ui/StatusPill';
@@ -17,6 +17,13 @@ const SY = withFragments(C.system, FRAGMENTS.systemParts);
 const TECH = FRAGMENTS.systemTech;
 
 const D = SY.diag.checks;
+
+/** The list shows this many checks, then a button for the rest, so the page does not run to thousands of pixels. */
+const SHOW_FIRST = 6;
+const COPY_REQUEST_dqShow = {
+  showAll: (n: number) => `Show all ${n} checks`,
+  showFewer: 'Show fewer',
+}; // COPY-REQUEST
 
 const title = (name: string) => {
   const t = name.replace(/_/g, ' ').trim();
@@ -109,13 +116,15 @@ export function DqFindings({
   onChanged: () => void;
   onOpenReading: (type: 'cone' | 'sack' | 'reject', id: number) => void;
 }) {
+  const [all, setAll] = useState(false);
   const acked = findings.filter((f) => f.acknowledgedUtc != null).length;
+  const shown = all ? findings : findings.slice(0, SHOW_FIRST);
   if (findings.length === 0) return <p className="sy-note">{D.none}</p>;
   return (
     <>
       {acked > 0 && <p className="sy-note">{D.ackSummary(acked)}</p>}
       <ul className="sy-find">
-        {findings.map((f) => (
+        {shown.map((f) => (
           <li key={f.findingId}>
             <div className="sy-find__tx">
               <b>{title(f.checkName)}</b>
@@ -131,7 +140,7 @@ export function DqFindings({
               <Severity severity={f.severity} />
               {f.acknowledgedUtc != null ? (
                 <span className="sy-acked">
-                  {f.acknowledgedBy ? D.ackBy(f.acknowledgedBy, fmt.fmtAppInstant(f.acknowledgedUtc)) : D.ackByUnknown(fmt.fmtAppInstant(f.acknowledgedUtc))}
+                  {f.acknowledgedBy ? D.ackBy(f.acknowledgedBy, fmtAppDateTime(f.acknowledgedUtc)) : D.ackByUnknown(fmtAppDateTime(f.acknowledgedUtc))}
                   {f.acknowledgedReason && <i>{`“${f.acknowledgedReason}”`}</i>}
                 </span>
               ) : f.acknowledgeable ? (
@@ -145,6 +154,11 @@ export function DqFindings({
           </li>
         ))}
       </ul>
+      {findings.length > SHOW_FIRST && (
+        <button type="button" className="ui-link sy-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? COPY_REQUEST_dqShow.showFewer : COPY_REQUEST_dqShow.showAll(findings.length)}
+        </button>
+      )}
     </>
   );
 }

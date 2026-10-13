@@ -1,0 +1,111 @@
+/* Reports preview in Style C (fix-wave T4, D6 D10 D11 D31 D32). Loaded AFTER legacy-report.css (the generated copy of the old
+   report styles), so on screen these rules win at equal specificity; print keeps the legacy rules untouched.
+   Tokens only (uniformity guard). The old markup is reused as it is, so the selectors are the old class names.
+   IFL's own table look is kept where IFL asked for it: .ifl-table headers are --ifl-header, and nowhere else. */
+@media screen {
+  /* ---- the page: blocks stack with one space token, no label column, no bands --------------------------- */
+  .rp-doc p, .rp-doc .fig-note, .rp-doc .note, .rp-doc .rp-doc__head { overflow-wrap: anywhere; }
+  .rp-doc .page, .rp-doc .band > .page { max-width: none; width: 100%; margin: 0; padding: 0; }
+  .rp-doc .band { border-top: 0; margin-top: var(--space-5); }
+  .rp-doc .block, .rp-doc .block.first, .rp-doc .block.tight, .rp-doc .block.plain, .rp-doc .block.wide {
+    display: block; margin: 0; padding: var(--space-5) 0 0; border-top: 0;
+  }
+  .rp-doc .block.first { padding-top: 0; }
+  .rp-doc .block > .h2, .rp-doc .block > *:not(.h2) { grid-column: auto; }
+  .rp-doc .block > div:has(.tw-span), .rp-doc .block > div:has(.ifl-table) { margin-top: var(--space-3); }
+  .rp-doc .h2 { display: block; margin: 0 0 var(--space-3); color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+  .rp-doc .h2 .note, .rp-doc .block > .note { display: block; margin: var(--space-1) 0 0; text-align: left; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+  .rp-doc .block > .note { margin: 0 0 var(--space-3); }
+  .rp-doc .two-col { gap: var(--space-5); }
+  .rp-doc .details { padding-top: var(--space-4); border-top: 0; color: var(--ink-2); }
+  .rp-doc .details summary { color: var(--accent); font-weight: var(--fw-semibold); }
+
+  /* ---- headline figures: KPI-card tiles ------------------------------------------------------------------ */
+  .rp-doc .figs { gap: var(--space-4); }
+  .rp-doc .figs > *, .rp-doc .figs > *:first-child, .rp-doc .figs > *:last-child, .rp-doc .figs > *:nth-child(n) {
+    padding: var(--kpi-pad-y) var(--kpi-pad-x); border: 0; border-radius: var(--radius-card); background: var(--surface-sunk);
+  }
+  .rp-doc .fig-val { color: var(--ink-1); font-weight: var(--fw-bold); letter-spacing: 0; }
+  .rp-doc .fig-unit { color: var(--ink-3); font-weight: var(--fw-medium); }
+  .rp-doc .fig-note { color: var(--ink-3); }
+  .rp-doc .fig-link:hover .fig-val { color: var(--accent); }
+
+  /* ---- the verdict: a Style C card with a pill, not a dark box ------------------------------------------- */
+  .rp-doc .verdict { padding: var(--card-pad); border-radius: var(--radius-card); background: var(--accent-tint); color: var(--ink-1); box-shadow: none; max-width: 100%; min-width: 0; }
+  .rp-doc .verdict > .lbl {
+    display: inline-block; padding: 2px var(--space-3); border-radius: var(--radius-pill); background: var(--surface); color: var(--accent);
+    font: var(--fw-semibold) var(--fs-1)/var(--lh-1) var(--font-sans); letter-spacing: 0; text-transform: none; opacity: 1;
+  }
+  .rp-doc .verdict > .val { margin-top: var(--space-3); color: var(--ink-1); font: var(--fw-bold) var(--fs-5)/var(--lh-5) var(--font-sans); letter-spacing: 0; }
+  .rp-doc .verdict > .who { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line-strong); color: var(--ink-2); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); opacity: 1; }
+
+  /* ---- tables take the DataTable look: header row, row height, hairlines, the same type ramp ------------------- */
+  .rp-doc table { width: 100%; border-collapse: separate; border-spacing: 0; font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); font-feature-settings: var(--tnum); }
+  .rp-doc th, .rp-doc tbody th {
+    height: var(--row-head-h); padding: 0 var(--space-4); border: 0; background: var(--surface-sunk); color: var(--ink-3);
+    font: var(--fw-semibold) var(--fs-1)/var(--lh-1) var(--font-sans); text-align: left; vertical-align: middle;
+  }
+  .rp-doc th:first-child { border-top-left-radius: var(--radius-ctl); }
+  .rp-doc th:last-child { border-top-right-radius: var(--radius-ctl); }
+  .rp-doc td, .rp-doc tbody tr:last-child td {
+    height: var(--row-h); padding: 0 var(--space-4); border: 0; border-top: 1px solid var(--line); color: var(--ink-2); vertical-align: middle;
+  }
+  .rp-doc tbody tr:first-child td { border-top: 0; }
+  .rp-doc tbody th { border-top: 1px solid var(--line); background: none; color: var(--ink-1); font-size: var(--fs-2); }
+  .rp-doc th.n, .rp-doc td.n, .rp-doc th.n:not(:last-child), .rp-doc td.n:not(:last-child) { padding: 0 var(--space-4); text-align: right; white-space: nowrap; }
+  .rp-doc tr.on td, .rp-doc tr.click:hover td { background: var(--accent-tint); }
+  /* Date, shift and time cells stay on one line, so a date never splits across two (M-12). */
+  .rp-doc td[data-nw], .rp-doc th[data-nw] { white-space: nowrap; }
+  .rp-doc th { white-space: nowrap; }
+  .rp-doc .calib-tbl th, .rp-doc .two-col .tw th, .rp-doc .tw-span th { white-space: normal; }
+  .rp-doc .chev { color: var(--ink-3); }
+
+  /* IFL's tables: their own header blue, hairline grid. Everything else about them is the table look above. */
+  .rp-doc .ifl-table th { background: var(--ifl-header); color: var(--ink-1); font-weight: var(--fw-bold); text-align: center; border-radius: 0; }
+  .rp-doc .ifl-table th, .rp-doc .ifl-table td { border: 1px solid var(--line); }
+  .rp-doc .ifl-table th:not(.n), .rp-doc .ifl-table td:not(.n) { padding-left: var(--space-3); padding-right: var(--space-3); }
+  .rp-doc .ifl-table tr.total td, .rp-doc .ifl-table tfoot td { background: var(--surface-sunk); }
+  .rp-doc .mp-scroll thead th { background: var(--ifl-header); color: var(--ink-1); }
+
+  /* ---- links: the app's link look (no underline at rest, 15 px) ----------------------------------------- */
+  .rp-doc a, .rp-doc .linkish {
+    color: var(--accent); font-size: var(--fs-3); font-weight: var(--fw-semibold); text-decoration: none;
+  }
+  .rp-doc a:hover, .rp-doc .linkish:hover { color: var(--accent-hover); text-decoration: underline; }
+  .rp-doc .linkish[disabled] { color: var(--ink-3); text-decoration: none; }
+  .rp-doc a:focus-visible, .rp-doc .linkish:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-ctl); }
+
+  /* ---- buttons: the app's quiet button, as wide as its label ---------------------------------------------- */
+  .rp-doc .btn {
+    display: inline-flex; width: auto; max-width: 100%; align-items: center; justify-content: center; gap: var(--space-2);
+    min-height: var(--control-h); padding: 0 var(--space-4); border: 0; border-radius: var(--radius-ctl);
+    background: var(--accent-tint); color: var(--accent); box-shadow: none;
+    font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); white-space: nowrap;
+  }
+  .rp-doc .btn:hover { background: var(--surface-sunk); color: var(--accent-hover); border: 0; }
+  .rp-doc .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+  .rp-doc .btn[disabled] { background: var(--surface-sunk); color: var(--ink-3); opacity: 1; }
+  .rp-doc input[type="text"], .rp-doc input[type="date"], .rp-doc input[type="time"], .rp-doc input[type="number"], .rp-doc select {
+    min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl);
+    background: var(--surface); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans);
+  }
+
+  /* ---- stations, bars, charts, states ----------------------------------------------------------------------- */
+  .rp-doc .st { border: 0; border-radius: var(--radius-tile); background: var(--surface-sunk); }
+  .rp-doc .st:hover { background: var(--accent-tint); }
+  .rp-doc .st.flag { box-shadow: 0 0 0 2px var(--accent); }
+  .rp-doc .chart-tip { border: 0; border-radius: var(--radius-ctl); box-shadow: var(--elev-2); }
+  .rp-doc .state { color: var(--ink-2); padding: var(--space-5) 0; }
+  .rp-doc .skel { border-radius: var(--radius-ctl); }
+  .rp-doc .period { background: var(--surface-sunk); border-radius: var(--radius-ctl); }
+  .rp-doc .period button { border-radius: var(--radius-ctl); }
+
+  /* ---- the preview inside its card (D6) ------------------------------------------------------------------- */
+  .rp-paper { max-width: 100%; box-sizing: border-box; }
+  .rp-doc .rp-doc__head { margin-bottom: var(--space-5); align-items: flex-start; }
+  .rp-doc .rp-doc__head > div { min-width: 0; flex: 1 1 20rem; }
+  .rp-doc .rp-note { padding: var(--space-3) var(--space-4); border-radius: var(--radius-ctl); background: var(--surface-sunk); }
+
+  /* the landing: a card is as tall as its own content, not as the tallest card in its row (D32) */
+  .rp-cards__sub { align-items: start; }
+}

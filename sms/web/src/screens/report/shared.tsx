@@ -26,7 +26,8 @@ import {
   type Rect, type GutterLabelIn,
 } from '../../ui/chartLayout';
 import { dayToShiftRange, snapToShifts, type ShiftRef, type PeriodParams } from '../../lib/period';
-import { fmtDayLong, fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
+import { fmtInt, fmtKg, fmtPct1 } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import { fmtDmy } from './PrintHead';
 import type { ReportLine, StateCounts } from '../../api';
 
@@ -204,6 +205,7 @@ export function DayBars({
    *  bar snapped to. Omitted (the default) draws the chart with no zoom. */
   onSelect?: (p: PeriodParams) => void;
 }) {
+  const df = useDateFmt();
   const days = rows.filter((r) => r.group !== 'total');
   if (days.length === 0) return <Empty message={W.report.coverageNone('This period')} />;
 
@@ -211,9 +213,9 @@ export function DayBars({
   const min = Math.min(...days.map((d) => d.cones));
   const data: BarDatum[] = days.map((d) => ({
     key: d.group,
-    label: fmtDayShort(d.group),
+    label: df.dayShort(d.group),
     value: d.cones,
-    detail: `${fmtDayLong(d.group)} · ${fmtInt(d.cones)} cones · ${fmtInt(d.sacks)} sacks`,
+    detail: `${df.dayLong(d.group)} · ${fmtInt(d.cones)} cones · ${fmtInt(d.sacks)} sacks`,
   }));
   const resting = `${days.length} ${days.length === 1 ? 'day' : 'days'} · ${fmtInt(min)} to ${fmtInt(max)} cones`;
   const zoom = onSelect
@@ -1078,7 +1080,7 @@ export function RejectTrendChart({
   singleName,
   periodFrom,
   periodTo,
-  labelFmt = fmtDayShort,
+  labelFmt: labelFmtProp,
   ariaLabel = 'Reject rate over time',
   onSelect,
 }: {
@@ -1099,6 +1101,8 @@ export function RejectTrendChart({
    */
   onSelect?: (p: PeriodParams) => void;
 }) {
+  const df = useDateFmt();
+  const labelFmt = labelFmtProp ?? df.dayShort;
   const H = 250;
   const L = 44;
   const R_MIN = 130;

@@ -2,7 +2,8 @@
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtClockSec, fmtDayLong, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import { stationLabel, type ConeWeightReportData, type StationRow } from '../../api';
 import { fmtG1, fmtSignedG, Histogram, statesLine } from './shared';
 
@@ -19,9 +20,10 @@ const targetIsLowerBound = (t: ConeWeightReportData['target']): boolean =>
  * C-119 (2 Oct 2026): `inForceAtUtc` is the plant's wall clock labelled `Z` (productLimits.ts converts through `toPlantMs`), so it is
  * printed with the UTC-pinned plant formatters, never `fmtAppInstant`, which would shift it into the viewer's zone (+5 h on a UTC+5 PC).
  */
-const fmtInForce = (iso: string): string => `${fmtDayLong(iso)}, ${fmtClockSec(iso)}`;
 
 export function ConeWeightSection({ d, names }: { d: ConeWeightReportData; names: StationRow[] }) {
+  const df = useDateFmt();
+  const fmtInForce = (iso: string): string => `${df.dayLong(iso)}, ${df.clockSec(iso)}`;
   if (d.cones === 0) {
     return (
       <Block first>

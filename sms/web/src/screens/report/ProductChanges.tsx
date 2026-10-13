@@ -11,7 +11,7 @@
  */
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
-import { fmtClock } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { MachineProductChange, ReportProductChanges } from '../../api';
 import { fmtDayDmy } from './shared';
 
@@ -26,9 +26,10 @@ export function labelOf(id: number | null, name: string | null, labels: Record<s
 }
 
 function ChangeRow({ c, labels }: { c: MachineProductChange; labels: Record<string, string> }) {
+  const df = useDateFmt();
   return (
     <tr>
-      <td>{fmtDayDmy(c.day)} {W.shiftName[c.shift]}{' · '}{fmtClock(c.firstUtc)}</td>
+      <td>{fmtDayDmy(c.day)} {W.shiftName[c.shift]}{' · '}{df.clock(c.firstUtc)}</td>
       <td>{machineLabel(c.station, c.machineName)}</td>
       <td>
         {labelOf(c.fromMaterialId, c.fromProductName, labels)}

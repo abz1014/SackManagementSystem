@@ -6,7 +6,7 @@
  *    skeleton, never a figure; a period after the newest reading says when the newest reading is (X-3).
  *  - EVERY EMPTY MACHINE-AND-PRODUCT PERIOD IS EMPTY (E-7): rows with no cones on any station are not "0 machines".
  */
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   rejectCodeParam,
   type AuthUser,
@@ -18,6 +18,8 @@ import {
   type StationRow,
 } from '../../bridge/api';
 import { fmt, live, period as P } from '../../bridge/lib';
+import { NextDateFmt } from '../../bridge/dateFmt';
+import { fmtDate, fmtDateTime, fmtRange } from '../../lib/fmt';
 import { W } from '../../bridge/words';
 import {
   AfterNewestProvider,
@@ -43,7 +45,6 @@ import {
   SpsPackingSection,
   StationSection,
   SummarySection,
-  fmtDayShort,
   generatedLine,
 } from '../../bridge/report';
 import { C, withFragments, FRAGMENTS } from '../../copy';
@@ -56,10 +57,35 @@ const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
 type Data = ReportResponse<ReportType>;
 
+/** A table cell that holds a date, a clock time or a shift name and nothing else must stay on one line (M-12). */
+const ONE_LINE_CELL = /^\s*(\d{1,2}-\d{1,2}-\d{4}|\d{1,2} [A-Z][a-z]{2} \d{4}|\d{1,2}:\d{2}|Morning|Evening|Night)\b/;
+
+/**
+ * The old renderers print dates as plain text, which a browser may break at a hyphen or a space. Cells that start with a
+ * date, a time or a shift name get `data-nw` (report-style-c.css makes them nowrap). Only an attribute is set, and only on
+ * cells, so React's own rendering is untouched; a MutationObserver keeps it true as the report loads.
+ */
+function useOneLineCells(ref: React.RefObject<HTMLElement>): void {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const mark = () => {
+      for (const c of root.querySelectorAll<HTMLElement>('td, th')) {
+        if (!c.hasAttribute('data-nw') && ONE_LINE_CELL.test(c.textContent ?? '')) c.setAttribute('data-nw', '');
+      }
+    };
+    mark();
+    if (typeof MutationObserver === 'undefined') return;
+    const mo = new MutationObserver(mark);
+    mo.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }, [ref]);
+}
+
 /** The sentence over the preview: coverage first, because "this quarter" on a 34-day record is 34 days of a longer period. */
 export function headline(type: ReportType, data: Data | null, period: P.Period, afterNewest: string | null): string {
-  const label = `${fmt.fmtDayLong(period.from)} to ${fmt.fmtDayLong(period.to)}`;
-  const short = period.from === period.to ? fmt.fmtDayLong(period.from) : label;
+  const label = `${fmtDate(period.from)} to ${fmtDate(period.to)}`;
+  const short = period.from === period.to ? fmtDate(period.from) : label;
   if (!data) return short;
   const c = coverageOf(type, data);
   if (!c) return `${W.reports.type[type]}, ${short}`;
@@ -69,8 +95,8 @@ export function headline(type: ReportType, data: Data | null, period: P.Period, 
     short,
     c.daysWithData,
     c.daysInPeriod,
-    c.firstDayWithData ? fmt.fmtDayLong(c.firstDayWithData) : '-',
-    c.lastDayWithData ? fmt.fmtDayLong(c.lastDayWithData) : '-',
+    c.firstDayWithData ? fmtDate(c.firstDayWithData) : '-',
+    c.lastDayWithData ? fmtDate(c.lastDayWithData) : '-',
   );
 }
 
@@ -98,9 +124,9 @@ export function Verdict({ type, data, lineName }: { type: ReportType; data: Data
         {fmt.fmtInt(totals.cones)} {W.fig.cones}, {fmt.fmtInt(totals.sacks)} {W.fig.sacks},{' '}
         {fmt.fmtInt(Math.round(totals.sackWeightKg))} {W.fig.kg}
         <br />
-        {fmtDayShort(h.period.from)} - {fmtDayShort(h.period.to)} · {lineName || h.lineName}
+        {fmtRange(h.period.from, h.period.to)} · {lineName || h.lineName}
       </span>
-      <span className="who">{generatedLine(h)}</span>
+      <span className="who">{generatedLine(h, fmtDateTime)}</span>
     </div>
   );
 }
@@ -154,11 +180,13 @@ export interface ReportDocumentProps {
 
 export function ReportDocument({ type, period, state, names, products, onOpenStation, onOpenCode, onSelectPeriod }: ReportDocumentProps) {
   const { line } = live.useLive();
+  const paper = useRef<HTMLElement>(null);
+  useOneLineCells(paper);
   const variant = variantOf(type);
   const { data, readable, error, fetch } = state;
   // X-3: a period that starts after the newest reading on record says when that reading is.
   const afterNewest = useMemo(
-    () => (period && line?.dataAsOfUtc && P.periodAfterNewest(period, line.dataAsOfUtc) ? W.periodAfterNewest(fmt.fmtClockOn(line.dataAsOfUtc, line.plantNowUtc)) : null),
+    () => (period && line?.dataAsOfUtc && P.periodAfterNewest(period, line.dataAsOfUtc) ? W.periodAfterNewest(fmtDateTime(line.dataAsOfUtc)) : null),
     [period, line?.dataAsOfUtc, line?.plantNowUtc],
   );
 
@@ -194,7 +222,8 @@ export function ReportDocument({ type, period, state, names, products, onOpenSta
 
   const header = data?.header ?? null;
   return (
-    <article className="rp-paper rp-doc" aria-label={variant.title} data-report-type={type}>
+    <NextDateFmt>
+    <article ref={paper} className="rp-paper rp-doc" aria-label={variant.title} data-report-type={type}>
       <PrintHead header={header} />
       <header className="rp-doc__head no-print">
         <div>
@@ -208,5 +237,6 @@ export function ReportDocument({ type, period, state, names, products, onOpenSta
       {fetch.staleError && data ? <p className="rp-note no-print" role="status">{C.couldntLoad(R.preview.failed(variant.title))}</p> : null}
       {body}
     </article>
+    </NextDateFmt>
   );
 }

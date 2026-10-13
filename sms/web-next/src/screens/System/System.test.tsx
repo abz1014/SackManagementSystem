@@ -150,7 +150,8 @@ describe('Diagnostics', () => {
     const inside = Array.from(container.querySelectorAll('.ui-disc, .sy-tech')).map((n) => n.textContent).join(' ');
     expect(inside).toMatch(/DATA_TP1U2_SEP07/);
     expect(inside).toMatch(/pack1_TP1U2/);
-    expect(inside).toMatch(new RegExp(TECH.colGeneration));
+    // the old Data batches table is back inside the disclosure: first seen, status, registered by, rows held
+    for (const h of [TECH.batchCol.firstSeen, TECH.batchCol.status, TECH.batchCol.registeredBy, TECH.batchCol.rows]) expect(inside, h).toContain(h);
   });
 
   it('shows Acknowledge to an engineer on an acknowledgeable open finding only', async () => {

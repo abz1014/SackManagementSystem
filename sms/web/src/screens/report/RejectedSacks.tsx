@@ -24,7 +24,8 @@
 import { W } from '../../lib/words';
 import { Block } from '../../ui/bits';
 import { Empty } from './shared';
-import { fmtClockSec, fmtInt } from '../../lib/fmt';
+import { fmtInt } from '../../lib/fmt';
+import { useDateFmt } from '../../lib/fmtContext';
 import type { RejectedSackCounts, RejectedSackShiftRow, RejectedSacksReportData } from '../../api';
 import { fmtDmy } from './PrintHead';
 import { PendingIfl } from './PendingIfl';
@@ -86,6 +87,7 @@ function shiftTotal(rows: readonly RejectedSackShiftRow[], shift: ShiftKey): Rej
 }
 
 export function RejectedSacksSection({ d }: { d: RejectedSacksReportData }) {
+  const df = useDateFmt();
   const byShift = d.byShift ?? [];
   const byDay = d.byDay ?? [];
   const total = d.total;
@@ -242,7 +244,7 @@ export function RejectedSacksSection({ d }: { d: RejectedSacksReportData }) {
                   <tr key={`${r.producedAtUtc}-${i}`}>
                     <td>{fmtDmy(r.date)}</td>
                     <td>{W.shiftName[r.shift] ?? r.shift}</td>
-                    <td>{fmtClockSec(r.producedAtUtc)}</td>
+                    <td>{df.clockSec(r.producedAtUtc)}</td>
                     <td className="n">{r.sackNum ?? '—'}</td>
                     <td>{r.productId == null ? T.noProduct : (r.productLabel ?? `${T.materialId} ${r.productId}`)}</td>
                     <td>{r.yarnCount ?? '—'}</td>
