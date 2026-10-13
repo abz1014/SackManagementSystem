@@ -82,3 +82,14 @@
 .sy-find { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
 @media (min-width: 1100px) { .sy-find { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .sy-find li, .sy-find li:first-child { padding: var(--space-3) var(--space-4); border-top: 0; border-radius: var(--radius-ctl); background: var(--surface-sunk); }
+/* css-067: a data check is one row, the words on the left and the acknowledge control beside them (at 1100 and wider), so an opened row stays compact */
+@media (min-width: 1100px) {
+  .sy-find { grid-template-columns: minmax(0, 1fr); }
+  .sy-find li { flex-wrap: nowrap; }
+  .sy-find__tx { flex: 1 1 0; }
+  .sy-find__side { flex: 0 1 auto; max-width: 45%; }
+  .sy-find .sy-ack { min-width: 0; }
+}
+/* css-007/017: the figure and its unit may wrap onto two lines (the unit stays whole) instead of widening the page */
+.sy-light__big { white-space: normal; }
+.sy-light__big small { display: inline-block; white-space: nowrap; }
