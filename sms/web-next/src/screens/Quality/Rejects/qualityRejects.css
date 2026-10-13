@@ -77,3 +77,4 @@ button.qr-heat__cell:focus-visible { outline: 2px solid var(--focus-ring); outli
 .qr-hops p { margin: 0; }
 .qr-about { display: flex; flex-direction: column; gap: var(--space-2); }
 .qr-about p { margin: 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+@container (max-width: 480px) { .qr .kpi-loading .kpi-skel-note { height: calc(var(--lh-3) - var(--space-1)); } } /* css-022 */

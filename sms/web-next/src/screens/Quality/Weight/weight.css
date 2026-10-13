@@ -22,3 +22,5 @@
 .qw-adv-list { margin: 0 0 var(--space-3); padding-left: var(--space-5); display: grid; gap: var(--space-2); font-size: var(--fs-3); line-height: var(--lh-3); color: var(--ink-2); }
 .qw-products .ck-title { margin-bottom: var(--space-3); }
 @media (max-width: 767px) { .qw { gap: var(--space-4); } }
+@container (max-width: 480px) { .qw .kpi-loading .kpi-skel-note { height: calc(var(--lh-3) - var(--space-1)); } } /* css-022: a phone-width card is wide enough for a one-line note */
+@container (max-width: 480px) { .qw .kpi-loading:nth-child(2) .kpi-skel-note, .qw .kpi-loading:nth-child(3) .kpi-skel-note { height: calc(2 * var(--lh-3) - var(--space-1)); } } /* css-022: at phone width the second and third figures are the two whose notes run to two lines */
