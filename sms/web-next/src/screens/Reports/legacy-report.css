@@ -146,23 +146,21 @@
 .rp-doc tbody th { padding-top: 9px; }
 .rp-doc tbody tr:last-child th { border-bottom: 0 !important; }
 .rp-doc .tw { overflow-x: auto; }
-/* [CSS-073, owner decision 6 Oct 2026, option A] A table wider than its box keeps scrolling sideways and fades out at each edge that has
-   more beyond it. A mask on the scroller (not a background behind the cells) so the fade also shows over the opaque IFL header cells and
-   shaded rows. Driven by the scroller's own scroll position (scroll-driven animation), so a table that fits shows no fade at all; a
-   browser without it simply shows none. */
-@property --tw-fade-l { syntax: '<length>'; inherits: false; initial-value: 0px; }
-@property --tw-fade-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
-@keyframes tw-fade-in-left { from { --tw-fade-l: 0px; } to { --tw-fade-l: 28px; } }
-@keyframes tw-fade-out-right { from { --tw-fade-r: 28px; } to { --tw-fade-r: 0px; } }
-@media screen and (prefers-reduced-motion: no-preference), screen and (prefers-reduced-motion: reduce) {
-  .rp-doc .tw:not(.mp-scroll) {
-    --tw-fade-l: 0px; --tw-fade-r: 0px;
-    -webkit-mask-image: linear-gradient(to right, transparent 0, var(--ink-1) var(--tw-fade-l), var(--ink-1) calc(100% - var(--tw-fade-r)), transparent 100%);
-    mask-image: linear-gradient(to right, transparent 0, var(--ink-1) var(--tw-fade-l), var(--ink-1) calc(100% - var(--tw-fade-r)), transparent 100%);
-    animation: tw-fade-in-left linear both, tw-fade-out-right linear both;
-    animation-timeline: scroll(self inline), scroll(self inline);
-    animation-range: 0 28px, calc(100% - 28px) 100%;
+/* [CSS-073, owner decision 6 Oct 2026, option A; css-073 spec] A table wider than its box keeps scrolling sideways and fades out at each edge that has
+   more beyond it. The fade is two real pseudo-elements (not a mask on the scroller), pinned to the scroller's edges with position:sticky inside a
+   one-cell grid, so it paints over the opaque IFL header cells and shaded rows. Each fades in only while there is more to scroll on its side
+   (scroll-driven opacity), so a table that fits shows none; a browser without scroll timelines shows none. */
+@keyframes tw-fade-in-left { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tw-fade-out-right { from { opacity: 1; } to { opacity: 0; } }
+@media screen {
+  .rp-doc .tw:not(.mp-scroll) { display: grid; grid-template-columns: minmax(min-content, 100%); }
+  .rp-doc .tw:not(.mp-scroll) > table { grid-area: 1 / 1; justify-self: start; }
+  .rp-doc .tw:not(.mp-scroll)::before, .rp-doc .tw:not(.mp-scroll)::after {
+    content: ""; grid-area: 1 / 1; position: sticky; z-index: 4; width: 28px; pointer-events: none; opacity: 0;
+    animation-timing-function: linear; animation-fill-mode: both; animation-timeline: scroll(self inline);
   }
+  .rp-doc .tw:not(.mp-scroll)::before { left: 0; justify-self: start; background: linear-gradient(to right, var(--surface), transparent); animation-name: tw-fade-in-left; animation-range: 0 28px; }
+  .rp-doc .tw:not(.mp-scroll)::after { right: 0; justify-self: end; background: linear-gradient(to left, var(--surface), transparent); animation-name: tw-fade-out-right; animation-range: calc(100% - 28px) 100%; }
 }
 .rp-doc .mp-scroll { max-height: 70vh; overflow: auto; position: relative; }
 .rp-doc .mp-scroll table { border-collapse: separate; border-spacing: 0; }
@@ -177,7 +175,7 @@
 .rp-doc .two-col .tw th { white-space: normal; }
 .rp-doc .calib-tbl { table-layout: fixed; }
 .rp-doc .calib-tbl th { white-space: normal; }
-@media screen and (max-width: 860px) { .rp-doc .calib-tbl { table-layout: auto; } }
+@media screen and (max-width: 1500px) { .rp-doc .calib-tbl { table-layout: auto; } } /* css-004: at 1.3 text size the fixed columns are narrower than their own headers */
 @media screen and (min-width: 861px) {
   .rp-doc .block > div:has(.tw-span) { grid-column: 1 / -1; margin-top: 14px; }
   .rp-doc .block > div:has([data-report-orientation] .ifl-table), .rp-doc [data-report-orientation] .block > div:has(.ifl-table) { grid-column: 1 / -1; margin-top: 14px; }
