@@ -192,6 +192,8 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
     next();
   });
 
+  // 12 Oct 2026 (Phase 3): cached routes use getOrLoad, so identical concurrent
+  // cold requests share one computation (M-LOAD: 4 at once cost 4.0x the SQL).
   const prodCache = new TtlCache<Envelope<unknown>>(cfg.cacheTtlSeconds * 1000);
   const loginLimiter = new LoginRateLimiter();
 
@@ -505,15 +507,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
       const asOfMs = q.data.asOf ? new Date(q.data.asOf).getTime() : undefined;
       const key = `live:${asOfMs ?? 'now'}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const data = await getLive(pool, cfg.lineId, cfg.lineName, { asOfMs });
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const data = await getLive(pool, cfg.lineId, cfg.lineName, { asOfMs });
+          return await envelope(pool, cfg.lineId, data);
+        },
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -615,20 +616,19 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         .slice(0, 10);
 
       const key = `attention:${from}:${to}:${q.data.shift ?? 'all'}:${trailingFrom}:${trailingTo}${q.data.tsTo ? `:${q.data.tsTo}` : ''}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const data = await getAttention(
-        pool,
-        cfg.lineId,
-        { from: trailingFrom, to: trailingTo },
-        { from, to, shift: q.data.shift ?? null, tsTo: q.data.tsTo ?? null, shiftRange: shiftRangeResult },
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const data = await getAttention(
+            pool,
+            cfg.lineId,
+            { from: trailingFrom, to: trailingTo },
+            { from, to, shift: q.data.shift ?? null, tsTo: q.data.tsTo ?? null, shiftRange: shiftRangeResult },
+          );
+          return await envelope(pool, cfg.lineId, data);
+        },
       );
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -822,47 +822,46 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       }
 
       const key = `wstations:${from}:${to}:${periodFrom}:${periodTo}:${q.data.shift ?? 'all'}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const [timeline, catalogue] = await Promise.all([
-        loadProductTimeline(pool, cfg.lineId),
-        loadProductCatalogue(pool),
-      ]);
-      // WS-PERF4 (24 Sep 2026): one per-request generation-scope cache,
-      // shared by getWeightStations (its own trailing drift window) and
-      // productDisagreement (the selected reporting period) — the two
-      // windows are usually different, so this ordinarily still resolves
-      // twice, but never a THIRD time as it did before (measured in
-      // PERFORMANCE-APP-2026-09-24.md: stationMaterialCounts and
-      // rejectRatesByStation, both inside getWeightStations, each resolved
-      // the SAME (from, to) independently — that pair is now resolved once
-      // inside getWeightStations itself). Created fresh for this request
-      // only; never stored anywhere it could outlive it — see
-      // generation.ts's createScopeCache for why that matters.
-      const resolveScope = createScopeCache(pool);
-      // Chart overhaul wave 2, Task TC (28 Sep 2026): getWeightStations' new
-      // 6th arg (TB1, a2cea3f) — the reject-rate window, distinct from the
-      // `from`/`to` trailing drift window passed positionally above.
-      // getWeightStations itself compares this against `{from, to}` to
-      // decide whether WS-PERF4's scope-cache dedup still applies, so it is
-      // safe to always pass it explicitly rather than omit it when equal.
-      const [stations, disagreement] = await Promise.all([
-        getWeightStations(pool, cfg.lineId, from, to, resolveScope, { from: periodFrom, to: periodTo, shiftRange: shiftRangeResult, shift: q.data.shift }),
-        productDisagreement(
-          pool,
-          cfg.lineId,
-          timeline,
-          { from: periodFrom, to: periodTo, shift: q.data.shift ?? null, shiftRange: shiftRangeResult },
-          catalogue,
-          resolveScope,
-        ),
-      ]);
-      const env = await envelope(pool, cfg.lineId, { ...stations, disagreement });
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const [timeline, catalogue] = await Promise.all([
+            loadProductTimeline(pool, cfg.lineId),
+            loadProductCatalogue(pool),
+          ]);
+          // WS-PERF4 (24 Sep 2026): one per-request generation-scope cache,
+          // shared by getWeightStations (its own trailing drift window) and
+          // productDisagreement (the selected reporting period) — the two
+          // windows are usually different, so this ordinarily still resolves
+          // twice, but never a THIRD time as it did before (measured in
+          // PERFORMANCE-APP-2026-09-24.md: stationMaterialCounts and
+          // rejectRatesByStation, both inside getWeightStations, each resolved
+          // the SAME (from, to) independently — that pair is now resolved once
+          // inside getWeightStations itself). Created fresh for this request
+          // only; never stored anywhere it could outlive it — see
+          // generation.ts's createScopeCache for why that matters.
+          const resolveScope = createScopeCache(pool);
+          // Chart overhaul wave 2, Task TC (28 Sep 2026): getWeightStations' new
+          // 6th arg (TB1, a2cea3f) — the reject-rate window, distinct from the
+          // `from`/`to` trailing drift window passed positionally above.
+          // getWeightStations itself compares this against `{from, to}` to
+          // decide whether WS-PERF4's scope-cache dedup still applies, so it is
+          // safe to always pass it explicitly rather than omit it when equal.
+          const [stations, disagreement] = await Promise.all([
+            getWeightStations(pool, cfg.lineId, from, to, resolveScope, { from: periodFrom, to: periodTo, shiftRange: shiftRangeResult, shift: q.data.shift }),
+            productDisagreement(
+              pool,
+              cfg.lineId,
+              timeline,
+              { from: periodFrom, to: periodTo, shift: q.data.shift ?? null, shiftRange: shiftRangeResult },
+              catalogue,
+              resolveScope,
+            ),
+          ]);
+          return await envelope(pool, cfg.lineId, { ...stations, disagreement });
+        },
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -900,15 +899,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.get('/api/operations', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const key = 'operations';
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const data = await getOperations(pool, cfg.lineId);
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const data = await getOperations(pool, cfg.lineId);
+          return await envelope(pool, cfg.lineId, data);
+        },
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -973,15 +971,14 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   app.get('/api/system-history', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const key = 'system-history';
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const data = await getSystemHistory(pool, cfg.lineId);
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const data = await getSystemHistory(pool, cfg.lineId);
+          return await envelope(pool, cfg.lineId, data);
+        },
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -1021,21 +1018,20 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
         return;
       }
       const key = JSON.stringify(parsed.data);
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const data = await getProduction(pool, cfg.lineId, {
-        ...rest,
-        groupBy: rest.groupBy as GroupBy,
-        // Cones per classification state, always (roadmap Phase 4, 14 Sep 2026).
-        withStates: true,
-        shiftRange: shiftRangeResult,
-      });
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const data = await getProduction(pool, cfg.lineId, {
+            ...rest,
+            groupBy: rest.groupBy as GroupBy,
+            // Cones per classification state, always (roadmap Phase 4, 14 Sep 2026).
+            withStates: true,
+            shiftRange: shiftRangeResult,
+          });
+          return await envelope(pool, cfg.lineId, data);
+        },
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -1113,25 +1109,24 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // to the limit model can never be served under a stale computation
       // shape for the same inputs.
       const key = `spc:${q.data.type}:${q.data.from}:${q.data.to}:${q.data.productId ?? 'none'}:${q.data.usl ?? 'none'}:${q.data.lsl ?? 'none'}:${q.data.shift ?? 'all'}:${q.data.station ?? 'all'}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type, { from: q.data.from, to: q.data.to });
-      // RT24-04: judged as of the PERIOD END, not "whatever is configured
-      // today" — getWeightSpc is a SQL-aggregate report over the whole
-      // range, so one rule for the range (not a per-row lookup) is correct.
-      const plausibility = (await getPlausibilityRuleAsOf(
-        pool, cfg.lineId, plantDayEndMs(q.data.to), plantDayStartMs(q.data.from),
-      )).rule;
-      const data = await getWeightSpc(
-        pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility,
-        q.data.shift ?? null, q.data.station ?? null, shiftRangeResult,
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const spec = await getSpec(pool, q.data.productId ?? null, q.data.usl ?? null, q.data.lsl ?? null, q.data.type, { from: q.data.from, to: q.data.to });
+          // RT24-04: judged as of the PERIOD END, not "whatever is configured
+          // today" — getWeightSpc is a SQL-aggregate report over the whole
+          // range, so one rule for the range (not a per-row lookup) is correct.
+          const plausibility = (await getPlausibilityRuleAsOf(
+            pool, cfg.lineId, plantDayEndMs(q.data.to), plantDayStartMs(q.data.from),
+          )).rule;
+          const data = await getWeightSpc(
+            pool, cfg.lineId, q.data.type as SpcType, q.data.from, q.data.to, spec, plausibility,
+            q.data.shift ?? null, q.data.station ?? null, shiftRangeResult,
+          );
+          return await envelope(pool, cfg.lineId, data);
+        },
       );
-      const env = await envelope(pool, cfg.lineId, data);
-      prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -1187,27 +1182,27 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // TTL is the live-safety bound every one of these routes already
       // accepts, not a special case for this one).
       const key = `reject-spc:${q.data.from}:${q.data.to}:${bucket}:${q.data.rejectType}:${q.data.shift ?? 'all'}:${q.data.station ?? 'all'}:${q.data.product ?? 'all'}:${q.data.code ?? 'none'}:${q.data.tsTo ?? 'none'}${shiftRangeResult ? `:${shiftRangeResult.fromShift}:${shiftRangeResult.toShift}` : ''}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      // C-009 (D-61, 2 Oct 2026): resolve the period's generation scope the way
-      // reports/reject.ts does. With no scope rejectSpc.ts takes the newest real
-      // generation present, which for a July period is the September
-      // generation's one stray July cone. A function of from/to, so the cache
-      // key above needs nothing new.
-      const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.data.from, to: q.data.to });
-      const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter, {
-        shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult, scope,
-      });
-      const env = await envelope(pool, cfg.lineId, data);
-      // Same RT-014 interaction as /api/events below: never cache a payload
-      // the response-cap middleware would go on to refuse — an over-cap
-      // response must be re-derived on every request, not served from a
-      // stale cache entry for the rest of the TTL.
-      if (largestKnownArray(env) <= MAX_RESPONSE_ROWS) prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          // C-009 (D-61, 2 Oct 2026): resolve the period's generation scope the way
+          // reports/reject.ts does. With no scope rejectSpc.ts takes the newest real
+          // generation present, which for a July period is the September
+          // generation's one stray July cone. A function of from/to, so the cache
+          // key above needs nothing new.
+          const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.data.from, to: q.data.to });
+          const data = await getRejectSpc(pool, cfg.lineId, q.data.from, q.data.to, bucket, q.data.rejectType as RejectTypeFilter, {
+            shift: q.data.shift, tsTo: q.data.tsTo, station: q.data.station, product: q.data.product, code, shiftRange: shiftRangeResult, scope,
+          });
+          // Same RT-014 interaction as /api/events below: never cache a payload
+          // the response-cap middleware would go on to refuse — an over-cap
+          // response must be re-derived on every request, not served from a
+          // stale cache entry for the rest of the TTL.
+          return await envelope(pool, cfg.lineId, data);
+        },
+        (env) => largestKnownArray(env) <= MAX_RESPONSE_ROWS,
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }
@@ -1309,22 +1304,22 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // route below (`/api/events/export`) deliberately does NOT share this
       // cache or any cache — it streams the full CSV/audit path, not a page.
       const key = `events:${JSON.stringify(q)}:${JSON.stringify(pageQ.data)}:${JSON.stringify(shiftRangeResult ?? null)}`;
-      const cached = prodCache.get(key);
-      if (cached) {
-        res.setHeader('X-Cache', 'HIT').json(cached);
-        return;
-      }
-      const { classification, states } = await registerClassification(q);
-      const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
-      const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states, shiftRange: shiftRangeResult }, scope);
-      const env = await envelope(pool, cfg.lineId, data);
-      // RT-014 interaction: never cache a page the response-cap middleware
-      // (responseCap.ts, wired globally below) would go on to refuse — a
-      // 413 must be re-derived from a fresh query on every request, the same
-      // guarantee it had before this route was cached, not served once and
-      // then repeated from a stale cache entry for the rest of the TTL.
-      if (largestKnownArray(env) <= MAX_RESPONSE_ROWS) prodCache.set(key, env);
-      res.setHeader('X-Cache', 'MISS').json(env);
+      const { value: env, hit } = await prodCache.getOrLoad(
+        key,
+        async () => {
+          const { classification, states } = await registerClassification(q);
+          const scope = await resolveGenerationScope(pool, cfg.lineId, { from: q.from, to: q.to }, [tableFor(q.type as EventType)], { key: q.batch });
+          const data = await listEvents(pool, cfg.lineId, q.type as EventType, { ...q, ...pageQ.data, classification, states, shiftRange: shiftRangeResult }, scope);
+          // RT-014 interaction: never cache a page the response-cap middleware
+          // (responseCap.ts, wired globally below) would go on to refuse — a
+          // 413 must be re-derived from a fresh query on every request, the same
+          // guarantee it had before this route was cached, not served once and
+          // then repeated from a stale cache entry for the rest of the TTL.
+          return await envelope(pool, cfg.lineId, data);
+        },
+        (env) => largestKnownArray(env) <= MAX_RESPONSE_ROWS,
+      );
+      res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(env);
     } catch (err) {
       next(err);
     }

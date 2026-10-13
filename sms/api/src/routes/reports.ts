@@ -327,23 +327,20 @@ export function mountReportsRoutes({ app, pool, cfg, audit }: RouteContext): voi
     // so whichever was fetched first silently answered the other.
     return `reports:${p.type}:${JSON.stringify(p.resolved)}:${JSON.stringify(p.filters)}:${JSON.stringify(p.shiftRange ?? null)}`;
   }
+  // 12 Oct 2026 (Phase 3): identical concurrent requests share one build
+  // (M-LOAD: 4 at once cost 4.0x the SQL of one). A joiner reports MISS.
+  async function loadReport(p: Parsed): Promise<{ value: AnyReportData; hit: boolean }> {
+    return cache.getOrLoad(reportKey(p), () => buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters, p.shiftRange));
+  }
   async function reportDataFor(p: Parsed): Promise<AnyReportData> {
-    const key = reportKey(p);
-    let data = cache.get(key);
-    if (data == null) {
-      data = await buildReport(pool, cfg.lineId, p.type, p.resolved, p.filters, p.shiftRange);
-      cache.set(key, data);
-    }
-    return data;
+    return (await loadReport(p)).value;
   }
 
   const serveReport = (fixedType?: ReportType) => async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const p = await parse(req, res, fixedType);
       if (!p) return;
-      const key = reportKey(p);
-      const hit = cache.get(key) != null;
-      const data = await reportDataFor(p);
+      const { value: data, hit } = await loadReport(p);
       const header = await headerFor(p, req, data);
       res.setHeader('X-Cache', hit ? 'HIT' : 'MISS').json(await envelope(pool, cfg.lineId, { header, report: data }));
     } catch (err) {

@@ -5,7 +5,40 @@
  */
 export class TtlCache<V> {
   private store = new Map<string, { expires: number; value: V }>();
+  private inflight = new Map<string, Promise<V>>();
   constructor(private readonly ttlMs: number) {}
+
+  /**
+   * Fresh value -> HIT; an identical load already running -> wait for it
+   * (HIT: this caller computed nothing); otherwise run `loader` once.
+   * 12 Oct 2026 (Phase 3): M-LOAD measured 4 identical concurrent cold
+   * management-summary requests each doing the full work (4.0x SQL, 5828 ms
+   * vs 1963 ms alone). A rejected load is never cached and is dropped from the
+   * in-flight map, so a later caller retries. With a TTL of zero nothing is
+   * shared at all: every request computes, exactly as before.
+   */
+  async getOrLoad(
+    key: string,
+    loader: () => Promise<V>,
+    shouldCache: (v: V) => boolean = () => true,
+  ): Promise<{ value: V; hit: boolean }> {
+    const fresh = this.get(key);
+    if (fresh !== undefined) return { value: fresh, hit: true };
+    if (this.ttlMs <= 0) return { value: await loader(), hit: false };
+    const running = this.inflight.get(key);
+    if (running) return { value: await running, hit: false };
+    const p = (async () => {
+      const v = await loader();
+      if (shouldCache(v)) this.set(key, v);
+      return v;
+    })();
+    this.inflight.set(key, p);
+    const clear = () => {
+      if (this.inflight.get(key) === p) this.inflight.delete(key);
+    };
+    p.then(clear, clear);
+    return { value: await p, hit: false };
+  }
 
   get(key: string): V | undefined {
     const hit = this.store.get(key);
