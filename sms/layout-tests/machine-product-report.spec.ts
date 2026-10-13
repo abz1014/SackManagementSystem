@@ -20,7 +20,13 @@ test('machine-product report: columns visible at 1366x768', async ({ browser, ba
 
   try {
     await page.setViewportSize({ width: 1366, height: 768 });
+    // X-3 (owner request, 8 Oct 2026): the default period (today) is after the
+    // newest reading (data ends 7 Sep), so the report must say so instead of
+    // printing an idle matrix. Then measure the columns on a period INSIDE the data.
     await page.goto('/?s=report&rt=machine-product');
+    await expect(page.getByText(/No readings in this period\s*[-–—]\s*the newest reading is/i).first()).toBeVisible({ timeout: 15_000 });
+
+    await page.goto('/?s=report&rt=machine-product&p=pick&from=2026-09-01&to=2026-09-07');
 
     const wrapper = page.locator('.tw').first();
     await expect(wrapper).toBeVisible({ timeout: 15_000 });

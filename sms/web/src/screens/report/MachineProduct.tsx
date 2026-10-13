@@ -66,7 +66,10 @@ function chunk<T>(arr: readonly T[], size: number): T[][] {
 }
 
 export function MachineProductSection({ d, onOpen }: { d: MachineProductReportData; onOpen: (station: number) => void }) {
-  if (d.rows.length === 0) {
+  // X-3c (12 Oct 2026): the API lists every roster station even when nothing was weighed (rows with 0 cones), so a
+  // period after the newest reading arrived here as "0 machines, 0 products" and never reached the shared Empty.
+  // No cones on any station and no product totals = an empty report.
+  if (d.rows.length === 0 || (d.products.length === 0 && d.rows.every((r) => r.cones === 0))) {
     return (
       <Block first>
         <Empty message={W.nothingHere} />

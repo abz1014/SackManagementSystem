@@ -94,6 +94,47 @@ function render(type: ReportType, period: typeof AFTER) {
 const main = (c: HTMLElement) => c.querySelector('main') ?? c;
 const mainText = (c: HTMLElement) => main(c).textContent ?? '';
 
+/** X-3c: the real machine-product payload for an empty period lists every roster station with 0 cones and null cells. */
+function machineProductAllZero() {
+  const columns = [{ day: '2026-10-01', shift: 'morning' }, { day: '2026-10-01', shift: 'evening' }];
+  return {
+    period: { period: 'custom', from: '2026-10-01', to: '2026-10-02', days: 2 }, filters: {},
+    columns,
+    rows: [1, 2, 3].map((station) => ({ station, stationName: null, machineName: null, cells: columns.map(() => null), cones: 0, materials: 0 })),
+    changes: [], products: [], labels: {}, conesWithoutStation: 0, machinesWeighing: 0, note: 'n',
+  };
+}
+
+describe('machine-product with idle roster rows (X-3c)', () => {
+  function renderAllZero(period: typeof AFTER) {
+    installFakeFetch({
+      '/api/live': LIVE_OCT,
+      '/api/stations': { stations: [] },
+      '/api/products': { products: [] },
+      '/api/reports/machine-product': { data: { header: header('machine-product'), report: machineProductAllZero() }, metadata: {} },
+    });
+    return renderWithLive(
+      <ReportScreen
+        period={period} user={{ username: 'u', displayName: 'U', role: 'manager' }} type="machine-product" onTypeChange={() => {}}
+        filters={{} as ReportFilters} onShiftChange={() => {}} onStationChange={() => {}} onProductChange={() => {}}
+        onOpenStation={() => {}} onOpenCode={() => {}}
+      />,
+    );
+  }
+  it('after the newest reading: names it, no "0 machines" line', async () => {
+    const { container } = renderAllZero(AFTER);
+    await waitFor(() => expect(mainText(container)).toContain(QUALIFIED));
+    expect(mainText(container)).not.toContain('0 machines');
+  });
+  it('inside the data range: makes no claim about the newest reading', async () => {
+    const { container } = renderAllZero(INSIDE);
+    await waitFor(() => expect(container.querySelector('.state, h1')).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mainText(container)).not.toContain('the newest reading is');
+    expect(mainText(container)).toContain('Nothing recorded in this period.');
+  });
+});
+
 describe('every report type - an empty period after the newest reading', () => {
   it('covers all 18 types', () => {
     expect(REPORT_TYPES.length).toBe(18);
