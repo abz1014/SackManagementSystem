@@ -365,6 +365,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
                 : R.notRising}
           </p>
         )}
+        {trendStatus === 'empty' ? (
+          <p className="qr-note" role="status">{R.trendEmpty(days, line?.dataAsOfUtc ? formatDate(line.dataAsOfUtc) : null)}</p>
+        ) : (
         <LineChart
           chartId="qr-trend"
           title={active ? R.trendTitleOne(reasonName(active), days) : R.trendTitle(days)}
@@ -381,6 +384,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
           errorPart={RF.part.trend}
           onRetry={trend.refresh}
         />
+        )}
       </section>
 
       {/* ---- hops (TRACE G-9) */}

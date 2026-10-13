@@ -22,6 +22,7 @@ import { Segmented } from '../../ui/Segmented';
 import { stationText } from '../../ui/StationTile';
 import { Skeleton } from '../../ui/Skeleton';
 import type { ScreenProps } from '../registry';
+import { reasonShort } from '../Quality/Rejects/format';
 import { Hop } from './Hop';
 import { findingKind, nf0, nf1, periodWords } from './model';
 
@@ -126,7 +127,7 @@ export function ReasonsCard({ reasons, period }: { reasons: DataState<Envelope<R
         const rows = quality.map((r) => {
           running += r.count;
           return {
-            label: r.label ?? T.reasons.unnamed(r.tubeCode, r.materialCode),
+            label: reasonShort(r),
             count: r.count,
             cumulativePct: pure ? r.cumulativePct : Math.round((1000 * running) / total) / 10,
           };

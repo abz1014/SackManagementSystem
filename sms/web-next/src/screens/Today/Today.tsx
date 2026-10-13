@@ -338,7 +338,7 @@ function StationsCard({
         <div className="today-change" role="status">
           <p>
             {T.productChange.changed(nameOf(top.station, stationNames.get(top.station) ?? null), productFor(top))}{' '}
-            {T.productChange.firstCone(changeTime(top.atUtc, period.to))}
+            {T.productChange.firstCone(changeTime(top.atUtc, period.to, period.from))}
             {changes.length > 1 ? ` ${T.productChange.others(changes.length - 1)}` : ''}
           </p>
           <Hop to={products} go={go}>{T.productChange.link}</Hop>

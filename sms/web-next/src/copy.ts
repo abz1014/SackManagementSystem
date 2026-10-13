@@ -276,6 +276,7 @@ export const C = {
       ofCones: (n: string, total: string) => `${n} of ${total} cones`,
       couldNotRead: 'Could not be read',
       points: (v: string) => `${v} points`,
+      pointsMoved: (v: string, way: 'lower' | 'higher') => `${v} points ${way}`,
     },
 
     links: {
@@ -626,6 +627,8 @@ export const C = {
 
     trendTitle: (days: number | null) => (days === null ? 'Daily failed-inspection rate' : `Daily failed-inspection rate, last ${days} production days`),
     trendTitleOne: (reason: string, days: number | null) => (days === null ? `Daily rate for ${reason}` : `Daily rate for ${reason}, last ${days} production days`),
+    trendEmpty: (days: number | null, newest: string | null) =>
+      `No readings fall in ${days === null ? 'this fixed window' : `the last ${days} production days`}, so there is no daily rate to draw.${newest ? ` The newest reading is from ${newest}.` : ''}`,
     trendCaption: 'Percent of the day\'s cones. Fixed window: it does not follow the period, because a rise needs consecutive days.',
     seriesDaily: 'Daily rate',
     seriesMean: 'Window mean',
@@ -688,7 +691,8 @@ export const C = {
     colProductRecord: 'Product and record',
     colWeight: 'Weight',
     noProductThen: 'Product not recorded',
-    notWeighed: 'Not weighed',
+    notWeighed: 'No weight on this record',
+    noWeightNote: 'A failed-inspection record does not carry the cone weight. Open the cone to see its weighed value if it has one.',
     hopDayRegister: 'See this day in the Register',
     hopDayReport: 'See this day on the reject report',
 
@@ -847,6 +851,7 @@ export const FRAGMENTS = {
       vsCount: (prev: string) => `vs ${prev}`,
       vsKg: (prev: string) => `vs ${prev} kg`,
       vsRate: (prev: string) => `vs ${prev} %`,
+      wasRate: (prev: string) => `(was ${prev} %)`,
     },
     stations: {
       partName: 'the station states',

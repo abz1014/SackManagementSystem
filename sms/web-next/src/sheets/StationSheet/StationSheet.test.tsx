@@ -94,7 +94,7 @@ describe('station sheet opens from the URL (PD1, station 8)', () => {
 
   it('lists the top reasons for the whole line and says they are not split by station', async () => {
     mount('pd1', 8);
-    await dlg().findByText('Tube 2 · Mat 1');
+    await dlg().findByText('Code 2/1');
     expect(dlg().getByText('97.6 %')).toBeTruthy();
     expect(dlg().getByText('whole line, not split by station yet')).toBeTruthy();
   });

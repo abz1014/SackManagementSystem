@@ -130,6 +130,10 @@ export function countDelta(cur: Figure, prev: Figure, live: boolean, vs: (p: str
 export function rateDelta(cur: RateFigure, prev: RateFigure): KpiDelta | null {
   if (cur.pct === null || prev.pct === null) return null;
   const diff = Math.round((cur.pct - prev.pct) * 10) / 10;
+  // A figure that rounds to 0.0 % next to "0.1 points vs 0.1 %" reads as nonsense: say which way it moved and what it was.
+  if (diff !== 0 && nf1(cur.pct) === nf1(0)) {
+    return { text: T.kpi.pointsMoved(nf1(Math.abs(diff)), diff < 0 ? 'lower' : 'higher'), direction: dir(diff), vs: TF.kpi.wasRate(nf1(prev.pct)) };
+  }
   return { text: T.kpi.points(nf1(Math.abs(diff))), direction: dir(diff), vs: TF.kpi.vsRate(nf1(prev.pct)) };
 }
 
@@ -184,7 +188,11 @@ export function dayRange(from: string, to: string): string {
 /** The selected period in words, with its year: "1 Sep 2026", "13 Oct 2026, morning shift". */
 export function periodWords(p: P.Period): string {
   if (p.shift) return `${formatDate(`${p.from}T12:00:00Z`)}, ${W.shift[p.shift]}`;
-  if (p.fromShift || p.toShift) return `${P.describePeriod(p)} ${p.to.slice(0, 4)}`;
+  if (p.fromShift || p.toShift) {
+    // A range that ends on a shift name reads "1 Sep evening shift - 2 Sep morning shift, 2026"; a plain day range takes the year directly.
+    const d = P.describePeriod(p);
+    return /shift$/.test(d) ? `${d}, ${p.to.slice(0, 4)}` : `${d} ${p.to.slice(0, 4)}`;
+  }
   return dayRange(p.from, p.to);
 }
 
@@ -224,10 +232,12 @@ function nextDay(day: string): string {
  * "20:56", or "20:56 on 28 Aug" when the change was not on the period's last production day. A production day's
  * night shift runs past midnight, so the day after `periodTo` still counts as inside it.
  */
-export function changeTime(atUtc: string, periodTo: string): string {
+export function changeTime(atUtc: string, periodTo: string, periodFrom: string = periodTo): string {
   const clock = formatClock(atUtc);
   const day = atUtc.slice(0, 10);
-  return day === periodTo || day === nextDay(periodTo) ? clock : `${clock} on ${formatDate(atUtc).replace(/ \d{4}$/, '')}`;
+  // In a period of several days the clock alone does not say which day; name the date.
+  const multiDay = periodFrom !== periodTo;
+  return !multiDay && (day === periodTo || day === nextDay(periodTo)) ? clock : `${clock} on ${formatDate(atUtc).replace(/ \d{4}$/, '')}`;
 }
 
 /**

@@ -350,12 +350,12 @@ describe('detail cards (A3-025, A3-026, G-10)', () => {
     await waitFor(() => expect(ff!.requests.some((r) => r.includes('groupBy=day'))).toBe(true));
   });
 
-  it('names unnamed reject codes as "not named yet" and counts every failed inspection', async () => {
+  it('names unnamed reject codes by their code pair and counts every failed inspection', async () => {
     mount();
     expect((await screen.findAllByText(/451 cones in total/)).length).toBeGreaterThan(0);
     await screen.findAllByRole('button', { name: /show as table/i });
     fireEvent.click(screen.getAllByRole('button', { name: /show as table/i })[1]!);
-    expect(await screen.findByText('Code 2/1 (not named yet)')).toBeTruthy();
+    expect(await screen.findByText('Code 2/1')).toBeTruthy();
   });
 
   it('attention is the fixed 14-day window, labelled as such, and calm when nothing fired (B5-03)', async () => {

@@ -139,6 +139,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
         error={reason.status === 'error' ? <ErrorState part={RF.part.thisReason} cause={reason.error} onRetry={reason.refresh} /> : undefined}
         empty={<EmptyState message={R.sheetEmpty} />}
       />
+      {(d?.rows ?? []).some((r) => r.weightG == null) && <p className="rs-note">{R.noWeightNote}</p>}
 
       <p className="rs-hop">
         <a className="ui-link" {...hop(dayRegisterHop(id.day))}>{R.hopDayRegister}</a>

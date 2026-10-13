@@ -29,6 +29,7 @@ import { StatusPill } from '../../ui/StatusPill';
 import { stationText } from '../../ui/StationTile';
 import type { SheetProps } from '../../screens/registry';
 import { patternOf, pct, signedG, targetOf } from '../../screens/Quality/Stations/model';
+import { reasonShort } from '../../screens/Quality/Rejects/format';
 import { useAdjustments, useLineReasons, useOneStationCounts, usePatternCheck } from '../../screens/Quality/Stations/useStationsData';
 import { AdjustmentForm } from './AdjustmentForm';
 import { DailyChart } from './DailyChart';
@@ -174,7 +175,7 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
                 <ul className="ss-reasons">
                   {reasons.data.data.reasons.slice(0, 3).map((r) => (
                     <li key={`${r.rejectType}-${r.rejectCodeId ?? r.displayLabel}`}>
-                      <span>{r.displayLabel}</span>
+                      <span>{r.rejectType === 'weight' && !r.label ? r.displayLabel : reasonShort(r)}</span>
                       <b>{pct(r.pct)}</b>
                     </li>
                   ))}
