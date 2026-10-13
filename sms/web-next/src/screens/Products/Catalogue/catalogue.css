@@ -24,3 +24,5 @@
 .pc-card .ui-dt__table th, .pc-card .ui-dt__table td { padding: 0 var(--space-2); }
 .pc-card .ui-dt__table td:first-child { white-space: normal; min-width: 12rem; padding-top: var(--space-1); padding-bottom: var(--space-1); }
 .pc-search { min-width: 0; width: 100%; max-width: 16rem; }
+/* css-047: the first cell's padding is added to its height, so a 44 px row was 52-53 px; take it out of the cell height. */
+.pc-card .ui-dt__table td:first-child { height: calc(var(--row-h) - 2 * var(--space-1)); }

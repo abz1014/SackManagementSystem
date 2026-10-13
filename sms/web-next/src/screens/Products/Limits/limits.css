@@ -49,3 +49,18 @@
 .lm-card .ui-dt__table th, .lm-card .ui-dt__table td { padding: 0 var(--space-2); }
 .lm-card .ui-dt__table td { white-space: normal; padding-top: var(--space-2); padding-bottom: var(--space-2); }
 .lm-card .ui-dt__table td:first-child { white-space: nowrap; }
+
+/* css-047: the cell padding is added to the row height, so a 44 px row with 8 px above and below was 60 px; pad inside the row height instead. */
+.lm-card .ui-dt__table td { height: calc(var(--row-h) - 2 * var(--space-2)); }
+
+/* css-078 (M-30): the PDAS action history is the widest table on the screen. Under 1100 px the page is narrower than its five columns, so each
+   row becomes two lines of one grid: When, Who, Action above; the Outcome (two columns wide, so its words stay whole) and the Reason below.
+   The header row uses the same grid, so every heading still sits over its own cell. */
+@media (max-width: 1099px) {
+  .lm-card:has(#lm-actions) .ui-dt__table, .lm-card:has(#lm-actions) .ui-dt__table thead, .lm-card:has(#lm-actions) .ui-dt__table tbody { display: block; }
+  .lm-card:has(#lm-actions) .ui-dt__table tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .lm-card:has(#lm-actions) .ui-dt__table th, .lm-card:has(#lm-actions) .ui-dt__table td { display: block; min-width: 0; white-space: normal; height: auto; padding-top: var(--space-2); padding-bottom: var(--space-2); }
+  .lm-card:has(#lm-actions) .ui-dt__table th { position: static; height: auto; }
+  .lm-card:has(#lm-actions) .ui-dt__table thead { position: sticky; top: 0; z-index: 1; }
+  .lm-card:has(#lm-actions) .ui-dt__table th:nth-child(4), .lm-card:has(#lm-actions) .ui-dt__table td:nth-child(4) { grid-column: 1 / span 2; }
+}
