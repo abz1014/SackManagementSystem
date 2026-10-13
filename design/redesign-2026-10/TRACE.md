@@ -1,0 +1,745 @@
+# TRACE - traceability matrix for the web redesign (sms/web-next)
+
+Worker output, 13 Oct 2026. Read-only audit of `sms/web/src`, `sms/api/src`, `design/redesign-2026-10/*` and the local mockup boards; nothing in code was changed. Purpose: no existing feature or requirement is lost when the web UI is rebuilt as `sms/web-next`.
+
+Status vocabulary: **mapped** (new home exists in IA-MAP and/or a mockup, or the item is non-visual and carries over unchanged); **gap** (no new home drawn or unclear in IA-MAP and the mockups; a proposal is in section C); **decision-needed** (an owner or architecture choice must be made first).
+
+Sources: `design/redesign-2026-10/IA-MAP.md` (verified against `App.tsx` parseRoute/routeSearch, `ui/Bar.tsx`, `api.ts`, `api/src/**` requireRole; IA-MAP is accurate except where Section C lists a correction), `APPROVAL.md`, `GLOSSARY.md`, mockup boards (Main, TodayEmpty, PeriodPanel, TodayPhone, Wall, QualityWeight/Rejects/Stations, Register, PdasBoard/Changeover/Catalogue/LimitsHistory, Reports, Diagnostics, States). Setup, Account, Login, Station/Reason/Stock sheets and print have no board.
+
+Line references are as of HEAD `f08b307` and may drift by a few lines.
+
+## How to read a row
+`id | item | source | new home | status | notes`. IDs are stable references for phase F.
+
+## Corrections to IA-MAP found while verifying
+
+1. **Management summary is rank 3 to read**, not rank 1 (`api/src/services/reports/common.ts` REPORT_RANK; `web/src/screens/report/model.ts` REPORT_MIN_RANK; `routes/reports.ts:186`). IA-MAP makes it the preselected default card for everyone (G-1).
+2. **Old report default with no `rt` is `daily`** (`App.tsx` DEFAULT_ROUTE.reportType), not management-summary; the legacy redirect for `?s=report` needs `rt=daily` (A6-L13).
+3. IA-MAP section 4 lists the PDAS catalogue writes as gated by "rank 2"; the real gate is rank 2 AND `PDAS_WRITE_ENABLED`, and the client decides from the server's `status.canWrite` / `status.local.canWrite`, not a rank constant (A4).
+4. IA-MAP sec 7 item 1 (sack stock home "owner to choose") is settled by APPROVAL: Quality > Register. The Register mockup has the tab; the movement form is missing (G-3).
+5. Merging Limits and History: IA-MAP keeps two tabs (`t=limits`, `t=history`); mockup and APPROVAL show one "Limits & History" (G-12).
+6. `wt=sack` is a Weight chart type (also reachable through the old Sacks screen); the Weight mockup does not draw it (G-8).
+7. The API has 81 registered routes plus the SPA catch-all; IA-MAP section 4 covers the 30 write-type actions (all re-verified, A4).
+
+## A1. Client API functions and constants (every export of `sms/web/src/api.ts`)
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A1-001 | `setUnauthorizedHandler` -> (client only) 401 -> sign-in | sms/web/src/api.ts:64 | App shell | mapped | Used by: App.tsx. Expired session on any call must bounce to Login, not surface as a data error on a screen. |
+| A1-002 | `getMe` -> GET /api/auth/me | sms/web/src/api.ts:162 | App shell / session bootstrap | mapped | Used by: App.tsx. Public route; null user -> Login. |
+| A1-003 | `login` -> POST /api/auth/login | sms/web/src/api.ts:165 | Login screen | mapped | Used by: Login.tsx. No mockup for Login (gap G-14). |
+| A1-004 | `logout` -> POST /api/auth/logout | sms/web/src/api.ts:168 | User menu > Sign out; phone More | mapped | Used by: App.tsx (user menu), Wall.tsx. Wall carries no logout (Esc exits to Today). |
+| A1-005 | `adminListUsers` -> GET /api/admin/users | sms/web/src/api.ts:210 | System > Setup > People | mapped | Used by: Setup.tsx (People). rank 4. |
+| A1-006 | `adminCreateUser` -> POST /api/admin/users | sms/web/src/api.ts:211 | System > Setup > People | mapped | Used by: Setup.tsx (NewUserForm). rank 4. Agents must never create accounts for verification. |
+| A1-007 | `adminUpdateUser` -> PATCH /api/admin/users/:id | sms/web/src/api.ts:212 | System > Setup > People | mapped | Used by: Setup.tsx. rank 4; role/active toggle. |
+| A1-008 | `adminListStations` -> GET /api/admin/stations | sms/web/src/api.ts:213 | System > Setup > Stations | mapped | Used by: setup/StationsBlock.tsx. rank 4. |
+| A1-009 | `adminSetStation` -> PUT /api/admin/stations/:id | sms/web/src/api.ts:220 | System > Setup > Stations | mapped | Used by: setup/StationsBlock.tsx. rank 4; name, machine link, active. |
+| A1-010 | `adminGetRules` -> GET /api/admin/rules | sms/web/src/api.ts:224 | System > Setup > Rules | mapped | Used by: setup/RulesBlock.tsx. rank 4. |
+| A1-011 | `adminSetWeightRule` -> POST /api/admin/rules/weight | sms/web/src/api.ts:233 | System > Setup > Rules | mapped | Used by: setup/RulesBlock.tsx. rank 4. Weight basis wording RESERVED (DP-1). |
+| A1-012 | `adminSetShiftRule` -> POST /api/admin/rules/shift | sms/web/src/api.ts:234 | System > Setup > Rules | mapped | Used by: setup/RulesBlock.tsx. rank 4; uses getShiftCheck note. |
+| A1-013 | `adminSetPlausibilityRule` -> POST /api/admin/rules/plausibility | sms/web/src/api.ts:238 | System > Setup > Rules | mapped | Used by: setup/RulesBlock.tsx. rank 4. |
+| A1-014 | `getConfig` -> GET /api/config | sms/web/src/api.ts:277 | System > Setup > Machines | mapped | Used by: setup/MachinesBlock.tsx. Rank 1 read. |
+| A1-015 | `adminGetLine` -> GET /api/admin/line | sms/web/src/api.ts:279 | System > Setup > Line | mapped | Used by: setup/LineBlock.tsx. rank 4. |
+| A1-016 | `adminSetLine` -> PUT /api/admin/line | sms/web/src/api.ts:280 | System > Setup > Line | mapped | Used by: setup/LineBlock.tsx. rank 4; plant/unit/line names feed the report masthead. |
+| A1-017 | `adminListMachines` -> GET /api/admin/machines | sms/web/src/api.ts:284 | System > Setup > Stations | mapped | Used by: setup/StationsBlock.tsx. rank 4. |
+| A1-018 | `adminCreateMachine` -> POST /api/admin/machines | sms/web/src/api.ts:290 | System > Setup > Machines | mapped | Used by: setup/MachinesBlock.tsx. rank 4. |
+| A1-019 | `adminUpdateMachine` -> PUT /api/admin/machines/:id | sms/web/src/api.ts:293 | System > Setup > Machines | mapped | Used by: setup/MachinesBlock.tsx. rank 4. |
+| A1-020 | `adminCreateStation` -> POST /api/admin/stations | sms/web/src/api.ts:298 | System > Setup > Stations | mapped | Used by: setup/StationsBlock.tsx. rank 4; link a raw station id. |
+| A1-021 | `adminGetSources` -> GET /api/admin/sources | sms/web/src/api.ts:318 | System > Setup > Sources; Diagnostics (admins only join) | mapped | Used by: setup/SourcesBlock.tsx, health/SyncHealthBlock.tsx. rank 4; Diagnostics must say a failed/unavailable source list is a different fact from /api/operations failing (Phase 7 Brief 3). |
+| A1-022 | `adminUpdateSource` -> PUT /api/admin/sources/:id | sms/web/src/api.ts:319 | System > Setup > Sources | mapped | Used by: setup/SourcesBlock.tsx. rank 4. |
+| A1-023 | `adminUpdateSourceTable` -> PUT /api/admin/sources/tables/:id | sms/web/src/api.ts:325 | System > Setup > Sources | mapped | Used by: setup/SourcesBlock.tsx. rank 4; SOURCE_TABLE_NAME regex. |
+| A1-024 | `getRejectCodes` -> GET /api/reject-codes | sms/web/src/api.ts:336 | System > Setup > Reject codes | mapped | Used by: setup/RejectCodesBlock.tsx. Rank 1 read (code names are also used on Rejects via the reasons payload). |
+| A1-025 | `setRejectCode` -> PUT /api/reject-codes/:id | sms/web/src/api.ts:338 | System > Setup > Reject codes | mapped | Used by: setup/RejectCodesBlock.tsx. rank 2 server; Setup is rank-4 visible, but write is rank 2 (IFL Q12). |
+| A1-026 | `adminGetAudit` -> GET /api/admin/audit | sms/web/src/api.ts:346 | n/a (keep wrapper) | mapped | Used by: (none; superseded by adminGetAuditPage). api.callers ALLOW_LIST (c) superseded. Do not drop; delete only with the endpoint. |
+| A1-027 | `getProductTimeline` -> GET /api/product-timeline | sms/web/src/api.ts:363 | Products > Limits & History | mapped | Used by: product/History.tsx. SMS-own "Current Product" timeline. |
+| A1-028 | `getProducts` -> GET /api/products | sms/web/src/api.ts:366 | Today (product line), Quality > Rejects (product chip), Reports (product filter), Products > all tabs | mapped | Used by: Line, Rejects, Report, Sacks, product/{Catalogue,Changeover,ProductLimitsBlock,Running}. distinctProductLabels disambiguates six materials sharing one description; a failed fetch must not look like an empty list (Sacks movement form). |
+| A1-029 | `getCurrentProduct` -> GET /api/current-product | sms/web/src/api.ts:369 | Products > Board ("Default for readings without a product") | mapped | Used by: product/Running.tsx. Fallback only for pre-MaterialId rows. |
+| A1-030 | `setCurrentProduct` -> POST /api/current-product | sms/web/src/api.ts:372 | Products > Board | mapped | Used by: product/Running.tsx (ChangeForm). rank 2; optional reason; also reached from Today "Change" today (IA-MAP: Today becomes read-only + link). |
+| A1-031 | `getProductWriteStatus` -> GET /api/product-write/status | sms/web/src/api.ts:404 | Products > Catalogue / Limits; Board PDAS strip | mapped | Used by: product/Catalogue.tsx, ProductLimitsBlock.tsx. Returns {enabled, reason, canWrite, local.canWrite}; client must NOT compute these from rank constants. |
+| A1-032 | `getProductOptions` -> GET /api/product-options | sms/web/src/api.ts:405 | Products > Catalogue (Create product) | mapped | Used by: product/Catalogue.tsx (CreateForm). Blend/count/tube pickers. |
+| A1-033 | `createProduct` -> POST /api/products | sms/web/src/api.ts:406 | Products > Catalogue | mapped | Used by: product/Catalogue.tsx. rank 2 AND PDAS_WRITE_ENABLED; 10-char reason. |
+| A1-034 | `setProductActive` -> POST /api/products/:id/active | sms/web/src/api.ts:411 | Products > Catalogue | mapped | Used by: product/Catalogue.tsx. rank 2 AND enabled; 10-char reason. |
+| A1-035 | `updateProductLimits` -> POST /api/products/:id/limits | sms/web/src/api.ts:414 | Products > Limits | mapped | Used by: product/Catalogue.tsx (LimitsForm). rank 2 AND enabled; before/after, large-change checkbox + 20-char reason, 10-char otherwise, optimistic-concurrency conflict. |
+| A1-036 | `getPallets` -> GET /api/pallets | sms/web/src/api.ts:441 | Products > Catalogue (Pallets in PDAS) | mapped | Used by: product/Catalogue.tsx. Route may be unregistered in older builds; screen tolerates (Catalogue.tsx:68). |
+| A1-037 | `setPalletActive` -> POST /api/pallets/:id/active | sms/web/src/api.ts:444 | Products > Catalogue | mapped | Used by: product/Catalogue.tsx. rank 2 AND enabled; reactivate direction included (D-34). |
+| A1-038 | `getRange` -> GET /api/range | sms/web/src/api.ts:457 | Quality > Rejects (window clip); Setup > Rules | mapped | Used by: Rejects.tsx, setup/RulesBlock.tsx. Failing /api/range degrades to unclipped window. |
+| A1-039 | `getRejects` -> GET /api/rejects | sms/web/src/api.ts:477 | n/a (keep wrapper) | mapped | Used by: (none; superseded by getRejectsFiltered). ALLOW_LIST (c). |
+| A1-040 | `setRejectLabel` -> PUT /api/reject-codes/:id | sms/web/src/api.ts:486 | Quality > Rejects and Reason sheet ("Name it") | mapped | Used by: Rejects.tsx, ReasonSheet.tsx. rank 2; absent below. Same endpoint as setRejectCode. |
+| A1-041 | `getWeights` -> GET /api/weights | sms/web/src/api.ts:522 | n/a (keep wrapper) | mapped | Used by: (none; superseded by getSpc + getWeightStations). ALLOW_LIST (c). Its giveawayTotalKg was deliberately dropped from the UI. |
+| A1-042 | `getProduction` -> GET /api/production | sms/web/src/api.ts:538 | Today (headline, KPIs, per-shift/day, stations); Quality > Weight headline | mapped | Used by: Line.tsx, Weight.tsx. Takes from/to/shift/fromShift/toShift/tsTo (replay bound). |
+| A1-043 | `getEvents` -> GET /api/events | sms/web/src/api.ts:771 | Quality > Register; reading sheet; sack list | mapped | Used by: Readings.tsx, ReadingSheet.tsx, Sacks.tsx. Keyset/paged; pageSize 1 used for counts. |
+| A1-044 | `getEventDetail` -> GET /api/events/:type/:id | sms/web/src/api.ts:775 | Reading sheet overlay (cone/sack/reject) | mapped | Used by: ReadingSheet.tsx. |
+| A1-045 | `eventsExportUrl` -> GET /api/events/export | sms/web/src/api.ts:779 | Quality > Register Export | mapped | Used by: Readings.tsx. rank 3, absent below. No Export control in Register mockup (see C-gap G-26). Decided E-8. |
+| A1-046 | `getDataBatch` -> GET /api/data-batch | sms/web/src/api.ts:802 | Global banner (dev/sim only) + Diagnostics | mapped | Used by: ui/SimulatorBanner.tsx. A FAILED fetch must never claim "real". |
+| A1-047 | `getDowntime` -> GET /api/downtime | sms/web/src/api.ts:839 | n/a (keep wrapper) | mapped | Used by: (none). ALLOW_LIST (b): not requested by IFL (no OEE/MTBF); time-lost subset reaches Daily via getReportOf. |
+| A1-048 | `getSpc` -> GET /api/spc | sms/web/src/api.ts:967 | Quality > Weight (cone and sack control charts, advisory) | mapped | Used by: Weight.tsx. wt=cone/sack; shift/range aware; failed fetch must not render as a flat/empty chart. |
+| A1-049 | `getCalibration` -> GET /api/calibration | sms/web/src/api.ts:1014 | n/a (keep wrapper) | mapped | Used by: (none; superseded by getWeightStations). ALLOW_LIST (c). |
+| A1-050 | `getCalibrationAdjustments` -> GET /api/calibration/adjustments | sms/web/src/api.ts:1020 | n/a (keep wrapper) | mapped | Used by: (none; superseded by listAdjustments). ALLOW_LIST (c). |
+| A1-051 | `recordCalibrationAdjustment` -> POST /api/calibration/adjustments | sms/web/src/api.ts:1023 | n/a (keep wrapper) | mapped | Used by: (none; superseded by recordAdjustment). ALLOW_LIST (c). |
+| A1-052 | `getRejectSpc` -> GET /api/reject-spc | sms/web/src/api.ts:1076 | n/a (keep wrapper) | mapped | Used by: (none; superseded by getRejectSpcFiltered). ALLOW_LIST (c). |
+| A1-053 | `getOperations` -> GET /api/operations | sms/web/src/api.ts:1201 | System > Diagnostics ("Plant connection and data checks") | mapped | Used by: health/SyncHealthBlock.tsx. Failed fetch must NOT print "None"/"no findings" (reliability GUARD 1). |
+| A1-054 | `getDqDestination` -> GET /api/dq-destination | sms/web/src/api.ts:1217 | System > Diagnostics (finding -> cone/sack/reject sheet) | mapped | Used by: health/SyncHealthBlock.tsx (DqSourceLink). reject_event findings offer no link (cannot tell QCS vs scale) and say why. |
+| A1-055 | `ackDqFinding` -> POST /api/dq-findings/:id/ack | sms/web/src/api.ts:1229 | System > Diagnostics | mapped | Used by: health/SyncHealthBlock.tsx (AcknowledgeControl). rank 2; also reachable in Setup today (duplicate removed by IA-MAP). |
+| A1-056 | `getSystemHistory` -> GET /api/system-history | sms/web/src/api.ts:1293 | System > Diagnostics ("How the data is organised") | mapped | Used by: health/SystemHistoryBlock.tsx. Says plainly this is the record of a manual run. |
+| A1-057 | `getLive` -> GET /api/live | sms/web/src/api.ts:1401 | App shell (strip clock, health), Today, Wall | mapped | Used by: lib/live.tsx (LiveProvider). 10 s poll; source of the plant clock; replay via at. |
+| A1-058 | `getStations` -> GET /api/stations | sms/web/src/api.ts:1446 | Every station label/chip | mapped | Used by: Line, product/Running, Readings, ReadingSheet, ReasonSheet, Rejects, Report, StationSheet, Wall, Weight. Failed /api/stations must not look like an empty roster (Readings, Report, Wall). |
+| A1-059 | `stationLabel` -> (client helper) | sms/web/src/api.ts:1451 | Every station label | mapped | Used by: Line, Running, Readings, ReadingSheet, ReasonSheet, Rejects, report/{Calibration,ConeWeight,Station}, StationSheet, Weight. Returns configured name else "Station N". New rule "Station 5 - East Conveyor" is RESERVED DP-4 (G-11; GLOSSARY rows 87/88/104): (G-11) old text stays until owner picks A (name as label) or B (number first). Decided E-9. |
+| A1-060 | `getProductAt` -> GET /api/product-at | sms/web/src/api.ts:1512 | Today product line; Board; reading sheet "product in force" | mapped | Used by: Line, product/Running, ReadingSheet. Time-versioned limits; neverRecorded flag; judged by limits at the reading's own time. |
+| A1-061 | `getAttention` -> GET /api/attention | sms/web/src/api.ts:1552 | Today > Attention; Wall footer | mapped | Used by: Line, Wall. Fixed 14-day detector window (ignores period); attention.ts rule kept (APPROVAL). |
+| A1-062 | `getWeightStations` -> GET /api/weight-stations | sms/web/src/api.ts:1616 | Quality > Stations (the one station table); station sheet; heat grid | mapped | Used by: lib/words.ts, StationSheet, Weight. Bias vs line AND vs target; targetBasis station_material/mixed/line_product (X-1). Act/Watch state needs a small API addition (G-18). |
+| A1-063 | `rejectCodeParam` -> (client helper) | sms/web/src/api.ts:1678 | Quality > Rejects; Reason sheet; Reports (jc) | mapped | Used by: ReasonSheet, Rejects, Report. |
+| A1-064 | `getRejectsFiltered` -> GET /api/rejects | sms/web/src/api.ts:1687 | Quality > Rejects | mapped | Used by: Rejects.tsx. st/pr/jc filters. |
+| A1-065 | `getRejectSpcFiltered` -> GET /api/reject-spc | sms/web/src/api.ts:1691 | Quality > Rejects (trend/episodes) | mapped | Used by: Rejects.tsx. Takes from/to/shift/tsTo like production. |
+| A1-066 | `getRejectsByDayCode` -> GET /api/rejects/by-day-code | sms/web/src/api.ts:1724 | Quality > Rejects (by-day table; heat) | mapped | Used by: Rejects.tsx. |
+| A1-067 | `getRejectReason` -> GET /api/rejects/reason | sms/web/src/api.ts:1756 | Reason sheet overlay | mapped | Used by: ReasonSheet.tsx. No Reason-sheet mockup (G-5). Decided E-8. |
+| A1-068 | `getHealth` -> GET /api/health | sms/web/src/api.ts:1824 | System > Diagnostics (Database, Service, Backups, Disk, Last verify run) | mapped | Used by: Health.tsx. Public route; anonymous caller gets nulled details. PdasWriteBlock reads the same payload. |
+| A1-069 | `changePassword` -> POST /api/auth/password | sms/web/src/api.ts:1829 | System > Account; user menu link | mapped | Used by: Account.tsx (AccountSheet), Bar.tsx. No Account mockup (G-6/G-14). Decided E-8. |
+| A1-070 | `adminResetPassword` -> POST /api/admin/users/:id/password | sms/web/src/api.ts:1833 | System > Setup > People | mapped | Used by: Setup.tsx (ResetPassword). rank 4. |
+| A1-071 | `adminGetAuditPage` -> GET /api/admin/audit | sms/web/src/api.ts:1838 | System > Setup > Audit log | mapped | Used by: Setup.tsx (AuditLog). rank 4; keyset paged. |
+| A1-072 | `getProductLimitHistory` -> GET /api/products/limits/history | sms/web/src/api.ts:2002 | Products > Limits & History ("Limit versions") | mapped | Used by: product/ProductLimitsBlock.tsx. Duplicate (Setup > Rules) removed. |
+| A1-073 | `setLocalLimitVersion` -> POST /api/products/limits/local | sms/web/src/api.ts:2006 | Products > Limits | mapped | Used by: product/ProductLimitsBlock.tsx. rank 2; independent of PDAS_WRITE_ENABLED; gate is status.local.canWrite. |
+| A1-074 | `getMachinesRunning` -> GET /api/machines/running | sms/web/src/api.ts:2048 | Products > Board (+ read-only product tag on Today tiles if owner wants) | mapped | Used by: Line, product/Running, StationSheet. 2-hour window anchored on newest reading; F-1 last-product list for non-running winders. |
+| A1-075 | `getShiftCheck` -> GET /api/shift-check | sms/web/src/api.ts:2066 | System > Setup > Rules | mapped | Used by: setup/RulesBlock.tsx. |
+| A1-076 | `getReconciliation` -> GET /api/reconciliation | sms/web/src/api.ts:2089 | System > Diagnostics ("Records SMS holds") | mapped | Used by: Health.tsx. Rank 1; a census of SMS tables, not a comparison against IFL. |
+| A1-077 | `listAdjustments` -> GET /api/calibration/adjustments | sms/web/src/api.ts:2295 | Station sheet ledger; Reports > Calibration; Quality > Stations log | mapped | Used by: report/Calibration.tsx, StationSheet.tsx. adjustmentId number vs string quirk (Calibration.tsx:144). |
+| A1-078 | `recordAdjustment` -> POST /api/calibration/adjustments | sms/web/src/api.ts:2322 | Station sheet overlay | mapped | Used by: StationSheet.tsx (LogForm). rank 2; no Station-sheet mockup (G-4). Decided E-8. |
+| A1-079 | `getCalibrationRules` -> GET /api/calibration/rules | sms/web/src/api.ts:2332 | n/a (keep wrapper) | mapped | Used by: (none). ALLOW_LIST (b): Nelson rule labels built, never wired; RT-019 withholds rules 2-8. |
+| A1-080 | `getSackSummary` -> GET /api/sacks/summary | sms/web/src/api.ts:2384 | Today (sack section); Quality > Weight wt=sack | mapped | Used by: Sacks.tsx. |
+| A1-081 | `getSackStock` -> GET /api/sacks/stock | sms/web/src/api.ts:2449 | Quality > Register rl=stock; Reports > Sacks | mapped | Used by: report/Sack.tsx, Sacks.tsx. Takes no shift: whole production days under a shift range, and the screen says so (C-170). |
+| A1-082 | `getSackMovements` -> GET /api/sacks/movements | sms/web/src/api.ts:2487 | Stock-day overlay | mapped | Used by: StockSheet.tsx. No Stock-sheet mockup (G-5). Decided E-8. |
+| A1-083 | `recordSackMovement` -> POST /api/sacks/movements | sms/web/src/api.ts:2510 | Quality > Register rl=stock | mapped | Used by: Sacks.tsx (MovementForm). rank 2; form not in Register mockup (G-3). Decided E-8. |
+| A1-084 | `getReportOf` -> GET /api/reports/:type | sms/web/src/api.ts:3420 | Reports (5 cards); Today sack section reuses sack-weight-summary data | mapped | Used by: Report.tsx, Sacks.tsx. management-summary read gate is rank 3 on the server (decision G-1). |
+| A1-085 | `reportExportUrl` -> GET /api/reports/:type/export | sms/web/src/api.ts:3431 | Reports export buttons (PDF/Excel/CSV) | mapped | Used by: Report.tsx. rank 3; absent below; disabled while report loading. |
+| A1-086 | `getReportHeader` -> GET /api/reports/header | sms/web/src/api.ts:3443 | Printed masthead (Register + reports) | mapped | Used by: report/PrintHead.tsx. Failure must leave a degraded block, never the browser clock. |
+| A1-087 | `getChangeoverRefs` -> GET /api/changeover/refs | sms/web/src/api.ts:3502 | Products > Changeover | mapped | Used by: product/Changeover.tsx. |
+| A1-088 | `planChangeover` -> POST /api/changeover/plan | sms/web/src/api.ts:3551 | Products > Changeover (Plan, Review) | mapped | Used by: product/Changeover.tsx. rank 1; never opens the PDAS writer pool. |
+| A1-089 | `executeChangeover` -> POST /api/changeover/execute | sms/web/src/api.ts:3582 | Products > Changeover (Execute) | mapped | Used by: product/Changeover.tsx; lib/pdasWords.ts. rank 2; 503 DISABLED while PDAS_WRITE_ENABLED=false; 409 BLOCKED; disabledReason printed verbatim; no optimistic UI. |
+| A1-090 | `getProductChanges` -> GET /api/product-changes | sms/web/src/api.ts:3607 | Products > Limits & History ("PDAS action history") | mapped | Used by: product/History.tsx. outcome=disabled rows labelled as attempts that never reached PDAS. |
+| A1-091 | const ROLE_RANK = viewer 1 / engineer 2 / manager 3 / admin 4 | sms/web/src/api.ts:160 | web-next `api.ts` (copy unchanged) | mapped | Same constants; web-next must keep ENGINEER_RANK 2, EXPORT_RANK 3, admin 4 (rank.crosscheck). |
+| A1-092 | const GET_TIMEOUT_MS = 30,000 | sms/web/src/api.ts:117 | web-next `api.ts` (copy unchanged) | mapped | Every GET times out at 30 s (api.timeout.test.ts). |
+| A1-093 | const SOURCE_TABLE_NAME regex | sms/web/src/api.ts:323 | web-next `api.ts` (copy unchanged) | mapped | Setup > Sources validation. |
+| A1-094 | const NELSON_RULE_LABEL | sms/web/src/api.ts:848 | web-next `api.ts` (copy unchanged) | mapped | Used by Weight/StationSheet Details; rules 2-8 stay withheld (RT-019). |
+| A1-095 | const CONE_STATES (within/low/high/rejected/unknown) | sms/web/src/api.ts:1853 | web-next `api.ts` (copy unchanged) | mapped | Register `rcs` filter values. |
+| A1-096 | const MOVEMENT_TYPES (opening, receipt, issue, consumption, adjustment) | sms/web/src/api.ts:2460 | web-next `api.ts` (copy unchanged) | mapped | Sack stock movement form; words RESERVED (GLOSSARY 144-155). |
+| A1-097 | const REPORT_TYPES (18) | sms/web/src/api.ts:2539 | web-next `api.ts` (copy unchanged) | mapped | Same 18 values; reportGroups.test requires every type placed in a group/view. |
+
+## A2. API routes (`sms/api/src/app.ts` + `routes/*.ts`)
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A2-001 | GET `/api/health` rank public [used by UI] | sms/api/src/app.ts / routes/*.ts | System > Diagnostics; bar health strip (wrapper getHealth) | mapped | 503 when down; nulls details for anonymous. |
+| A2-002 | POST `/api/auth/login` rank public [used by UI] | sms/api/src/app.ts / routes/*.ts | Login (wrapper login) | mapped |  |
+| A2-003 | POST `/api/auth/logout` rank signed in [used by UI] | sms/api/src/app.ts / routes/*.ts | User menu (wrapper logout) | mapped |  |
+| A2-004 | GET `/api/auth/me` rank public [used by UI] | sms/api/src/app.ts / routes/*.ts | App bootstrap (wrapper getMe) | mapped |  |
+| A2-005 | GET `/api/range` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Quality > Rejects; Setup > Rules (wrapper getRange) | mapped |  |
+| A2-006 | GET `/api/live` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Shell, Today, Wall (wrapper getLive) | mapped |  |
+| A2-007 | GET `/api/stations` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | All station chips (wrapper getStations) | mapped |  |
+| A2-008 | GET `/api/config` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Machines (wrapper getConfig) | mapped |  |
+| A2-009 | GET `/api/attention` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Today, Wall (wrapper getAttention) | mapped |  |
+| A2-010 | GET `/api/product-at` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Today, Board, Reading sheet (wrapper getProductAt) | mapped |  |
+| A2-011 | GET `/api/weight-stations` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Quality > Stations, Station sheet (wrapper getWeightStations) | mapped |  |
+| A2-012 | GET `/api/operations` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Diagnostics (wrapper getOperations) | mapped |  |
+| A2-013 | GET `/api/dq-destination` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Diagnostics (wrapper getDqDestination) | mapped |  |
+| A2-014 | GET `/api/system-history` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Diagnostics (wrapper getSystemHistory) | mapped |  |
+| A2-015 | GET `/api/production` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Today, Quality > Weight (wrapper getProduction) | mapped |  |
+| A2-016 | GET `/api/downtime` rank 1 [UNUSED by UI] | sms/api/src/app.ts / routes/*.ts | not used (ALLOW_LIST b) (wrapper (none) getDowntime) | mapped | Keep. Not requested by IFL. |
+| A2-017 | GET `/api/spc` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Quality > Weight (wrapper getSpc) | mapped |  |
+| A2-018 | GET `/api/reject-spc` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Quality > Rejects (wrapper getRejectSpcFiltered) | mapped |  |
+| A2-019 | GET `/api/events` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Register, sheets (wrapper getEvents) | mapped |  |
+| A2-020 | GET `/api/events/export` rank 3 [used by UI] | sms/api/src/app.ts / routes/*.ts | Register Export (wrapper eventsExportUrl) | mapped | No Export control in Register mockup (G-26). Decided E-8. |
+| A2-021 | GET `/api/events/:type/:id` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Reading sheet (wrapper getEventDetail) | mapped |  |
+| A2-022 | GET `/api/rejects` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Quality > Rejects (wrapper getRejectsFiltered) | mapped |  |
+| A2-023 | GET `/api/reject-codes` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Reject codes (wrapper getRejectCodes) | mapped |  |
+| A2-024 | PUT `/api/reject-codes/:id` rank 2 [used by UI] | sms/api/src/app.ts / routes/*.ts | Rejects, Reason sheet, Setup (wrapper setRejectCode / setRejectLabel) | mapped | WRITE |
+| A2-025 | GET `/api/weights` rank 1 [UNUSED by UI] | sms/api/src/app.ts / routes/*.ts | not used (ALLOW_LIST c) (wrapper (none) getWeights) | mapped | Keep. |
+| A2-026 | GET `/api/calibration` rank 1 [UNUSED by UI] | sms/api/src/app.ts / routes/*.ts | not used (ALLOW_LIST c) (wrapper (none) getCalibration) | mapped | Keep. |
+| A2-027 | GET `/api/calibration/adjustments` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Station sheet, Reports > Calibration (wrapper listAdjustments) | mapped |  |
+| A2-028 | POST `/api/calibration/adjustments` rank 2 [used by UI] | sms/api/src/app.ts / routes/*.ts | Station sheet (wrapper recordAdjustment) | mapped | WRITE |
+| A2-029 | GET `/api/products` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | All product pickers (wrapper getProducts) | mapped |  |
+| A2-030 | GET `/api/current-product` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Board (wrapper getCurrentProduct) | mapped |  |
+| A2-031 | GET `/api/product-timeline` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Limits & History (wrapper getProductTimeline) | mapped |  |
+| A2-032 | POST `/api/current-product` rank 2 [used by UI] | sms/api/src/app.ts / routes/*.ts | Board (wrapper setCurrentProduct) | mapped | WRITE |
+| A2-033 | GET `/api/product-write/status` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Catalogue, Limits, Board strip (wrapper getProductWriteStatus) | mapped |  |
+| A2-034 | GET `/api/product-options` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Catalogue (wrapper getProductOptions) | mapped |  |
+| A2-035 | POST `/api/products` rank 2 (PDAS_WRITE_RANK) + PDAS_WRITE_ENABLED [used by UI] | sms/api/src/app.ts / routes/*.ts | Catalogue (wrapper createProduct) | mapped | WRITE; 503 while disabled. |
+| A2-036 | POST `/api/products/:id/active` rank 2 + enabled [used by UI] | sms/api/src/app.ts / routes/*.ts | Catalogue (wrapper setProductActive) | mapped | WRITE |
+| A2-037 | POST `/api/products/:id/limits` rank 2 + enabled [used by UI] | sms/api/src/app.ts / routes/*.ts | Limits (wrapper updateProductLimits) | mapped | WRITE |
+| A2-038 | GET `/api/pallets` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Catalogue (wrapper getPallets) | mapped |  |
+| A2-039 | POST `/api/pallets/:id/active` rank 2 + enabled [used by UI] | sms/api/src/app.ts / routes/*.ts | Catalogue (wrapper setPalletActive) | mapped | WRITE |
+| A2-040 | GET `/api/admin/users` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > People (wrapper adminListUsers) | mapped |  |
+| A2-041 | POST `/api/admin/users` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > People (wrapper adminCreateUser) | mapped | WRITE |
+| A2-042 | PATCH `/api/admin/users/:id` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > People (wrapper adminUpdateUser) | mapped | WRITE |
+| A2-043 | GET `/api/admin/line` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Line (wrapper adminGetLine) | mapped |  |
+| A2-044 | PUT `/api/admin/line` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Line (wrapper adminSetLine) | mapped | WRITE |
+| A2-045 | GET `/api/admin/machines` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Stations (wrapper adminListMachines) | mapped |  |
+| A2-046 | POST `/api/admin/machines` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Machines (wrapper adminCreateMachine) | mapped | WRITE |
+| A2-047 | PUT `/api/admin/machines/:id` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Machines (wrapper adminUpdateMachine) | mapped | WRITE |
+| A2-048 | GET `/api/admin/stations` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Stations (wrapper adminListStations) | mapped |  |
+| A2-049 | POST `/api/admin/stations` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Stations (wrapper adminCreateStation) | mapped | WRITE |
+| A2-050 | PUT `/api/admin/stations/:id` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Stations (wrapper adminSetStation) | mapped | WRITE |
+| A2-051 | GET `/api/admin/sources` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Sources; Diagnostics (admins) (wrapper adminGetSources) | mapped |  |
+| A2-052 | PUT `/api/admin/sources/:id` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Sources (wrapper adminUpdateSource) | mapped | WRITE |
+| A2-053 | PUT `/api/admin/sources/tables/:id` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Sources (wrapper adminUpdateSourceTable) | mapped | WRITE |
+| A2-054 | GET `/api/admin/rules` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Rules (wrapper adminGetRules) | mapped |  |
+| A2-055 | POST `/api/admin/rules/weight` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Rules (wrapper adminSetWeightRule) | mapped | WRITE |
+| A2-056 | POST `/api/admin/rules/shift` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Rules (wrapper adminSetShiftRule) | mapped | WRITE |
+| A2-057 | POST `/api/admin/rules/plausibility` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Rules (wrapper adminSetPlausibilityRule) | mapped | WRITE |
+| A2-058 | GET `/api/admin/audit` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Audit log (wrapper adminGetAuditPage) | mapped |  |
+| A2-059 | GET `/api/calibration/rules` rank 1 [UNUSED by UI] | sms/api/src/app.ts / routes/*.ts | not used (ALLOW_LIST b) (wrapper (none) getCalibrationRules) | mapped | Keep. |
+| A2-060 | GET `/api/changeover/refs` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Changeover (wrapper getChangeoverRefs) | mapped |  |
+| A2-061 | POST `/api/changeover/plan` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Changeover (wrapper planChangeover) | mapped | plan only; no PDAS pool |
+| A2-062 | POST `/api/changeover/execute` rank 2 (PDAS_WRITE_RANK) + enabled [used by UI] | sms/api/src/app.ts / routes/*.ts | Changeover (wrapper executeChangeover) | mapped | WRITE; 503 DISABLED / 409 BLOCKED. |
+| A2-063 | GET `/api/product-changes` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Limits & History (wrapper getProductChanges) | mapped |  |
+| A2-064 | GET `/api/products/limits/history` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Limits (wrapper getProductLimitHistory) | mapped |  |
+| A2-065 | POST `/api/products/limits/local` rank 2 [used by UI] | sms/api/src/app.ts / routes/*.ts | Limits (wrapper setLocalLimitVersion) | mapped | WRITE; independent of PDAS flag. |
+| A2-066 | GET `/api/reconciliation` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Diagnostics (wrapper getReconciliation) | mapped |  |
+| A2-067 | GET `/api/machines/running` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Board (wrapper getMachinesRunning) | mapped |  |
+| A2-068 | GET `/api/shift-check` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > Rules (wrapper getShiftCheck) | mapped |  |
+| A2-069 | POST `/api/dq-findings/:id/ack` rank 2 [used by UI] | sms/api/src/app.ts / routes/*.ts | Diagnostics (wrapper ackDqFinding) | mapped | WRITE |
+| A2-070 | GET `/api/data-batch` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Global banner, Diagnostics (wrapper getDataBatch) | mapped |  |
+| A2-071 | POST `/api/auth/password` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | System > Account (wrapper changePassword) | mapped | WRITE (own password) |
+| A2-072 | POST `/api/admin/users/:id/password` rank 4 [used by UI] | sms/api/src/app.ts / routes/*.ts | Setup > People (wrapper adminResetPassword) | mapped | WRITE |
+| A2-073 | GET `/api/rejects/by-day-code` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Quality > Rejects (wrapper getRejectsByDayCode) | mapped |  |
+| A2-074 | GET `/api/rejects/reason` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Reason sheet (wrapper getRejectReason) | mapped |  |
+| A2-075 | GET `/api/reports/header` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Printed masthead (wrapper getReportHeader) | mapped |  |
+| A2-076 | GET `/api/reports/:type` rank 1 (3 for management-summary) [used by UI] | sms/api/src/app.ts / routes/*.ts | Reports (wrapper getReportOf) | mapped | Rank checked per type via REPORT_RANK (reports.ts:186). Decided E-1. |
+| A2-077 | GET `/api/reports/:type/export` rank 3 [used by UI] | sms/api/src/app.ts / routes/*.ts | Reports exports (wrapper reportExportUrl) | mapped | csv/xlsx/pdf; audited export.* |
+| A2-078 | GET `/api/sacks/summary` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Today, Quality > Weight (wrapper getSackSummary) | mapped |  |
+| A2-079 | GET `/api/sacks/stock` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Register stock, Reports > Sacks (wrapper getSackStock) | mapped |  |
+| A2-080 | GET `/api/sacks/movements` rank 1 [used by UI] | sms/api/src/app.ts / routes/*.ts | Stock-day sheet (wrapper getSackMovements) | mapped |  |
+| A2-081 | POST `/api/sacks/movements` rank 2 [used by UI] | sms/api/src/app.ts / routes/*.ts | Register stock (wrapper recordSackMovement) | mapped | WRITE |
+| A2-082 | GET `*` SPA catch-all + `express.static(webDist)` (production) + `/api/*` 404 | sms/api/src/app.ts:2324-2338 | Serve web-next under `/next` (base path) alongside old UI; fall-through for unknown `/api` | mapped | Rollout "served at /next": redirect table (IA-MAP s3) assumes root-relative `?s=` URLs; at switch the base moves. Need a rule for cold-loading /next/?s=... and for the old root URL after cutover (G-35). Decided E-10. |
+| A2-083 | NEW small API addition: per-station state Act/Watch/No data (computed server-side; >2x line failed-inspection rate = Act, >1.5x = Watch, no cones = No data) | design/redesign-2026-10/APPROVAL.md | Today heat grid, Quality > Stations | mapped | Not an existing route. Spec needed: field on /api/weight-stations or /api/attention; minimum-cone floor for small n; must not be asserted when health is not ok (G-18). Decided E-4. |
+| A2-084 | NEW small API additions (anticipated): none other approved; "no database schema changes" | APPROVAL.md | - | decision-needed | List any further additions (e.g. heat-grid silent/high-reject flags) before building; keep read-time derivation only (no migration). |
+
+## A3. Screens, blocks, sheets, menus and shared UI (component level)
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A3-001 | Session / Chrome: single route + period + sheet owner; `go()` push vs replace; ZoomContext | sms/web/src/App.tsx:370-520 | web-next App shell | mapped |  |
+| A3-002 | Login screen | sms/web/src/screens/Login.tsx:13 | Login | mapped | No mockup (G-14). Decided E-8. |
+| A3-003 | Skip-to-content link (`W.skipToContent`) + `main#main tabIndex=-1` | sms/web/src/App.tsx:630 | App shell | mapped | DESIGN-SYSTEM does not mention a skip link (0 hits); keep it. |
+| A3-004 | Top bar: brand, nav (8 SCREENS), period control, Back-from-zoom, Wall button, Setup gear, user menu, health strip | sms/web/src/ui/Bar.tsx:358 | Top bar (desk) / bottom bar (phone: Today, Quality, Products, Reports, More) | mapped | Setup gear removed; Setup becomes System > Setup tab (hidden below rank 4). |
+| A3-005 | PeriodControl: shift/today/yesterday/week/month/pick/range chips; date inputs; seeded from the period on screen (X-2) | sms/web/src/ui/Bar.tsx:99 | Global period chip + period panel (PeriodPanel mockup) | mapped | Seven keys; range button label from `rangeButtonLabel`; pick validated with isRealDate. |
+| A3-006 | Back-from-zoom button (`canGoBack`, history.state.zoomFrom) | sms/web/src/ui/Bar.tsx:~440, App.tsx:`zoomApi` | Top bar + near chart ("Zoomed in - Back", CSS-053) | mapped | No mockup shows it (zoom=0 hits); G-27. Decided E-8. |
+| A3-007 | Wall display button | sms/web/src/ui/Bar.tsx:446 | Top bar "Wall display" -> Today ?wall=1 | mapped |  |
+| A3-008 | User menu: initials button, name+role, Text size Desk/Wall (`sms.uiScale`), Change password, Sign out; Esc + outside-click close, focus returns to trigger (CSS-039) | sms/web/src/ui/Bar.tsx:202 | User menu (desk) / More sheet (phone) | mapped | Phone More contents undefined (G-13). |
+| A3-009 | Account sheet (change own password) | sms/web/src/screens/Account.tsx:21 | System > Account (page) | mapped | No mockup (G-6). G-10. Decided E-8. |
+| A3-010 | Health strip: dot + lag sentence (ok/late/stale/lag_unknown/no_data) + "details" link; plant clock | sms/web/src/ui/Bar.tsx:309,HealthLine | Top bar strip / page footer, links to System > Diagnostics | mapped | Server-side health decision; never claim running when not ok; lag_unknown must not say stopped. |
+| A3-011 | Replay banner "Leave replay" (`line.replay`, `?at=`) | sms/web/src/App.tsx:~605 | Global banner | mapped | No mockup (replay=0 hits); dev-only (LIVE_ALLOW_AS_OF false in production) but banner is mandatory when active (G-17). Decided E-8. |
+| A3-012 | SimulatorBanner: global "simulated data" notice; silent on Setup, Wall, non-Running Product tabs; failed /api/data-batch must not claim real | sms/web/src/ui/SimulatorBanner.tsx:41 | Global banner | mapped | Not in design package; dev-only but guard-tested (banner.provenance.test) (G-17). Decided E-8. |
+| A3-013 | ErrorBoundary: screen-level (keyed on view), sheet-level (keyed on sheet), `wall` variant with one automatic remount after 4 s | sms/web/src/ui/ErrorBoundary.tsx:36 | App shell | mapped | Not in design system (0 hits). Keep behaviour; need a fallback visual (G-30). Decided E-8. |
+| A3-014 | Sheet overlay primitive: Esc closes, focus trap, eyebrow+title, close | sms/web/src/ui/Sheet.tsx:23 | Overlay/sheet component | mapped | Sheet is an OVERLAY: opening one must not remount the screen under it (sheet.remount.test). |
+| A3-015 | ChartFrame: sizing, drag-resize handle (keyboard steps 20 px, persisted `sms.chartH.<id>`), floating tooltip, keyboard nav, touch-pin, click-to-zoom, print = fixed size no tooltip | sms/web/src/ui/ChartFrame.tsx:205, ui/useChartSize.ts | Custom SVG chart frame | mapped | APPROVAL: no new libraries, custom charts. Reuse or rewrite ChartFrame? The brush was deliberately removed (click-to-zoom only). G-28. Decided E-3. |
+| A3-016 | chart.tsx primitives: Readout (aria-live), HoverBands, Crosshair, RefLine(+gutter), CategoryBars, NoChartData | sms/web/src/ui/chart.tsx:181-787 | Custom charts | mapped | Readout is the screen-reader and wall path; every tooltip value must also be in the readout. |
+| A3-017 | bits: Block, Figure(s), Details, Skel{Figures,Lines,Chart,Stations}, Loading, Failed(+retry), Empty, Chevron, Toolbar, Toggle | sms/web/src/ui/bits.tsx | Design-system primitives | mapped | Skeletons must match real box heights (acceptance check 9: measured 90/90, 250/250, 86/86). |
+| A3-018 | LiveProvider / usePolling / useTicker / usePlantNow (10 s poll; `enabled:false` for fixed history; visibility refetch) | sms/web/src/lib/live.tsx | web-next lib (copy) | mapped |  |
+| A3-019 | period.ts: PERIOD_KEYS, resolvePeriod on PLANT clock, shift range, describePeriod, writePeriodParams | sms/web/src/lib/period.ts | web-next lib (copy) | mapped | Never the browser clock. |
+| A3-020 | health.ts / healthWords / syncHealth / generationWords / simulatorWords / provenance / pdasWords | sms/web/src/lib/*.ts | web-next lib (copy) | mapped | Words RESERVED where GLOSSARY says so. |
+| A3-021 | words.ts / strings.ts central copy table (`W`) | sms/web/src/lib/words.ts | web-next copy table | decision-needed | GLOSSARY rewrites 138 rows; 32 RESERVED rows stay verbatim. Keep one central table (Urdu pass anticipated). |
+| A3-022 | format helpers fmtClock, fmtClockOn, fmtSpan, fmtG...; `csv.ts` | sms/web/src/lib/fmt.ts, format.ts, csv.ts | web-next lib | mapped | One date/clock form (GLOSSARY 1.4) needs a pass over fmt.ts. |
+| A3-023 | Line: headline sentence + state (running/stopped/idle/unknown) + KPI figures | sms/web/src/screens/Line.tsx:400 Headline | Today (hero) | mapped | Judged against now-minus-lag; gated on stateIsKnowable(health). |
+| A3-024 | Line: provenance/generation banner under the headline (`quietBecauseGeneration`) | sms/web/src/screens/Line.tsx/lib/generationWords.ts | Today (note under hero) | mapped | Must match generation.simulator in BOTH directions (banner.provenance + generationQuiet tests). |
+| A3-025 | Line: cones per day/shift chart (OutputSpread, click-to-zoom) | sms/web/src/screens/Line.tsx:688 | Today > "Cones per shift" | mapped |  |
+| A3-026 | Line: Attention list | sms/web/src/screens/Line.tsx:770 | Today > Attention | mapped | attention.ts rule unchanged; rows hop to Quality > Stations or Register `rf`. |
+| A3-027 | Line: station grid / compare (StationCompare, StationRowGrid, median, quiet tiles, "scroll for more machines") | sms/web/src/screens/Line.tsx:1213,1287 | Today > "Stations, worst first" heat grid (sort Worst first / By station number) | mapped | Needs Act/Watch/No data server field (G-18); station tile -> station sheet. CSS-015/019 outcomes. |
+| A3-028 | Line: machines matrix "What is being made" (MachinesBlock) | sms/web/src/screens/Line.tsx:1024 | Products > Board | mapped | Optional read-only product tag on Today tiles (IA-MAP s7.3). |
+| A3-029 | Line: product footer (current product, Change, History) | sms/web/src/screens/Line.tsx:902 | Today: read-only line + links to Products > Board / History | mapped | Change button removed from Today (writes live on Products). |
+| A3-030 | Line: Last readings (LastReadings) + Details | sms/web/src/screens/Line.tsx:1356, :369 | Today > Last readings | mapped | Not in Main mockup (0 "Last cone/readings" hits outside PdasBoard). Propose a compact "Latest cone / sack / failed" strip. G-10. Decided E-8. |
+| A3-031 | Line: sacks section (counts, per-day, by shift, by product) reached via Sacks screen | sms/web/src/screens/Sacks.tsx | Today > Sacks (Main mockup: "Sacks packed: morning/evening/night") | mapped | Unit toggle `su` stays on Today. |
+| A3-032 | Weight: headline (mean + target as two facts until basis confirmed) | sms/web/src/screens/Weight.tsx:272 | Quality > Weight (hero) | mapped | Wording RESERVED (rows 139-141). |
+| A3-033 | Weight: Distribution chart (histogram with limit/target) and Over-time chart; wm toggle; period-conditional default | sms/web/src/screens/Weight.tsx:967,1253,392 | Quality > Weight | mapped | Mockup shows both histogram and line; the `wm` toggle itself is not drawn. |
+| A3-034 | Weight: sack control chart (`wt=sack`) | sms/web/src/screens/Weight.tsx:405 | Quality > Weight (cone/sack switch) | mapped | QualityWeight mockup has no sack content (sack=0 hits). G-8. Decided E-8. |
+| A3-035 | Weight: flagged-days advisory, days-to-limit (90% range or "not established"), Sparkline | sms/web/src/screens/Weight.tsx:518,1450 | Quality > Weight / Stations | mapped | No advisory in mockup; RT-020 wording must stay (G-8). Decided E-8. |
+| A3-036 | Weight: "see outside limits" hop (`rf=outsideLimits`) | sms/web/src/screens/Weight.tsx:onSeeOutside | Quality > Weight -> Register | mapped | No hop control in mockup (G-8). Decided E-8. |
+| A3-037 | Weight: ONE station table (bias vs line and vs target, targetBasis marker, X-1 mixed marker) + adjustments log | sms/web/src/screens/Weight.tsx:1522,1702 | Quality > Stations | mapped | Mockup station table + station detail (h2 "Station 8"). |
+| A3-038 | Weight: generation disclosure + empty/working states | sms/web/src/screens/Weight.tsx/screens/Weight.emptyWorking.test.tsx | Quality > Weight | mapped |  |
+| A3-039 | Rejects: headline with denominators, trend (`reject-spc`), episodes | sms/web/src/screens/Rejects.tsx:470,559 | Quality > Rejects (hero + "When each reason happened") | mapped | Two named verdicts "Failed inspection" vs "Failed weight check" (GLOSSARY). |
+| A3-040 | Rejects: reasons Pareto + Name it (rank 2, absent below) + code filter `jc` | sms/web/src/screens/Rejects.tsx:725 | Quality > Rejects ("Failed inspection by reason") | mapped | QualityRejects mockup includes Name/rename (15 hits). |
+| A3-041 | Rejects: by-day table (by-day-code) | sms/web/src/screens/Rejects.tsx:608,844 | Quality > Rejects heat/by-day | mapped |  |
+| A3-042 | Rejects: station chip, product chip (`st`, `pr`) | sms/web/src/screens/Rejects.tsx:680,700 | Quality filters | mapped | Shared keys. |
+| A3-043 | Rejects: "See the cones" hop (rf/rl=inspectionRejects), "By station" hop | sms/web/src/screens/Rejects.tsx:onSeeCones,onSeeStations | Quality > Rejects -> Register / Stations | mapped | Hops not in mockup (G-9). Decided E-8. |
+| A3-044 | Sacks: headline + figures (weighed, avg, in-range), `su` unit toggle | sms/web/src/screens/Sacks.tsx:181,593 | Today (Sacks) | mapped | Sack weight = gross (IFL Q24). |
+| A3-045 | Sacks: weighed-per-day chart, by shift, by product (GroupTable, ByProduct) | sms/web/src/screens/Sacks.tsx:322,441,515 | Today (Sacks) / Quality > Weight wt=sack | mapped |  |
+| A3-046 | Sacks: average sack weight per day, in-range by product | sms/web/src/screens/Sacks.tsx:383 | Quality > Weight (wt=sack) | mapped | Not in mockup (G-8). Decided E-8. |
+| A3-047 | Sacks: stock ledger (opening, receipts, issues, consumption, adjustments, closing; DayRow -> stock sheet) | sms/web/src/screens/Sacks.tsx:284,568,685 | Quality > Register "Sack stock" tab | mapped | APPROVAL settles the home. Column words RESERVED (rows 144-155). |
+| A3-048 | Sacks: "Record a movement" form (rank 2) | sms/web/src/screens/Sacks.tsx:594,706 | Quality > Register "Sack stock" header action | mapped | Form not drawn (G-3). Decided E-8. |
+| A3-049 | Sacks: movement history / sack list `History` (paged, `sp`) | sms/web/src/screens/Sacks.tsx:798,872 | Quality > Register `rl=sacks` / stock sheet | mapped | `sp` retires to `rp`. |
+| A3-050 | Sacks: machineLevel reason ("per machine: not available") | sms/web/src/screens/Sacks.tsx:674-678 | Register stock | mapped | Sack stock per machine is NOT computable; keep wording (rows 154/155). |
+| A3-051 | Readings: listing toggle (cones, sacks, rejected, inspectionRejects) | sms/web/src/screens/Readings.tsx:260 | Quality > Register tabs (Cones, Sacks, Inspection fails, Weight-check fails, Sack stock) | mapped | Old `rejected` = scale reject = "Weight-check fails". |
+| A3-052 | Readings: StateChips (rcs), StationChip (st), Pager (rp, replace not push), ReadingTable (rowKeys Enter/Space) | sms/web/src/screens/Readings.tsx:506,550,569,615 | Register | mapped |  |
+| A3-053 | Readings: BatchDisclosure, count headline (weighed / rejected / %), zero-weighed state | sms/web/src/screens/Readings.tsx:462 | Register | mapped | Never print a count it does not have (sheet.remount). |
+| A3-054 | Readings: Export CSV (rank 3, absent below) | sms/web/src/screens/Readings.tsx:248 | Register header | mapped | G-26. Decided E-8. |
+| A3-055 | Readings: Print (PrintHead degraded block) | sms/web/src/screens/Readings.tsx:253 | Register | mapped | Print layout absent from mockups (G-7). Known gap: prints while rows still loading. Decided E-6. |
+| A3-056 | ReadingSheet (cone/sack/reject): weight, both verdicts, product in force, provenance, hop to product report + Catalogue | sms/web/src/screens/ReadingSheet.tsx:53,320 | Reading sheet overlay (mockup "Reading sheet") | mapped | Sack<->cone link approximate; wording "cones weighed between the previous sack and this one" with caveat, never a packing list. |
+| A3-057 | ReasonSheet: per-day-per-code table, Name it (rank 2), hops to Register day / Reports reject day / reject sheet | sms/web/src/screens/ReasonSheet.tsx:70 | Reason sheet overlay | mapped | G-5. Decided E-8. |
+| A3-058 | StockSheet: one production day of sack stock | sms/web/src/screens/StockSheet.tsx:24 | Stock-day overlay | mapped | G-5. Decided E-8. |
+| A3-059 | StationSheet: drift, DailyMeans chart (click-zoom), adjustments ledger, LogForm (rank 2), days-to-limit, 4 hop links, Nelson Details | sms/web/src/screens/StationSheet.tsx:62,507,689 | Station sheet overlay | mapped | G-4. Decided E-8. |
+| A3-060 | Wall: state sentence (79px), station bars (count = bar height, floor ratio 0.045), pinned footer, out-of-contact (3 polls) stops the verdict, quiet after 20 min, Esc exits, no logout/hover/click | sms/web/src/screens/Wall.tsx:112 | Today ?wall=1 (dark Style C variant) | mapped | Wall mockup exists (dark). Never blanks on failure; no skeletons; simulator short note in footer. |
+| A3-061 | Health: Database, Service, Backups (verified marker), Disk, Last verify run | sms/web/src/screens/Health.tsx:178-277 | System > Diagnostics | mapped | Diagnostics mockup. Not a contracted feature (no RFQ line). |
+| A3-062 | Health: ReconciliationBlock | sms/web/src/screens/Health.tsx:40 | Diagnostics "Records SMS holds" | mapped |  |
+| A3-063 | Health: SyncHealthBlock (verdict, last pass, oldest table, per-table list, blocking DQ findings + ack + destination link) | sms/web/src/screens/health/SyncHealthBlock.tsx:145 | Diagnostics "What IFL has sent" / "Data checks" | mapped | Duplicate mount in Setup removed. |
+| A3-064 | Health: SystemHistoryBlock (batches/epochs, rebuilds, verify runs) | sms/web/src/screens/health/SystemHistoryBlock.tsx:35 | Diagnostics "Checks against IFL" | mapped | Pipeline vocabulary allowed here only. |
+| A3-065 | Health: PdasWriteBlock | sms/web/src/screens/health/PdasWriteBlock.tsx:31 | Products > Board "PDAS connection" | mapped | Diagnostics keeps a one-line link. |
+| A3-066 | Setup: LineBlock | sms/web/src/screens/setup/LineBlock.tsx:17 | System > Setup (one scrolling page of sections) | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-067 | Setup: MachinesBlock | sms/web/src/screens/setup/MachinesBlock.tsx:25 | System > Setup (one scrolling page of sections) | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-068 | Setup: StationsBlock | sms/web/src/screens/setup/StationsBlock.tsx:33 | System > Setup (one scrolling page of sections) | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-069 | Setup: SourcesBlock | sms/web/src/screens/setup/SourcesBlock.tsx:27 | System > Setup (one scrolling page of sections) | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-070 | Setup: RulesBlock | sms/web/src/screens/setup/RulesBlock.tsx:45 | System > Setup (one scrolling page of sections) | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-071 | Setup: RejectCodesBlock | sms/web/src/screens/setup/RejectCodesBlock.tsx:28 | System > Setup (one scrolling page of sections) | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-072 | Setup: People (list, create, role/active toggle, reset password) and AuditLog (paged) | sms/web/src/screens/Setup.tsx:76,347 | System > Setup | mapped | G-6. Server has no self-protection on PATCH users (Setup.tsx:134): client guard must stay. Decided E-8. |
+| A3-073 | Setup: not-allowed sentence for rank < 4 typed URL (`W.notAllowed`) | sms/web/src/App.tsx:~565 | System > Setup route guard | mapped | Tab absent below rank 4; typed URL still shows the sentence (rank.matrix). |
+| A3-074 | Product shell: tabs Running / Changeover / Catalogue / History (`pt`) | sms/web/src/screens/Product.tsx:38 | Products & PDAS tabs Board / Changeover / Catalogue / Limits / History | mapped | History merged into "Limits & History" in mockup; IA-MAP keeps t=limits and t=history separate (G-12). G-12. |
+| A3-075 | Product > Running: LineWideProduct (set current product, rank 2), machines pivot ByProduct, F-1 "last product it stamped" for non-running winders | sms/web/src/screens/product/Running.tsx:38,127,289 | Products > Board | mapped |  |
+| A3-076 | Product > Changeover: RefPicker, TubePicker, PickersForm, StepRow, PlanReview, OutcomeView | sms/web/src/screens/product/Changeover.tsx:137-703 | Products > Changeover (Plan / Review / Execute / blocked) | mapped | Retire-only intent still needs blend/count/tube (62c540e explanation). |
+| A3-077 | Product > Catalogue: PdasProducts, LimitsForm, ActiveForm, CreateForm, PdasPallets, PalletActiveForm | sms/web/src/screens/product/Catalogue.tsx:140-627 | Products > Catalogue (+ LimitsForm moves to Limits) | mapped | Controls absent when status.canWrite false, with a sentence saying why. |
+| A3-078 | Product > ProductLimitsBlock: version history + LocalLimitsForm | sms/web/src/screens/product/ProductLimitsBlock.tsx:106 | Products > Limits | mapped | Removed from Setup > Rules and Catalogue. |
+| A3-079 | Product > History: TimelineBlock + TrailBlock (product_change) | sms/web/src/screens/product/History.tsx:58,131 | Products > Limits & History | mapped |  |
+| A3-080 | Report: type chips (IFL eight + analysis ten), filter chips (shift/station/product), Print, Export x3, Verdict mark, headline per type, GenerationDisclosure, not-allowed state | sms/web/src/screens/Report.tsx:81-401 | Reports (5 cards + "Build your report" panel) | mapped | See A5. |
+
+## A4. Write controls (anything that POSTs / PUTs / PATCHes, plus exports and sign-in)
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A4-01 | Sign in: POST /api/auth/login | api/src (see A2); client gates App.tsx:211,218 | Login (was: Login); server gate public | mapped | Wrong credentials: server message; no account creation by agents. Login not drawn (G-14). Decided E-8. |
+| A4-02 | Sign out: POST /api/auth/logout | api/src (see A2); client gates App.tsx:211,218 | user menu / More (was: user menu); server gate signed in | mapped |  |
+| A4-03 | Change own password: POST /api/auth/password | api/src (see A2); client gates App.tsx:211,218 | System > Account (was: AccountSheet); server gate rank 1 | mapped | Response includes other sessions revoked count. Account not drawn (G-6). Decided E-8. |
+| A4-04 | Record the running product: POST /api/current-product | api/src (see A2); client gates App.tsx:211,218 | Products > Board (was: Product > Running ChangeForm; Line "Change"); server gate rank 2; client `canWrite=rank>=ENGINEER_RANK` | mapped | Absent below rank 2. Optional reason. |
+| A4-05 | Plan a changeover: POST /api/changeover/plan | api/src (see A2); client gates App.tsx:211,218 | Products > Changeover (was: Changeover); server gate rank 1 | mapped | Never opens PDAS pool; shows blockers (e.g. -7001 duplicate triple). |
+| A4-06 | Execute a changeover: POST /api/changeover/execute | api/src (see A2); client gates App.tsx:211,218 | Products > Changeover (was: Changeover Execute); server gate rank 2 + PDAS_WRITE_ENABLED | mapped | Button always rendered, disabled with `disabledReason` printed verbatim (pdasReasonForDisplay) while 503; disabled while blocked; no optimistic UI. |
+| A4-07 | Create a product (CreateMaterial): POST /api/products | api/src (see A2); client gates App.tsx:211,218 | Products > Catalogue (was: Catalogue CreateForm); server gate rank 2 + enabled; client `status.canWrite` | mapped | 10-char reason; new blend/count/tube by name allowed. |
+| A4-08 | Retire / reactivate a product: POST /api/products/:id/active | api/src (see A2); client gates App.tsx:211,218 | Products > Catalogue (was: Catalogue ActiveForm); server gate rank 2 + enabled | mapped | 10-char reason. Retire-and-recreate is NOT an edit. |
+| A4-09 | Change a product's weight limits in PDAS: POST /api/products/:id/limits | api/src (see A2); client gates App.tsx:211,218 | Products > Limits (was: Catalogue LimitsForm); server gate rank 2 + enabled | mapped | Two-step review; large-change checkbox + 20-char reason (3% / 20 g placeholders); concurrency conflict path; guarded single-row UPDATE + paired nhs_events. |
+| A4-10 | Retire / reactivate a pallet: POST /api/pallets/:id/active | api/src (see A2); client gates App.tsx:211,218 | Products > Catalogue (was: Catalogue PalletActiveForm); server gate rank 2 + enabled | mapped | Reactivate included (D-34). |
+| A4-11 | Set SMS-local product limits: POST /api/products/limits/local | api/src (see A2); client gates App.tsx:211,218 | Products > Limits (was: ProductLimitsBlock (Catalogue + Setup>Rules)); server gate rank 2; client `status.local.canWrite` | mapped | Works with PDAS off. Time-versioned. |
+| A4-12 | Record a calibration adjustment: POST /api/calibration/adjustments | api/src (see A2); client gates App.tsx:211,218 | Station sheet (was: StationSheet LogForm); server gate rank 2; client `canAdjust` | mapped | Recommendation only; SMS never adjusts a scale (IFL Q46-48). Station sheet not drawn (G-4). Decided E-8. |
+| A4-13 | Name a reject code: PUT /api/reject-codes/:id | api/src (see A2); client gates App.tsx:211,218 | Quality > Rejects + Reason sheet; Setup > Reject codes (was: Rejects, ReasonSheet, Setup); server gate rank 2; client `canName` | mapped | Two entry points, one write. |
+| A4-14 | Record a sack stock movement: POST /api/sacks/movements | api/src (see A2); client gates App.tsx:211,218 | Quality > Register stock (was: Sacks MovementForm); server gate rank 2; client `canRecord` | mapped | Type words RESERVED. Form not drawn (G-3). Decided E-8. |
+| A4-15 | Acknowledge a DQ finding: POST /api/dq-findings/:id/ack | api/src (see A2); client gates App.tsx:211,218 | System > Diagnostics (was: SyncHealthBlock); server gate rank 2; client `canAcknowledge` | mapped | System-state checks are not acknowledgeable. |
+| A4-16 | Export a report (CSV/XLSX/PDF): GET /api/reports/:type/export | api/src (see A2); client gates App.tsx:211,218 | Reports (was: Report links); server gate rank 3 (EXPORT_MIN_RANK) | mapped | Absent below 3; disabled until data arrives. |
+| A4-17 | Export the register (CSV): GET /api/events/export | api/src (see A2); client gates App.tsx:211,218 | Quality > Register (was: Readings); server gate rank 3 (EXPORT_RANK) | mapped | Absent at rank 1-2 (the 3 Sep defect). Control missing in Register mockup (G-26). Decided E-8. |
+| A4-18 | Create a user: POST /api/admin/users | api/src (see A2); client gates App.tsx:211,218 | Setup > People (was: Setup People); server gate rank 4 | mapped |  |
+| A4-19 | Edit a user (role/active): PATCH /api/admin/users/:id | api/src (see A2); client gates App.tsx:211,218 | Setup > People (was: Setup People); server gate rank 4 | mapped |  |
+| A4-20 | Reset a user's password: POST /api/admin/users/:id/password | api/src (see A2); client gates App.tsx:211,218 | Setup > People (was: Setup People); server gate rank 4 | mapped |  |
+| A4-21 | Edit the line: PUT /api/admin/line | api/src (see A2); client gates App.tsx:211,218 | Setup > Line (was: LineBlock); server gate rank 4 | mapped |  |
+| A4-22 | Add a machine: POST /api/admin/machines | api/src (see A2); client gates App.tsx:211,218 | Setup > Machines (was: MachinesBlock); server gate rank 4 | mapped |  |
+| A4-23 | Edit a machine: PUT /api/admin/machines/:id | api/src (see A2); client gates App.tsx:211,218 | Setup > Machines (was: MachinesBlock); server gate rank 4 | mapped |  |
+| A4-24 | Add a station: POST /api/admin/stations | api/src (see A2); client gates App.tsx:211,218 | Setup > Stations (was: StationsBlock); server gate rank 4 | mapped |  |
+| A4-25 | Edit a station: PUT /api/admin/stations/:id | api/src (see A2); client gates App.tsx:211,218 | Setup > Stations (was: StationsBlock); server gate rank 4 | mapped |  |
+| A4-26 | Edit a data source: PUT /api/admin/sources/:id | api/src (see A2); client gates App.tsx:211,218 | Setup > Sources (was: SourcesBlock); server gate rank 4 | mapped |  |
+| A4-27 | Edit a source table: PUT /api/admin/sources/tables/:id | api/src (see A2); client gates App.tsx:211,218 | Setup > Sources (was: SourcesBlock); server gate rank 4 | mapped |  |
+| A4-28 | Set weight rule: POST /api/admin/rules/weight | api/src (see A2); client gates App.tsx:211,218 | Setup > Rules (was: RulesBlock); server gate rank 4 | mapped | Basis wording RESERVED. |
+| A4-29 | Set shift rule: POST /api/admin/rules/shift | api/src (see A2); client gates App.tsx:211,218 | Setup > Rules (was: RulesBlock); server gate rank 4 | mapped | Shows shift-check note. |
+| A4-30 | Set plausibility rule: POST /api/admin/rules/plausibility | api/src (see A2); client gates App.tsx:211,218 | Setup > Rules (was: RulesBlock); server gate rank 4 | mapped |  |
+| A4-31 | Client-only write: UI text size (localStorage `sms.uiScale` 1 / 1.3) | sms/web/src/ui/Bar.tsx:197-221 | User menu / More | mapped | Per-viewer convenience; wrap storage in try/catch. |
+| A4-32 | Client-only write: chart height (localStorage `sms.chartH.<id>`) | sms/web/src/ui/useChartSize.ts:67 | Chart frame | mapped | Depends on G-28 (reuse vs rewrite ChartFrame). Decided E-3. |
+
+## A5. Reports: 18 types, exports, print, notes
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A5-01 | Report type `management-summary` (component Summary.tsx): read rank rank 3 read; filters none; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 1 Management summary (default) | mapped | KPIs with prior and delta, KpiShape total/rate; every KPI "IFL approval: awaiting". G-1: default card needs rank 3. |
+| A5-02 | Report type `daily` (component Daily.tsx): read rank 1; filters shift; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 2 Production by day/shift (host) | mapped | Also hosts view "By shift"; ProductChanges (F-2). |
+| A5-03 | Report type `shift` (component Shift.tsx): read rank 1; filters shift; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 2 view "By shift" inside Daily | mapped | MERGED UI-only; rt=shift stays valid; ProductChanges (F-2). |
+| A5-04 | Report type `shift-production` (component ShiftProduction.tsx): read rank 1; filters shift; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 2 Shift-wise CTS Loop Production Report | mapped | IFL title RESERVED; pass+weight rejects, each cone once (D-35); ProductChanges (F-2). |
+| A5-05 | Report type `reject` (component Reject.tsx): read rank 1; filters shift, station, product; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 3 Rejects & quality | mapped | Reasons over days. |
+| A5-06 | Report type `rejected-cones` (component RejectedCones.tsx): read rank 1; filters shift, station; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 3 List of Rejected Cones Against Weight | mapped | IFL title RESERVED. |
+| A5-07 | Report type `rejected-hangers` (component RejectedHangers.tsx): read rank 1; filters shift, station, product; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 3 Rejected Cone Hangers Report | mapped | IFL title RESERVED; flag wording "stands out in this period", never faulty. |
+| A5-08 | Report type `rejected-unknown-lifter` (component RejectedUnknownLifter.tsx): read rank 1; filters shift, product; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 3 Rejected Unknown (Lifter) Report | mapped | IFL title RESERVED. |
+| A5-09 | Report type `rejected-sacks` (component RejectedSacks.tsx): read rank 1; filters shift, product; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 3 Rejected Sack Report - Daily | mapped | IFL title RESERVED; no sack is ever called under- or overweight. |
+| A5-10 | Report type `sack-weight-summary` (component SackWeightSummary.tsx): read rank 1; filters shift, product; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 4 Sack Packing Weight Summary (host) | mapped | IFL title RESERVED; 0.1 kg bands, sample SD. |
+| A5-11 | Report type `sack` (component Sack.tsx): read rank 1; filters shift; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 4 view "Stock ledger" inside the summary | mapped | MERGED; stock takes no shift (C-170 sentence). |
+| A5-12 | Report type `sack-weight-range` (component SackWeightRange.tsx): read rank 1; filters shift, product; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 4 SPS Sack Weight Range Report | mapped | IFL title RESERVED. |
+| A5-13 | Report type `sps-packing` (component SpsPacking.tsx): read rank 1; filters shift; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 4 SPS Production Report - Count-wise Packing at Each SPS | mapped | IFL title RESERVED; landscape; "SPS 1". |
+| A5-14 | Report type `machine-product` (component MachineProduct.tsx): read rank 1; filters shift, station; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 5 Product by machine (host) | mapped | Per-machine product per shift (IFL key requirement); NOT printed (one line points to CSV); ProductChanges (F-2); X-3 gap open: prints "0 machines, 0 products" when all rows zero. |
+| A5-15 | Report type `product` (component Product.tsx): read rank 1; filters shift, station; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 5 view "One product" inside Product by machine | mapped | MERGED; C-005: filtered to one winder, sack figures blank with a sentence. |
+| A5-16 | Report type `cone-weight` (component ConeWeight.tsx): read rank 1; filters none; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 5 Cone weight (host) | mapped | Target = the period's own versioned target (targets.guard). |
+| A5-17 | Report type `station` (component Station.tsx): read rank 1; filters none; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 5 view "By station" inside Cone weight | mapped | MERGED; drift rule. |
+| A5-18 | Report type `calibration` (component Calibration.tsx): read rank 1; filters station; exports CSV/XLSX/PDF rank 3 | sms/web/src/api.ts:2539, screens/report/model.ts:16 | Reports card 5 Calibration | mapped | 10 columns; adjustments table (listAdjustments). |
+| A5-19 | Export links CSV, XLSX, PDF: rank 3, absent below, disabled until the report arrives; audited export.*; filename carries attribution; trailing rows after a blank line (not a comment header) | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | Restyling exports is a LATER phase (APPROVAL). |
+| A5-20 | Print button: disabled until data; window.print(); `no-print` hides controls | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped |  |
+| A5-21 | PrintHead masthead: "Ibrahim Fibres Limited" + plant/unit/line from header config (no hard-coded "Textile Plant 4"); degraded block when header fetch fails (never the browser clock) | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | Print layout not in mockups (G-7). Decided E-6. |
+| A5-22 | PrintDoc: executive summary, tiles, sentences, coverage, weight caveat, closing footnotes ("Page X of Y"), notes carried into exports | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | G-7. Decided E-6. |
+| A5-23 | Print CSS: reports landscape via `main:has([role="group"][aria-label="Report"])` named page; MachineProduct suppressed in print; charts fixed width, no tooltip/handle | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | The landscape selector keys off W.reports.selectorLabel; the new Reports card picker needs a first-class hook (print.landscape.guard). G-7. Decided E-6. |
+| A5-24 | "Assumed until IFL confirms" block (PendingIfl, `reports.pendingHeading`) and "Figure definitions are awaiting IFL's approval" | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | decision-needed | RESERVED rows 142/143/164 (owner picks keep vs "Working assumptions"). |
+| A5-25 | Verdict mark (the one ink fill) beside Print/Export | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped |  |
+| A5-26 | Report filter chips per type (FILTERS_BY_TYPE): a control the server would 400 is not offered | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | Reports mockup "Build your report" panel. |
+| A5-27 | Report picker groups: IFL eight in IFL's numbering (1 shift-wise CTS loop ... 8 rejected unknown lifter) vs analysis ten (reportGroups.test) | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | New 5-card layout regroups; IFL numbering for report N at position N must stay discoverable. Decided E-5. |
+| A5-28 | Report polling: 60 s when period.live else 10 min, enabled only when live; keyed by type+query | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped |  |
+| A5-29 | Empty-after-newest sentence on every report type (X-3, 17 of 18 types) | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped |  |
+| A5-30 | Shift-range header label (`periodLabel`) and PDF shift range (D-49) | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped |  |
+| A5-31 | Server PDF route (puppeteer); CSV BOM; XLSX workbook | sms/web/src/screens/Report.tsx, report/PrintDoc.tsx, PrintHead.tsx | Reports / print | mapped | Server-side, unchanged; not touched by web-next. |
+
+## A6. URL query keys, sheets, drilldown hops, legacy redirects
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A6-01 | URL key `s`: screen | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | new values today/quality/products/reports/system; old 10 values redirect | mapped |  |
+| A6-02 | URL key `p`: period key shift/today/yesterday/week/month/pick/range | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | global period chip | mapped | Default shift omitted from URL. |
+| A6-03 | URL key `from`: pick date or range start (YYYY-MM-DD or YYYY-MM-DD.shift) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | global | mapped |  |
+| A6-04 | URL key `to`: pick date or range end | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | global | mapped |  |
+| A6-05 | URL key `at`: replay instant (dev only) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | global; banner "Leave replay" | mapped | Banner not drawn (G-17). |
+| A6-06 | URL key `sheet`: overlay kind:id (station, cone, sack, reject, reason, stock) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | global overlay | mapped | `product:*` legacy -> Board. |
+| A6-07 | URL key `rf`: Register filter outsideLimits / inspectionRejects | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Quality > Register | mapped | rf=inspectionRejects seeds listing when rl absent. |
+| A6-08 | URL key `rl`: Register listing cones/sacks/rejected/inspectionRejects | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Register; gains `stock` | mapped |  |
+| A6-09 | URL key `rcs`: Register cone-state filter | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Register | mapped |  |
+| A6-10 | URL key `rp`: Register page (replace, not push) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Register | mapped |  |
+| A6-11 | URL key `st`: shared station | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Quality tabs, Reports | mapped |  |
+| A6-12 | URL key `pr`: shared product id | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Rejects, Reports, Catalogue/Limits deep link | mapped |  |
+| A6-13 | URL key `wm`: Weight chart mode dist/time (null = period-conditional default) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Quality > Weight | mapped | Mockup shows both charts; keep param working. |
+| A6-14 | URL key `wt`: Weight chart type cone/sack | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Quality > Weight | mapped |  |
+| A6-15 | URL key `jc`: Rejects reason code | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Quality > Rejects | mapped |  |
+| A6-16 | URL key `su`: Sacks unit sacks/kg | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Today (sack) | mapped |  |
+| A6-17 | URL key `sp`: Sacks history page | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | retired -> rp on Register rl=sacks | mapped |  |
+| A6-18 | URL key `rt`: Report type (18) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Reports; card derived from type | mapped | Old default (no rt) was `daily`; new default card is Management summary (rank 3). Decide what `?s=report` with no rt lands on (G-1). Decided E-1. |
+| A6-19 | URL key `rsh`: Report shift filter morning/evening/night | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Reports | mapped |  |
+| A6-20 | URL key `pt`: Product tab | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | retired -> t | mapped |  |
+| A6-21 | URL key `t`: sub-tab within a screen (NEW) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | new | mapped |  |
+| A6-22 | URL key `wall`: Wall flag (NEW) | sms/web/src/App.tsx:270-385, lib/period.ts:477-510 | Today ?wall=1 | mapped |  |
+| A6-23 | localStorage `sms.uiScale` (Desk 1 / Wall 1.3) and `sms.chartH.<id>` | sms/web/src/ui/Bar.tsx:211, ui/useChartSize.ts:67 | user menu; charts | mapped |  |
+| A6-S1 | Sheet kind `station:N` (StationSheet) | sms/web/src/App.tsx:332 | overlay | mapped | G-4/G-5 Decided E-8. |
+| A6-S2 | Sheet kind `cone:ID` (ReadingSheet) | sms/web/src/App.tsx:332 | overlay | mapped |  |
+| A6-S3 | Sheet kind `sack:ID` (ReadingSheet) | sms/web/src/App.tsx:332 | overlay | mapped |  |
+| A6-S4 | Sheet kind `reject:ID` (ReadingSheet) | sms/web/src/App.tsx:332 | overlay | mapped |  |
+| A6-S5 | Sheet kind `reason:ID` (ReasonSheet) | sms/web/src/App.tsx:332 | overlay | mapped | G-4/G-5 Decided E-8. |
+| A6-S6 | Sheet kind `stock:DAY` (StockSheet) | sms/web/src/App.tsx:332 | overlay | mapped | G-4/G-5 Decided E-8. |
+| A6-S7 | Sheet kind `product:* (deleted legacy)` (redirect only) | sms/web/src/App.tsx:332 | overlay | mapped |  |
+| A6-H01 | hop 1: Station sheet -> station's Register (st, rp reset, sheet closed) | hops.test.tsx:272 | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H02 | hop 2: Station sheet -> station's Rejects | hops.test.tsx:291 | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H03 | hop 3: Station sheet -> Calibration report (rt=calibration, st) | hops.test.tsx:310 | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H04 | hop 4: Reason sheet -> that day's Register (pick day, rf/rl=inspectionRejects) | hops.test.tsx:329 | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H05 | hop 5: Reading sheet -> Products > Catalogue (pt=catalogue, pr highlighted) | hops.test.tsx:355 | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H06 | hop 6: Weight -> "see outside limits" (rf=outsideLimits, rl=cones, no stale chip/page) | hops.test.tsx:388 | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. Control not drawn in mockup (G-8). Decided E-8. |
+| A6-H07 | hop 7: Station sheet -> Product by machine report (rt=machine-product, st) | App.tsx onSeeShiftReport | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H08 | hop 8: Reason sheet -> Reject report for the day | App.tsx onOpenReport | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H09 | hop 9: Reading sheet -> Product report for product+day (rt=product, pr, pick day) | App.tsx onOpenProductReport | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H10 | hop 10: Rejects -> Register inspectionRejects ("See the cones") | App.tsx onSeeCones | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. Control not drawn in mockup (G-9). Decided E-8. |
+| A6-H11 | hop 11: Rejects -> Weight/Stations ("By station") | App.tsx onSeeStations | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. Control not drawn in mockup (G-9). Decided E-8. |
+| A6-H12 | hop 12: Report -> Rejects with jc (onOpenCode) | App.tsx onOpenCode | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H13 | hop 13: Product tab -> station sheet / station Register (onOpenStation, onSeeStationReadings) | App.tsx | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H14 | hop 14: Today station tile -> station sheet; Today attention row -> Register rf; Today product -> Products | Line.tsx | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-H15 | hop 15: Diagnostics DQ finding -> cone/sack/reject sheet | SyncHealthBlock DqSourceLink | retargeted per IA-MAP s5 | mapped | Hop must carry state, not just switch screen. |
+| A6-L01 | Legacy redirect: `?s=line` or no `s` -> `?s=today` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L02 | Legacy redirect: `?s=readings[&rl&rf&rcs&rp&st]` -> `?s=quality&t=register` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L03 | Legacy redirect: `?s=weight[&wm&wt&st]` (+`sheet=station:N`) -> `?s=quality&t=weight` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L04 | Legacy redirect: `?s=rejects[&jc&st&pr]` -> `?s=quality&t=rejects` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L05 | Legacy redirect: `?s=sacks[&su]` -> `?s=today&su=..` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L06 | Legacy redirect: `?s=sacks&sp=N` -> `?s=quality&t=register&rl=sacks&rp=N` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L07 | Legacy redirect: `?s=sacks&sheet=stock:DAY` -> register rl=stock + same sheet | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L08 | Legacy redirect: `?s=product[&pt=running/changeover/catalogue/history][&pr]` -> `?s=products&t=board/changeover/catalogue/history` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L09 | Legacy redirect: `?sheet=product:*` -> `?s=products&t=board` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L10 | Legacy redirect: `?s=report[&rt&rsh&st&pr]` -> `?s=reports[same keys]` (4 merged types keep their rt) | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L11 | Legacy redirect: `?s=health` -> `?s=system&t=diagnostics`; `?s=setup` -> `?s=system&t=setup`; `?s=wall` -> `?s=today&wall=1` | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L12 | Legacy redirect: `p`,`from`,`to`,`at`,`sheet` pass through | IA-MAP.md s3 | parseRoute redirect (replaceState, keep every other key) | mapped | IA-MAP table verified against parseRoute/routeSearch. |
+| A6-L13 | Legacy gap: `?s=report` with NO `rt` meant `daily`; IA-MAP redirect makes it `reports` whose default card is Management summary | App.tsx:DEFAULT_ROUTE.reportType | Redirect must write rt=daily when rt absent | mapped | Not in IA-MAP s3. G-1. Decided E-1. |
+| A6-L14 | Legacy gap: `?s=weight&wt=sack` and `?s=sacks` weight charts -> Quality > Weight wt=sack (IA-MAP s2.1 row 5) but no redirect row for old sack chart anchors | IA-MAP.md s2.1 | add row | gap | Add to redirect table. |
+| A6-L15 | Legacy gap: `?s=readings&rl=sacks` (Readings sack listing) vs old `?s=sacks` history both land on Register rl=sacks | IA-MAP.md | ok | mapped | Dedupe note only. |
+
+## A7. Behaviours
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| A7-01 | Live polling: LIVE_POLL_MS 10 s; other polls 15 s - 10 min; fixed historical periods fetch once (`enabled: period.live`); tab regain refetches only when live | sms/web/src/lib/live.tsx:35-123 | web-next behaviour | mapped |  |
+| A7-02 | Plant clock only: periods resolved from /api/live (shiftDate, plantNowUtc, dataAsOfUtc), never browser time (one exception: Wall out-of-contact age) | sms/web/src/App.tsx:520 | web-next behaviour | mapped | TWO CLOCKS. |
+| A7-03 | Chart click-to-zoom: a click on a day/shift mark sets the WHOLE-page period (`p=range`, shift-snapped); Enter on keyboard; second tap on touch; station bars keep onActivate (open sheet) | sms/web/src/ui/ChartFrame.tsx | web-next behaviour | mapped | Drag-select removed everywhere (29 Sep). |
+| A7-04 | Back from zoom: history.state.zoomFrom; `zoomIsNoop` avoids dead history stop; REPLACE keeps state | sms/web/src/App.tsx:zoomTo | web-next behaviour | mapped | Control position undrawn (G-27). Decided E-8. |
+| A7-05 | Shift-range periods `p=range&from=D.shift&to=D.shift`; every period-bearing route honours them | sms/web/src/lib/period.ts | web-next behaviour | mapped |  |
+| A7-06 | Keyboard: rowKeys Enter/Space on clickable rows; Esc closes sheet, user menu, Wall; chart arrows/Enter; resize handle keyboard | sms/web/src/various | web-next behaviour | mapped |  |
+| A7-07 | a11y: skip link; `.sr-only-th` (no position property so headers keep columnheader role); aria-pressed toggles; aria-live chart readout; forced-colours selected state; focus never hidden under sticky sheet head (CSS-060) | sms/web/src/app.css, a11y.tables.spec.ts | web-next behaviour | mapped | Needs web-next Playwright equivalent. |
+| A7-08 | Empty / error / partial states: Failed(+retry), Empty, Loading, skeleton heights equal real boxes; partial failure names which part failed | sms/web/src/ui/bits.tsx | web-next behaviour | mapped | States mockup (loading, error in one chart, partial, empty). |
+| A7-09 | UI scale Desk/Wall (--ui-scale 1 / 1.3), persisted | sms/web/src/ui/Bar.tsx:197 | web-next behaviour | mapped |  |
+| A7-10 | Session renewal while in use (Wall never logs itself out); expired session -> Login | sms/api/src/auth.ts | web-next behaviour | mapped | Server-side; client handler in api.ts. |
+| A7-11 | Sheets are overlays: no remount of the screen behind (own ErrorBoundary keyed on sheet) | sms/web/src/sheet.remount.test.tsx | web-next behaviour | mapped |  |
+| A7-12 | Weight chart mode default is period-conditional (<=1 day Distribution, else Over time); explicit wm wins | sms/web/src/App.tsx:230 | web-next behaviour | mapped |  |
+| A7-13 | Pick dates / Custom range start from the period on screen, not today (X-2) | sms/web/src/ui/Bar.tsx:99-141 | web-next behaviour | mapped |  |
+| A7-14 | Empty period after newest reading says when the newest reading is (X-3) | sms/web/src/lib/period.ts periodAfterNewest | web-next behaviour | mapped | Machine-product report still open. |
+| A7-15 | Wall: out-of-contact after 3 missed polls stops "Line 3 is running"; counts stay; quiet after 20 min; bar floor 4.5 % | sms/web/src/screens/Wall.tsx:69-100 | web-next behaviour | mapped |  |
+| A7-16 | Print behaviour: no-print controls; charts fixed size; page numbers; landscape for reports; Register portrait | app.css @media print | web-next behaviour | mapped | See A5 print hook (G-7). Decided E-6. |
+| A7-17 | Fonts self-hosted woff2 (plant PC has no internet); Manrope replaces Instrument Sans | sms/web/public/fonts | web-next behaviour | mapped | Add Manrope woff2; no CDN, no npm font package (APPROVAL). |
+| A7-18 | Error handling: GET timeout 30 s; 401 handler; failed fetch never renders as zero | sms/web/src/api.ts | web-next behaviour | mapped |  |
+| A7-19 | Test/layout harness: 100+ Playwright css-NNN specs, a11y, print, login, ifl-reports, s3-* specs run against old app | sms/layout-tests/ | web-next behaviour | mapped | Which specs are re-pointed at web-next vs retired (G-37). Decided E-11. |
+
+## B1. IFL RFQ (10 lines) and scope exclusions
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B1-01 | RFQ line 1: Connectivity with PLCs, HMIs, machines, databases (state today: SQL only; PLC path out of scope (IFL Q22/Q63)) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | System > Diagnostics (plant connection and data checks) | mapped | No PLC control in UI; never claim SMS switches a winder product. |
+| B1-02 | RFQ line 2: Cone weight collection; flag weights outside limits (state today: Built) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Today, Quality > Weight, Stations, Register | mapped | Two named verdicts: scale in-range bit vs product tolerance. |
+| B1-03 | RFQ line 3: Screens to view and update product details on machines (state today: Built, PDAS writes OFF at plant) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Products & PDAS (Board, Changeover, Catalogue, Limits & History) | mapped | PDAS_WRITE_ENABLED gate; half-delivered: SMS never writes to a machine. |
+| B1-04 | RFQ line 4: History logs and trend graphs for rejected cones (state today: Built) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Quality > Rejects, Register | mapped |  |
+| B1-05 | RFQ line 5: AI-based analytics recommending calibration adjustments (state today: Built as statistics (drift, days-to-limit, ledger)) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Quality > Stations, Weight advisory, Station sheet, Reports > Calibration | mapped | Never call it AI until agreed; recommendation only; advisory not in Weight mockup (G-8) and Station sheet undrawn (G-4). Decided E-8. |
+| B1-06 | RFQ line 6: Collection and logging of all sack data (state today: Built) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Today (Sacks), Register rl=sacks, Quality > Weight wt=sack | mapped |  |
+| B1-07 | RFQ line 7: Sack stock tracking per machine (state today: NOT buildable per machine (no machine column); line-level ledger exists) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Register "Sack stock" tab | mapped | Keep wording "line stock, not per machine" (RESERVED rows 154/155). |
+| B1-08 | RFQ line 8: Comprehensive reporting, analytics, graphical dashboards (state today: Built (18 report types, PDF/Excel/CSV)) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Reports (5 cards), Today | mapped |  |
+| B1-09 | RFQ line 9: User-friendly interface, access control, data security (state today: Built; user-friendly is the standing complaint) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Whole redesign; ranks gate writes only | mapped |  |
+| B1-10 | RFQ line 10: Scalable to more machines and data points (state today: `line_id` throughout; multi-line not built) | CLAUDE.md "Requirement mapping"; memory/project-ifl-requirements.md | Setup > Line/Machines; any new UI must not hard-code 14 stations or "Line 3" | mapped | Wall renders one card per line the API reports. |
+| B1-11 | NOT requested - do not rebuild: OEE, availability, performance, downtime, stoppage clustering, MTBF/MTTR, shift-vs-shift | memory/project-ifl-requirements.md | Excluded from web-next | mapped | getDowntime/getCalibrationRules wrappers stay as unused. Time lost / stop count survive only as Daily report figures. |
+| B1-12 | Single audience: GM, managers, process engineers (no role-tiered reading); objection is density/duplication, not difficulty | memory/project-ifl-audience.md | IA principle | mapped | No two screens answer the same question (IA-MAP duplicate resolution). |
+
+## B2. IFL's eight named reports
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B2-1 | IFL report 1: "Shift-wise CTS Loop Production Report" (`rt=shift-production`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (2); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-2 | IFL report 2: "Rejected Sack Report - Daily" (`rt=rejected-sacks`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (3); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-3 | IFL report 3: "SPS Production Report - Count-wise Packing at Each SPS" (`rt=sps-packing`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (4); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-4 | IFL report 4: "SPS Sack Weight Range Report" (`rt=sack-weight-range`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (4); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-5 | IFL report 5: "Sack Packing Weight Summary" (`rt=sack-weight-summary`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (4); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-6 | IFL report 6: "List of Rejected Cones Against Weight" (`rt=rejected-cones`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (3); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-7 | IFL report 7: "Rejected Cone Hangers Report" (`rt=rejected-hangers`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (3); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-8 | IFL report 8: "Rejected Unknown (Lifter) Report" (`rt=rejected-unknown-lifter`) - title verbatim (RESERVED rows 156-163; plain subtitle may be added beneath) | CLAUDE.md "IFL's eight reports"; words.ts:2121-2128 | Reports card (3); shown with IFL title | mapped | Verbatim assumptions footers: "Assumed until IFL confirms". |
+| B2-9 | Eight reports stay discoverable in IFL's own numbering (report N at position N), existing `sack` report stays beside sack-weight-summary | model.ts REPORT_GROUPS | Reports cards | mapped | Five-card regroup breaks numbering; propose an "IFL's eight" index line/anchors (A5). Decided E-5. |
+| B2-10 | Defaults printed as assumptions: one CTS loop (hangers 1-299 shared by 14 winders); each cone counted once; weight rejection = reject record + scale bit shown beside it; weighed kg on Setup basis; sack reject = scale in-range bit 0; production day 06:00-06:00 3 shifts; SPS = PLC_sack1 as "SPS 1"; yarn count from product master; 0.1 kg bands; sample SD; hanger flag = exact binomial 5 % with >=100 cones | CLAUDE.md | Report notes + PendingIfl | mapped | All stay verbatim; exports carry notes. |
+
+## B3. IFL answers of 15 Sep 2026
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B3-01 | Q1/Q3: 14 Rieter winders; machine = station 1-14 (one concept) | memory/project-ifl-answers-sep-2026.md | Station N labels everywhere | mapped | Display form RESERVED DP-4. |
+| B3-02 | Q10: product limits changeable in admin settings; SMS owns editable, versioned limits (not only the PDAS mirror) | memory/project-ifl-answers-sep-2026.md | Products > Limits (local limits + PDAS limits) | mapped | Time-versioned: a reading is judged by limits in force at its own time. |
+| B3-03 | Q12: reject-code meanings set in settings (no predefined list) | memory/project-ifl-answers-sep-2026.md | Setup > Reject codes; Name it on Rejects | mapped | rank 2. |
+| B3-04 | Q19/40/41/43: process engineer on the floor changes products, limits, sack adjustments -> one engineer role (rank 2) | memory/project-ifl-answers-sep-2026.md | All rank-2 write controls | mapped | Roles viewer/engineer/manager/admin. |
+| B3-05 | Q24: sack weight = total (gross) weight of the sack | memory/project-ifl-answers-sep-2026.md | Sack labels | mapped |  |
+| B3-06 | Q28: "sack stock per machine" = sack PRODUCTION by shift/day/product; per machine impossible (sacks carry no machine) | memory/project-ifl-answers-sep-2026.md | Today Sacks, Reports sack cards | mapped | No per-machine sack claim. |
+| B3-07 | Q30/36: reports beautiful, Excel AND PDF, with graphics | memory/project-ifl-answers-sep-2026.md | Reports exports | mapped | Restyling exports is a later phase (APPROVAL). |
+| B3-08 | Q33/34: every report, daily and per shift | memory/project-ifl-answers-sep-2026.md | Reports (shift filter on every type that accepts it) | mapped |  |
+| B3-09 | Q35: dashboard = live data + today + shift + machine problems | memory/project-ifl-answers-sep-2026.md | Today (hero, stations, attention) | mapped |  |
+| B3-10 | Q37: no email | memory/project-ifl-answers-sep-2026.md | No mail feature | mapped |  |
+| B3-11 | Q44: as soon as possible; 10 s polling (18 min acquisition lag is IFL's) | memory/project-ifl-answers-sep-2026.md | Strip states the lag | mapped |  |
+| B3-12 | Q46-48: recommendation only, no automatic adjustment; never call it AI until agreed | memory/project-ifl-answers-sep-2026.md | Station sheet / Weight advisory wording | mapped | G-4/G-8: the advisory and station sheet are undrawn. Decided E-8. |
+| B3-13 | Q51-57: archive ingest of last 6 months (July shape, non-displacing archive generations) | memory/project-ifl-answers-sep-2026.md | Diagnostics (data batches), generation disclosures | mapped | Backend; UI shows generation disclosures only in Diagnostics and "How this is calculated". |
+| B3-14 | Q63 + PLC: no PLC communication or automation | memory/project-ifl-answers-sep-2026.md | No PLC UI | mapped |  |
+| B3-15 | Q65-70: owner supplies a PC with the software installed; plant air-gapped | memory/project-ifl-answers-sep-2026.md | Self-hosted assets, no CDN | mapped |  |
+| B3-16 | KEY: per machine, which product ran in which shift; a separate product-by-machine-by-shift report (actual from MaterialId + declared changeover + declared-vs-actual) | memory/project-ifl-answers-sep-2026.md | Reports > Machine & product (machine-product); Products > Board/Changeover | mapped | Declared-vs-actual comparison still open with owner (does the PLC take product from PDAS active flag or HMI?). |
+
+## B4. Stage 3 items (F-1, F-2, X-1..X-3, C-005) and CSS follow-ups
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B4-01 | C-005 (D-300): a Product report filtered to one winder blanks sack figures and says why (sacks carry no winder) | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Reports > Machine & product, view "One product" | mapped |  |
+| B4-02 | F-1 (D-304): Product > Running lists, for each winder not running, the last product it stamped and the time of its last cone | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Products > Board | mapped |  |
+| B4-03 | F-2 (D-305): product changes shown in product, shift-production, daily, shift and machine-product reports, timed at the first cone of the new product, including a change across the period start | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Reports cards 2 and 5 (ProductChanges) | mapped |  |
+| B4-04 | X-1 (D-301): Weight: a winder that ran several products shows a short marker; full sentence once under the table | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Quality > Stations | mapped |  |
+| B4-05 | X-2 (D-303): Custom range and Pick dates start from the period on screen, not today | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Global period panel | mapped |  |
+| B4-06 | X-3 (D-302/D-310): an empty period after the newest reading says when the newest reading is (17 of 18 types; machine-product open) | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | All screens + Reports | mapped | X-3 machine-product gap is still open in old UI: web-next must fix it (treat all-zero rows as empty). Decided E-7. |
+| B4-07 | CSS follow-up outcomes: CSS-015 quiet tile grey; CSS-019 "scroll for more machines" line; CSS-036 matrix header colour; CSS-053 "Zoomed in - Back"; CSS-073 fade at edge of sideways-scrolling tables; CSS-060 focus not under sticky head; CSS-033 dates not split | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Design-system tokens/components | decision-needed | Confirm each outcome still applies under Style C; re-baseline layout specs. |
+| B4-08 | Owner "no change" decisions (CSS-020 resize handle 10 px, CSS-030 printed blocks whole, CSS-037 860 px breakpoint, CSS-061 21-22.5 px controls) | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Superseded by new design? | decision-needed | Confirm each outcome still applies under Style C; re-baseline layout specs. |
+| B4-09 | PDAS product knowledge: SMS knows a winder's product only from its cones ("last product this winder stamped, as of its last cone"; never the moment of selection); July readings carry no product and are ignored | CLAUDE.md Stage 3; memory/project-pdas-winder-product.md | Board + reports wording | mapped |  |
+
+## B5. Non-negotiable rules
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B5-01 | ONE STATUS VOCABULARY: the scale's own in-range bit is the single flag ("Passed"/"Rejected by the scale" -> new words "Failed weight check"); product tolerance is a SECOND, separately named fact shown only when a product was in force at that reading's time (productAt.ts) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Wording rows 39-85 | mapped |  |
+| B5-02 | TWO CLOCKS: production timestamps are plant wall clock labelled UTC; app-written instants are real UTC (5 h apart); never compare unconverted (plantClock.ts) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | lib/plantClock | mapped |  |
+| B5-03 | THE DETECTORS IGNORE THE PERIOD: station drift, attention list, reject episodes run over a fixed 14 production days (trailingWindow) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Today Attention, Stations, Rejects episodes | mapped |  |
+| B5-04 | HEALTH DECISION SERVER-SIDE AND MEASURED: freshness from OLDEST source table; when not ok no screen asserts whether the line is running; lag_unknown never says stopped | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Today hero, Wall, strip | mapped |  |
+| B5-05 | NO OVER-CLAIMING: no "reduce station 7 by 9 g"; no product limits without a product; Weight headline states mean and target as two facts until basis confirmed; never call a sack under/overweight; no "AI" | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Weight, Stations, Station sheet | mapped |  |
+| B5-06 | ONE STATION TABLE in the whole app (Quality > Stations) with bias vs line AND vs target | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Quality > Stations | mapped |  |
+| B5-07 | ONE AUDIENCE: every screen open to every signed-in account; ranks gate WRITES only (+ Setup rank 4, + export rank 3); a control a role cannot use is ABSENT, not greyed | CLAUDE.md (redesign, floor-first, PDAS sections); memory | All; see G-1 for the one read gate (management-summary) | mapped |  |
+| B5-08 | A failed fetch never renders as zero/none/"no findings"; name which part failed (partial failure); keep asserting parts still known | CLAUDE.md (redesign, floor-first, PDAS sections); memory | All screens (reliability GUARD 1/1B/1C, missingField.fuzz) | mapped |  |
+| B5-09 | Never print a count the app does not have; paired figures must come from consistent polls (sheet.remount impossible-pair) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Register headline etc. | mapped |  |
+| B5-10 | PDAS: PDAS_WRITE_ENABLED gate; `disabledReason` printed verbatim; no optimistic UI; execute 503 DISABLED / 409 BLOCKED | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Products > Changeover, Catalogue, Limits | mapped |  |
+| B5-11 | Retire-and-recreate is NOT an edit (CreateMaterial refuses duplicate blend/count/tube, -7001 regardless of active flag); the only setpoint change is the guarded single-row UPDATE (Limits) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Changeover copy; Limits | mapped |  |
+| B5-12 | Limits change guard: before/after, large change (3 % / 20 g placeholders) needs a checkbox + 20-char reason; other writes need 10-char reason; optimistic-concurrency conflict | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Products > Limits, Catalogue | mapped |  |
+| B5-13 | Time-versioned limits: a reading is judged by the limits in force at its own time; targets carry inForceAtUtc or none (targets.guard); no current-product target for historical data | CLAUDE.md (redesign, floor-first, PDAS sections); memory | All target displays | mapped |  |
+| B5-14 | Sack <-> cone link is approximate and says so ("cones weighed between the previous sack and this one", never a packing list) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Reading sheet | mapped |  |
+| B5-15 | Per-station product shown as observed from cone stamps only; SMS never claims it switches a winder's product | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Board, Today tag | mapped |  |
+| B5-16 | Replay `?at=` always bannered ("Leave replay"); LIVE_ALLOW_AS_OF false in production | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Global banner | mapped |  |
+| B5-17 | Simulator disclosure: never call real rows synthetic nor simulator rows real; a failed data-batch fetch must not claim real | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Global banner, Today, Wall footer | mapped |  |
+| B5-18 | Plant is air-gapped: self-host fonts/assets (no CDN, no Google Fonts); no cloud dependency | CLAUDE.md (redesign, floor-first, PDAS sections); memory | web-next build | mapped |  |
+| B5-19 | No new libraries without asking (CLAUDE.md rule 4); custom charts + ~20 hand-drawn SVG icons | CLAUDE.md (redesign, floor-first, PDAS sections); memory | web-next build | mapped |  |
+| B5-20 | No database writes beyond existing endpoints; frontend + small API additions only; zero modification to IFL DB; derive at read time | CLAUDE.md (redesign, floor-first, PDAS sections); memory | API additions | mapped |  |
+| B5-21 | Read-only on IFL DB; parameterised queries only (API side) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | n/a UI | mapped |  |
+| B5-22 | Quiet screen must say WHY it is quiet (generation too short / newer elsewhere), but at IFL (non-overlapping generations) the sentence must NEVER appear | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Today, Wall, Diagnostics | mapped |  |
+| B5-23 | Every claim has a source and every "IFL has not confirmed" caveat is real; remove caveats only when IFL resolves them | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Wording (GLOSSARY 164) | mapped |  |
+| B5-24 | Drill-downs open as overlays and close with Escape; reader keeps filters, page and place | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Sheets | mapped |  |
+| B5-25 | Station state Act/Watch/No data is an ASSUMED default computed server-side (>2x / >1.5x line failed-inspection rate) | CLAUDE.md (redesign, floor-first, PDAS sections); memory | Today heat grid | mapped | Needs server field and small-n floor; label as assumed default (G-18). Decided E-4. |
+
+## B6. Guard tests that encode rules
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B6-01 | `api.callers.test.ts`: Every exported api.ts wrapper has a screen/lib caller or a written ALLOW_LIST entry (currently 9: getDowntime, getCalibrationRules, adminGetAudit, getRejects, getWeights, getCalibration, getCalibrationAdjustments, recordCalibrationAdjustment, getRejectSpc); ALLOW_LIST must not be stale | sms/web/src/api.callers.test.ts | web-next api.ts must pass the same scan (or carry its own list); do not delete the unused wrappers unless the endpoint goes | mapped |  |
+| B6-02 | `targets.guard.test.ts`: Current-product identifiers (nominalSetpointG, nominalSource, FALLBACK_CONE_SETPOINT_G) stay in weights.ts; report payload `target` states inForceAtUtc or a none source; lower-bound qualifier on version resolvers | sms/web/src/targets.guard.test.ts | No web-next screen may import a "now" target for a period view | mapped |  |
+| B6-03 | `reliability.guard.test.ts`: GUARD 1: every usePolling result's .error is read (or ALLOW_LIST); 1B: no `A.error ?? B.error` blur; 1C: no `?? 0` on fetched data; 2A: the exact list of `rank >=` comparisons in App.tsx (11 tokens) | sms/web/src/reliability.guard.test.ts | web-next must keep usePolling shape and update the rank-token list for the new shell in a reviewed change | mapped |  |
+| B6-04 | `print.landscape.guard.test.ts`: app.css `main:has([role=group][aria-label=...])` equals W.reports.selectorLabel | sms/web/src/print.landscape.guard.test.ts | web-next needs a first-class print hook (e.g. `main.report`) and a re-written guard (G-7) | mapped | Decided E-6. |
+| B6-05 | `print.chart.guard.test.ts`: Chart overlay classes (tooltip, handle) are hidden under @media print | sms/web/src/print.chart.guard.test.ts | Keep print rules for web-next chart frame | mapped |  |
+| B6-06 | `rank.crosscheck.test.ts`: PAIRINGS table: every client write gate constant matches the route's requireRole (ENGINEER_RANK 2, EXPORT_RANK 3, PDAS_WRITE_RANK 2 across app.ts/changeover.ts, EXPORT_MIN_RANK 3 vs EXPORT_RANK in reports); fails on stale entries | sms/web/src/rank.crosscheck.test.ts | Keep those constants; update file/line references for web-next screens | mapped |  |
+| B6-07 | `rank.matrix.test.tsx`: Mounts <App/> at ranks 1-4: 8 nav entries; Setup gear absent <4; Export absent at 1-2, present 3-4; Change/record/name/product write controls absent at rank 1 and present at 2+; ?s=setup at rank 1 shows notAllowed; ?s=health renders at rank 1 | sms/web/src/rank.matrix.test.tsx | Re-write for 5 areas: Setup tab absent <4, Diagnostics visible at rank 1; same present/absent pairs | decision-needed |  |
+| B6-08 | `hops.test.tsx`: Six hops carry state and the destination actually requests it | sms/web/src/hops.test.tsx | Rebuild for new URLs, keep all six plus hops 7-15 (A6) | mapped |  |
+| B6-09 | `App.test.ts`: 30 pure cases on parseRoute/routeSearch: defaults omitted, round-trips, legacy `product:*`, range period, zoomIsNoop | sms/web/src/App.test.ts | New route parser needs equal coverage plus the legacy redirect table | mapped |  |
+| B6-10 | `missingField.fuzz.test.tsx`: Delete one field at a time from a valid payload; screens never print a confident zero | sms/web/src/missingField.fuzz.test.tsx | Re-run against every web-next data component | mapped |  |
+| B6-11 | `sheet.remount.test.tsx`: Opening a sheet does not remount the screen; the impossible-pair headline never prints | sms/web/src/sheet.remount.test.tsx | Same | mapped |  |
+| B6-12 | `banner.provenance.test.tsx + generationQuiet.test.tsx`: Banner claim never disagrees with generation.simulator in either direction; quiet screen says why; sentence absent at IFL | sms/web/src/banner.provenance.test.tsx | Same wording on Today/Wall/Diagnostics | mapped |  |
+| B6-13 | `rt006.lagUnknown.test.tsx`: lag_unknown never renders "stopped" | sms/web/src/rt006.lagUnknown.test.tsx | Same | mapped |  |
+| B6-14 | `zoom.test.tsx`: Chart click -> shift-snapped period reaches URL; Back control only while zoomFrom set; replace keeps history.state | sms/web/src/zoom.test.tsx | Needs G-27 decision on control placement | mapped | Decided E-8. |
+| B6-15 | `reportGroups.test.ts + report/emptyAfterNewest.allTypes.test.tsx + layoutMocks.contract.test.tsx`: Every report type placed in exactly one group; empty-after-newest per type; layout mock contract | sms/web/src/reportGroups.test.ts | Adapt to cards/views | mapped |  |
+| B6-16 | `api.timeout.test.ts, layout-tests (Playwright 100+ css-NNN specs, a11y.tables, print, login-screen, ifl-reports, s3-*)`: GET timeout; real-Edge layout/print/a11y regressions | sms/web/src/api.timeout.test.ts | Decide which port to web-next (G-37) | mapped | Decided E-11. |
+| B6-17 | `API-side guards (api/src/app.rbac.test.ts, responseCap, rateDenominator agreement tests)`: Read ranks, response cap, three-way reject-rate agreement | sms/web/src/API-side | Unchanged; web-next must not add read tiers (Part B of GUARD 2) | mapped |  |
+
+## B7. Owner-reserved wording
+
+| id | item | source | new home | status | notes |
+|---|---|---|---|---|---|
+| B7-1 | Station naming DP-4 (rows 87, 88, 104): old text = configured name as label; owner picks A keep, B "Station 5 - East Conveyor" | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | stationLabel(), reports.type.station label "Machine / station" | mapped | Old text stays live until the owner picks. Decided E-9. |
+| B7-2 | Weight basis DP-1 / Q4-5 (rows 139-141): "Average recorded weight is {mean}; the product target is {target} (weight basis not yet confirmed)." and Setup label "Weight basis" | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | weight.headlineUnconfirmed/Confirmed | decision-needed | Old text stays live until the owner picks. |
+| B7-3 | "Assumed until IFL confirms" heading and "Figure definitions are awaiting IFL's approval." (rows 142, 143); "IFL has not yet said ..." sentences (row 164); product.changeLimitsPropagation (row 109) | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | reports.pendingHeading etc. | decision-needed | Old text stays live until the owner picks. |
+| B7-4 | Sack-stock words (rows 144-155): Stock ledger, line stock not per machine, Opening/Receipts/Issues/Consumption/Adjustments/Closing, Received/Issued out/Consumed/Correction, Per machine / not available, ledgerCaveat | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | sacks.* and reports.stockCol* | decision-needed | Old text stays live until the owner picks. |
+| B7-5 | IFL's eight report titles verbatim (rows 156-163) | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | reports.type.* | mapped | Old text stays live until the owner picks. Decided E-5. |
+| B7-6 | DECISIONS-PENDING 14.5.1: "about 3.8 hours" insert lag wording in CLAUDE.md / SCHEMA.md / QUESTIONS.md Q7 (docs only; UI states measured lag, row 25) | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | docs only | mapped | Record only; no UI string. |
+| B7-7 | DECISIONS-PENDING 14.5.2: CLAUDE.md and `.env` PDAS write-path comment (docs only) | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | docs only | mapped | Record only; no UI string. |
+| B7-8 | GLOSSARY says 32 RESERVED rows total; the other 134 rows are OK to apply but must not reintroduce banned nouns (Winder/Machine/Lifter as position, "Rejected by the scale", data batch/generation/epoch/simulator/source table on primary pages) | design/redesign-2026-10/GLOSSARY.md s3.6, s5; DECISIONS-PENDING.md 14.5 | words table | mapped | Record only; no UI string. |
+
+## C. GAPS and decisions: rows whose home is missing or unclear, with a proposal
+
+Ids are stable references from the rows above (numbering is sparse on purpose).
+
+| gap | kind | what is missing | rows citing it | proposed home |
+|---|---|---|---|---|
+| G-1 | mapped (decided E-1) | Management summary is the preselected default card (IA-MAP) but the SERVER gates it at rank 3 (`REPORT_RANK`, `REPORT_MIN_RANK`); a viewer/engineer would land on `W.reports.notAllowed`. Also the old default with no `rt` was `daily`, so `?s=report` redirect changes meaning. | 5 | Default the card by rank (rank<3 -> Production by day/shift, redirect writes rt=daily when rt absent); show card 1 only for rank>=3 (absent, not greyed) OR lower the server gate (owner decision, ONE AUDIENCE). |
+| G-3 | mapped (decided E-8) | Sack stock "Record a movement" form (rank 2) not in the Register mockup. | 3 | Header action on Register "Sack stock" tab, absent below rank 2, opens the existing form fields (type, day, kg/sacks, reason) in a sheet. |
+| G-4 | mapped (decided E-8) | Station sheet has no board: drift chart, daily means with click-zoom, adjustments ledger, "Record an adjustment" (rank 2), days-to-limit with 90 % range or "not established", 4 hop links, Nelson Details. | 8 | Overlay in the Quality > Stations visual language; reuse existing content order; keep recommendation-only wording. |
+| G-5 | mapped (decided E-8) | Reason sheet and Stock-day sheet have no board (Reading sheet does). | 7 | Same overlay component as Reading sheet; Reason sheet carries Name it (rank 2) and hops to Register day / Reports day; Stock sheet is one production day. |
+| G-6 | mapped (decided E-8) | System > Setup (10 sections) and System > Account have no mockup. | 10 | Setup = one scrolling page of sections under the System tab bar (as IA-MAP 2.7); People and Audit log tables; Account = single form. Build from tokens, no new patterns. |
+| G-7 | mapped (decided E-6) | Print/PDF layout (PrintHead, PrintDoc, footnotes, landscape reports, Register portrait) is absent from the mockups and the landscape selector keys off a translatable aria-label. | 6 | Keep print CSS as a separate stylesheet; add a first-class hook (`main.report`) and rewrite print.landscape.guard; confirm print stays unstyled-by-Style-C until exports restyle phase. |
+| G-8 | mapped (decided E-8) | Quality > Weight mockup lacks: sack control chart (`wt=sack`), avg sack weight per day, in-range by product, flagged-days advisory, days-to-limit, "see outside limits" hop, the Distribution/Over time toggle (both drawn), flagged-days Sparkline. | 7 | Add a Cone/Sack switch (keeps `wt`), advisory strip under the charts, and the hop link beside the outside-limits count. |
+| G-9 | mapped (decided E-8) | Rejects hops "See the cones" and "By station" not drawn. | 3 | Two text links in the Rejects hero row. |
+| G-10 | mapped (decided E-8) | Today "Last readings" (latest cone / sack / reject, each opens a sheet) not in Main mockup. | 2 | Compact "Latest" strip below Attention; rows open cone/sack/reject sheets. |
+| G-11 | mapped (decided E-9) | Station label form: stationLabel() returns the configured name; mockups show "Station 8"; RESERVED DP-4. | 1 | Owner picks A (name as label) or B ("Station 5 - East Conveyor"); implement via one function. |
+| G-12 | mapped (decided E-2) | Tab structure: IA-MAP has Limits and History as separate tabs; mockup and APPROVAL merge them as "Limits & History". | 1 | Follow APPROVAL (one tab "Limits & History", `t=limits`; `t=history` redirects to it). |
+| G-13 | mapped (decided E-8) | Phone bottom bar has a "More" entry with no defined contents; period control, Back-from-zoom, Wall, text size, sign out, System tabs on phone undefined. | 1 | More sheet: System (Diagnostics, Setup if rank 4, Account), Wall display, Text size, Sign out. |
+| G-14 | mapped (decided E-8) | Login screen has no mockup. | 4 | Single centred card, logo, username/password, server error message; same tokens. |
+| G-17 | mapped (decided E-8) | Replay banner ("Leave replay") and SimulatorBanner not designed (dev/sim only, but guard-tested). | 3 | One slim banner row above the page, one instance, same rules as today. |
+| G-18 | mapped (decided E-4) | Act/Watch/No data station state needs a server-side field (small API addition) and a small-n floor; must be suppressed when health is not ok; must not read as a repair instruction (NO OVER-CLAIMING). | 4 | Add `state` to /api/weight-stations (or attention), floor e.g. 100 inspected cones (as hangers rule), label as assumed default; spec before build. |
+| G-26 | mapped (decided E-8) | Register Export CSV (rank 3) and Print not in the Register mockup. | 4 | Export + Print buttons in Register header, Export absent below rank 3. |
+| G-27 | mapped (decided E-8) | Back-from-zoom control placement (top bar and near the chart "Zoomed in - Back") not drawn. | 3 | Keep top-bar Back and the chart-adjacent control from CSS-053. |
+| G-28 | mapped (decided E-3) | Reuse vs rewrite ChartFrame (tooltip, keyboard, resize handle, touch pin, click-zoom, print). | 2 | Port ChartFrame behaviours, restyle only; its guard tests then carry over. |
+| G-30 | mapped (decided E-8) | ErrorBoundary fallback (screen, sheet, wall retry) not designed. | 1 | One plain card with the existing copy and a retry/reload. |
+| G-35 | mapped (decided E-10) | Serving web-next at /next while redirect table is root-relative; cutover URL policy. | 1 | Define base path handling in parseRoute and API static route; at cutover add old-root redirects. |
+| G-37 | mapped (decided E-11) | Layout/a11y/print Playwright specs target the old DOM. | 2 | Port the specs that encode owner decisions or defects fixed (a11y.tables, print, css-053, css-060, s3-*); retire pure-layout ones with a note. |
+
+### C.1 Every gap / decision-needed row (generated)
+
+| id | item | status | notes |
+|---|---|---|---|
+| A1-045 | `eventsExportUrl` -> GET /api/events/export | mapped | Used by: Readings.tsx. rank 3, absent below. No Export control in Register mockup (see C-gap G-26). Decided E-8. |
+| A1-059 | `stationLabel` -> (client helper) | mapped | Used by: Line, Running, Readings, ReadingSheet, ReasonSheet, Rejects, report/{Calibration,ConeWeight,Station}, StationSheet, Weight. Returns configured name else "Station N". New rule "Station 5 - Eas Decided E-9. |
+| A1-067 | `getRejectReason` -> GET /api/rejects/reason | mapped | Used by: ReasonSheet.tsx. No Reason-sheet mockup (G-5). Decided E-8. |
+| A1-069 | `changePassword` -> POST /api/auth/password | mapped | Used by: Account.tsx (AccountSheet), Bar.tsx. No Account mockup (G-6/G-14). Decided E-8. |
+| A1-078 | `recordAdjustment` -> POST /api/calibration/adjustments | mapped | Used by: StationSheet.tsx (LogForm). rank 2; no Station-sheet mockup (G-4). Decided E-8. |
+| A1-082 | `getSackMovements` -> GET /api/sacks/movements | mapped | Used by: StockSheet.tsx. No Stock-sheet mockup (G-5). Decided E-8. |
+| A1-083 | `recordSackMovement` -> POST /api/sacks/movements | mapped | Used by: Sacks.tsx (MovementForm). rank 2; form not in Register mockup (G-3). Decided E-8. |
+| A2-020 | GET `/api/events/export` rank 3 [used by UI] | mapped | No Export control in Register mockup (G-26). Decided E-8. |
+| A2-076 | GET `/api/reports/:type` rank 1 (3 for management-summary) [used by UI] | mapped | Rank checked per type via REPORT_RANK (reports.ts:186). Decided E-1. |
+| A2-082 | GET `*` SPA catch-all + `express.static(webDist)` (production) + `/api/*` 404 | mapped | Rollout "served at /next": redirect table (IA-MAP s3) assumes root-relative `?s=` URLs; at switch the base moves. Need a rule for cold-loading /next/?s=... and for the old root URL after cutover (G-35 Decided E-10. |
+| A2-083 | NEW small API addition: per-station state Act/Watch/No data (computed server-side; >2x line failed-inspection rate = Act, >1.5x = Watch, no cones = No | mapped | Not an existing route. Spec needed: field on /api/weight-stations or /api/attention; minimum-cone floor for small n; must not be asserted when health is not ok (G-18). Decided E-4. |
+| A2-084 | NEW small API additions (anticipated): none other approved; "no database schema changes" | decision-needed | List any further additions (e.g. heat-grid silent/high-reject flags) before building; keep read-time derivation only (no migration). |
+| A3-002 | Login screen | mapped | No mockup (G-14). Decided E-8. |
+| A3-006 | Back-from-zoom button (`canGoBack`, history.state.zoomFrom) | mapped | No mockup shows it (zoom=0 hits); G-27. Decided E-8. |
+| A3-009 | Account sheet (change own password) | mapped | No mockup (G-6). G-10. Decided E-8. |
+| A3-011 | Replay banner "Leave replay" (`line.replay`, `?at=`) | mapped | No mockup (replay=0 hits); dev-only (LIVE_ALLOW_AS_OF false in production) but banner is mandatory when active (G-17). Decided E-8. |
+| A3-012 | SimulatorBanner: global "simulated data" notice; silent on Setup, Wall, non-Running Product tabs; failed /api/data-batch must not claim real | mapped | Not in design package; dev-only but guard-tested (banner.provenance.test) (G-17). Decided E-8. |
+| A3-013 | ErrorBoundary: screen-level (keyed on view), sheet-level (keyed on sheet), `wall` variant with one automatic remount after 4 s | mapped | Not in design system (0 hits). Keep behaviour; need a fallback visual (G-30). Decided E-8. |
+| A3-015 | ChartFrame: sizing, drag-resize handle (keyboard steps 20 px, persisted `sms.chartH.<id>`), floating tooltip, keyboard nav, touch-pin, click-to-zoom,  | mapped | APPROVAL: no new libraries, custom charts. Reuse or rewrite ChartFrame? The brush was deliberately removed (click-to-zoom only). G-28. Decided E-3. |
+| A3-021 | words.ts / strings.ts central copy table (`W`) | decision-needed | GLOSSARY rewrites 138 rows; 32 RESERVED rows stay verbatim. Keep one central table (Urdu pass anticipated). |
+| A3-030 | Line: Last readings (LastReadings) + Details | mapped | Not in Main mockup (0 "Last cone/readings" hits outside PdasBoard). Propose a compact "Latest cone / sack / failed" strip. G-10. Decided E-8. |
+| A3-034 | Weight: sack control chart (`wt=sack`) | mapped | QualityWeight mockup has no sack content (sack=0 hits). G-8. Decided E-8. |
+| A3-035 | Weight: flagged-days advisory, days-to-limit (90% range or "not established"), Sparkline | mapped | No advisory in mockup; RT-020 wording must stay (G-8). Decided E-8. |
+| A3-036 | Weight: "see outside limits" hop (`rf=outsideLimits`) | mapped | No hop control in mockup (G-8). Decided E-8. |
+| A3-043 | Rejects: "See the cones" hop (rf/rl=inspectionRejects), "By station" hop | mapped | Hops not in mockup (G-9). Decided E-8. |
+| A3-046 | Sacks: average sack weight per day, in-range by product | mapped | Not in mockup (G-8). Decided E-8. |
+| A3-048 | Sacks: "Record a movement" form (rank 2) | mapped | Form not drawn (G-3). Decided E-8. |
+| A3-054 | Readings: Export CSV (rank 3, absent below) | mapped | G-26. Decided E-8. |
+| A3-055 | Readings: Print (PrintHead degraded block) | mapped | Print layout absent from mockups (G-7). Known gap: prints while rows still loading. Decided E-6. |
+| A3-057 | ReasonSheet: per-day-per-code table, Name it (rank 2), hops to Register day / Reports reject day / reject sheet | mapped | G-5. Decided E-8. |
+| A3-058 | StockSheet: one production day of sack stock | mapped | G-5. Decided E-8. |
+| A3-059 | StationSheet: drift, DailyMeans chart (click-zoom), adjustments ledger, LogForm (rank 2), days-to-limit, 4 hop links, Nelson Details | mapped | G-4. Decided E-8. |
+| A3-066 | Setup: LineBlock | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-067 | Setup: MachinesBlock | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-068 | Setup: StationsBlock | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-069 | Setup: SourcesBlock | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-070 | Setup: RulesBlock | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-071 | Setup: RejectCodesBlock | mapped | No Setup mockup (G-6). rank 4 (RejectCodes write rank 2). Decided E-8. |
+| A3-072 | Setup: People (list, create, role/active toggle, reset password) and AuditLog (paged) | mapped | G-6. Server has no self-protection on PATCH users (Setup.tsx:134): client guard must stay. Decided E-8. |
+| A4-01 | Sign in: POST /api/auth/login | mapped | Wrong credentials: server message; no account creation by agents. Login not drawn (G-14). Decided E-8. |
+| A4-03 | Change own password: POST /api/auth/password | mapped | Response includes other sessions revoked count. Account not drawn (G-6). Decided E-8. |
+| A4-12 | Record a calibration adjustment: POST /api/calibration/adjustments | mapped | Recommendation only; SMS never adjusts a scale (IFL Q46-48). Station sheet not drawn (G-4). Decided E-8. |
+| A4-14 | Record a sack stock movement: POST /api/sacks/movements | mapped | Type words RESERVED. Form not drawn (G-3). Decided E-8. |
+| A4-17 | Export the register (CSV): GET /api/events/export | mapped | Absent at rank 1-2 (the 3 Sep defect). Control missing in Register mockup (G-26). Decided E-8. |
+| A4-32 | Client-only write: chart height (localStorage `sms.chartH.<id>`) | mapped | Depends on G-28 (reuse vs rewrite ChartFrame). Decided E-3. |
+| A5-21 | PrintHead masthead: "Ibrahim Fibres Limited" + plant/unit/line from header config (no hard-coded "Textile Plant 4"); degraded block when header fetch  | mapped | Print layout not in mockups (G-7). Decided E-6. |
+| A5-22 | PrintDoc: executive summary, tiles, sentences, coverage, weight caveat, closing footnotes ("Page X of Y"), notes carried into exports | mapped | G-7. Decided E-6. |
+| A5-23 | Print CSS: reports landscape via `main:has([role="group"][aria-label="Report"])` named page; MachineProduct suppressed in print; charts fixed width, n | mapped | The landscape selector keys off W.reports.selectorLabel; the new Reports card picker needs a first-class hook (print.landscape.guard). G-7. Decided E-6. |
+| A5-24 | "Assumed until IFL confirms" block (PendingIfl, `reports.pendingHeading`) and "Figure definitions are awaiting IFL's approval" | decision-needed | RESERVED rows 142/143/164 (owner picks keep vs "Working assumptions"). |
+| A5-27 | Report picker groups: IFL eight in IFL's numbering (1 shift-wise CTS loop ... 8 rejected unknown lifter) vs analysis ten (reportGroups.test) | mapped | New 5-card layout regroups; IFL numbering for report N at position N must stay discoverable. Decided E-5. |
+| A6-18 | URL key `rt`: Report type (18) | mapped | Old default (no rt) was `daily`; new default card is Management summary (rank 3). Decide what `?s=report` with no rt lands on (G-1). Decided E-1. |
+| A6-S1 | Sheet kind `station:N` (StationSheet) | mapped | G-4/G-5 Decided E-8. |
+| A6-S5 | Sheet kind `reason:ID` (ReasonSheet) | mapped | G-4/G-5 Decided E-8. |
+| A6-S6 | Sheet kind `stock:DAY` (StockSheet) | mapped | G-4/G-5 Decided E-8. |
+| A6-H06 | hop 6: Weight -> "see outside limits" (rf=outsideLimits, rl=cones, no stale chip/page) | mapped | Hop must carry state, not just switch screen. Control not drawn in mockup (G-8). Decided E-8. |
+| A6-H10 | hop 10: Rejects -> Register inspectionRejects ("See the cones") | mapped | Hop must carry state, not just switch screen. Control not drawn in mockup (G-9). Decided E-8. |
+| A6-H11 | hop 11: Rejects -> Weight/Stations ("By station") | mapped | Hop must carry state, not just switch screen. Control not drawn in mockup (G-9). Decided E-8. |
+| A6-L13 | Legacy gap: `?s=report` with NO `rt` meant `daily`; IA-MAP redirect makes it `reports` whose default card is Management summary | mapped | Not in IA-MAP s3. G-1. Decided E-1. |
+| A6-L14 | Legacy gap: `?s=weight&wt=sack` and `?s=sacks` weight charts -> Quality > Weight wt=sack (IA-MAP s2.1 row 5) but no redirect row for old sack chart an | gap | Add to redirect table. |
+| A7-04 | Back from zoom: history.state.zoomFrom; `zoomIsNoop` avoids dead history stop; REPLACE keeps state | mapped | Control position undrawn (G-27). Decided E-8. |
+| A7-16 | Print behaviour: no-print controls; charts fixed size; page numbers; landscape for reports; Register portrait | mapped | See A5 print hook (G-7). Decided E-6. |
+| A7-19 | Test/layout harness: 100+ Playwright css-NNN specs, a11y, print, login, ifl-reports, s3-* specs run against old app | mapped | Which specs are re-pointed at web-next vs retired (G-37). Decided E-11. |
+| B1-05 | RFQ line 5: AI-based analytics recommending calibration adjustments (state today: Built as statistics (drift, days-to-limit, ledger)) | mapped | Never call it AI until agreed; recommendation only; advisory not in Weight mockup (G-8) and Station sheet undrawn (G-4). Decided E-8. |
+| B2-9 | Eight reports stay discoverable in IFL's own numbering (report N at position N), existing `sack` report stays beside sack-weight-summary | mapped | Five-card regroup breaks numbering; propose an "IFL's eight" index line/anchors (A5). Decided E-5. |
+| B3-12 | Q46-48: recommendation only, no automatic adjustment; never call it AI until agreed | mapped | G-4/G-8: the advisory and station sheet are undrawn. Decided E-8. |
+| B4-06 | X-3 (D-302/D-310): an empty period after the newest reading says when the newest reading is (17 of 18 types; machine-product open) | mapped | X-3 machine-product gap is still open in old UI: web-next must fix it (treat all-zero rows as empty). Decided E-7. |
+| B4-07 | CSS follow-up outcomes: CSS-015 quiet tile grey; CSS-019 "scroll for more machines" line; CSS-036 matrix header colour; CSS-053 "Zoomed in - Back"; CS | decision-needed | Confirm each outcome still applies under Style C; re-baseline layout specs. |
+| B4-08 | Owner "no change" decisions (CSS-020 resize handle 10 px, CSS-030 printed blocks whole, CSS-037 860 px breakpoint, CSS-061 21-22.5 px controls) | decision-needed | Confirm each outcome still applies under Style C; re-baseline layout specs. |
+| B5-25 | Station state Act/Watch/No data is an ASSUMED default computed server-side (>2x / >1.5x line failed-inspection rate) | mapped | Needs server field and small-n floor; label as assumed default (G-18). Decided E-4. |
+| B6-04 | `print.landscape.guard.test.ts`: app.css `main:has([role=group][aria-label=...])` equals W.reports.selectorLabel | mapped |  |
+| B6-07 | `rank.matrix.test.tsx`: Mounts <App/> at ranks 1-4: 8 nav entries; Setup gear absent <4; Export absent at 1-2, present 3-4; Change/record/name/product | decision-needed |  |
+| B6-14 | `zoom.test.tsx`: Chart click -> shift-snapped period reaches URL; Back control only while zoomFrom set; replace keeps history.state | mapped |  |
+| B6-16 | `api.timeout.test.ts, layout-tests (Playwright 100+ css-NNN specs, a11y.tables, print, login-screen, ifl-reports, s3-*)`: GET timeout; real-Edge layou | mapped |  |
+| B7-1 | Station naming DP-4 (rows 87, 88, 104): old text = configured name as label; owner picks A keep, B "Station 5 - East Conveyor" | mapped | Old text stays live until the owner picks. Decided E-9. |
+| B7-2 | Weight basis DP-1 / Q4-5 (rows 139-141): "Average recorded weight is {mean}; the product target is {target} (weight basis not yet confirmed)." and Set | decision-needed | Old text stays live until the owner picks. |
+| B7-3 | "Assumed until IFL confirms" heading and "Figure definitions are awaiting IFL's approval." (rows 142, 143); "IFL has not yet said ..." sentences (row  | decision-needed | Old text stays live until the owner picks. |
+| B7-4 | Sack-stock words (rows 144-155): Stock ledger, line stock not per machine, Opening/Receipts/Issues/Consumption/Adjustments/Closing, Received/Issued ou | decision-needed | Old text stays live until the owner picks. |
+| B7-5 | IFL's eight report titles verbatim (rows 156-163) | mapped | Old text stays live until the owner picks. Decided E-5. |
+
+## E. Decisions, 13 Oct 2026 (orchestrator, under owner's "go with your recommendations")
+
+Rows in A, B and C that cited these gaps were changed from gap / decision-needed to **mapped** with a note "Decided E-n". Section D counts below are recomputed from the rows.
+
+| id | gap | decision |
+|---|---|---|
+| E-1 | G-1 | Management summary keeps server rank 3 to read. Reports landing preselects it for rank 3 and above, Daily otherwise. `?s=report` with no `rt` redirects with `rt=daily`. |
+| E-2 | G-12, IA-MAP | One tab "Limits & History" under Products & PDAS (as in the approved mockup). IA-MAP updated accordingly later. |
+| E-3 | G-28 | Reuse the existing ChartFrame / chart.tsx via a bridge, restyled by classes. |
+| E-4 | G-18 | Station state small-n floor: fewer than 50 cones in the period never gives Watch or Act; state is ok with reason "Too few cones to judge (under 50)"; 0 cones gives nodata. Assumed default, flagged `assumed:true`. Health not ok does not suppress period states (they describe historical data); only "running" claims are suppressed, as today. |
+| E-5 | B2-9 | IFL's eight report titles verbatim; within each card, variants are listed in IFL's numbering order. |
+| E-6 | G-7 | web-next gets its own print CSS keyed to a stable class hook (e.g. `main.report-print`), not an aria-label; the print guard tests are ported. |
+| E-7 | X-3 | The machine-product empty period must say the period is empty in web-next (all-zero rows treated as empty); verified in parity. |
+| E-8 | G-3, 4, 5, 6, 8, 9, 10, 13, 14, 17, 26, 27, 30 | Built from the approved design-system components without new mockups; the owner reviews live at /next. Phone "More" = Register, Diagnostics, Setup (rank 4), Account, Sign out. |
+| E-9 | G-11, B7 reserved wording | Reserved wording unchanged; station label layout "Station N - <name>" uses the existing name string verbatim. |
+| E-10 | G-35 | The legacy redirect applies to query strings under /next/ as well as at switch-over root. |
+| E-11 | G-37 | All Playwright layout specs that cover a screen in web-next get a web-next variant in phase F via the login-free harness. |
+
+## D. Summary
+
+| section | rows | mapped | gap | decision-needed |
+|---|---|---|---|---|
+| A1 | 97 | 97 | 0 | 0 |
+| A2 | 84 | 83 | 0 | 1 |
+| A3 | 80 | 79 | 0 | 1 |
+| A4 | 32 | 32 | 0 | 0 |
+| A5 | 31 | 30 | 0 | 1 |
+| A6 | 60 | 59 | 1 | 0 |
+| A7 | 19 | 19 | 0 | 0 |
+| B1 | 12 | 12 | 0 | 0 |
+| B2 | 10 | 10 | 0 | 0 |
+| B3 | 16 | 16 | 0 | 0 |
+| B4 | 9 | 7 | 0 | 2 |
+| B5 | 25 | 25 | 0 | 0 |
+| B6 | 17 | 16 | 0 | 1 |
+| B7 | 8 | 5 | 0 | 3 |
+| **total** | **500** | **490** | **1** | **9** |
+
+Inventory counts used: 90 exported functions + 7 exported constants in `api.ts`; 81 API routes (+ SPA catch-all and 2 anticipated additions); 80 component rows; 30 write-type actions (A4-01..30, 2 client-only extras); 18 report types; 22 URL keys (20 existing + `t`, `wall`), 7 sheet kinds, 15 hops, 12 legacy redirects (+3 notes/gaps); 10 RFQ lines; 8 IFL reports; 16 IFL answers; 25 rules; 17 guard-test rows; 8 reserved-wording groups.
+
+NOT verified: nothing was run (no servers, DB, browser); the mockups were inspected as text only; line numbers were not re-checked after reading.

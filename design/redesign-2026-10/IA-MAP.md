@@ -25,9 +25,11 @@ Products & PDAS           s=products
   Catalogue               t=catalogue
   Limits                  t=limits      (new tab, assembled from Catalogue + Setup > Rules)
   History                 t=history
+  NOTE (decided E-2, 13 Oct 2026, TRACE.md section E): Limits and History are ONE tab "Limits & History" (t=limits); t=history redirects to it.
 Reports                   s=reports
   5 cards (the card is derived from rt, never stored in the URL):
   1 Management summary    (default, preselected)
+                          NOTE (decided E-1, TRACE.md section E): server reads at rank 3; preselected for rank >= 3, Daily otherwise; ?s=report with no rt redirects with rt=daily.
   2 Production by day / shift
   3 Rejects & quality
   4 Sacks
