@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { U } from './strings';
+import { C } from '../copy';
 import './components/Toast.css';
 
 export interface ToastOptions {
@@ -48,7 +48,7 @@ function ToastView({ item, onDone }: { item: Item; onDone: (id: number) => void 
       )}
       {sticky && (
         <button type="button" className="ui-toast__btn" onClick={() => onDone(item.id)}>
-          {U.dismiss}
+          {C.ui.dismiss}
         </button>
       )}
     </div>

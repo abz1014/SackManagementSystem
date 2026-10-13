@@ -15,13 +15,6 @@ export interface StationItem {
   product: string | null;
 }
 
-const S = {
-  failed: 'failed inspection',
-  cones: (n: number) => `${n.toLocaleString('en-GB')} cones`,
-  noProduct: 'No product',
-  vsTarget: (g: number) => `${g > 0 ? '+' : g < 0 ? '-' : ''}${Math.abs(g)} g vs target`,
-};
-
 export function stationText(s: Pick<StationItem, 'station' | 'name'>): string {
   return s.name ? C.stationWithName(s.station, s.name) : C.station(s.station);
 }
@@ -56,12 +49,12 @@ export const StationTile = forwardRef<HTMLButtonElement, StationTileProps>(funct
         {nodata || item.failedPct == null ? C.state.noData : `${item.failedPct.toFixed(1)}%`}
       </span>
       <span className="tile-small">
-        {nodata ? C.noCones : `${S.failed} · ${S.cones(item.cones)}`}
+        {nodata ? C.noCones : `${C.stationUi.failedInspection.toLowerCase()} · ${C.stationUi.cones(item.cones)}`}
       </span>
       {!nodata && (
         <span className="tile-small">
-          {item.vsTargetG != null ? `${S.vsTarget(item.vsTargetG)} · ` : ''}
-          {item.product ?? S.noProduct}
+          {item.vsTargetG != null ? `${C.stationUi.vsTarget(item.vsTargetG)} · ` : ''}
+          {item.product ?? C.stationUi.noProduct}
         </span>
       )}
       <span className="tile-state-word">{STATE_WORD[item.state]}</span>

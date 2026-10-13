@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
-import { C } from '../copy';
-import { U } from './strings';
+import { C, DIAGNOSTICS_HREF } from '../copy';
 import './components/ErrorState.css';
 
 export interface ErrorStateProps {
@@ -18,14 +17,14 @@ export interface ErrorStateProps {
   minHeight?: number | string;
 }
 
-export function ErrorState({ part, cause, title, onRetry, attempts = 1, diagnosticsHref = U.diagnosticsHref, minHeight }: ErrorStateProps) {
+export function ErrorState({ part, cause, title, onRetry, attempts = 1, diagnosticsHref = DIAGNOSTICS_HREF, minHeight }: ErrorStateProps) {
   return (
     <div className="ui-error" role="alert" style={minHeight !== undefined ? { minHeight } : undefined}>
       <p className="ui-error__title">
         <span className="ui-error__glyph" aria-hidden="true" />
         {title ?? C.couldntLoad(part)}
       </p>
-      <p className="ui-error__cause">{cause ?? U.serverSilent}</p>
+      <p className="ui-error__cause">{cause ?? C.ui.serverSilent}</p>
       <div className="ui-error__actions">
         {onRetry && (
           <button type="button" className="ui-btn" onClick={onRetry}>
@@ -34,7 +33,7 @@ export function ErrorState({ part, cause, title, onRetry, attempts = 1, diagnost
         )}
         {attempts >= 2 && (
           <a className="ui-link" href={diagnosticsHref}>
-            {U.checkDiagnostics}
+            {C.ui.checkDiagnostics}
           </a>
         )}
       </div>

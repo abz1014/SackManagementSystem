@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { U } from './strings';
+import { C } from '../copy';
 import { useMediaQuery } from './useMediaQuery';
 import './components/DataTable.css';
 
@@ -101,10 +101,10 @@ export function DataTable<T>(p: DataTableProps<T>) {
 
   const footer = (
     <div className="ui-dt__foot">
-      {rows.length > 0 && <span className="ui-dt__range">{U.showingRange(1, rows.length, p.total)}</span>}
+      {rows.length > 0 && <span className="ui-dt__range">{C.ui.showingRange(1, rows.length, p.total)}</span>}
       {p.hasMore && p.onLoadMore && (
         <button type="button" className="ui-btn" onClick={p.onLoadMore} disabled={p.loadingMore}>
-          {p.loadingMore ? U.loadingMore : U.loadMore}
+          {p.loadingMore ? C.ui.loadingMore : C.ui.loadMore}
         </button>
       )}
     </div>
@@ -210,7 +210,7 @@ export function DataTable<T>(p: DataTableProps<T>) {
         </div>
         {cue && <div className="ui-dt__fade" aria-hidden="true" />}
       </div>
-      {cue && <div className="ui-dt__cue">{U.scrollForMore}</div>}
+      {cue && <div className="ui-dt__cue">{C.ui.scrollForMore}</div>}
       {footer}
     </div>
   );
@@ -255,7 +255,7 @@ function CardRow<T>({
             setAll(true);
           }}
         >
-          {U.showAll}
+          {C.ui.showAll}
         </button>
       )}
     </div>

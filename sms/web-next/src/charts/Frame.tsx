@@ -6,8 +6,8 @@
  * A failed fetch never draws a plot.
  */
 import { useId, useState, type ReactNode } from 'react';
+import { C } from '../copy';
 import { ChartFrame, type ChartFrameProps } from '../bridge/chart';
-import { CHART_COPY } from './chartCopy';
 import { TableView, type TableData } from './TableView';
 import type { ChartStatus } from './types';
 
@@ -54,11 +54,11 @@ export function ChartError({ part, onRetry, height }: { part: string; onRetry?: 
   return (
     <div className="ck-state ck-error" style={{ minHeight: height }} role="alert">
       <p>
-        <span className="ck-act-glyph" aria-hidden="true" /> {CHART_COPY.couldntLoad(part)}
+        <span className="ck-act-glyph" aria-hidden="true" /> {C.couldntLoad(part)}
       </p>
       {onRetry && (
         <button type="button" className="ck-btn" onClick={onRetry}>
-          {CHART_COPY.tryAgain}
+          {C.tryAgain}
         </button>
       )}
     </div>
@@ -94,17 +94,17 @@ export function Frame(p: FrameProps) {
         <span className="ck-unit">{p.unit}</span>
         {status === 'ready' && (
           <button type="button" className="ck-toggle no-print" aria-pressed={asTable} onClick={() => setAsTable((v) => !v)}>
-            {asTable ? CHART_COPY.showAsChart : CHART_COPY.showAsTable}
+            {asTable ? C.chart.showAsChart : C.chart.showAsTable}
           </button>
         )}
       </header>
       {status === 'ready' && p.legend && <Legend items={p.legend} />}
-      {status === 'loading' && <div className="skel ck-skel" style={{ height: h }} role="status" aria-label={CHART_COPY.loading} />}
+      {status === 'loading' && <div className="skel ck-skel" style={{ height: h }} role="status" aria-label={C.chart.loading} />}
       {status === 'error' && <ChartError part={p.errorPart ?? p.title} onRetry={p.onRetry} height={h} />}
-      {status === 'empty' && <ChartEmpty message={p.emptyMessage ?? CHART_COPY.nothingInPeriod} action={p.emptyAction} height={h} />}
+      {status === 'empty' && <ChartEmpty message={p.emptyMessage ?? C.nothingInPeriodNoNewest} action={p.emptyAction} height={h} />}
       {status === 'ready' &&
         (asTable ? (
-          <TableView caption={CHART_COPY.tableCaption(p.title)} data={p.table} />
+          <TableView caption={C.chart.tableCaption(p.title)} data={p.table} />
         ) : (
           <ChartFrame chartId={p.chartId} defaultH={h} caption={p.caption} ariaLabel={`${p.title}, ${p.unit}`} {...p.frame} />
         ))}

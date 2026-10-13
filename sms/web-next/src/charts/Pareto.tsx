@@ -6,11 +6,11 @@
  * "vital few" cut comes from the shared `lib/pareto` (no arithmetic here).
  */
 import { useRef } from 'react';
+import { C } from '../copy';
 import { pareto } from '../bridge/lib';
 import { bandHit, gridValues, leftGutterFor, linear, linePath, niceDomain, type ChartTip } from '../bridge/chart';
 import { XLabels, YAxis } from './Axes';
 import { barPath } from './BarChart';
-import { CHART_COPY } from './chartCopy';
 import { Frame, type LegendItem } from './Frame';
 import { defaultFormat, type ChartCommonProps, type Margins } from './types';
 
@@ -46,7 +46,7 @@ export function Pareto(p: ParetoProps) {
 
   const legend: LegendItem[] = [
     { name: `${p.title.split(' (')[0] ?? 'Rejects'}`, color: 'var(--bar-from)' },
-    { name: CHART_COPY.cumulative, color: 'var(--cat-2)', shape: 'line' },
+    { name: C.chart.cumulative, color: 'var(--cat-2)', shape: 'line' },
   ];
   legend[0]!.name = `Count (${p.unit})`;
 
@@ -57,7 +57,7 @@ export function Pareto(p: ParetoProps) {
       heading: r.label,
       rows: [
         { name: 'Count', value: `${fmt(r.count)} ${p.unit}`, mark: 'ink' },
-        { name: CHART_COPY.cumulative, value: `${fmt(r.cumulativePct)} %`, mark: 'graphite' },
+        { name: C.chart.cumulative, value: `${fmt(r.cumulativePct)} %`, mark: 'graphite' },
       ],
     };
   };
@@ -67,7 +67,7 @@ export function Pareto(p: ParetoProps) {
       chartId={p.chartId}
       title={p.title}
       unit={p.unit}
-      caption={p.caption ?? (n > 0 ? CHART_COPY.vitalFew(vital, n) : undefined)}
+      caption={p.caption ?? (n > 0 ? C.chart.vitalFew(vital, n) : undefined)}
       status={status}
       errorPart={p.errorPart}
       onRetry={p.onRetry}
@@ -76,7 +76,7 @@ export function Pareto(p: ParetoProps) {
       defaultH={p.defaultH}
       legend={legend}
       table={{
-        columns: ['', `Count (${p.unit})`, CHART_COPY.cumulativeAxis],
+        columns: ['', `Count (${p.unit})`, C.chart.cumulativeAxis],
         rows: p.rows.map((r) => [r.label, fmt(r.count), fmt(r.cumulativePct)]),
       }}
       frame={{
@@ -113,7 +113,7 @@ export function Pareto(p: ParetoProps) {
                 scale={g.yR}
                 margins={g.m}
                 width={width}
-                unit={CHART_COPY.cumulativeAxis}
+                unit={C.chart.cumulativeAxis}
                 side="right"
                 ticks={[0, 25, 50, 75, 100]}
                 format={(v) => `${v}`}

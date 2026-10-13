@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
+import { C } from '../copy';
 import { Icon } from './Icon';
-import { WS } from './writeStrings';
 import './components/write.css';
 
 export interface WizardStep {
@@ -22,12 +22,12 @@ export interface WizardProps {
 }
 
 /** Plan, Review, Execute. Completed steps can be revisited; later ones cannot be jumped to. */
-export function Wizard({ steps, current, onStep, nextBlockedReason, finalAction, nextLabel = WS.next, children }: WizardProps) {
+export function Wizard({ steps, current, onStep, nextBlockedReason, finalAction, nextLabel = C.write.next, children }: WizardProps) {
   const last = current >= steps.length - 1;
   const blocked = !!nextBlockedReason;
   return (
     <div className="wr-wizard">
-      <ol className="wr-steps" aria-label={WS.stepsLabel}>
+      <ol className="wr-steps" aria-label={C.write.stepsLabel}>
         {steps.map((s, i) => {
           const done = i < current;
           const here = i === current;
@@ -42,9 +42,9 @@ export function Wizard({ steps, current, onStep, nextBlockedReason, finalAction,
           );
         })}
       </ol>
-      <div className="wr-wizard__panel" role="group" aria-label={WS.stepOf(current + 1, steps.length)}>{children}</div>
+      <div className="wr-wizard__panel" role="group" aria-label={C.write.stepOf(current + 1, steps.length)}>{children}</div>
       <div className="wr-wizard__nav">
-        {current > 0 && <button type="button" className="wr-btn" onClick={() => onStep(current - 1)}>{WS.back}</button>}
+        {current > 0 && <button type="button" className="wr-btn" onClick={() => onStep(current - 1)}>{C.write.back}</button>}
         <span className="wr-wizard__spacer" />
         {last ? finalAction : (
           <>

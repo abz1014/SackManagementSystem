@@ -1,14 +1,9 @@
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { C } from '../copy';
 import { StationTile, type StationItem } from './StationTile';
 import '../components/state.css';
 
 const RANK = { act: 0, watch: 1, nodata: 2, ok: 3 } as const;
-
-const S = {
-  worst: 'Worst first',
-  byNumber: 'By station number',
-  aria: 'Stations',
-};
 
 /** Order only: the state of each tile is whatever the server said. */
 export function sortStations(items: StationItem[], by: 'worst' | 'number'): StationItem[] {
@@ -85,13 +80,13 @@ export function StationHeatGrid({ stations, onOpen, sort = 'worst' }: StationHea
     <div className="heat">
       <div className="heat-bar">
         <button type="button" className="heat-toggle" aria-pressed={by === 'number'} onClick={() => setBy(by === 'worst' ? 'number' : 'worst')}>
-          {by === 'worst' ? S.byNumber : S.worst}
+          {by === 'worst' ? C.stationUi.byNumber : C.stationUi.worstFirst}
         </button>
       </div>
       <div
         className="heat-grid"
         role="group"
-        aria-label={S.aria}
+        aria-label={C.stationUi.stations}
         onKeyDown={onKey}
         onMouseEnter={() => setFrozen(ids)}
         onMouseLeave={() => setFrozen(null)}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { C } from '../copy';
 import { createPortal } from 'react-dom';
 import type { SheetKind, SheetRef } from '../route';
-import { U } from './strings';
 import './components/Sheet.css';
 
 export interface SheetProps {
@@ -76,7 +76,7 @@ export function Sheet({ sheet, kind, open, onClose, title, status, width = 480, 
             {title}
           </h2>
           {status}
-          <button type="button" className="ui-sheet__close" onClick={onClose} aria-label={U.close}>
+          <button type="button" className="ui-sheet__close" onClick={onClose} aria-label={C.ui.close}>
             <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
               <path d="M5 5l10 10M15 5L5 15" />
             </svg>

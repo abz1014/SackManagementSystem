@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { C, FRAGMENTS } from '../copy';
 import { createPortal } from 'react-dom';
 import { period as P, fmt } from '../bridge/lib';
 import type { PeriodState } from '../data/usePeriod';
 import { Segmented } from './Segmented';
 import { Sheet } from './Sheet';
 import { useMediaQuery } from './useMediaQuery';
-import { PS } from './period/strings';
 import './components/shared.css';
 import './components/period.css';
 
@@ -54,10 +54,10 @@ function refs(d: Draft): { from: P.ShiftRef; to: P.ShiftRef } {
 
 /** Why the draft cannot be applied, or null. Order is checked by the bridged range decoder. */
 function invalidReason(d: Draft): string | null {
-  if (!P.isRealDate(d.fd)) return PS.needStart;
-  if (!P.isRealDate(d.td)) return PS.needEnd;
+  if (!P.isRealDate(d.fd)) return C.periodUi.needStart;
+  if (!P.isRealDate(d.td)) return C.periodUi.needEnd;
   const r = refs(d);
-  return P.decodeRangeParams(P.encodeShiftRef(r.from), P.encodeShiftRef(r.to)) ? null : PS.endBeforeStart;
+  return P.decodeRangeParams(P.encodeShiftRef(r.from), P.encodeShiftRef(r.to)) ? null : C.periodUi.endBeforeStart;
 }
 
 function longDate(date: string): string {
@@ -73,7 +73,7 @@ function ShiftSelect({ id, label, value, onChange }: { id: string; label: string
       <select id={id} className="pp-input" value={value} onChange={(e) => onChange(e.target.value as ShiftChoice)}>
         {(['whole', 'morning', 'evening', 'night'] as const).map((k) => (
           <option key={k} value={k}>
-            {PS.shifts[k]}
+            {C.periodUi.shifts[k]}
           </option>
         ))}
       </select>
@@ -120,13 +120,13 @@ function PanelOpen({ onClose, state, anchor, maxDate }: Omit<PeriodPanelProps, '
   const samePick = (p: P.PeriodParams | null) => !!p && P.samePeriodParams(params, p);
 
   const presets: Array<{ id: string; label: string; pressed: boolean; run: (() => void) | null }> = [
-    { id: 'shift', label: PS.presets.shift, pressed: params.key === 'shift', run: () => go({ key: 'shift' }) },
-    { id: 'today', label: PS.presets.today, pressed: params.key === 'today', run: () => go({ key: 'today' }) },
-    { id: 'yesterday', label: PS.presets.yesterday, pressed: params.key === 'yesterday', run: () => go({ key: 'yesterday' }) },
-    { id: 'week', label: PS.presets.week, pressed: params.key === 'week', run: () => go({ key: 'week' }) },
-    { id: 'lastWeek', label: PS.presets.lastWeek, pressed: samePick(lastWeek), run: lastWeek ? () => go(lastWeek!) : null },
-    { id: 'month', label: PS.presets.month, pressed: params.key === 'month', run: () => go({ key: 'month' }) },
-    { id: 'lastMonth', label: PS.presets.lastMonth, pressed: samePick(lastMonth), run: lastMonth ? () => go(lastMonth!) : null },
+    { id: 'shift', label: C.periodUi.presets.shift, pressed: params.key === 'shift', run: () => go({ key: 'shift' }) },
+    { id: 'today', label: C.periodUi.presets.today, pressed: params.key === 'today', run: () => go({ key: 'today' }) },
+    { id: 'yesterday', label: C.periodUi.presets.yesterday, pressed: params.key === 'yesterday', run: () => go({ key: 'yesterday' }) },
+    { id: 'week', label: C.periodUi.presets.week, pressed: params.key === 'week', run: () => go({ key: 'week' }) },
+    { id: 'lastWeek', label: C.periodUi.presets.lastWeek, pressed: samePick(lastWeek), run: lastWeek ? () => go(lastWeek!) : null },
+    { id: 'month', label: C.periodUi.presets.month, pressed: params.key === 'month', run: () => go({ key: 'month' }) },
+    { id: 'lastMonth', label: C.periodUi.presets.lastMonth, pressed: samePick(lastMonth), run: lastMonth ? () => go(lastMonth!) : null },
   ];
 
   const showNewest = !!period && !!maxDate && P.periodAfterNewest(period, anchor?.dataAsOfUtc ?? null);
@@ -141,10 +141,10 @@ function PanelOpen({ onClose, state, anchor, maxDate }: Omit<PeriodPanelProps, '
   const actions = (
     <>
       <button type="button" className="pp-quiet" onClick={onClose}>
-        {PS.cancel}
+        {C.periodUi.cancel}
       </button>
       <button type="button" className="ui-btn" disabled={!!reason} aria-describedby={reason ? 'pp-reason' : undefined} onClick={apply}>
-        {PS.apply}
+        {C.periodUi.apply}
       </button>
     </>
   );
@@ -153,57 +153,57 @@ function PanelOpen({ onClose, state, anchor, maxDate }: Omit<PeriodPanelProps, '
     <div className="pp-body">
       {!phone && (
         <div className="pp-head">
-          <h2 id="pp-title">{PS.title}</h2>
-          <span className="pp-cap">{PS.plantTime}</span>
+          <h2 id="pp-title">{C.periodUi.title}</h2>
+          <span className="pp-cap">{C.periodUi.plantTime}</span>
         </div>
       )}
       {showNewest && (
         <div className="pp-newest">
-          <span>{PS.newestData(longDate(maxDate!))}</span>
+          <span>{C.periodUi.newestData(longDate(maxDate!))}</span>
           <button type="button" className="ui-link" onClick={goNewest}>
-            {PS.goNewest}
+            {C.periodUi.goNewest}
           </button>
         </div>
       )}
-      <div className="pp-presets" role="group" aria-label={PS.quick}>
+      <div className="pp-presets" role="group" aria-label={C.periodUi.quick}>
         {presets.map((p) => (
           <button key={p.id} type="button" className="pp-preset" aria-pressed={p.pressed} disabled={!p.run} onClick={() => p.run?.()}>
             {p.label}
           </button>
         ))}
       </div>
-      <div className="pp-sec" role="group" aria-label={PS.custom}>
-        <span className="pp-cmp__lbl">{PS.custom}</span>
+      <div className="pp-sec" role="group" aria-label={C.periodUi.custom}>
+        <span className="pp-cmp__lbl">{C.periodUi.custom}</span>
         <div className="pp-grid">
           <div className="pp-fld">
-            <label htmlFor="pp-fd">{PS.fromDate}</label>
+            <label htmlFor="pp-fd">{C.periodUi.fromDate}</label>
             <input id="pp-fd" type="date" className="pp-input" value={draft.fd} onChange={(e) => set({ fd: e.target.value })} aria-invalid={reason !== null} />
           </div>
-          <ShiftSelect id="pp-fs" label={PS.fromShift} value={draft.fs} onChange={(v) => set({ fs: v })} />
+          <ShiftSelect id="pp-fs" label={C.periodUi.fromShift} value={draft.fs} onChange={(v) => set({ fs: v })} />
           <div className="pp-fld">
-            <label htmlFor="pp-td">{PS.toDate}</label>
+            <label htmlFor="pp-td">{C.periodUi.toDate}</label>
             <input id="pp-td" type="date" className="pp-input" value={draft.td} onChange={(e) => set({ td: e.target.value })} aria-invalid={reason !== null} />
           </div>
-          <ShiftSelect id="pp-ts" label={PS.toShift} value={draft.ts} onChange={(v) => set({ ts: v })} />
+          <ShiftSelect id="pp-ts" label={C.periodUi.toShift} value={draft.ts} onChange={(v) => set({ ts: v })} />
         </div>
         {reason ? (
           <p id="pp-reason" className="pp-reason" role="alert">
             {reason}
           </p>
         ) : (
-          preview && <p className="pp-sentence">{PS.shows(preview)}</p>
+          preview && <p className="pp-sentence">{C.periodUi.shows(preview)}</p>
         )}
-        <p className="pp-cap">{PS.dayRule}</p>
+        <p className="pp-cap">{C.periodUi.dayRule}</p>
       </div>
       <div className="pp-sec pp-cmp">
-        <span className="pp-cmp__lbl">{PS.compare}</span>
+        <span className="pp-cmp__lbl">{C.periodUi.compare}</span>
         <Segmented
-          label={PS.compare}
+          label={C.periodUi.compare}
           value={compare ?? 'off'}
           options={[
-            { id: 'off', label: PS.compareOpts.off },
-            { id: 'prev', label: PS.compareOpts.prev },
-            { id: 'week', label: PS.compareOpts.week },
+            { id: 'off', label: FRAGMENTS.compareOpts.off },
+            { id: 'prev', label: FRAGMENTS.compareOpts.prev },
+            { id: 'week', label: FRAGMENTS.compareOpts.week },
           ]}
           onChange={(id) => setCompare(id === 'prev' || id === 'week' ? id : null)}
         />
@@ -214,7 +214,7 @@ function PanelOpen({ onClose, state, anchor, maxDate }: Omit<PeriodPanelProps, '
 
   if (phone) {
     return (
-      <Sheet open onClose={onClose} title={PS.title} footer={actions}>
+      <Sheet open onClose={onClose} title={C.periodUi.title} footer={actions}>
         {body}
       </Sheet>
     );

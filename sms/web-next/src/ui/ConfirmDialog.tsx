@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { C } from '../copy';
 import { createPortal } from 'react-dom';
-import { WS } from './writeStrings';
 import './components/write.css';
 
 export interface ConfirmDialogProps {
@@ -18,7 +18,7 @@ export interface ConfirmDialogProps {
 const FOCUSABLE = 'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 /** Focus starts on Cancel, never on the confirming action. Esc cancels. Tab is trapped. */
-export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = WS.cancel, busy, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = C.write.cancel, busy, onConfirm, onCancel }: ConfirmDialogProps) {
   const box = useRef<HTMLDivElement>(null);
   const cancelBtn = useRef<HTMLButtonElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);

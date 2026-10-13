@@ -4,12 +4,12 @@
  * as a vertical in-limit band.
  */
 import { useRef } from 'react';
+import { C } from '../copy';
 import { bandHit, gridValues, leftGutterFor, linear, niceDomain, type ChartTip } from '../bridge/chart';
 import { YAxis } from './Axes';
 import { barPath } from './BarChart';
 import { Frame } from './Frame';
 import { LimitBand } from './LimitBand';
-import { CHART_COPY } from './chartCopy';
 import { defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
 
 export interface HistogramBin {
@@ -59,7 +59,7 @@ export function Histogram(p: HistogramProps) {
       unit={p.unit}
       caption={
         <>
-          {p.caption} {n > 0 && CHART_COPY.binWidth(fmt(width0), p.valueUnit)}
+          {p.caption} {n > 0 && C.chart.binWidth(fmt(width0), p.valueUnit)}
         </>
       }
       status={status}

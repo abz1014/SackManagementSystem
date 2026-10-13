@@ -1,7 +1,6 @@
 import { C } from '../copy';
 import { defaultTab, writeRoute, type Route, type Screen } from '../route';
 import type { IconName } from './Icon';
-import { SHELL } from './shellCopy';
 
 export const ADMIN_RANK = 4;
 
@@ -22,17 +21,17 @@ const item = (id: string, label: string, icon: IconName, s: Screen, t: string | 
 
 /** The approved IA (DESIGN-SYSTEM 6.2): Monitor, Operate, Analyse, System. */
 export const NAV_GROUPS: NavGroup[] = [
-  { id: 'monitor', label: SHELL.groups.monitor, items: [
+  { id: 'monitor', label: C.shell.groups.monitor, items: [
     item('today', C.nav.today, 'overview', 'today', null),
     item('quality', C.nav.quality, 'weight', 'quality', defaultTab('quality')),
   ] },
-  { id: 'operate', label: SHELL.groups.operate, items: [
+  { id: 'operate', label: C.shell.groups.operate, items: [
     item('products', C.nav.products, 'product', 'products', defaultTab('products')),
   ] },
-  { id: 'analyse', label: SHELL.groups.analyse, items: [
+  { id: 'analyse', label: C.shell.groups.analyse, items: [
     item('reports', C.nav.reports, 'reports', 'reports', null),
   ] },
-  { id: 'system', label: SHELL.groups.system, items: [
+  { id: 'system', label: C.shell.groups.system, items: [
     item('diagnostics', C.tabs.system.diagnostics, 'health', 'system', 'diagnostics'),
     item('setup', C.tabs.system.setup, 'setup', 'system', 'setup', ADMIN_RANK),
     item('account', C.tabs.system.account, 'lock', 'system', 'account'),

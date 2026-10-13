@@ -1,5 +1,5 @@
 import type { Scale } from '../bridge/chart';
-import { CHART_COPY } from './chartCopy';
+import { C } from '../copy';
 import type { LimitSpec } from './types';
 
 /**
@@ -27,9 +27,9 @@ export function LimitBand({
         <rect x={from} y={top} width={Math.max(0, to - from)} height={Math.abs(lo - hi)} className="ck-band" />
         <line x1={from} x2={to} y1={hi} y2={hi} className="ck-limit-line" />
         <line x1={from} x2={to} y1={lo} y2={lo} className="ck-limit-line" />
-        <text x={to} y={hi - 4} textAnchor="end" className="ck-limit-text" fontSize={fontPx}>{CHART_COPY.upperLimit(limits.upperText)}</text>
-        <text x={to} y={lo + fontPx + 2} textAnchor="end" className="ck-limit-text" fontSize={fontPx}>{CHART_COPY.lowerLimit(limits.lowerText)}</text>
-        <text x={from + 6} y={top + fontPx + 4} className="ck-band-text" fontSize={fontPx}>{CHART_COPY.inLimits}</text>
+        <text x={to} y={hi - 4} textAnchor="end" className="ck-limit-text" fontSize={fontPx}>{C.chart.upperLimit(limits.upperText)}</text>
+        <text x={to} y={lo + fontPx + 2} textAnchor="end" className="ck-limit-text" fontSize={fontPx}>{C.chart.lowerLimit(limits.lowerText)}</text>
+        <text x={from + 6} y={top + fontPx + 4} className="ck-band-text" fontSize={fontPx}>{C.chart.inLimits}</text>
       </g>
     );
   }
@@ -39,7 +39,7 @@ export function LimitBand({
       <rect x={left} y={from} width={Math.abs(lo - hi)} height={Math.max(0, to - from)} className="ck-band" />
       <line x1={lo} x2={lo} y1={from} y2={to} className="ck-limit-line" />
       <line x1={hi} x2={hi} y1={from} y2={to} className="ck-limit-line" />
-      <text x={left + 6} y={from + fontPx + 2} className="ck-band-text" fontSize={fontPx}>{CHART_COPY.inLimits}</text>
+      <text x={left + 6} y={from + fontPx + 2} className="ck-band-text" fontSize={fontPx}>{C.chart.inLimits}</text>
     </g>
   );
 }

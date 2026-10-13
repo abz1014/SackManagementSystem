@@ -1,8 +1,8 @@
 import { useCallback, useState, type ReactNode } from 'react';
+import { C, PLANT_NAME } from '../copy';
 import type { Route } from '../route';
 import { Icon } from './Icon';
 import { hrefFor, isActive, plainClick, routeFor, visibleGroups } from './nav';
-import { SHELL } from './shellCopy';
 
 const KEY = 'sms.sidebar.collapsed';
 
@@ -46,10 +46,10 @@ export function Sidebar({ route, rank, collapsed, onCollapsedChange, onNavigate,
   return (
     <aside className="sh-side" data-collapsed={collapsed ? '' : undefined}>
       <div className="sh-brand">
-        <span className="sh-wordmark">{SHELL.appName}</span>
-        {!collapsed && <span className="sh-plant">{SHELL.plant}</span>}
+        <span className="sh-wordmark">{C.shell.appName}</span>
+        {!collapsed && <span className="sh-plant">{PLANT_NAME}</span>}
       </div>
-      <nav aria-label={SHELL.mainNav} className="sh-nav">
+      <nav aria-label={C.shell.mainNav} className="sh-nav">
         {groups.map((g) => (
           <div className="sh-group" key={g.id} role="group" aria-label={g.label}>
             {!collapsed && <div className="sh-group-label">{g.label}</div>}
@@ -80,8 +80,8 @@ export function Sidebar({ route, rank, collapsed, onCollapsedChange, onNavigate,
           type="button"
           className="sh-collapse"
           aria-expanded={!collapsed}
-          aria-label={collapsed ? SHELL.expand : SHELL.collapse}
-          title={collapsed ? SHELL.expand : SHELL.collapse}
+          aria-label={collapsed ? C.shell.expand : C.shell.collapse}
+          title={collapsed ? C.shell.expand : C.shell.collapse}
           onClick={() => onCollapsedChange(!collapsed)}
         >
           <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} className={collapsed ? undefined : 'sh-rot'} />

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { C, FRAGMENTS } from '../copy';
 import { getLive } from '../bridge/api';
 import { period as P } from '../bridge/lib';
 import { useData } from '../data/useData';
@@ -6,7 +7,6 @@ import { useRange } from '../data/hooks';
 import { usePeriod } from '../data/usePeriod';
 import { Icon } from './Icon';
 import { PeriodPanel } from './PeriodPanel';
-import { PS } from './period/strings';
 import './components/period.css';
 
 /**
@@ -33,8 +33,8 @@ export function PeriodChip({ className }: { className?: string }) {
     : null;
 
   const { period, compare, status } = state;
-  const sentence = period ? P.describePeriod(period) : status === 'error' ? PS.unavailable : PS.loading;
-  const cmpTag = compare ? (compare === 'prev' ? PS.vsPrevious : PS.vsLastWeek) : null;
+  const sentence = period ? P.describePeriod(period) : status === 'error' ? C.periodUi.unavailable : C.periodUi.loading;
+  const cmpTag = compare ? (compare === 'prev' ? FRAGMENTS.vsPrevious : FRAGMENTS.vsLastWeek) : null;
 
   return (
     <>
@@ -44,8 +44,8 @@ export function PeriodChip({ className }: { className?: string }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={!period}
-        title={live.error !== null && !anchor ? PS.clockUnread : undefined}
-        aria-label={period ? PS.chipLabel(sentence + (cmpTag ? `, ${cmpTag}` : '')) : sentence}
+        title={live.error !== null && !anchor ? C.periodUi.clockUnread : undefined}
+        aria-label={period ? C.periodUi.chipLabel(sentence + (cmpTag ? `, ${cmpTag}` : '')) : sentence}
         onClick={() => setOpen(true)}
       >
         <Icon name="calendar" size={16} />

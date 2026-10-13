@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { U } from './strings';
+import { C } from '../copy';
 import './components/Chip.css';
 
 export interface ChipProps {
@@ -16,7 +16,7 @@ export function Chip({ children, label, onRemove }: ChipProps) {
     <span className={`ui-chip ${onRemove ? 'ui-chip--filter' : 'ui-chip--info'}`}>
       {children}
       {onRemove && (
-        <button type="button" className="ui-chip__x" onClick={onRemove} aria-label={U.remove(name)}>
+        <button type="button" className="ui-chip__x" onClick={onRemove} aria-label={C.ui.remove(name)}>
           <svg viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
             <path d="M5 5l10 10M15 5L5 15" />
           </svg>

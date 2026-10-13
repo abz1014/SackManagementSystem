@@ -4,7 +4,6 @@ import { C } from '../copy';
 import type { Route } from '../route';
 import { routeFor } from './nav';
 import { Sidebar, useSidebarCollapsed } from './Sidebar';
-import { SHELL } from './shellCopy';
 import { TabBar } from './TabBar';
 import { TopBar } from './TopBar';
 import './components/shell.css';
@@ -42,7 +41,7 @@ class PageBoundary extends Component<{ resetKey: string; children: ReactNode }, 
     if (!this.state.failed) return this.props.children;
     return (
       <div className="card sh-page-error" role="alert">
-        <h2>{C.couldntLoad(SHELL.pageFailed)}</h2>
+        <h2>{C.couldntLoad(C.shell.pageFailed.toLowerCase())}</h2>
         <button type="button" className="btn quiet" onClick={() => this.setState({ failed: false })}>
           {C.tryAgain}
         </button>
@@ -62,7 +61,7 @@ export function AppShell({
     setSignOutError(null);
     logout().then(
       () => (onSignedOut ? onSignedOut() : window.location.reload()),
-      () => setSignOutError(SHELL.signOutFailed),
+      () => setSignOutError(C.shell.signOutFailed),
     );
   };
 
@@ -78,7 +77,7 @@ export function AppShell({
   return (
     <div className="sh-app" data-collapsed={collapsed ? '' : undefined}>
       <a className="sh-skip" href="#sh-main">
-        {SHELL.skip}
+        {C.shell.skip}
       </a>
       <Sidebar
         route={route}

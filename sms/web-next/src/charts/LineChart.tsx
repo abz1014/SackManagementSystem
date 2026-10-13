@@ -4,11 +4,11 @@
  * Up to four series are also labelled directly at their last point.
  */
 import { useRef } from 'react';
+import { C } from '../copy';
 import { gridValues, leftGutterFor, linear, linePath, nearestIndex, niceDomain, type ChartTip } from '../bridge/chart';
 import { XLabels, YAxis } from './Axes';
 import { Frame, type LegendItem } from './Frame';
 import { LimitBand } from './LimitBand';
-import { CHART_COPY } from './chartCopy';
 import { catVar, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
 
 export interface LineSeries {
@@ -57,7 +57,7 @@ export function LineChart(p: LineChartProps) {
       const v = s.values[i];
       return {
         name: s.name,
-        value: v == null ? CHART_COPY.noValue : `${fmt(v)} ${p.unit}${outside(v) ? ` · ${CHART_COPY.outside}` : ''}`,
+        value: v == null ? C.chart.noValue : `${fmt(v)} ${p.unit}${outside(v) ? ` · ${C.chart.outside}` : ''}`,
         mark: si === 0 ? ('ink' as const) : ('graphite' as const),
       };
     }),

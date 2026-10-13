@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from 'react';
-import { REASON_MIN_CHARS, WS } from './writeStrings';
+import { C, REASON_MIN_CHARS } from '../copy';
 import './components/write.css';
 
 interface ShellProps {
@@ -94,7 +94,7 @@ export function ReasonField({ label, value, onChange, minLength = REASON_MIN_CHA
         aria-describedby={[hint ? `${id}-hint` : '', `${id}-count`].filter(Boolean).join(' ')}
         onChange={(e) => onChange(e.target.value)} />
       <div id={`${id}-count`} className={`wr-count${ok ? ' wr-count--ok' : ''}`} aria-live="polite">
-        {ok ? WS.reasonOk(n) : WS.reasonCount(n, minLength)}
+        {ok ? C.write.reasonOk(n) : C.write.reasonCount(n, minLength)}
       </div>
     </Shell>
   );

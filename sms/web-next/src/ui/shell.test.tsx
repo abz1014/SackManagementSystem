@@ -145,7 +145,7 @@ describe('HealthDot', () => {
     render(<HealthDot health={null} onOpen={open} />);
     expect(screen.getByText('Status unknown')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Status unknown/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Open Diagnostics' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open diagnostics' }));
     expect(open).toHaveBeenCalledOnce();
   });
 });

@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AuthUser } from '../bridge/api';
 import { C } from '../copy';
 import { Icon } from './Icon';
-import { SHELL } from './shellCopy';
 
 export interface TopBarProps {
   title: string;
@@ -53,7 +52,7 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
               className="sh-user-btn"
               aria-expanded={open}
               aria-controls={id}
-              aria-label={SHELL.userMenu}
+              aria-label={C.shell.userMenu}
               onClick={() => setOpen((o) => !o)}
             >
               <span className="sh-user-name">{name}</span>
@@ -61,7 +60,7 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
               <Icon name="chevron-down" size={16} />
             </button>
             {open && (
-              <div className="popover sh-popover sh-menu" id={id} role="menu" aria-label={SHELL.signedInAs(name, user.role)}>
+              <div className="popover sh-popover sh-menu" id={id} role="menu" aria-label={C.shell.signedInAs(name, user.role)}>
                 <button
                   type="button"
                   role="menuitem"

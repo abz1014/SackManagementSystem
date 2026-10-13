@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
+import { C } from '../copy';
 import { ErrorState } from './ErrorState';
-import { U } from './strings';
 import './components/Skeleton.css';
 
 export interface SkeletonProps {
@@ -27,7 +27,7 @@ export function Skeleton({ part, width = '100%', height = 96, lines, timeoutMs =
   if (slow) {
     return (
       <div style={{ width }}>
-        <ErrorState part={part} title={U.takingTooLong(part)} onRetry={onRetry} minHeight={height} />
+        <ErrorState part={part} title={C.ui.takingTooLong(part)} onRetry={onRetry} minHeight={height} />
       </div>
     );
   }

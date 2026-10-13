@@ -104,12 +104,12 @@ describe('ErrorState', () => {
     expect(screen.getByText("Couldn't load the reject chart.")).toBeTruthy();
     fireEvent.click(screen.getByText('Try again'));
     expect(retry).toHaveBeenCalledOnce();
-    expect(screen.queryByText('Check Diagnostics')).toBeNull();
+    expect(screen.queryByText('Check diagnostics')).toBeNull();
   });
 
   it('adds the Diagnostics link after repeated failure', () => {
     render(<ErrorState part="the table" attempts={2} />);
-    expect(screen.getByText('Check Diagnostics').getAttribute('href')).toContain('t=diagnostics');
+    expect(screen.getByText('Check diagnostics').getAttribute('href')).toContain('t=diagnostics');
   });
 });
 

@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { fmt, health as healthLib } from '../bridge/lib';
 import { W } from '../bridge/words';
 import { C } from '../copy';
-import { SHELL } from './shellCopy';
 
 type Health = healthLib.Health;
 
@@ -16,29 +15,29 @@ export interface HealthView { state: DotState; short: string; sentence: string }
  */
 export function describeHealth(health: Health | null, plantNowUtc?: string | null): HealthView {
   const when = (iso: string) => (plantNowUtc ? fmt.fmtClockOn(iso, plantNowUtc) : fmt.fmtClock(iso));
-  if (!health) return { state: 'nodata', short: SHELL.health.unknown, sentence: SHELL.health.unknownSentence };
+  if (!health) return { state: 'nodata', short: C.shell.health.unknown, sentence: C.shell.health.unknownSentence };
   switch (health.kind) {
     case 'ok':
       return {
         state: 'ok',
-        short: SHELL.health.ok,
+        short: C.shell.health.ok,
         sentence:
           health.lagSeconds != null
             ? W.lag.ok(when(health.readingUtc), fmt.fmtSpan(health.lagSeconds))
             : W.lag.okNoLag(when(health.readingUtc)),
       };
     case 'late':
-      return { state: 'watch', short: SHELL.health.late, sentence: W.lag.late(fmt.fmtSpan(health.lagSeconds)) };
+      return { state: 'watch', short: C.shell.health.late, sentence: W.lag.late(fmt.fmtSpan(health.lagSeconds)) };
     case 'lag_unknown':
-      return { state: 'watch', short: SHELL.health.lagUnknown, sentence: W.lag.lagUnknown(when(health.readingUtc)) };
+      return { state: 'watch', short: C.shell.health.lagUnknown, sentence: W.lag.lagUnknown(when(health.readingUtc)) };
     case 'stale':
       return {
         state: 'act',
-        short: SHELL.health.stale,
+        short: C.shell.health.stale,
         sentence: health.readingUtc ? C.noDataSince(when(health.readingUtc)) : W.lag.stale('-'),
       };
     default:
-      return { state: 'nodata', short: SHELL.health.none, sentence: W.lag.noData };
+      return { state: 'nodata', short: C.shell.health.none, sentence: W.lag.noData };
   }
 }
 
@@ -88,7 +87,7 @@ export function HealthDot({ health, plantNowUtc, onOpen }: HealthDotProps) {
         </span>
       </button>
       {open && (
-        <div className="popover sh-popover" id={id} role="dialog" aria-label={SHELL.health.title}>
+        <div className="popover sh-popover" id={id} role="dialog" aria-label={C.shell.health.title}>
           <p className="sh-pop-text">{v.sentence}</p>
           <button
             type="button"
@@ -98,7 +97,7 @@ export function HealthDot({ health, plantNowUtc, onOpen }: HealthDotProps) {
               onOpen();
             }}
           >
-            {SHELL.health.open}
+            {C.shell.health.open}
           </button>
         </div>
       )}

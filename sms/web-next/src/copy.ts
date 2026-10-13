@@ -102,7 +102,142 @@ export const C = {
 
   /* Disclosure that holds the pipeline detail */
   howCalculated: 'How this is calculated',
+
+  /* ---- Shell (was ui/shellCopy.ts) ---- */
+  shell: {
+    appName: 'SMS',
+    groups: { monitor: 'Monitor', operate: 'Operate', analyse: 'Analyse', system: 'System' },
+    more: 'More',
+    register: 'Register',
+    account: 'Account',
+    mainNav: 'Main navigation',
+    phoneNav: 'Screens',
+    skip: 'Skip to content',
+    collapse: 'Collapse sidebar',
+    expand: 'Expand sidebar',
+    userMenu: 'Account menu',
+    signedInAs: (name: string, role: string) => `${name}, ${role}`,
+    signOutFailed: "Couldn't sign out. Try again.",
+    pageFailed: 'This page',
+    closeMenu: 'Close',
+    health: {
+      title: 'Data status',
+      ok: 'Data current',
+      late: 'Data late',
+      lagUnknown: 'Delay unknown',
+      stale: 'Data out of date',
+      none: 'No data',
+      unknown: 'Status unknown',
+      unknownSentence: "Couldn't read the data status. Check the plant connection.",
+      open: 'Open diagnostics',
+    },
+  },
+
+  /* ---- General components (was ui/strings.ts) ---- */
+  ui: {
+    showDate: (date: string) => `Show ${date}`,
+    showingRange: (a: number, b: number, total?: number) =>
+      total === undefined ? `Showing ${a}–${b}` : `Showing ${a}–${b} of ${total.toLocaleString('en-GB')}`,
+    loadMore: 'Load more',
+    loadingMore: 'Loading',
+    scrollForMore: 'Scroll for more',
+    showAll: 'Show all',
+    close: 'Close',
+    remove: (label: string) => `Remove ${label}`,
+    takingTooLong: (part: string) => `${part} is taking too long to load.`,
+    serverSilent: 'The server did not answer.',
+    checkDiagnostics: 'Check diagnostics',
+    aboutFigures: 'About these figures',
+    dismiss: 'Dismiss',
+  },
+
+  /* ---- Station tiles, heat grid, KPI card (were local constants) ---- */
+  stationUi: {
+    failedInspection: 'Failed inspection',
+    cones: (n: number) => `${n.toLocaleString('en-GB')} cones`,
+    noProduct: 'No product',
+    vsTarget: (g: number) => `${g > 0 ? '+' : g < 0 ? '-' : ''}${Math.abs(g)} g vs target`,
+    worstFirst: 'Worst first',
+    byNumber: 'By station number',
+    stations: 'Stations',
+  },
+
+  /* ---- Chart kit (was charts/chartCopy.ts) ---- */
+  chart: {
+    showAsTable: 'Show as table',
+    showAsChart: 'Show as chart',
+    inLimits: 'In limits',
+    upperLimit: (v: string) => `Upper limit ${v}`,
+    lowerLimit: (v: string) => `Lower limit ${v}`,
+    cumulative: 'Cumulative share',
+    cumulativeAxis: 'Cumulative share (%)',
+    vitalFew: (k: number, total: number) =>
+      k === 1 ? `1 of ${total} reasons makes up most of the rejects.` : `${k} of ${total} reasons make up most of the rejects.`,
+    binWidth: (w: string, unit: string) => `Each bar is ${w}${unit ? ` ${unit}` : ''} wide.`,
+    loading: 'Loading',
+    tableCaption: (title: string) => `${title}, as a table`,
+    noValue: 'No value',
+    outside: 'Outside limits',
+    zoomedBack: W.chart.zoomedBack,
+  },
+
+  /* ---- Period control (was ui/period/strings.ts) ---- */
+  periodUi: {
+    title: 'Period',
+    plantTime: 'Plant time, 24 hours',
+    chipLabel: (sentence: string) => `Period: ${sentence}. Change period`,
+    loading: 'Loading period',
+    clockUnread: 'The plant clock could not be read, so relative periods are unavailable.',
+    unavailable: 'Period unavailable',
+    quick: 'Quick periods',
+    presets: {
+      shift: 'This shift',
+      today: 'Today',
+      yesterday: 'Yesterday',
+      week: 'This week',
+      lastWeek: 'Last week',
+      month: 'This month',
+      lastMonth: 'Last month',
+    },
+    custom: 'Pick dates and shifts',
+    fromDate: 'From date',
+    fromShift: 'From shift',
+    toDate: 'To date',
+    toShift: 'To shift',
+    shifts: { whole: 'Whole day', morning: 'Morning 06-14', evening: 'Evening 14-22', night: 'Night 22-06' },
+    dayRule: 'A production day runs 06:00 to 06:00.',
+    needStart: 'Enter a start date',
+    needEnd: 'Enter an end date',
+    endBeforeStart: 'End is before start',
+    shows: (s: string) => `Shows ${s}`,
+    compare: 'Compare',
+    compareOff: 'Off',
+    newestData: (date: string) => `Newest data: ${date}`,
+    goNewest: 'Go to newest',
+    cancel: 'Cancel',
+    apply: 'Apply',
+  },
+
+  /* ---- Write controls (was ui/writeStrings.ts) ---- */
+  write: {
+    stepsLabel: 'Steps',
+    back: 'Back',
+    next: 'Next',
+    cancel: 'Cancel',
+    stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
+    reasonCount: (n: number, min: number) => `${n} of ${min} characters minimum`,
+    reasonOk: (n: number) => `${n} characters`,
+  },
 } as const;
+
+/** Plant name: a proper noun, so it sits outside C (whose strings are checked for sentence case). */
+export const PLANT_NAME = 'Ibrahim Fibres, TP1 Line 3';
+
+/** Where "Check diagnostics" points. A URL, not copy. */
+export const DIAGNOSTICS_HREF = '?s=system&t=diagnostics';
+
+/** Server minimum for every PDAS write reason (api/src/services/pdasWrite.ts MIN_REASON_CHARS). */
+export const REASON_MIN_CHARS = 10;
 
 /* ---- helpers for the date and clock rule (GLOSSARY 1.4) ----------------- */
 
@@ -221,3 +356,13 @@ export const RESERVED_SOURCES: Record<string, string> = {
   'iflReportTitles.rejected-hangers': 'reports.type.rejected-hangers',
   'iflReportTitles.rejected-unknown-lifter': 'reports.type.rejected-unknown-lifter',
 };
+
+/**
+ * Lowercase fragments that are appended to other text ("5.1% vs previous"), so the
+ * sentence-case rule in copy.test.ts does not apply to them.
+ */
+export const FRAGMENTS = {
+  vsPrevious: 'vs previous',
+  vsLastWeek: 'vs last week',
+  compareOpts: { off: 'Off', prev: 'vs previous', week: 'vs last week' },
+} as const;

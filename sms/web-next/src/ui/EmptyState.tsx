@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { C, formatDate } from '../copy';
-import { U } from './strings';
 import './components/EmptyState.css';
 
 export interface EmptyStateProps {
@@ -18,7 +17,7 @@ export interface EmptyStateProps {
 export function EmptyState({ newest, onShowNewest, message, action, icon }: EmptyStateProps) {
   const date = newest !== null && newest !== undefined ? formatDate(newest) : null;
   const text = message ?? (date ? C.nothingInPeriod(date) : C.nothingInPeriodNoNewest);
-  const act = action ?? (date && onShowNewest ? { label: U.showDate(date), onClick: onShowNewest } : null);
+  const act = action ?? (date && onShowNewest ? { label: C.ui.showDate(date), onClick: onShowNewest } : null);
   return (
     <div className="ui-empty" role="status">
       <span className="ui-empty__icon" aria-hidden="true">
