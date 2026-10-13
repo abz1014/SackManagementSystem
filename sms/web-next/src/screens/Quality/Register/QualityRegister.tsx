@@ -26,7 +26,7 @@ import {
 } from '../../../bridge/api';
 import { live, period as P } from '../../../bridge/lib';
 import { RegisterPrintHead } from '../../../bridge/register';
-import { RESERVED, formatClock, formatDate } from '../../../copy';
+import { RESERVED, formatClock, formatDate, C, FRAGMENTS, withFragments } from '../../../copy';
 import { useData } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { EXPORT_MIN_RANK } from '../../../ranks';
@@ -66,8 +66,9 @@ import {
   withoutHop,
   type Listing,
 } from './model';
-import { R, RF } from './registerCopy';
 import './register.css';
+const R = withFragments(C.register, FRAGMENTS.registerParts);
+const RF = FRAGMENTS.register;
 
 /** A request that never settles: the part stays loading until its inputs exist, with no request and no error. */
 const wait = (): Promise<never> => new Promise<never>(() => {});

@@ -5,6 +5,7 @@
  * (Setup sections present at rank 4 only), A1-046 (data sources), A3-009 (Account page), A3-061, A3-062 (Diagnostics).
  * Fixtures are shaped like the real responses; nothing here reads a database or creates an account.
  */
+import { C, FRAGMENTS, withFragments } from '../../copy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '../../../../web/src/testkit/render';
@@ -18,7 +19,8 @@ import { DiagnosticsScreen } from './Diagnostics/DiagnosticsScreen';
 import { SetupScreen } from './Setup/SetupScreen';
 import { AccountScreen } from './Account/AccountScreen';
 import { SystemTabs } from './SystemTabs';
-import { SY, TECH } from './systemCopy';
+const SY = withFragments(C.system, FRAGMENTS.systemParts);
+const TECH = FRAGMENTS.systemTech;
 
 installDomStubs();
 
@@ -127,7 +129,7 @@ describe('Diagnostics', () => {
     expect(screen.getAllByText('Cones').length).toBeGreaterThan(0);
     expect(screen.getByText('Current IFL database')).toBeTruthy();
     expect(screen.getByText('Older IFL database')).toBeTruthy();
-    expect(screen.getByText('Practice data on this PC')).toBeTruthy();
+    expect(screen.getByText('Practice data on this computer')).toBeTruthy();
     expect(screen.getByText(/132,552 cones\. Reports use this one\./)).toBeTruthy();
     expect(await screen.findByText('Records SMS holds')).toBeTruthy();
     await waitFor(() => expect(screen.getByText(/Cones recorded for/)).toBeTruthy());

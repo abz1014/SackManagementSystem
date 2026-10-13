@@ -8,7 +8,7 @@
  */
 import { getSackMovements, type SackMovement } from '../../bridge/api';
 import { fmt } from '../../bridge/lib';
-import { RESERVED, formatClock, formatDate } from '../../copy';
+import { RESERVED, formatClock, formatDate, C, FRAGMENTS, withFragments } from '../../copy';
 import { useData } from '../../data';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { EmptyState } from '../../ui/EmptyState';
@@ -16,8 +16,9 @@ import { ErrorState } from '../../ui/ErrorState';
 import { Sheet } from '../../ui/Sheet';
 import { Skeleton } from '../../ui/Skeleton';
 import type { SheetProps } from '../../screens/registry';
-import { R, RF } from '../../screens/Quality/Register/registerCopy';
 import './stockSheet.css';
+const R = withFragments(C.register, FRAGMENTS.registerParts);
+const RF = FRAGMENTS.register;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

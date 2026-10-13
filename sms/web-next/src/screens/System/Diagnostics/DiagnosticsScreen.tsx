@@ -13,7 +13,7 @@ import {
 } from '../../../bridge/api';
 import { fmt, healthWords, live, period as P } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
-import { C, formatClock, formatDate } from '../../../copy';
+import { C, formatClock, formatDate, FRAGMENTS, withFragments } from '../../../copy';
 import { useData, usePeriod, type DataState } from '../../../data';
 import { Disclosure } from '../../../ui/Disclosure';
 import { ErrorState } from '../../../ui/ErrorState';
@@ -21,10 +21,11 @@ import { Skeleton } from '../../../ui/Skeleton';
 import { StatusPill } from '../../../ui/StatusPill';
 import type { ScreenProps } from '../../registry';
 import { SystemTabs } from '../SystemTabs';
-import { SY, TECH } from '../systemCopy';
 import { DqFindings } from './DqFindings';
 import { backupState, dbState, feedKind, feedName, feedRowState, feedState, feedVerdict, groupSources, headline } from './model';
 import '../system.css';
+const SY = withFragments(C.system, FRAGMENTS.systemParts);
+const TECH = FRAGMENTS.systemTech;
 
 const D = SY.diag;
 const STATES: ConeState[] = ['within', 'low', 'high', 'rejected', 'unknown'];

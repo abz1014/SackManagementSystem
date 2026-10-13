@@ -46,13 +46,13 @@ import {
   fmtDayShort,
   generatedLine,
 } from '../../bridge/report';
-import { C } from '../../copy';
+import { C, withFragments, FRAGMENTS } from '../../copy';
 import { EmptyState } from '../../ui/EmptyState';
 import { ErrorState } from '../../ui/ErrorState';
 import { Skeleton } from '../../ui/Skeleton';
 import { coverageOf, isEmptyReport, variantOf } from './model';
-import { R } from './strings';
 import type { ReportState } from './useReport';
+const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
 type Data = ReportResponse<ReportType>;
 

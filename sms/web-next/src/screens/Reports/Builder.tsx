@@ -12,14 +12,14 @@ import { useState } from 'react';
 import { reportExportUrl, type ProductOption, type ReportFilters, type ReportType, type StationRow } from '../../bridge/api';
 import { period as P, productLabel } from '../../bridge/lib';
 import { EXPORT_MIN_RANK, FILTERS_BY_TYPE } from '../../bridge/report';
-import { C } from '../../copy';
+import { C, withFragments, FRAGMENTS } from '../../copy';
 import type { PeriodState } from '../../data/usePeriod';
 import { SelectField } from '../../ui/Field';
 import { WriteGate } from '../../ui/WriteGate';
 import { cardOf } from './model';
 import { QUICK_ORDER, paramsForQuick, quickOf, withShifts, type QuickPeriod, type ShiftChoice } from './periods';
-import { R } from './strings';
 import type { ReportState } from './useReport';
+const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
 const RB = R.builder;
 const RP = R.periods;

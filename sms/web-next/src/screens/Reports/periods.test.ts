@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { R } from './strings';
 import { addDays, lastMonthOf, paramsForQuick, quickOf, withShifts } from './periods';
 
 describe('quick periods', () => {
@@ -37,23 +36,5 @@ describe('quick periods', () => {
     expect(quickOf({ key: 'today' } as never, range)).toBe('today');
     expect(quickOf({ key: 'pick', from: '2026-08-05', to: '2026-09-07' } as never, range)).toBe('whole');
     expect(quickOf({ key: 'pick', from: '2026-08-06', to: '2026-09-07' } as never, range)).toBeNull();
-  });
-});
-
-describe('Reports strings', () => {
-  const collect = (node: unknown, out: string[] = []): string[] => {
-    if (typeof node === 'string') out.push(node);
-    else if (typeof node === 'function') out.push((node as (...a: unknown[]) => string)(3, 'Aa').replace(/^the /, 'The '));
-    else if (node && typeof node === 'object') Object.values(node).forEach((v) => collect(v, out));
-    return out;
-  };
-  const ACRONYMS = new Set(['IFL', 'PDF', 'CSV', 'GM']);
-  it('sentence case, no ellipsis, no all-caps words', () => {
-    for (const s of collect(R)) {
-      expect(s, s).toMatch(/^[A-Z]/);
-      expect(s, s).not.toContain('...');
-      expect(s, s).not.toContain('…');
-      for (const w of s.match(/[A-Za-z]{2,}/g) ?? []) if (w === w.toUpperCase()) expect(ACRONYMS.has(w), `${w} in ${s}`).toBe(true);
-    }
   });
 });

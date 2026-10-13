@@ -16,7 +16,7 @@ import { installDomStubs } from '../../../../../web/src/testkit/domStubs';
 import { installFakeFetch, type FakeFetch, type Routes } from '../../../../../web/src/testkit/fetchRouter';
 import { LIVE_FIXTURE } from '../../../../../web/src/testkit/fixtures';
 import { live } from '../../../bridge/lib';
-import { RESERVED } from '../../../copy';
+import { RESERVED, C, withFragments, FRAGMENTS } from '../../../copy';
 import { legacyRedirect, parseRoute, writeRoute } from '../../../route';
 import { ConeSheet } from '../../../sheets/ConeSheet/ConeSheet';
 import { RejectSheet } from '../../../sheets/RejectSheet/RejectSheet';
@@ -27,7 +27,7 @@ import { conesHop, dayRegisterHop } from '../Rejects/model';
 import { hopRoute } from '../../../sheets/StationSheet/hops';
 import { QualityRegisterScreen } from './QualityRegister';
 import { buildQuery, countLine, countStateOf, parseFilter, parseListing, parsePages, parseStates, withListing } from './model';
-import { R } from './registerCopy';
+const R = withFragments(C.register, FRAGMENTS.registerParts);
 
 installDomStubs();
 

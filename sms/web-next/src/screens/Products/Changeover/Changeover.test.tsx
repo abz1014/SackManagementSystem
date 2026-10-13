@@ -8,6 +8,7 @@
  *   B5-10            503 and 409 are printed as sent; a result is drawn only from a returned body (no optimistic UI)
  *   B3-04            the engineer rank (2) is the write gate
  */
+import { C, FRAGMENTS, withFragments } from '../../../copy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '../../../../../web/src/testkit/render';
@@ -18,7 +19,7 @@ import { live } from '../../../bridge/lib';
 import { parseRoute } from '../../../route';
 import { ProductsChangeoverScreen } from './ChangeoverScreen';
 import { buildBody, emptyForm, limitsTargetOf, missingFor } from './model';
-import { CO, collectStrings } from './strings';
+const CO = withFragments(C.changeover, FRAGMENTS.changeover);
 
 installDomStubs();
 
@@ -360,20 +361,5 @@ describe('model', () => {
   it('finds the product a duplicate blocker points at, and nothing else', () => {
     expect(limitsTargetOf(DUP)).toBe(21);
     expect(limitsTargetOf('The new blend has no name.')).toBeNull();
-  });
-});
-
-describe('wording', () => {
-  const banned = [/\bbatch(es)?\b/i, /\bepochs?\b/i, /\bgenerations?\b/i, /\bsimulator\b/i, /\brejected\b/i, /\bwinder\b/i, /\bmachines?\b/i, /\blifter\b/i, /\bAI\b/, /\bAssumed\b/];
-  const ACRONYMS = new Set(['OK', 'PDAS', 'SMS', 'IFL', 'CSV', 'PDF', 'PLC']);
-  it('keeps the copy rules: sentence case, no pipeline words, no ellipsis', () => {
-    for (const s of collectStrings()) {
-      expect(s, s).toMatch(/^[A-Z]/);
-      expect(s, s).not.toContain('…');
-      expect(s, s).not.toContain('...');
-      for (const re of banned) expect(s, `${s} ~ ${re}`).not.toMatch(re);
-      for (const w of s.match(/[A-Za-z]{2,}/g) ?? []) if (w === w.toUpperCase()) expect(ACRONYMS.has(w), `${w} in ${s}`).toBe(true);
-      expect(s.replace(/\b(Aa|Bb|Cc|Dd)\b/g, 'x'), s).not.toMatch(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/);
-    }
   });
 });

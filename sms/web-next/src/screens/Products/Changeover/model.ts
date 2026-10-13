@@ -3,8 +3,9 @@
  * Business rules (plausible range, duplicate triple, wildcard collisions) are the SERVER's;
  * this file only decides whether there is enough on the form to ASK the server for a plan.
  */
+import { C, FRAGMENTS, withFragments } from '../../../copy';
 import type { ChangeoverRequestBody, ChangeoverRefChoice, ChangeoverTubeChoice } from '../../../bridge/api';
-import { CO } from './strings';
+const CO = withFragments(C.changeover, FRAGMENTS.changeover);
 
 /** The server's minimum reason length (pdasWrite.ts MIN_REASON_CHARS, changeover.ts). */
 export const REASON_MIN = 10;

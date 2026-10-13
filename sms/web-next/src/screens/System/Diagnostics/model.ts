@@ -2,11 +2,12 @@
  * Diagnostics model. Every state here is a lookup on a value the SERVER decided (live health kind, database.ok,
  * backup.warning, outcome); none is computed from a number in the client (guards.test rule 2).
  */
+import { C, withFragments, FRAGMENTS } from '../../../copy';
 import type { HealthReport, SourceGeneration, SyncStatus } from '../../../bridge/api';
 import { health as healthLib } from '../../../bridge/lib';
 import type { LiveLine } from '../../../bridge/api';
 import type { UiState } from '../../../ui/StatusPill';
-import { SY } from '../systemCopy';
+const SY = withFragments(C.system, FRAGMENTS.systemParts);
 
 type FeedKind = ReturnType<typeof healthLib.assessHealth>['kind'];
 

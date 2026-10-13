@@ -5,11 +5,12 @@
  * (outsideLimits | inspectionRejects), rcs cone check results (comma list), rp how many pages are shown
  * (replace, not push), st station, pr product, su ledger unit. Everything else belongs to the shell.
  */
+import { C, withFragments, FRAGMENTS } from '../../../copy';
 import { CONE_STATES, type ConeState, type RegisterQuery, type RegisterType } from '../../../bridge/api';
 import { period as P } from '../../../bridge/lib';
 import { fmt } from '../../../bridge/lib';
 import type { Route } from '../../../route';
-import { R } from './registerCopy';
+const R = withFragments(C.register, FRAGMENTS.registerParts);
 
 export const LISTINGS = ['cones', 'sacks', 'rejected', 'inspectionRejects', 'stock'] as const;
 export type Listing = (typeof LISTINGS)[number];

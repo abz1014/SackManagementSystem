@@ -11,7 +11,7 @@
  */
 import { stationLabel, type RegisterRow, type RegisterType } from '../../bridge/api';
 import { batchName, fmt, provenance as prov } from '../../bridge/lib';
-import { formatClock, formatDate } from '../../copy';
+import { formatClock, formatDate, C, FRAGMENTS, withFragments } from '../../copy';
 import { Disclosure } from '../../ui/Disclosure';
 import { ErrorState } from '../../ui/ErrorState';
 import { Skeleton } from '../../ui/Skeleton';
@@ -20,10 +20,11 @@ import { Sheet } from '../../ui/Sheet';
 import type { Route } from '../../route';
 import type { SheetProps } from '../../screens/registry';
 import { coneVerdict } from '../../screens/Quality/Register/model';
-import { R, RF } from '../../screens/Quality/Register/registerCopy';
 import { reasonName } from '../../screens/Quality/Rejects/format';
 import { useConesAround, useProductThen, useReadingDetail, useReadingStations, validId, type ReadingData } from './useReading';
 import './readingSheet.css';
+const R = withFragments(C.register, FRAGMENTS.registerParts);
+const RF = FRAGMENTS.register;
 
 const KIND_TITLE: Record<RegisterType, string> = { cone: R.coneTitle, sack: R.sackTitle, reject: R.rejectTitle };
 

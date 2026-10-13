@@ -12,6 +12,7 @@
  *  - PRINT IS KEYED TO A STABLE CLASS (E-6): this screen puts `report-print` on the page's <main>, and print.css
  *    binds the landscape page to `main.report-print`, never to a label that a copy edit could change.
  */
+import { C, withFragments, FRAGMENTS } from '../../copy';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { getProducts, getStations, type ReportFilters } from '../../bridge/api';
 import { useData, useRange } from '../../data';
@@ -24,11 +25,11 @@ import { Builder } from './Builder';
 import { Cards } from './Cards';
 import { ReportDocument } from './ReportDocument';
 import { cardOf, typeFromKeys, variantOf } from './model';
-import { R } from './strings';
 import { useReport } from './useReport';
 import './reports.css';
 import './legacy-report.css';
 import './print.css';
+const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
 const SHIFTS: readonly string[] = ['morning', 'evening', 'night'];
 const intKey = (v: string | undefined): number | null => (v !== undefined && /^\d{1,9}$/.test(v) ? Number(v) : null);

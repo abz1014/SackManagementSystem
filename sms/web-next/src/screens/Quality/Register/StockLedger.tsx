@@ -22,7 +22,7 @@ import {
   type StockLedgerData,
 } from '../../../bridge/api';
 import { live, fmt, period as P } from '../../../bridge/lib';
-import { REASON_MIN_CHARS, RESERVED, formatDate } from '../../../copy';
+import { REASON_MIN_CHARS, RESERVED, formatDate, C, FRAGMENTS, withFragments } from '../../../copy';
 import { useData } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import type { Route } from '../../../route';
@@ -36,7 +36,8 @@ import { Sheet } from '../../../ui/Sheet';
 import { Skeleton } from '../../../ui/Skeleton';
 import { WriteGate } from '../../../ui/WriteGate';
 import { intKey, periodSig, sheetFor } from './model';
-import { R, RF } from './registerCopy';
+const R = withFragments(C.register, FRAGMENTS.registerParts);
+const RF = FRAGMENTS.register;
 
 type Unit = 'sacks' | 'kg';
 const unitOf = (v: string | undefined): Unit => (v === 'kg' ? 'kg' : 'sacks');

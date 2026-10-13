@@ -8,6 +8,7 @@
  * block lives only on Diagnostics, and product limits live only on Products & PDAS (a link stands here).
  * The data-source tables name IFL's tables, so that section is drawn inside a "Technical detail" disclosure.
  */
+import { C, withFragments, FRAGMENTS } from '../../../copy';
 import type { ReactNode } from 'react';
 import { hrefFor, routeFor } from '../../../ui/nav';
 import { Disclosure } from '../../../ui/Disclosure';
@@ -16,9 +17,9 @@ import { ADMIN_RANK } from '../../../ranks';
 import { AuditLog, LineBlock, MachinesBlock, People, RejectCodesBlock, RulesBlock, SourcesBlock, StationsBlock } from '../../../bridge/system';
 import type { ScreenProps } from '../../registry';
 import { SystemTabs } from '../SystemTabs';
-import { SY } from '../systemCopy';
 import '../system.css';
 import './legacy.css';
+const SY = withFragments(C.system, FRAGMENTS.systemParts);
 
 const S = SY.setup;
 

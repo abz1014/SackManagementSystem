@@ -15,7 +15,7 @@ import { useMemo, useState } from 'react';
 import { getCurrentProduct, getProducts, getProduction, setCurrentProduct, type ProductOption, type TimelineEntry } from '../../../bridge/api';
 import { fmt, generationWords, period as P, productLabel } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
-import { C, formatClock, formatDate } from '../../../copy';
+import { C, formatClock, formatDate, withFragments, FRAGMENTS } from '../../../copy';
 import { useData, useMachinesRunning, usePeriod, type DataState } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { Disclosure } from '../../../ui/Disclosure';
@@ -30,10 +30,10 @@ import { routeFor } from '../../../ui/nav';
 import type { ScreenProps } from '../../registry';
 import { PdasStatusCard, usePdasWriteStatus } from '../PdasStatusCard';
 import { ProductsTabs } from '../ProductsTabs';
-import { PC } from '../productsCopy';
 import { applyFilter, buildCards, buildChanges, limitsText, productFacts, type BoardCard, type BoardChange, type BoardProduct, type Filter, type ProductFacts } from './model';
 import '../products.css';
 import './board.css';
+const PC = withFragments(C.products, FRAGMENTS.productsParts);
 
 const B = PC.board;
 

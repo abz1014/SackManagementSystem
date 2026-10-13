@@ -3,6 +3,7 @@
  * server says are acknowledgeable. A system-state check never gets a control, not even a disabled one. No optimistic UI:
  * the list is re-read after the server answers, and a refusal is printed in the server's own words.
  */
+import { C, FRAGMENTS, withFragments } from '../../../copy';
 import { useState } from 'react';
 import { ackDqFinding, ApiError, getDqDestination, type DqFinding } from '../../../bridge/api';
 import { dqRawTableFor } from '../../../bridge/system';
@@ -11,8 +12,9 @@ import { reasonValid, ReasonField } from '../../../ui/Field';
 import { WriteGate } from '../../../ui/WriteGate';
 import { StatusPill } from '../../../ui/StatusPill';
 import { ENGINEER_RANK } from '../../../ranks';
-import { SY, TECH } from '../systemCopy';
 import { severityState } from './model';
+const SY = withFragments(C.system, FRAGMENTS.systemParts);
+const TECH = FRAGMENTS.systemTech;
 
 const D = SY.diag.checks;
 

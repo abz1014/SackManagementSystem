@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getPallets, getProducts, setPalletActive, setProductActive, type PalletRow } from '../../../bridge/api';
 import { fmt, pdasWords, productLabel } from '../../../bridge/lib';
-import { C, REASON_MIN_CHARS } from '../../../copy';
+import { C, REASON_MIN_CHARS, withFragments, FRAGMENTS } from '../../../copy';
 import { useData, useMachinesRunning } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { ConfirmDialog } from '../../../ui/ConfirmDialog';
@@ -28,10 +28,10 @@ import { routeFor } from '../../../ui/nav';
 import type { ScreenProps } from '../../registry';
 import { PdasStatusCard, usePdasWriteStatus } from '../PdasStatusCard';
 import { ProductsTabs } from '../ProductsTabs';
-import { PC } from '../productsCopy';
 import { activeFirst, buildRows, countByStatus, filterRows, type CatalogueFilter, type CatalogueRow } from './model';
 import '../products.css';
 import './catalogue.css';
+const PC = withFragments(C.products, FRAGMENTS.productsParts);
 
 const K = PC.catalogue;
 const REASON_ID = 'pds-reason';

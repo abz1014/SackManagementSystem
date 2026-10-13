@@ -18,6 +18,7 @@
  *  - ONE AUDIENCE: every rank can plan and review; the Execute control is ABSENT below the engineer rank
  *    (a lock sentence stands in its place) and DISABLED, with the server's reason, while writes are off.
  */
+import { C, FRAGMENTS, withFragments } from '../../../copy';
 import { useState } from 'react';
 import {
   ApiError,
@@ -56,8 +57,8 @@ import {
   type ChangeoverForm,
   type RefForm,
 } from './model';
-import { CO } from './strings';
 import './changeover.css';
+const CO = withFragments(C.changeover, FRAGMENTS.changeover);
 
 const errText = (e: unknown): string => String((e as { message?: string } | null)?.message ?? e);
 const STEPS = [

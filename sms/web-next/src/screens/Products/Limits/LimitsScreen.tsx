@@ -19,6 +19,7 @@
  *  - ONE AUDIENCE: reading is open to every rank; the editor is absent below the engineer rank.
  *  - EVERY FETCH HAS ITS OWN FAILURE STATE that names the part.
  */
+import { C, FRAGMENTS, withFragments } from '../../../copy';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ApiError,
@@ -48,8 +49,8 @@ import type { ScreenProps } from '../../registry';
 import { usePdasWriteStatus } from '../PdasStatusCard';
 import { ProductsTabs } from '../ProductsTabs';
 import { LARGE_REASON_MIN, REASON_MIN, boundsOf, type GuardBounds, fieldsOf, guardOf, limitsLabel, outcomeKind, rangeOf, versionLabel, type OutcomeKind } from './model';
-import { LM } from './strings';
 import './limits.css';
+const LM = withFragments(C.limits, FRAGMENTS.limits);
 
 const errText = (e: unknown): string => String((e as { message?: string } | null)?.message ?? e);
 const STEPS = [

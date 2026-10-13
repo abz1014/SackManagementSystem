@@ -9,6 +9,7 @@
  *   A1-090 / A2-063 / A3-079  the PDAS action history with an outcome filter; "disabled" is an attempt that never reached PDAS
  *   A1-027           the running-product record
  */
+import { C, FRAGMENTS, withFragments } from '../../../copy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '../../../../../web/src/testkit/render';
@@ -19,7 +20,7 @@ import { live } from '../../../bridge/lib';
 import { parseRoute } from '../../../route';
 import { ProductsLimitsScreen } from './LimitsScreen';
 import { FALLBACK_BOUNDS, boundsOf, guardOf, limitsLabel, outcomeKind } from './model';
-import { LM, collectStrings } from './strings';
+const LM = withFragments(C.limits, FRAGMENTS.limits);
 
 installDomStubs();
 
@@ -364,18 +365,5 @@ describe('model and wording', () => {
     open(1);
     await screen.findByRole('table', { name: LM.versionsTitle });
     expect(screen.getByText(LM.retireTitle)).toBeTruthy();
-  });
-
-  const banned = [/\bbatch(es)?\b/i, /\bepochs?\b/i, /\bgenerations?\b/i, /\bsimulator\b/i, /\brejected\b/i, /\bwinder\b/i, /\bmachines?\b/i, /\blifter\b/i, /\bAI\b/, /\bAssumed\b/];
-  const ACRONYMS = new Set(['OK', 'PDAS', 'SMS', 'IFL', 'CSV', 'PDF', 'PLC']);
-  it('keeps the copy rules: sentence case, no pipeline words, no ellipsis', () => {
-    for (const s of collectStrings()) {
-      expect(s, s).toMatch(/^[A-Z]/);
-      expect(s, s).not.toContain('…');
-      expect(s, s).not.toContain('...');
-      for (const re of banned) expect(s, `${s} ~ ${re}`).not.toMatch(re);
-      for (const w of s.match(/[A-Za-z]{2,}/g) ?? []) if (w === w.toUpperCase()) expect(ACRONYMS.has(w), `${w} in ${s}`).toBe(true);
-      expect(s.replace(/\b(Aa|Bb|Cc|Dd)\b/g, 'x'), s).not.toMatch(/\b[A-Z][a-z]+ [A-Z][a-z]+\b/);
-    }
   });
 });

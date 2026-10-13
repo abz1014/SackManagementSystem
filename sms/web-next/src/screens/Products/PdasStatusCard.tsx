@@ -9,13 +9,13 @@
  */
 import { pdasWords } from '../../bridge/lib';
 import { getProductWriteStatus, type ProductWriteStatus } from '../../bridge/api';
-import { C } from '../../copy';
+import { C, withFragments, FRAGMENTS } from '../../copy';
 import { useData, type DataState } from '../../data';
 import { ErrorState } from '../../ui/ErrorState';
 import { Icon } from '../../ui/Icon';
 import { Skeleton } from '../../ui/Skeleton';
-import { PC } from './productsCopy';
 import './products.css';
+const PC = withFragments(C.products, FRAGMENTS.productsParts);
 
 const S = PC.status;
 

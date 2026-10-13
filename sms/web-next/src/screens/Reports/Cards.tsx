@@ -3,10 +3,11 @@
  * gives and in which formats. Every report type is a button inside its card, so every `rt` stays one click away
  * and IFL's eight sit in IFL's own numbering (decision E-5): "IFL report 6" is found by the number in their email.
  */
+import { C, withFragments, FRAGMENTS } from '../../copy';
 import type { ReactNode } from 'react';
 import type { ReportType } from '../../bridge/api';
 import { canRead, CARDS, type ReportCard } from './model';
-import { R } from './strings';
+const R = withFragments(C.reports, FRAGMENTS.reportsParts);
 
 const ICON: Record<ReportCard['id'], ReactNode> = {
   summary: <path d="M5 2.5h7l3.5 3.5v11.5H5zM12 2.5V6h3.5M7.5 10h5M7.5 13h5" />,

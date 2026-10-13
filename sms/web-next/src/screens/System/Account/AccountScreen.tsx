@@ -4,12 +4,13 @@
  * Nothing is shown before the server answers: a wrong current password (403) and a refused new one (400, the policy
  * sentence in `detail`) are printed as the server says them.
  */
+import { C, withFragments, FRAGMENTS } from '../../../copy';
 import { useState } from 'react';
 import { ApiError, changePassword, logout } from '../../../bridge/api';
 import { SystemTabs } from '../SystemTabs';
 import type { ScreenProps } from '../../registry';
-import { SY } from '../systemCopy';
 import '../system.css';
+const SY = withFragments(C.system, FRAGMENTS.systemParts);
 
 const A = SY.account;
 
