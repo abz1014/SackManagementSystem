@@ -219,11 +219,11 @@ describe('legacy links (A6-01, A6-05, A6-06, A6-20, A6-22)', () => {
 });
 
 describe('sheets (A6-06)', () => {
-  it('sheet=station:5 opens a sheet and closing removes the key', async () => {
-    setup('viewer', {}, '/next/?s=today&sheet=station:5');
+  it('an unbuilt sheet kind (sack:5) opens the placeholder sheet and closing removes the key', async () => {
+    setup('viewer', {}, '/next/?s=today&sheet=sack:5');
     render(<App />);
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('link', { name: 'Open it in the current app' }).getAttribute('href')).toContain('sheet=station%3A5');
+    expect(within(dialog).getByRole('link', { name: 'Open it in the current app' }).getAttribute('href')).toContain('sheet=sack%3A5');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(new URLSearchParams(window.location.search).get('sheet')).toBeNull();
@@ -348,7 +348,7 @@ describe('registry', () => {
     expect(SCREEN_KEYS).toContain('today/wall');
     for (const k of SCREEN_KEYS) expect(SCREENS[k], k).toBeDefined();
     expect(SCREEN_KEYS.length).toBe(1 + 4 + 5 + 1 + 3 + 1);
-    expect(Object.keys(SHEETS)).toEqual([]);
+    expect(Object.keys(SHEETS).sort()).toEqual(['reason', 'station']);
   });
 
   it('every placeholder links to the same view in the current app, keeping the period', async () => {

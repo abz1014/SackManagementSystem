@@ -12,11 +12,12 @@
  * Products and PDAS screens must be EAGER: rank.matrix pins their write controls
  * synchronously and a lazy chunk would make that test hollow.
  */
-import type { ComponentType, LazyExoticComponent } from 'react';
+import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
 import type { AuthUser } from '../bridge/api';
 import { SCREENS as SCREEN_IDS, TABS, type Route, type SheetKind } from '../route';
 import { Placeholder } from './Placeholder';
 import { PlaceholderSheet } from './PlaceholderSheet';
+import { TodayScreen } from './Today/Today';
 
 export interface ScreenProps {
   route: Route;
@@ -54,7 +55,17 @@ export const SCREENS: Record<string, ScreenComponent> = Object.fromEntries(
   SCREEN_KEYS.map((k) => [k, Placeholder]),
 );
 
-export const SHEETS: Partial<Record<SheetKind, SheetComponent>> = {};
+// Today is eager (the landing page); Quality, Wall and the sheets are separate chunks.
+SCREENS['today/'] = TodayScreen;
+SCREENS['today/wall'] = lazy(() => import('./Wall/Wall').then((m) => ({ default: m.WallScreen })));
+SCREENS['quality/stations'] = lazy(() => import('./Quality/Stations').then((m) => ({ default: m.QualityStationsScreen })));
+SCREENS['quality/weight'] = lazy(() => import('./Quality/Weight/WeightScreen').then((m) => ({ default: m.QualityWeightScreen })));
+SCREENS['quality/rejects'] = lazy(() => import('./Quality/Rejects/QualityRejects').then((m) => ({ default: m.QualityRejectsScreen })));
+
+export const SHEETS: Partial<Record<SheetKind, SheetComponent>> = {
+  station: lazy(() => import('../sheets/StationSheet/StationSheet').then((m) => ({ default: m.StationSheet }))),
+  reason: lazy(() => import('../sheets/ReasonSheet/ReasonSheet').then((m) => ({ default: m.ReasonSheet }))),
+};
 
 export function resolveScreen(r: Route): ScreenComponent {
   return SCREENS[screenKey(r)] ?? Placeholder;
