@@ -12,7 +12,7 @@
 import { useCallback } from 'react';
 import { health as healthLib, live, fmt } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
-import { C, RESERVED, formatDate } from '../../../copy';
+import { C, RESERVED, formatDate, FRAGMENTS } from '../../../copy';
 import { useRange, useStationStatus, usePeriod } from '../../../data';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
@@ -22,10 +22,12 @@ import { StatusPill } from '../../../ui/StatusPill';
 import { QualityTabs } from '../QualityTabs';
 import type { ScreenProps } from '../../registry';
 import { buildRows, missingFromFeed, pct, sortWorstFirst } from './model';
-import { S } from './stationsCopy';
 import { StationsTable } from './StationsTable';
 import { usePatternCheck, useStationCounts } from './useStationsData';
 import './stations.css';
+
+const S = C.qualityStations;
+const SF = FRAGMENTS.qualityStations;
 
 function span(from: string, to: string): string {
   return from === to ? formatDate(from) : C.period(formatDate(from), formatDate(to));
@@ -57,7 +59,7 @@ export function QualityStationsScreen(props: ScreenProps) {
 function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnType<typeof usePeriod>['period']> }) {
   const status = useStationStatus(period);
   const counts = useStationCounts(period);
-  const pattern = usePatternCheck(period, S.partPattern);
+  const pattern = usePatternCheck(period, SF.partPattern);
   const range = useRange();
   const { line } = live.useLive();
   const dataNow = healthLib.assessHealth(line).kind === 'ok';
@@ -72,9 +74,9 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
 
   let content;
   if (status.status === 'loading') {
-    content = <Skeleton part={S.partStations} height={480} onRetry={status.refresh} />;
+    content = <Skeleton part={SF.partStations} height={480} onRetry={status.refresh} />;
   } else if (status.status === 'error' || !status.data) {
-    content = <ErrorState part={S.partStations} cause={status.error ?? undefined} onRetry={status.refresh} />;
+    content = <ErrorState part={SF.partStations} cause={status.error ?? undefined} onRetry={status.refresh} />;
   } else {
     const sd = status.data.data;
     const countsRows = counts.data ? counts.data.data.rows : null;
@@ -140,13 +142,13 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
               />
               {countsFailed && (
                 <p className="qs-fail" role="alert">
-                  {S.failedPart(S.partCounts)}{' '}
+                  {S.failedPart(SF.partCounts)}{' '}
                   <button type="button" className="ui-link" onClick={counts.refresh}>{C.tryAgain}</button>
                 </p>
               )}
               {patternFailed && (
                 <p className="qs-fail" role="alert">
-                  {S.failedPart(S.partPattern)}{' '}
+                  {S.failedPart(SF.partPattern)}{' '}
                   <button type="button" className="ui-link" onClick={pattern.refresh}>{C.tryAgain}</button>
                 </p>
               )}

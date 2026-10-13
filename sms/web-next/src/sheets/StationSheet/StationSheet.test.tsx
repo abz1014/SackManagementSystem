@@ -181,7 +181,7 @@ describe('the four hops (A6-H01, H02, H03, H07)', () => {
     fireEvent.click(dlg().getByText('Calibration report'));
     expect(go.mock.calls[0]![0]).toMatchObject({ s: 'reports', t: null, sheet: null, keys: { st: '8', rt: 'calibration' } });
     go.mockClear();
-    fireEvent.click(dlg().getByText('Product by machine report'));
+    fireEvent.click(dlg().getByText('Product by station report'));
     expect(go.mock.calls[0]![0]).toMatchObject({ s: 'reports', t: null, sheet: null, keys: { st: '8', rt: 'machine-product' } });
   });
 

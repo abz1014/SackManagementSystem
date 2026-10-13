@@ -24,7 +24,7 @@ import {
   type RejectFilters,
 } from '../../../bridge/api';
 import { live, period as P, productLabel } from '../../../bridge/lib';
-import { C, formatDate } from '../../../copy';
+import { C, formatDate, FRAGMENTS } from '../../../copy';
 import { useData, useRange } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { Pareto, LineChart } from '../../../charts';
@@ -56,8 +56,11 @@ import {
   stationsHop,
   type ReasonRow,
 } from './model';
-import { R, fmtCount, fmtRate, rateNum, reasonName, reasonShort } from './strings';
+import { fmtCount, fmtRate, rateNum, reasonName, reasonShort } from './format';
 import './qualityRejects.css';
+
+const R = C.qualityRejects;
+const RF = FRAGMENTS.qualityRejects;
 
 /** A request that never settles: the part stays "loading" until its inputs exist, with no request and no error. */
 const wait = (): Promise<never> => new Promise<never>(() => {});
@@ -149,7 +152,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
   if (periodStatus === 'error') {
     return <ErrorState part={periodFailed[0] ?? 'the plant clock'} onRetry={() => window.location.reload()} />;
   }
-  if (!period) return <Skeleton part={R.part.figures} height={320} />;
+  if (!period) return <Skeleton part={RF.part.figures} height={320} />;
 
   const afterNewest = !!line?.dataAsOfUtc && P.periodAfterNewest(period, line.dataAsOfUtc);
   const top = rows[0] ?? null;
@@ -213,7 +216,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       </div>
       {(stations.status === 'error' || products.status === 'error') && (
         <ErrorState
-          part={stations.status === 'error' ? R.part.stations : R.part.products}
+          part={stations.status === 'error' ? RF.part.stations : RF.part.products}
           cause={stations.error ?? products.error}
           onRetry={() => { stations.refresh(); products.refresh(); }}
         />
@@ -232,7 +235,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               unit="%"
               chip={1}
               status={figState}
-              part={R.part.figureInspection}
+              part={RF.part.figureInspection}
               onRetry={retryFigs}
               note={fig && figState === 'ok' ? R.ofChecked(fmtCount(fig.inspectionN), fmtCount(fig.inspected)) : null}
             />
@@ -244,7 +247,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               unit="%"
               chip={3}
               status={figState}
-              part={R.part.figureWeight}
+              part={RF.part.figureWeight}
               onRetry={retryFigs}
               note={fig && figState === 'ok' ? R.recordsOf(fmtCount(fig.weightN), fmtCount(fig.inspected)) : null}
             />
@@ -256,10 +259,10 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               unit="%"
               chip={2}
               status={reasons.status === 'error' ? 'error' : reasons.status === 'loading' ? 'loading' : top ? 'ok' : 'empty'}
-              part={R.part.reasons}
+              part={RF.part.reasons}
               onRetry={reasons.refresh}
             />
-            {top && <p className="qr-note">{`${reasonName(top)} · ${fmtCount(top.count)} ${R.cones}`}</p>}
+            {top && <p className="qr-note">{`${reasonName(top)} · ${fmtCount(top.count)} ${RF.cones}`}</p>}
           </div>
         </div>
         {figState === 'error' && figError && <p className="qr-note">{figError}</p>}
@@ -272,9 +275,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       <section className="qr-sec" aria-labelledby="qr-pareto-h">
         <h2 id="qr-pareto-h" className="qr-sec__h">{R.paretoTitle}</h2>
         {reasons.status === 'error' ? (
-          <ErrorState part={R.part.reasons} cause={reasons.error} onRetry={reasons.refresh} />
+          <ErrorState part={RF.part.reasons} cause={reasons.error} onRetry={reasons.refresh} />
         ) : reasons.status === 'loading' ? (
-          <Skeleton part={R.part.reasons} height={260} onRetry={reasons.refresh} />
+          <Skeleton part={RF.part.reasons} height={260} onRetry={reasons.refresh} />
         ) : rows.length === 0 ? (
           afterNewest ? <EmptyState newest={line?.dataAsOfUtc ?? null} /> : <EmptyState message={R.noReasons} />
         ) : (
@@ -282,10 +285,10 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
             <Pareto
               chartId="qr-pareto"
               title={R.paretoTitle}
-              unit={R.cones}
+              unit={RF.cones}
               rows={paretoRows(shown, reasonShort)}
               caption={cover ? `${R.coverTop(cover.k, rateNum(cover.pct) + ' %')} ${R.paretoCaption(`${formatDate(`${period.from}T12:00:00Z`)} to ${formatDate(`${period.to}T12:00:00Z`)}`, fmtCount(rows.reduce((s, r) => s + r.count, 0)))}` : undefined}
-              errorPart={R.part.reasons}
+              errorPart={RF.part.reasons}
             />
             <div>
               <ul className="qr-list" aria-label={R.paretoTitle}>
@@ -330,9 +333,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       <section className="qr-sec" aria-labelledby="qr-heat-h">
         <h2 id="qr-heat-h" className="qr-sec__h">{R.heatTitle}</h2>
         {byDay.status === 'error' ? (
-          <ErrorState part={R.part.byDay} cause={byDay.error} onRetry={byDay.refresh} />
+          <ErrorState part={RF.part.byDay} cause={byDay.error} onRetry={byDay.refresh} />
         ) : byDay.status === 'loading' || reasons.status === 'loading' ? (
-          <Skeleton part={R.part.byDay} height={240} onRetry={byDay.refresh} />
+          <Skeleton part={RF.part.byDay} height={240} onRetry={byDay.refresh} />
         ) : heat.days.length === 0 || shown.length === 0 ? (
           <EmptyState message={R.heatNoRows} />
         ) : (
@@ -365,7 +368,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
         <LineChart
           chartId="qr-trend"
           title={active ? R.trendTitleOne(reasonName(active), days) : R.trendTitle(days)}
-          unit={R.trendUnit}
+          unit={RF.trendUnit}
           zeroBase
           categories={trendRows.map((b) => dayLabel(b.bucketTs))}
           series={[
@@ -375,7 +378,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
           formatValue={(v) => rateNum(v)}
           caption={`${R.trendCaption}${win && heldDays > 0 && heldDays < win.requestedDays ? ` ${R.daysHold(heldDays, win.requestedDays)}` : ''}`}
           status={trendStatus}
-          errorPart={R.part.trend}
+          errorPart={RF.part.trend}
           onRetry={trend.refresh}
         />
       </section>
@@ -384,11 +387,11 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       <nav className="qr-hops" aria-label="Related">
         <p>
           <a className="ui-link" {...hop(conesHop(route))}>{R.hopCones}</a>
-          <span className="qr-note"> · {R.hopConesNote}</span>
+          <span className="qr-note"> · {RF.hopConesNote}</span>
         </p>
         <p>
           <a className="ui-link" {...hop(stationsHop(route))}>{R.hopStations}</a>
-          <span className="qr-note"> · {R.hopStationsNote}</span>
+          <span className="qr-note"> · {RF.hopStationsNote}</span>
         </p>
       </nav>
 

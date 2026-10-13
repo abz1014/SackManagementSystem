@@ -4,11 +4,13 @@
  * The 14-day pattern check is fetched with the period only as its END anchor: the detectors
  * ignore the period (CLAUDE.md, redesign rule 3).
  */
+import { FRAGMENTS } from '../../../copy';
 import { getProduction, getRejects, getWeightStations, listAdjustments } from '../../../bridge/api';
 import { period as P } from '../../../bridge/lib';
 import { useData, type DataState } from '../../../data';
 import type { Envelope, ProductionData, RejectData, WeightStationsData, AdjustmentList } from '../../../bridge/api';
-import { S } from './stationsCopy';
+
+const SF = FRAGMENTS.qualityStations;
 
 function key(period: P.Period): string {
   const q = P.periodQuery(period);
@@ -18,7 +20,7 @@ function key(period: P.Period): string {
 /** Cones, rejected cones and the scale's in-range share, one row per station, for the period. */
 export function useStationCounts(period: P.Period): DataState<Envelope<ProductionData>> {
   return useData(
-    S.partCounts,
+    SF.partCounts,
     () => getProduction({ ...P.periodQuery(period), groupBy: 'station' }),
     `stations:counts:${key(period)}`,
     { live: period.live },
@@ -28,7 +30,7 @@ export function useStationCounts(period: P.Period): DataState<Envelope<Productio
 /** One station's counts for the period (groupBy none). */
 export function useOneStationCounts(period: P.Period, station: number): DataState<Envelope<ProductionData>> {
   return useData(
-    S.partSheetCounts,
+    SF.partSheetCounts,
     () => getProduction({ ...P.periodQuery(period), station, groupBy: 'none' }),
     `station:${station}:counts:${key(period)}`,
     { live: period.live },
@@ -59,7 +61,7 @@ export function usePatternCheck(period: P.Period, part: string): DataState<Envel
 export function useLineReasons(period: P.Period): DataState<Envelope<RejectData>> {
   const q = P.periodQuery(period);
   return useData(
-    S.partSheetReasons,
+    SF.partSheetReasons,
     () => getRejects(q.from, q.to, q.fromShift, q.toShift),
     `stations:reasons:${key(period)}`,
     { live: period.live },
@@ -68,5 +70,5 @@ export function useLineReasons(period: P.Period): DataState<Envelope<RejectData>
 
 /** This station's adjustments plus the line-wide ones. Fetched once; refresh() after a save. */
 export function useAdjustments(station: number): DataState<AdjustmentList> {
-  return useData(S.partSheetLog, () => listAdjustments({ station }), `station:${station}:adjustments`, { live: false });
+  return useData(SF.partSheetLog, () => listAdjustments({ station }), `station:${station}:adjustments`, { live: false });
 }

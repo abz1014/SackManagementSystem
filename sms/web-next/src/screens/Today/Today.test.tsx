@@ -9,6 +9,7 @@
  * real lastChange), A3-030 and G-10 (latest readings), A3-031 + A3-044 + A3-045 (sack section, su toggle),
  * A1-042, A1-057, A1-061, A1-080 (the endpoints), A6-H14 (every old Line and Sacks hop), B5-03 (detectors ignore the period).
  */
+import { C } from '../../copy';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,7 +23,8 @@ import type { AuthUser } from '../../bridge/api';
 import { parseRoute, type Route } from '../../route';
 import { TodayScreen } from './Today';
 import { runStartText, kpis, countDelta, rateDelta, productChanges, changeTime } from './model';
-import { T } from './todayCopy';
+
+const T = C.today;
 
 installDomStubs();
 
@@ -489,7 +491,7 @@ describe('empty period (X-3)', () => {
   it('a live empty period warns that the line may be stopped, with the age on the plant clock', async () => {
     mount('/?s=today&p=shift', { '/api/production': env(emptyProd) });
     expect(await screen.findByText(/The line may be stopped or data is delayed\. The newest reading is/)).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Open Diagnostics' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open the Diagnostics tab' })).toBeTruthy();
   });
 });
 

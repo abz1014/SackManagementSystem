@@ -17,7 +17,7 @@ import {
 } from '../../bridge/api';
 import { W } from '../../bridge/words';
 import { fmt, generationWords, health as healthLib, live, period as P, productLabel } from '../../bridge/lib';
-import { C, RESERVED, formatClock, formatDate } from '../../copy';
+import { C, RESERVED, formatClock, formatDate, FRAGMENTS } from '../../copy';
 import { useData, useRange, useStationStatus, usePeriod, useProduction, type DataState } from '../../data';
 import type { Compare } from '../../data';
 import type { Route } from '../../route';
@@ -37,8 +37,10 @@ import {
   rateDelta, ranSentence, stationCounts, stationSentence,
 } from './model';
 import { Hop } from './Hop';
-import { T } from './todayCopy';
 import './Today.css';
+
+const T = C.today;
+const TF = FRAGMENTS.today;
 
 type Go = ScreenProps['go'];
 type Prod = DataState<Envelope<ProductionData>>;
@@ -83,15 +85,15 @@ function TodayBody({
   const spreadKind: 'day' | 'shift' = period.days >= 2 ? 'day' : 'shift';
 
   const prod = useProduction(period, compare);
-  const spread = useData(T.shifts.partName, () => getProduction({ ...pq, groupBy: spreadKind }), `today-spread:${spreadKind}:${key}`, { live: isLive });
+  const spread = useData(TF.shifts.partName, () => getProduction({ ...pq, groupBy: spreadKind }), `today-spread:${spreadKind}:${key}`, { live: isLive });
   const stations = useStationStatus(period);
-  const sacks = useData(T.sacks.partName, () => getSackSummary(pq), `today-sacks:${key}`, { live: isLive });
-  const reasons = useData(T.reasons.partName, () => getRejectsFiltered(pq), `today-reasons:${key}`, { live: isLive });
-  const attention = useData(T.attention.partName, () => getAttention({
+  const sacks = useData(TF.sacks.partName, () => getSackSummary(pq), `today-sacks:${key}`, { live: isLive });
+  const reasons = useData(TF.reasons.partName, () => getRejectsFiltered(pq), `today-reasons:${key}`, { live: isLive });
+  const attention = useData(TF.attention.partName, () => getAttention({
     from: period.from, to: period.to, shift: period.shift, fromShift: pq.fromShift, toShift: pq.toShift,
   }), `today-attention:${periodKey(period)}`, { live: isLive });
-  const machines = useData(T.productChange.partName, () => getMachinesRunning(period.tsTo), `today-machines:${isLive ? (asOf ?? 'now') : period.tsTo}`, { live: isLive });
-  const products = useData(T.sacks.productsPartName, () => getProducts(), 'today-products', { live: false });
+  const machines = useData(TF.productChange.partName, () => getMachinesRunning(period.tsTo), `today-machines:${isLive ? (asOf ?? 'now') : period.tsTo}`, { live: isLive });
+  const products = useData(TF.sacks.productsPartName, () => getProducts(), 'today-products', { live: false });
   const range = useRange();
 
   const hop = (s: 'quality' | 'products', t: string, extra: Record<string, string> = {}): Route => {
@@ -107,10 +109,10 @@ function TodayBody({
 
   // Parts that failed with nothing to show are named in the notes too, so a missing card is never a silent absence.
   const unloaded: string[] = [];
-  if (sacks.error !== null && sacks.data === null) unloaded.push(T.sacks.partName);
-  if (reasons.error !== null && reasons.data === null) unloaded.push(T.reasons.partName);
-  if (attention.error !== null && attention.data === null) unloaded.push(T.attention.partName);
-  if (products.error !== null && products.data === null) unloaded.push(T.sacks.productsPartName);
+  if (sacks.error !== null && sacks.data === null) unloaded.push(TF.sacks.partName);
+  if (reasons.error !== null && reasons.data === null) unloaded.push(TF.reasons.partName);
+  if (attention.error !== null && attention.data === null) unloaded.push(TF.attention.partName);
+  if (products.error !== null && products.data === null) unloaded.push(TF.sacks.productsPartName);
 
   const showNewest = () => {
     const day = range.data?.maxDate ?? line?.dataAsOfUtc?.slice(0, 10) ?? null;
@@ -253,11 +255,11 @@ function Band({
     : null;
 
   const prev = prod.data?.data.previous;
-  const caption = `${periodWords(period)}, ${T.band.plantTime}${prev ? `, ${T.band.comparedWith(dayRange(prev.from, prev.to))}` : ''}`;
+  const caption = `${periodWords(period)}, ${TF.band.plantTime}${prev ? `, ${TF.band.comparedWith(dayRange(prev.from, prev.to))}` : ''}`;
 
   return (
     <header className="band">
-      <h1>{T.title}</h1>
+      <h1>{C.nav.today}</h1>
       {pending && sentence === '' ? <span className="band-skel" role="status" aria-label="Loading the line status" /> : <p className="sentence">{sentence}</p>}
       <p className="cap">{caption}.</p>
       <p className="cap">{T.answers}</p>
@@ -277,7 +279,7 @@ function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: 
   const pk = prevData ? kpis(prevData) : null;
   const live = period.live;
 
-  const common = { status, part: T.kpi.partName, onRetry: prod.refresh } as const;
+  const common = { status, part: TF.kpi.partName, onRetry: prod.refresh } as const;
   const fmtRate = (r: { pct: number | null; unreadable: boolean }) => (r.unreadable || r.pct === null ? null : r.pct.toFixed(1));
   const rateNote = (r: { n: number | null; of: number | null }, kind: 'inspection' | 'weight'): string | null =>
     r.n === null ? null
@@ -287,16 +289,16 @@ function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: 
   return (
     <>
       <KpiCard {...common} label={T.kpi.cones} chip={1} icon={<Icon name="stations" />}
-        value={k?.cones.text ?? null} delta={k && pk ? countDelta(k.cones, pk.cones, live, T.kpi.vsCount) : null} />
+        value={k?.cones.text ?? null} delta={k && pk ? countDelta(k.cones, pk.cones, live, TF.kpi.vsCount) : null} />
       <KpiCard {...common} label={T.kpi.sacks} chip={2} icon={<Icon name="sacks" />}
-        value={k?.sacks.text ?? null} delta={k && pk ? countDelta(k.sacks, pk.sacks, live, T.kpi.vsCount) : null} />
+        value={k?.sacks.text ?? null} delta={k && pk ? countDelta(k.sacks, pk.sacks, live, TF.kpi.vsCount) : null} />
       <KpiCard {...common} label={T.kpi.packed} chip={3} icon={<Icon name="weight" />}
-        value={k?.kg.text ?? null} unit={T.kpi.kg} delta={k && pk ? countDelta(k.kg, pk.kg, live, T.kpi.vsKg) : null} />
+        value={k?.kg.text ?? null} unit={TF.kpi.kg} delta={k && pk ? countDelta(k.kg, pk.kg, live, TF.kpi.vsKg) : null} />
       <KpiCard {...common} label={C.checks.failedInspection} chip={4} icon={<Icon name="rejects" />}
-        value={k ? fmtRate(k.inspection) : null} unit={T.kpi.percent} note={k ? rateNote(k.inspection, 'inspection') : null}
+        value={k ? fmtRate(k.inspection) : null} unit={TF.kpi.percent} note={k ? rateNote(k.inspection, 'inspection') : null}
         delta={k && pk ? rateDelta(k.inspection, pk.inspection) : null} />
       <KpiCard {...common} label={C.checks.failedWeight} chip={5} icon={<Icon name="health" />}
-        value={k ? fmtRate(k.weight) : null} unit={T.kpi.percent} note={k ? rateNote(k.weight, 'weight') : null}
+        value={k ? fmtRate(k.weight) : null} unit={TF.kpi.percent} note={k ? rateNote(k.weight, 'weight') : null}
         delta={k && pk ? rateDelta(k.weight, pk.weight) : null} />
     </>
   );
@@ -343,11 +345,11 @@ function StationsCard({
         </div>
       )}
       {machines.status === 'error' && (
-        <p className="cap-sm" role="status">{C.couldntLoad(T.productChange.partName)}</p>
+        <p className="cap-sm" role="status">{C.couldntLoad(TF.productChange.partName)}</p>
       )}
-      {stations.status === 'loading' && <Skeleton part={T.stations.partName} height={240} />}
+      {stations.status === 'loading' && <Skeleton part={TF.stations.partName} height={240} />}
       {stations.status === 'error' && (
-        <ErrorState part={T.stations.partName} cause={stations.error ?? undefined} onRetry={stations.refresh} minHeight={160} />
+        <ErrorState part={TF.stations.partName} cause={stations.error ?? undefined} onRetry={stations.refresh} minHeight={160} />
       )}
       {rows !== null && rows.length === 0 && <EmptyState message={T.stations.none} />}
       {rows !== null && rows.length > 0 && (

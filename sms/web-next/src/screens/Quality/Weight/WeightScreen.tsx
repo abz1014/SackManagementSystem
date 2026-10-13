@@ -54,8 +54,9 @@ import {
   withKeys,
   type WeightMode,
 } from './model';
-import { QW } from './strings';
 import './weight.css';
+
+const QW = C.qualityWeight;
 
 const TRAILING_DAYS = P.TRAILING_DAYS;
 const POLL = 60_000;

@@ -163,11 +163,11 @@ describe('Wall in dark Style C', () => {
     const { container } = mount();
     await waitFor(() => expect(container.querySelectorAll('.wl-tile')).toHaveLength(3));
     const t = (n: number) => container.querySelector(`.wl-tile[data-station="${n}"]`) as HTMLElement;
-    expect(t(4).textContent).toMatch(/Silent since/);
+    expect(t(4).textContent).toMatch(/No readings since/);
     expect(t(5).textContent).toMatch(/No cones/);
-    expect(t(5).textContent).not.toMatch(/Silent since/);
+    expect(t(5).textContent).not.toMatch(/No readings since/);
     expect(t(4).textContent).toContain('–');
-    expect(t(10).textContent).toMatch(/Quiet since/);
+    expect(t(10).textContent).toMatch(/No cones since/);
   });
 
   it('refreshes by itself: /api/live is requested again after a poll interval', async () => {

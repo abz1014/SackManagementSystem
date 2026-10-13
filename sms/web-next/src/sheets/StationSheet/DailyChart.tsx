@@ -12,8 +12,10 @@ import { LineChart } from '../../charts';
 import type { LimitSpec } from '../../charts';
 import type { PeriodParams } from '../../bridge/chart';
 import { period as P, plantClock, fmt } from '../../bridge/lib';
-import { formatDate } from '../../copy';
-import { S } from '../../screens/Quality/Stations/stationsCopy';
+import { C, formatDate, FRAGMENTS } from '../../copy';
+
+const S = C.qualityStations;
+const SF = FRAGMENTS.qualityStations;
 
 export interface DailyPoint {
   date: string;
@@ -68,7 +70,7 @@ export function DailyChart(p: DailyChartProps) {
       series={series}
       limits={limits}
       defaultH={190}
-      errorPart={S.chartPart}
+      errorPart={SF.chartPart}
       onRetry={p.onRetry}
       periodFor={(i) => {
         const d = p.days[i]?.date;

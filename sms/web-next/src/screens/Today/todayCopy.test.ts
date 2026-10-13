@@ -1,5 +1,7 @@
+import { C } from '../../copy';
 import { describe, expect, it } from 'vitest';
-import { T } from './todayCopy';
+
+const T = C.today;
 
 /** Same banned words and shape rules as copy.test.ts applies to C (GLOSSARY 1.7 and section 2). */
 function collect(node: unknown, out: string[] = []): string[] {

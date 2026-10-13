@@ -18,7 +18,7 @@ import { NELSON_RULE_LABEL, type NelsonRuleId, type NelsonRuleInfo, type Station
 import { fmt } from '../../bridge/lib';
 import { projectionSentence } from '../../bridge/station';
 import { W } from '../../bridge/words';
-import { C, formatClock, formatDate } from '../../copy';
+import { C, formatClock, formatDate, FRAGMENTS } from '../../copy';
 import { useMachinesRunning, usePeriod, useStationStatus } from '../../data';
 import { Disclosure } from '../../ui/Disclosure';
 import { EmptyState } from '../../ui/EmptyState';
@@ -29,12 +29,14 @@ import { StatusPill } from '../../ui/StatusPill';
 import { stationText } from '../../ui/StationTile';
 import type { SheetProps } from '../../screens/registry';
 import { patternOf, pct, signedG, targetOf } from '../../screens/Quality/Stations/model';
-import { S } from '../../screens/Quality/Stations/stationsCopy';
 import { useAdjustments, useLineReasons, useOneStationCounts, usePatternCheck } from '../../screens/Quality/Stations/useStationsData';
 import { AdjustmentForm } from './AdjustmentForm';
 import { DailyChart } from './DailyChart';
 import { hopHref, hopRoute, type HopKind } from './hops';
 import './stationSheet.css';
+
+const S = C.qualityStations;
+const SF = FRAGMENTS.qualityStations;
 
 type Per = NonNullable<ReturnType<typeof usePeriod>['period']>;
 
@@ -107,7 +109,7 @@ interface LoadedProps extends SheetProps {
 function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedProps) {
   const status = useStationStatus(period);
   const counts = useOneStationCounts(period, station);
-  const pattern = usePatternCheck(period, S.partSheetPattern);
+  const pattern = usePatternCheck(period, SF.partSheetPattern);
   const reasons = useLineReasons(period);
   const log = useAdjustments(station);
   const machines = useMachinesRunning();
@@ -138,7 +140,7 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
   return (
     <>
       {status.status === 'loading' && !srow ? (
-        <Skeleton part={S.partSheetStatus} height={320} onRetry={status.refresh} />
+        <Skeleton part={SF.partSheetStatus} height={320} onRetry={status.refresh} />
       ) : gone ? (
         <EmptyState message={W.stationNotFound} />
       ) : (
@@ -161,10 +163,10 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
           <section className="ss-sec" aria-labelledby="ss-reasons-h">
             <div className="ss-h2">
               <h3 id="ss-reasons-h" className="ss-h">{S.reasonsTitle}</h3>
-              <span className="ss-cap">{S.reasonsCaption}</span>
+              <span className="ss-cap">{SF.reasonsCaption}</span>
             </div>
             {reasons.status === 'error' ? (
-              <ErrorState part={S.partSheetReasons} onRetry={reasons.refresh} />
+              <ErrorState part={SF.partSheetReasons} onRetry={reasons.refresh} />
             ) : reasons.data ? (
               reasons.data.data.reasons.length === 0 ? (
                 <p className="ss-note">{S.reasonsNone}</p>
@@ -179,7 +181,7 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
                 </ul>
               )
             ) : (
-              <Skeleton part={S.partSheetReasons} height={64} lines={3} onRetry={reasons.refresh} />
+              <Skeleton part={SF.partSheetReasons} height={64} lines={3} onRetry={reasons.refresh} />
             )}
           </section>
 
@@ -188,25 +190,25 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
             <dl className="ss-dl">
               <div>
                 <dt>{S.productJudged}</dt>
-                <dd>{srow ? (srow.product ?? S.noProduct) : S.dash}</dd>
+                <dd>{srow ? (srow.product ?? S.noProduct) : SF.dash}</dd>
               </div>
               <div>
                 <dt>{S.lastReading}</dt>
                 <dd>
                   {machines.status === 'error'
-                    ? S.dash
+                    ? SF.dash
                     : machine?.lastSeenUtc
                       ? `${formatDate(machine.lastSeenUtc)} ${formatClock(machine.lastSeenUtc)}`
                       : machines.data
                         ? S.noReading
-                        : S.dash}
+                        : SF.dash}
                 </dd>
               </div>
             </dl>
             <p className="ss-note">
               {machines.status === 'error' ? (
                 <>
-                  {C.couldntLoad(S.partSheetMachine)}{' '}
+                  {C.couldntLoad(SF.partSheetMachine)}{' '}
                   <button type="button" className="ui-link" onClick={machines.refresh}>{C.tryAgain}</button>
                 </>
               ) : machine?.state === 'running' && machine.productName ? (
@@ -245,7 +247,7 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
 }
 
 function stamp(at: string | null | undefined): string {
-  return at ? `${formatDate(at)} ${formatClock(at)}` : S.dash;
+  return at ? `${formatDate(at)} ${formatClock(at)}` : SF.dash;
 }
 
 /* ------------------------------------------------------------------ KPIs */
@@ -259,14 +261,14 @@ function Kpis(p: {
   wsd: WeightStationsData | null;
 }) {
   const { srow, counts } = p;
-  if (p.statusFailed) return <ErrorState part={S.partSheetStatus} onRetry={p.onRetry} />;
+  if (p.statusFailed) return <ErrorState part={SF.partSheetStatus} onRetry={p.onRetry} />;
   const c = counts.data ? counts.data.data.rows[0] : undefined;
   const countsFailed = counts.status === 'error';
   const weightFail = c && c.conesInRangePct != null ? Math.max(0, 100 - c.conesInRangePct) : null;
   const target = srow ? targetOf(srow, p.wrow, p.wsd) : null;
   const targetText =
     target == null || target.kind === 'unavailable'
-      ? S.dash
+      ? SF.dash
       : target.kind === 'value'
         ? target.text
         : target.kind === 'mixed'
@@ -274,26 +276,26 @@ function Kpis(p: {
           : target.kind === 'none'
             ? W.weight.noTarget
             : S.noData;
-  const cones = srow ? fmt.fmtInt(srow.cones) : S.dash;
+  const cones = srow ? fmt.fmtInt(srow.cones) : SF.dash;
 
   return (
     <section aria-label={S.sheetPeriod('')} className="ss-kpis">
       <div className="ss-kpi">
         <span className="ss-cap">{S.kpiFailedInspection}</span>
-        <b>{srow ? (pct(srow.failedPct) ?? S.noData) : S.dash}</b>
+        <b>{srow ? (pct(srow.failedPct) ?? S.noData) : SF.dash}</b>
         <span className="ss-cap">
-          {countsFailed ? S.dash : c && srow ? S.nOfCones(fmt.fmtInt(c.rejectedCones), cones) : srow && srow.cones === 0 ? S.noData : S.dash}
+          {countsFailed ? SF.dash : c && srow ? S.nOfCones(fmt.fmtInt(c.rejectedCones), cones) : srow && srow.cones === 0 ? S.noData : SF.dash}
         </span>
       </div>
       <div className="ss-kpi">
         <span className="ss-cap">{S.kpiFailedWeight}</span>
-        <b>{countsFailed ? S.dash : (pct(weightFail) ?? S.noData)}</b>
-        <span className="ss-cap">{srow ? S.ofConesWeighed(cones) : S.dash}</span>
+        <b>{countsFailed ? SF.dash : (pct(weightFail) ?? S.noData)}</b>
+        <span className="ss-cap">{srow ? SF.ofConesWeighed(cones) : SF.dash}</span>
       </div>
       <div className="ss-kpi" title={target?.kind === 'mixed' ? W.weight.mixedTarget(target.materials) : undefined}>
         <span className="ss-cap">{S.kpiMeanVsTarget}</span>
         <b>{targetText}</b>
-        <span className="ss-cap">{S.vsTargetSub}</span>
+        <span className="ss-cap">{SF.vsTargetSub}</span>
       </div>
       <div className="ss-kpi">
         <span className="ss-cap">{S.kpiCones}</span>
@@ -301,7 +303,7 @@ function Kpis(p: {
       </div>
       {countsFailed && (
         <p className="ss-error" role="alert">
-          {C.couldntLoad(S.partSheetCounts)}{' '}
+          {C.couldntLoad(SF.partSheetCounts)}{' '}
           <button type="button" className="ui-link" onClick={counts.refresh}>{C.tryAgain}</button>
         </p>
       )}
@@ -334,7 +336,7 @@ function Pattern(p: {
     return (
       <section className="ss-sec ss-box" aria-labelledby="ss-pattern-h">
         {head}
-        <ErrorState part={S.partSheetPattern} onRetry={p.onRetry} />
+        <ErrorState part={SF.partSheetPattern} onRetry={p.onRetry} />
       </section>
     );
   }
@@ -342,7 +344,7 @@ function Pattern(p: {
     return (
       <section className="ss-sec ss-box" aria-labelledby="ss-pattern-h">
         {head}
-        <Skeleton part={S.partSheetPattern} height={220} onRetry={p.onRetry} />
+        <Skeleton part={SF.partSheetPattern} height={220} onRetry={p.onRetry} />
       </section>
     );
   }
@@ -401,10 +403,10 @@ function Pattern(p: {
       )}
 
       <dl className="ss-dl ss-dl--wide">
-        <div><dt>{W.calibration.colMedian}</dt><dd>{wrow.medianG == null ? S.dash : fmt.fmtG(wrow.medianG)}</dd></div>
-        <div><dt>{W.calibration.colSd}</dt><dd>{wrow.sdG == null ? S.dash : `${wrow.sdG.toFixed(1)} g`}</dd></div>
+        <div><dt>{W.calibration.colMedian}</dt><dd>{wrow.medianG == null ? SF.dash : fmt.fmtG(wrow.medianG)}</dd></div>
+        <div><dt>{W.calibration.colSd}</dt><dd>{wrow.sdG == null ? SF.dash : `${wrow.sdG.toFixed(1)} g`}</dd></div>
         <div><dt>{W.weight.colVsLine}</dt><dd>{signedG(wrow.vsLineG)}</dd></div>
-        <div><dt>{W.weight.colRejects}</dt><dd>{wrow.rejectRatePct == null ? S.dash : `${wrow.rejectRatePct.toFixed(1)} %`}</dd></div>
+        <div><dt>{W.weight.colRejects}</dt><dd>{wrow.rejectRatePct == null ? SF.dash : `${wrow.rejectRatePct.toFixed(1)} %`}</dd></div>
       </dl>
 
       <Disclosure id="station-sheet-nelson">
@@ -415,7 +417,7 @@ function Pattern(p: {
         </p>
         <p>
           {W.calibration.rulesRun}{' '}
-          {W.calibration.centreline(fmt.fmtG(wrow.centrelineG), wrow.sigmaDayToDay == null ? S.dash : `${wrow.sigmaDayToDay.toFixed(2)} g`)}
+          {W.calibration.centreline(fmt.fmtG(wrow.centrelineG), wrow.sigmaDayToDay == null ? SF.dash : `${wrow.sigmaDayToDay.toFixed(2)} g`)}
           {wrow.restartedOn ? `, ${W.calibration.restartedOn(short(wrow.restartedOn))}` : ''}.{' '}
           {cannot.length > 0 ? W.calibration.cannotFire(ruleList(cannot), wrow.longestRun) : W.calibration.allCanFire(wrow.longestRun)}{' '}
           {W.calibration.notApproved}
@@ -431,17 +433,17 @@ function Pattern(p: {
 
 function Ledger({ log }: { log: ReturnType<typeof useAdjustments> }) {
   const beforeAfter = (a: import('../../bridge/api').CalibrationAdjustment) => {
-    if (a.beforeG == null && a.afterG == null) return S.dash;
+    if (a.beforeG == null && a.afterG == null) return SF.dash;
     const ref = a.referenceG != null ? ` (ref ${fmt.fmtG(a.referenceG)})` : '';
-    return `${a.beforeG == null ? S.dash : fmt.fmtG(a.beforeG)} → ${a.afterG == null ? S.dash : fmt.fmtG(a.afterG)}${ref}`;
+    return `${a.beforeG == null ? SF.dash : fmt.fmtG(a.beforeG)} → ${a.afterG == null ? SF.dash : fmt.fmtG(a.afterG)}${ref}`;
   };
   return (
     <section className="ss-sec" aria-labelledby="ss-log-h">
       <h3 id="ss-log-h" className="ss-h">{W.weight.adjustmentLog}</h3>
       {log.status === 'error' && !log.data ? (
-        <ErrorState part={S.partSheetLog} onRetry={log.refresh} />
+        <ErrorState part={SF.partSheetLog} onRetry={log.refresh} />
       ) : !log.data ? (
-        <Skeleton part={S.partSheetLog} height={64} lines={2} onRetry={log.refresh} />
+        <Skeleton part={SF.partSheetLog} height={64} lines={2} onRetry={log.refresh} />
       ) : log.data.adjustments.length === 0 ? (
         <p className="ss-note">{W.weight.adjustmentsIn(0, 14)}</p>
       ) : (
@@ -464,11 +466,11 @@ function Ledger({ log }: { log: ReturnType<typeof useAdjustments> }) {
                       {short(a.adjustedAtPlant)} {formatClock(a.adjustedAtPlant)}
                       {a.stationId == null && <span className="ss-mut"> {'·'} {W.calibration.lineWide}</span>}
                     </td>
-                    <td className="ss-n">{signedG(a.amountG) ?? S.dash}</td>
+                    <td className="ss-n">{signedG(a.amountG) ?? SF.dash}</td>
                     <td className="ss-n">{beforeAfter(a)}</td>
-                    <td>{a.productLabel ?? S.dash}</td>
+                    <td>{a.productLabel ?? SF.dash}</td>
                     <td>
-                      {a.reason ?? S.dash}
+                      {a.reason ?? SF.dash}
                       {a.note && <span className="ss-mut"> {'·'} {a.note}</span>}
                       {a.recordedBy && <span className="ss-mut"> {'·'} {a.recordedBy}</span>}
                     </td>

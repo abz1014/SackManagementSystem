@@ -11,14 +11,16 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react';
 import { W } from '../../../bridge/words';
 import { fmt } from '../../../bridge/lib';
-import { C } from '../../../copy';
+import { C, FRAGMENTS } from '../../../copy';
 import { StatusPill } from '../../../ui/StatusPill';
 import { stationText } from '../../../ui/StationTile';
 import { useMediaQuery } from '../../../ui/useMediaQuery';
 import '../../../ui/components/DataTable.css';
 import './stations.css';
 import { pct, type PatternCell, type StationRowModel, type TargetCell } from './model';
-import { S } from './stationsCopy';
+
+const S = C.qualityStations;
+const SF = FRAGMENTS.qualityStations;
 
 export interface StationsTableProps {
   rows: readonly StationRowModel[];
@@ -34,7 +36,7 @@ export interface StationsTableProps {
 
 const Dash = () => (
   <span className="qs-mut" aria-label={S.noData}>
-    {S.dash}
+    {SF.dash}
   </span>
 );
 
@@ -58,7 +60,7 @@ function TargetValue({ cell, failed }: { cell: TargetCell; failed: boolean }): R
       return (
         <span title={cell.lineProduct ? W.weight.targetLineProduct : undefined}>
           <b>{cell.text}</b>
-          <span className="qs-sub">{S.vsTargetSub}</span>
+          <span className="qs-sub">{SF.vsTargetSub}</span>
         </span>
       );
     case 'mixed':
@@ -82,7 +84,7 @@ function FailedInspection({ r, failed }: { r: StationRowModel; failed: boolean }
   return (
     <>
       <b>{p}</b>
-      <span className="qs-sub">{failed || r.failedN == null ? S.dash : S.conesSub(fmt.fmtInt(r.failedN))}</span>
+      <span className="qs-sub">{failed || r.failedN == null ? SF.dash : S.conesSub(fmt.fmtInt(r.failedN))}</span>
     </>
   );
 }

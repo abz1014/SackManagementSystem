@@ -16,9 +16,11 @@ import type {
 } from '../../bridge/api';
 import { period as P } from '../../bridge/lib';
 import { W } from '../../bridge/words';
-import { formatClock, formatDate } from '../../copy';
+import { C, formatClock, formatDate, FRAGMENTS } from '../../copy';
 import type { KpiDelta } from '../../ui/KpiCard';
-import { T } from './todayCopy';
+
+const T = C.today;
+const TF = FRAGMENTS.today;
 
 /* ---------------------------------------------------------------- numbers */
 
@@ -120,7 +122,7 @@ export function countDelta(cur: Figure, prev: Figure, live: boolean, vs: (p: str
   if (cur.value === null || prev.value === null || prev.text === null || prev.value === 0) return null;
   const diff = cur.value - prev.value;
   const pct = Math.abs((100 * diff) / prev.value);
-  const text = `${nf1(pct)} %${live ? ` ${T.kpi.soFar}` : ''}`;
+  const text = `${nf1(pct)} %${live ? ` ${TF.kpi.soFar}` : ''}`;
   return { text, direction: dir(diff), vs: vs(prev.text) };
 }
 
@@ -128,7 +130,7 @@ export function countDelta(cur: Figure, prev: Figure, live: boolean, vs: (p: str
 export function rateDelta(cur: RateFigure, prev: RateFigure): KpiDelta | null {
   if (cur.pct === null || prev.pct === null) return null;
   const diff = Math.round((cur.pct - prev.pct) * 10) / 10;
-  return { text: T.kpi.points(nf1(Math.abs(diff))), direction: dir(diff), vs: T.kpi.vsRate(nf1(prev.pct)) };
+  return { text: T.kpi.points(nf1(Math.abs(diff))), direction: dir(diff), vs: TF.kpi.vsRate(nf1(prev.pct)) };
 }
 
 /* ------------------------------------------------------------ the band */
@@ -236,7 +238,7 @@ export function changeTime(atUtc: string, periodTo: string): string {
 export function runStartText(m: Pick<MachineRunning, 'runStartUtc' | 'runStartIsLookbackLimit'>): string | null {
   if (!m.runStartUtc) return null;
   const when = `${formatDate(m.runStartUtc)} ${formatClock(m.runStartUtc)}`;
-  return m.runStartIsLookbackLimit ? T.productChange.sinceAtLeast(when) : T.productChange.since(when);
+  return m.runStartIsLookbackLimit ? TF.productChange.sinceAtLeast(when) : TF.productChange.since(when);
 }
 
 /* ------------------------------------------------------------- attention */

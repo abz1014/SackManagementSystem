@@ -19,14 +19,16 @@ import { useMemo } from 'react';
 import { getProduction, type LiveLine, type StationStatusRow } from '../../bridge/api';
 import { fmt, generationWords, health as healthLib, live, period as P, simulatorWords } from '../../bridge/lib';
 import { W } from '../../bridge/words';
-import { C } from '../../copy';
+import { C, FRAGMENTS } from '../../copy';
 import { todayRoute } from '../../appRoute';
 import { useData, usePeriod, useProduction, useStationStatus } from '../../data';
 import { hrefFor, plainClick } from '../../ui/nav';
 import { StatusPill, type UiState } from '../../ui/StatusPill';
 import type { ScreenProps } from '../registry';
-import { WC } from './wallCopy';
 import './wall.css';
+
+const WC = C.wall;
+const WCF = FRAGMENTS.wall;
 
 /** Quiet after twenty minutes without a cone, measured from the newest reading (the plant writes rows ~15 min late). */
 const QUIET_AFTER_SECONDS = 20 * 60;
@@ -167,9 +169,9 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
   const shiftMax = shiftRows ? Math.max(1, ...shiftRows.map((r) => r.cones)) : 1;
 
   const failedParts: string[] = [];
-  if (stationsD.status === 'error') failedParts.push(WC.parts.stations);
-  if (prodD.status === 'error') failedParts.push(WC.parts.production);
-  if (shiftsD.status === 'error') failedParts.push(WC.parts.shifts);
+  if (stationsD.status === 'error') failedParts.push(WCF.parts.stations);
+  if (prodD.status === 'error') failedParts.push(WCF.parts.production);
+  if (shiftsD.status === 'error') failedParts.push(WCF.parts.shifts);
   const staleParts = [stationsD, prodD, shiftsD].some((d) => d.staleError);
 
   const periodText = P.describePeriod(period);
@@ -223,7 +225,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
         </div>
       ) : (
         <p className="wl-missing" role="status">
-          {stationsD.status === 'error' ? WC.couldntRead(WC.parts.stations) : WC.loading}
+          {stationsD.status === 'error' ? WC.couldntRead(WCF.parts.stations) : WC.loading}
         </p>
       )}
 
@@ -239,7 +241,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
             </div>
           ))
         ) : shiftsD.status === 'error' ? (
-          <p className="wl-missing" role="status">{WC.couldntRead(WC.parts.shifts)}</p>
+          <p className="wl-missing" role="status">{WC.couldntRead(WCF.parts.shifts)}</p>
         ) : null}
       </div>
 

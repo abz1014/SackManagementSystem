@@ -3,10 +3,14 @@
  * (--seq-*), light to dark; every non-zero cell also prints its number, so colour is never the only cue.
  * A cell opens the reason sheet for that reason and day. Capped by the caller (top 8, then "Show all").
  */
+import { C, FRAGMENTS } from '../../../copy';
 import { fmt } from '../../../bridge/lib';
 import { dayLabel, heatStep, HEAT_STEPS, type Heat, type HeatRow } from './model';
-import { R, fmtRate, reasonName, reasonShort } from './strings';
+import { fmtRate, reasonName, reasonShort } from './format';
 import './qualityRejects.css';
+
+const R = C.qualityRejects;
+const RF = FRAGMENTS.qualityRejects;
 
 export interface HeatMatrixProps {
   heat: Heat;
@@ -51,7 +55,7 @@ export function HeatMatrix({ heat, rows, activeCode, onOpen }: HeatMatrixProps) 
                         {c.pct >= 10 ? Math.round(c.pct) : c.pct.toFixed(1)}
                       </button>
                     ) : (
-                      <span className="qr-heat__cell qr-heat__cell--s0" aria-label={`${reasonName(row.reason)}, ${fmt.fmtDay(`${c.day}T12:00:00Z`)}: ${R.heatLegendNone}`} />
+                      <span className="qr-heat__cell qr-heat__cell--s0" aria-label={`${reasonName(row.reason)}, ${fmt.fmtDay(`${c.day}T12:00:00Z`)}: ${RF.heatLegendNone}`} />
                     )}
                   </td>
                 ))}
@@ -61,7 +65,7 @@ export function HeatMatrix({ heat, rows, activeCode, onOpen }: HeatMatrixProps) 
         </table>
       </div>
       <ul className="qr-heat__legend" aria-label={R.heatLegendLabel}>
-        <li><span className="qr-heat__swatch qr-heat__cell--s0" aria-hidden="true" />{R.heatLegendNone}</li>
+        <li><span className="qr-heat__swatch qr-heat__cell--s0" aria-hidden="true" />{RF.heatLegendNone}</li>
         <li><span className="qr-heat__swatch qr-heat__cell--s1" aria-hidden="true" />{`under ${HEAT_STEPS[0]} %`}</li>
         <li><span className="qr-heat__swatch qr-heat__cell--s2" aria-hidden="true" />{`under ${HEAT_STEPS[1]} %`}</li>
         <li><span className="qr-heat__swatch qr-heat__cell--s3" aria-hidden="true" />{`under ${HEAT_STEPS[2]} %`}</li>

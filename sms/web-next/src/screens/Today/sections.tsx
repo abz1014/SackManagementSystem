@@ -11,7 +11,7 @@ import { fmt, period as P } from '../../bridge/lib';
 import { projectionSentence } from '../../bridge/station';
 import { W } from '../../bridge/words';
 import { BarChart, Pareto } from '../../charts';
-import { C, formatClock, formatDate } from '../../copy';
+import { C, formatClock, formatDate, FRAGMENTS } from '../../copy';
 import type { DataState } from '../../data';
 import type { Route } from '../../route';
 import { AttentionList, type AttentionItem } from '../../ui/AttentionList';
@@ -24,7 +24,9 @@ import { Skeleton } from '../../ui/Skeleton';
 import type { ScreenProps } from '../registry';
 import { Hop } from './Hop';
 import { findingKind, nf0, nf1, periodWords } from './model';
-import { T } from './todayCopy';
+
+const T = C.today;
+const TF = FRAGMENTS.today;
 
 type Go = ScreenProps['go'];
 const SHIFT_ORDER = ['morning', 'evening', 'night'] as const;
@@ -69,8 +71,8 @@ export function ShiftsCard({
   return (
     <section className="card today-card" aria-label={title}>
       {!spread.data && <h2>{title}</h2>}
-      {spread.status === 'loading' && <Skeleton part={T.shifts.partName} height={260} />}
-      {spread.status === 'error' && <ErrorState part={T.shifts.partName} cause={spread.error ?? undefined} onRetry={spread.refresh} minHeight={200} />}
+      {spread.status === 'loading' && <Skeleton part={TF.shifts.partName} height={260} />}
+      {spread.status === 'error' && <ErrorState part={TF.shifts.partName} cause={spread.error ?? undefined} onRetry={spread.refresh} minHeight={200} />}
       {spread.data && (() => {
         const rows = orderedRows(spread.data.data.rows, spreadKind);
         const values = rows.map((r) => num(r.cones));
@@ -89,7 +91,7 @@ export function ShiftsCard({
             <BarChart
               chartId={`today-cones-${spreadKind}`}
               title={title}
-              unit={T.shifts.unit}
+              unit={TF.shifts.unit}
               categories={rows.map((r) => labelOf(r.group, spreadKind))}
               series={[{ name: T.shifts.series, values }]}
               caption={T.shifts.caption(periodWords(period), nf0(total), sackParts)}
@@ -111,8 +113,8 @@ export function ReasonsCard({ reasons, period }: { reasons: DataState<Envelope<R
   return (
     <section className="card today-card" aria-label={T.reasons.title}>
       {!reasons.data && <h2>{T.reasons.title}</h2>}
-      {reasons.status === 'loading' && <Skeleton part={T.reasons.partName} height={260} />}
-      {reasons.status === 'error' && <ErrorState part={T.reasons.partName} cause={reasons.error ?? undefined} onRetry={reasons.refresh} minHeight={200} />}
+      {reasons.status === 'loading' && <Skeleton part={TF.reasons.partName} height={260} />}
+      {reasons.status === 'error' && <ErrorState part={TF.reasons.partName} cause={reasons.error ?? undefined} onRetry={reasons.refresh} minHeight={200} />}
       {reasons.data && (() => {
         const quality = reasons.data.data.reasons.filter((r) => r.rejectType === 'quality');
         if (quality.length === 0) return <EmptyState message={T.reasons.none} />;
@@ -133,7 +135,7 @@ export function ReasonsCard({ reasons, period }: { reasons: DataState<Envelope<R
           <Pareto
             chartId="today-reasons"
             title={T.reasons.title}
-            unit={T.reasons.unit}
+            unit={TF.reasons.unit}
             rows={rows}
             formatValue={nf0}
             caption={T.reasons.caption(periodWords(period), nf0(total))}
@@ -196,8 +198,8 @@ export function AttentionCard({
   const tooFew = data !== null && data.window.days < data.thresholds.minDaysHeld;
   return (
     <div className="today-card card">
-      {attention.status === 'loading' && <Skeleton part={T.attention.partName} height={120} />}
-      {attention.status === 'error' && <ErrorState part={T.attention.partName} cause={attention.error ?? undefined} onRetry={attention.refresh} minHeight={120} />}
+      {attention.status === 'loading' && <Skeleton part={TF.attention.partName} height={120} />}
+      {attention.status === 'error' && <ErrorState part={TF.attention.partName} cause={attention.error ?? undefined} onRetry={attention.refresh} minHeight={120} />}
       {data && (
         <>
           <AttentionList items={items} onOpen={open} />
@@ -231,8 +233,8 @@ export function LatestCard({
   let body: ReactNode;
   if (!line) {
     body = loading
-      ? <Skeleton part={T.latest.partName} height={140} />
-      : <ErrorState part={T.latest.partName} cause={error ?? undefined} onRetry={refresh} minHeight={120} />;
+      ? <Skeleton part={TF.latest.partName} height={140} />
+      : <ErrorState part={TF.latest.partName} cause={error ?? undefined} onRetry={refresh} minHeight={120} />;
   } else {
     const verdict = (inRange: boolean | null) => (inRange === false ? C.checks.failedWeight : C.checks.passedWeight);
     const rows: ReactNode[] = [];
@@ -325,8 +327,8 @@ export function SacksSection({
   const s = sacks.data?.data ?? null;
 
   const body = (() => {
-    if (sacks.status === 'loading') return <Skeleton part={T.sacks.partName} height={200} />;
-    if (sacks.status === 'error' || s === null) return <ErrorState part={T.sacks.partName} cause={sacks.error ?? undefined} onRetry={sacks.refresh} minHeight={160} />;
+    if (sacks.status === 'loading') return <Skeleton part={TF.sacks.partName} height={200} />;
+    if (sacks.status === 'error' || s === null) return <ErrorState part={TF.sacks.partName} cause={sacks.error ?? undefined} onRetry={sacks.refresh} minHeight={160} />;
     if (s.totals.sacks === 0) return <EmptyState message={T.sacks.none} />;
     const nameOf = (id: number | null, plain: string | null) =>
       id === null ? T.sacks.noProduct : (labels.get(id) ?? plain ?? `Product ${id}`);
@@ -358,7 +360,7 @@ export function SacksSection({
           <div><dt>{T.sacks.passedScale}</dt><dd>{t.inRangePct === null ? '-' : `${nf1(t.inRangePct)} %`}</dd></div>
           <div><dt>{T.sacks.conesPerSack}</dt><dd>{t.conesPerSack === null ? '-' : nf1(t.conesPerSack)}</dd></div>
         </dl>
-        {spread.status === 'error' && <ErrorState part={T.shifts.partName} cause={spread.error ?? undefined} onRetry={spread.refresh} minHeight={120} />}
+        {spread.status === 'error' && <ErrorState part={TF.shifts.partName} cause={spread.error ?? undefined} onRetry={spread.refresh} minHeight={120} />}
         {rows.length > 1 && (
           <BarChart
             chartId={`today-sacks-${spreadKind}-${unit}`}
@@ -391,7 +393,7 @@ export function SacksSection({
           label={T.sacks.unitLabel}
           value={unit}
           onChange={setUnit}
-          options={[{ id: 'sacks', label: T.sacks.unitSacks }, { id: 'kg', label: T.sacks.unitKg }]}
+          options={[{ id: 'sacks', label: T.sacks.unitSacks }, { id: 'kg', label: TF.sacks.unitKg }]}
         />
       </div>
       {body}

@@ -4,12 +4,14 @@
  * own reason is printed verbatim (WriteGate). No optimistic UI: the editor stays open until the server
  * says yes, and a refusal is shown with the server's own words.
  */
+import { C } from '../../copy';
 import { useId, useState } from 'react';
 import { setRejectLabel } from '../../bridge/api';
 import { ENGINEER_RANK } from '../../ranks';
 import { WriteGate } from '../../ui/WriteGate';
-import { R } from '../../screens/Quality/Rejects/strings';
 import './reasonSheet.css';
+
+const R = C.qualityRejects;
 
 export interface NameItProps {
   rank: number;

@@ -8,6 +8,7 @@
  * someone did. The calibration route has no "writes are off" switch of its own (unlike PDAS), so
  * the gate has no server reason to print; WriteGate still owns the rank rule.
  */
+import { C } from '../../copy';
 import { useId, useState, type FormEvent } from 'react';
 import { recordAdjustment, type MachineRunning } from '../../bridge/api';
 import { live, plantClock } from '../../bridge/lib';
@@ -15,8 +16,9 @@ import { W } from '../../bridge/words';
 import { NumberField } from '../../ui/Field';
 import { WriteGate } from '../../ui/WriteGate';
 import { ENGINEER_RANK } from '../../ranks';
-import { S } from '../../screens/Quality/Stations/stationsCopy';
 import '../../ui/components/write.css';
+
+const S = C.qualityStations;
 
 export interface AdjustmentFormProps {
   rank: number;

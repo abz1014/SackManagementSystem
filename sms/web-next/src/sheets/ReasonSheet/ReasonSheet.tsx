@@ -8,6 +8,7 @@
  *  - Hops: the day in the Register, the day on the reject report, one cone's reading sheet.
  *  - Every fetch has its own failure state that names the part; a malformed id is "couldn't load", not a crash.
  */
+import { C, FRAGMENTS } from '../../copy';
 import { getRejectReason, getRejectsByDayCode, getStations, stationLabel, type RejectDayCodeRow, type RejectReasonRow } from '../../bridge/api';
 import { batchName, fmt, period as P } from '../../bridge/lib';
 import { useData } from '../../data';
@@ -20,9 +21,12 @@ import { Sheet } from '../../ui/Sheet';
 import { Skeleton } from '../../ui/Skeleton';
 import type { SheetProps } from '../../screens/registry';
 import { dayRegisterHop, dayReportHop, parseReasonId, reasonIdOf, type ReasonId } from '../../screens/Quality/Rejects/model';
-import { R, reasonName, fmtCount, fmtRate } from '../../screens/Quality/Rejects/strings';
+import { reasonName, fmtCount, fmtRate } from '../../screens/Quality/Rejects/format';
 import { NameIt } from './NameIt';
 import './reasonSheet.css';
+
+const R = C.qualityRejects;
+const RF = FRAGMENTS.qualityRejects;
 
 const codeOf = (id: ReasonId): string => (id.rejectType === 'weight' ? 'weight' : `${id.tubeCode ?? 'null'}-${id.materialCode ?? 'null'}`);
 
@@ -32,7 +36,7 @@ export function ReasonSheet({ route, rank, go, onClose }: SheetProps) {
   const title = ref ? (ref.rejectType === 'weight' ? R.weightRecords : reasonName({ label: null, tubeCode: ref.tubeCode, materialCode: ref.materialCode })) : R.sheetTitle;
   return (
     <Sheet open onClose={onClose} title={title} width={640}>
-      {ref ? <Body key={raw} id={ref} rank={rank} route={route} go={go} /> : <ErrorState part={R.part.thisReason} cause={R.malformed} />}
+      {ref ? <Body key={raw} id={ref} rank={rank} route={route} go={go} /> : <ErrorState part={RF.part.thisReason} cause={R.malformed} />}
     </Sheet>
   );
 }
@@ -97,9 +101,9 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
       <p className="rs-day">{R.dayBasisLine(fmt.fmtDayLong(id.day))}</p>
 
       {reason.status === 'error' ? (
-        <ErrorState part={R.part.thisReason} cause={reason.error} onRetry={reason.refresh} />
+        <ErrorState part={RF.part.thisReason} cause={reason.error} onRetry={reason.refresh} />
       ) : !d ? (
-        <Skeleton part={R.part.thisReason} height={72} onRetry={reason.refresh} />
+        <Skeleton part={RF.part.thisReason} height={72} onRetry={reason.refresh} />
       ) : (
         <>
           <p className="rs-count">
@@ -118,7 +122,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
         onRowOpen={(r) => openDay(r.day)}
         loading={days.status === 'loading'}
         loadingRows={4}
-        error={days.status === 'error' ? <ErrorState part={R.part.byDay} cause={days.error} onRetry={days.refresh} /> : undefined}
+        error={days.status === 'error' ? <ErrorState part={RF.part.byDay} cause={days.error} onRetry={days.refresh} /> : undefined}
         empty={<EmptyState message={R.noDaysForReason} />}
       />
 
@@ -132,17 +136,17 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
         total={d?.total}
         loading={reason.status === 'loading'}
         loadingRows={4}
-        error={reason.status === 'error' ? <ErrorState part={R.part.thisReason} cause={reason.error} onRetry={reason.refresh} /> : undefined}
+        error={reason.status === 'error' ? <ErrorState part={RF.part.thisReason} cause={reason.error} onRetry={reason.refresh} /> : undefined}
         empty={<EmptyState message={R.sheetEmpty} />}
       />
 
       <p className="rs-hop">
         <a className="ui-link" {...hop(dayRegisterHop(id.day))}>{R.hopDayRegister}</a>
-        <span className="rs-note"> · {R.hopDayRegisterNote}</span>
+        <span className="rs-note"> · {RF.hopDayRegisterNote}</span>
       </p>
       <p className="rs-hop">
         <a className="ui-link" {...hop(dayReportHop(id.day))}>{R.hopDayReport}</a>
-        <span className="rs-note"> · {R.hopDayReportNote}</span>
+        <span className="rs-note"> · {RF.hopDayReportNote}</span>
       </p>
       <p className="rs-note">{R.dayBasis}</p>
     </div>
