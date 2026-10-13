@@ -10,6 +10,7 @@ import { envelope, type Envelope } from './envelope.js';
 import { getOperations, resolveDqDestination, isDqDestinationTable, type DqDestinationTable } from './services/operations.js';
 import { getSystemHistory } from './services/systemHistory.js';
 import { getProduction, type GroupBy } from './services/production.js';
+import { previousPeriod } from './comparePeriod.js';
 import { getRejectPareto, listRejectCodes, updateRejectCode, REJECT_SEVERITIES, parseCodeParam } from './services/rejects.js';
 import { getWeights, type Basis } from './services/weights.js';
 import { listProducts, getCurrent, setCurrent, listTimeline } from './services/currentProduct.js';
@@ -130,6 +131,9 @@ const productionQuery = z.object({
   // its cache on the same object, so both follow automatically.
   tsTo: isoTimestamp.optional(),
   groupBy: z.enum(['day', 'shift', 'station', 'none']).default('day'),
+  // Optional comparison period: 'prev' = the equal-length period just before,
+  // 'week' = the same period one week earlier. Adds data.previous.
+  compare: z.enum(['prev', 'week']).optional(),
 });
 
 export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
@@ -1011,11 +1015,29 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       // Chart overhaul wave 2, Task TC (28 Sep 2026): production.ts's
       // ProductionParams already carries an optional `shiftRange`
       // (Task TB2) — decode the wire form and AND it in alongside from/to.
-      const { fromShift, toShift, ...rest } = parsed.data;
+      const { fromShift, toShift, compare, ...rest } = parsed.data;
       const shiftRangeResult = decodeShiftRangeParam({ from: rest.from, to: rest.to, fromShift, toShift });
       if (isShiftRangeError(shiftRangeResult)) {
         res.status(400).json({ error: shiftRangeResult.error });
         return;
+      }
+      let prevPeriod: ReturnType<typeof previousPeriod> | undefined;
+      if (compare) {
+        prevPeriod = previousPeriod(
+          {
+            from: rest.from!,
+            to: rest.to!,
+            fromShift: shiftRangeResult?.fromShift,
+            toShift: shiftRangeResult?.toShift,
+            shift: rest.shift,
+          },
+          compare,
+        );
+        const prevErr = validateRange(prevPeriod.from, prevPeriod.to);
+        if (prevErr) {
+          res.status(400).json({ error: prevErr });
+          return;
+        }
       }
       const key = JSON.stringify(parsed.data);
       const { value: env, hit } = await prodCache.getOrLoad(
@@ -1028,6 +1050,33 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
             withStates: true,
             shiftRange: shiftRangeResult,
           });
+          if (prevPeriod) {
+            // tsTo (the replay cap) belongs to the current period only.
+            const { tsTo: _tsTo, ...prevRest } = rest;
+            void _tsTo;
+            const pSr =
+              prevPeriod.fromShift && prevPeriod.toShift
+                ? { from: prevPeriod.from, fromShift: prevPeriod.fromShift, to: prevPeriod.to, toShift: prevPeriod.toShift }
+                : undefined;
+            const result = await getProduction(pool, cfg.lineId, {
+              ...prevRest,
+              from: prevPeriod.from,
+              to: prevPeriod.to,
+              groupBy: rest.groupBy as GroupBy,
+              withStates: true,
+              shiftRange: pSr,
+            });
+            return await envelope(pool, cfg.lineId, {
+              ...data,
+              previous: {
+                from: prevPeriod.from,
+                to: prevPeriod.to,
+                fromShift: prevPeriod.fromShift ? `${prevPeriod.from}.${prevPeriod.fromShift}` : null,
+                toShift: prevPeriod.toShift ? `${prevPeriod.to}.${prevPeriod.toShift}` : null,
+                result,
+              },
+            });
+          }
           return await envelope(pool, cfg.lineId, data);
         },
       );
