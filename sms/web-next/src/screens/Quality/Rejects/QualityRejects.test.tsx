@@ -112,9 +112,10 @@ describe('headline, KPIs and the two verdicts (A3-039)', () => {
     // 6,048 of 132,665 = 4.56 %; 41 of 132,665 = 0.03 %; together 6,089 = 4.59 %, the Today/Reports figure.
     expect(await screen.findByText(/4\.6 % of cones failed inspection\./)).toBeTruthy();
     expect(screen.getByText('Failed inspection')).toBeTruthy();
-    expect(screen.getByText('Failed weight check (scale)')).toBeTruthy();
+    expect(screen.getByText('Weight-reject records')).toBeTruthy();
+    expect(screen.queryByText('Failed weight check (scale)', { selector: '.kpi-label' })).toBeNull();
     expect(screen.getByText('6,048 of 132,665 cones checked')).toBeTruthy();
-    expect(screen.getByText('41 of 132,665 cones checked')).toBeTruthy();
+    expect(screen.getByText('41 records over 132,665 cones checked')).toBeTruthy();
     expect(screen.getByText(/Together 6,089 of 132,665 cones checked \(4\.6 %\)/)).toBeTruthy();
     expect(screen.getByText('Top reason share')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/\brejected\b/i);
@@ -300,7 +301,7 @@ describe('a failed fetch is named, never "none" (CLAUDE.md, rule: name which par
   });
   it('failed rate series: the KPI says which part, and the headline asserts nothing', async () => {
     open(QUERY, 1, { '/api/reject-spc': ({ search }: { search: URLSearchParams }) => (search.get('rejectType') === 'weight' ? new Response('{}', { status: 500 }) : env(spc(6048))) });
-    expect(await screen.findAllByText(/Couldn't load the (failed-inspection|weight-check) rate\./)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/Couldn't load the (failed-inspection|weight-reject) rate\./)).not.toHaveLength(0);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('How many cones failed a check, why, is it getting worse, and where?');
   });
   it('failed trend: the chart names its part, no rising verdict, the list and rates are unaffected', async () => {

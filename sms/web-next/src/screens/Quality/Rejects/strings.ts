@@ -10,6 +10,7 @@ export const R = {
   question: 'How many cones failed a check, why, is it getting worse, and where?',
   failedInspection: 'Failed inspection',
   failedWeight: 'Failed weight check (scale)',
+  weightRecords: 'Weight-reject records',
   topReasonShare: 'Top reason share',
   cones: 'cones',
   /** "6,048 of 132,665 cones checked" */
@@ -71,7 +72,10 @@ export const R = {
     'Percentages use cones that were checked. Times are plant time and a production day runs 06:00 to 06:00.',
   ],
   aboutCounts: (inspection: string, weight: string) =>
-    `In this period ${inspection} cones failed inspection and ${weight} failed the scale's weight check. The reason list holds the inspection failures only; weight-check failures are on Quality > Weight.`,
+    `In this period ${inspection} cones failed inspection and ${weight} weight-reject records were logged. The reason list holds the inspection failures only.`,
+  aboutScale: (records: string) =>
+    `Weight-reject records (${records}) are rows in the weight-reject log. "Failed weight check (scale)" on Today and Reports counts the cones the scale flagged out of range, which can be more: some flagged cones have no reject record.`,
+  recordsOf: (n: string, total: string) => `${n} records over ${total} cones checked`,
   detectorFixed: (days: number) => `The trend and its rising verdict always look at the last ${days} production days.`,
   spansBatches: 'This window includes the 5 Aug 2026 database rebuild. The normal range is worked out for each side separately.',
   dayBasis: 'IFL has not confirmed whether reject reports should count by production day or by calendar date; this screen uses the production day.',
@@ -91,7 +95,8 @@ export const R = {
   malformed: 'This link does not name a reason and a day.',
   dayBasisLine: (day: string) => `${day} · production day`,
   sheetCount: (n: string, reason: string) => `${n} cones failed inspection for ${reason}`,
-  sheetCountWeight: (n: string) => `${n} cones failed the scale's weight check`,
+  sheetCountWeight: (n: string) => `${n} weight-reject records`,
+  stationNamesMissing: "Station names couldn't be loaded, so stations show as numbers.",
   perDayTitle: 'Day by day in this period',
   noDaysForReason: 'No cones failed for this reason in this period.',
   conesOnDay: (day: string) => `Cones on ${day}`,
@@ -118,7 +123,7 @@ export const R = {
     stations: 'the station list',
     products: 'the product list',
     figureInspection: 'the failed-inspection rate',
-    figureWeight: 'the weight-check rate',
+    figureWeight: 'the weight-reject rate',
   },
 } as const;
 

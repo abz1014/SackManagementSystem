@@ -13,3 +13,4 @@ export * as batchName from '../../../web/src/lib/batchName';
 export * as pdasWords from '../../../web/src/lib/pdasWords';
 export * as generationWords from '../../../web/src/lib/generationWords';
 export * as simulatorWords from '../../../web/src/lib/simulatorWords';
+export { preferredGeneration } from '../../../web/src/lib/preferredGeneration';

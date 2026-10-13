@@ -52,6 +52,7 @@ function fmtRate(n: number | null | undefined): string {
   return n != null && n > 0 && n < 1 ? `${n.toFixed(2)}%` : fmtPct1(n);
 }
 import { vitalFew } from '../lib/pareto';
+import { preferredGeneration } from '../lib/preferredGeneration';
 import { RejectTrendChart } from './report/shared';
 // The SAME type Readings.tsx's headline uses, imported rather than restated,
 // so this app has one idiom for "a count I have / have not been told" and not
@@ -61,7 +62,7 @@ import type { CountState } from './Readings';
 import {
   getRange, getStations, getProducts, stationLabel, setRejectLabel,
   getRejectsFiltered, getRejectSpcFiltered, getRejectsByDayCode, rejectCodeParam,
-  type RejectReason, type RejectSpcData, type RejectGeneration, type RejectDayCodeRow, type RejectFilters,
+  type RejectReason, type RejectSpcData, type RejectDayCodeRow, type RejectFilters,
   type StationRow, type ProductOption,
 } from '../api';
 
@@ -92,27 +93,6 @@ const never = (): Promise<never> => new Promise<never>(() => {});
  * never a fabricated number.
  */
 const finiteOrNull = (n: number): number | null => (Number.isFinite(n) ? n : null);
-
-/**
- * The ONE generation entry that `d.totalProduced`/`d.totalRejects` already
- * describe (28 Sep 2026 fix — see the `inspected` computation below for the
- * defect this closes). `rejectSpc.ts` derives those two top-level fields
- * from a SINGLE preferred generation (real-over-simulator, then newest
- * ordinal — `newestGenTotals` in that file), while `d.generations[]` lists
- * EVERY generation the query touched. There is exactly one entry whose own
- * `totalProduced`/`totalRejects` equal the top-level pair, because that is
- * where the top-level pair came from; matching on both fields finds it
- * without this file re-implementing the server's real/simulator preference
- * rule (which needs `sms.source_epoch.provenance`/`source_db`, not sent to
- * the client). When only one generation is present — the common case, and
- * the only case at IFL, where the two generations never overlap in time —
- * it is trivially that one.
- */
-function preferredGeneration(d: RejectSpcData | null): RejectGeneration | null {
-  if (!d) return null;
-  if (d.generations.length <= 1) return d.generations[0] ?? null;
-  return d.generations.find((g) => g.totalProduced === d.totalProduced && g.totalRejects === d.totalRejects) ?? null;
-}
 
 /** What the by-day table hands the reason sheet. */
 export interface ReasonRef {

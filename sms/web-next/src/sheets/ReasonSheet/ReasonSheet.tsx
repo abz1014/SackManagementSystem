@@ -29,7 +29,7 @@ const codeOf = (id: ReasonId): string => (id.rejectType === 'weight' ? 'weight' 
 export function ReasonSheet({ route, rank, go, onClose }: SheetProps) {
   const raw = route.sheet?.kind === 'reason' ? route.sheet.id : '';
   const ref = parseReasonId(raw);
-  const title = ref ? (ref.rejectType === 'weight' ? R.failedWeight : reasonName({ label: null, tubeCode: ref.tubeCode, materialCode: ref.materialCode })) : R.sheetTitle;
+  const title = ref ? (ref.rejectType === 'weight' ? R.weightRecords : reasonName({ label: null, tubeCode: ref.tubeCode, materialCode: ref.materialCode })) : R.sheetTitle;
   return (
     <Sheet open onClose={onClose} title={title} width={640}>
       {ref ? <Body key={raw} id={ref} rank={rank} route={route} go={go} /> : <ErrorState part={R.part.thisReason} cause={R.malformed} />}
@@ -93,6 +93,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
 
   return (
     <div className="rs-body">
+      {stations.status === 'error' && <p className="rs-note" role="status">{R.stationNamesMissing} {stations.error}</p>}
       <p className="rs-day">{R.dayBasisLine(fmt.fmtDayLong(id.day))}</p>
 
       {reason.status === 'error' ? (

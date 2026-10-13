@@ -3,8 +3,8 @@
  * Business rules (the rate, the vital few, the reason code string, the detectors) stay where
  * they live (api.ts rejectCodeParam, lib/pareto, the server); this file only shapes their output.
  */
-import { pareto } from '../../../bridge/lib';
-import type { RejectDayCodeRow, RejectGeneration, RejectReason, RejectSpcData } from '../../../bridge/api';
+import { pareto, preferredGeneration } from '../../../bridge/lib';
+import type { RejectDayCodeRow, RejectReason, RejectSpcData } from '../../../bridge/api';
 import { rejectCodeParam } from '../../../bridge/api';
 import { writeRoute, type Route } from '../../../route';
 
@@ -59,16 +59,6 @@ export function vitalCount(rows: readonly ReasonRow[]): number {
 /* ---------------------------------------------------------------- the figures */
 
 const finiteOrNull = (n: number): number | null => (Number.isFinite(n) ? n : null);
-
-/**
- * The ONE generation entry that q.totalProduced / q.totalRejects describe (the old screen's rule,
- * Rejects.tsx preferredGeneration): matching on both totals finds it without needing provenance.
- */
-export function preferredGeneration(d: RejectSpcData | null): RejectGeneration | null {
-  if (!d) return null;
-  if (d.generations.length <= 1) return d.generations[0] ?? null;
-  return d.generations.find((g) => g.totalProduced === d.totalProduced && g.totalRejects === d.totalRejects) ?? null;
-}
 
 export interface Figures {
   inspectionN: number;

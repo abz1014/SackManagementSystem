@@ -93,7 +93,7 @@ export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
   // ---- the period's figures, reasons and days
   const reasons = useData('reasons', () => (periodF ? getRejectsFiltered(periodF) : wait()), `rj:reasons:${pKey}`, { live: polls });
   const periodQ = useData('the failed-inspection rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'quality', bucket: 'day' }) : wait()), `rj:pq:${pKey}`, { live: polls });
-  const periodW = useData('the weight-check rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'weight', bucket: 'day' }) : wait()), `rj:pw:${pKey}`, { live: polls });
+  const periodW = useData('the weight-reject rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'weight', bucket: 'day' }) : wait()), `rj:pw:${pKey}`, { live: polls });
   const byDay = useData('the days by reason', () => (periodF ? getRejectsByDayCode({ ...periodF, from: periodF.from!, to: periodF.to! }) : wait()), `rj:byday:${pKey}`, { live: polls });
 
   // ---- the trend: the fixed window, never the period
@@ -161,6 +161,7 @@ export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
   const figStatus = kpiStatus(periodQ, periodW);
   const figState: 'loading' | 'error' | 'ok' = figStatus === 'ok' && !fig ? 'error' : figStatus;
   const retryFigs = () => { periodQ.refresh(); periodW.refresh(); };
+  const figError = periodQ.error ?? periodW.error;
   const unattributed = reasons.data?.data.unattributed ?? null;
 
   const cover = coverage(rows, TOP_REASONS);
@@ -228,7 +229,7 @@ export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
           </div>
           <div className="qr-kpi">
             <KpiCard
-              label={R.failedWeight}
+              label={R.weightRecords}
               value={fig ? rateNum(fig.weightPct) : null}
               unit="%"
               chip={3}
@@ -236,7 +237,7 @@ export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
               part={R.part.figureWeight}
               onRetry={retryFigs}
             />
-            {fig && figState === 'ok' && <p className="qr-note">{R.ofChecked(fmtCount(fig.weightN), fmtCount(fig.inspected))}</p>}
+            {fig && figState === 'ok' && <p className="qr-note">{R.recordsOf(fmtCount(fig.weightN), fmtCount(fig.inspected))}</p>}
           </div>
           <div className="qr-kpi">
             <KpiCard
@@ -251,6 +252,7 @@ export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
             {top && <p className="qr-note">{`${reasonName(top)} · ${fmtCount(top.count)} ${R.cones}`}</p>}
           </div>
         </div>
+        {figState === 'error' && figError && <p className="qr-note">{figError}</p>}
         {fig && figState === 'ok' && (
           <p className="qr-note">{R.together(fmtCount(fig.inspectionN + fig.weightN), fmtRate(fig.togetherPct), fmtCount(fig.inspected))}</p>
         )}
@@ -383,6 +385,7 @@ export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
       <Disclosure id="qr-about" label={C.ui.aboutFigures}>
         <div className="qr-about">
           {fig && <p>{R.aboutCounts(fmtCount(fig.inspectionN), fmtCount(fig.weightN))}</p>}
+          {fig && <p>{R.aboutScale(fmtCount(fig.weightN))}</p>}
           {R.about.map((t) => <p key={t}>{t}</p>)}
           {win && <p>{R.detectorFixed(win.requestedDays)}</p>}
           {trend.data?.data.spansGenerations && <p>{R.spansBatches}</p>}
