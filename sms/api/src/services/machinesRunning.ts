@@ -52,6 +52,7 @@ export const RUNNING_WINDOW_MS = 2 * 60 * 60 * 1000;
 const QUIET_AFTER_MS = RUNNING_WINDOW_MS; // 2 h — 'running' vs 'quiet'
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000; // 24 h — 'quiet' vs 'stale'
 const SILENT_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — 'stale' vs 'silent'
+export const RUN_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000; // run-start lookback (14 production days)
 
 /**
  * Per-machine state (24 Sep 2026, Task #8). Anchored on the SAME reading
@@ -121,6 +122,23 @@ export interface MachineRunning {
   lastProductName: string | null;
   lastProductActive: boolean | null;
   lastStampedUtc: string | null;
+  /**
+   * D4 (Oct 2026): when the current product run began, looking back up to
+   * RUN_LOOKBACK_MS (14 production days) in this generation, capped at the
+   * anchor. It is the first cone of the current uninterrupted material run,
+   * the only evidence of a changeover (never "when it was selected"). Plant
+   * clock labelled UTC. Null for a winder that is not running.
+   * `sinceUtc` / `sinceIsWindowStart` (the 2 h window) are unchanged.
+   */
+  runStartUtc: string | null;
+  /** True when no change was found in the lookback and cones exist before it: the run may be older than `runStartUtc`. */
+  runStartIsLookbackLimit: boolean;
+  /**
+   * The newest material change seen at this winder inside the lookback: the
+   * product it moved FROM and the time of the first cone of the new product.
+   * Null when none changed in the lookback (or the winder is not running).
+   */
+  lastChange: { fromMaterialId: number | null; fromProductName: string | null; atUtc: string } | null;
 }
 
 export interface MachinesRunningData {
@@ -239,6 +257,9 @@ export async function getMachinesRunning(
     lastProductName: null,
     lastProductActive: null,
     lastStampedUtc: null,
+    runStartUtc: null,
+    runStartIsLookbackLimit: false,
+    lastChange: null,
   }));
 
   if (asOfMs == null) {
@@ -321,6 +342,7 @@ export async function getMachinesRunning(
         cones: 0, conesOnMaterial: 0, newestUtc: null, sinceUtc: null, sinceIsWindowStart: false, quiet: true,
         lastSeenUtc: lastSeenUtcOf(st), state: 'silent',
         lastMaterialId: null, lastProductName: null, lastProductActive: null, lastStampedUtc: null,
+        runStartUtc: null, runStartIsLookbackLimit: false, lastChange: null,
       };
       machines.push(m);
       byStation.set(st, m);
@@ -408,6 +430,63 @@ export async function getMachinesRunning(
       m.lastProductName = row.product_name ?? `Product ${m.lastMaterialId}`;
       m.lastProductActive = row.product_active == null ? null : Boolean(row.product_active);
       m.lastStampedUtc = new Date(Number(row.ms)).toISOString();
+    }
+  }
+  // 6. D4: when the current run began and the last change, for running winders
+  // only. One grouped read over the lookback, run last so earlier positional
+  // order is unchanged. LAG finds each transition; the newest one is the
+  // current run's first cone. No change in the lookback means the run began at
+  // the first cone seen, flagged as the lookback limit when older cones exist.
+  const running = machines.filter((m) => !m.quiet).map((m) => m.station);
+  if (running.length > 0) {
+    const lbMs = asOfMs - RUN_LOOKBACK_MS;
+    const rReq = bindCone(
+      pool.request().input('line', mssql.Int, lineId).input('end', mssql.BigInt, asOfMs).input('lb', mssql.BigInt, lbMs),
+    );
+    running.forEach((st, i) => rReq.input(`rs${i}`, mssql.Int, st));
+    const rList = running.map((_, i) => `@rs${i}`).join(', ');
+    const runs = await rReq.query<{
+      st: number; first_ms: string | number; change_ms: string | number | null; prev_mat: number | null;
+      prev_name: string | null; before_lb: number;
+    }>(
+      `WITH c AS (
+         SELECT source_station, material_id, production_ts_utc_ms AS ms,
+                LAG(material_id) OVER (PARTITION BY source_station ORDER BY production_ts_utc_ms, cone_event_id) AS prev_mat,
+                ROW_NUMBER() OVER (PARTITION BY source_station ORDER BY production_ts_utc_ms, cone_event_id) AS rn
+           FROM sms.cone_event
+          WHERE line_id = @line AND source_station IN (${rList})
+            AND production_ts_utc_ms > @lb AND production_ts_utc_ms <= @end${andCone}
+       ),
+       ch AS (
+         SELECT source_station, ms, prev_mat,
+                ROW_NUMBER() OVER (PARTITION BY source_station ORDER BY ms DESC) AS k
+           FROM c WHERE rn > 1 AND ISNULL(material_id, -1) <> ISNULL(prev_mat, -1)
+       ),
+       f AS (SELECT source_station, MIN(ms) AS first_ms FROM c GROUP BY source_station)
+       SELECT f.source_station AS st, f.first_ms, ch.ms AS change_ms, ch.prev_mat,
+              COALESCE(p.description, p.lot_code) AS prev_name,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM sms.cone_event e
+                 WHERE e.line_id = @line AND e.source_station = f.source_station
+                   AND e.production_ts_utc_ms > 0 AND e.production_ts_utc_ms <= @lb${andCone}
+              ) THEN 1 ELSE 0 END AS before_lb
+         FROM f
+         LEFT JOIN ch ON ch.source_station = f.source_station AND ch.k = 1
+         LEFT JOIN sms.product p ON p.product_id = ch.prev_mat`,
+    );
+    for (const row of runs.recordset) {
+      const m = byStation.get(Number(row.st));
+      if (!m || m.quiet) continue;
+      if (row.change_ms != null) {
+        const at = new Date(Number(row.change_ms)).toISOString();
+        const fromId = row.prev_mat == null ? null : Number(row.prev_mat);
+        m.runStartUtc = at;
+        m.runStartIsLookbackLimit = false;
+        m.lastChange = { fromMaterialId: fromId, fromProductName: row.prev_name ?? (fromId != null ? `Product ${fromId}` : null), atUtc: at };
+      } else {
+        m.runStartUtc = new Date(Number(row.first_ms)).toISOString();
+        m.runStartIsLookbackLimit = Number(row.before_lb) === 1;
+      }
     }
   }
   return {

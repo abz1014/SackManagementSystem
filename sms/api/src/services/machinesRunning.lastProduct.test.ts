@@ -69,11 +69,12 @@ describe('getMachinesRunning - last product of a winder that is not running', ()
 
   it('reads stamped cones only, in this generation, up to the anchor, with bound parameters', async () => {
     const { calls } = await run(LAST_STAMPED);
-    const sql = calls[calls.length - 1]!.sql;
+    const f1 = calls.filter((c) => c.sql.includes("attribution_method"));
+    const sql = f1[f1.length - 1]!.sql;
     expect(sql).toContain("attribution_method = 'source_column'");
     expect(sql).toContain('material_id IS NOT NULL');
     expect(sql).toContain('production_ts_utc_ms <= @end');
-    expect(calls[calls.length - 1]!.params.get('end')).toBe(ANCHOR);
+    expect(f1[f1.length - 1]!.params.get('end')).toBe(ANCHOR);
     expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|MERGE)\b/i);
   });
 });
