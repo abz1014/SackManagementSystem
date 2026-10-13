@@ -32,6 +32,7 @@ import { TopBar } from './ui/TopBar';
 import { AttentionList } from './ui/AttentionList';
 import { Wizard } from './ui/Wizard';
 import { WriteGate } from './ui/WriteGate';
+import { ENGINEER_RANK } from './ranks';
 import type { Route } from './route';
 import {
   GALLERY_HISTOGRAM,
@@ -316,14 +317,14 @@ export function Gallery() {
           </Row>
           <Row label="Wizard"><div className="gal-wide"><WizardDemo /></div></Row>
           <Row label="Write gate, below rank (absent)">
-            <WriteGate rank={1} minRank={2}><button type="button" className="ui-btn">Change limits</button></WriteGate>
+            <WriteGate rank={ENGINEER_RANK - 1} minRank={ENGINEER_RANK}><button type="button" className="ui-btn">Change limits</button></WriteGate>
             <span className="gal-note">Nothing is drawn below the rank.</span>
           </Row>
           <Row label="Write gate, writes off (disabled with the server reason)">
-            <WriteGate rank={2} minRank={2} disabledReason="PDAS_WRITE_ENABLED is not true."><button type="button" className="ui-btn">Change limits</button></WriteGate>
+            <WriteGate rank={ENGINEER_RANK} minRank={ENGINEER_RANK} disabledReason="PDAS_WRITE_ENABLED is not true."><button type="button" className="ui-btn">Change limits</button></WriteGate>
           </Row>
           <Row label="Write gate, writes on">
-            <WriteGate rank={2} minRank={2}><button type="button" className="ui-btn">Change limits</button></WriteGate>
+            <WriteGate rank={ENGINEER_RANK} minRank={ENGINEER_RANK}><button type="button" className="ui-btn">Change limits</button></WriteGate>
           </Row>
         </Block>
       </div>
