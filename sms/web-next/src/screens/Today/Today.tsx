@@ -245,7 +245,7 @@ function Band({
     }
   } else {
     if (spread.status === 'loading') pending = true;
-    first = ranSentence(spread.data ? spread.data.data.rows : null, spreadKind, period);
+    first = ranSentence(spread.data ? (spread.data.data.rows ?? null) : null, spreadKind, period);
   }
   const second = stationSentence(counts);
   const sentence = empty && !(period.live && !known) ? T.band.nothing : [first, second].filter((s) => s !== null).join(' ');
@@ -486,7 +486,7 @@ function Notes({
               )}
             </p>
           )}
-          <p>{T.about.detectors(att ? att.window.days : null, att ? fmt.fmtG(att.thresholds.driftG) : null, att ? att.thresholds.minDaysHeld : null)}</p>
+          <p>{T.about.detectors(att?.window ? att.window.days : null, att?.thresholds ? fmt.fmtG(att.thresholds.driftG) : null, att?.thresholds ? att.thresholds.minDaysHeld : null)}</p>
           {unloaded.length > 0 && <p>{T.about.notLoaded(unloaded.join(', '))}</p>}
           <p>{T.about.plantTimes}</p>
         </div>

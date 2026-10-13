@@ -36,7 +36,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 
 /** Rows of a by-shift or by-day answer, in reading order. */
 function orderedRows(rows: readonly ProductionRow[], spreadKind: 'day' | 'shift'): ProductionRow[] {
-  const real = rows.filter((r) => r.group !== 'total');
+  const real = (rows ?? []).filter((r) => r.group !== 'total');
   return spreadKind === 'shift'
     ? [...real].sort((a, b) => SHIFT_ORDER.indexOf(a.group as (typeof SHIFT_ORDER)[number]) - SHIFT_ORDER.indexOf(b.group as (typeof SHIFT_ORDER)[number]))
     : [...real].sort((a, b) => (a.group < b.group ? -1 : 1));
@@ -194,7 +194,7 @@ export function AttentionCard({
     else go(f.kind === 'reject_rise' ? rejectsRoute : limitsRoute);
   };
   const more = data && data.totalFindings > data.findings.length ? data.totalFindings - data.findings.length : 0;
-  const tooFew = data !== null && data.window.days < data.thresholds.minDaysHeld;
+  const tooFew = data !== null && data.window && data.thresholds ? data.window.days < data.thresholds.minDaysHeld : false;
   return (
     <div className="today-card card">
       {attention.status === 'loading' && <Skeleton part={TF.attention.partName} height={120} />}

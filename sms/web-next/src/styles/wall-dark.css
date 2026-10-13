@@ -19,6 +19,6 @@
 
 /* Wall type scale (fix-wave D22). --wall-ui is set by the Wall (1, or 1.25 when the viewer saved the Wall text size);
    the base steps down with the screen so a 1366 px board keeps its chips and names inside their tiles. */
-.wall.dark { --wall-scale: calc(1.6 * var(--wall-ui, 1)); }
-@media (max-width: 1699px) { .wall.dark { --wall-scale: calc(1.2 * var(--wall-ui, 1)); } }
-@media (max-width: 1279px) { .wall.dark { --wall-scale: calc(1 * var(--wall-ui, 1)); } }
+.wall.dark { --wall-ui: 1; --wall-scale: calc(1.6 * var(--wall-ui)); }
+@media (max-width: 1699px) { .wall.dark { --wall-scale: calc(1.2 * var(--wall-ui)); } }
+@media (max-width: 1279px) { .wall.dark { --wall-scale: calc(1 * var(--wall-ui)); } }

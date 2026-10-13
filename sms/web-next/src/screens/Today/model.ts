@@ -30,8 +30,8 @@ export function clockOn(iso: string, nowIso: string): string {
 
 /* ---------------------------------------------------------------- numbers */
 
-export const nf0 = (n: number): string => n.toLocaleString('en-GB');
-export const nf1 = (n: number): string => n.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+export const nf0 = (n: number): string => (Number.isFinite(n) ? n.toLocaleString('en-GB') : '-');
+export const nf1 = (n: number): string => (Number.isFinite(n) ? n.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '-');
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -44,7 +44,7 @@ export function unreadable(r: ProductionRow | null, data: ProductionData, field:
 
 /** The single "total" row of a groupBy=none answer. */
 export function totalRow(data: ProductionData | null | undefined): ProductionRow | null {
-  return data?.rows[0] ?? null;
+  return data?.rows?.[0] ?? null;
 }
 
 /** An answer with no readings at all (cones, sacks and failed inspections all absent or zero). */
