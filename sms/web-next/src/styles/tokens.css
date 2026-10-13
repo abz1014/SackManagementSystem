@@ -122,6 +122,8 @@
   --tabbar-h: 56px;                 /* bottom tab bar < 768px */
   --bp-phone: 375px; --bp-tablet: 768px; --bp-laptop: 1024px; --bp-plant: 1366px; --bp-tv: 1920px;
   --tap-min: 44px;                  /* touch target on phone/tablet */
+  --row-h: 44px;                    /* DataTable body row; Skeleton rows use the same */
+  --row-head-h: 40px;               /* DataTable header row */
   --control-h: 36px;                /* desktop control height */
   --nav-h: 40px;                    /* sidebar item height */
 

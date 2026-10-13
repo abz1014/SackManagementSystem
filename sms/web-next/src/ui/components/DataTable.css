@@ -6,12 +6,12 @@
 .ui-dt__wrap:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .ui-dt__table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-2); line-height: var(--lh-2); font-feature-settings: var(--tnum); }
 .ui-dt__table th {
-  position: sticky; top: 0; z-index: 1; height: 40px; padding: 0 var(--space-4); text-align: left; white-space: nowrap;
+  position: sticky; top: 0; z-index: 1; height: var(--row-head-h); padding: 0 var(--space-4); text-align: left; white-space: nowrap;
   background: var(--surface-sunk); color: var(--ink-3); font-size: var(--fs-1); font-weight: var(--fw-semibold);
 }
 .ui-dt__table th:first-child { border-top-left-radius: var(--radius-ctl); }
 .ui-dt__table th:last-child { border-top-right-radius: var(--radius-ctl); }
-.ui-dt__table td { height: 44px; padding: 0 var(--space-4); border-top: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.ui-dt__table td { height: var(--row-h); padding: 0 var(--space-4); border-top: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
 .ui-dt__table tbody tr:first-child td { border-top: 0; }
 .ui-dt__num { text-align: right !important; font-variant-numeric: tabular-nums; }
 .ui-dt__row--open { cursor: pointer; }

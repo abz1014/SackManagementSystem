@@ -50,7 +50,7 @@ describe('C wording rules', () => {
   it('no banned term', () => {
     for (const s of strings) for (const re of banned) expect(s, `${s} ~ ${re}`).not.toMatch(re);
   });
-  const ACRONYMS = new Set(['OK', 'PDAS', 'SMS', 'IFL', 'CSV', 'PDF', 'PLC']);
+  const ACRONYMS = new Set(['OK', 'PDAS', 'SMS', 'IFL', 'CSV', 'PDF', 'PLC', 'TV']);
   it('sentence case, no all-caps words, no ellipsis', () => {
     for (const s of strings) {
       expect(s, s).toMatch(/^[A-Z]/);

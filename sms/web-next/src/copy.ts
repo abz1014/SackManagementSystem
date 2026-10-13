@@ -123,6 +123,9 @@ export const C = {
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
     userMenu: 'Account menu',
+    /* Fix-wave owner decision 13 Oct 2026: the wall is for large screens only (below 1024 px both are hidden / replaced). */
+    openWall: 'Open TV wall',
+    wallNeedsLargeScreen: 'The TV wall is designed for a large screen',
     signedInAs: (name: string, role: string) => `${name}, ${role}`,
     signOutFailed: "Couldn't sign out. Try again.",
     pageFailed: 'This page',
@@ -1164,6 +1167,7 @@ export const C = {
     pdasCode: (c: number) => `PDAS code ${c}`,
 
     noPickers: 'The pickers could not load, so a plan cannot be made yet.',
+    techDetail: 'Technical detail',
   },
   /* ---- Products > Limits and History (folded in from the screen's own strings file) ---- */
   limits: {
@@ -1482,7 +1486,7 @@ export const C = {
     setup: {
       title: 'Setup',
       sentence: 'Names, rules and accounts for this line. Every change is recorded in the audit log.',
-      notAllowed: 'Setup is only available to an administrator.',
+      notAllowed: 'This is only available to an administrator.',
       sections: {
         line: 'Line',
         machines: 'Machines',
@@ -1761,6 +1765,33 @@ export const FRAGMENTS = {
   changeover: {
     loadingLists: 'the lists to pick from',
     loadingProducts: 'the products to retire',
+    /*
+     * Review step wording (fix-wave D19). Every value is an existing Plan label, by reference, so the
+     * Review step says "Target weight" where the server sends setpointG. Keys with no entry here are
+     * shown only inside the Technical detail disclosure (techDetail), never as prose.
+     */
+    stepWords: {
+      /* step.step -> the word for the kind of step */
+      step: {
+        blend: C.changeover.blend,
+        count: C.changeover.count,
+        tube_type: C.changeover.tube,
+        material: C.changeover.productName,
+        pallet: null, // no existing Plan label for a pallet step; the action word and the label carry it
+        retire_material: C.changeover.retireProduct,
+        retire_pallet: C.changeover.retirePallet,
+      } as Record<string, string | ((label: string, id: number) => string) | null>,
+      /* step.detail key -> label of the value */
+      detail: {
+        tubeWeightG: C.changeover.tubeWeight,
+        tubeForm: C.changeover.tubeForm,
+        setpointG: C.changeover.setpoint,
+        offsetMinusG: C.changeover.below,
+        offsetPlusG: C.changeover.above,
+        lot: C.changeover.productName,
+        sackColour: C.changeover.sackColour,
+      } as Record<string, string>,
+    },
   },
   limits: {
     olderPart: 'older PDAS actions',
@@ -1772,6 +1803,22 @@ export const FRAGMENTS = {
   },
   /* ---- Names drawn only inside a Technical detail disclosure (folded in from the screen's own strings file) ---- */
   systemTech: {
+    /* The old Health batch table, verbatim by reference (fix-wave D18/P5), shown inside Technical detail. */
+    batchesTitle: W.health.epochRegister.title,
+    batchesNote: W.health.epochRegister.note,
+    batchesNone: W.health.epochRegister.none,
+    batchCol: {
+      table: W.health.epochRegister.colTable,
+      batch: W.health.epochRegister.colOrdinal,
+      source: W.health.epochRegister.colProvenance,
+      firstSeen: W.health.epochRegister.colFirstSeen,
+      lastSeen: W.health.epochRegister.colLastSeen,
+      status: W.health.epochRegister.colStatus,
+      registeredBy: W.health.epochRegister.colBy,
+      rows: W.health.epochRegister.colRows,
+    },
+    batchFirstSeenNote: W.health.epochRegister.firstSeenIsRegistration,
+    batchLastSeenNote: W.health.epochRegister.lastSeenNeverRecorded,
     colGeneration: 'Generation',
     colTable: 'Table',
     colDatabase: 'IFL database',

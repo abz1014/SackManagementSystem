@@ -1,0 +1,5 @@
+.ui-pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin: 0 0 var(--space-5); }
+.ui-pagehead__text { flex: 1 1 320px; min-width: 0; }
+.ui-pagehead__title { margin: 0; font-size: var(--fs-5); line-height: var(--lh-5); font-weight: var(--fw-bold); color: var(--ink-1); overflow-wrap: anywhere; }
+.ui-pagehead__sentence { margin: var(--space-1) 0 0; max-width: 72ch; font-size: var(--fs-3, var(--fs-2)); line-height: var(--lh-3, var(--lh-2)); color: var(--ink-3); }
+.ui-pagehead__actions { flex: none; display: flex; align-items: center; gap: var(--space-3); }

@@ -31,6 +31,12 @@ export interface KpiCardProps {
   state?: UiState;
   /** Data hook status. */
   status?: 'loading' | 'ok' | 'empty' | 'error';
+  /**
+   * Shorthand for status="loading". Renders the card's own box (chip, two-line label slot, padding)
+   * with placeholder bars where the value, the count line and the state pill go, so a row of cards
+   * does not change height when the figures land.
+   */
+  loading?: boolean;
   /** Name of the part that failed, for the error line. */
   part?: string;
   onRetry?: () => void;
@@ -78,7 +84,8 @@ function InfoButton({ label, text }: { label: string; text: string }) {
 
 const ARROW = { up: '▲', down: '▼', flat: '▬' } as const;
 
-export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, noteWhenEmpty, info, state, status = 'ok', part, onRetry }: KpiCardProps) {
+export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, noteWhenEmpty, info, state, status: statusProp = 'ok', loading: loadingProp, part, onRetry }: KpiCardProps) {
+  const status = loadingProp ? 'loading' : statusProp;
   const loading = status === 'loading';
   const error = status === 'error';
   const empty = status === 'empty';
@@ -89,12 +96,16 @@ export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, noteW
       <span className="kpi-chip" style={{ background: `var(--chip-${chip}-bg)`, color: `var(--chip-${chip}-fg)` }} aria-hidden="true">
         {icon}
       </span>
-      <div className="kpi-label">
-        {label}
+      <div className="kpi-head">
+        <div className="kpi-label">{label}</div>
         {info && <InfoButton label={label} text={info} />}
       </div>
       {loading ? (
-        <div className="kpi-skel" aria-label="Loading" />
+        <div role="status" aria-label="Loading">
+          <div className="kpi-skel" />
+          <div className="kpi-skel kpi-skel-note" />
+          {state !== undefined && <div className="kpi-skel kpi-skel-pill" />}
+        </div>
       ) : error ? (
         <div className="kpi-err">
           <div className="kpi-value">{'–'}</div>
@@ -111,7 +122,7 @@ export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, noteW
       ) : (
         <div>
           <div className="kpi-value">
-            {value ?? '–'}
+            <span className="kpi-figure">{value ?? '–'}</span>
             {unit && value != null && <span className="kpi-unit">{unit}</span>}
           </div>
           {note && (value != null || noteWhenEmpty) && <div className="kpi-note">{note}</div>}

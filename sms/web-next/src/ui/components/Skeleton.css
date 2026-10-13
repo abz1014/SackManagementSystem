@@ -10,3 +10,12 @@
 .ui-skel__line { display: block; height: 12px; border-radius: var(--radius-pill); background: var(--line); margin: 0 var(--space-4); }
 @keyframes ui-shimmer { to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .ui-skel::after, .ui-dt__skel::after { animation: none; display: none; } }
+
+/* Table-shaped placeholder: the header row and N body rows at the DataTable's own heights. */
+.ui-skel--rows { justify-content: flex-start; gap: 0; height: auto; }
+.ui-skel__head { flex: none; height: var(--row-head-h); background: var(--surface-sunk); }
+.ui-skel__row { flex: none; display: flex; align-items: center; border-top: 1px solid var(--line); }
+.ui-skel__row .ui-skel__line { flex: 1 1 0; margin: 0 var(--space-4); }
+.ui-skel-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--kpi-min, 200px), 1fr)); gap: var(--gutter, 16px); }
+.ui-skel-chart .ck-head { min-height: var(--lh-4); }
+.ui-skel-chart__title { display: block; width: 40%; height: var(--lh-4); border-radius: var(--radius-ctl); background: var(--surface-sunk); }
