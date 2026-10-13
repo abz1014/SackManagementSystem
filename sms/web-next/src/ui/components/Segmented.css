@@ -10,3 +10,4 @@
 .ui-seg__opt:disabled { opacity: .5; cursor: not-allowed; }
 @media (pointer: coarse) { .ui-seg__opt { min-height: var(--tap-min); } }
 @media (prefers-reduced-motion: reduce) { .ui-seg__opt { transition: none; } }
+@media print { .ui-seg, .rs-nameit { display: none !important; } } /* css-034: a toggle and the Name-it editor are controls, not content */
