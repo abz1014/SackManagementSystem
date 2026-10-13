@@ -118,13 +118,35 @@ const wrapperNames = exportedWrapperNames(apiSource);
 const callerFiles = listSourceFiles(SRC_DIR).filter(
   (f) => !f.endsWith(`/${API_FILE}`) && !/\.test\.tsx?$/.test(f) && !f.includes('/testkit/'),
 );
-const callerSource = callerFiles.map((f) => stripComments(readFileSync(f, 'utf8'))).join('\n');
+// web-next (the redesign app) is also a caller: its sources count, except bridge/
+// (pure re-exports of api.ts, not a call) and tests/testkit.
+const WEB_NEXT_DIR = fileURLToPath(new URL('../../web-next/src', import.meta.url)).replace(/\\/g, '/');
+function listWebNextCallerFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = `${dir}/${entry}`;
+    if (statSync(full).isDirectory()) {
+      if (entry === 'bridge' || entry === 'testkit') continue;
+      out.push(...listWebNextCallerFiles(full));
+    } else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) out.push(full);
+  }
+  return out;
+}
+const webNextCallerFiles = listWebNextCallerFiles(WEB_NEXT_DIR);
+const callerSource = [...callerFiles, ...webNextCallerFiles]
+  .map((f) => stripComments(readFileSync(f, 'utf8')))
+  .join('\n');
 
 describe('api.ts wrappers are reachable from the app', () => {
   it('scanned a realistic number of exported wrappers (sanity check on the scan itself)', () => {
     // A canary for the regex above breaking silently, not a real business
     // rule — bump the floor if wrappers are removed and it starts failing.
     expect(wrapperNames.length).toBeGreaterThan(50);
+  });
+
+  it('canary: web-next/src was actually scanned for callers (bridge/ and tests excluded)', () => {
+    expect(webNextCallerFiles.length).toBeGreaterThan(0);
+    expect(webNextCallerFiles.some((f) => f.includes('/bridge/'))).toBe(false);
   });
 
   it('every exported wrapper has a caller outside api.ts/*.test.ts, or a written ALLOW_LIST reason', () => {

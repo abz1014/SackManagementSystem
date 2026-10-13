@@ -37,6 +37,8 @@ const toPosix = (p: string) => p.replace(/\\/g, '/');
 const WEB_SRC = toPosix(fileURLToPath(new URL('.', import.meta.url))).replace(/\/*$/, '/'); // .../sms/web/src/
 const SCREENS_DIR = `${WEB_SRC}screens`;
 const REPO_ROOT = toPosix(fileURLToPath(new URL('../..', import.meta.url))).replace(/\/*$/, '/'); // .../sms/
+/** The redesign app. GUARD 1 scans it too; bridge/ (re-exports of web/src) and tests are skipped. */
+const WEB_NEXT_SRC = `${REPO_ROOT}web-next/src`;
 const relPath = (f: string) => toPosix(f).replace(REPO_ROOT, '').replace(/\/{2,}/g, '/');
 
 /**
@@ -99,14 +101,14 @@ function readCode(file: string): string {
  * a screen. Neither exclusion weakens an existing assertion: every current
  * `expect` in this file (and its threshold) is untouched.
  */
-function listSourceFiles(dir: string): string[] {
+function listSourceFiles(dir: string, skipDirs: string[] = ['testkit']): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     const full = toPosix(`${dir}/${entry}`);
     const st = statSync(full);
     if (st.isDirectory()) {
-      if (entry === 'testkit') continue;
-      out.push(...listSourceFiles(full));
+      if (skipDirs.includes(entry)) continue;
+      out.push(...listSourceFiles(full, skipDirs));
     } else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
       out.push(full);
     }
@@ -121,19 +123,44 @@ function listSourceFiles(dir: string): string[] {
 /** `const NAME = usePolling(` — the declaration line only; the call itself
  *  may span many lines below, which is irrelevant here since the check is
  *  "does NAME.error appear anywhere in this file", not on this one line. */
-const USE_POLLING_DECL_RE = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*usePolling\(/g;
+const USE_POLLING_DECL_RE = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$]*\.)?usePolling\(/g;
+/** web-next's useData(): it carries the error as status 'error' / `.error` / `.staleError`. */
+const USE_DATA_DECL_RE = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*useData\b/g;
 
-interface PollingUse { file: string; rel: string; varName: string }
+interface PollingUse { file: string; rel: string; varName: string; kind: 'polling' | 'data' }
+
+/** web-next files in scope: not bridge/ (re-exports), not testkit/, not tests. */
+function listWebNextFiles(): string[] {
+  return listSourceFiles(WEB_NEXT_SRC, ['testkit', 'bridge']);
+}
 
 function listPollingUses(): PollingUse[] {
   const uses: PollingUse[] = [];
   for (const file of listSourceFiles(SCREENS_DIR)) {
     const src = readCode(file);
     for (const m of src.matchAll(USE_POLLING_DECL_RE)) {
-      uses.push({ file, rel: relPath(file), varName: m[1]! });
+      uses.push({ file, rel: relPath(file), varName: m[1]!, kind: 'polling' });
+    }
+  }
+  for (const file of listWebNextFiles()) {
+    if (toPosix(file).endsWith('/data/useData.ts')) continue; // defines the surfacing itself
+    const src = readCode(file);
+    for (const m of src.matchAll(USE_POLLING_DECL_RE)) {
+      uses.push({ file, rel: relPath(file), varName: m[1]!, kind: 'polling' });
+    }
+    for (const m of src.matchAll(USE_DATA_DECL_RE)) {
+      uses.push({ file, rel: relPath(file), varName: m[1]!, kind: 'data' });
     }
   }
   return uses;
+}
+
+/** Is this use's failure surfaced in its file? usePolling: `X.error` read. useData: `X.error`,
+ *  `X.status` or `X.staleError` read (status 'error' is how it carries the failure). */
+function surfacesError(src: string, use: PollingUse): boolean {
+  const v = use.varName;
+  const re = use.kind === 'data' ? new RegExp(`\\b${v}\\.(?:error|status|staleError)\\b`) : new RegExp(`\\b${v}\\.error\\b`);
+  return re.test(src);
 }
 
 /**
@@ -181,7 +208,12 @@ const ALLOW_LIST: Record<string, string> = {
  * rather than leaving it to rot. The map stays declared, empty, for the next
  * genuine finding.
  */
-const KNOWN_DEFECTS: Record<string, string> = {};
+const KNOWN_DEFECTS: Record<string, string> = {
+  // Found by extending GUARD 1 to web-next (B5). usePeriod.ts reads rangeD.data only (dataAsOfUtc fallback and
+  // firstDay); only liveD.status feeds `failed`, so a failed data-range fetch silently yields firstDay null.
+  // Owner of usePeriod.ts to fix (add rangeD to `failed`); delete this entry then.
+  'web-next/src/data/usePeriod.ts:rangeD': 'data-range failure not surfaced; firstDay/dataAsOfUtc fallback fall silent',
+};
 
 describe('GUARD 1 — every usePolling() error is read, surfaced, or a written exception', () => {
   const uses = listPollingUses();
@@ -190,12 +222,17 @@ describe('GUARD 1 — every usePolling() error is read, surfaced, or a written e
     expect(uses.length).toBeGreaterThan(20);
   });
 
+  it('canary: web-next/src was actually scanned (at least one non-bridge, non-test source file)', () => {
+    const files = listWebNextFiles();
+    expect(files.length, `no source files found under ${WEB_NEXT_SRC}; the web-next extension of GUARD 1 would pass on an empty tree`).toBeGreaterThan(0);
+    expect(files.some((f) => f.includes('/bridge/'))).toBe(false);
+  });
+
   it('every usePolling() result has its .error read in the same file, or a written ALLOW_LIST/KNOWN_DEFECTS entry', () => {
     const violations: string[] = [];
     for (const use of uses) {
       const src = readCode(use.file);
-      const errorRe = new RegExp(`\\b${use.varName}\\.error\\b`);
-      if (errorRe.test(src)) continue;
+      if (surfacesError(src, use)) continue;
       const key = `${use.rel}:${use.varName}`;
       if (ALLOW_LIST[key] !== undefined) continue;
       if (KNOWN_DEFECTS[key] !== undefined) continue; // tracked separately below, not hidden — see its own canary test
@@ -221,8 +258,7 @@ describe('GUARD 1 — every usePolling() error is read, surfaced, or a written e
       const use = uses.find((u) => u.rel === rel && u.varName === varName);
       if (!use) { stale.push(`${key} (no such usePolling() declaration found)`); continue; }
       const src = readCode(use.file);
-      const errorRe = new RegExp(`\\b${varName}\\.error\\b`);
-      if (errorRe.test(src)) stale.push(`${key} (now HAS an .error read — the gap is closed, remove this entry)`);
+      if (surfacesError(src, use)) stale.push(`${key} (now HAS an .error read — the gap is closed, remove this entry)`);
     }
     expect(stale, `ALLOW_LIST entries that no longer match reality (fix or remove them): ${stale.join(', ')}`).toEqual([]);
   });
@@ -234,8 +270,7 @@ describe('GUARD 1 — every usePolling() error is read, surfaced, or a written e
       const use = uses.find((u) => u.rel === rel && u.varName === varName);
       if (!use) { stale.push(`${key} (no such usePolling() declaration found — was it removed/renamed?)`); continue; }
       const src = readCode(use.file);
-      const errorRe = new RegExp(`\\b${varName}\\.error\\b`);
-      if (errorRe.test(src)) stale.push(`${key} (now HAS an .error read — the bug is fixed, delete this KNOWN_DEFECTS entry)`);
+      if (surfacesError(src, use)) stale.push(`${key} (now HAS an .error read — the bug is fixed, delete this KNOWN_DEFECTS entry)`);
     }
     expect(stale, `KNOWN_DEFECTS entries that no longer match reality: ${stale.join(', ')}`).toEqual([]);
   });
