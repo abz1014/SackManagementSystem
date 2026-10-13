@@ -27,9 +27,11 @@ export interface PdasStatusCardProps {
   status: DataState<ProductWriteStatus>;
   /** Id of the element that holds the server reason, so a disabled control can point at it. */
   reasonId?: string;
+  /** Badge and the server's reason only: for tabs where the card is a reminder, not the subject. */
+  compact?: boolean;
 }
 
-export function PdasStatusCard({ status, reasonId = 'pds-reason' }: PdasStatusCardProps) {
+export function PdasStatusCard({ status, reasonId = 'pds-reason', compact = false }: PdasStatusCardProps) {
   const d = status.data;
   let body;
   let badge: { text: string; kind: 'on' | 'off' | 'unread' };
@@ -47,7 +49,7 @@ export function PdasStatusCard({ status, reasonId = 'pds-reason' }: PdasStatusCa
       <>
         <p className="pds__lead">{S.onLead}</p>
         {!d.canWrite && <p className="pds__note">{S.onNoRank}</p>}
-        <Rows d={d} />
+        {!compact && <Rows d={d} />}
       </>
     );
   } else {
@@ -61,19 +63,21 @@ export function PdasStatusCard({ status, reasonId = 'pds-reason' }: PdasStatusCa
             {d.reason ? d.reason : S.noReason}
           </p>
         </div>
-        <div className="pds__stays">
-          <h3 className="pds__stays-title">{S.staysTitle}</h3>
-          <p className="pds__note">
-            {S.staysPlans} {d.local.canWrite ? S.staysLocal : ''} {S.staysDecision}
-          </p>
-        </div>
-        <Rows d={d} />
+        {!compact && (
+          <div className="pds__stays">
+            <h3 className="pds__stays-title">{S.staysTitle}</h3>
+            <p className="pds__note">
+              {S.staysPlans} {d.local.canWrite ? S.staysLocal : ''} {S.staysDecision}
+            </p>
+          </div>
+        )}
+        {!compact && <Rows d={d} />}
       </>
     );
   }
 
   return (
-    <section className="card pds" aria-labelledby="pds-title">
+    <section className={`card pds${compact ? ' pds--compact' : ''}`} aria-labelledby="pds-title">
       <div className="pds__head">
         <h2 id="pds-title" className="pds__title">
           {S.title}
