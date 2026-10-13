@@ -1,0 +1,12 @@
+.ui-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-sunk); }
+.ui-seg__opt {
+  min-height: 30px; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-pill); background: none; cursor: pointer;
+  color: var(--ink-3); font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ui-seg__opt:hover:not(:disabled) { color: var(--ink-1); }
+.ui-seg__opt[aria-checked="true"] { background: var(--surface); color: var(--ink-1); font-weight: var(--fw-bold); box-shadow: var(--elev-seg); }
+.ui-seg__opt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ui-seg__opt:disabled { opacity: .5; cursor: not-allowed; }
+@media (pointer: coarse) { .ui-seg__opt { min-height: var(--tap-min); } }
+@media (prefers-reduced-motion: reduce) { .ui-seg__opt { transition: none; } }

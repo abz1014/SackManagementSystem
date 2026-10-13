@@ -1,0 +1,8 @@
+@import "./shared.css";
+.ui-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  padding: var(--space-6) var(--space-4); text-align: center;
+  background: var(--surface); border-radius: var(--radius-card);
+}
+.ui-empty__icon { color: var(--ink-3); display: inline-flex; }
+.ui-empty__text { margin: 0; max-width: 44ch; color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }

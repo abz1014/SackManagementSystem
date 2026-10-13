@@ -1,0 +1,10 @@
+@import "./shared.css";
+.ui-error {
+  display: flex; flex-direction: column; justify-content: center; gap: var(--space-2);
+  padding: var(--space-5) var(--space-4); box-sizing: border-box;
+  background: var(--surface); border-radius: var(--radius-card);
+}
+.ui-error__title { margin: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--act-fg); font: var(--fw-semibold) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.ui-error__glyph::before { content: var(--act-glyph); font-size: var(--fs-2); }
+.ui-error__cause { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.ui-error__actions { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-2); }

@@ -1,0 +1,14 @@
+.ui-chip {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  min-height: 24px; padding: 0 var(--space-3); border-radius: var(--radius-pill);
+  font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans); font-feature-settings: var(--tnum);
+}
+.ui-chip--filter { background: var(--accent-tint); color: var(--accent); padding-right: var(--space-1); }
+.ui-chip--info { background: var(--surface-sunk); color: var(--ink-2); }
+.ui-chip__x {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border: 0; border-radius: var(--radius-pill); background: none; color: inherit; cursor: pointer;
+}
+.ui-chip__x:hover { background: var(--surface); }
+.ui-chip__x:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+@media (pointer: coarse) { .ui-chip__x { width: var(--tap-min); height: var(--tap-min); margin: -10px 0; } }

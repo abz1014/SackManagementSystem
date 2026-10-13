@@ -1,0 +1,16 @@
+.ui-toasts {
+  position: fixed; left: var(--space-4); bottom: var(--space-4); z-index: 60;
+  display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(100vw - 2 * var(--space-4));
+}
+.ui-toast {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-ctl);
+  background: var(--ink-1); color: var(--surface); box-shadow: var(--elev-2);
+  font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans);
+}
+.ui-toast__btn {
+  background: none; border: 0; padding: 0; cursor: pointer; color: var(--accent-tint);
+  font: var(--fw-bold) var(--fs-2)/var(--lh-2) var(--font-sans); text-decoration: underline;
+}
+.ui-toast__btn:focus-visible { outline: 2px solid var(--surface); outline-offset: 2px; }
+@media (max-width: 767px) { .ui-toasts { bottom: calc(var(--tabbar-h) + var(--space-3)); } }

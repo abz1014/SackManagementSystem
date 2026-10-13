@@ -1,0 +1,22 @@
+/* Shared by the general components: button, link, screen-reader text. Tokens only. */
+.ui-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.ui-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--control-h); padding: 0 var(--space-4);
+  border: 0; border-radius: var(--radius-ctl);
+  background: var(--accent); color: var(--on-accent);
+  font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans);
+  box-shadow: var(--elev-accent); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.ui-btn:hover { background: var(--accent-hover); }
+.ui-btn:disabled { background: var(--surface-sunk); color: var(--ink-3); box-shadow: none; cursor: default; }
+.ui-btn:focus-visible, .ui-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (pointer: coarse) { .ui-btn { min-height: var(--tap-min); } }
+
+.ui-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--accent); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); text-decoration: none;
+}
+.ui-link:hover { color: var(--accent-hover); text-decoration: underline; }
