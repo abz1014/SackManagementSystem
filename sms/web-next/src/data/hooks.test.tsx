@@ -31,10 +31,15 @@ describe('data hooks', () => {
     expect(ff.requests[0]).not.toContain('compare');
   });
   it('useStationStatus succeeds without tsTo', async () => {
-    ff = installFakeFetch({ '/api/station-status': env({ stations: [] }) });
+    ff = installFakeFetch({ '/api/station-status': env({ thresholds: { act: 2, watch: 1.3 }, stations: [] }) });
     render(<Probe hook={() => useStationStatus(period)} />);
     await waitFor(() => expect(screen.getByTestId('s').textContent).toMatch(/^ok\|station status/));
     expect(ff.requests[0]).toBe('/api/station-status?from=2026-09-05&to=2026-09-05');
+  });
+  it('useStationStatus names its part when the answer has no thresholds', async () => {
+    ff = installFakeFetch({ '/api/station-status': env({ stations: [] }) });
+    render(<Probe hook={() => useStationStatus(period)} />);
+    await waitFor(() => expect(screen.getByTestId('s').textContent).toMatch(/^error\|station status\|.*incomplete/));
   });
   it('useStationStatus names its part on failure', async () => {
     ff = installFakeFetch({ '/api/station-status': fail() });
