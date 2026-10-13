@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Changeover plan</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+
+body{margin:0}
+.ptabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line)}
+.ptabs a{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;box-shadow:inset 0 -2px 0 transparent}
+.ptabs a:hover{color:var(--ink-1)}
+.ptabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.phead{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-5);flex-wrap:wrap}
+.phead .titlerow{min-width:0;flex:1 1 420px}
+a.btn{text-decoration:none}
+.btn.lg{height:44px;padding:0 var(--space-5);font-size:var(--fs-3)}
+.btn.sm{height:28px;padding:0 var(--space-3);font-size:var(--fs-2)}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-tint)}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4)}
+.eyebrow{font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-3);font-weight:var(--fw-medium)}
+.big-num{font-size:var(--fs-6);line-height:var(--lh-6);letter-spacing:-0.02em;color:var(--ink-1);font-weight:var(--fw-semibold)}
+.big-num .unit{font-size:var(--fs-3);color:var(--ink-3);font-weight:var(--fw-regular);margin-left:var(--space-1);letter-spacing:0}
+.verbatim{background:var(--surface-sunk);border-radius:var(--radius);padding:var(--space-3) var(--space-4);color:var(--ink-1);font-size:var(--fs-2);line-height:var(--lh-2);font-weight:var(--fw-medium);overflow-wrap:anywhere}
+.verbatim .cap{display:block;color:var(--ink-3);font-weight:var(--fw-regular);font-size:var(--fs-1);margin-bottom:2px}
+.linkrow{display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center}
+.linkrow a{font-weight:var(--fw-medium);font-size:var(--fs-2)}
+.chip.ex{background:var(--surface-sunk);color:var(--ink-3);height:22px;font-size:var(--fs-1)}
+.sub{color:var(--ink-3);font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3{display:grid;grid-template-columns:auto 1fr;gap:var(--space-1) var(--space-3);margin:0;font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3 dt{color:var(--ink-3)}
+.dl3 dd{margin:0;color:var(--ink-1);font-weight:var(--fw-medium);text-align:right}
+.stack{display:flex;flex-direction:column;gap:var(--space-4)}
+.stack5{display:flex;flex-direction:column;gap:var(--space-5)}
+.frow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-4)}
+.srch{position:relative;display:inline-flex;align-items:center}
+.srch .field{padding-left:36px;width:260px}
+.srch .ico{position:absolute;left:10px;width:16px;height:16px;color:var(--ink-3);pointer-events:none}
+.lock .ico{margin-top:1px}
+.shell.full .page{max-width:var(--page-max)}
+
+
+.planrow{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--space-5);align-items:start}
+@media (max-width:1100px){.planrow{grid-template-columns:minmax(0,1fr)}}
+.stephead{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4)}
+.stephead .dot{width:28px;height:28px;border-radius:var(--radius-pill);display:grid;place-items:center;font-size:var(--fs-2);font-weight:var(--fw-medium);flex:none}
+.stephead .dot.done{background:var(--accent);color:var(--on-accent)}
+.stephead .dot.cur{box-shadow:inset 0 0 0 2px var(--accent);color:var(--accent)}
+.stephead .dot.todo{box-shadow:inset 0 0 0 1px var(--line-strong);color:var(--ink-3)}
+.stephead .dot .ico{width:16px;height:16px}
+.stephead h2{flex:1 1 auto}
+.sumline{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-3) 0;border-bottom:1px solid var(--line)}
+.sumline:last-child{border-bottom:0}
+.sumline .k{font-size:var(--fs-1);color:var(--ink-3)}
+.sumline .v{font-size:var(--fs-3);color:var(--ink-1);font-weight:var(--fw-medium)}
+.sumline .v .tag{margin-left:var(--space-2)}
+.plan{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-3)}
+.plan li{display:grid;grid-template-columns:32px 1fr auto;gap:var(--space-3);align-items:center;padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--surface-sunk)}
+.plan .no{width:28px;height:28px;border-radius:var(--radius-pill);background:var(--surface);color:var(--ink-1);display:grid;place-items:center;font-weight:var(--fw-semibold);font-size:var(--fs-2);box-shadow:inset 0 0 0 1px var(--line-strong)}
+.plan .t{font-size:var(--fs-3);font-weight:var(--fw-medium);color:var(--ink-1)}
+.plan .d{font-size:var(--fs-2);color:var(--ink-3)}
+.kind{display:inline-flex;align-items:center;height:22px;padding:0 var(--space-2);border-radius:var(--radius-pill);font-size:var(--fs-1);font-weight:var(--fw-medium);background:var(--accent-tint);color:var(--accent)}
+.kind.ret{background:var(--surface);color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--line-strong)}
+.msgs{display:flex;flex-direction:column;gap:var(--space-2)}
+.m{display:flex;gap:var(--space-3);align-items:flex-start;font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-2)}
+.m .ico{width:16px;height:16px;margin-top:1px}
+.m.watch{color:var(--watch-fg)}
+.m.watch span{color:var(--ink-1)}
+.variants{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-5);align-items:start}
+.variants > *{min-width:0}
+.vcard{display:flex;flex-direction:column;gap:var(--space-4)}
+.vcard .vh{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.vcard .vh h3{font-size:var(--fs-3);line-height:var(--lh-3);color:var(--ink-1);font-weight:var(--fw-semibold);flex:1 1 auto}
+.res{display:flex;flex-direction:column;gap:var(--space-2)}
+.res .grp{font-size:var(--fs-1);color:var(--ink-3);font-weight:var(--fw-medium);margin-top:var(--space-2)}
+.res .it{display:flex;gap:var(--space-2);align-items:flex-start;font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-1)}
+.res .it .pill{flex:none}
+.res .it small{display:block;color:var(--ink-3);font-size:var(--fs-1)}
+.blockcard{}
+.chkrow{display:flex;gap:var(--space-3);align-items:flex-start;font-size:var(--fs-3);color:var(--ink-1)}
+.chkrow input{width:18px;height:18px;margin:2px 0 0;accent-color:var(--accent)}
+.chkrow .sub{display:block}
+
+</style>
+</helmet>
+<div class="shell full" style="min-height: 1700px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Products &amp; PDAS</span>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <nav class="ptabs" aria-label="Products and PDAS"><a href="PdasBoard.dc.html">Board</a><a href="PdasChangeover.dc.html" aria-current="page">Changeover</a><a href="PdasCatalogue.dc.html">Catalogue</a><a href="PdasLimitsHistory.dc.html">Limits &amp; History</a></nav>
+
+      <div class="phead">
+        <div class="titlerow">
+          <h1>Changeover</h1>
+          <p class="sentence">Plan a new product, check what will happen, then run it in PDAS.</p>
+          <p class="caption">The example below is a plan only. Nothing here has been sent to PDAS.</p>
+        </div>
+        <div class="steps" aria-label="Changeover steps">
+          <div class="step done"><span class="dot"><svg class="ico" style="width:16px;height:16px" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg></span>Plan</div><span class="bar"></span>
+          <div class="step cur"><span class="dot">2</span>Review</div><span class="bar"></span>
+          <div class="step"><span class="dot">3</span>Execute</div>
+        </div>
+      </div>
+
+      <div class="planrow">
+        <section class="card" aria-labelledby="s1">
+          <div class="stephead"><span class="dot done"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg></span><h2 id="s1">Plan</h2><a href="#s1" class="sub" style="font-weight:500">Edit plan</a></div>
+          <div class="stack">
+            <div class="frow">
+              <div class="fld"><label for="blend">Blend</label><select class="field" id="blend"><option>205-IL0 (existing)</option></select></div>
+              <div class="fld"><label for="count">Count</label><select class="field" id="count"><option>30 (existing)</option></select></div>
+            </div>
+            <div class="fld"><label id="tl">Tube type</label>
+              <div class="seg" role="group" aria-labelledby="tl" style="align-self:flex-start"><button type="button" aria-pressed="false">Use existing</button><button type="button" aria-pressed="true">Add new</button></div>
+            </div>
+            <div class="frow">
+              <div class="fld"><label for="tn">New tube name</label><input class="field" id="tn" type="text" value="AMBER"></div>
+              <div class="fld"><label for="tf">Form</label><select class="field" id="tf"><option>2 (cone)</option></select></div>
+              <div class="fld"><label for="tw">Tube weight</label><input class="field" id="tw" type="text" value="118 g"></div>
+            </div>
+            <div class="chkrow"><input id="pal" type="checkbox" checked><label for="pal">Also create a pallet <span class="sub">Named AMBER-30</span></label></div>
+            <div class="fld"><label id="rl">Retire when this runs</label>
+              <div class="chkrow"><input id="rt1" type="checkbox" checked aria-labelledby="rl rt1l"><label id="rt1l" for="rt1">205-IL0-SD Orange / Grey, id 1023 <span class="sub">No station is running it</span></label></div>
+            </div>
+          </div>
+          <p class="sub" style="margin-top:var(--space-4)">A plan adds products to PDAS. Which station runs the new product is chosen at the machine.</p>
+        </section>
+
+        <section class="card" aria-labelledby="s2">
+          <div class="stephead"><span class="dot cur">2</span><h2 id="s2">Review</h2><span class="pill state" data-state="ok">Ready to run</span></div>
+          <p class="sub" style="margin-bottom:var(--space-3)">The server checked the plan. These steps run in this order.</p>
+          <ol class="plan">
+            <li><span class="no">1</span><div><div class="t">Add tube type AMBER</div><div class="d">Form 2, 118 g</div></div><span class="kind">New</span></li>
+            <li><span class="no">2</span><div><div class="t">Create product 205-IL0-SD Amber</div><div class="d">Blend 205-IL0, count 30, tube AMBER, 1,960 ± 50 g</div></div><span class="kind">New</span></li>
+            <li><span class="no">3</span><div><div class="t">Create pallet AMBER-30</div><div class="d">For the new product</div></div><span class="kind">New</span></li>
+            <li><span class="no">4</span><div><div class="t">Retire 205-IL0-SD Orange / Grey, id 1023</div><div class="d">Stays in history, cannot be picked for new work</div></div><span class="kind ret">Retire</span></li>
+          </ol>
+          <div class="msgs" style="margin-top:var(--space-4)">
+            <div class="m watch"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></svg><span>Pallet name AMBER-30 does not exist in PDAS yet and will be created.</span></div>
+            <div class="m"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></svg><span>No automatic rollback. A step that has run stays run.</span></div>
+            <div class="m"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></svg><span>This does not reach the machines. The operator picks the material on each winder's panel.</span></div>
+          </div>
+        </section>
+      </div>
+
+      <section aria-labelledby="s3" class="stack5">
+        <div class="stephead" style="margin:0"><span class="dot todo">3</span><h2 id="s3">Execute</h2><span class="sub">What you see depends on the server and your role.</span></div>
+        <div class="variants">
+          <div class="card vcard">
+            <div class="vh"><h3>Writes on</h3><span class="chip ex">Example</span></div>
+            <p class="sub">Engineer role, PDAS writes switched on.</p>
+            <button class="btn lg" type="button" style="align-self:flex-start">Execute 4 steps</button>
+            <div class="res" aria-label="Result of a run, example">
+              <div class="grp">Result of a run</div>
+              <div class="it"><span class="pill state" data-state="ok">Done</span><div>Add tube type AMBER<small>Tube type id 28 created</small></div></div>
+              <div class="it"><span class="pill state" data-state="ok">Done</span><div>Create product 205-IL0-SD Amber<small>Product id 1025 created</small></div></div>
+              <div class="it"><span class="pill state" data-state="act">Failed</span><div>Create pallet AMBER-30<small>PDAS refused: a pallet with this name exists</small></div></div>
+              <div class="it"><span class="pill state" data-state="nodata">Not done</span><div>Retire 205-IL0-SD Orange / Grey<small>Stopped after the failed step</small></div></div>
+              <p class="sub" style="margin-top:var(--space-2)">Steps 1 and 2 stay done. Fix the pallet name and plan the rest again.</p>
+            </div>
+          </div>
+
+          <div class="card vcard">
+            <div class="vh"><h3>Writes off on this server</h3><span class="pill state" data-state="watch">Watch</span></div>
+            <div class="verbatim"><span class="cap">Reason given by the server</span>PDAS_WRITE_ENABLED is not true.</div>
+            <button class="btn lg" type="button" disabled style="align-self:flex-start">Execute 4 steps</button>
+            <p class="sub">Nothing was sent to PDAS. Planning and review still work.</p>
+            <details class="disc"><summary>Who can turn writes on</summary><div class="body">An engineer on the plant server. The setting is not changed from this screen.</div></details>
+          </div>
+
+          <div class="card vcard">
+            <div class="vh"><h3>Viewer</h3><span class="chip ex">Example</span></div>
+            <p class="sub">The plan and review above are visible. There is no Execute control at this role.</p>
+            <div class="lock" style="max-width:none"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 016 0V9"/></svg><span>Running a changeover needs the engineer role. Ask an engineer to open this plan and run it.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card blockcard" aria-labelledby="bk">
+        <div class="cardhead"><h2 id="bk">When the plan is blocked</h2><span class="pill state" data-state="act">Blocked</span></div>
+        <div class="two" style="gap:var(--space-5);align-items:center">
+          <div class="stack">
+            <p style="color:var(--ink-1);font-size:var(--fs-4);line-height:var(--lh-4);font-weight:var(--fw-semibold)">This blend, count and tube already exist as 205-IL0-SD Blue. Change its limits instead.</p>
+            <p class="sub">PDAS refuses a second product with the same blend, count and tube, even if the first is retired. To change a target weight, edit the limits of the existing product.</p>
+            <div class="linkrow"><a class="btn" href="PdasLimitsHistory.dc.html">Change limits of 205-IL0-SD Blue</a><a href="PdasChangeover.dc.html">Back to the plan</a></div>
+          </div>
+          <div class="stack">
+            <button class="btn lg" type="button" disabled style="align-self:flex-start">Execute</button>
+            <p class="sub">Execute stays off while a blocker is open.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

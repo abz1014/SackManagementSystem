@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Today states</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<svg class="defs" aria-hidden="true" focusable="false"><defs><linearGradient id="barGradC" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b59e0"/><stop offset="1" stop-color="#8aa5f2"/></linearGradient></defs></svg>
+<div style="min-height: 1080px; padding: var(--space-5); background: var(--bg); display: flex; flex-direction: column; gap: var(--space-5)">
+  <div class="titlerow" style="display:flex;flex-direction:column;gap:4px">
+    <h1>Today: loading, error, partial failure and empty</h1>
+    <p class="small">Each part of the page fails on its own and says which part. Loading never shows a false zero.</p>
+  </div>
+
+  <div class="sgrid">
+    <section aria-labelledby="s1">
+      <h2 id="s1">Loading</h2>
+      <p class="caption">Placeholders keep the final size, so nothing moves when the figures arrive.</p>
+      <div class="kpis" aria-busy="true">
+        <div class="skel" style="height:96px"></div>
+        <div class="skel" style="height:96px"></div>
+        <div class="skel" style="height:96px"></div>
+      </div>
+      <div class="card" aria-busy="true">
+        <div class="skel" style="height:26px;width:200px;margin-bottom:12px"></div>
+        <div class="heat">
+          <div class="skel" style="height:112px"></div>
+          <div class="skel" style="height:112px"></div>
+          <div class="skel" style="height:112px"></div>
+          <div class="skel" style="height:112px"></div>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="s2">
+      <h2 id="s2">Error in one chart</h2>
+      <p class="caption">The failed part is named. The rest of the page stays usable.</p>
+      <div class="chart-frame">
+        <div class="hd"><h2>Failed inspection by reason</h2><span class="caption">cones, 1 Sep 2026</span></div>
+        <div class="msg error" role="alert" style="box-shadow:none;background:var(--surface-sunk)">
+          <div class="head">Couldn't load the reject chart.</div>
+          <p class="why">The server did not answer.</p>
+          <button class="btn" type="button">Try again</button>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="s3">
+      <h2 id="s3">Partial failure</h2>
+      <p class="caption">Four figures loaded. One did not, and its card says so.</p>
+      <div class="kpis">
+        <div class="kpi k-cone"><div class="label">Cones</div><div class="value">3,089</div></div>
+        <div class="kpi k-sack"><div class="label">Sacks</div><div class="value">133</div></div>
+        <div class="kpi k-pack"><div class="label">Packed</div><div class="value">6,296.7<span class="unit">kg</span></div></div>
+        <div class="kpi k-insp"><div class="label">Failed inspection</div>
+          <div class="value">&ndash;</div>
+          <div class="err"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3l8 14H2z"/><path d="M10 8v4M10 14.4v.1"/></svg><span>Couldn't load failed inspection.</span></div>
+          <div class="foot"><span class="caption">The server did not answer.</span><button class="btn quiet" type="button" style="height:28px;font-size:var(--fs-2)">Try again</button></div>
+        </div>
+      </div>
+      <div class="note">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></svg>
+        <span class="grow">The station grid and the shift chart loaded. Only failed inspection is missing.</span>
+        <a href="Diagnostics.dc.html">Check Diagnostics</a>
+      </div>
+    </section>
+
+    <section aria-labelledby="s4">
+      <h2 id="s4">Empty period</h2>
+      <p class="caption">Says why it is empty and offers the next step.</p>
+      <div class="msg">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13.5 13.5L17 17"/></svg>
+        <p>Nothing recorded in this shift. Newest data: 7 Sep 2026 12:00.</p>
+        <p class="why">The line may be stopped or data is delayed.</p>
+        <div class="row" style="gap:var(--space-2);justify-content:center">
+          <a class="btn quiet" href="Main.dc.html">Show 7 Sep 2026</a>
+          <a class="btn quiet" href="Diagnostics.dc.html">Open Diagnostics</a>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quality, register</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+
+body{margin:0}
+.qtabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line);flex-wrap:wrap}
+.qtabs a{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;box-shadow:inset 0 -2px 0 transparent}
+.qtabs a:hover{color:var(--ink-1)}
+.qtabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.qhead{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-5);flex-wrap:wrap}
+.qhead h1{font-size:var(--fs-6);line-height:var(--lh-6);letter-spacing:-0.02em}
+.qhead .sentence{font-size:var(--fs-4);line-height:var(--lh-4);font-weight:var(--fw-regular);color:var(--ink-2);max-width:56ch;margin-top:var(--space-2)}
+.qhead .sentence b{color:var(--ink-1);font-weight:var(--fw-semibold)}
+.qsec{display:flex;flex-direction:column;gap:var(--space-5)}
+.qkpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-5)}
+.tr{text-align:right}
+.mut{color:var(--ink-3)}
+.sub{display:block;font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3);font-weight:var(--fw-regular)}
+.chart text{font-family:var(--font-sans)}
+.hov:hover{filter:brightness(.92)}
+.btn.sm{height:28px;padding:0 var(--space-3);font-size:var(--fs-2)}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-tint)}
+.lnk{color:var(--accent);font-weight:var(--fw-medium);text-decoration:none;font-size:var(--fs-2)}
+.lnk:hover{text-decoration:underline}
+
+.fb{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:var(--space-4);align-items:end}
+.rg{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-5);align-items:start}
+.rg.open{grid-template-columns:minmax(0,1fr) 340px}
+.scroll{max-height:560px;overflow:auto;border-radius:var(--radius);box-shadow:inset 0 0 0 1px var(--line)}
+.scroll .dt th{position:sticky;top:0;z-index:1}
+.dt tbody tr{cursor:pointer}
+.dt tbody tr.sel td{background:var(--accent-tint)}
+.dt tbody tr:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
+.rtag{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-2);font-weight:var(--fw-medium);color:var(--ink-2)}
+.rtag::before{content:"";width:8px;height:8px;border-radius:2px}
+.rtag.ok::before{background:var(--ok-edge)}.rtag.act::before{background:var(--act-edge)}.rtag.watch::before{background:var(--watch-edge)}
+.sheet{position:sticky;top:var(--space-5);display:flex;flex-direction:column;gap:var(--space-4);box-shadow:var(--elev-2)}
+.sheet .big{font-size:var(--fs-kpi);line-height:var(--lh-kpi);color:var(--ink-1);font-weight:var(--fw-semibold);letter-spacing:-0.02em}
+.sheet .big i{font-style:normal;font-size:var(--fs-2);color:var(--ink-3);font-weight:var(--fw-regular);margin-left:var(--space-1)}
+.sheet dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3) var(--space-4);padding-top:var(--space-4);box-shadow:inset 0 1px 0 var(--line)}
+.sheet dl div{display:flex;flex-direction:column;gap:2px}
+.sheet dt{font-size:var(--fs-1);color:var(--ink-3)}
+.sheet dd{margin:0;font-size:var(--fs-2);color:var(--ink-1);font-weight:var(--fw-medium)}
+.sheet .x{width:32px;height:32px;border:0;border-radius:var(--radius);background:none;color:var(--ink-3);display:grid;place-items:center;cursor:pointer}
+.sheet .x:hover{background:var(--surface-sunk);color:var(--ink-1)}
+.rtabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line);flex-wrap:wrap}
+.rtabs button{background:none;border:0;padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);cursor:pointer;box-shadow:inset 0 -2px 0 transparent;display:inline-flex;align-items:center;gap:var(--space-2)}
+.rtabs button:hover{color:var(--ink-1)}
+.rtabs button[aria-selected="true"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.exm{display:inline-flex;align-items:center;height:20px;padding:0 var(--space-2);border-radius:var(--radius-pill);background:var(--surface-sunk);color:var(--ink-3);font-size:var(--fs-1)}
+@media (max-width:1100px){.rg.open{grid-template-columns:minmax(0,1fr)}.sheet{position:static}}
+
+</style>
+</helmet>
+<div class="shell full" style="min-height: 1500px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Quality</span>
+      <a class="pchip" href="PeriodPanel.dc.html" title="Plant time, 24 hours. Production day runs 06:00 to 06:00."><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/></svg>5 Aug to 7 Sep 2026 · 34 days<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></a>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+<div class="qhead"><div><h1>Quality</h1><p class="sentence"><b>Find any single reading.</b> Pick a type, narrow the time, then open a row for its detail.</p></div><p class="caption">1 Sep 2026 06:00 to 2 Sep 2026 06:00, plant time</p></div>
+<nav class="qtabs" aria-label="Quality sections"><a href="QualityStations.dc.html">Stations</a><a href="QualityRejects.dc.html">Rejects</a><a href="QualityWeight.dc.html">Weight</a><a href="Register.dc.html" aria-current="page">Register</a></nav>
+      <div class="rg {{sheetClass}}">
+        <section class="card" aria-labelledby="rg" style="display:flex;flex-direction:column;gap:var(--space-4);min-width:0">
+          <div class="rtabs" role="tablist" aria-label="Record type">
+            <button type="button" role="tab" aria-selected="{{t0}}" onClick="{{go0}}">Cones</button>
+            <button type="button" role="tab" aria-selected="{{t1}}" onClick="{{go1}}">Sacks</button>
+            <button type="button" role="tab" aria-selected="{{t2}}" onClick="{{go2}}">Inspection fails</button>
+            <button type="button" role="tab" aria-selected="{{t3}}" onClick="{{go3}}">Weight-check fails</button>
+            <button type="button" role="tab" aria-selected="{{t4}}" onClick="{{go4}}">Sack stock <span class="chip info" style="height:22px;font-size:var(--fs-1)">Placement under review</span></button>
+          </div>
+          <div class="fb">
+          <div class="fld"><label for="f1">From (plant time)</label><input id="f1" class="field" value="1 Sep 2026 06:00"></div>
+          <div class="fld"><label for="f2">To (plant time)</label><input id="f2" class="field" value="2 Sep 2026 06:00"></div>
+          <div class="fld"><label for="f3">Station</label><select id="f3" class="field"><option>All stations</option><option>Station 8</option></select></div>
+          <div class="fld"><label for="f4">Product</label><select id="f4" class="field"><option>All products</option><option>Blue, 205-IL0-SD</option></select></div>
+          <div class="fld"><label for="f5">Search</label><input id="f5" class="field" placeholder="Hanger, sack number"></div>
+        </div>
+          <h2 id="rg" style="display:flex;align-items:center;gap:var(--space-3)">{{title}} <span class="exm">{{note}}</span></h2>
+          <sc-if value="{{t0b}}" hint-placeholder-val="{{true}}">
+          <div class="scroll"><table class="dt"><thead><tr><th>Time (plant)</th><th>Production day</th><th>Station</th><th>Product</th><th class="num">Weight</th><th class="num">vs target</th><th>Result</th></tr></thead><tbody>
+<tr class="{{r0.cls}}" onClick="{{r0.pick}}" tabindex="0"><td>21:58:41</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Blue, 205-IL0-SD</td><td class="num">1,951 g</td><td class="num">−9 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r1.cls}}" onClick="{{r1.pick}}" tabindex="0"><td>21:58:12</td><td>1 Sep 2026</td><td class="strong">Station 2</td><td>Star Green, 205-IL0-SD</td><td class="num">1,957 g</td><td class="num">−3 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r2.cls}}" onClick="{{r2.pick}}" tabindex="0"><td>21:57:50</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Blue, 205-IL0-SD</td><td class="num">1,946 g</td><td class="num">−14 g</td><td><span class="rtag act">Failed inspection</span></td></tr>
+<tr class="{{r3.cls}}" onClick="{{r3.pick}}" tabindex="0"><td>21:57:09</td><td>1 Sep 2026</td><td class="strong">Station 1</td><td>Star Green, 205-IL0-SD</td><td class="num">1,962 g</td><td class="num">+2 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r4.cls}}" onClick="{{r4.pick}}" tabindex="0"><td>21:56:33</td><td>1 Sep 2026</td><td class="strong">Station 10</td><td>Blue, 205-IL0-SD</td><td class="num">1,949 g</td><td class="num">−11 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r5.cls}}" onClick="{{r5.pick}}" tabindex="0"><td>21:55:58</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Blue, 205-IL0-SD</td><td class="num">1,953 g</td><td class="num">−7 g</td><td><span class="rtag act">Failed inspection</span></td></tr>
+<tr class="{{r6.cls}}" onClick="{{r6.pick}}" tabindex="0"><td>21:55:20</td><td>1 Sep 2026</td><td class="strong">Station 14</td><td>Cir Red, 205-IL0-SD</td><td class="num">1,955 g</td><td class="num">−5 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r7.cls}}" onClick="{{r7.pick}}" tabindex="0"><td>21:54:47</td><td>1 Sep 2026</td><td class="strong">Station 9</td><td>Blue, 205-IL0-SD</td><td class="num">1,940 g</td><td class="num">−20 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r8.cls}}" onClick="{{r8.pick}}" tabindex="0"><td>21:54:11</td><td>1 Sep 2026</td><td class="strong">Station 2</td><td>Star Green, 205-IL0-SD</td><td class="num">1,951 g</td><td class="num">−9 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r9.cls}}" onClick="{{r9.pick}}" tabindex="0"><td>21:53:36</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Blue, 205-IL0-SD</td><td class="num">1,948 g</td><td class="num">−12 g</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr class="{{r10.cls}}" onClick="{{r10.pick}}" tabindex="0"><td>21:52:59</td><td>1 Sep 2026</td><td class="strong">Station 13</td><td>Cir Red, 205-IL0-SD</td><td class="num">1,944 g</td><td class="num">−16 g</td><td><span class="rtag watch">Failed weight check</span></td></tr>
+<tr class="{{r11.cls}}" onClick="{{r11.pick}}" tabindex="0"><td>21:52:24</td><td>1 Sep 2026</td><td class="strong">Station 1</td><td>Star Green, 205-IL0-SD</td><td class="num">1,959 g</td><td class="num">−1 g</td><td><span class="rtag ok">Passed</span></td></tr>
+          </tbody></table></div>
+          </sc-if>
+          <sc-if value="{{t1b}}" hint-placeholder-val="{{false}}">
+          <div class="scroll"><table class="dt"><thead><tr><th>Time (plant)</th><th>Production day</th><th>Sack</th><th class="num">Weight</th><th>Shift</th><th>Scale check</th></tr></thead><tbody>
+<tr><td>21:44:02</td><td>1 Sep 2026</td><td class="strong">Sack 4,417</td><td class="num">47.31 kg</td><td>Night</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr><td>21:31:18</td><td>1 Sep 2026</td><td class="strong">Sack 4,416</td><td class="num">47.26 kg</td><td>Evening</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr><td>21:19:40</td><td>1 Sep 2026</td><td class="strong">Sack 4,415</td><td class="num">47.38 kg</td><td>Evening</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr><td>21:08:05</td><td>1 Sep 2026</td><td class="strong">Sack 4,414</td><td class="num">45.12 kg</td><td>Evening</td><td><span class="rtag watch">Failed scale check</span></td></tr>
+<tr><td>20:56:27</td><td>1 Sep 2026</td><td class="strong">Sack 4,413</td><td class="num">47.29 kg</td><td>Evening</td><td><span class="rtag ok">Passed</span></td></tr>
+<tr><td>20:44:51</td><td>1 Sep 2026</td><td class="strong">Sack 4,412</td><td class="num">47.33 kg</td><td>Evening</td><td><span class="rtag ok">Passed</span></td></tr>
+          </tbody></table></div>
+          </sc-if>
+          <sc-if value="{{t2b}}" hint-placeholder-val="{{false}}">
+          <div class="scroll"><table class="dt"><thead><tr><th>Time (plant)</th><th>Production day</th><th>Station</th><th>Reason</th><th class="num">Weight</th></tr></thead><tbody>
+<tr><td>21:57:50</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Code 2/1 (not named yet)</td><td class="num">1,946 g</td></tr>
+<tr><td>21:55:58</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Code 2/1 (not named yet)</td><td class="num">1,953 g</td></tr>
+<tr><td>21:41:16</td><td>1 Sep 2026</td><td class="strong">Station 14</td><td>Code 1/11 (not named yet)</td><td class="num">1,960 g</td></tr>
+<tr><td>21:33:02</td><td>1 Sep 2026</td><td class="strong">Station 10</td><td>Code 2/1 (not named yet)</td><td class="num">1,949 g</td></tr>
+<tr><td>21:20:44</td><td>1 Sep 2026</td><td class="strong">Station 8</td><td>Code 10/1 (not named yet)</td><td class="num">1,952 g</td></tr>
+          </tbody></table></div>
+          </sc-if>
+          <sc-if value="{{t3b}}" hint-placeholder-val="{{false}}">
+          <div class="scroll"><table class="dt"><thead><tr><th>Time (plant)</th><th>Production day</th><th>Station</th><th class="num">Weight</th><th>Scale range</th></tr></thead><tbody>
+<tr><td>21:52:24</td><td>1 Sep 2026</td><td class="strong">Station 13</td><td class="num">1,944 g</td><td>1,920 to 2,000 g</td></tr>
+<tr><td>20:11:09</td><td>1 Sep 2026</td><td class="strong">Station 2</td><td class="num">2,013 g</td><td>1,920 to 2,000 g</td></tr>
+<tr><td>18:47:30</td><td>1 Sep 2026</td><td class="strong">Station 10</td><td class="num">1,899 g</td><td>1,920 to 2,000 g</td></tr>
+<tr><td>17:02:51</td><td>1 Sep 2026</td><td class="strong">Station 4</td><td class="num">2,008 g</td><td>1,920 to 2,000 g</td></tr>
+          </tbody></table></div>
+          </sc-if>
+          <sc-if value="{{t4b}}" hint-placeholder-val="{{false}}">
+          <div class="scroll"><table class="dt"><thead><tr><th>Production day</th><th class="num">Sacks in</th><th class="num">Weight in</th><th class="num">Stock, sacks</th><th class="num">Stock, weight</th></tr></thead><tbody>
+<tr><td class="strong">7 Sep 2026</td><td class="num">55</td><td class="num">2,600.8 kg</td><td class="num">5,435</td><td class="num">256,871.2 kg</td></tr>
+<tr><td class="strong">6 Sep 2026</td><td class="num">154</td><td class="num">7,294.7 kg</td><td class="num">5,380</td><td class="num">254,270.5 kg</td></tr>
+<tr><td class="strong">5 Sep 2026</td><td class="num">134</td><td class="num">6,338.0 kg</td><td class="num">5,226</td><td class="num">246,975.7 kg</td></tr>
+<tr><td class="strong">4 Sep 2026</td><td class="num">111</td><td class="num">5,253.5 kg</td><td class="num">5,092</td><td class="num">240,637.8 kg</td></tr>
+<tr><td class="strong">3 Sep 2026</td><td class="num">107</td><td class="num">5,056.4 kg</td><td class="num">4,981</td><td class="num">235,384.2 kg</td></tr>
+<tr><td class="strong">2 Sep 2026</td><td class="num">148</td><td class="num">6,971.2 kg</td><td class="num">4,874</td><td class="num">230,327.8 kg</td></tr>
+<tr><td class="strong">1 Sep 2026</td><td class="num">133</td><td class="num">6,296.7 kg</td><td class="num">4,726</td><td class="num">223,356.6 kg</td></tr>
+<tr><td class="strong">31 Aug 2026</td><td class="num">131</td><td class="num">6,190.7 kg</td><td class="num">4,593</td><td class="num">217,059.9 kg</td></tr>
+<tr><td class="strong">30 Aug 2026</td><td class="num">132</td><td class="num">6,237.1 kg</td><td class="num">4,462</td><td class="num">210,869.3 kg</td></tr>
+<tr><td class="strong">29 Aug 2026</td><td class="num">116</td><td class="num">5,488.3 kg</td><td class="num">4,330</td><td class="num">204,632.2 kg</td></tr>
+          </tbody></table></div>
+          </sc-if>
+          <div class="ft" style="display:flex;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap"><span class="caption">{{foot}}</span><span class="caption">Times are plant time, 24 hours. Production day runs 06:00 to 06:00.</span></div>
+        </section>
+        <sc-if value="{{sheetOpen}}" hint-placeholder-val="{{true}}">
+        <aside class="card sheet" aria-labelledby="sh">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)"><div><h2 id="sh">Reading sheet</h2><span class="caption">{{sheetSub}}</span></div><button class="x" type="button" aria-label="Close reading sheet" onClick="{{closeSheet}}"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+          <div class="big">{{sw}}<i>g</i></div>
+          <span class="rtag {{sresCls}}">{{sres}}</span>
+          <dl>
+            <div><dt>Plant time</dt><dd>{{stime}}</dd></div>
+            <div><dt>Production day</dt><dd>1 Sep 2026</dd></div>
+            <div><dt>Station</dt><dd>{{sstation}}</dd></div>
+            <div><dt>Hanger</dt><dd>{{shanger}}</dd></div>
+            <div><dt>Product</dt><dd>{{sprod}}</dd></div>
+            <div><dt>Against target</dt><dd>{{soff}}</dd></div>
+          </dl>
+          <a class="btn quiet" href="QualityStations.dc.html" style="text-decoration:none">Open Station {{sstationN}} in Quality</a>
+        </aside>
+        </sc-if>
+      </div>
+      <details class="disc"><summary>About these figures</summary><div class="body">Rows in the Cones, Sacks, Inspection fails and Weight-check fails tabs are example rows that show the layout; live rows come from the readings feed. Sack stock rows are real daily totals from the 5 Aug to 7 Sep 2026 period (sacks weighed at the packing scale, counted as receipts). Where sack stock lives in the app is still being decided.</div></details>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 0, sel: 0, sheet: true };
+  }
+  renderVals() {
+    const sel = this.state.tab === 0 ? this.state.sel : -1;
+    const cones = [{"id":0,"date":"1 Sep 2026","time":"21:58:41","st":8,"w":1951,"res":"Passed","prod":"Blue, 205-IL0-SD","hanger":212},{"id":1,"date":"1 Sep 2026","time":"21:58:12","st":2,"w":1957,"res":"Passed","prod":"Star Green, 205-IL0-SD","hanger":87},{"id":2,"date":"1 Sep 2026","time":"21:57:50","st":8,"w":1946,"res":"Failed inspection","prod":"Blue, 205-IL0-SD","hanger":134},{"id":3,"date":"1 Sep 2026","time":"21:57:09","st":1,"w":1962,"res":"Passed","prod":"Star Green, 205-IL0-SD","hanger":41},{"id":4,"date":"1 Sep 2026","time":"21:56:33","st":10,"w":1949,"res":"Passed","prod":"Blue, 205-IL0-SD","hanger":276},{"id":5,"date":"1 Sep 2026","time":"21:55:58","st":8,"w":1953,"res":"Failed inspection","prod":"Blue, 205-IL0-SD","hanger":18},{"id":6,"date":"1 Sep 2026","time":"21:55:20","st":14,"w":1955,"res":"Passed","prod":"Cir Red, 205-IL0-SD","hanger":160},{"id":7,"date":"1 Sep 2026","time":"21:54:47","st":9,"w":1940,"res":"Passed","prod":"Blue, 205-IL0-SD","hanger":229},{"id":8,"date":"1 Sep 2026","time":"21:54:11","st":2,"w":1951,"res":"Passed","prod":"Star Green, 205-IL0-SD","hanger":95},{"id":9,"date":"1 Sep 2026","time":"21:53:36","st":8,"w":1948,"res":"Passed","prod":"Blue, 205-IL0-SD","hanger":203},{"id":10,"date":"1 Sep 2026","time":"21:52:59","st":13,"w":1944,"res":"Failed weight check","prod":"Cir Red, 205-IL0-SD","hanger":77},{"id":11,"date":"1 Sep 2026","time":"21:52:24","st":1,"w":1959,"res":"Passed","prod":"Star Green, 205-IL0-SD","hanger":255}];
+    const c = cones[this.state.sel];
+    const titles = ['Cones', 'Sacks', 'Inspection fails', 'Weight-check fails', 'Sack stock'];
+    const notes = ['Example rows', 'Example rows', 'Example rows', 'Example rows', 'Real daily totals'];
+    const foots = ['12 of 3,089 cones shown', '6 of 133 sacks shown', '5 of 451 shown', '4 of 4 shown', '10 of 34 production days shown'];
+    const t = this.state.tab;
+    const o = {
+      sheetOpen: this.state.sheet && t === 0,
+      sheetClass: this.state.sheet && t === 0 ? 'open' : '',
+      closeSheet: () => this.setState({ sheet: false }),
+      title: titles[t], note: notes[t], foot: foots[t],
+      t0: t === 0, t1: t === 1, t2: t === 2, t3: t === 3, t4: t === 4,
+      t0b: t === 0, t1b: t === 1, t2b: t === 2, t3b: t === 3, t4b: t === 4,
+      go0: () => this.setState({ tab: 0 }), go1: () => this.setState({ tab: 1 }), go2: () => this.setState({ tab: 2 }), go3: () => this.setState({ tab: 3 }), go4: () => this.setState({ tab: 4 }),
+      sheetSub: 'Example reading · Station ' + c.st,
+      sw: c.w.toLocaleString('en-US'), sres: c.res, sresCls: c.res === 'Passed' ? 'ok' : c.res === 'Failed inspection' ? 'act' : 'watch',
+      stime: '1 Sep 2026 ' + c.time, sstation: 'Station ' + c.st, sstationN: c.st, shanger: String(c.hanger), sprod: c.prod,
+      soff: (c.w - 1960 < 0 ? '\u2212' : '+') + Math.abs(c.w - 1960) + ' g vs 1,960 g',
+      r0: { cls: sel === 0 ? 'sel' : '', pick: () => this.setState({ sel: 0, sheet: true }) },
+      r1: { cls: sel === 1 ? 'sel' : '', pick: () => this.setState({ sel: 1, sheet: true }) },
+      r2: { cls: sel === 2 ? 'sel' : '', pick: () => this.setState({ sel: 2, sheet: true }) },
+      r3: { cls: sel === 3 ? 'sel' : '', pick: () => this.setState({ sel: 3, sheet: true }) },
+      r4: { cls: sel === 4 ? 'sel' : '', pick: () => this.setState({ sel: 4, sheet: true }) },
+      r5: { cls: sel === 5 ? 'sel' : '', pick: () => this.setState({ sel: 5, sheet: true }) },
+      r6: { cls: sel === 6 ? 'sel' : '', pick: () => this.setState({ sel: 6, sheet: true }) },
+      r7: { cls: sel === 7 ? 'sel' : '', pick: () => this.setState({ sel: 7, sheet: true }) },
+      r8: { cls: sel === 8 ? 'sel' : '', pick: () => this.setState({ sel: 8, sheet: true }) },
+      r9: { cls: sel === 9 ? 'sel' : '', pick: () => this.setState({ sel: 9, sheet: true }) },
+      r10: { cls: sel === 10 ? 'sel' : '', pick: () => this.setState({ sel: 10, sheet: true }) },
+      r11: { cls: sel === 11 ? 'sel' : '', pick: () => this.setState({ sel: 11, sheet: true }) }
+    };
+    return o;
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Products and PDAS board</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+
+body{margin:0}
+.ptabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line)}
+.ptabs a{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;box-shadow:inset 0 -2px 0 transparent}
+.ptabs a:hover{color:var(--ink-1)}
+.ptabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.phead{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-5);flex-wrap:wrap}
+.phead .titlerow{min-width:0;flex:1 1 420px}
+a.btn{text-decoration:none}
+.btn.lg{height:44px;padding:0 var(--space-5);font-size:var(--fs-3)}
+.btn.sm{height:28px;padding:0 var(--space-3);font-size:var(--fs-2)}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-tint)}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4)}
+.eyebrow{font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-3);font-weight:var(--fw-medium)}
+.big-num{font-size:var(--fs-6);line-height:var(--lh-6);letter-spacing:-0.02em;color:var(--ink-1);font-weight:var(--fw-semibold)}
+.big-num .unit{font-size:var(--fs-3);color:var(--ink-3);font-weight:var(--fw-regular);margin-left:var(--space-1);letter-spacing:0}
+.verbatim{background:var(--surface-sunk);border-radius:var(--radius);padding:var(--space-3) var(--space-4);color:var(--ink-1);font-size:var(--fs-2);line-height:var(--lh-2);font-weight:var(--fw-medium);overflow-wrap:anywhere}
+.verbatim .cap{display:block;color:var(--ink-3);font-weight:var(--fw-regular);font-size:var(--fs-1);margin-bottom:2px}
+.linkrow{display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center}
+.linkrow a{font-weight:var(--fw-medium);font-size:var(--fs-2)}
+.chip.ex{background:var(--surface-sunk);color:var(--ink-3);height:22px;font-size:var(--fs-1)}
+.sub{color:var(--ink-3);font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3{display:grid;grid-template-columns:auto 1fr;gap:var(--space-1) var(--space-3);margin:0;font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3 dt{color:var(--ink-3)}
+.dl3 dd{margin:0;color:var(--ink-1);font-weight:var(--fw-medium);text-align:right}
+.stack{display:flex;flex-direction:column;gap:var(--space-4)}
+.stack5{display:flex;flex-direction:column;gap:var(--space-5)}
+.frow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-4)}
+.srch{position:relative;display:inline-flex;align-items:center}
+.srch .field{padding-left:36px;width:260px}
+.srch .ico{position:absolute;left:10px;width:16px;height:16px;color:var(--ink-3);pointer-events:none}
+.lock .ico{margin-top:1px}
+.shell.full .page{max-width:var(--page-max)}
+
+
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:var(--space-5)}
+.strip > *{min-width:0}
+.conn{display:flex;flex-direction:column;gap:var(--space-3)}
+.conn .top{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.conn .top .ico{color:var(--ink-3)}
+.conn h2{flex:1 1 auto}
+.dflt .code{font-size:var(--fs-5);line-height:var(--lh-5);color:var(--ink-1);font-weight:var(--fw-semibold);letter-spacing:-0.01em}
+.boardgrid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--space-5);align-items:start}
+@media (max-width:1100px){.boardgrid{grid-template-columns:minmax(0,1fr)}}
+.wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:var(--space-4)}
+.wcard{background:var(--surface);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3);min-width:0;transition:box-shadow var(--dur-base) var(--ease)}
+.wcard:hover{box-shadow:var(--card-shadow-hover)}
+.wcard .top{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.wcard .name{font-size:var(--fs-3);font-weight:var(--fw-semibold);color:var(--ink-1)}
+.wcard .pcode{font-size:var(--fs-4);line-height:var(--lh-4);font-weight:var(--fw-semibold);color:var(--ink-1);letter-spacing:-0.01em}
+.wcard .pcol{font-size:var(--fs-2);color:var(--ink-2)}
+.wcard .tol{font-size:var(--fs-5);line-height:var(--lh-5);font-weight:var(--fw-semibold);color:var(--ink-1);letter-spacing:-0.02em}
+.wcard .tol .unit{font-size:var(--fs-2);color:var(--ink-3);font-weight:var(--fw-regular);letter-spacing:0}
+.wcard.idle .pcode,.wcard.idle .pcol,.wcard.idle .tol{color:var(--ink-3)}
+.wcard .lastp{font-size:var(--fs-1);color:var(--ink-3)}
+.wcard .dl3{border-top:1px solid var(--line);padding-top:var(--space-3)}
+.tl{list-style:none;margin:0 0 var(--space-3);padding:0;display:flex;flex-direction:column;gap:0}
+.tl li{display:grid;grid-template-columns:20px 1fr;gap:var(--space-3);padding-bottom:var(--space-4);position:relative}
+.tl li::before{content:"";position:absolute;left:5px;top:14px;bottom:-2px;width:1px;background:var(--line-strong)}
+.tl li:last-child::before{display:none}
+.tl .dot{width:11px;height:11px;border-radius:var(--radius-pill);background:var(--accent);margin-top:5px;box-shadow:0 0 0 3px var(--accent-tint)}
+.tl .when{font-size:var(--fs-1);color:var(--ink-3)}
+.tl .what{font-size:var(--fs-3);color:var(--ink-1);font-weight:var(--fw-medium)}
+.tl .what span{color:var(--ink-2);font-weight:var(--fw-regular)}
+
+</style>
+</helmet>
+<div class="shell full" style="min-height: 1400px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Products &amp; PDAS</span>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <nav class="ptabs" aria-label="Products and PDAS"><a href="PdasBoard.dc.html" aria-current="page">Board</a><a href="PdasChangeover.dc.html">Changeover</a><a href="PdasCatalogue.dc.html">Catalogue</a><a href="PdasLimitsHistory.dc.html">Limits &amp; History</a></nav>
+
+      <div class="phead">
+        <div class="titlerow">
+          <h1>Products &amp; PDAS</h1>
+          <p class="sentence">{{headline}}</p>
+          <p class="caption">What each station is running, as seen from the cones it weighed. Shown as at 1 Sep 2026, 22:00.</p>
+        </div>
+        <div class="stack" style="align-items:flex-end;gap:var(--space-2)">
+          <a class="btn lg" href="PdasChangeover.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>Start a changeover</a>
+          <span class="sub">Planning works now. Executing is off on this server.</span>
+        </div>
+      </div>
+
+      <div class="strip">
+        <section class="card conn" aria-labelledby="pc">
+          <div class="top"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 2.5v4M13 2.5v4M5 6.5h10v3a5 5 0 01-10 0zM10 14.5v3"/></svg><h2 id="pc">PDAS connection</h2><span class="pill state" data-state="watch">Writes switched off</span></div>
+          <p>SMS can read products from PDAS. Changing them from SMS is switched off on this server.</p>
+          <div class="verbatim"><span class="cap">Reason given by the server</span>PDAS_WRITE_ENABLED is not true.</div>
+          <details class="disc"><summary>What stays available</summary><div class="body">Plans and reviews still work and nothing is sent to PDAS. Local weight limits can still be changed in SMS. Turning PDAS writes on is an engineer's decision on the plant server.</div></details>
+        </section>
+        <section class="card dflt conn" aria-labelledby="pd">
+          <div class="top"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg><h2 id="pd">Default for readings without a product</h2><span class="pill state" data-state="nodata">Retired</span></div>
+          <div><div class="code">201-IH0-SD</div><div class="sub">1,960 ± 40 g, set by hand in SMS</div></div>
+          <p class="sub">Only used when a reading carries no product. Every reading since 5 Aug carries one, so this has no effect on current figures.</p>
+          <div class="linkrow"><a href="PdasCatalogue.dc.html">See in catalogue</a></div>
+        </section>
+      </div>
+
+      <div class="note"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></svg><span class="grow">PDAS changes do not reach the machines by themselves. The operator picks the material on each winder's panel, and SMS sees the change at the first cone weighed with it.</span></div>
+
+      <div class="boardgrid">
+        <section class="card" aria-labelledby="bw">
+          <div class="hd2">
+            <h2 id="bw">Stations</h2>
+            <div class="seg" role="group" aria-label="Filter stations">
+              <button type="button" aria-pressed="{{fAll}}" onClick="{{setAll}}">All 14</button>
+              <button type="button" aria-pressed="{{fRun}}" onClick="{{setRun}}">Running {{nRun}}</button>
+              <button type="button" aria-pressed="{{fIdle}}" onClick="{{setIdle}}">Idle {{nIdle}}</button>
+            </div>
+          </div>
+          <div class="wgrid">
+            <sc-for list="{{cards}}" as="w" hint-placeholder-count="14">
+              <article class="wcard {{w.cls}}">
+                <div class="top"><span class="name">Station {{w.n}}</span><span class="pill state" data-state="{{w.ps}}">{{w.pt}}</span></div>
+                <div>
+                  <div class="pcode">{{w.code}}</div>
+                  <div class="pcol">{{w.colour}}</div>
+                  <sc-if value="{{w.idle}}" hint-placeholder-val="{{false}}"><div class="lastp">Last product it stamped</div></sc-if>
+                </div>
+                <div class="tol">1,960 <span class="unit">g</span> ± 50 <span class="unit">g</span></div>
+                <dl class="dl3">
+                  <dt>{{w.l1}}</dt><dd>{{w.v1}}</dd>
+                  <dt>Cones on 1 Sep</dt><dd>{{w.v2}}</dd>
+                  <dt>Last cone</dt><dd>{{w.v3}}</dd>
+                </dl>
+              </article>
+            </sc-for>
+          </div>
+          <details class="disc" style="margin-top:var(--space-3)"><summary>How SMS knows the product</summary><div class="body">No database stores which product a winder is set to. The winder's panel stamps the product on every cone, so SMS shows the product of the latest cone it weighed. An idle station shows the last product it stamped and when its last cone was weighed.</div></details>
+        </section>
+        <aside class="card" aria-labelledby="rc">
+          <div class="cardhead"><h2 id="rc">Product changes</h2><span class="sub">1 Sep, evening</span></div>
+          <ol class="tl">
+            <sc-for list="{{changes}}" as="c" hint-placeholder-count="6">
+              <li><span class="dot"></span><div><div class="when">{{c.when}}</div><div class="what">Station {{c.n}} <span>{{c.what}}</span></div></div></li>
+            </sc-for>
+          </ol>
+          <p class="sub">Timed at the first cone of the new product, not when the operator pressed the button.</p>
+          <div class="linkrow" style="margin-top:var(--space-3)"><a href="PdasLimitsHistory.dc.html">All PDAS actions</a></div>
+        </aside>
+      </div>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1400}}'>
+class Component extends DCLogic {
+  constructor(props){ super(props); this.state = { f: 'all' }; }
+  renderVals() {
+    const run = (n, p, since, cones) => ({ n, run: true, p, l1: 'Since', v1: since, v2: cones, v3: 'In the last 2 h' });
+    const idle = (n, p, stamped, cones, last) => ({ n, run: false, p, l1: 'Last stamped', v1: stamped, v2: cones, v3: last });
+    const SG = ['205-IL0-SD', 'Star Green'], BL = ['205-IL0-SD', 'Blue'], OR = ['205-IL0-SD', 'Orange'], CR = ['205-IL0-SD', 'CIR_RED'];
+    const W = [
+      run(1, SG, '1 Sep 19:55', '801'), run(2, SG, '1 Sep 20:34', '789'),
+      idle(3, OR, '31 Aug 08:24', '0', '31 Aug 08:24'), idle(4, OR, '28 Aug 12:45', '0', '7 Sep 12:00'),
+      idle(5, OR, '27 Aug 13:35', '0', '7 Sep 11:54'), idle(6, OR, '16 Aug 19:12', '0', '7 Sep 11:59'),
+      idle(7, OR, '16 Aug 04:38', '0', '7 Sep 03:47'),
+      run(8, BL, '1 Sep 21:11', '412'), run(9, BL, '1 Sep 20:43', '357'), run(10, BL, '1 Sep 20:44', '397'),
+      idle(11, BL, 'Not recorded', '0', '7 Sep 11:42'), idle(12, BL, 'Not recorded', '0', '7 Sep 11:36'),
+      idle(13, CR, 'Not recorded', '82', '7 Sep 11:36'), run(14, CR, '1 Sep 20:56', '251')
+    ];
+    const f = this.state.f;
+    const list = W.filter((w) => f === 'all' || (f === 'run' ? w.run : !w.run));
+    const cards = list.map((w) => ({ n: w.n, idle: !w.run, cls: w.run ? '' : 'idle', ps: w.run ? 'ok' : 'nodata', pt: w.run ? 'Running' : 'Idle', code: w.p[0], colour: w.p[1], l1: w.l1, v1: w.v1, v2: w.v2, v3: w.v3 }));
+    const ch = [[8, '21:11', 'started Blue'], [14, '20:56', 'started CIR_RED'], [10, '20:44', 'started Blue'], [9, '20:43', 'started Blue'], [2, '20:34', 'started Star Green'], [1, '19:55', 'started Star Green']];
+    return {
+      headline: '6 stations are running 3 products. 8 are idle.',
+      cards, nRun: 6, nIdle: 8,
+      fAll: f === 'all', fRun: f === 'run', fIdle: f === 'idle',
+      setAll: () => this.setState({ f: 'all' }), setRun: () => this.setState({ f: 'run' }), setIdle: () => this.setState({ f: 'idle' }),
+      changes: ch.map((c) => ({ n: c[0], when: '1 Sep 2026, ' + c[1], what: c[2] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

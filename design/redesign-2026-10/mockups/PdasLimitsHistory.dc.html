@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Limits and PDAS history</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+
+body{margin:0}
+.ptabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line)}
+.ptabs a{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;box-shadow:inset 0 -2px 0 transparent}
+.ptabs a:hover{color:var(--ink-1)}
+.ptabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.phead{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-5);flex-wrap:wrap}
+.phead .titlerow{min-width:0;flex:1 1 420px}
+a.btn{text-decoration:none}
+.btn.lg{height:44px;padding:0 var(--space-5);font-size:var(--fs-3)}
+.btn.sm{height:28px;padding:0 var(--space-3);font-size:var(--fs-2)}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-tint)}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4)}
+.eyebrow{font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-3);font-weight:var(--fw-medium)}
+.big-num{font-size:var(--fs-6);line-height:var(--lh-6);letter-spacing:-0.02em;color:var(--ink-1);font-weight:var(--fw-semibold)}
+.big-num .unit{font-size:var(--fs-3);color:var(--ink-3);font-weight:var(--fw-regular);margin-left:var(--space-1);letter-spacing:0}
+.verbatim{background:var(--surface-sunk);border-radius:var(--radius);padding:var(--space-3) var(--space-4);color:var(--ink-1);font-size:var(--fs-2);line-height:var(--lh-2);font-weight:var(--fw-medium);overflow-wrap:anywhere}
+.verbatim .cap{display:block;color:var(--ink-3);font-weight:var(--fw-regular);font-size:var(--fs-1);margin-bottom:2px}
+.linkrow{display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center}
+.linkrow a{font-weight:var(--fw-medium);font-size:var(--fs-2)}
+.chip.ex{background:var(--surface-sunk);color:var(--ink-3);height:22px;font-size:var(--fs-1)}
+.sub{color:var(--ink-3);font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3{display:grid;grid-template-columns:auto 1fr;gap:var(--space-1) var(--space-3);margin:0;font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3 dt{color:var(--ink-3)}
+.dl3 dd{margin:0;color:var(--ink-1);font-weight:var(--fw-medium);text-align:right}
+.stack{display:flex;flex-direction:column;gap:var(--space-4)}
+.stack5{display:flex;flex-direction:column;gap:var(--space-5)}
+.frow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-4)}
+.srch{position:relative;display:inline-flex;align-items:center}
+.srch .field{padding-left:36px;width:260px}
+.srch .ico{position:absolute;left:10px;width:16px;height:16px;color:var(--ink-3);pointer-events:none}
+.lock .ico{margin-top:1px}
+.shell.full .page{max-width:var(--page-max)}
+
+
+.lhrow{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:var(--space-5);align-items:start}
+@media (max-width:1100px){.lhrow{grid-template-columns:minmax(0,1fr)}}
+.curlim{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-4) var(--space-5);background:var(--surface-sunk);border-radius:var(--radius)}
+.guard{display:flex;gap:var(--space-3);align-items:flex-start;padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:var(--tint);box-shadow:inset 0 0 0 1px var(--edge)}
+.guard .pill{flex:none;margin-top:1px}
+.guard .tx{font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-1)}
+.guard .tx small{display:block;color:var(--ink-3);font-size:var(--fs-1);margin-top:2px}
+.ba{display:grid;grid-template-columns:1fr auto 1fr;gap:var(--space-4);align-items:center}
+.ba .box{padding:var(--space-4);border-radius:var(--radius);background:var(--surface-sunk);display:flex;flex-direction:column;gap:var(--space-1)}
+.ba .box.new{background:var(--accent-tint)}
+.ba .box .big-num{font-size:var(--fs-5);line-height:var(--lh-5)}
+.ba .arrow{color:var(--ink-3)}
+.dest{display:flex;flex-direction:column;gap:var(--space-2)}
+.dest .row2{display:flex;gap:var(--space-3);align-items:flex-start;font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-1)}
+.dest .row2 input{margin:2px 0 0;width:16px;height:16px}
+.dest .row2 .sub{display:block}
+.okbox{display:flex;gap:var(--space-3);align-items:flex-start;background:var(--ok-tint);box-shadow:inset 0 0 0 1px var(--ok-edge);border-radius:var(--radius);padding:var(--space-4);color:var(--ink-1)}
+.okbox .ico{color:var(--ok-fg);margin-top:2px}
+.dt td.wrap{white-space:normal;min-width:220px;line-height:var(--lh-2)}
+.dt td{height:48px}
+.dt td .sub2{display:block;color:var(--ink-3);font-size:var(--fs-1)}
+.dt tr.pending td{background:var(--accent-tint)}
+textarea.field{height:auto;min-height:72px;padding:var(--space-3);resize:vertical;line-height:var(--lh-3)}
+
+</style>
+</helmet>
+<div class="shell full" style="min-height: 1700px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Products &amp; PDAS</span>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <nav class="ptabs" aria-label="Products and PDAS"><a href="PdasBoard.dc.html">Board</a><a href="PdasChangeover.dc.html">Changeover</a><a href="PdasCatalogue.dc.html">Catalogue</a><a href="PdasLimitsHistory.dc.html" aria-current="page">Limits &amp; History</a></nav>
+
+      <div class="phead">
+        <div class="titlerow">
+          <h1>Limits &amp; history</h1>
+          <p class="sentence">Change a product's weight limits, and see who changed what in PDAS.</p>
+          <p class="caption">Each reading is judged by the limits in force when it was weighed. A change never rewrites earlier readings.</p>
+        </div>
+        <span class="pill state" data-state="watch">PDAS writes switched off</span>
+      </div>
+
+      <div class="lhrow">
+        <section class="card" aria-labelledby="le">
+          <div class="cardhead"><h2 id="le">Weight limits</h2>
+            <div class="steps">
+              <div class="step {{s1}}"><span class="dot">1</span>Edit</div><span class="bar"></span>
+              <div class="step {{s2}}"><span class="dot">2</span>Review</div><span class="bar"></span>
+              <div class="step {{s3}}"><span class="dot">3</span>Saved</div>
+            </div>
+          </div>
+          <div class="stack5">
+            <div class="fld"><label for="prod">Product</label><select class="field" id="prod"><option>205-IL0-SD Star Green, id 20</option></select><span class="help">Running now on Stations 1 and 2.</span></div>
+            <div class="curlim">
+              <span class="eyebrow">In force now</span>
+              <div class="big-num">{{curLabel}}<span class="unit">g</span></div>
+              <span class="sub">Accepts {{curLow}} to {{curHigh}} g. In force since 30 Jul 2026.</span>
+            </div>
+
+            <sc-if value="{{isEdit}}" hint-placeholder-val="{{true}}">
+              <div class="stack5">
+                <div class="frow">
+                  <div class="fld"><label for="tg">New target (g)</label><input class="field" id="tg" type="number" step="1" value="{{tg}}" onInput="{{setTg}}"></div>
+                  <div class="fld"><label for="tl">New tolerance, plus or minus (g)</label><input class="field" id="tl" type="number" step="1" value="{{tl}}" onInput="{{setTl}}"></div>
+                </div>
+                <div class="guard state" data-state="{{guardState}}">
+                  <span class="pill state" data-state="{{guardState}}">{{guardWord}}</span>
+                  <div class="tx">{{guardText}}<small>Guard limits are 3 % of the target and 20 g of tolerance. They are developer defaults and not confirmed.</small></div>
+                </div>
+                <div class="fld"><label for="rs">Reason</label><textarea class="field" id="rs" placeholder="Why are the limits changing? At least 10 characters." onInput="{{setRs}}">{{rs}}</textarea><span class="help">{{rsHelp}}</span></div>
+                <div class="linkrow"><button class="btn lg" type="button" disabled="{{cantReview}}" onClick="{{toReview}}">Review change</button><span class="sub">{{reviewHint}}</span></div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{isReview}}" hint-placeholder-val="{{false}}">
+              <div class="stack5">
+                <div class="ba">
+                  <div class="box"><span class="eyebrow">Before</span><div class="big-num">{{curLabel}}<span class="unit">g</span></div><span class="sub">{{curLow}} to {{curHigh}} g</span></div>
+                  <span class="arrow"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg></span>
+                  <div class="box new"><span class="eyebrow">After</span><div class="big-num">{{newLabel}}<span class="unit">g</span></div><span class="sub">{{newLow}} to {{newHigh}} g</span></div>
+                </div>
+                <div class="dest">
+                  <span class="eyebrow">Where it is saved</span>
+                  <label class="row2"><input type="checkbox" checked disabled><span>SMS, used to judge readings from the next cone onward<span class="sub">Available</span></span></label>
+                  <label class="row2"><input type="checkbox" disabled><span>PDAS, the product master<span class="sub">Switched off. PDAS_WRITE_ENABLED is not true.</span></span></label>
+                </div>
+                <p class="sub">Reason: {{rs}}</p>
+                <div class="linkrow"><button class="btn lg" type="button" onClick="{{confirm}}">Confirm and save in SMS</button><button class="btn ghost lg" type="button" onClick="{{toEdit}}">Back</button></div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{isDone}}" hint-placeholder-val="{{false}}">
+              <div class="stack">
+                <div class="okbox"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg><div><b>Saved in SMS as version 25.</b><div class="sub" style="color:var(--ink-2)">Readings weighed from now on are judged by {{newLabel}} g. PDAS was not changed.</div></div></div>
+                <div class="linkrow"><button class="btn quiet" type="button" onClick="{{reset}}">Change again</button></div>
+              </div>
+            </sc-if>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="vh">
+          <div class="cardhead"><h2 id="vh">Limit versions</h2><span class="sub">205-IL0-SD Star Green</span></div>
+          <div class="tw">
+            <table class="dt">
+              <thead><tr><th>Limits</th><th>In force from</th><th>Source</th></tr></thead>
+              <tbody>
+                <sc-if value="{{showNew}}" hint-placeholder-val="{{false}}">
+                  <tr class="pending"><td class="strong">{{newLabel}} g</td><td>{{newFrom}}</td><td><span class="pill state" data-state="{{newState}}">{{newWord}}</span></td></tr>
+                </sc-if>
+                <tr><td class="strong">1,960 ± 50 g</td><td>30 Jul 2026</td><td>Created in PDAS</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="sub" style="margin-top:var(--space-4)">Only one version exists so far for this product. Every version keeps the time it began, so past readings stay judged by the limits of their day.</p>
+          <details class="disc" style="margin-top:var(--space-2)"><summary>Retire and recreate does not change limits</summary><div class="body">PDAS refuses a second product with the same blend, count and tube. To change limits, edit the existing product here.</div></details>
+        </section>
+      </div>
+
+      <section class="card" aria-labelledby="ah">
+        <div class="hd2"><h2 id="ah">PDAS action history</h2>
+          <div class="seg" role="group" aria-label="Filter by outcome">
+            <button type="button" aria-pressed="{{fAll}}" onClick="{{setAll}}">All</button>
+            <button type="button" aria-pressed="{{fOk}}" onClick="{{setOk}}">Done</button>
+            <button type="button" aria-pressed="{{fRef}}" onClick="{{setRef}}">Refused</button>
+            <button type="button" aria-pressed="{{fOff}}" onClick="{{setOff}}">Not sent</button>
+          </div>
+        </div>
+        <div class="tw">
+          <table class="dt">
+            <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Outcome</th><th>Reason or message</th></tr></thead>
+            <tbody>
+              <sc-for list="{{audit}}" as="a" hint-placeholder-count="6">
+                <tr>
+                  <td>{{a.when}}</td>
+                  <td>{{a.who}}<sc-if value="{{a.ex}}" hint-placeholder-val="{{false}}"><span class="chip ex" style="margin-left:8px">Example</span></sc-if></td>
+                  <td class="strong">{{a.what}}<span class="sub2">{{a.prod}}</span></td>
+                  <td><span class="pill state" data-state="{{a.ps}}">{{a.pt}}</span></td>
+                  <td class="wrap">{{a.msg}}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption" style="margin-top:var(--space-3)">The three Not sent rows are real tests from 16 and 23 Sep, made while writes were off. Rows marked Example show what the other outcomes look like.</p>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(props){ super(props); this.state = { step: 1, tg: '1970', tl: '40', rs: 'Align with the revised customer spec sheet', f: 'all' }; }
+  renderVals() {
+    const S = this.state, CT = 1960, CO = 50;
+    const fmt = (n) => Number(n).toLocaleString('en-US');
+    const t = Number(S.tg), o = Number(S.tl);
+    const valid = S.tg !== '' && S.tl !== '' && isFinite(t) && isFinite(o) && t > 0 && o > 0;
+    const dPct = valid ? Math.abs(t - CT) / CT * 100 : 0, dG = valid ? Math.abs(o - CO) : 0;
+    const changed = valid && (t !== CT || o !== CO);
+    const guardOk = dPct <= 3 && dG <= 20;
+    const rsOk = S.rs.trim().length >= 10;
+    let gs = 'nodata', gw = 'No change', gt = 'Enter a new target or tolerance to run the guard check.';
+    if (!valid) { gw = 'Enter values'; gt = 'Enter a target and a tolerance in grams.'; }
+    else if (changed) {
+      gs = guardOk ? 'ok' : 'act'; gw = guardOk ? 'Within guard' : 'Outside guard';
+      gt = 'Target moves ' + dPct.toFixed(1) + ' % (guard 3 %). Tolerance moves ' + dG + ' g (guard 20 g).' + (guardOk ? '' : ' Change in smaller steps.');
+    }
+    const can = changed && guardOk && rsOk;
+    const newLabel = valid ? fmt(t) + ' ± ' + o : '–';
+    const st = (n) => (S.step === n ? 'cur' : (S.step > n ? 'done' : ''));
+    const A = [
+      ['12 Oct 2026 09:14', 'Example engineer', 'Change limits', '205-IL0-SD Blue, id 21', 'ok', 'Done', '1,960 ± 50 g to 1,960 ± 45 g. Spec sheet update.', true, 'ok'],
+      ['11 Oct 2026 14:02', 'Example engineer', 'Create product', '205-IL0-SD Amber', 'act', 'Refused', 'PDAS error -7001: Material already exist.', true, 'ref'],
+      ['11 Oct 2026 13:40', 'Example engineer', 'Retire product', '205-IL0-SD Orange / Grey, id 1023', 'ok', 'Done', 'Not used on any station.', true, 'ok'],
+      ['23 Sep 2026 10:59', 'Plant Admin', 'Create product', 'Not created', 'nodata', 'Not sent', 'PDAS_WRITE_ENABLED is not true. Reason given: security audit dry test, expect 503 DISABLED, no PDAS call.', false, 'off'],
+      ['16 Sep 2026 12:41', 'Plant Admin', 'Create product', 'Not created', 'nodata', 'Not sent', 'PDAS_WRITE_ENABLED is not true. Reason given: Brief 2 verification, clean plan execute.', false, 'off'],
+      ['16 Sep 2026 08:19', 'curltest_eng', 'Create product', 'Not created', 'nodata', 'Not sent', 'PDAS_WRITE_ENABLED is not true. Reason given: curl demo of the disabled refusal, roadmap acceptance.', false, 'off']
+    ];
+    const f = S.f;
+    const audit = A.filter((a) => f === 'all' || a[8] === f).map((a) => ({ when: a[0], who: a[1], what: a[2], prod: a[3], ps: a[4], pt: a[5], msg: a[6], ex: a[7] }));
+    return {
+      s1: st(1), s2: st(2), s3: S.step === 3 ? 'done' : '',
+      curLabel: '1,960 ± 50', curLow: '1,910', curHigh: '2,010',
+      isEdit: S.step === 1, isReview: S.step === 2, isDone: S.step === 3,
+      tg: S.tg, tl: S.tl, rs: S.rs,
+      setTg: (e) => this.setState({ tg: e.target.value }), setTl: (e) => this.setState({ tl: e.target.value }), setRs: (e) => this.setState({ rs: e.target.value }),
+      guardState: gs, guardWord: gw, guardText: gt,
+      rsHelp: rsOk ? 'Recorded with the change.' : 'A reason of at least 10 characters is required.',
+      cantReview: !can, reviewHint: can ? 'Nothing is saved until you confirm on the next step.' : (changed ? (guardOk ? 'Add a reason to continue.' : 'The change is outside the guard.') : 'Change the target or tolerance to continue.'),
+      toReview: () => this.setState({ step: 2 }), toEdit: () => this.setState({ step: 1 }), confirm: () => this.setState({ step: 3 }), reset: () => this.setState({ step: 1 }),
+      newLabel, newLow: valid ? fmt(t - o) : '–', newHigh: valid ? fmt(t + o) : '–',
+      showNew: S.step >= 2 && valid, newFrom: S.step === 3 ? 'Next cone weighed' : 'On confirm', newState: S.step === 3 ? 'ok' : 'watch', newWord: S.step === 3 ? 'Saved in SMS' : 'Proposed',
+      audit, fAll: f === 'all', fOk: f === 'ok', fRef: f === 'ref', fOff: f === 'off',
+      setAll: () => this.setState({ f: 'all' }), setOk: () => this.setState({ f: 'ok' }), setRef: () => this.setState({ f: 'ref' }), setOff: () => this.setState({ f: 'off' })
+    };
+  }
+}
+</script>
+</body>
+</html>

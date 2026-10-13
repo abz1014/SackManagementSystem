@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Today, period panel</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="shell full" style="min-height: 780px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main" style="position:relative">
+    <header class="topbar">
+      <span class="ttl">Today</span>
+      <a class="pchip" href="Main.dc.html" aria-expanded="true" style="background:var(--accent-tint)"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/></svg>1 Sep 2026 · whole day<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></a>
+      <span class="cmp"><button id="cmpTop" class="switch" type="button" role="switch" aria-checked="{{compareAria}}" aria-label="Compare with the previous day" onClick="{{toggleCompare}}"></button><label for="cmpTop">Compare</label></span>
+      <span class="pill state" data-state="watch">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <div class="titlerow">
+        <h1>Today</h1>
+        <p class="sentence">Line ran all three shifts. <span class="act">1 station needs action</span>, <span class="watch">1 to watch</span>.</p>
+      </div>
+      <div class="kpis">
+        <div class="kpi k-cone"><div class="label">Cones</div><div class="value">3,089</div></div>
+        <div class="kpi k-sack"><div class="label">Sacks</div><div class="value">133</div></div>
+        <div class="kpi k-pack"><div class="label">Packed</div><div class="value">6,296.7<span class="unit">kg</span></div></div>
+        <div class="kpi k-insp"><div class="label">Failed inspection</div><div class="value">14.6<span class="unit">%</span></div></div>
+        <div class="kpi k-gauge"><div class="label">Failed weight check (scale)</div><div class="value">0.0<span class="unit">%</span></div></div>
+      </div>
+      <div class="card" style="height:300px"><h2>Stations, worst first</h2></div>
+    </main>
+    <div style="position:absolute;left:0;right:0;bottom:0;top:56px;background:var(--scrim)" aria-hidden="true"></div>
+
+    <div class="popover" role="dialog" aria-label="Choose a period" style="top:64px;right:24px;width:448px;padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <h2>Period</h2>
+        <span class="caption">Plant time, 24 hours</span>
+      </div>
+      <div role="group" aria-label="Quick periods" style="display:flex;flex-direction:column;gap:2px">
+        <button type="button" class="preset" aria-pressed="false">This shift</button>
+        <button type="button" class="preset" aria-pressed="false">Today</button>
+        <button type="button" class="preset" aria-pressed="false">Yesterday</button>
+        <button type="button" class="preset" aria-pressed="false">This week</button>
+        <button type="button" class="preset" aria-pressed="false">Last week</button>
+        <button type="button" class="preset" aria-pressed="false">This month</button>
+        <button type="button" class="preset" aria-pressed="false">Last month</button>
+        <button type="button" class="preset" aria-pressed="true">Pick dates and shifts<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg></button>
+      </div>
+      <div style="border-top:1px solid var(--line);padding-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--space-3)">
+          <div class="fld"><label for="fromD">From date</label><input id="fromD" class="field" value="1 Sep 2026"></div>
+          <div class="fld"><label for="fromS">From shift</label><select id="fromS" class="field"><option>Whole day</option><option>Morning 06-14</option><option>Evening 14-22</option><option>Night 22-06</option></select></div>
+          <div class="fld"><label for="toD">To date</label><input id="toD" class="field" value="1 Sep 2026"></div>
+          <div class="fld"><label for="toS">To shift</label><select id="toS" class="field"><option>Whole day</option><option>Morning 06-14</option><option>Evening 14-22</option><option>Night 22-06</option></select></div>
+        </div>
+        <p class="caption">A production day runs 06:00 to 06:00. Newest data: 7 Sep 2026 12:00.</p>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);border-top:1px solid var(--line);padding-top:var(--space-3)">
+        <span class="cmp"><button id="cmpPanel" class="switch" type="button" role="switch" aria-checked="{{compareAria}}" aria-label="Compare with the previous period" onClick="{{toggleCompare}}"></button><label for="cmpPanel">Compare with the previous period</label></span>
+        <span class="caption">31 Aug 2026</span>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:var(--space-2)">
+        <a class="btn quiet" href="Main.dc.html">Cancel</a>
+        <a class="btn" href="Main.dc.html">Apply</a>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":780}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { compare: true };
+  }
+  renderVals() {
+    return {
+      compareAria: this.state.compare ? 'true' : 'false',
+      toggleCompare: () => this.setState({ compare: !this.state.compare })
+    };
+  }
+}
+</script>
+</body>
+</html>

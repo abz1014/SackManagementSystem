@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wall display</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+/* TV wall: dark variant of Style C. Same font, radii, spacing, shapes and chips; dark surfaces, luminous states, glow only on Act and Watch. Scale 1.6 comes from .wall in tokens.css. */
+html body{background:#0b0d12}
+html body .wall{
+  color-scheme:dark;
+  --bg:#0b0d12; --surface:#12151c; --surface-sunk:#1a1f2a;
+  --line:rgba(255,255,255,.08); --line-strong:#5b6578;
+  --ink-1:#f2f4f8; --ink-2:#b7bfcc; --ink-3:#8b94a3;
+  --accent:#6f93ff; --accent-tint:rgba(111,147,255,.16); --on-accent:#0b0d12; --focus-ring:#8fa9ff;
+  --ok-fg:#5ed596; --ok-tint:#10241b; --ok-edge:#2f8f66;
+  --watch-fg:#f4bd50; --watch-tint:#271f0f; --watch-edge:#b8872b;
+  --act-fg:#ff8178; --act-tint:#2a171a; --act-edge:#d9524a;
+  --nodata-fg:#8b94a1; --nodata-tint:#1a1f2a; --nodata-edge:#4a5363;
+  --cat-1:#6f93ff; --cat-2:#ff7fae; --cat-3:#a58cf3; --cat-4:#4fc3d6; --cat-5:#e0a447;
+  --card-bg:linear-gradient(160deg,#12151c,#151924);
+  --card-shadow:0 0 0 1px rgba(255,255,255,.07),0 18px 40px -18px rgba(0,0,0,.7);
+  --elev-1:var(--card-shadow);
+  background:var(--bg);color:var(--ink-2);font-family:var(--font-sans);
+}
+html body .wall .brandw, html body .wall .clock b, html body .wall .hero-fig{color:var(--ink-1)}
+html body .wall .brandw span, html body .wall .clock{color:var(--ink-3)}
+html body .wall .hero-fig{font-weight:600;letter-spacing:-.025em;line-height:1.15}
+html body .wall .kpi{background:var(--card-bg);box-shadow:var(--card-shadow);border-radius:var(--r-card)}
+html body .wall .kpi .label{color:var(--ink-3)}
+html body .wall .kpi .value{color:var(--ink-1);font-weight:700;letter-spacing:-.04em}
+html body .wall .kpi .unit{color:var(--ink-3)}
+html body .wall .tile{border:0;border-radius:var(--r-tile);background:var(--card-bg);box-shadow:0 0 0 1px rgba(255,255,255,.07);cursor:default}
+html body .wall .tile .name{color:var(--ink-1)}
+html body .wall .tile .big{color:var(--ink-1);font-weight:700;letter-spacing:-.04em}
+html body .wall .tile .meta{color:var(--ink-3)}
+html body .wall .tile .meta:first-of-type{color:var(--ink-2)}
+html body .wall .tile.state[data-state="nodata"]{background:var(--surface-sunk);box-shadow:none}
+html body .wall .tile.state[data-state="nodata"] .big{color:var(--ink-3);font-weight:500}
+html body .wall .tile.state[data-state="watch"]{background:var(--watch-tint);box-shadow:0 0 0 1.5px rgba(244,189,80,.55),0 0 36px -6px rgba(244,189,80,.35)}
+html body .wall .tile.state[data-state="act"]{background:var(--act-tint);box-shadow:0 0 0 1.5px rgba(255,129,120,.65),0 0 44px -6px rgba(255,129,120,.45)}
+html body .wall .tile.state[data-state="watch"] .big{color:var(--watch-fg)}
+html body .wall .tile.state[data-state="act"] .big{color:var(--act-fg)}
+html body .wall .shiftbar{color:var(--ink-2)}
+html body .wall .shiftbar b{color:var(--ink-1)}
+html body .wall .shiftbar .trk{background:var(--surface-sunk)}
+html body .wall .shiftbar .fil{background:linear-gradient(90deg,#4a6fe0,#6f93ff)}
+html body .wall .wcap{font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3);margin:0}
+</style>
+</helmet>
+<div class="wall">
+  <div class="hdr">
+    <div class="brandw">SMS <span>Ibrahim Fibres, TP1 Line 3 · 1 Sep 2026, whole day</span></div>
+    <div class="clock"><span class="pill state" data-state="watch">Data to 7 Sep 2026 12:00</span><span>Updated</span><b>12:00</b></div>
+  </div>
+
+  <p class="hero-fig">Line ran all three shifts. <span style="color:var(--act-fg)">1 station needs action</span>, <span style="color:var(--watch-fg)">1 to watch</span>.</p>
+
+  <div class="kpis">
+    <div class="kpi k-cone"><div class="label">Cones</div><div class="value">3,089</div></div>
+    <div class="kpi k-sack"><div class="label">Sacks</div><div class="value">133</div></div>
+    <div class="kpi k-pack"><div class="label">Packed</div><div class="value">6,296.7<span class="unit">kg</span></div></div>
+    <div class="kpi k-insp"><div class="label">Failed inspection</div><div class="value">14.6<span class="unit">%</span></div></div>
+  </div>
+
+  <div class="heat">
+    <sc-for list="{{tiles}}" as="t" hint-placeholder-count="14">
+      <div class="tile state" data-state="{{t.state}}">
+        <span class="top"><span class="name">Station {{t.n}}</span><span class="pill state" data-state="{{t.state}}"></span></span>
+        <span class="big">{{t.big}}</span>
+        <span class="meta">{{t.m1}}</span>
+        <span class="meta">{{t.m2}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div class="shiftbars">
+    <div class="shiftbar"><span>Morning</span><span class="trk"><span class="fil" style="display:block;width:88.9%"></span></span><b>1,067</b></div>
+    <div class="shiftbar"><span>Evening</span><span class="trk"><span class="fil" style="display:block;width:83.4%"></span></span><b>1,001</b></div>
+    <div class="shiftbar"><span>Night</span><span class="trk"><span class="fil" style="display:block;width:85.1%"></span></span><b>1,021</b></div>
+  </div>
+  <p class="wcap">TV wall uses the dark version of Style C</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = [
+      [8, 'act', '53.9 %', '412 cones', 'Blue'],
+      [9, 'watch', '23.1 %', '357 cones', 'Blue'],
+      [3, 'nodata', '–', 'Silent since 31 Aug', 'Last: Orange'],
+      [4, 'nodata', '–', 'No cones', 'Last: Orange'],
+      [5, 'nodata', '–', 'No cones', 'Last: Orange'],
+      [6, 'nodata', '–', 'No cones', 'Last: Orange'],
+      [7, 'nodata', '–', 'No cones', 'Last: Orange'],
+      [11, 'nodata', '–', 'No cones', 'Last: Blue'],
+      [12, 'nodata', '–', 'No cones', 'Last: Blue'],
+      [10, 'ok', '20.6 %', '397 cones', 'Blue'],
+      [14, 'ok', '17.9 %', '251 cones', 'CIR_RED'],
+      [13, 'ok', '3.7 %', '82 cones', 'CIR_RED'],
+      [2, 'ok', '1.0 %', '789 cones', 'Star Green'],
+      [1, 'ok', '0.9 %', '801 cones', 'Star Green']
+    ];
+    return { tiles: T.map((t) => ({ n: t[0], state: t[1], big: t[2], m1: t[3], m2: t[4] })) };
+  }
+}
+</script>
+</body>
+</html>

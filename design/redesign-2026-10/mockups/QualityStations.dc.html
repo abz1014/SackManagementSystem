@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quality, stations</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+
+body{margin:0}
+.qtabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line);flex-wrap:wrap}
+.qtabs a{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;box-shadow:inset 0 -2px 0 transparent}
+.qtabs a:hover{color:var(--ink-1)}
+.qtabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.qhead{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-5);flex-wrap:wrap}
+.qhead h1{font-size:var(--fs-6);line-height:var(--lh-6);letter-spacing:-0.02em}
+.qhead .sentence{font-size:var(--fs-4);line-height:var(--lh-4);font-weight:var(--fw-regular);color:var(--ink-2);max-width:56ch;margin-top:var(--space-2)}
+.qhead .sentence b{color:var(--ink-1);font-weight:var(--fw-semibold)}
+.qsec{display:flex;flex-direction:column;gap:var(--space-5)}
+.qkpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-5)}
+.tr{text-align:right}
+.mut{color:var(--ink-3)}
+.sub{display:block;font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3);font-weight:var(--fw-regular)}
+.chart text{font-family:var(--font-sans)}
+.hov:hover{filter:brightness(.92)}
+.btn.sm{height:28px;padding:0 var(--space-3);font-size:var(--fs-2)}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-tint)}
+.lnk{color:var(--accent);font-weight:var(--fw-medium);text-decoration:none;font-size:var(--fs-2)}
+.lnk:hover{text-decoration:underline}
+
+.qs{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-5);align-items:start}
+.qs.open{grid-template-columns:minmax(0,1fr) 360px}
+.qs .dt th,.qs .dt td{padding:0 var(--space-3)}
+.qs .dt td{height:56px}
+.qs .dt td.strong{line-height:var(--lh-2)}
+.qs .dt tr.sel td{background:var(--accent-tint)}
+.qs .dt thead tr.grp th{background:none;border:0;height:auto;padding:var(--space-2) var(--space-3);color:var(--ink-2);font-size:var(--fs-2);font-weight:var(--fw-semibold);white-space:normal;vertical-align:bottom}
+.qs .dt thead tr.grp th.pbox{background:var(--surface-sunk);box-shadow:inset 0 0 0 1px var(--line-strong);border-radius:var(--radius) var(--radius) 0 0;box-shadow:inset 1px 0 0 var(--line-strong),inset -1px 0 0 var(--line-strong),inset 0 1px 0 var(--line-strong)}
+.qs .dt .pat{background:var(--surface-sunk)}
+.qs .dt .pat.l{box-shadow:inset 1px 0 0 var(--line-strong)}
+.qs .dt .pat.r{box-shadow:inset -1px 0 0 var(--line-strong)}
+.qs .dt .pat.b{border-bottom-color:var(--line-strong)}
+.qs .dt thead th.pat.l{box-shadow:inset 1px 0 0 var(--line-strong)}
+.qs .dt thead th.pat.r{box-shadow:inset -1px 0 0 var(--line-strong)}
+.drawer{position:sticky;top:var(--space-5);display:flex;flex-direction:column;gap:var(--space-4);padding:var(--space-5);box-shadow:var(--elev-2)}
+.drawer .dhd{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)}
+.drawer .dact{display:flex;align-items:center;gap:var(--space-2)}
+.drawer .x{width:32px;height:32px;border:0;border-radius:var(--radius);background:none;color:var(--ink-3);display:grid;place-items:center;cursor:pointer}
+.drawer .x:hover{background:var(--surface-sunk);color:var(--ink-1)}
+.drawer .dk{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
+.drawer .dk div{display:flex;flex-direction:column;gap:2px}
+.drawer .dk b{font-size:var(--fs-kpi);line-height:var(--lh-kpi);color:var(--ink-1);font-weight:var(--fw-semibold);letter-spacing:-0.02em}
+.drawer .dk i{font-style:normal;font-size:var(--fs-2);color:var(--ink-3);font-weight:var(--fw-regular);margin-left:var(--space-1)}
+.drawer h3{font-size:var(--fs-3);line-height:var(--lh-3);color:var(--ink-1);font-weight:var(--fw-semibold);margin:0}
+.drawer .dsec{display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-4);box-shadow:inset 0 1px 0 var(--line)}
+.drawer .dh2{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-2)}
+.rl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-2);font-size:var(--fs-2)}
+.rl li{display:flex;justify-content:space-between;gap:var(--space-3);color:var(--ink-2)}
+.rl b{color:var(--ink-1);font-weight:var(--fw-semibold)}
+.dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);padding-top:var(--space-4);box-shadow:inset 0 1px 0 var(--line)}
+.dl div{display:flex;flex-direction:column;gap:2px}
+.dl dt{font-size:var(--fs-1);color:var(--ink-3)}
+.dl dd{margin:0;font-size:var(--fs-2);color:var(--ink-1);font-weight:var(--fw-medium)}
+.drawer .btn{text-decoration:none;align-self:stretch}
+@media (max-width:1100px){.qs.open{grid-template-columns:minmax(0,1fr)}.drawer{position:static}}
+
+</style>
+</helmet>
+<svg class="defs" aria-hidden="true" focusable="false"><defs><linearGradient id="barGradC" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b59e0"/><stop offset="1" stop-color="#8aa5f2"/></linearGradient></defs></svg>
+<div class="shell full" style="min-height: 1500px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Quality</span>
+      <a class="pchip" href="PeriodPanel.dc.html" title="Plant time, 24 hours. Production day runs 06:00 to 06:00."><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/></svg>5 Aug to 7 Sep 2026 · 34 days<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></a>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+<div class="qhead"><div><h1>Quality</h1><p class="sentence"><b>3 stations need action.</b> Each one's failed-inspection rate is more than twice the line's 4.59 %.</p></div><p class="caption">5 Aug to 7 Sep 2026, 34 production days (06:00 to 06:00 plant time)</p></div>
+<nav class="qtabs" aria-label="Quality sections"><a href="QualityStations.dc.html" aria-current="page">Stations</a><a href="QualityRejects.dc.html">Rejects</a><a href="QualityWeight.dc.html">Weight</a><a href="Register.dc.html">Register</a></nav>
+      <div class="qs {{drawerClass}}">
+        <section class="card" aria-labelledby="st">
+          <div class="hd2"><div><h2 id="st">Stations, worst first</h2><span class="caption">14 stations · 132,550 cones · line failed-inspection rate 4.59 %</span></div>
+            <div class="legend"><span><span class="pill state" data-state="act"></span></span><span><span class="pill state" data-state="watch"></span></span><span><span class="pill state" data-state="ok"></span></span><span><span class="pill state" data-state="nodata"></span></span></div></div>
+          <div class="tw"><table class="dt">
+            <thead>
+              <tr class="grp"><th colspan="6">This period · 5 Aug to 7 Sep 2026</th><th colspan="2" class="pbox pat l r">Pattern check · always the last 14 production days (25 Aug to 7 Sep 2026)</th></tr>
+              <tr><th>Station and product</th><th>State</th><th class="num">Cones</th><th class="num">Failed inspection</th><th class="num">Failed weight check (scale)</th><th class="num">Mean weight vs target</th><th class="num pat l">Days with a note</th><th class="pat r">Result</th></tr>
+            </thead>
+            <tbody>
+<tr class="sel">
+      <td class="strong"><a class="strong" href="#drawer" role="button" onClick="{{openDrawer}}" style="text-decoration:none;color:var(--accent)">Station 8</a><span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="act"></span></td>
+      <td class="num">6,010</td>
+      <td class="num strong">14.5 %<span class="sub">874 cones</span></td>
+      <td class="num">0.1 %</td>
+      <td class="num">1,950.1 g<span class="sub">−9.9 g vs 1,960 g</span></td>
+      <td class="num pat l">2</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 14<span class="sub">205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="act"></span></td>
+      <td class="num">7,678</td>
+      <td class="num strong">11.7 %<span class="sub">899 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,953.4 g<span class="sub">−6.6 g vs 1,960 g</span></td>
+      <td class="num pat l">4</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 10<span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="act"></span></td>
+      <td class="num">7,183</td>
+      <td class="num strong">11.2 %<span class="sub">806 cones</span></td>
+      <td class="num">0.1 %</td>
+      <td class="num">1,950.6 g<span class="sub">−9.4 g vs 1,960 g</span></td>
+      <td class="num pat l">1</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 9<span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">5,307</td>
+      <td class="num strong">6.0 %<span class="sub">319 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,948.7 g<span class="sub">−11.3 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 13<span class="sub">Star Green, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">7,324</td>
+      <td class="num strong">5.8 %<span class="sub">425 cones</span></td>
+      <td class="num">0.1 %</td>
+      <td class="num">1,952.6 g<span class="sub">−7.4 g vs 1,960 g</span></td>
+      <td class="num pat l">5</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 7<span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">5,136</td>
+      <td class="num strong">5.0 %<span class="sub">258 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,952.1 g<span class="sub">−7.9 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 5<span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">6,721</td>
+      <td class="num strong">4.3 %<span class="sub">291 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,952.3 g<span class="sub">−7.7 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 6<span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">5,029</td>
+      <td class="num strong">3.8 %<span class="sub">189 cones</span></td>
+      <td class="num">0.1 %</td>
+      <td class="num">1,950.0 g<span class="sub">−10.0 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 4<span class="sub">Blue, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">8,386</td>
+      <td class="num strong">3.7 %<span class="sub">309 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,951.4 g<span class="sub">−8.6 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 3<span class="sub">Orange, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">10,124</td>
+      <td class="num strong">3.5 %<span class="sub">359 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,953.5 g<span class="sub">−6.5 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 12<span class="sub">Yellow, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">7,133</td>
+      <td class="num strong">3.1 %<span class="sub">219 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,951.7 g<span class="sub">−8.3 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 11<span class="sub">Orange, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">7,532</td>
+      <td class="num strong">2.5 %<span class="sub">188 cones</span></td>
+      <td class="num">0.1 %</td>
+      <td class="num">1,949.0 g<span class="sub">−11.0 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 2<span class="sub">Star Green, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">24,236</td>
+      <td class="num strong">2.1 %<span class="sub">509 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,951.0 g<span class="sub">−9.0 g vs 1,960 g</span></td>
+      <td class="num pat l">0</td>
+      <td class="pat r"><span class="mut">Nothing flagged</span></td>
+    </tr>
+<tr>
+      <td class="strong">Station 1<span class="sub">Star Green, 205-IL0-SD</span></td>
+      <td><span class="pill state" data-state="ok"></span></td>
+      <td class="num">24,751</td>
+      <td class="num strong">1.8 %<span class="sub">444 cones</span></td>
+      <td class="num">0.0 %</td>
+      <td class="num">1,953.6 g<span class="sub">−6.4 g vs 1,960 g</span></td>
+      <td class="num pat l b">0</td>
+      <td class="pat r b"><span class="mut">Nothing flagged</span></td>
+    </tr>
+            </tbody></table></div>
+          <p class="caption" style="margin-top:var(--space-3)">Stations 6 and 7 did not appear in the weight-by-station feed, so their weight figures show No data. Failed weight check is a share of cones, rounded to 0.1 %.</p>
+          <details class="disc"><summary>How states are decided</summary><div class="body">Act: a station's failed-inspection rate is more than 2 times the line's rate (over 9.2 % for 5 Aug to 7 Sep 2026). Watch: more than 1.5 times (over 6.9 %). A station with no weight data in the period shows No data, never OK. The two columns in the box are not affected by the period you pick: pattern detectors need consecutive days, so they always look at the last 14 production days. Assumed until IFL confirms.</div></details>
+        </section>
+        <sc-if value="{{drawerOpen}}" hint-placeholder-val="{{true}}">
+        <aside class="drawer card" id="drawer" aria-labelledby="dh">
+          <div class="dhd"><div><h2 id="dh">Station 8</h2><span class="caption">Blue, 205-IL0-SD · 5 Aug to 7 Sep 2026</span></div><div class="dact"><span class="pill state" data-state="act"></span><button class="x" type="button" aria-label="Close station details" onClick="{{closeDrawer}}"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div></div>
+          <div class="dk">
+            <div><span class="caption">Failed inspection</span><b>14.5<i>%</i></b><span class="caption">874 of 6,010 cones</span></div>
+            <div><span class="caption">Mean cone weight</span><b>1,950.1<i>g</i></b><span class="caption">−9.9 g vs target</span></div>
+          </div>
+          <div class="dsec"><div class="dh2"><h3>Cone weight by day</h3><span class="caption">daily mean, g</span></div><svg class="chart" viewBox="0 0 330 110" role="img" aria-label="Station 8 daily mean cone weight, 5 Aug to 5 Sep 2026, 1,940.6 to 1,956.4 grams, target 1,960 grams">
+    <line class="grid" x1="40" x2="322" y1="88" y2="88"/><text class="tick" x="34" y="92" text-anchor="end">1,930</text><line class="grid" x1="40" x2="322" y1="48" y2="48"/><text class="tick" x="34" y="52" text-anchor="end">1,950</text><line class="grid" x1="40" x2="322" y1="8" y2="8"/><text class="tick" x="34" y="12" text-anchor="end">1,970</text>
+    <line class="limit" x1="40" x2="322" y1="28" y2="28"/><text class="tick" x="322" y="24" text-anchor="end">Target 1,960 g</text>
+    <path d="M40.0 55.8L56.6 60.2L73.2 39.9L89.8 47.4L106.4 52.0L122.9 55.8L139.5 53.9L156.1 58.7L172.7 66.7L189.3 43.5L205.9 36.7L222.5 37.8L239.1 38.9L255.6 35.2L272.2 40.0L288.8 49.8L305.4 48.7L322.0 44.7L322.0 88L40.0 88Z" fill="var(--seq-1)" opacity=".55"/>
+    <path class="ln s1" d="M40.0 55.8L56.6 60.2L73.2 39.9L89.8 47.4L106.4 52.0L122.9 55.8L139.5 53.9L156.1 58.7L172.7 66.7L189.3 43.5L205.9 36.7L222.5 37.8L239.1 38.9L255.6 35.2L272.2 40.0L288.8 49.8L305.4 48.7L322.0 44.7"/>
+    <circle cx="40.0" cy="55.8" r="8" fill="transparent" stroke="none" stroke-width="2"><title>5 Aug 2026: 1,946.1 g, 160 cones</title></circle><circle cx="56.6" cy="60.2" r="8" fill="transparent" stroke="none" stroke-width="2"><title>6 Aug 2026: 1,943.9 g, 374 cones</title></circle><circle cx="73.2" cy="39.9" r="8" fill="transparent" stroke="none" stroke-width="2"><title>7 Aug 2026: 1,954.0 g, 371 cones</title></circle><circle cx="89.8" cy="47.4" r="8" fill="transparent" stroke="none" stroke-width="2"><title>8 Aug 2026: 1,950.3 g, 370 cones</title></circle><circle cx="106.4" cy="52.0" r="8" fill="transparent" stroke="none" stroke-width="2"><title>9 Aug 2026: 1,948.0 g, 381 cones</title></circle><circle cx="122.9" cy="55.8" r="8" fill="transparent" stroke="none" stroke-width="2"><title>10 Aug 2026: 1,946.1 g, 363 cones</title></circle><circle cx="139.5" cy="53.9" r="8" fill="transparent" stroke="none" stroke-width="2"><title>11 Aug 2026: 1,947.0 g, 372 cones</title></circle><circle cx="156.1" cy="58.7" r="8" fill="transparent" stroke="none" stroke-width="2"><title>12 Aug 2026: 1,944.7 g, 390 cones</title></circle><circle cx="172.7" cy="66.7" r="8" fill="transparent" stroke="none" stroke-width="2"><title>13 Aug 2026: 1,940.6 g, 246 cones</title></circle><circle cx="189.3" cy="43.5" r="8" fill="transparent" stroke="none" stroke-width="2"><title>14 Aug 2026: 1,952.3 g, 275 cones</title></circle><circle cx="205.9" cy="36.7" r="8" fill="transparent" stroke="none" stroke-width="2"><title>29 Aug 2026: 1,955.7 g, 210 cones</title></circle><circle cx="222.5" cy="37.8" r="8" fill="transparent" stroke="none" stroke-width="2"><title>30 Aug 2026: 1,955.1 g, 373 cones</title></circle><circle cx="239.1" cy="38.9" r="8" fill="transparent" stroke="none" stroke-width="2"><title>31 Aug 2026: 1,954.6 g, 366 cones</title></circle><circle cx="255.6" cy="35.2" r="8" fill="transparent" stroke="none" stroke-width="2"><title>1 Sep 2026: 1,956.4 g, 412 cones</title></circle><circle cx="272.2" cy="40.0" r="8" fill="transparent" stroke="none" stroke-width="2"><title>2 Sep 2026: 1,954.0 g, 428 cones</title></circle><circle cx="288.8" cy="49.8" r="8" fill="transparent" stroke="none" stroke-width="2"><title>3 Sep 2026: 1,949.1 g, 344 cones</title></circle><circle cx="305.4" cy="48.7" r="8" fill="transparent" stroke="none" stroke-width="2"><title>4 Sep 2026: 1,949.6 g, 329 cones</title></circle><circle cx="322.0" cy="44.7" r="4" fill="var(--surface)" stroke="var(--cat-1)" stroke-width="2"><title>5 Sep 2026: 1,951.7 g, 246 cones</title></circle>
+    <text class="tick" x="40" y="104">5 Aug</text><text class="tick" x="322" y="104" text-anchor="end">5 Sep</text>
+  </svg></div>
+          <div class="dsec"><div class="dh2"><h3>Top reasons</h3><span class="caption">whole line, not split by station yet</span></div>
+            <ul class="rl"><li><span>Code 2/1 <span class="mut">(not named yet)</span></span><b>69.6 %</b></li><li><span>Code 1/11 <span class="mut">(not named yet)</span></span><b>17.0 %</b></li><li><span>Code 10/1 <span class="mut">(not named yet)</span></span><b>5.2 %</b></li></ul></div>
+          <dl class="dl"><div><dt>Product</dt><dd>Blue, 205-IL0-SD</dd></div><div><dt>Last reading</dt><dd>6 Sep 2026 03:22</dd></div></dl>
+          <a class="btn" href="Register.dc.html">Open in Register<span class="mut" style="color:inherit;opacity:.85"> · Station 8</span></a>
+        </aside>
+        </sc-if>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: true };
+  }
+  renderVals() {
+    return {
+      drawerOpen: this.state.open,
+      drawerClass: this.state.open ? 'open' : '',
+      openDrawer: () => this.setState({ open: true }),
+      closeDrawer: () => this.setState({ open: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

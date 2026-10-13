@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Today, nothing in this shift</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div class="shell full" style="min-height: 760px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Today</span>
+      <a class="pchip" href="PeriodPanel.dc.html" title="Plant time, 24 hours."><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/></svg>This shift · 13 Oct 2026<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></a>
+      <span class="cmp"><button id="cmp" class="switch" type="button" role="switch" aria-checked="false" aria-label="Compare with the previous shift"></button><label for="cmp">Compare</label></span>
+      <span class="pill state" data-state="watch" title="The newest reading is from 7 Sep 2026 12:00 plant time.">No new data for 36 days</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <div class="titlerow">
+        <h1>Today</h1>
+        <p class="sentence">Nothing has been recorded in this shift.</p>
+        <p class="caption">This shift, 13 Oct 2026, plant time</p>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi k-cone"><div class="label">Cones</div><div class="value">&ndash;</div><div class="delta">No readings in this period</div></div>
+        <div class="kpi k-sack"><div class="label">Sacks</div><div class="value">&ndash;</div><div class="delta">No readings in this period</div></div>
+        <div class="kpi k-pack"><div class="label">Packed</div><div class="value">&ndash;<span class="unit">kg</span></div><div class="delta">No readings in this period</div></div>
+        <div class="kpi k-insp"><div class="label">Failed inspection</div><div class="value">&ndash;<span class="unit">%</span></div><div class="delta">No readings in this period</div></div>
+        <div class="kpi k-gauge"><div class="label">Failed weight check (scale)</div><div class="value">&ndash;<span class="unit">%</span></div><div class="delta">No readings in this period</div></div>
+      </div>
+
+      <div class="msg">
+        <svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13.5 13.5L17 17"/></svg>
+        <p>Nothing recorded in this shift. Newest data: 7 Sep 2026 12:00.</p>
+        <p class="why">The line may be stopped or data is delayed. The newest reading is 36 days old.</p>
+        <div class="row" style="gap:var(--space-2);justify-content:center">
+          <a class="btn quiet" href="Main.dc.html">Show 7 Sep 2026</a>
+          <a class="btn quiet" href="Diagnostics.dc.html">Open Diagnostics</a>
+        </div>
+      </div>
+
+      <details class="disc"><summary>About these figures</summary><div class="body">
+        A station with no cones in the period shows No data, never OK and never 0. Times are plant time.
+      </div></details>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

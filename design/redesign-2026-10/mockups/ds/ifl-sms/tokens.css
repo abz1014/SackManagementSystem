@@ -1,0 +1,186 @@
+/* ==========================================================================
+   SMS redesign tokens - design/redesign-2026-10/tokens.css
+   Single source for colour, type, space, layout, elevation, motion.
+   Rules: components read ONLY these tokens, never raw hex. Light work area +
+   dark sidebar. No dark-mode work area in v1 (see DESIGN-SYSTEM.md section 14).
+   Contrast figures for every pair are in DESIGN-SYSTEM.md section 3.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Sidebar (dark slate) ------------------------------------------- */
+  --side-bg:          #12161b;
+  --side-bg-hover:    #1a2027;
+  --side-active-bg:   #232b35;
+  --side-active-edge: #5aa2f0;   /* 3px left bar on the active item */
+  --side-line:        #2a323c;   /* dividers inside the sidebar */
+  --side-fg:          #c4ccd6;
+  --side-fg-dim:      #8d98a6;
+  --side-fg-strong:   #ffffff;
+  --side-focus:       #8ec1ff;   /* focus ring on dark */
+
+  /* ---- Work area ------------------------------------------------------- */
+  --bg:             #f5f6f8;
+  --surface:        #ffffff;
+  --surface-sunk:   #eef0f3;     /* table header, inputs at rest, disclosure body */
+  --line:           #dde1e7;     /* decorative hairlines only (1.3:1, never the sole boundary of a control) */
+  --line-strong:    #79848f;     /* control borders, chart axes (>=3:1) */
+  --ink-1:          #12161b;     /* headings, KPI values */
+  --ink-2:          #444d59;     /* body */
+  --ink-3:          #5b6571;     /* captions, axis labels, units (>=4.5:1 on bg/surface/sunk) */
+  --scrim:          rgba(18, 22, 27, .48);
+
+  /* ---- Accent: interaction ONLY (links, buttons, focus, selection). Never a state. */
+  --accent:         #1d5fc4;
+  --accent-hover:   #174d9f;
+  --accent-tint:    #e8f0fc;
+  --on-accent:      #ffffff;
+  --focus-ring:     #1d5fc4;
+
+  /* ---- Four states. Each = fg (text/glyph), tint (fill), edge (border), glyph, word. */
+  --ok-fg:      #0b6b3a;   --ok-tint:      #e6f4ec;   --ok-edge:      #238c4b;   --ok-glyph:      "\25CF"; /* ● */  --ok-word:      "OK";
+  --watch-fg:   #8a5300;   --watch-tint:   #fdf1db;   --watch-edge:   #b36f00;   --watch-glyph:   "\25B2"; /* ▲ */  --watch-word:   "Watch";
+  --act-fg:     #b3261e;   --act-tint:     #fde8e6;   --act-edge:     #d92d20;   --act-glyph:     "\25A0"; /* ■ */  --act-word:     "Act";
+  --nodata-fg:  #4f5965;   --nodata-tint:  #eef0f3;   --nodata-edge:  #79848f;   --nodata-glyph:  "\25CB"; /* ○ */  --nodata-word:  "No data";
+
+  /* ---- Categorical chart palette (identity only; no state hue; fixed order; max 5 series, then "Other") */
+  --cat-1: #2370c8;  /* blue    */
+  --cat-2: #c93874;  /* magenta */
+  --cat-3: #7a4fc8;  /* violet  */
+  --cat-4: #0e8fa6;  /* teal    (3.82:1 - direct labels mandatory) */
+  --cat-5: #9a6a1c;  /* bronze  */
+  --cat-other: #79848f;
+  /* scatter / any all-pairs form: use slots 1, 2, 5 only */
+
+  /* ---- Sequential ramp (magnitude, one hue, light -> dark) */
+  --seq-1: #dbe8f8;  --seq-2: #a9c8ee;  --seq-3: #6aa0e0;  --seq-4: #2370c8;  --seq-5: #164a8c;
+
+  /* ---- Chart anatomy */
+  --chart-grid:     #e6e9ee;       /* recessive gridlines */
+  --chart-axis:     var(--line-strong);
+  --chart-limit-band: rgba(35, 140, 75, .10);  /* shaded in-limit band; OK-green tint, never a line colour */
+  --chart-limit-edge: var(--line-strong);      /* dashed limit lines */
+  --chart-gap:      var(--surface);            /* 2px gap/ring between adjacent fills */
+
+  /* ---- Typography */
+  --font-sans: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --fs-1: 12px;  --lh-1: 16px;   /* caption, axis tick, unit */
+  --fs-2: 13px;  --lh-2: 18px;   /* table body, helper text, pill */
+  --fs-3: 15px;  --lh-3: 22px;   /* body, form fields, nav */
+  --fs-4: 18px;  --lh-4: 26px;   /* card title, section heading */
+  --fs-5: 24px;  --lh-5: 30px;   /* page title */
+  --fs-6: 36px;  --lh-6: 42px;   /* hero figure (headline numbers on Line) */
+  --fs-kpi: 32px; --lh-kpi: 40px; /* KpiCard value */
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600;
+  --tnum: "tnum" 1, "lnum" 1;
+  --wall-scale: 1.6;                      /* applied on .wall root: every --fs-* and --space-* multiplies */
+
+  /* ---- Spacing (4px base) */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;  --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px;  --space-8: 64px;
+
+  /* ---- Layout */
+  --grid-cols: 12;
+  --gutter: 24px;
+  --page-max: 1600px;
+  --page-pad: 24px;                 /* 16px < 768 */
+  --side-w: 232px;
+  --side-w-collapsed: 64px;
+  --topbar-h: 56px;
+  --tabbar-h: 56px;                 /* bottom tab bar < 768 */
+  --bp-phone: 375px; --bp-tablet: 768px; --bp-laptop: 1024px; --bp-plant: 1366px; --bp-tv: 1920px;
+  --tap-min: 44px;                  /* touch target on phone/tablet */
+  --control-h: 36px;                /* desktop control height */
+
+  /* ---- Radius / elevation */
+  --radius: 6px;
+  --radius-pill: 999px;
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(18, 22, 27, .08), 0 0 0 1px var(--line);   /* cards */
+  --elev-2: 0 8px 24px rgba(18, 22, 27, .16), 0 0 0 1px var(--line-strong); /* sheet, popover, dialog */
+
+  /* ---- Motion */
+  --dur-fast: 120ms;  --dur-base: 160ms;  --dur-slow: 200ms;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* Wall (TV, 3-4 m): one switch scales type and spacing. Component CSS uses the tokens, so nothing else changes. */
+.wall {
+  --fs-1: calc(12px * var(--wall-scale)); --lh-1: calc(16px * var(--wall-scale));
+  --fs-2: calc(13px * var(--wall-scale)); --lh-2: calc(18px * var(--wall-scale));
+  --fs-3: calc(15px * var(--wall-scale)); --lh-3: calc(22px * var(--wall-scale));
+  --fs-4: calc(18px * var(--wall-scale)); --lh-4: calc(26px * var(--wall-scale));
+  --fs-5: calc(24px * var(--wall-scale)); --lh-5: calc(30px * var(--wall-scale));
+  --fs-6: calc(36px * var(--wall-scale)); --lh-6: calc(42px * var(--wall-scale));
+  --fs-kpi: calc(32px * var(--wall-scale)); --lh-kpi: calc(40px * var(--wall-scale));
+  --space-3: 18px; --space-4: 24px; --space-5: 36px;
+}
+
+/* ==========================================================================
+   Reference usage - proves each token is consumed. Production CSS may move
+   these into component files but must not change what they read.
+   ========================================================================== */
+body { margin: 0; background: var(--bg); color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); font-feature-settings: var(--tnum); }
+h1 { font-size: var(--fs-5); line-height: var(--lh-5); color: var(--ink-1); font-weight: var(--fw-semibold); }
+h2 { font-size: var(--fs-4); line-height: var(--lh-4); color: var(--ink-1); font-weight: var(--fw-semibold); }
+.caption { font-size: var(--fs-1); line-height: var(--lh-1); color: var(--ink-3); }
+.small   { font-size: var(--fs-2); line-height: var(--lh-2); }
+.hero-fig { font-size: var(--fs-6); line-height: var(--lh-6); color: var(--ink-1); font-weight: var(--fw-semibold); }
+a { color: var(--accent); } a:hover { color: var(--accent-hover); }
+
+.app { display: grid; grid-template-columns: var(--side-w) 1fr; min-height: 100vh; }
+.app[data-collapsed] { grid-template-columns: var(--side-w-collapsed) 1fr; }
+.sidebar { background: var(--side-bg); color: var(--side-fg); border-right: 1px solid var(--side-line); }
+.sidebar a { display: flex; align-items: center; gap: var(--space-3); height: var(--control-h); padding: 0 var(--space-4); color: var(--side-fg); text-decoration: none; transition: background var(--dur-fast) var(--ease); }
+.sidebar a:hover { background: var(--side-bg-hover); color: var(--side-fg-strong); }
+.sidebar a[aria-current="page"] { background: var(--side-active-bg); color: var(--side-fg-strong); box-shadow: inset 3px 0 0 var(--side-active-edge); }
+.sidebar .dim { color: var(--side-fg-dim); }
+.sidebar :focus-visible { outline: 2px solid var(--side-focus); outline-offset: -2px; }
+.topbar { height: var(--topbar-h); display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--page-pad); background: var(--surface); box-shadow: 0 1px 0 var(--line); }
+.page { max-width: var(--page-max); margin: 0 auto; padding: var(--page-pad); display: grid; grid-template-columns: repeat(var(--grid-cols), 1fr); gap: var(--gutter); }
+.card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--elev-1); padding: var(--space-5); }
+.popover, .sheet, .dialog { background: var(--surface); border-radius: var(--radius); box-shadow: var(--elev-2); }
+.scrim { background: var(--scrim); }
+.field { height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink-1); font: inherit; }
+.field:disabled { background: var(--surface-sunk); color: var(--ink-3); }
+.btn { height: var(--control-h); padding: 0 var(--space-4); border: 0; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font: var(--fw-medium) var(--fs-3) var(--font-sans); transition: background var(--dur-fast) var(--ease); }
+.btn:hover { background: var(--accent-hover); }
+.btn.quiet { background: var(--accent-tint); color: var(--accent); }
+.th { background: var(--surface-sunk); color: var(--ink-3); font-size: var(--fs-1); font-weight: var(--fw-medium); border-bottom: 1px solid var(--line); }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (max-width: 767px) { .app, .app[data-collapsed] { grid-template-columns: 1fr; padding-bottom: var(--tabbar-h); } .page { padding: var(--space-4); gap: var(--space-4); } .sidebar { display: none; } }
+@media (hover: none) { .btn, .field, .sidebar a { min-height: var(--tap-min); } }
+
+/* State kit: colour + glyph + word, always together. */
+.state { --fg: var(--nodata-fg); --tint: var(--nodata-tint); --edge: var(--nodata-edge); --glyph: var(--nodata-glyph); --word: var(--nodata-word); }
+.state[data-state="ok"]     { --fg: var(--ok-fg);     --tint: var(--ok-tint);     --edge: var(--ok-edge);     --glyph: var(--ok-glyph);     --word: var(--ok-word); }
+.state[data-state="watch"]  { --fg: var(--watch-fg);  --tint: var(--watch-tint);  --edge: var(--watch-edge);  --glyph: var(--watch-glyph);  --word: var(--watch-word); }
+.state[data-state="act"]    { --fg: var(--act-fg);    --tint: var(--act-tint);    --edge: var(--act-edge);    --glyph: var(--act-glyph);    --word: var(--act-word); }
+.state[data-state="nodata"] { --fg: var(--nodata-fg); --tint: var(--nodata-tint); --edge: var(--nodata-edge); --glyph: var(--nodata-glyph); --word: var(--nodata-word); }
+.pill { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border-radius: var(--radius-pill); background: var(--tint); color: var(--fg); box-shadow: inset 0 0 0 1px var(--edge); font-size: var(--fs-2); line-height: var(--lh-2); font-weight: var(--fw-medium); }
+.pill::before { content: var(--glyph); }
+.pill:empty::after { content: var(--word); }
+.kpi.state { background: var(--tint); box-shadow: inset 4px 0 0 var(--edge), var(--elev-1); border-radius: var(--radius); padding: var(--space-4) var(--space-5); }
+.kpi .value { font-size: var(--fs-kpi); line-height: var(--lh-kpi); color: var(--ink-1); font-weight: var(--fw-semibold); }
+.kpi .unit { font-size: var(--fs-2); color: var(--ink-3); }
+.tile.state { background: var(--tint); border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--edge); padding: var(--space-3); transition: box-shadow var(--dur-base) var(--ease); }
+
+/* Chart helpers */
+.chart .grid { stroke: var(--chart-grid); } .chart .axis { stroke: var(--chart-axis); } .chart .tick { fill: var(--ink-3); font-size: var(--fs-1); }
+.chart .band { fill: var(--chart-limit-band); } .chart .limit { stroke: var(--chart-limit-edge); stroke-dasharray: 4 3; }
+.chart .mark { stroke: var(--chart-gap); stroke-width: 2px; }
+.s1 { fill: var(--cat-1); stroke: var(--cat-1); } .s2 { fill: var(--cat-2); stroke: var(--cat-2); } .s3 { fill: var(--cat-3); stroke: var(--cat-3); }
+.s4 { fill: var(--cat-4); stroke: var(--cat-4); } .s5 { fill: var(--cat-5); stroke: var(--cat-5); } .sother { fill: var(--cat-other); stroke: var(--cat-other); }
+.seq1 { fill: var(--seq-1); } .seq2 { fill: var(--seq-2); } .seq3 { fill: var(--seq-3); } .seq4 { fill: var(--seq-4); } .seq5 { fill: var(--seq-5); }
+
+/* Skeleton: fixed dimensions, never a false zero */
+.skel { background: linear-gradient(90deg, var(--surface-sunk), var(--bg), var(--surface-sunk)); background-size: 200% 100%; animation: skel var(--dur-slow) linear infinite; animation-duration: 1.4s; border-radius: var(--radius); }
+@keyframes skel { to { background-position: -200% 0; } }
+
+/* Accessibility floors */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: 0.01ms !important; } }
+@media (forced-colors: active) {
+  .pill, .tile.state, .kpi.state, .card { border: 1px solid CanvasText; box-shadow: none; }
+  .sidebar a[aria-current="page"] { border-left: 3px solid Highlight; box-shadow: none; }
+}

@@ -1,0 +1,256 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-13T09:00:00Z"
+  },
+  "title": "IFL SMS Screens",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [
+    {
+      "id": "today",
+      "name": "Today"
+    },
+    {
+      "id": "quality",
+      "name": "Quality"
+    },
+    {
+      "id": "pdas",
+      "name": "Products and PDAS"
+    },
+    {
+      "id": "reports",
+      "name": "Reports"
+    },
+    {
+      "id": "system",
+      "name": "System"
+    },
+    {
+      "id": "styles",
+      "name": "Styles"
+    }
+  ],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1366,
+      "h": 1560,
+      "title": "Today",
+      "page": "today",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "TodayEmpty.dc.html": {
+      "x": 1446,
+      "y": 0,
+      "w": 1366,
+      "h": 760,
+      "title": "Today, nothing in this shift",
+      "page": "today",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "PeriodPanel.dc.html": {
+      "x": 2892,
+      "y": 0,
+      "w": 1366,
+      "h": 780,
+      "title": "Today, period panel open",
+      "page": "today",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "TodayPhone.dc.html": {
+      "x": 0,
+      "y": 1680,
+      "w": 390,
+      "h": 844,
+      "title": "Today on a phone",
+      "page": "today",
+      "is_interactive": true
+    },
+    "Wall.dc.html": {
+      "x": 470,
+      "y": 1680,
+      "w": 1920,
+      "h": 1080,
+      "title": "Wall display",
+      "page": "today"
+    },
+    "States.dc.html": {
+      "x": 2470,
+      "y": 1680,
+      "w": 1366,
+      "h": 1080,
+      "title": "Loading, error, partial and empty states",
+      "page": "today",
+      "expand": "fill"
+    },
+    "PdasBoard.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1366,
+      "h": 1400,
+      "title": "Products and PDAS board",
+      "page": "pdas",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "PdasCatalogue.dc.html": {
+      "x": 2892,
+      "y": 0,
+      "w": 1366,
+      "h": 1300,
+      "title": "Product catalogue",
+      "page": "pdas",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "PdasChangeover.dc.html": {
+      "x": 1446,
+      "y": 0,
+      "w": 1366,
+      "h": 1700,
+      "title": "Changeover plan, review and execute",
+      "page": "pdas",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "PdasLimitsHistory.dc.html": {
+      "x": 4338,
+      "y": 0,
+      "w": 1366,
+      "h": 1700,
+      "title": "Limits and PDAS history",
+      "page": "pdas",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Reports.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1366,
+      "h": 2420,
+      "title": "Reports",
+      "page": "reports",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Diagnostics.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1366,
+      "h": 1960,
+      "title": "Diagnostics",
+      "page": "system",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "QualityStations.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1366,
+      "h": 1500,
+      "title": "Quality, stations",
+      "page": "quality",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "QualityRejects.dc.html": {
+      "x": 1446,
+      "y": 0,
+      "w": 1366,
+      "h": 1950,
+      "title": "Quality, rejects",
+      "page": "quality",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "QualityWeight.dc.html": {
+      "x": 2892,
+      "y": 0,
+      "w": 1366,
+      "h": 1500,
+      "title": "Quality, weight",
+      "page": "quality",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Register.dc.html": {
+      "x": 4338,
+      "y": 0,
+      "w": 1366,
+      "h": 1500,
+      "title": "Quality, register",
+      "page": "quality",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "StyleA.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1366,
+      "h": 1610,
+      "title": "Style A, crisp neutral (not chosen)",
+      "page": "styles",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "StyleB.dc.html": {
+      "x": 1446,
+      "y": 0,
+      "w": 1366,
+      "h": 1610,
+      "title": "Style B, dark control room (not chosen)",
+      "page": "styles",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "StyleC.dc.html": {
+      "x": 2892,
+      "y": 0,
+      "w": 1366,
+      "h": 1610,
+      "title": "Style C, soft premium (chosen)",
+      "page": "styles",
+      "expand": "fill",
+      "is_interactive": true
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "TodayEmpty.dc.html",
+    "PeriodPanel.dc.html",
+    "TodayPhone.dc.html",
+    "Wall.dc.html",
+    "States.dc.html",
+    "PdasBoard.dc.html",
+    "PdasCatalogue.dc.html",
+    "PdasChangeover.dc.html",
+    "PdasLimitsHistory.dc.html",
+    "Reports.dc.html",
+    "Diagnostics.dc.html",
+    "QualityStations.dc.html",
+    "QualityRejects.dc.html",
+    "QualityWeight.dc.html",
+    "Register.dc.html",
+    "StyleA.dc.html",
+    "StyleB.dc.html",
+    "StyleC.dc.html"
+  ],
+  "notes": {},
+  "designSystems": [
+    {
+      "title": "IFL SMS Design System",
+      "namespace": "ifl-sms",
+      "artifact": "https://claude.ai/artifact/2XsqivDMZmsjaCYpLvYBcd",
+      "version": "1791880304-6ec5",
+      "copiedAt": "2026-10-13T09:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Product catalogue</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+
+body{margin:0}
+.ptabs{display:flex;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line)}
+.ptabs a{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;box-shadow:inset 0 -2px 0 transparent}
+.ptabs a:hover{color:var(--ink-1)}
+.ptabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.phead{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-5);flex-wrap:wrap}
+.phead .titlerow{min-width:0;flex:1 1 420px}
+a.btn{text-decoration:none}
+.btn.lg{height:44px;padding:0 var(--space-5);font-size:var(--fs-3)}
+.btn.sm{height:28px;padding:0 var(--space-3);font-size:var(--fs-2)}
+.btn.ghost{background:none;color:var(--accent)}
+.btn.ghost:hover{background:var(--accent-tint)}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4)}
+.eyebrow{font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-3);font-weight:var(--fw-medium)}
+.big-num{font-size:var(--fs-6);line-height:var(--lh-6);letter-spacing:-0.02em;color:var(--ink-1);font-weight:var(--fw-semibold)}
+.big-num .unit{font-size:var(--fs-3);color:var(--ink-3);font-weight:var(--fw-regular);margin-left:var(--space-1);letter-spacing:0}
+.verbatim{background:var(--surface-sunk);border-radius:var(--radius);padding:var(--space-3) var(--space-4);color:var(--ink-1);font-size:var(--fs-2);line-height:var(--lh-2);font-weight:var(--fw-medium);overflow-wrap:anywhere}
+.verbatim .cap{display:block;color:var(--ink-3);font-weight:var(--fw-regular);font-size:var(--fs-1);margin-bottom:2px}
+.linkrow{display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:center}
+.linkrow a{font-weight:var(--fw-medium);font-size:var(--fs-2)}
+.chip.ex{background:var(--surface-sunk);color:var(--ink-3);height:22px;font-size:var(--fs-1)}
+.sub{color:var(--ink-3);font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3{display:grid;grid-template-columns:auto 1fr;gap:var(--space-1) var(--space-3);margin:0;font-size:var(--fs-2);line-height:var(--lh-2)}
+.dl3 dt{color:var(--ink-3)}
+.dl3 dd{margin:0;color:var(--ink-1);font-weight:var(--fw-medium);text-align:right}
+.stack{display:flex;flex-direction:column;gap:var(--space-4)}
+.stack5{display:flex;flex-direction:column;gap:var(--space-5)}
+.frow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-4)}
+.srch{position:relative;display:inline-flex;align-items:center}
+.srch .field{padding-left:36px;width:260px}
+.srch .ico{position:absolute;left:10px;width:16px;height:16px;color:var(--ink-3);pointer-events:none}
+.lock .ico{margin-top:1px}
+.shell.full .page{max-width:var(--page-max)}
+
+
+.toolbar{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4)}
+.toolbar .grow{flex:1 1 auto}
+.dt td .code{color:var(--ink-1);font-weight:var(--fw-medium)}
+.dt td .sub2{display:block;color:var(--ink-3);font-size:var(--fs-1);line-height:var(--lh-1)}
+.dt td.act{text-align:right}
+.dt tbody tr.ret td{color:var(--ink-3)}
+.dt tbody tr.ret td .code{color:var(--ink-2)}
+.dt td{height:52px}
+.refuse{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;background:var(--act-tint);box-shadow:inset 0 0 0 1px var(--act-edge);border-radius:var(--radius);padding:var(--space-3) var(--space-4);color:var(--ink-1);font-size:var(--fs-3)}
+.refuse .grow{flex:1 1 320px;min-width:0}
+.refuse .vb{font-weight:var(--fw-medium)}
+.empty{padding:var(--space-6);text-align:center;color:var(--ink-3)}
+
+</style>
+</helmet>
+<div class="shell full" style="min-height: 1300px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Products &amp; PDAS</span>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <nav class="ptabs" aria-label="Products and PDAS"><a href="PdasBoard.dc.html">Board</a><a href="PdasChangeover.dc.html">Changeover</a><a href="PdasCatalogue.dc.html" aria-current="page">Catalogue</a><a href="PdasLimitsHistory.dc.html">Limits &amp; History</a></nav>
+
+      <div class="phead">
+        <div class="titlerow">
+          <h1>Catalogue</h1>
+          <p class="sentence">{{headline}}</p>
+          <p class="caption">Products and pallets as they exist in PDAS.</p>
+        </div>
+        <div class="stack" style="align-items:flex-end;gap:var(--space-2)">
+          <a class="btn lg" href="PdasChangeover.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>New product</a>
+          <span class="sub">Opens the changeover plan.</span>
+        </div>
+      </div>
+
+      <div class="note"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 2.5v4M13 2.5v4M5 6.5h10v3a5 5 0 01-10 0zM10 14.5v3"/></svg><span class="grow">PDAS writes are switched off on this server. Retire and Reactivate will be refused: <b>PDAS_WRITE_ENABLED is not true.</b></span></div>
+
+      <sc-if value="{{hasMsg}}" hint-placeholder-val="{{false}}">
+        <div class="refuse" role="status"><span class="pill state" data-state="act">Not changed</span><span class="grow">{{msgText}} <span class="vb">The server said: PDAS_WRITE_ENABLED is not true.</span></span><button class="btn quiet sm" type="button" onClick="{{dismiss}}">Dismiss</button></div>
+      </sc-if>
+
+      <section class="card" aria-labelledby="mt">
+        <div class="hd2"><h2 id="mt">Products</h2></div>
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="Filter by status">
+            <button type="button" aria-pressed="{{fActive}}" onClick="{{setActive}}">Active 6</button>
+            <button type="button" aria-pressed="{{fRetired}}" onClick="{{setRetired}}">Retired 8</button>
+            <button type="button" aria-pressed="{{fAll}}" onClick="{{setAll}}">All 14</button>
+          </div>
+          <span class="grow"></span>
+          <span class="srch"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13.5 13.5L17 17"/></svg><input class="field" id="q" type="search" placeholder="Search code, colour or tube" aria-label="Search products" value="{{q}}" onInput="{{setQ}}"></span>
+        </div>
+        <div class="tw">
+          <table class="dt">
+            <thead><tr><th>Code (blend)</th><th>Colour</th><th>Count</th><th>Tube</th><th class="num">Target</th><th class="num">Tolerance</th><th>Status</th><th>Running it now</th><th><span class="sr-only" style="position:absolute;left:-9999px">Actions</span></th></tr></thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                <tr class="{{r.cls}}">
+                  <td><span class="code">{{r.code}}</span><span class="sub2">id {{r.id}}</span></td>
+                  <td>{{r.colour}}</td><td>{{r.count}}</td><td>{{r.tube}}</td>
+                  <td class="num strong">{{r.target}} g</td><td class="num">± {{r.tol}} g</td>
+                  <td><span class="pill state" data-state="{{r.ps}}">{{r.pt}}</span></td>
+                  <td>{{r.using}}</td>
+                  <td class="act"><button class="btn quiet sm" type="button" onClick="{{r.act}}">{{r.actLabel}}</button></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <sc-if value="{{noRows}}" hint-placeholder-val="{{false}}"><div class="empty">No product matches this search. Clear the search or change the filter.</div></sc-if>
+        <p class="caption" style="margin-top:var(--space-3)">Retired products keep their history. Colour, count and tube of retired products are not held by SMS and show a dash.</p>
+        <details class="disc"><summary>Why a retired product cannot be recreated</summary><div class="body">PDAS refuses a new product with the same blend, count and tube as an existing one, active or not. To change a target weight, use Limits on the existing product.</div></details>
+      </section>
+
+      <section class="card" aria-labelledby="pt">
+        <div class="hd2"><h2 id="pt">Pallets in PDAS</h2><span class="chip ex">Example rows</span></div>
+        <div class="tw">
+          <table class="dt small">
+            <thead><tr><th>Pallet</th><th>Used for</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              <sc-for list="{{pallets}}" as="p" hint-placeholder-count="4">
+                <tr class="{{p.cls}}">
+                  <td><span class="code" style="color:var(--ink-1);font-weight:500">{{p.name}}</span></td><td>{{p.used}}</td>
+                  <td><span class="pill state" data-state="{{p.ps}}">{{p.pt}}</span></td>
+                  <td class="act"><button class="btn quiet sm" type="button" onClick="{{p.act}}">{{p.actLabel}}</button></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption" style="margin-top:var(--space-3)">The pallet list is not in the sample data, so these names are placeholders.</p>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(props){ super(props); this.state = { f: 'active', q: '', msg: null }; }
+  renderVals() {
+    const P = [
+      [20, '205-IL0-SD', 'Star Green', '18', 'STAR_GREEN', 1960, 50, true, '1, 2'],
+      [21, '205-IL0-SD', 'Blue', '36', 'BLUE', 1960, 50, true, '8, 9, 10'],
+      [1021, '205-IL0-SD', 'Orange', '30', 'ORANGE', 1960, 50, true, 'None'],
+      [1022, '205-IL0-SD', 'None', '50', 'CIR_RED', 1960, 50, true, '14'],
+      [1023, '205-IL0-SD', 'Orange', '20 Slub', 'GREY', 1960, 50, true, 'None'],
+      [1024, '205-IL0-SD', 'Yellow', '36 Slub', 'STAR_RED', 1960, 50, true, 'None'],
+      [11, '201-IH0-SD', '–', '–', '–', 1950, 40, false, 'None'],
+      [12, '201-IH0-SD', '–', '–', '–', 1960, 40, false, 'None'],
+      [13, '201-IH0-SD', '–', '–', '–', 1960, 40, false, 'None'],
+      [14, '204-ILT-BR', '–', '–', '–', 1960, 30, false, 'None'],
+      [15, '201-IHO-SD', '–', '–', '–', 1960, 30, false, 'None'],
+      [16, '204-ILT-BR', '–', '–', '–', 1960, 30, false, 'None'],
+      [17, 'STR-RED', '–', '–', '–', 1960, 50, false, 'None'],
+      [18, '204-ILT-BR', '–', '–', '–', 1960, 50, false, 'None']
+    ];
+    const f = this.state.f, q = this.state.q.trim().toLowerCase();
+    const refuse = (t) => () => this.setState({ msg: t });
+    const rows = P.filter((p) => f === 'all' || (f === 'active') === p[7]).filter((p) => !q || (p[1] + ' ' + p[2] + ' ' + p[4] + ' ' + p[0]).toLowerCase().indexOf(q) >= 0)
+      .map((p) => ({ id: p[0], code: p[1], colour: p[2], count: p[3], tube: p[4], target: p[5].toLocaleString('en-US'), tol: p[6], cls: p[7] ? '' : 'ret', ps: p[7] ? 'ok' : 'nodata', pt: p[7] ? 'Active' : 'Retired', using: p[8], actLabel: p[7] ? 'Retire' : 'Reactivate', act: refuse((p[7] ? 'Retire' : 'Reactivate') + ' ' + p[1] + ' ' + (p[2] === 'None' ? p[4] : p[2]) + ' did not run.') }));
+    const PL = [['AMBER-30', '205-IL0-SD Amber', true], ['PAL-STAR-18', '205-IL0-SD Star Green', true], ['PAL-BLUE-36', '205-IL0-SD Blue', true], ['PAL-OLD-A', 'Retired products', false]];
+    const pallets = PL.map((p) => ({ name: p[0], used: p[1], cls: p[2] ? '' : 'ret', ps: p[2] ? 'ok' : 'nodata', pt: p[2] ? 'Active' : 'Retired', actLabel: p[2] ? 'Retire' : 'Reactivate', act: refuse((p[2] ? 'Retire' : 'Reactivate') + ' pallet ' + p[0] + ' did not run.') }));
+    return {
+      headline: '6 products are active in PDAS. 8 are retired.',
+      rows, noRows: rows.length === 0, pallets, q: this.state.q,
+      fActive: f === 'active', fRetired: f === 'retired', fAll: f === 'all',
+      setActive: () => this.setState({ f: 'active' }), setRetired: () => this.setState({ f: 'retired' }), setAll: () => this.setState({ f: 'all' }),
+      setQ: (e) => this.setState({ q: e.target.value }),
+      hasMsg: !!this.state.msg, msgText: this.state.msg || '', dismiss: () => this.setState({ msg: null })
+    };
+  }
+}
+</script>
+</body>
+</html>

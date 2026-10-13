@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reports</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.rgrid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-5);align-items:start}
+.rleft{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
+.rsub{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5)}
+.rcard{display:flex;flex-direction:column;gap:var(--space-4);background:var(--surface);min-width:0}
+.rcard[data-sel="true"]{box-shadow:0 0 0 2px var(--accent)}
+.rcard .rhead{display:flex;align-items:center;gap:var(--space-3)}
+.rcard .rico{width:40px;height:40px;border-radius:var(--radius);background:var(--accent-tint);color:var(--accent);display:grid;place-items:center;flex:none}
+.rcard .rico svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rcard h2{margin:0;font-size:var(--fs-4);line-height:var(--lh-4);letter-spacing:-0.01em;color:var(--ink-1);font-weight:var(--fw-semibold)}
+.rcard .who{font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3)}
+.rcard .what{margin:0;color:var(--ink-2);font-size:var(--fs-3);line-height:var(--lh-3)}
+.rcard .items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.rcard .items li{display:flex;flex-direction:column;gap:2px;padding:var(--space-3) 0;border-top:1px solid var(--line)}
+.rcard .items li b{font-size:var(--fs-2);line-height:var(--lh-2);font-weight:var(--fw-medium);color:var(--ink-1)}
+.rcard .items li span{font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3)}
+.rcard .rfoot{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-top:auto;flex-wrap:wrap}
+.fmts{display:flex;gap:var(--space-2)}
+.fmts span{font-size:var(--fs-1);line-height:var(--lh-1);font-weight:var(--fw-medium);color:var(--ink-2);background:var(--surface-sunk);border-radius:var(--radius-pill);padding:2px 10px}
+.rfeat{padding:var(--space-6);gap:var(--space-5)}
+.rfeat h2{font-size:var(--fs-5);line-height:var(--lh-5)}
+.rfeat .heroes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-5);padding:var(--space-5) 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.rfeat .heroes .v{font-size:var(--fs-6);line-height:var(--lh-6);font-weight:var(--fw-semibold);letter-spacing:-0.02em;color:var(--ink-1);font-variant-numeric:tabular-nums}
+.rfeat .heroes .v small{font-size:var(--fs-3);font-weight:var(--fw-regular);color:var(--ink-3);margin-left:2px}
+.rfeat .heroes .l{font-size:var(--fs-2);color:var(--ink-3)}
+.badge{font-size:var(--fs-1);line-height:var(--lh-1);font-weight:var(--fw-medium);color:var(--accent);background:var(--accent-tint);border-radius:var(--radius-pill);padding:2px 10px}
+.bld{position:sticky;top:var(--space-5);display:flex;flex-direction:column;gap:var(--space-4)}
+.bld .sel{font-size:var(--fs-3);color:var(--ink-1);font-weight:var(--fw-semibold)}
+.bld .row2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.bld .acts{display:flex;flex-direction:column;gap:var(--space-3);padding-top:var(--space-4);border-top:1px solid var(--line)}
+.bld .exp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-2)}
+.bld .exp .btn,.bld .acts>.btn{justify-content:center;text-align:center}
+.bld a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.bld .lk{display:flex;align-items:center;gap:var(--space-2);font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3)}
+.bld .lk svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.pvwrap{background:var(--surface-sunk);border-radius:var(--radius);padding:var(--space-6) var(--space-5);display:flex;justify-content:center}
+.paper{width:100%;max-width:820px;background:var(--surface);border-radius:2px;box-shadow:var(--elev-2);padding:var(--space-7);display:flex;flex-direction:column;gap:var(--space-5);box-sizing:border-box}
+.paper .mast{display:flex;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap}
+.paper .mast b{display:block;color:var(--ink-1);font-size:var(--fs-3);font-weight:var(--fw-semibold)}
+.paper .mast span{color:var(--ink-3);font-size:var(--fs-2)}
+.paper .mast .r{text-align:right}
+.paper .verdict{margin:0;font-size:var(--fs-5);line-height:var(--lh-5);font-weight:var(--fw-semibold);color:var(--ink-1);letter-spacing:-0.01em}
+.paper .sub{margin:0;color:var(--ink-2);font-size:var(--fs-3)}
+.paper table{width:100%}
+.paper .chd{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-3);flex-wrap:wrap}
+.paper .chd h3{margin:0;font-size:var(--fs-3);font-weight:var(--fw-semibold);color:var(--ink-1)}
+.paper .pfoot{display:flex;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;border-top:1px solid var(--line);padding-top:var(--space-3);font-size:var(--fs-1);line-height:var(--lh-1);color:var(--ink-3)}
+.mute{color:var(--ink-3)}
+@media (max-width:1100px){.rgrid{grid-template-columns:minmax(0,1fr)}.bld{position:static}}
+@media (max-width:720px){.rsub{grid-template-columns:minmax(0,1fr)}.rfeat .heroes{grid-template-columns:minmax(0,1fr)}.paper{padding:var(--space-5)}}
+</style>
+</helmet>
+<svg class="defs" aria-hidden="true" focusable="false"><defs><linearGradient id="barGradC" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b59e0"/><stop offset="1" stop-color="#8aa5f2"/></linearGradient></defs></svg>
+<div class="shell full" style="min-height: 2420px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Reports</span>
+      <a class="pchip" href="PeriodPanel.dc.html" title="Plant time, 24 hours. Production day runs 06:00 to 06:00."><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/></svg>5 Aug to 7 Sep 2026<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></a>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <div class="titlerow">
+        <h1>Reports</h1>
+        <p class="sentence">Pick a report, set the period, then preview or download it.</p>
+      </div>
+
+      <div class="rgrid">
+        <div class="rleft">
+
+          <article class="rcard rfeat" data-sel="{{selSummary}}">
+            <div class="rhead">
+              <span class="rico"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg></span>
+              <div><h2>Management summary</h2><span class="who">One page, for the GM</span></div>
+              <span class="badge" style="margin-left:auto">Start here</span>
+            </div>
+            <p class="what">The verdict in a sentence, the figures that matter and how they moved since the previous period.</p>
+            <div class="heroes">
+              <div><div class="v">132,550</div><div class="l">cones weighed</div></div>
+              <div><div class="v">4.59<small>%</small></div><div class="l">failed inspection</div></div>
+              <div><div class="v">5,435</div><div class="l">sacks packed</div></div>
+            </div>
+            <div class="rfoot">
+              <div class="fmts"><span>PDF</span><span>Excel</span><span>CSV</span></div>
+              <button class="btn" type="button" onClick="{{pickSummary}}">Use this report</button>
+            </div>
+          </article>
+
+          <div class="rsub">
+            <article class="rcard" data-sel="{{selProd}}">
+              <div class="rhead"><span class="rico"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="1.5"/><path d="M3 8.5h14M7 2.5v3M13 2.5v3"/></svg></span><div><h2>Production by day and shift</h2><span class="who">For shift managers</span></div></div>
+              <p class="what">What the line made, day by day or shift by shift.</p>
+              <ul class="items">
+                <li><b>Daily production</b><span>Cones, sacks and kg for each day, with a by-shift view</span></li>
+                <li><b>Shift-wise CTS Loop Production Report</b><span>Cones passed and rejected in each shift</span></li>
+              </ul>
+              <div class="rfoot"><div class="fmts"><span>PDF</span><span>Excel</span><span>CSV</span></div><button class="btn quiet" type="button" onClick="{{pickProd}}">Use this report</button></div>
+            </article>
+
+            <article class="rcard" data-sel="{{selRej}}">
+              <div class="rhead"><span class="rico"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M6.5 6.5l7 7M13.5 6.5l-7 7"/></svg></span><div><h2>Rejects and quality</h2><span class="who">For quality and process engineers</span></div></div>
+              <p class="what">Which cones and sacks were rejected, and why.</p>
+              <ul class="items">
+                <li><b>Rejects by reason</b><span>Reason codes over the days</span></li>
+                <li><b>List of Rejected Cones Against Weight</b><span>Each cone the scale rejected, with its weight and limits</span></li>
+                <li><b>Rejected Cone Hangers Report</b><span>Hangers that stand out for rejected cones</span></li>
+                <li><b>Rejected Unknown (Lifter) Report</b><span>Rejects with no lifter or winder recorded</span></li>
+                <li><b>Rejected Sack Report - Daily</b><span>Sacks the scale marked out of range, by day</span></li>
+              </ul>
+              <div class="rfoot"><div class="fmts"><span>PDF</span><span>Excel</span><span>CSV</span></div><button class="btn quiet" type="button" onClick="{{pickRej}}">Use this report</button></div>
+            </article>
+
+            <article class="rcard" data-sel="{{selSack}}">
+              <div class="rhead"><span class="rico"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l2-2.5h6L15 5l1.5 12h-13z"/><path d="M7 8.5h6"/></svg></span><div><h2>Sacks</h2><span class="who">For packing supervisors</span></div></div>
+              <p class="what">Sacks packed, their weight and where they were packed.</p>
+              <ul class="items">
+                <li><b>Sack Packing Weight Summary</b><span>Sacks and kg by shift and product, with a stock ledger view</span></li>
+                <li><b>SPS Sack Weight Range Report</b><span>How sack weights spread across 0.1 kg bands</span></li>
+                <li><b>SPS Production Report - Count-wise Packing at Each SPS</b><span>Sacks packed by yarn count at each scale</span></li>
+              </ul>
+              <div class="rfoot"><div class="fmts"><span>PDF</span><span>Excel</span><span>CSV</span></div><button class="btn quiet" type="button" onClick="{{pickSack}}">Use this report</button></div>
+            </article>
+
+            <article class="rcard" data-sel="{{selMach}}">
+              <div class="rhead"><span class="rico"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15.5h14M5 15.5V9h4v6.5M11 15.5V5h4v10.5"/></svg></span><div><h2>Machine and product</h2><span class="who">For process engineers</span></div></div>
+              <p class="what">What each winder ran and how its cones weighed.</p>
+              <ul class="items">
+                <li><b>Product by machine</b><span>What each winder ran, with a one-product view</span></li>
+                <li><b>Cone weight</b><span>Average weight against target, with a by-station view</span></li>
+                <li><b>Calibration</b><span>Station drift and recorded adjustments</span></li>
+              </ul>
+              <div class="rfoot"><div class="fmts"><span>PDF</span><span>Excel</span><span>CSV</span></div><button class="btn quiet" type="button" onClick="{{pickMach}}">Use this report</button></div>
+            </article>
+          </div>
+        </div>
+
+        <aside class="card bld" aria-labelledby="bh">
+          <div><h2 id="bh" style="margin:0;font-size:var(--fs-4);line-height:var(--lh-4);letter-spacing:-0.01em">Build your report</h2></div>
+          <div class="sel">{{cardName}}</div>
+          <div class="fld"><label for="variant">Report</label>
+            <select id="variant" class="field"><sc-for list="{{variants}}" as="v" hint-placeholder-count="2"><option>{{v.t}}</option></sc-for></select></div>
+          <div class="fld"><label for="period">Period</label>
+            <select id="period" class="field">
+              <option>Whole data range, 5 Aug to 7 Sep 2026</option>
+              <option>Today</option>
+              <option>Yesterday</option>
+              <option>Last 7 days</option>
+              <option>This month</option>
+              <option>Last month</option>
+              <option>Custom dates</option>
+            </select>
+            <span class="help">Plant time. A production day runs 06:00 to 06:00.</span></div>
+          <div class="row2">
+            <div class="fld"><label for="sf">From shift</label><select id="sf" class="field"><option>First shift</option><option>Morning 06-14</option><option>Evening 14-22</option><option>Night 22-06</option></select></div>
+            <div class="fld"><label for="st">To shift</label><select id="st" class="field"><option>Last shift</option><option>Morning 06-14</option><option>Evening 14-22</option><option>Night 22-06</option></select></div>
+          </div>
+          <div class="acts">
+            <a class="btn" href="#preview">Preview</a>
+            <div class="exp"><button class="btn quiet" type="button">PDF</button><button class="btn quiet" type="button">Excel</button><button class="btn quiet" type="button">CSV</button></div>
+            <div class="lk"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 016 0V9"/></svg>Downloads are for managers and admins. Viewers and engineers see Preview only.</div>
+          </div>
+        </aside>
+      </div>
+
+      <section class="card" id="preview" aria-labelledby="ph">
+        <div class="hd2"><h2 id="ph">Preview</h2><span class="caption">Management summary, 5 Aug to 7 Sep 2026. One page.</span></div>
+        <div class="pvwrap">
+          <article class="paper" aria-label="Management summary preview">
+            <div class="mast">
+              <div><b>Ibrahim Fibres Limited</b><span>TP1 · Line 3 · Unit 2</span></div>
+              <div class="r"><b>Management summary</b><span>5 Aug to 7 Sep 2026, 34 days</span></div>
+            </div>
+            <p class="verdict">In 34 days the line weighed 132,550 cones and packed 5,435 sacks. 4.59 % of cones failed inspection.</p>
+            <p class="sub">That is up from 2.48 % in the previous period, which covers 9 days of readings.</p>
+            <div class="tw"><table class="dt small">
+              <thead><tr><th>Measure</th><th class="num">This period</th><th class="num">Previous period</th><th class="num">Change</th></tr></thead>
+              <tbody>
+                <tr><td class="strong">Cones weighed</td><td class="num">132,550</td><td class="num">67,044</td><td class="num mute">Periods differ in length</td></tr>
+                <tr><td class="strong">Failed inspection</td><td class="num">6,089 (4.59 %)</td><td class="num">1,666 (2.48 %)</td><td class="num"><svg class="arr" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10V2M3 5l3-3 3 3"/></svg>2.11 points</td></tr>
+                <tr><td class="strong">Rejected by the scale</td><td class="num">53</td><td class="num">242</td><td class="num mute">Periods differ in length</td></tr>
+                <tr><td class="strong">Mean cone weight</td><td class="num">1,951.8 g</td><td class="num">1,952.1 g</td><td class="num"><svg class="arr" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M3 7l3 3 3-3"/></svg>0.3 g</td></tr>
+                <tr><td class="strong">Cone weight spread</td><td class="num">8.72 g</td><td class="num">8.77 g</td><td class="num"><svg class="arr" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M3 7l3 3 3-3"/></svg>0.05 g</td></tr>
+                <tr><td class="strong">Sacks weighed</td><td class="num">5,435</td><td class="num">2,689</td><td class="num mute">Periods differ in length</td></tr>
+                <tr><td class="strong">Sack weight</td><td class="num">256,871 kg</td><td class="num">127,078 kg</td><td class="num mute">Periods differ in length</td></tr>
+                <tr><td class="strong">Average sack</td><td class="num">47.26 kg</td><td class="num">47.26 kg</td><td class="num">No change</td></tr>
+                <tr><td class="strong">Cones per sack (approx.)</td><td class="num">24.4</td><td class="num">24.9</td><td class="num"><svg class="arr" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M3 7l3 3 3-3"/></svg>0.5</td></tr>
+              </tbody></table></div>
+            <div>
+              <div class="chd"><h3>Failed inspection by day</h3><span class="caption">% of cones checked</span></div>
+              <svg class="chart" viewBox="0 0 640 216" role="img" aria-label="Failed inspection rate by day, 5 Aug to 7 Sep 2026. Peak 14.6 percent on 1 Sep; near zero 15 to 17 Aug."><line class="axis" x1="48" x2="616" y1="184.0" y2="184.0"/><text class="tick" x="40" y="188.0" text-anchor="end">0 %</text><line class="grid" x1="48" x2="616" y1="142.0" y2="142.0"/><text class="tick" x="40" y="146.0" text-anchor="end">4 %</text><line class="grid" x1="48" x2="616" y1="100.0" y2="100.0"/><text class="tick" x="40" y="104.0" text-anchor="end">8 %</text><line class="grid" x1="48" x2="616" y1="58.0" y2="58.0"/><text class="tick" x="40" y="62.0" text-anchor="end">12 %</text><line class="grid" x1="48" x2="616" y1="16.0" y2="16.0"/><text class="tick" x="40" y="20.0" text-anchor="end">16 %</text><text class="tick" x="48.0" y="206" text-anchor="middle">5 Aug</text><text class="tick" x="220.1" y="206" text-anchor="middle">15 Aug</text><text class="tick" x="392.2" y="206" text-anchor="middle">25 Aug</text><text class="tick" x="564.4" y="206" text-anchor="middle">4 Sep</text><text class="tick" x="616.0" y="206" text-anchor="end">7 Sep</text><path d="M48.0 83.7L65.2 92.2L82.4 125.6L99.6 162.1L116.8 163.9L134.1 166.5L151.3 154.0L168.5 140.4L185.7 140.2L202.9 174.2L220.1 183.6L237.3 182.9L254.5 183.2L271.8 135.2L289.0 138.8L306.2 140.4L323.4 139.0L340.6 133.1L357.8 138.1L375.0 136.7L392.2 126.5L409.5 124.1L426.7 124.9L443.9 102.5L461.1 65.0L478.3 43.3L495.5 42.1L512.7 31.0L529.9 134.7L547.2 159.4L564.4 156.7L581.6 164.1L598.8 163.3L616.0 159.3L616 184L48 184Z" fill="var(--cat-1)" fill-opacity="0.12" stroke="none"/><path d="M48.0 83.7L65.2 92.2L82.4 125.6L99.6 162.1L116.8 163.9L134.1 166.5L151.3 154.0L168.5 140.4L185.7 140.2L202.9 174.2L220.1 183.6L237.3 182.9L254.5 183.2L271.8 135.2L289.0 138.8L306.2 140.4L323.4 139.0L340.6 133.1L357.8 138.1L375.0 136.7L392.2 126.5L409.5 124.1L426.7 124.9L443.9 102.5L461.1 65.0L478.3 43.3L495.5 42.1L512.7 31.0L529.9 134.7L547.2 159.4L564.4 156.7L581.6 164.1L598.8 163.3L616.0 159.3" fill="none" stroke="var(--cat-1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="512.7" cy="31.0" r="4" fill="var(--surface)" stroke="var(--cat-1)" stroke-width="2"/><text class="lab" x="504.7" y="29.0" text-anchor="end">14.6 % on 1 Sep</text><circle cx="616.0" cy="159.3" r="4" fill="var(--cat-1)" stroke="var(--surface)" stroke-width="2"/></svg>
+              <p class="caption" style="margin:4px 0 0">Almost no rejects were recorded from 14 to 18 Aug.</p>
+            </div>
+            <div class="pfoot"><span>Generated 13 Oct 2026 by Plant Admin. Plant time.</span><span>Definitions are proposed by SMS and not yet approved by IFL. Page 1 of 1</span></div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":2420}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { card: 'summary' };
+  }
+  renderVals() {
+    const C = {
+      summary: { name: 'Management summary', v: ['Management summary'] },
+      prod: { name: 'Production by day and shift', v: ['Daily production', 'Daily production, by shift', 'Shift-wise CTS Loop Production Report'] },
+      rej: { name: 'Rejects and quality', v: ['Rejects by reason', 'List of Rejected Cones Against Weight', 'Rejected Cone Hangers Report', 'Rejected Unknown (Lifter) Report', 'Rejected Sack Report - Daily'] },
+      sack: { name: 'Sacks', v: ['Sack Packing Weight Summary', 'Sack Packing Weight Summary, stock ledger', 'SPS Sack Weight Range Report', 'SPS Production Report - Count-wise Packing at Each SPS'] },
+      mach: { name: 'Machine and product', v: ['Product by machine', 'Product by machine, one product', 'Cone weight', 'Cone weight, by station', 'Calibration'] }
+    };
+    const c = this.state.card;
+    const pick = (k) => () => this.setState({ card: k });
+    return {
+      cardName: C[c].name,
+      variants: C[c].v.map((t) => ({ t })),
+      selSummary: c === 'summary' ? 'true' : 'false',
+      selProd: c === 'prod' ? 'true' : 'false',
+      selRej: c === 'rej' ? 'true' : 'false',
+      selSack: c === 'sack' ? 'true' : 'false',
+      selMach: c === 'mach' ? 'true' : 'false',
+      pickSummary: pick('summary'), pickProd: pick('prod'), pickRej: pick('rej'), pickSack: pick('sack'), pickMach: pick('mach')
+    };
+  }
+}
+</script>
+</body>
+</html>

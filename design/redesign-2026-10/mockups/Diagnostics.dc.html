@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Diagnostics</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/ifl-sms/tokens.css">
+<link rel="stylesheet" href="ds/ifl-sms/components/bundle.css">
+<link rel="stylesheet" href="sms-extra.css">
+<link rel="stylesheet" href="style-c.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.lights{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-5)}
+.light{background:var(--surface);padding:var(--space-5);display:flex;flex-direction:column;gap:var(--space-3);min-width:0;min-height:208px}
+.light .lh{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)}
+.light .lh span.n{font-size:var(--fs-3);line-height:var(--lh-3);font-weight:var(--fw-semibold);color:var(--ink-1)}
+.light .big{font-size:var(--fs-6);line-height:var(--lh-6);font-weight:var(--fw-semibold);letter-spacing:-0.02em;color:var(--ink-1);font-variant-numeric:tabular-nums}
+.light .big small{font-size:var(--fs-3);font-weight:var(--fw-regular);color:var(--ink-3);letter-spacing:0;margin-left:var(--space-1)}
+.light .d{font-size:var(--fs-2);line-height:var(--lh-2);color:var(--ink-2)}
+.light .d.m{color:var(--ink-3)}
+.light .bar{height:6px;border-radius:var(--radius-pill);background:var(--surface-sunk);overflow:hidden;margin-top:auto}
+.light .bar i{display:block;height:100%;background:var(--cat-1);border-radius:var(--radius-pill)}
+.light[data-s="watch"]{}
+.stabs{display:flex;align-items:center;gap:var(--space-5);box-shadow:inset 0 -1px 0 var(--line)}
+.stabs a,.stabs span.t{padding:var(--space-3) 0;font:var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans);color:var(--ink-3);text-decoration:none;display:inline-flex;align-items:center;gap:var(--space-2)}
+.stabs a[aria-current="page"]{color:var(--ink-1);box-shadow:inset 0 -2px 0 var(--accent)}
+.stabs .ico{width:14px;height:14px}
+.stabs .rk{font-size:var(--fs-1);color:var(--ink-3);background:var(--surface-sunk);border-radius:var(--radius-pill);padding:0 8px;line-height:18px}
+.src{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.src li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--space-4);padding:var(--space-4) 0;border-top:1px solid var(--line)}
+.src li:first-child{border-top:0;padding-top:0}
+.src .dt0{width:36px;height:36px;border-radius:var(--radius);background:var(--surface-sunk);color:var(--ink-2);display:grid;place-items:center}
+.src .dt0 svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.src b{display:block;color:var(--ink-1);font-size:var(--fs-3);line-height:var(--lh-3);font-weight:var(--fw-medium)}
+.src span.s{display:block;color:var(--ink-2);font-size:var(--fs-2);line-height:var(--lh-2)}
+.src span.s.m{color:var(--ink-3)}
+.find{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.find li{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-4) 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.find li:first-child{border-top:0;padding-top:0}
+.find .tx{flex:1 1 260px;min-width:0}
+.find .tx b{display:block;color:var(--ink-1);font-size:var(--fs-3);line-height:var(--lh-3);font-weight:var(--fw-medium)}
+.find .tx span{display:block;color:var(--ink-3);font-size:var(--fs-2);line-height:var(--lh-2)}
+.find .ok{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--ok-fg);font-size:var(--fs-2);font-weight:var(--fw-medium)}
+.find .ok svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.cnts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5)}
+.cnts .v{font-size:var(--fs-6);line-height:var(--lh-6);font-weight:var(--fw-semibold);letter-spacing:-0.02em;color:var(--ink-1);font-variant-numeric:tabular-nums}
+.cnts .l{font-size:var(--fs-2);color:var(--ink-3)}
+.ex{font-size:var(--fs-1);line-height:18px;color:var(--ink-3);background:var(--surface-sunk);border-radius:var(--radius-pill);padding:0 8px;white-space:nowrap}
+.pgt{margin:0;color:var(--ink-3);font-size:var(--fs-2)}
+@media (max-width:1000px){.lights{grid-template-columns:minmax(0,1fr)}.cnts{grid-template-columns:minmax(0,1fr)}}
+</style>
+</helmet>
+<div class="shell full" style="min-height: 1960px">
+  <nav class="sidebar" aria-label="Main">
+    <div class="brand">SMS<span>Ibrahim Fibres, TP1 Line 3</span></div>
+    <div class="grp">Monitor</div>
+    <a href="Main.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>Today</a>
+    <a href="QualityStations.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16h12M10 4v12M5 7h10"/><path d="M5 7l-2 5h4zM15 7l-2 5h4z"/></svg>Quality</a>
+    <div class="grp">Operate</div>
+    <a href="PdasBoard.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 3.5v8l-7 3.5-7-3.5V6z"/><path d="M3 6l7 3.5L17 6M10 9.5v8"/></svg>Products &amp; PDAS</a>
+    <div class="grp">Analyse</div>
+    <a href="Reports.dc.html"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>Reports</a>
+    <div class="grp">System</div>
+    <a href="Diagnostics.dc.html" aria-current="page"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10h4l2-5 4 10 2-5h4"/></svg>Diagnostics</a>
+    <div class="foot"><span>Data to 7 Sep 2026</span><svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 5l-5 5 5 5"/></svg></div>
+  </nav>
+  <div class="main">
+    <header class="topbar">
+      <span class="ttl">Diagnostics</span>
+      <span class="pill state" data-state="watch" title="The newest reading is 36 days old. See Diagnostics.">Data to 7 Sep 2026 12:00</span>
+      <button class="user" type="button" aria-label="User menu"><span class="av" aria-hidden="true">PA</span>Plant Admin<svg class="ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg></button>
+    </header>
+    <main class="page">
+      <div class="titlerow">
+        <h1>System</h1>
+        <p class="sentence">SMS is working. IFL's data feed has been quiet for 36 days.</p>
+      </div>
+
+      <nav class="stabs" aria-label="System">
+        <a href="Diagnostics.dc.html" aria-current="page">Diagnostics</a>
+        <span class="t">Setup<span class="rk">Admin</span></span>
+        <span class="t">Account</span>
+      </nav>
+
+      <div class="lights">
+        <section class="light" data-s="watch" aria-labelledby="l1">
+          <div class="lh"><span class="n" id="l1">Data feed from IFL</span><span class="pill state" data-state="watch"></span></div>
+          <div class="big">36<small>days without new data</small></div>
+          <div class="d">Last reading 7 Sep 2026 12:00 plant time.</div>
+          <div class="d m">The feed is checked every 61 seconds.</div>
+        </section>
+        <section class="light" data-s="ok" aria-labelledby="l2">
+          <div class="lh"><span class="n" id="l2">Database</span><span class="pill state" data-state="ok"></span></div>
+          <div class="big">7<small>ms to answer</small></div>
+          <div class="d">520 MB used of 10,240 MB.</div>
+          <div class="bar" role="img" aria-label="5 percent of the database limit used"><i style="width:5.1%"></i></div>
+        </section>
+        <section class="light" data-s="watch" aria-labelledby="l3">
+          <div class="lh"><span class="n" id="l3">Backups</span><span class="pill state" data-state="watch"></span></div>
+          <div class="big">13.7<small>days since the newest</small></div>
+          <div class="d">29 Sep 2026, checked and restorable.</div>
+          <div class="d m">71 GB free for backups.</div>
+        </section>
+      </div>
+
+      <section class="card" aria-labelledby="h-feeds">
+        <div class="hd2"><h2 id="h-feeds">What IFL has sent</h2><span class="caption">Newest reading in each feed, plant time</span></div>
+        <div class="tw"><table class="dt">
+          <thead><tr><th>Feed</th><th>Newest reading</th><th class="num">Readings today</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td class="strong">Cones</td><td>7 Sep 2026 12:00</td><td class="num">0</td><td><span class="pill state" data-state="watch"></span></td></tr>
+            <tr><td class="strong">Sacks</td><td>7 Sep 2026 12:08</td><td class="num">0</td><td><span class="pill state" data-state="watch"></span></td></tr>
+            <tr><td class="strong">Inspection fails</td><td>7 Sep 2026 11:35</td><td class="num">0</td><td><span class="pill state" data-state="watch"></span></td></tr>
+            <tr><td class="strong">Weight-check fails</td><td>7 Sep 2026 <span class="ex">Example time</span></td><td class="num">0</td><td><span class="pill state" data-state="watch"></span></td></tr>
+          </tbody></table></div>
+      </section>
+
+      <div class="two">
+        <section class="card" aria-labelledby="h-src">
+          <div class="hd2"><h2 id="h-src">Data sources</h2></div>
+          <ul class="src">
+            <li><span class="dt0"><svg viewBox="0 0 20 20" aria-hidden="true"><ellipse cx="10" cy="5" rx="6" ry="2.5"/><path d="M4 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5"/></svg></span>
+              <div><b>Older IFL database</b><span class="s">22 Jun to 10 Jul 2026, 142,511 cones. Kept as history and left out of current reports.</span></div></li>
+            <li><span class="dt0"><svg viewBox="0 0 20 20" aria-hidden="true"><ellipse cx="10" cy="5" rx="6" ry="2.5"/><path d="M4 5v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V5M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5"/></svg></span>
+              <div><b>Current IFL database</b><span class="s">5 Aug to 7 Sep 2026, 132,552 cones. Reports use this one.</span></div></li>
+            <li><span class="dt0"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="10" rx="1.5"/><path d="M7 17h6M10 14v3"/></svg></span>
+              <div><b>Practice data on this PC</b><span class="s">Made by the plant simulator for testing. Never counted in a report.</span></div></li>
+            <li><span class="dt0"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.5l3 1.5"/></svg></span>
+              <div><b>10 Jul to 5 Aug 2026</b><span class="s m">IFL has not sent this month, so SMS has nothing for it.</span></div></li>
+          </ul>
+          <details class="disc" style="margin-top:12px"><summary>Technical detail</summary><div class="body">
+            <div class="tw"><table class="dt small">
+              <thead><tr><th>Name in SMS</th><th>IFL database</th><th>Table</th><th>Rows</th></tr></thead>
+              <tbody>
+                <tr><td class="strong">Epoch 1 to 4 (July)</td><td>DATA_TP1U2</td><td>pack1_TP1U2</td><td class="num">142,511</td></tr>
+                <tr><td class="strong">DATA_TP1U2_SEP07#3</td><td>DATA_TP1U2_SEP07</td><td>pack1_TP1U2</td><td class="num">132,552</td></tr>
+                <tr><td class="strong">Simulator</td><td>DATA_TP1U2_SIM</td><td>pack1_TP1U2 gen 4</td><td class="num">284,351</td></tr>
+              </tbody></table></div>
+            A new generation starts when IFL rebuilds its tables. SMS stops and waits for an engineer to accept it.
+          </div></details>
+        </section>
+
+        <section class="card" aria-labelledby="h-dq">
+          <div class="hd2"><h2 id="h-dq">Data checks</h2><span class="caption">Engineers and above can acknowledge</span></div>
+          <ul class="find">
+            <sc-for list="{{findings}}" as="f" hint-placeholder-count="2">
+              <li>
+                <div class="tx"><b>{{f.title}} <span class="ex">Example wording</span></b><span>{{f.meta}}</span></div>
+                <sc-if value="{{f.acked}}" hint-placeholder-val="{{false}}">
+                  <span class="ok"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>Acknowledged by Plant Admin</span>
+                </sc-if>
+                <sc-if value="{{f.open}}" hint-placeholder-val="{{true}}">
+                  <span class="pill state" data-state="watch"></span>
+                  <a class="small" href="QualityRejects.dc.html">Open the reading</a>
+                  <button class="btn quiet" type="button" onClick="{{f.ack}}">Acknowledge</button>
+                </sc-if>
+              </li>
+            </sc-for>
+          </ul>
+          <p class="caption" style="margin-top:12px">An acknowledged check stays on record. It no longer counts as blocking.</p>
+        </section>
+      </div>
+
+      <div class="two">
+        <section class="card" aria-labelledby="h-ver">
+          <div class="hd2"><h2 id="h-ver">Checks against IFL</h2><span class="ex">Latest date real, results example</span></div>
+          <div class="tw"><table class="dt">
+            <thead><tr><th>Run</th><th>What it compared</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">23 Sep 2026 10:35</td><td>SMS against IFL, every row</td><td><span class="pill state" data-state="ok"></span></td></tr>
+              <tr><td class="strong">16 Sep 2026 09:10</td><td>SMS against IFL, every row</td><td><span class="pill state" data-state="ok"></span></td></tr>
+              <tr><td class="strong">9 Sep 2026 09:02</td><td>September copy only</td><td><span class="pill state" data-state="ok"></span></td></tr>
+            </tbody></table></div>
+          <p class="caption" style="margin-top:12px">These runs are started by hand. Nothing checks IFL's data between them.</p>
+        </section>
+
+        <section class="card" aria-labelledby="h-rec">
+          <div class="hd2"><h2 id="h-rec">Records SMS holds</h2><span class="caption">Cones and sacks: July and September copies added. Failed counts: 5 Aug to 7 Sep.</span></div>
+          <div class="cnts">
+            <div><div class="v">275,063</div><div class="l">cones</div></div>
+            <div><div class="v">10,897</div><div class="l">sacks</div></div>
+            <div><div class="v">6,089</div><div class="l">failed inspection, 5 Aug to 7 Sep</div></div>
+            <div><div class="v">53</div><div class="l">failed weight check, 5 Aug to 7 Sep</div></div>
+          </div>
+        </section>
+      </div>
+
+      <p class="pgt">SMS 0.2.0, running since 13 Oct 2026 08:22. Setup and Account are on the tabs above.</p>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":1960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { a0: false, a1: false };
+  }
+  renderVals() {
+    const F = [
+      { k: 'a0', title: 'A cone was recorded at 0 g', meta: 'Weight of exactly zero, treated as a scale fault.' },
+      { k: 'a1', title: 'A sack was recorded at 0 kg', meta: 'Weight of exactly zero, treated as a scale fault.' }
+    ];
+    const findings = F.map((f) => ({
+      title: f.title,
+      meta: f.meta,
+      acked: this.state[f.k],
+      open: !this.state[f.k],
+      ack: () => this.setState({ [f.k]: true })
+    }));
+    return { findings };
+  }
+}
+</script>
+</body>
+</html>
