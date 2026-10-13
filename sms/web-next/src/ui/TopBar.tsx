@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AuthUser } from '../bridge/api';
 import { C } from '../copy';
 import { Icon } from './Icon';
-import { A11Y } from './a11yCopy';
+const A11Y = C.a11y;
 import { TextSizeControl, useUiScale } from './TextSize';
 import { useZoomed, zoomBack } from '../charts/zoomMarker';
 

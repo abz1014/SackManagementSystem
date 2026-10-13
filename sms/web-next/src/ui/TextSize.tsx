@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { A11Y } from './a11yCopy';
+import { C } from '../copy';
+const A11Y = C.a11y;
 import { UI_SCALE_KEY, parseUiScale, readUiScale } from './uiScale';
 
 /**

@@ -591,3 +591,13 @@ describe('record sheets open from the URL (A3-056, A3-058, A6-S2..S4, A6-S6, G-5
     expect(await screen.findByText("Couldn't load the movements for this day.")).toBeTruthy();
   });
 });
+
+describe('print (coordinator item b)', () => {
+  it('hides the sort arrows and the row chevron column on paper', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(`${__dirname}/register.css`, 'utf8');
+    const print = css.slice(css.indexOf('@media print'));
+    expect(print).toMatch(/\.ui-dt__arrows/);
+    expect(print).toMatch(/\.ui-dt__chev-col/);
+  });
+});

@@ -38,4 +38,6 @@
   .rg-print { display: block; }
   .rg-noprint, .rg .ui-tabs, .rg .ui-dt__foot .ui-btn { display: none !important; }
   .rg .ui-dt__wrap { overflow: visible; }
+  /* sort arrows and the row chevron column are controls, not content */
+  .rg .ui-dt__arrows, .rg .ui-dt__chev-col, .rg .ui-dt__row td:last-child .ui-dt__chev { display: none !important; }
 }

@@ -38,6 +38,13 @@ export const C = {
     },
     system: { diagnostics: 'Diagnostics', setup: 'Setup', account: 'Account' },
   },
+  /* Text size control and the zoomed-chart way back (folded in from ui/a11yCopy.ts) */
+  a11y: {
+    textSize: 'Text size',
+    desk: 'Desk',
+    wall: 'Wall',
+    zoomedBack: 'Zoomed in · Back',
+  },
   signOut: 'Sign out',
   plantTime: 'Plant time',
 
