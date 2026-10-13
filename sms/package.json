@@ -21,6 +21,7 @@
     "typecheck": "tsc -b shared sync-worker cli api web web-next",
     "test": "vitest run",
     "test:layout": "playwright test -c playwright.config.ts",
+    "test:layout:next": "playwright test -c playwright.next.config.ts",
     "db:migrate": "node scripts/migrate.mjs",
     "dictionary": "node scripts/data-dictionary.mjs",
     "build": "npm run build --workspace @sms/shared && npm run build --workspace @sms/sync-worker && npm run build --workspace @sms/cli && npm run build --workspace @sms/api && npm run build --workspace @sms/web && npm run build --workspace @sms/web-next",

@@ -54,6 +54,8 @@ const BASE_URL = process.env.SMS_WEB_URL ?? 'http://localhost:5173';
 export default defineConfig({
   testDir: './layout-tests',
   testMatch: '**/*.spec.ts',
+  // The web-next specs (layout-tests/next) have their own config, playwright.next.config.ts, and need SMS_NEXT_URL.
+  testIgnore: '**/next/**',
   outputDir: './layout-tests/.output/test-results',
   // Single worker: this drives the SAME dev server + SAME dev database every
   // other tab in this session is using. Nothing here should race another

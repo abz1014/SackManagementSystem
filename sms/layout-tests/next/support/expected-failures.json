@@ -1,0 +1,46 @@
+{
+  "about": "Failures of the web-next Playwright port against a scratch build, mapped to VERIFY-V2-VISUAL defects (D1-D32, M-01..M-30). Written 13 Oct 2026 by fix-wave T6 so T7 can tell an accepted item from a regression. Not read by any test.",
+  "baseline_224df3d": {
+    "build": "224df3d (HEAD at the start of the fix wave, before T1-T5)",
+    "run": "81 tests, 23 failed with the first specs; 4 of those were my own spec errors (fitz under python -I, a date regex, a frame count, and the Stations card used as a fixed block) fixed afterwards. Expected failures:",
+    "failures": {
+      "css-001": "D4 (top bar: user button 884..925 past a 900 px viewport at text size 1.3); extends M-01 which was measured at 930@1.3",
+      "css-003": "D8 / M-18: Rejects trend chart text outside its svg (unit label left of it, 'Window mean' right of it)",
+      "css-009": "D2 (Limits textarea wider than its card) and D4 (page overflow 25 px at 768)",
+      "css-015": "D27 (quiet tile has no dashed edge, owner CSS-015)",
+      "css-017": "D18 / M-11 (Diagnostics batch table wider than its box)",
+      "css-022": "D12 / M-15 (skeleton shorter than loaded content: Today 206->214, Weight 206->258, Rejects 206->214 at 1366)",
+      "css-031": "D20 / M-19 (Register prints without 'Page N of M')",
+      "css-033": "D11 / M-12 (dates split mid-value at 768: rejected-sacks 24, rejected-hangers 48, daily 1)",
+      "css-034": "NEW against V2a: 'Name it' prints on Rejects and the Segmented toggles print on Weight (M-19 only checked the Register)",
+      "css-050": "D8 / M-18 ('Window mean' end label 2-5 px past the svg)",
+      "css-067": "D18 (Diagnostics page 8,648 px; finding rows median 257 px)",
+      "css-073": "D11 / M-12 (no fade cue on report tables that scroll at 768)",
+      "css-077": "D8 / M-18 (unit labels left of the svg)",
+      "css-078": "D23b / M-30 (Outcome column past the scroll edge at 768)",
+      "s3-x1-weight-mixed-row-height": "D25 / M-22 (station row 75 px at 1920@1.3)",
+      "m-18": "D8 / M-18 (38 axis-title/tick intersections)",
+      "date-format": "D15 ('06/05/2026' on Weight, 'Sept' on Rejects)",
+      "login-screen": "D5 (inputs 26 px wider than the card inner edge; 20 px overflow at 375)",
+      "wall": "D9 (no large-screen message and overflow at 375) and D22 (type 70 px at 1 vs 75 px at 1.3)"
+    }
+  },
+  "at_62cbba2": {
+    "build": "62cbba2 (HEAD after T1-T5 landed), scratch build served on an ephemeral port",
+    "result": "81 tests, 12 failed, 69 passed (7.5 min). Dates guard green, wall, login, m-18, date-format, css-001, css-009, css-031, css-033's date splits, charts all pass.",
+    "failures": {
+      "css-003": "D8 residual: 'Window mean' label ends 2 px past the svg at 320-600",
+      "css-004": "M-04 residual: calibration report cells overprint by 1.5 px at 1366@1.3 ('Days flagged' | 'Adjustments')",
+      "css-007": "NEW after a19c529: Diagnostics overflows the page by 36 px at 320",
+      "css-015": "D27 not done (no dashed edge on the quiet tile)",
+      "css-017": "NEW after a19c529: Diagnostics page overflow at 1366@1.3 (table fit itself now passes)",
+      "css-022": "D12 / M-15 residual: Weight at 375 1244->1178 px, Rejects at 375 756->690 px (the 1366 cells now pass)",
+      "css-034": "M-19 residual: Name it prints on Rejects, Segmented toggles print on Weight",
+      "css-047": "NEW after b1b8925: Catalogue rows 53 px and Limits rows 61 px (limit 50; passed at 224df3d)",
+      "css-050": "D8 residual: 'Window mean' end label 2-5 px past the svg",
+      "css-067": "D18 residual: Diagnostics finding rows median 266 px (limit 215); page height now under 3,000",
+      "css-073": "D11 / M-12 not delivered: report tables that scroll at 768 still have no fade cue",
+      "css-078": "D23b / M-30: Outcome column is 103 px at 768 (needs 276)"
+    }
+  }
+}
