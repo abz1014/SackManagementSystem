@@ -42,8 +42,6 @@ const ALLOW_LIST: Record<string, string> = {
   // ---- (c) superseded — the endpoint still works, but a richer wrapper on the SAME endpoint is what screens call ----
   adminGetAudit:
     'superseded by adminGetAuditPage — same GET /api/admin/audit, keyset-paginated — used by screens/Setup.tsx.',
-  getRejects:
-    'superseded by getRejectsFiltered — same GET /api/rejects plus station/product/code filters — used by screens/Rejects.tsx.',
   getWeights:
     "superseded by getSpc + getWeightStations, the Weight screen's replacement for the old Spread screen; getWeights's giveawayTotalKg was the disclaimer-boxed figure the 3 Sep 2026 redesign deliberately dropped.",
   getCalibration:
