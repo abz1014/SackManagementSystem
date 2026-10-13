@@ -1,0 +1,81 @@
+/* Chart kit (DESIGN-SYSTEM 6.9, 3b). Restyles the existing ChartFrame classes (.chart-tip, .readout,
+   .chart-resize ...) and adds the kit's own (.ck-*). Colours come from tokens only. */
+
+.ck-frame { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); padding: var(--space-4, 16px) var(--space-5, 20px) var(--space-4, 16px); position: relative; }
+.ck-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.ck-title { margin: 0; font-size: var(--fs-4); line-height: var(--lh-4); color: var(--ink-1); font-weight: 600; }
+.ck-unit { font-size: var(--fs-1); color: var(--ink-3); }
+.ck-toggle { margin-left: auto; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill, 999px); background: var(--surface); color: var(--accent, var(--cat-1)); font: inherit; font-size: var(--fs-2); cursor: pointer; }
+.ck-toggle[aria-pressed="true"] { background: var(--accent-tint, var(--surface-sunk)); }
+.ck-toggle:focus-visible, .ck-btn:focus-visible, .chart-frame-body:focus-visible, .chart-resize:focus-visible, .linkish:focus-visible { outline: 2px solid var(--focus, var(--cat-1)); outline-offset: 2px; }
+@media (pointer: coarse) { .ck-toggle, .ck-btn { min-height: 44px; } }
+
+.ck-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; margin: 4px 0 8px; padding: 0; font-size: var(--fs-2); color: var(--ink-2); }
+.ck-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.ck-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 2px solid transparent; box-sizing: border-box; }
+.ck-swatch.line { height: 0; width: 16px; border-radius: 0; border: 0; border-top: 2px solid; background: none !important; }
+.ck-swatch.dashed { height: 0; width: 16px; border-radius: 0; border: 0; border-top: 2px dashed; }
+
+/* ChartFrame's own pieces */
+.chart-frame { position: relative; }
+.chart-frame-body { position: relative; width: 100%; touch-action: pan-y; }
+.chart-frame-body.can-activate { cursor: pointer; }
+.chart-frame-body.resizing { user-select: none; }
+.chart-frame-caption, .ck-caption { margin: 8px 0 0; font-size: var(--fs-1); line-height: var(--lh-1); color: var(--ink-3); }
+.readout { min-height: 1.4em; font-size: var(--fs-1); color: var(--ink-3); text-align: right; }
+.readout .dim { color: var(--ink-3); }
+.sr-only, .readout .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ck-spark .sr-only { position: absolute; }
+.linkish { border: 0; background: none; padding: 0; font: inherit; font-size: var(--fs-2); color: var(--accent, var(--cat-1)); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.chart-tip { z-index: 5; box-sizing: border-box; padding: 10px 12px; border-radius: var(--radius-ctl); background: var(--surface); box-shadow: var(--elev-2); font-size: var(--fs-1); color: var(--ink-2); }
+.chart-tip-h { margin: 0 0 6px; font-weight: 600; color: var(--ink-1); }
+.chart-tip ul { list-style: none; margin: 0; padding: 0; }
+.chart-tip li { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+.chart-tip li b { color: var(--ink-1); font-weight: 600; }
+.chart-tip li span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; background: var(--cat-1); }
+.chart-tip li.m-graphite span::before { background: var(--cat-2); }
+.chart-tip-ctx { margin: 6px 0 0; color: var(--ink-3); }
+.chart-tip-hint { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--line); color: var(--accent, var(--cat-1)); }
+.chart-resize { position: absolute; left: 0; right: 0; bottom: -6px; height: 10px; cursor: ns-resize; touch-action: none; z-index: 1; }
+.chart-resize::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 40px; height: 3px; transform: translateX(-50%); border-radius: 2px; background: var(--chart-axis); }
+
+/* SVG parts */
+.ck-svg { display: block; overflow: visible; }
+.ck-grid { stroke: var(--chart-grid); stroke-width: 1; }
+.ck-base { stroke: var(--chart-axis); stroke-width: 1; }
+.ck-tick { fill: var(--ink-3); }
+.ck-unit-label { fill: var(--ink-3); }
+.ck-band { fill: var(--chart-limit-band); }
+.ck-limit-line { stroke: var(--chart-limit-edge); stroke-width: 1; stroke-dasharray: 4 3; }
+.ck-limit-text { fill: var(--ink-2); }
+.ck-band-text { fill: var(--ok-fg); }
+.ck-bar { stroke: none; }
+.ck-line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ck-dot { stroke: var(--chart-gap); stroke-width: 2; }
+.ck-ring { fill: none; stroke: var(--act-edge); stroke-width: 2; }
+.ck-crosshair { stroke: var(--line-strong); stroke-width: 1; }
+.ck-direct { fill: var(--ink-2); }
+
+/* States */
+.ck-skel { width: 100%; }
+.ck-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; border-radius: var(--radius-card); background: var(--surface-sunk); color: var(--ink-2); padding: 16px; font-size: var(--fs-3); }
+.ck-state p { margin: 0; }
+.ck-error { background: var(--act-tint); color: var(--act-fg); }
+.ck-act-glyph::before { content: var(--act-glyph); }
+.ck-btn { min-height: 32px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); font: inherit; font-size: var(--fs-2); cursor: pointer; }
+
+/* Table view */
+.ck-table-wrap { overflow-x: auto; }
+.ck-table { width: 100%; border-collapse: collapse; font-size: var(--fs-2); color: var(--ink-2); }
+.ck-table caption { text-align: left; font-size: var(--fs-1); color: var(--ink-3); padding-bottom: 6px; }
+.ck-table th, .ck-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.ck-table thead th { background: var(--surface-sunk); color: var(--ink-1); font-weight: 600; }
+.ck-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Sparkline */
+.ck-spark { display: inline-flex; position: relative; }
+.ck-spark-none { display: inline-block; }
+.ck-spark-skel { display: inline-block; }
+
+@media print { .no-print, .chart-tip, .chart-resize { display: none !important; } }
+@media (forced-colors: active) { .ck-band { fill: none; stroke: CanvasText; stroke-dasharray: 2 2; } .ck-line { stroke: CanvasText; } }
