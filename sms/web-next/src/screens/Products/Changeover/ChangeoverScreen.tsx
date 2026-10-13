@@ -50,7 +50,7 @@ import { ProductsTabs } from '../ProductsTabs';
 import {
   REASON_MIN,
   buildBody,
-  detailLine,
+  readStep,
   emptyForm,
   limitsTargetOf,
   missingFor,
@@ -341,13 +341,26 @@ function ReviewStep({ plan, go }: { plan: ChangeoverPlan; go: ScreenProps['go'] 
       <p className="co-note">{CO.reviewIntro}</p>
       <ol className="co-plan" aria-label={CO.stepsLabel}>
         {plan.steps.map((s, i) => {
-          const d = detailLine(s.detail);
+          const r = readStep(s, CO.stepWords);
           return (
             <li key={i}>
               <span className="co-plan__no" aria-hidden="true">{i + 1}</span>
-              <div>
+              <div className="co-plan__body">
                 <div className="co-plan__t">{s.label}</div>
-                {(s.proc || d) && <div className="co-plan__d">{[s.proc, d].filter(Boolean).join(', ')}</div>}
+                {r.kind && <div className="co-plan__k">{r.kind}</div>}
+                {r.pairs.length > 0 && (
+                  <dl className="co-plan__d">
+                    {r.pairs.map((p) => (
+                      <div key={p.label}><dt>{p.label}</dt><dd>{p.value}</dd></div>
+                    ))}
+                  </dl>
+                )}
+                {r.technical.length > 0 && (
+                  <details className="co-tech">
+                    <summary>{CO.techDetail}</summary>
+                    <p className="co-note">{r.technical.join(', ')}</p>
+                  </details>
+                )}
               </div>
               <span className={`co-kind${s.action === 'retire' ? ' co-kind--ret' : ''}`}>{CO.kind[s.action] ?? s.action}</span>
             </li>

@@ -118,13 +118,13 @@ describe('Products > Board on PD1 (replayed at 1 Sep 2026)', () => {
     });
     const { container } = mount({ '/api/machines/running': { data: m, metadata: META } });
     await screen.findByText('6 stations are running 3 products. 8 are idle.');
-    expect(cardOf(container, 14).textContent).toContain('Changed from 205-IL0-SD Blue. First cone of this product: 1 Sep, 20:56.');
+    expect(cardOf(container, 14).textContent).toContain('Changed from 205-IL0-SD · Blue · PVSD8020 · 36. First cone of this product: 1 Sep, 20:56.');
     expect(cardOf(container, 9).textContent).toContain('Changed from no product.');
     const items = Array.from(container.querySelectorAll('.pb-changes li'));
     expect(items).toHaveLength(2);
     expect(items[0]!.textContent).toContain('1 Sep, 20:56');
     expect(items[0]!.textContent).toContain('Station 14');
-    expect(items[0]!.textContent).toContain('Started 205-IL0-SD CIR_RED, replacing 205-IL0-SD Blue');
+    expect(items[0]!.textContent).toContain('Started 205-IL0-SD · PVSD8020 · 50, replacing 205-IL0-SD · Blue · PVSD8020 · 36');
     expect(screen.getByText('Timed at the first cone of the new product, not when the operator pressed the button.')).toBeTruthy();
   });
 

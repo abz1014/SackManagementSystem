@@ -118,3 +118,43 @@ export function detailLine(detail: Record<string, string | number | boolean | nu
     .map(([k, v]) => `${k}: ${v === true ? 'yes' : String(v)}`)
     .join(', ');
 }
+
+/** The step-words table of copy.ts (FRAGMENTS.changeover.stepWords), by shape, so this file needs no copy import. */
+export interface StepWordTable {
+  step: Record<string, string | ((label: string, id: number) => string) | null>;
+  detail: Record<string, string>;
+}
+
+export interface StepReading {
+  /** The word for the kind of step ("Blend", "Product name"), or null when none exists (pallet, retire). */
+  kind: string | null;
+  /** Detail values the screen has an existing label for, in the server's order. Values only: nothing invented. */
+  pairs: { label: string; value: string }[];
+  /** The vendor procedure and every detail key with no label. Shown only inside the technical-detail disclosure. */
+  technical: string[];
+}
+
+const shown = (v: string | number | boolean | null): string | null =>
+  v === null || v === '' || v === false ? null : v === true ? 'yes' : String(v);
+
+/** Structured form of detailLine: labelled values for the Review step, raw keys kept for the disclosure. */
+export function readStep(
+  s: { step: string; proc: string | null; detail: Record<string, string | number | boolean | null> },
+  words: StepWordTable,
+): StepReading {
+  const k = words.step[s.step];
+  const pairs: StepReading['pairs'] = [];
+  const rest: Record<string, string | number | boolean | null> = {};
+  for (const [key, raw] of Object.entries(s.detail)) {
+    const label = words.detail[key];
+    const value = shown(raw);
+    if (value === null) continue;
+    if (label) pairs.push({ label, value });
+    else rest[key] = raw;
+  }
+  const technical: string[] = [];
+  if (s.proc) technical.push(s.proc);
+  const tail = detailLine(rest);
+  if (tail) technical.push(tail);
+  return { kind: typeof k === 'string' ? k : null, pairs, technical };
+}

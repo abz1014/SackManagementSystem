@@ -16,19 +16,20 @@
 .lm-now { display: flex; flex-direction: column; gap: var(--space-1); }
 
 .lm-edit .wr-wizard__panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.lm-row > * { min-width: 0; }
 .lm-form, .lm-review { display: flex; flex-direction: column; gap: var(--space-4); }
-.lm-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); }
+.lm-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--space-4); }
 .lm-guard, .lm-large, .lm-fail, .lm-done { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-4); border-radius: var(--radius-ctl); background: var(--tint); box-shadow: inset 0 0 0 1px var(--edge); }
 .lm-large, .lm-fail, .lm-done { flex-direction: column; gap: var(--space-2); }
 .lm-guard > .pill { flex: none; }
 .lm-large__t, .lm-fail__t, .lm-done__t { margin: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--ink-1); font: var(--fw-semibold) var(--fs-3)/var(--lh-3) var(--font-sans); }
 .lm-tick { display: flex; gap: var(--space-3); align-items: center; color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
-.lm-tick input { accent-color: var(--accent); }
+.lm-tick input { flex: none; accent-color: var(--accent); }
 
 .lm-dest { margin: 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-ctl); display: flex; flex-direction: column; gap: var(--space-3); }
 .lm-dest legend { padding: 0 var(--space-2); color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .lm-dest__row { display: flex; gap: var(--space-3); align-items: flex-start; color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
-.lm-dest__row input { margin-top: var(--space-1); accent-color: var(--accent); }
+.lm-dest__row input { flex: none; margin: calc((var(--lh-3) - 1rem) / 2) 0 0; accent-color: var(--accent); }
 .lm-dest__row small { display: block; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .lm-dest__row--off strong { color: var(--ink-3); }
 .lm-lock { display: flex !important; gap: var(--space-2); align-items: flex-start; }
@@ -43,3 +44,8 @@
 
 .lm-disc summary { cursor: pointer; color: var(--ink-1); font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .lm-actions__head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+
+/* Tables inside the Limits cards fit the card (fix-wave D23/M-30): tight cells, long text wraps, the date stays whole. */
+.lm-card .ui-dt__table th, .lm-card .ui-dt__table td { padding: 0 var(--space-2); }
+.lm-card .ui-dt__table td { white-space: normal; padding-top: var(--space-2); padding-bottom: var(--space-2); }
+.lm-card .ui-dt__table td:first-child { white-space: nowrap; }

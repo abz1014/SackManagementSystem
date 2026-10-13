@@ -18,3 +18,9 @@
 .pc-dialog { display: flex; flex-direction: column; gap: var(--space-3); }
 .pc-dialog p { margin: 0; }
 .pds--compact .pds__lead { font-size: var(--fs-2); line-height: var(--lh-2); }
+
+/* The product table fits its card at 1366 (fix-wave D23): tight cells, long codes wrap, the Retire column stays in view. */
+.pc-card .ui-dt__frame { margin: 0; }
+.pc-card .ui-dt__table th, .pc-card .ui-dt__table td { padding: 0 var(--space-2); }
+.pc-card .ui-dt__table td:first-child { white-space: normal; min-width: 12rem; padding-top: var(--space-1); padding-bottom: var(--space-1); }
+.pc-search { min-width: 0; width: 100%; max-width: 16rem; }

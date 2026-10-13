@@ -6,9 +6,9 @@
 .pb-card__title { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-4)/var(--lh-4) var(--font-sans); }
 
 /* Station cards: the product code is the figure; everything else is quiet. */
-.pb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
-.pb-st { display: flex; flex-direction: column; height: 100%; padding: var(--space-4); border-radius: var(--radius-tile); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.pb-st--idle { background: var(--surface-sunk); box-shadow: inset 0 0 0 1px var(--line); }
+.pb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: var(--space-4); align-items: stretch; margin: 0; padding: 0; list-style: none; }
+.pb-grid > li { display: flex; min-width: 0; }
+.pb-st { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; padding: var(--space-4); border-radius: var(--radius-tile); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .pb-st__top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .pb-st__name { font-size: var(--fs-3); line-height: var(--lh-3); text-align: left; }
 .pb-st__badge { padding: var(--space-1) var(--space-3); border-radius: var(--radius-pill); background: var(--chip-5-bg); color: var(--chip-5-fg); font: var(--fw-semibold) var(--fs-1)/var(--lh-1) var(--font-sans); }
@@ -20,7 +20,7 @@
 .pb-st__retired { margin-left: var(--space-2); color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); letter-spacing: 0; }
 .pb-st__colour { margin: 0; min-height: var(--lh-3); color: var(--ink-2); font: var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans); }
 .pb-st__limits { margin: var(--space-1) 0 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
-.pb-st__facts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) var(--space-4); margin: var(--space-4) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.pb-st__facts { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .pb-st__facts div:last-child { grid-column: 1 / -1; }
 .pb-st__facts dt { color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
 .pb-st__facts dd { margin: var(--space-1) 0 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
@@ -28,7 +28,7 @@
 
 /* Product changes timeline. */
 .pb-changes { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.pb-changes li { display: grid; grid-template-columns: 9rem 6.5rem 1fr; align-items: baseline; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.pb-changes li { display: grid; grid-template-columns: 9rem 6.5rem minmax(0, 1fr); align-items: baseline; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
 .pb-changes li:last-child { border-bottom: 0; }
 .pb-changes__when { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .pb-changes .ui-link { justify-self: start; }
@@ -47,3 +47,5 @@
   .pb-grid { grid-template-columns: minmax(0, 1fr); }
   .pb-changes li { grid-template-columns: 1fr; gap: var(--space-1); }
 }
+
+.pb-st > :has(+ .pb-st__facts) { margin-bottom: var(--space-4); }

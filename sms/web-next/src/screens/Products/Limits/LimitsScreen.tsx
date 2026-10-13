@@ -20,6 +20,7 @@
  *  - EVERY FETCH HAS ITS OWN FAILURE STATE that names the part.
  */
 import { C, FRAGMENTS, withFragments } from '../../../copy';
+import { fmtAppDateTime, fmtDateTime } from '../../../lib/fmt';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ApiError,
@@ -35,7 +36,7 @@ import {
   type ProductOption,
   type TimelineEntry,
 } from '../../../bridge/api';
-import { fmt, pdasWords, productLabel } from '../../../bridge/lib';
+import { pdasWords, productLabel } from '../../../bridge/lib';
 import { useData } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { DataTable, type Column } from '../../../ui/DataTable';
@@ -173,7 +174,7 @@ function InForce({ product }: { product: LimitHistoryProduct }) {
   const v = product.versions[0];
   if (!v || v.setpointG == null || v.offsetMinusG == null || v.offsetPlusG == null) return <p className="lm-note">{LM.noLimits}</p>;
   const r = rangeOf(v.setpointG, v.offsetMinusG, v.offsetPlusG);
-  const when = `${fmt.fmtDay(v.effectiveFromPlant)} ${fmt.fmtClock(v.effectiveFromPlant)}`;
+  const when = fmtDateTime(v.effectiveFromPlant);
   return (
     <div className="lm-now">
       <span className="lm-cap">{LM.inForceNow}</span>
@@ -381,7 +382,7 @@ function Versions({ product }: { product: LimitHistoryProduct }) {
     { key: 'limits', header: LM.colLimits, render: (v) => <strong>{versionLabel(v)}</strong> },
     {
       key: 'from', header: LM.colFrom,
-      render: (v) => <>{v.effectiveIsLowerBound && <span className="lm-note">{LM.noBound} </span>}{fmt.fmtDay(v.effectiveFromPlant)} {fmt.fmtClock(v.effectiveFromPlant)}</>,
+      render: (v) => <>{v.effectiveIsLowerBound && <span className="lm-note">{LM.noBound} </span>}{fmtDateTime(v.effectiveFromPlant)}</>,
     },
     { key: 'source', header: LM.colSource, render: (v) => LM.sources[v.source] ?? v.source },
     { key: 'by', header: LM.colBy, render: (v) => v.changedBy ?? '—' },
@@ -441,7 +442,7 @@ function ActionHistory({ nonce }: { nonce: number }) {
     </span>
   );
   const cols: Column<ProductChangeEntry>[] = [
-    { key: 'when', header: LM.colWhen, render: (c) => fmt.fmtAppInstant(c.changedAtUtc) },
+    { key: 'when', header: LM.colWhen, render: (c) => fmtAppDateTime(c.changedAtUtc) },
     { key: 'who', header: LM.colWho, render: (c) => c.changedByName ?? '—' },
     {
       key: 'action', header: LM.colAction,
@@ -450,7 +451,7 @@ function ActionHistory({ nonce }: { nonce: number }) {
           <strong>{c.procName ?? c.operation}</strong>
           {c.productId != null && <small className="lm-sub2">{LM.productN(c.productId)}</small>}
           {c.palletId != null && <small className="lm-sub2">{LM.palletN(c.palletId)}</small>}
-          {c.effectiveFromUtc && <small className="lm-sub2">{LM.effective(fmt.fmtAppInstant(c.effectiveFromUtc))}</small>}
+          {c.effectiveFromUtc && <small className="lm-sub2">{LM.effective(fmtAppDateTime(c.effectiveFromUtc))}</small>}
         </>
       ),
     },
@@ -480,7 +481,7 @@ function ActionHistory({ nonce }: { nonce: number }) {
         <Segmented label={LM.filterLabel} options={filters} value={filter} onChange={(f) => setFilter(f as Filter)} />
       </div>
       {first.status === 'error' && <ErrorState part={LM.loadingActions} cause={first.error} onRetry={first.refresh} />}
-      {first.status === 'loading' && <Skeleton part={LM.loadingActions} lines={4} onRetry={first.refresh} />}
+      {first.status === 'loading' && <Skeleton part={LM.loadingActions} rows={5} onRetry={first.refresh} />}
       {first.data && (
         <DataTable
           columns={cols}
@@ -504,7 +505,7 @@ function Timeline() {
   const t = useData('the running-product record', getProductTimeline, 'lm:timeline', { live: false });
   const rows: TimelineEntry[] = [...(t.data?.timeline ?? [])].sort((a, b) => (b.changedAt ?? '').localeCompare(a.changedAt ?? ''));
   const cols: Column<TimelineEntry>[] = [
-    { key: 'from', header: LM.colFrom, render: (r) => (r.effectiveFrom == null ? '—' : fmt.fmtAppInstant(r.effectiveFrom)) },
+    { key: 'from', header: LM.colFrom, render: (r) => (r.effectiveFrom == null ? '—' : fmtAppDateTime(r.effectiveFrom)) },
     { key: 'product', header: LM.colProduct, render: (r) => r.productLabel },
     { key: 'by', header: LM.colBy, render: (r) => r.changedBy ?? '—' },
     { key: 'reason', header: LM.colReason, render: (r) => r.reason ?? '—' },
@@ -513,7 +514,7 @@ function Timeline() {
     <section className="lm-card" aria-labelledby="lm-timeline">
       <h2 id="lm-timeline" className="lm-h2">{LM.timelineTitle}</h2>
       {t.status === 'error' && <ErrorState part={LM.loadingTimeline} cause={t.error} onRetry={t.refresh} />}
-      {t.status === 'loading' && <Skeleton part={LM.loadingTimeline} lines={3} onRetry={t.refresh} />}
+      {t.status === 'loading' && <Skeleton part={LM.loadingTimeline} rows={4} onRetry={t.refresh} />}
       {t.data && (
         <DataTable columns={cols} rows={rows} rowKey={(r) => String(r.timelineId)} caption={LM.timelineTitle} empty={<p className="lm-note">{LM.noTimeline}</p>} />
       )}

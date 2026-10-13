@@ -147,6 +147,7 @@ export function applyFilter(cards: readonly BoardCard[], f: Filter): BoardCard[]
 
 export interface BoardChange {
   station: number;
+  stationName: string | null;
   atUtc: string;
   to: BoardProduct | null;
   from: BoardProduct | null;
@@ -156,7 +157,7 @@ export interface BoardChange {
 export function buildChanges(cards: readonly BoardCard[]): BoardChange[] {
   return cards
     .filter((c) => c.change)
-    .map((c) => ({ station: c.station, atUtc: c.change!.atUtc, to: c.product, from: c.change!.from }))
+    .map((c) => ({ station: c.station, stationName: c.stationName, atUtc: c.change!.atUtc, to: c.product, from: c.change!.from }))
     .sort((a, b) => (a.atUtc < b.atUtc ? 1 : a.atUtc > b.atUtc ? -1 : a.station - b.station));
 }
 

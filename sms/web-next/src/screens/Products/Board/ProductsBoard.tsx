@@ -15,7 +15,8 @@ import { useMemo, useState } from 'react';
 import { getCurrentProduct, getProducts, getProduction, setCurrentProduct, type ProductOption, type TimelineEntry } from '../../../bridge/api';
 import { fmt, generationWords, period as P, productLabel } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
-import { C, formatClock, formatDate, withFragments, FRAGMENTS } from '../../../copy';
+import { C, withFragments, FRAGMENTS } from '../../../copy';
+import { fmtAppDate, fmtDate, fmtTime } from '../../../lib/fmt';
 import { useData, useMachinesRunning, usePeriod, type DataState } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { Disclosure } from '../../../ui/Disclosure';
@@ -39,7 +40,7 @@ const B = PC.board;
 
 /** "1 Sep, 19:55": a plant-clock instant without the year (the period on screen carries it). */
 export function stamp(at: string): string {
-  return `${formatDate(at).replace(/ \d{4}$/, '')}, ${formatClock(at)}`;
+  return `${fmtDate(at).replace(/ \d{4}$/, '')}, ${fmtTime(at)}`;
 }
 
 function key(period: P.Period): string {
@@ -210,7 +211,7 @@ function Body({ route, rank, go, period }: ScreenProps & { period: P.Period }) {
               {changes.map((ch) => (
                 <li key={ch.station}>
                   <time className="pb-changes__when" dateTime={ch.atUtc}>{stamp(ch.atUtc)}</time>
-                  <button type="button" className="ui-link" onClick={() => openStation(ch.station)}>{B.station(ch.station)}</button>
+                  <button type="button" className="ui-link" onClick={() => openStation(ch.station)}>{ch.stationName ?? B.station(ch.station)}</button>
                   <span>{B.changeLine(describe(ch.to), ch.from ? describe(ch.from) : null)}</span>
                 </li>
               ))}
@@ -231,7 +232,7 @@ function Body({ route, rank, go, period }: ScreenProps & { period: P.Period }) {
 
 function describe(p: BoardProduct | null): string {
   if (!p) return B.noProduct;
-  return p.colour ? `${p.code} ${p.colour}` : p.code;
+  return p.label;
 }
 
 /* ------------------------------------------------------------ station card */
@@ -251,7 +252,7 @@ function StationCard({ card, onOpen }: { card: BoardCard; onOpen: () => void }) 
       {p ? (
         <>
           <p className="pb-st__code">
-            {p.code}
+            {p.label}
             {p.retired && <span className="pb-st__retired">{W.retiredProduct.marker}</span>}
           </p>
           <p className="pb-st__colour">{p.colour ?? ' '}</p>
@@ -321,12 +322,11 @@ function DefaultProduct({ rank, current, products, productsFailed, facts, labels
     body = cur ? (
       <>
         <p className="pb-def__name">
-          {f ? f.code : cur.productLabel}
-          {f?.colour ? <span className="pb-def__colour"> {f.colour}</span> : null}
+          {f ? f.label : cur.productLabel}
           {f?.retired && <span className="pb-st__retired">{W.retiredProduct.marker}</span>}
         </p>
         {limits && <p className="pb-st__limits">{limits}</p>}
-        <p className="pds__note">{cur.changedBy ? B.defaultSetBy(cur.changedBy, formatDate(cur.effectiveFrom)) : B.defaultSetOn(formatDate(cur.effectiveFrom))}</p>
+        <p className="pds__note">{cur.changedBy ? B.defaultSetBy(cur.changedBy, fmtAppDate(cur.effectiveFrom)) : B.defaultSetOn(fmtAppDate(cur.effectiveFrom))}</p>
         <p className="pds__note">{B.defaultOnlyUsed}</p>
         <button type="button" className="ui-link" onClick={() => onSeeCatalogue(cur.productId)}>{B.defaultSeeCatalogue}</button>
       </>

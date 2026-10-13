@@ -23,3 +23,9 @@
 .pds__rows { display: flex; flex-wrap: wrap; gap: var(--space-5); margin: 0; padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .pds__rows dt { color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
 .pds__rows dd { margin: var(--space-1) 0 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+
+/* Form fit (fix-wave D1/D2): every field fills its column and never pushes past the card. */
+.co .wr-field, .lm .wr-field, .pb-def .wr-field, .pc-card .wr-field { min-width: 0; }
+.co .wr-input, .lm .wr-input, .pb-def .wr-input, .pc-card .wr-input { box-sizing: border-box; width: 100%; max-width: 100%; }
+.co .wr-input-wrap, .lm .wr-input-wrap { width: 100%; min-width: 0; }
+.co textarea.wr-input, .lm textarea.wr-input { display: block; resize: vertical; }

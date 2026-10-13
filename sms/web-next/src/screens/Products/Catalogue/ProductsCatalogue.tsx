@@ -33,6 +33,9 @@ import '../products.css';
 import './catalogue.css';
 const PC = withFragments(C.products, FRAGMENTS.productsParts);
 
+/** COPY-REQUEST (fix-wave T3, D23): the placeholder was cut off in its own box; T7 folds this into copy.ts as catalogue.searchHint. */
+const COPY_REQUEST_T3 = { searchHint: 'Code, colour or tube' }; // COPY-REQUEST
+
 const K = PC.catalogue;
 const REASON_ID = 'pds-reason';
 
@@ -260,7 +263,7 @@ export function ProductsCatalogueScreen({ route, rank, go }: ScreenProps) {
                 className="wr-input"
                 type="search"
                 value={query}
-                placeholder={K.searchHint}
+                placeholder={COPY_REQUEST_T3.searchHint}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
@@ -273,7 +276,7 @@ export function ProductsCatalogueScreen({ route, rank, go }: ScreenProps) {
           </p>
         )}
         {products.status === 'loading' ? (
-          <Skeleton part={K.productsPart} height={320} onRetry={products.refresh} />
+          <Skeleton part={K.productsPart} rows={6} onRetry={products.refresh} />
         ) : products.status === 'error' || !rows ? (
           <ErrorState part={K.productsPart} cause={products.error ?? undefined} onRetry={products.refresh} />
         ) : (
