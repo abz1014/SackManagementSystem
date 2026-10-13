@@ -73,7 +73,7 @@ export function SetupScreen({ currentUsername }: { currentUsername?: string }) {
 
 /* ----------------------------------------------------------------- people */
 
-function People({ currentUsername }: { currentUsername?: string }) {
+export function People({ currentUsername }: { currentUsername?: string }) {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -344,7 +344,7 @@ function ResetPassword({ user }: { user: AdminUser }) {
 
 /* -------------------------------------------------------------- audit log */
 
-function AuditLog() {
+export function AuditLog() {
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);

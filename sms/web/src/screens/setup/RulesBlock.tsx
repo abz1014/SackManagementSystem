@@ -42,7 +42,8 @@ const DEFAULT_WEIGHT = { basis: 'as_recorded' as Basis, coneTubeWeightG: 70, sac
 const DEFAULT_SHIFT = { morningStart: '06:00', eveningStart: '14:00', nightStart: '22:00', mode: 'corrected' as ShiftMode, nightBelongsTo: 'start_day' as NightBelongsTo };
 const DEFAULT_PLAUSIBILITY = { coneLoG: 1500, coneHiG: 2100, sackLoKg: 40, sackHiKg: 60 };
 
-export function RulesBlock() {
+/** `withProductLimits` defaults to true (the old Setup); web-next sets it false because Products > Limits owns that block (IA-MAP). */
+export function RulesBlock({ withProductLimits = true }: { withProductLimits?: boolean } = {}) {
   const res = useResource(() => adminGetRules());
 
   // Finding H14 (Sep 2026 audit): this used to swallow a fetch failure into
@@ -58,7 +59,7 @@ export function RulesBlock() {
         <WeightForm key={JSON.stringify(rules.weight)} rules={rules} onSaved={res.reload} />
         <ShiftForm key={JSON.stringify(rules.shift)} rules={rules} onSaved={res.reload} />
         <PlausibilityForm key={JSON.stringify(rules.plausibility)} rules={rules} onSaved={res.reload} />
-        <ProductLimitsBlock />
+        {withProductLimits && <ProductLimitsBlock />}
       </div>
     </Block>
   );

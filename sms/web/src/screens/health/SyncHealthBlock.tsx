@@ -91,7 +91,7 @@ type RawDqTable = (typeof RAW_TABLES)[number];
 function isRawDqTable(v: string): v is RawDqTable {
   return (RAW_TABLES as readonly string[]).includes(v);
 }
-function dqRawTableFor(subjectTable: string | null): RawDqTable | null {
+export function dqRawTableFor(subjectTable: string | null): RawDqTable | null {
   if (subjectTable == null) return null;
   if (subjectTable === 'cone_event') return 'cone_raw';
   if (subjectTable === 'sack_event') return 'sack_raw';

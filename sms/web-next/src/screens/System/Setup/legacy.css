@@ -1,0 +1,55 @@
+/*
+ * Restyles the old Setup sections (reused through bridge/system.ts) in the redesign's tokens. Everything is scoped to
+ * .sy-legacy, so nothing here reaches another screen. The old blocks wrap themselves in .page and (when not first)
+ * .band; in the redesign those names are the page grid and the status band, so they are neutralised here.
+ */
+.sy-legacy .band { padding: 0; border-radius: 0; background: none; box-shadow: none; }
+.sy-legacy .page { display: block; max-width: none; margin: 0; padding: 0; }
+.sy-legacy .block { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; padding: 0; border: 0; }
+.sy-legacy .block > div { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.sy-legacy .h2 { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+.sy-legacy .note { color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.sy-legacy p { margin: 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.sy-legacy .mut { color: var(--ink-3); }
+.sy-legacy .sm { font-size: var(--fs-2); line-height: var(--lh-2); }
+.sy-legacy .acc { color: var(--ink-1); font-weight: var(--fw-semibold); }
+.sy-legacy .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* tables */
+.sy-legacy .tw { overflow-x: auto; }
+.sy-legacy table { width: 100%; border-collapse: collapse; font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.sy-legacy th { padding: var(--space-3) var(--space-4); background: var(--surface-sunk); color: var(--ink-3); font: var(--fw-semibold) var(--fs-1)/var(--lh-1) var(--font-sans); text-align: left; white-space: nowrap; }
+.sy-legacy td { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); color: var(--ink-2); vertical-align: top; }
+.sy-legacy th.n, .sy-legacy td.n { text-align: right; }
+
+/* forms: label.field is a wrapper in the old markup, an input style in the redesign */
+.sy-legacy label.field { display: flex; flex-direction: column; gap: var(--space-1); height: auto; padding: 0; border: 0; background: none; }
+.sy-legacy label.field > span { color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.sy-legacy input, .sy-legacy select { min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.sy-legacy td input, .sy-legacy td select { min-height: 0; }
+.sy-legacy input:focus-visible, .sy-legacy select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.sy-legacy input:disabled, .sy-legacy select:disabled { background: var(--surface-sunk); color: var(--ink-3); }
+.sy-legacy input[type="checkbox"] { min-height: 0; }
+.sy-legacy .row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.sy-legacy .row.top { align-items: flex-start; }
+
+/* buttons */
+.sy-legacy .btn { display: inline-flex; align-items: center; justify-content: center; height: auto; min-height: var(--control-h); padding: 0 var(--space-4); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); box-shadow: none; font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); cursor: pointer; }
+.sy-legacy .btn:hover { background: var(--surface-sunk); }
+.sy-legacy .btn.primary { border-color: transparent; background: var(--accent); color: var(--on-accent); box-shadow: var(--elev-accent); }
+.sy-legacy .btn.primary:hover { background: var(--accent-hover); }
+.sy-legacy .btn:disabled { background: var(--surface-sunk); color: var(--ink-3); box-shadow: none; cursor: default; }
+.sy-legacy .btn.sm { min-height: 0; padding: var(--space-1) var(--space-3); }
+.sy-legacy .btn:focus-visible, .sy-legacy .linkish:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.sy-legacy .linkish { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.sy-legacy .linkish:hover { color: var(--accent-hover); }
+.sy-legacy .linkish:disabled { color: var(--ink-3); cursor: default; text-decoration: none; }
+
+/* states the old blocks print */
+.sy-legacy .state { padding: var(--space-4) 0; color: var(--ink-2); }
+.sy-legacy .skel { display: block; height: 16px; border-radius: var(--radius-ctl); background: var(--surface-sunk); }
+.sy-legacy .skel.short { width: 60%; }
+.sy-legacy .details > summary { color: var(--accent); cursor: pointer; font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.sy-legacy .kv { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-5); }
+.sy-legacy .kv dt { color: var(--ink-3); }
+.sy-legacy .kv dd { margin: 0; }
