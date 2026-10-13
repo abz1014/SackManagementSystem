@@ -71,8 +71,13 @@ export function usePeriod(): PeriodState {
       )
     : null;
 
-  const failed = liveD.status === 'error' ? [liveD.part] : [];
-  const status = failed.length ? 'error' : period ? 'ok' : 'loading';
+  // A failed range fetch is named, never silent: the period may still resolve
+  // from the live anchor, but firstDay / the data-as-of fallback are then missing.
+  const failed = [
+    ...(liveD.status === 'error' ? [liveD.part] : []),
+    ...(rangeD.error !== null ? [rangeD.part] : []),
+  ];
+  const status = liveD.status === 'error' ? 'error' : period ? 'ok' : 'loading';
 
   const setParams = useCallback((p: P.PeriodParams) => push((s) => P.writePeriodParams(s, p)), []);
   const setCompare = useCallback(

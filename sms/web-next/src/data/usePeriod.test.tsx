@@ -44,4 +44,11 @@ describe('usePeriod', () => {
     expect(api.failed).toEqual(['plant clock']);
     expect(api.period).toBeNull();
   });
+  it('names a failed data-range fetch but still resolves the period', async () => {
+    installFakeFetch({ ...routes, '/api/range': new Response('{}', { status: 500 }) });
+    render(<Probe />);
+    await waitFor(() => expect(api.failed).toEqual(['data range']));
+    expect(api.status).toBe('ok');
+    expect(api.period).not.toBeNull();
+  });
 });

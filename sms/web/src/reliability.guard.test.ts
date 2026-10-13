@@ -209,10 +209,6 @@ const ALLOW_LIST: Record<string, string> = {
  * genuine finding.
  */
 const KNOWN_DEFECTS: Record<string, string> = {
-  // Found by extending GUARD 1 to web-next (B5). usePeriod.ts reads rangeD.data only (dataAsOfUtc fallback and
-  // firstDay); only liveD.status feeds `failed`, so a failed data-range fetch silently yields firstDay null.
-  // Owner of usePeriod.ts to fix (add rangeD to `failed`); delete this entry then.
-  'web-next/src/data/usePeriod.ts:rangeD': 'data-range failure not surfaced; firstDay/dataAsOfUtc fallback fall silent',
 };
 
 describe('GUARD 1 — every usePolling() error is read, surfaced, or a written exception', () => {
