@@ -18,6 +18,20 @@ The plant runs Siemens S7-1500 PLCs that weigh every cone and every sack; readin
 
 ## Current phase
 
+### Performance (Phase 3) - 12 Oct 2026 - 3 fixes committed (2 performance, 1 report wording); 9 recorded; nothing verified on the plant
+
+**Result.** Whole-app performance measured on this dev PC only (harness, `sms_audit`, render token, loopback, Edge via Playwright). Two candidates passed the decision rule and were committed: P3-01 (identical simultaneous requests share one computation, D-311 `581f6fc`) and P3-04 (Report, Setup, Health and Wall load as separate chunks, D-312 `45a31f8`). X-3c (D-313 `6bb6286`) closed the open Stage 3 gap: the machine-product report now says when a period is empty, so all 18 report types do. 9 candidates are recorded with numbers and proposals; 4 were refuted (polling churn, static revalidation, render cost, D-55 slowness). Full account `PERFORMANCE-2026-10-12.md`; register `DEFECTS.md` Part 18 (Part 17 is Stage 3).
+
+**Measured gains (RV, ABAB, N=7; IQR in the report).** P3-01, four identical cold requests at once over 34 days: SQL round trips down 73 to 75 % on all four routes; management-summary 12,596 to 4,284 ms, spc 2,868 to 1,785 ms; weight-stations 4,264 to 3,172 ms is marginal; production no time gain. P3-04: Line's first load 642,671 to 468,570 B of JavaScript (-174,101 B) with NO measured time gain (inside noise); one route switch (Line to Weight) +128 ms was called noise, not re-confirmed.
+
+**What the measurements say.** Slowest cold request at 34 days: `/api/spc` 3.9-4.3 s; composite reports 2.8-2.9 s. Management-summary PDF failed (502) in 3 of 5 concurrent runs, never alone. D-55 re-measured 417 ms (was 1.27 s). Polling is clean on a closed period.
+
+**Gate (G1r, HEAD `7bcc386` plus the three items).** Typecheck clean; vitest twice identical **404 files passed / 1 skipped, 4,183 tests passed / 4 skipped, 0 failed**; layout 422 listed, **384 passed, 38 skipped, 0 failed**; mirror **417 passed, 5 failed** (the same 5 known); RV sweep PASS (42 server paths, 0 regressions). The re-gate on the committed HEAD is the orchestrator's.
+
+**NOT verified.** The plant PC, IFL's server, a real LAN/Wi-Fi, many real users, a signed-in session, growth with months of data (inference only), the 10 Jul - 5 Aug month, live running data, a warm-cache browser reload, the cause of the PDF 502 and of a 10.0 s SQL outlier, SQL plan warnings (scripts prepared, never run). No time gain was shown for P3-04. The owner's API on :4000 was never contacted and still runs old code until restarted after `npm run build`.
+
+**Next, owner decisions.** (1) IDX-1/IDX-2 on a scratch restore of `sms` (never IFL's). (2) Response compression (a new package). (3) PDF queue. (4) Shared scope lookups across report services and an `/api/spc` profile. (5) Cache time and polling are owner/IFL settings, untouched. Phase 4 only with owner approval. Commit count: `git rev-list --count origin/main..HEAD` measured 507 at `6bb6286`, before the docs commits.
+
 ### Stage 3: owner items after the CSS recovery (12 Oct 2026) - C-005, F-1, F-2, X-1, X-2, X-3 and the four CSS follow-ups committed; one gap open (X-3 on the machine-product report; 17 of 18 types done by D-310); nothing verified on the plant
 
 **Result.** Ten items in 12 commits (`ea16464`..`b6a1767`, `DEFECTS.md` Part 17, D-300 to D-309), built on the recovery's HEAD `fca25f0` (the entry below). No migration, no new table or column, no database write: every new figure is derived at read time (owner constraint, 8 Oct 2026).

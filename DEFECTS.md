@@ -2247,6 +2247,8 @@ Programme built 1 Oct 2026; its final gate and the live verification below were 
 | D-55 | LOW | **New, found by this gate.** A cold `GET /api/reports/rejected-hangers` over the 34-day September range took 1.27 s (897 KB, 6,089-row list); July (19 days) 0.86 s; repeat calls 0.20 s (cache). The acceptance target was under 1 s. | **OPEN, noted.** Cold SQL Server Express on the dev box; the screen shows 500 rows. Not a correctness defect. |
 | D-56 | LOW | **New, found by this gate.** The Vite dev server on :5173 and the dev API preview were not running when the gate began, so `npm run test:layout` was pointed at the built web served by the API on :4000 (`SMS_WEB_URL`). | Not a product defect; recorded so the layout result is read as "against the production build served by the API", not "against Vite". |
 
+12 Oct 2026 (Phase 3): re-measured with the harness on `sms_audit` (median of 5 after a warm-up): 34 days 417 ms (IQR 6 ms, 897 KB, 12 round trips); July 19 days 391 ms (IQR 7 ms). The 1 s target is met under this method; the method differs from the 2 Oct one, so the status is left to the owner. Not verified on the plant. See Part 18.
+
 **Narrow-width layout defects** found during the programme are already recorded in Part 13's addenda (A1 top-bar "Pick dates" overlap, A5 Health data-batches overprint, the S35 / D09 follow-up) and are not renumbered here.
 
 ### Live verification, 2 Oct 2026
@@ -2795,3 +2797,38 @@ All four were covered by the S3-W3 re-check (248 cells, PASS) and the S3-W3 gate
 - Residuals unchanged from Part 16 section 7 (CSS-016 and 044 record-only; Readings 57 px at 375; IFL tables at Wall size; Sacks stock-note overlap); CSS-033 leaves 5 of 26 shift-production dates split at 768.
 - **Not verified:** the plant or IFL's server; a printer (print emulated, browser PDFs only); a person looking at any screen or printed page or opening a workbook in Excel; a signed-in viewer, engineer or manager session (render token only; Setup not swept); F-1 on live running data (the snapshot ends 7 Sep); touch; Urdu; Windows high-contrast beyond forced-colours emulation. The 10 Jul to 5 Aug month was never sent by IFL, so F-1 and F-2 are unproven on it (July carries no product anyway).
 - **The owner's API on :4000 still runs the old code until restarted after `npm run build`**; it was never contacted. `npm run typecheck` refreshed `api/dist` during the gates (sanctioned).
+
+## Part 18 - 12 Oct 2026: performance (Phase 3)
+
+(The brief called this Part 17; Part 17 already exists for Stage 3, so this one is Part 18. D-numbers continue at D-311.) Measured on the dev PC, `sms_audit`, harness render token, loopback; relative evidence only; nothing verified on the plant. Report: `PERFORMANCE-2026-10-12.md`.
+
+### Committed items (performance, not correctness)
+| D | Pid | Sev | Item | Before | After (N=7 ABAB; IQR in the report) | SHA |
+|---|---|---|---|---|---|---|
+| D-311 | P3-01 | S3 | Identical simultaneous cold requests share one computation | 4 at once, 34 days: SQL round trips 52 / 100 / 36 / 628 (production / weight-stations / spc / management-summary); management-summary 12,596 ms (IQR 346) | round trips 13 / 25 / 9 / 172 (-73 to -75 %); management-summary 4,284 ms (340), spc 2,868 to 1,785 ms; weight-stations 4,264 to 3,172 ms is marginal (gain under 2x IQR); production no gain (-5 %, noise). 342 paths equal apart from /api/health process fields | `581f6fc` |
+| D-312 | P3-04 | S3 | Report, Setup, Health, Wall load as separate chunks | Line first load 642,671 B of JavaScript | 468,570 B (-174,101 B). No measured time gain (Line 2,226 to 2,141 ms, inside noise). Line to Weight route switch +128 ms, called noise (bimodal), not re-confirmed | `45a31f8` |
+| D-313 | X-3c | S4 | Machine-product report says when a period is empty (closes the Stage 3 X-3 gap) | "0 machines, 0 products this period." on 2026-10-05..06 | "No readings in this period - the newest reading is 12:00 PM, 7 Sep."; 2026-09-01..07 unchanged (13 machines, 5 products). All 18 report types now covered. One session-gated spec changed on the orchestrator's authority | `6bb6286` |
+
+Gate G1r (HEAD `7bcc386` with the three items in the tree): typecheck clean; vitest twice identical 404 files / 1 skipped, 4,183 passed / 4 skipped / 0 failed; layout 384 passed / 38 skipped / 0 failed; mirror 417 passed / 5 failed (the same 5 known). RV sweep PASS (42 server paths, 0 regressions). Re-gate on the committed HEAD: the orchestrator's, not recorded here.
+
+### Recorded, not fixed
+| Pid | Numbers | Proposal | Owner |
+|---|---|---|---|
+| P3-02 | report cache HIT still 170-185 ms, 5 queries | remember envelope data inside the cache time, or IDX-2 | may a cached report's freshness line describe the moment it was computed? |
+| P3-03 | spc 3.9-4.3 s at 34 days; management-summary 157 round trips, 25 scope lookups | share one scope lookup per request; profile spc; IDX-1 | approve a later item |
+| P3-08 | management-summary PDF 502 in 3 of 5 concurrent runs (about 36 s), never alone; cause not investigated | investigate; one PDF at a time | queue PDFs? |
+| P3-09 | rejected-hangers 897 KB, spc 795 KB; gzip saves 88-94 % | response compression (a new package) | approve if viewers use LAN or Wi-Fi |
+| P3-10 | newest-day lookup 400 runs, 47.6 s total, 119 ms average; envelope 491 runs, 13,191 reads each | IDX-1, IDX-2 on a scratch restore of `sms` first; never IFL's databases | approve test |
+| P3-11 | Weight sends /api/spc twice, 20 of 20 loads | reuse the first result (P3-01 already shares the server work) | - |
+| P3-12 | newest-day lookup 119 ms average | remember per epoch inside the cache time, or IDX-1 | - |
+| P3-13 | Catalogue: status 3x, products 2x, under 0.3 s | share one fetch | - |
+| P3-14 | rejects by-day-code 1,139 ms at 34 days, uncached, 6 round trips | profile; consider the same cache | - |
+
+### Refuted candidates
+- P3-05 polling churn: a closed period polls only /api/live (5.5-6 per minute); C-137 and C-143 hold.
+- P3-06 static revalidation: 304 in 0.5-2.4 ms on loopback.
+- P3-07 render cost: no long task over 50 ms; script to first figure 62-72 ms.
+- P3-15 D-55 slowness: 417 ms (34 days) and 391 ms (July) against 1.27 s and 0.86 s (different method; dated note under D-55).
+- Triple scope resolution (24 Sep): holds (weight-stations 5 scope-shaped statements at 34 days).
+
+Not verified: the plant PC, IFL's server, a real network, many real users, a signed-in session, growth with months of data, the 10 Jul - 5 Aug month.
