@@ -3,12 +3,16 @@
 .today { display: flex; flex-direction: column; gap: var(--gutter); width: 100%; max-width: var(--page-max); margin: 0 auto; min-width: 0; }
 .today > * { min-width: 0; }
 
-/* ---- status band (page template row 1) ---- */
-.today .band h1 { margin: 0 0 var(--space-2); }
-.today .band .sentence { margin: 0 0 var(--space-3); max-width: 36ch; }
-.today .band .cap { margin: 0; max-width: 72ch; color: var(--ink-2); font-size: var(--fs-2); line-height: var(--lh-2); }
-.today .band .cap + .cap { margin-top: var(--space-1); }
-.today .band-skel { display: block; height: var(--lh-sent); width: min(32ch, 100%); border-radius: var(--radius-ctl); background: var(--surface-sunk); opacity: 0.8; margin-bottom: var(--space-3); }
+/* ---- page head (PageHead) and the caption lines under it; no band card, no dead space ---- */
+.today-head-block { container-type: inline-size; display: flex; flex-direction: column; gap: var(--space-2); }
+.today .ui-pagehead { margin: 0; }
+.today .ui-pagehead__sentence { margin-top: var(--space-2); max-width: 40ch; font-size: var(--fs-sent); line-height: var(--lh-sent); font-weight: var(--fw-bold); color: var(--ink-1); }
+.today-meta { display: flex; flex-direction: column; gap: var(--space-1); }
+.today .today-meta .cap { margin: 0; max-width: 72ch; color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today .band-skel { display: block; height: var(--lh-sent); width: min(32ch, 100%); border-radius: var(--radius-ctl); background: var(--surface-sunk); opacity: 0.8; }
+.today .today-wall { background: var(--surface); color: var(--accent); box-shadow: inset 0 0 0 1px var(--line-strong); text-decoration: none; white-space: nowrap; }
+.today .today-wall:hover { background: var(--accent-tint); }
+@media (max-width: 1023px) { .today .today-wall { display: none; } }
 
 /* ---- KPI row (row 2) ---- */
 .today-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: var(--gutter); }
@@ -30,7 +34,7 @@
 
 .today .heat-grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); }
 
-.today-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gutter); }
+.today-grid { container: today-grid / inline-size; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gutter); }
 .today-grid > * { grid-column: span 12; min-width: 0; }
 @media (min-width: 1024px) {
   .today-grid > .span-7 { grid-column: span 7; }
@@ -59,7 +63,6 @@
 /* ---- phone (TodayPhone board): one column, KPI two per row, stations two per row ---- */
 @media (max-width: 767px) {
   .today { gap: var(--space-4); }
-  .today .band { padding: var(--space-4); }
   .today-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
   .today-kpis > :last-child:nth-child(odd) { grid-column: span 2; }
   .today .heat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -69,3 +72,29 @@
 
 .today-subhead { margin: var(--space-3) 0 0; font-size: var(--fs-3); line-height: var(--lh-3); font-weight: var(--fw-semibold); color: var(--ink-1); }
 .today-links a, .today-links span { white-space: nowrap; }
+
+/* Phone: five cards never leave one alone on a row; one column keeps them the same width. */
+@media (max-width: 479px) {
+  .today-kpis { grid-template-columns: minmax(0, 1fr); }
+  .today-kpis > :last-child:nth-child(odd) { grid-column: auto; }
+}
+
+/* ---- loading placeholders: the real cards and tiles with their text hidden ---- */
+.today-ghost-card { min-width: 0; display: flex; }
+.today-ghost-card > .kpi { flex: 1 1 auto; }
+.today-ghost-card .kpi-chip { visibility: hidden; }
+.today-ghost-card .kpi-figure, .today-ghost-card .kpi-unit, .today-ghost-card .kpi-note, .today-ghost-card .kpi-delta,
+.today-ghost-card .kpi-label { color: transparent; background: var(--surface-sunk); border-radius: var(--radius-ctl); }
+.today-ghost-card .kpi-label { width: max-content; max-width: 100%; }
+.today-stations-ghost { display: flex; flex-direction: column; gap: var(--space-3); }
+.today-stations-ghost > div { pointer-events: none; }
+.today-stations-ghost .cap { color: transparent; }
+.today-stations-ghost .heat-grid * { color: transparent !important; }
+.today-stations-ghost .heat-grid { opacity: .55; }
+.today-ghost { background: var(--surface-sunk); color: transparent; }
+
+/* The status sentence wraps to two lines below about 900 px of head width, so its placeholder reserves two. */
+@container (max-width: 900px) { .today .band-skel { height: calc(var(--lh-sent) * 2); } }
+/* Chart cards while loading: the plot plus the caption lines and legend the loaded frame carries. */
+.today .ui-skel-chart .ck-skel { height: 342px !important; }
+@container today-grid (max-width: 1000px) { .today .ui-skel-chart .ck-skel { height: 376px !important; } }

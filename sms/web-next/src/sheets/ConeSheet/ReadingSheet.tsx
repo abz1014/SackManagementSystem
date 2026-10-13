@@ -11,6 +11,8 @@
  */
 import { stationLabel, type RegisterRow, type RegisterType } from '../../bridge/api';
 import { batchName, fmt, provenance as prov } from '../../bridge/lib';
+import { W } from '../../bridge/words';
+import { fmtAppDateTime } from '../../lib/fmt';
 import { formatClock, formatDate, C, FRAGMENTS, withFragments } from '../../copy';
 import { Disclosure } from '../../ui/Disclosure';
 import { ErrorState } from '../../ui/ErrorState';
@@ -123,7 +125,7 @@ function Detail({ kind, id, row, detail, route, go }: { kind: RegisterType; id: 
 
   return (
     <div className="rd">
-      <div className="rd-big">{isSack ? fmt.fmtKg(row.weight_kg) : row.weight_g == null ? R.notWeighed : fmt.fmtG(row.weight_g)}</div>
+      <div className="rd-big">{isSack ? fmt.fmtKg(row.weight_kg) : row.weight_g == null ? W.readings.notWeighed : fmt.fmtG(row.weight_g)}</div>
       <p className={`rd-verdict${scaleFailed || coneState === 'low' || coneState === 'high' ? ' rd-verdict--flag' : ''}`}>{headline}</p>
       {limitsLine !== null && <div className="rd-limits">{limitsLine}</div>}
 
@@ -136,7 +138,7 @@ function Detail({ kind, id, row, detail, route, go }: { kind: RegisterType; id: 
         </div>
         <div>
           <dt>{R.shift}</dt>
-          <dd>{String(row.shift_code)}</dd>
+          <dd>{W.shiftName[row.shift_code as keyof typeof W.shiftName] ?? String(row.shift_code)}</dd>
         </div>
         {!isSack && station !== null && (
           <div>
@@ -219,7 +221,7 @@ function Provenance({ row }: { row: RegisterRow }) {
             <div><dt>{L.sourceRow}</dt><dd>{id(p.sourceRowId)}</dd></div>
             {/* TWO CLOCKS: the plant's insert time is the plant clock; the read time is a genuine instant, in the viewer's zone. */}
             <div><dt>{L.insertedAt}</dt><dd>{p.sourceInsertUtc == null ? dash : `${plantDay(p.sourceInsertUtc)}, ${formatClock(p.sourceInsertUtc, true)}`}</dd></div>
-            <div><dt>{L.readAt}</dt><dd>{p.ingestedAtUtc == null ? dash : fmt.fmtAppInstant(p.ingestedAtUtc)}</dd></div>
+            <div><dt>{L.readAt}</dt><dd>{p.ingestedAtUtc == null ? dash : fmtAppDateTime(p.ingestedAtUtc)}</dd></div>
             <div><dt>{L.transform}</dt><dd>{p.transformVersion == null ? dash : String(p.transformVersion)}</dd></div>
             <div><dt>{L.product}</dt><dd>{prov.describeAttribution(p.attributionMethod, p.attributionConfidence)}</dd></div>
             <div><dt>{L.rawRow}</dt><dd>{id(p.rawId)}</dd></div>

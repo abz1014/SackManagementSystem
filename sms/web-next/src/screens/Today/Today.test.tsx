@@ -520,11 +520,31 @@ describe('empty period (X-3)', () => {
 });
 
 describe('phone and plant PC share one structure (DESIGN-SYSTEM 8)', () => {
-  it('page template order: band, KPI row, stations, then detail', async () => {
+  it('"Open TV wall" is offered at 1024 px and wider and opens the wall; below that it is not offered', async () => {
+    const original = window.matchMedia;
+    const mm = (w: number) => {
+      window.matchMedia = ((q: string) => {
+        const m = /min-width:\s*(\d+)px/.exec(q);
+        return { matches: m ? w >= Number(m[1]) : false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false } as unknown as MediaQueryList;
+      }) as typeof window.matchMedia;
+    };
+    mm(1366);
+    const big = mount();
+    const link = (await screen.findByRole('link', { name: 'Open TV wall' })) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toMatch(/wall=1/);
+    big.unmount();
+    mm(375);
+    mount();
+    await screen.findByRole('heading', { level: 1, name: 'Today' });
+    expect(screen.queryByRole('link', { name: 'Open TV wall' })).toBeNull();
+    window.matchMedia = original;
+  });
+
+  it('page template order: page head, KPI row, stations, then detail', async () => {
     const { container } = mount();
     await waitFor(() => expect(container.querySelector('.tile')).not.toBeNull());
     const order = [...container.querySelector('.today')!.children].map((e) => e.className.split(' ')[0]);
-    expect(order.indexOf('band')).toBe(0);
+    expect(order.indexOf('today-head-block')).toBe(0);
     expect(order.indexOf('today-kpis')).toBe(1);
     expect(order.indexOf('today-kpis')).toBeLessThan(order.findIndex((c) => c === 'card'));
     expect(container.querySelectorAll('.today-kpis .kpi')).toHaveLength(5);

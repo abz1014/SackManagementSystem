@@ -8,6 +8,7 @@
  */
 import { getSackMovements, type SackMovement } from '../../bridge/api';
 import { fmt } from '../../bridge/lib';
+import { fmtAppDateTime } from '../../lib/fmt';
 import { RESERVED, formatClock, formatDate, C, FRAGMENTS, withFragments } from '../../copy';
 import { useData } from '../../data';
 import { DataTable, type Column } from '../../ui/DataTable';
@@ -64,7 +65,7 @@ function Body({ day }: { day: string }) {
       render: (m) => (
         <>
           {m.recordedBy?.name ?? R.nobody}
-          <span className="sk-sub">{R.recordedAtOn(fmt.fmtAppInstant(m.recordedAtUtc))}</span>
+          <span className="sk-sub">{R.recordedAtOn(fmtAppDateTime(m.recordedAtUtc))}</span>
         </>
       ),
     },

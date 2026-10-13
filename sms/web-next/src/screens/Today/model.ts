@@ -17,10 +17,16 @@ import type {
 import { period as P } from '../../bridge/lib';
 import { W } from '../../bridge/words';
 import { C, formatClock, formatDate, FRAGMENTS } from '../../copy';
+import { fmtDayShort, fmtTime } from '../../lib/fmt';
 import type { KpiDelta } from '../../ui/KpiCard';
 
 const T = C.today;
 const TF = FRAGMENTS.today;
+
+/** "12:00" when `iso` is on the same plant day as `nowIso`, else "12:00, Mon 7 Sep". Plant clock, 24-hour (lib/fmt). */
+export function clockOn(iso: string, nowIso: string): string {
+  return iso.slice(0, 10) === nowIso.slice(0, 10) ? fmtTime(iso) : `${fmtTime(iso)}, ${fmtDayShort(iso)}`;
+}
 
 /* ---------------------------------------------------------------- numbers */
 

@@ -11,6 +11,8 @@
 import { C, FRAGMENTS } from '../../copy';
 import { getRejectReason, getRejectsByDayCode, getStations, stationLabel, type RejectDayCodeRow, type RejectReasonRow } from '../../bridge/api';
 import { batchName, fmt, period as P } from '../../bridge/lib';
+import { W } from '../../bridge/words';
+import { fmtDate, fmtDayShort, fmtTime } from '../../lib/fmt';
 import { useData } from '../../data';
 import { usePeriod } from '../../data/usePeriod';
 import { hrefFor, plainClick } from '../../ui/nav';
@@ -63,7 +65,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
   const hop = (r: ReturnType<typeof dayRegisterHop>) => ({ href: hrefFor(r), onClick: (e: React.MouseEvent) => plainClick(e, () => go(r)) });
 
   const dayCols: Column<RejectDayCodeRow>[] = [
-    { key: 'day', header: R.colDay, render: (r) => fmt.fmtDay(`${r.day}T12:00:00Z`) },
+    { key: 'day', header: R.colDay, render: (r) => fmtDayShort(`${r.day}T12:00:00Z`) },
     { key: 'count', header: R.colCones, numeric: true, render: (r) => fmtCount(r.count) },
     { key: 'cones', header: R.colConesThatDay, numeric: true, render: (r) => fmtCount(r.cones) },
     { key: 'rate', header: R.colRate, numeric: true, render: (r) => fmtRate(r.ratePct) },
@@ -74,7 +76,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
       header: R.colTimeStation,
       render: (r) => (
         <>
-          <span className="rs-nowrap">{fmt.fmtClock(r.productionTsUtc)}</span>
+          <span className="rs-nowrap">{fmtTime(r.productionTsUtc)}</span>
           <span className="rs-sub">{r.station == null ? '–' : stationLabel(stations.data?.stations.find((x) => x.stationId === r.station), r.station)}</span>
         </>
       ),
@@ -92,13 +94,13 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
         </>
       ),
     },
-    { key: 'weight', header: R.colWeight, numeric: true, render: (r) => (r.weightG == null ? R.notWeighed : fmt.fmtG(r.weightG)) },
+    { key: 'weight', header: R.colWeight, numeric: true, render: (r) => (r.weightG == null ? W.rejectsMore.notWeighed : fmt.fmtG(r.weightG)) },
   ];
 
   return (
     <div className="rs-body">
       {stations.status === 'error' && <p className="rs-note" role="status">{R.stationNamesMissing} {stations.error}</p>}
-      <p className="rs-day">{R.dayBasisLine(fmt.fmtDayLong(id.day))}</p>
+      <p className="rs-day">{R.dayBasisLine(fmtDate(id.day))}</p>
 
       {reason.status === 'error' ? (
         <ErrorState part={RF.part.thisReason} cause={reason.error} onRetry={reason.refresh} />
@@ -126,7 +128,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
         empty={<EmptyState message={R.noDaysForReason} />}
       />
 
-      <h3 className="rs-h">{R.conesOnDay(fmt.fmtDay(`${id.day}T12:00:00Z`))}</h3>
+      <h3 className="rs-h">{R.conesOnDay(fmtDayShort(`${id.day}T12:00:00Z`))}</h3>
       <DataTable<RejectReasonRow>
         caption={R.conesOnDay(id.day)}
         columns={coneCols}

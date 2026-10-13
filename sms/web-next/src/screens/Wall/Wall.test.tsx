@@ -64,7 +64,18 @@ function mount() {
   );
 }
 
-beforeEach(() => localStorage.clear());
+/** matchMedia that answers min-width queries for a viewport of this width (jsdom has none that matches). */
+function viewport(width: number): void {
+  window.matchMedia = ((q: string) => {
+    const m = /min-width:\s*(\d+)px/.exec(q);
+    return { matches: m ? width >= Number(m[1]) : false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false } as unknown as MediaQueryList;
+  }) as typeof window.matchMedia;
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  viewport(1920);
+});
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -79,7 +90,7 @@ describe('Wall in dark Style C', () => {
     await screen.findByText(/Line 3 is running/);
     const root = container.querySelector('.wall.dark');
     expect(root).not.toBeNull();
-    expect(container.querySelector('.wl-clock')?.textContent).toMatch(/Updated\s*5:00/);
+    expect(container.querySelector('.wl-clock')?.textContent).toMatch(/Updated\s*17:00/);
     expect(screen.queryByRole('button', { name: /sign out|log out/i })).toBeNull();
   });
 
@@ -193,6 +204,24 @@ describe('Wall in dark Style C', () => {
     await waitFor(() => expect(container.textContent).not.toMatch(/is running/));
     expect(container.textContent).toMatch(/Not updating since/);
     expect(container.querySelector('.k-cone .wl-kpi-value')?.textContent).toBe('3,089');
+  });
+
+  it('below 1024 px there is no wall: one sentence and a link back to Today (owner decision 13 Oct 2026)', async () => {
+    viewport(375);
+    installFakeFetch(routes());
+    const { container } = mount();
+    expect(await screen.findByText('The TV wall is designed for a large screen')).toBeTruthy();
+    const link = screen.getByRole('link', { name: 'Today' }) as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('?s=today');
+    expect(container.querySelector('.wl-tile')).toBeNull();
+    expect(container.querySelector('.wl-kpis')).toBeNull();
+  });
+
+  it('at exactly 1024 px the wall draws', async () => {
+    viewport(1024);
+    installFakeFetch(routes());
+    mount();
+    await screen.findByText(/Line 3 is running/);
   });
 
   it('offers a small exit link that leaves the wall', async () => {

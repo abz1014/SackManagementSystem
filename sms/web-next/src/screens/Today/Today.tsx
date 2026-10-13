@@ -26,14 +26,16 @@ import { EmptyState } from '../../ui/EmptyState';
 import { ErrorState } from '../../ui/ErrorState';
 import { Icon } from '../../ui/Icon';
 import { KpiCard } from '../../ui/KpiCard';
-import { routeFor } from '../../ui/nav';
+import { hrefFor, plainClick, routeFor } from '../../ui/nav';
+import { PageHead } from '../../ui/PageHead';
+import { useMediaQuery } from '../../ui/useMediaQuery';
 import { Skeleton } from '../../ui/Skeleton';
 import { StationHeatGrid } from '../../ui/StationHeatGrid';
 import { stationText } from '../../ui/StationTile';
 import type { ScreenProps } from '../registry';
 import { AttentionCard, LatestCard, ReasonsCard, SacksSection, ShiftsCard } from './sections';
 import {
-  countDelta, dayRange, isEmptyProduction, kpis, nf0, periodWords, productChanges, changeTime,
+  clockOn, countDelta, dayRange, isEmptyProduction, kpis, nf0, periodWords, productChanges, changeTime,
   rateDelta, ranSentence, stationCounts, stationSentence,
 } from './model';
 import { Hop } from './Hop';
@@ -122,13 +124,14 @@ function TodayBody({
   return (
     <div className="today">
       <Band
-        period={period} prod={prod} spread={spread} stations={stations} spreadKind={spreadKind}
+        route={route} go={go} period={period} prod={prod} spread={spread} stations={stations} spreadKind={spreadKind}
         empty={empty} health={health}
       />
 
       <div className="today-kpis">
         <KpiRow prod={prod} period={period} empty={empty} />
       </div>
+      {prod.status === 'loading' && prodData === null && <p className="today-links today-ghost-links" aria-hidden="true">{' '}</p>}
       {prodData !== null && !empty && (
         <p className="today-links">
           <span>{T.links.label}:</span>
@@ -206,8 +209,10 @@ function emptyMessage(line: ReturnType<typeof live.useLive>['line'], periodIsLiv
 /* ------------------------------------------------------------------ band */
 
 function Band({
-  period, prod, spread, stations, spreadKind, empty, health,
+  route, go, period, prod, spread, stations, spreadKind, empty, health,
 }: {
+  route: Route;
+  go: Go;
   period: P.Period;
   prod: Prod;
   spread: Prod;
@@ -236,7 +241,7 @@ function Band({
       else if (line.state.status === 'stopped') {
         const behind = line.state.behindSeconds;
         first = `${title} ${behind === null ? W.state.stoppedUnknownDuration : W.state.stopped(fmt.fmtSpan(behind))}.`;
-      } else first = `${title} ${W.state.idle(line.dataAsOfUtc ? fmt.fmtClockOn(line.dataAsOfUtc, line.plantNowUtc) : '-')}.`;
+      } else first = `${title} ${W.state.idle(line.dataAsOfUtc ? clockOn(line.dataAsOfUtc, line.plantNowUtc) : '-')}.`;
     }
   } else {
     if (spread.status === 'loading') pending = true;
@@ -249,7 +254,7 @@ function Band({
   const quiet = line && line.dataAsOfUtc && generationWords.hasNewerElsewhere(line.generation)
     ? generationWords.quietBecauseGeneration(
         line.generation,
-        fmt.fmtClockOn(line.dataAsOfUtc, line.plantNowUtc),
+        clockOn(line.dataAsOfUtc, line.plantNowUtc),
         fmt.secondsBetween(line.dataAsOfUtc, line.plantNowUtc) >= 60 ? fmt.fmtSpan(fmt.secondsBetween(line.dataAsOfUtc, line.plantNowUtc)) : null,
       )
     : null;
@@ -257,19 +262,65 @@ function Band({
   const prev = prod.data?.data.previous;
   const caption = `${periodWords(period)}, ${TF.band.plantTime}${prev ? `, ${TF.band.comparedWith(dayRange(prev.from, prev.to))}` : ''}`;
 
+  const sentenceNode = pending && sentence === ''
+    ? <span className="band-skel" role="status" aria-label="Loading the line status" />
+    : sentence;
+  const wallRoute: Route = { ...route, sheet: null, wall: true };
+
   return (
-    <header className="band">
-      <h1>{C.nav.today}</h1>
-      {pending && sentence === '' ? <span className="band-skel" role="status" aria-label="Loading the line status" /> : <p className="sentence">{sentence}</p>}
-      <p className="cap">{caption}.</p>
-      <p className="cap">{T.answers}</p>
-      {quiet && <p className="cap" data-testid="today-generation">{quiet}</p>}
-      {period.live && <p className="cap">{T.band.updatedLive}</p>}
-    </header>
+    <div className="today-head-block">
+      <PageHead
+        title={C.nav.today}
+        sentence={sentenceNode}
+        actions={<OpenWall to={wallRoute} go={go} />}
+      />
+      <div className="today-meta">
+        <p className="cap">{caption}.</p>
+        <p className="cap">{T.answers}</p>
+        {quiet && <p className="cap" data-testid="today-generation">{quiet}</p>}
+        {period.live && <p className="cap">{T.band.updatedLive}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** "Open TV wall": only offered on a large screen (owner decision 13 Oct 2026). jsdom has no matchMedia, so tests see it. */
+const WALL_QUERY = '(min-width: 1024px)';
+function OpenWall({ to, go }: { to: Route; go: Go }) {
+  const hasMedia = typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+  const large = useMediaQuery(WALL_QUERY);
+  if (hasMedia && !large) return null;
+  return (
+    <a className="ui-btn today-wall" href={hrefFor(to)} onClick={(e) => plainClick(e, () => go(to))}>
+      {C.shell.openWall}
+    </a>
   );
 }
 
 /* ------------------------------------------------------------------- KPIs */
+
+/**
+ * The loading row. It is the loaded cards with placeholder figures made invisible, so labels wrap, notes
+ * and delta lines take their room and the row is the height the figures will give it (fix-wave M-15).
+ */
+function KpiGhost() {
+  const cards: { label: string; chip: 1 | 2 | 3 | 4 | 5; value: string; unit?: string; note?: string }[] = [
+    { label: T.kpi.cones, chip: 1, value: '0,000' },
+    { label: T.kpi.sacks, chip: 2, value: '000' },
+    { label: T.kpi.packed, chip: 3, value: '0,000.0', unit: TF.kpi.kg },
+    { label: C.checks.failedInspection, chip: 4, value: '00.0', unit: TF.kpi.percent, note: T.kpi.coneCount('000') },
+    { label: C.checks.failedWeight, chip: 5, value: '0.0', unit: TF.kpi.percent, note: T.kpi.ofCones('0', '0,000') },
+  ];
+  return (
+    <div className="today-kpi-ghost" role="status" aria-busy="true" aria-label={`Loading ${TF.kpi.partName}`} style={{ display: 'contents' }}>
+      {cards.map((c) => (
+        <div key={c.label} className="today-ghost-card" aria-hidden="true">
+          <KpiCard label={c.label} chip={c.chip} icon={<span />} value={c.value} unit={c.unit} note={c.note ?? null} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: boolean }) {
   const status = prod.status === 'loading' ? 'loading' : prod.status === 'error' ? 'error' : empty ? 'empty' : 'ok';
@@ -280,6 +331,7 @@ function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: 
   const live = period.live;
 
   const common = { status, part: TF.kpi.partName, onRetry: prod.refresh } as const;
+  if (status === 'loading') return <KpiGhost />;
   const fmtRate = (r: { pct: number | null; unreadable: boolean }) => (r.unreadable || r.pct === null ? null : r.pct.toFixed(1));
   const rateNote = (r: { n: number | null; of: number | null }, kind: 'inspection' | 'weight'): string | null =>
     r.n === null ? null
@@ -344,10 +396,11 @@ function StationsCard({
           <Hop to={products} go={go}>{T.productChange.link}</Hop>
         </div>
       )}
+      {machines.status === 'loading' && !top && <div className="today-change today-ghost" aria-hidden="true"><p>{' '}<br />{' '}</p></div>}
       {machines.status === 'error' && (
         <p className="cap-sm" role="status">{C.couldntLoad(TF.productChange.partName)}</p>
       )}
-      {stations.status === 'loading' && <Skeleton part={TF.stations.partName} height={240} />}
+      {stations.status === 'loading' && <StationsGhost words={words} />}
       {stations.status === 'error' && (
         <ErrorState part={TF.stations.partName} cause={stations.error ?? undefined} onRetry={stations.refresh} minHeight={160} />
       )}
@@ -367,6 +420,22 @@ function StationsCard({
         </>
       )}
     </section>
+  );
+}
+
+/** The station grid while it loads: fourteen tiles of an OK station, invisible, so the grid has the rows it will have. */
+function StationsGhost({ words }: { words: string }) {
+  const items = Array.from({ length: 14 }, (_, i) => ({
+    station: i + 1, name: null, cones: 397, failedPct: 20.6, state: 'ok' as const, reasons: [], vsTargetG: -7.8, product: '201-IH0-SD',
+  }));
+  return (
+    <div className="today-stations-ghost" role="status" aria-busy="true" aria-label={`Loading ${TF.stations.partName}`}>
+      <div aria-hidden="true" {...({ inert: '' } as object)}>
+        <StationHeatGrid stations={items as never} />
+      </div>
+      <p className="cap" aria-hidden="true">{T.stations.caption(words)}</p>
+      <p className="cap" aria-hidden="true">{T.stations.noCones(`${T.stations.stationsWord(7)} 3, 4, 5, 6, 7, 11, 12`, words)}</p>
+    </div>
   );
 }
 

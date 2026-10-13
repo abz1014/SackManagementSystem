@@ -15,7 +15,7 @@
  *  - Nothing is measured against the browser clock except the age of this
  *    browser's own last answer (a fact about the browser, not the plant).
  */
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { getProduction, type LiveLine, type StationStatusRow } from '../../bridge/api';
 import { fmt, generationWords, health as healthLib, live, period as P, simulatorWords } from '../../bridge/lib';
 import { W } from '../../bridge/words';
@@ -25,7 +25,9 @@ import { useData, usePeriod, useProduction, useStationStatus } from '../../data'
 import { hrefFor, plainClick } from '../../ui/nav';
 import { StatusPill, type UiState } from '../../ui/StatusPill';
 import type { ScreenProps } from '../registry';
-import { readUiScale, wallScale } from '../../ui/uiScale';
+import { readUiScale } from '../../ui/uiScale';
+import { fmtTime } from '../../lib/fmt';
+import { clockOn } from '../Today/model';
 import { inShiftOrder } from './shifts';
 import './wall.css';
 
@@ -54,20 +56,20 @@ function stateSentence(line: LiveLine, anchor: string): string {
         ? `${name} ${W.state.stopped(fmt.fmtSpan(line.state.behindSeconds))}`
         : `${name} ${W.state.stoppedUnknownDuration}`;
     default:
-      return `${name} ${W.state.idle(fmt.fmtClock(anchor))}`;
+      return `${name} ${W.state.idle(fmtTime(anchor))}`;
   }
 }
 
 function lagSentence(health: ReturnType<typeof healthLib.assessHealth>): string {
   switch (health.kind) {
     case 'stale':
-      return W.lag.stale(health.readingUtc ? fmt.fmtClock(health.readingUtc) : '—');
+      return W.lag.stale(health.readingUtc ? fmtTime(health.readingUtc) : '—');
     case 'late':
       return W.lag.late(fmt.fmtSpan(health.lagSeconds));
     case 'ok':
       return health.lagSeconds != null
-        ? W.lag.ok(fmt.fmtClock(health.readingUtc), fmt.fmtSpan(health.lagSeconds))
-        : W.lag.okNoLag(fmt.fmtClock(health.readingUtc));
+        ? W.lag.ok(fmtTime(health.readingUtc), fmt.fmtSpan(health.lagSeconds))
+        : W.lag.okNoLag(fmtTime(health.readingUtc));
     default:
       return W.lag.noData;
   }
@@ -77,9 +79,46 @@ interface Kpi { key: string; label: string; value: string; unit: string; cls: st
 
 /** Waits for the plant clock (which fixes the period), then draws the board. Nothing is fetched for an invented period. */
 /** The Wall honours the old app's saved display scale (localStorage sms.uiScale: 1 Desk, 1.3 Wall). */
-const wallStyleNow = (): CSSProperties => ({ '--wall-scale': wallScale(readUiScale()) } as CSSProperties);
+/* Saved Wall size (1.3) enlarges the board's type 1.25x; wall-dark.css multiplies it into --wall-scale and also steps it down on narrower screens. */
+const wallStyleNow = (): CSSProperties => ({ '--wall-ui': readUiScale() > 1 ? 1.25 : 1 } as CSSProperties);
+
+/** Fix-wave owner decision 13 Oct 2026: the TV wall is for large screens only. No matchMedia (jsdom) counts as large. */
+export const WALL_MIN_WIDTH = 1024;
+function useLargeScreen(): boolean {
+  const q = `(min-width: ${WALL_MIN_WIDTH}px)`;
+  const get = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(q).matches : true);
+  const [large, setLarge] = useState(get);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(q);
+    const on = () => setLarge(mq.matches);
+    on();
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, [q]);
+  return large;
+}
 
 export function WallScreen(props: ScreenProps) {
+  const large = useLargeScreen();
+  if (!large) return <WallNeedsLargeScreen route={props.route} />;
+  return <WallLoader {...props} />;
+}
+
+/** Below 1024 px there is no wall layout: one sentence and the way back to Today. */
+function WallNeedsLargeScreen({ route }: Pick<ScreenProps, 'route'>) {
+  const back = todayRoute(route);
+  return (
+    <div className="wall dark wl wl-small" data-wall data-wall-small style={wallStyleNow()}>
+      <h1 className="wl-small-text">{C.shell.wallNeedsLargeScreen}</h1>
+      <a className="wl-small-link" href={hrefFor(back)} onClick={(e) => plainClick(e, () => window.location.assign(hrefFor(back)))}>
+        {C.nav.today}
+      </a>
+    </div>
+  );
+}
+
+function WallLoader(props: ScreenProps) {
   const { period, status, failed } = usePeriod();
   const { error } = live.useLive();
   if (!period) {
@@ -142,7 +181,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
   const act = sorted ? sorted.filter((s) => s.state === 'act').length : 0;
   const watch = sorted ? sorted.filter((s) => s.state === 'watch').length : 0;
 
-  const hero = knowable ? stateSentence(line, anchor) : sinceUtc ? WC.notUpdatingSince(fmt.fmtClock(sinceUtc)) : WC.notUpdating;
+  const hero = knowable ? stateSentence(line, anchor) : sinceUtc ? WC.notUpdatingSince(fmtTime(sinceUtc)) : WC.notUpdating;
 
   const liveByStation = new Map(line.stations.map((s) => [s.station, s]));
   const quietClock = (id: number): string | null => {
@@ -150,7 +189,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
     if (!r) return null;
     const t = new Date(r.lastTs).getTime();
     if (Number.isNaN(t)) return null;
-    return (new Date(anchor).getTime() - t) / 1000 > QUIET_AFTER_SECONDS ? fmt.fmtClock(r.lastTs) : null;
+    return (new Date(anchor).getTime() - t) / 1000 > QUIET_AFTER_SECONDS ? fmtTime(r.lastTs) : null;
   };
 
   const prodRow = prodD.data?.data.rows[0] ?? null;
@@ -190,7 +229,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
         </div>
         <div className="wl-clock">
           <span>{WC.updated}</span>
-          <b>{fmt.fmtClock(line.plantNowUtc)}</b>
+          <b>{fmtTime(line.plantNowUtc)}</b>
           {exit}
         </div>
       </header>
@@ -254,7 +293,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
         <span>
           {outOfContact ? W.offline : lagSentence(health)}
           {!outOfContact && generationEnded && line.generation && (
-            <> · {generationWords.quietBecauseGenerationShort(line.generation, fmt.fmtClockOn(anchor, line.plantNowUtc)) ?? ''}</>
+            <> · {generationWords.quietBecauseGenerationShort(line.generation, clockOn(anchor, line.plantNowUtc)) ?? ''}</>
           )}
           {generationWords.currentIsSimulator(line.generation) && <> · {simulatorWords.wallSimulatorNote}</>}
           {error && !outOfContact && <> · {W.offline}</>}

@@ -20,7 +20,7 @@ import { EmptyState } from '../../ui/EmptyState';
 import { ErrorState } from '../../ui/ErrorState';
 import { Segmented } from '../../ui/Segmented';
 import { stationText } from '../../ui/StationTile';
-import { Skeleton } from '../../ui/Skeleton';
+import { ChartSkeleton, Skeleton } from '../../ui/Skeleton';
 import type { ScreenProps } from '../registry';
 import { reasonShort } from '../Quality/Rejects/format';
 import { Hop } from './Hop';
@@ -71,8 +71,7 @@ export function ShiftsCard({
   const title = T.shifts.title(spreadKind);
   return (
     <section className="card today-card" aria-label={title}>
-      {!spread.data && <h2>{title}</h2>}
-      {spread.status === 'loading' && <Skeleton part={TF.shifts.partName} height={260} />}
+      {spread.status === 'loading' && !spread.data && <ChartSkeleton part={TF.shifts.partName} />}
       {spread.status === 'error' && <ErrorState part={TF.shifts.partName} cause={spread.error ?? undefined} onRetry={spread.refresh} minHeight={200} />}
       {spread.data && (() => {
         const rows = orderedRows(spread.data.data.rows, spreadKind);
@@ -113,8 +112,7 @@ export function ShiftsCard({
 export function ReasonsCard({ reasons, period }: { reasons: DataState<Envelope<RejectDataFiltered>>; period: P.Period }) {
   return (
     <section className="card today-card" aria-label={T.reasons.title}>
-      {!reasons.data && <h2>{T.reasons.title}</h2>}
-      {reasons.status === 'loading' && <Skeleton part={TF.reasons.partName} height={260} />}
+      {reasons.status === 'loading' && !reasons.data && <ChartSkeleton part={TF.reasons.partName} />}
       {reasons.status === 'error' && <ErrorState part={TF.reasons.partName} cause={reasons.error ?? undefined} onRetry={reasons.refresh} minHeight={200} />}
       {reasons.data && (() => {
         const quality = reasons.data.data.reasons.filter((r) => r.rejectType === 'quality');
