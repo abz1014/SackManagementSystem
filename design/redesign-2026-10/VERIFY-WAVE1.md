@@ -67,3 +67,45 @@ Matches: soft blue-grey background, white floating sidebar, frosted top bar, 16 
 Printed pages; the plant PC's real Edge and Windows scaling; Wall at uiScale 1.3 (no visible effect); signed-in viewer/engineer/admin; Products, Reports, System screens and the Register tab; sack-weight and distribution visuals beyond text (PNGs captured, only the cone distribution reviewed); writes (read-only); touch input; keyboard focus; PL/PR/default PNGs only sampled by eye (the overflow and error scan covers all cells).
 
 Owner PNGs: scratchpad `v1/for-owner/` (7 files).
+
+
+## Fixes (L1) - 13 Oct 2026
+
+Method as V1: real Edge via Playwright, api/dist on an ephemeral port, DB sms_audit READ_ONLY, render-token identity, web-next built to scratchpad . 123 cells before and after (PD1, PL, PR, default at 1366, 1920, 375; Wall at 1366, 1920 and 1920 with  1.3). Before PNGs: ; after PNGs:  (same file names); owner set: .
+Result: horizontal overflow 42 of 123 cells before, 0 after; console errors/warnings 0, failed requests 0 in both. Wall page height 1080 at 1920 in all 8 cells, including uiScale 1.3.
+
+Commits: d4cc79c (layout), 90aa9f0 (charts), 51e510b (Wall, uiScale), b710379 (vocabulary, banner, delta, empty trend).
+
+| Defect | Status | What changed |
+|---|---|---|
+| D1 phone overflow | fixed |  grid column was content-sized (1116 px); now .  min-width 200 px removed. Stations table scrolls inside its box with a fade and "Scroll for more". |
+| D2 1366 KPI row | fixed | auto-fit minmax(176px) grid, five across at 1366 and 1920; tiles shrink with . |
+| D3 phone tiles and top bar | fixed | tiles no longer overflow, so no stagger; top bar wraps (title on its own row, then period, health, account). |
+| D4 negative count axes | fixed |   (the shared  padded below 0); used by Bar, Histogram, Pareto, zero-base Line. Unit-tested. |
+| D5 Wall | fixed | shifts Morning, Evening, Night (); station name on its own wrapping line, never cut.  now read: 1 keeps the 1.6 TV scale, 1.3 gives 1.7 (2.08 = 1.6 x 1.3 did not fit one 1080p screen). Old Desk/Wall labels map: key honoured, not the same multiplier. |
+| D6 Weight indent and tile | fixed | removed extra horizontal padding on ; 5 tiles fit. |
+| D7 Stations pattern columns | fixed | tighter cell padding, wrapping headers, result column narrower: whole table fits 1366; contained scroll with cue below that. |
+| D8 empty daily card | fixed | when the 14-day window has no readings, a one-line note names the newest reading instead of an empty chart card. |
+| D9 vocabulary and "Not weighed" | fixed | station sheet reasons use "Code 2/1" (and weight rejects keep their own name). Quality-reject rows carry no weight in all 200 checked (reject_event.weight_g null), so the cell reads "No weight on this record" with a one-line explanation. |
+| D11 banner date | fixed | a multi-day period always names the date ("10:37 on 7 Sep"). |
+| D12 chart labels | fixed | right-axis unit anchored inside the chart; Today reason chart uses the short "Code 2/1". Also fixed (found while checking): the Weight histogram's "In limits" band was drawn across the whole card; now clipped to the plot. |
+| D13 heading year | fixed | "1 Sep evening shift - 2 Sep morning shift, 2026". |
+| D14 compare delta | fixed | "0.1 points lower (was 0.1 %)" when the current figure rounds to 0.0. |
+| D10, D15 | not changed | D10 (station sheet product wording) and D15 (default-period empty tiles) were S3/S4 notes outside this list. |
+
+scrollWidth (worst page of each screen, before to after; viewport width 375 / 1366 / 1920):
+
+| Screen | 375 | 1366 | 1920 |
+|---|---|---|---|
+| today | 547 to 375 | 1402 to 1366 | 1920 to 1920 |
+| compare | 442 to 375 | 1402 to 1366 | 1920 to 1920 |
+| wt_cone_time | 1116 to 375 | 1366 to 1366 | 1920 to 1920 |
+| wt_cone_dist | 1116 to 375 | 1366 to 1366 | 1920 to 1920 |
+| wt_sack_time | 1116 to 375 | 1366 to 1366 | 1920 to 1920 |
+| wt_sack_dist | 1116 to 375 | 1366 to 1366 | 1920 to 1920 |
+| rejects | 547 to 375 | 1366 to 1366 | 1920 to 1920 |
+| stations | 547 to 375 | 1366 to 1366 | 1920 to 1920 |
+| sheet_station8 | 547 to 375 | 1366 to 1366 | 1920 to 1920 |
+| sheet_reason | 547 to 375 | 1366 to 1366 | 1920 to 1920 |
+
+Not checked: printing, touch, signed-in sessions, Wall on a physical TV.
