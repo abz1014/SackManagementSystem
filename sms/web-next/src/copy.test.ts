@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { W } from './bridge/words';
 import { stationLabel } from './bridge/api';
+import { TABS } from './route';
 import { C, RESERVED, RESERVED_SOURCES, formatClock, formatDate } from './copy';
 
 const dig = (root: unknown, path: string): unknown =>
@@ -70,5 +71,20 @@ describe('date and clock helpers', () => {
     expect(formatDate('2026-09-01T14:30:05Z')).toBe('1 Sep 2026');
     expect(formatClock('2026-09-01T14:30:05Z')).toBe('14:30');
     expect(formatClock('2026-09-01T14:30:05Z', true)).toBe('14:30:05');
+  });
+});
+
+describe('tab labels match route.ts TABS', () => {
+  for (const screen of Object.keys(TABS) as Array<keyof typeof TABS>) {
+    it(screen, () => {
+      const labels = Object.keys(C.tabs[screen]).sort();
+      expect(labels).toEqual([...TABS[screen]].sort());
+    });
+  }
+  it('every C.tabs screen is a TABS screen', () => {
+    expect(Object.keys(C.tabs).sort()).toEqual(Object.keys(TABS).sort());
+  });
+  it('station with name uses a middle dot', () => {
+    expect(C.stationWithName(5, 'East Conveyor')).toBe('Station 5 · East Conveyor');
   });
 });

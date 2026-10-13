@@ -26,10 +26,17 @@ export const C = {
     reports: 'Reports',
     system: 'System',
   },
+  /* Keys match route.ts TABS 1:1 (APPROVAL / TRACE E-2). `history` is only a legacy alias of `limits`. */
   tabs: {
-    quality: { weight: 'Weight', rejects: 'Rejects', register: 'Register' },
-    products: { running: 'Running', changeover: 'Changeover', catalogue: 'Catalogue', history: 'History' },
-    system: { diagnostics: 'Diagnostics', setup: 'Setup', wall: 'Wall display' },
+    quality: { weight: 'Weight', rejects: 'Rejects', stations: 'Stations', register: 'Register' },
+    products: {
+      board: 'Board',
+      changeover: 'Changeover',
+      catalogue: 'Catalogue',
+      limits: 'Limits & History',
+      history: 'Limits & History',
+    },
+    system: { diagnostics: 'Diagnostics', setup: 'Setup', account: 'Account' },
   },
   signOut: 'Sign out',
   plantTime: 'Plant time',
@@ -60,8 +67,8 @@ export const C = {
 
   /* Stations: "Station N" is the primary label (GLOSSARY 1.2). */
   station: (n: number) => `Station ${n}`,
-  /** Number first, assigned name second. Shown only once the owner confirms the pair format (DP-4). */
-  stationWithName: (n: number, name: string) => `Station ${n} - ${name}`,
+  /** Decision E-9: "Station N · <name>", the existing name string verbatim. */
+  stationWithName: (n: number, name: string) => `Station ${n} · ${name}`,
   noCones: 'No cones',
   noConesFor: (n: number, span: string) => `Station ${n}: no cones for ${span}`,
 
