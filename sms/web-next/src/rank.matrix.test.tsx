@@ -18,9 +18,22 @@ import { App } from './App';
 import { ROLE_RANK } from './bridge/api';
 import { SCREEN_KEYS } from './screens/registry';
 import { ADMIN_RANK } from './ranks';
+import { C, FRAGMENTS, withFragments } from './copy';
+import {
+  CHANGEOVER_ROUTES, DIAGNOSTICS_ROUTES, LIMITS_ROUTES, PRODUCTS_ROUTES, REGISTER_ROUTES, REPORTS_ROUTES, SETUP_ROUTES,
+} from './rank.matrix.fixtures';
 import { URLS, routes as stationRoutes } from './screens/Quality/Stations/testkit/pd1';
 
+// The report bodies are the old app's sections; this file only needs the Reports frame (the Download group).
+vi.mock('../../web/src/screens/report/Daily', () => ({ DailySection: () => <div data-testid="section" /> }));
+vi.mock('../../web/src/screens/report/Summary', () => ({ SummarySection: () => <div data-testid="section" /> }));
+
 installDomStubs();
+
+const REG = C.register;
+const CO = withFragments(C.changeover, FRAGMENTS.changeover);
+const LM = withFragments(C.limits, FRAGMENTS.limits);
+const SY = C.system;
 
 const ROLES = [
   { role: 'viewer', rank: 1 },
@@ -44,11 +57,18 @@ const BY_DAY = { dayBasis: 'production_day', denominator: 'cones_plus_rejects', 
  */
 const WRITE_CONTROLS: Array<{
   screen: string;
-  control: string;
+  control: string | RegExp;
   minRank: number;
   open: string;
   routes: Record<string, unknown>;
   ready: RegExp;
+  /** Pages (not sheets): the control is looked for on the whole page. Default is the open dialog. */
+  page?: boolean;
+  role?: string;
+  /** Text proving the screen drew when the viewer is below minRank (default: `ready`). */
+  readyBelow?: RegExp;
+  /** Steps that reach the control (forms, wizards); run once the screen is ready. */
+  drive?: (rank: number) => Promise<void>;
 }> = [
   {
     screen: 'Quality > Stations > station sheet',
@@ -70,6 +90,67 @@ const WRITE_CONTROLS: Array<{
       '/api/products': { products: [] },
     },
     ready: /Failures for one reason|Code 2\/1/,
+  },
+  /* ---- wave 2: every write control now wired. Page rows are looked for on the whole page. ---- */
+  {
+    screen: 'Quality > Register', control: REG.exportCsv, role: 'link', minRank: 3, page: true,
+    open: '/next/?s=quality&t=register&p=pick&from=2026-09-05&to=2026-09-07', routes: REGISTER_ROUTES, ready: new RegExp(`^${REG.print}$`),
+  },
+  {
+    screen: 'Quality > Register > sack stock', control: REG.record, minRank: 2, page: true,
+    open: '/next/?s=quality&t=register&p=pick&from=2026-09-05&to=2026-09-07&rl=stock', routes: REGISTER_ROUTES, ready: /^Sack stock$/,
+  },
+  {
+    screen: 'Products > Catalogue (product)', control: C.products.catalogue.retire, minRank: 2, page: true,
+    open: '/next/?s=products&t=catalogue', routes: PRODUCTS_ROUTES(), ready: /6 products are active in PDAS/,
+  },
+  {
+    screen: 'Products > Catalogue (pallet)', control: C.products.catalogue.reactivate, minRank: 2, page: true,
+    open: '/next/?s=products&t=catalogue', routes: PRODUCTS_ROUTES(), ready: /6 products are active in PDAS/,
+  },
+  {
+    screen: 'Products > Board (default product)', control: C.products.board.defaultChange, minRank: 2, page: true,
+    open: '/next/?s=products&t=board&p=pick&from=2026-09-01&to=2026-09-01', routes: PRODUCTS_ROUTES(), ready: /^Default for readings without a product$/,
+  },
+  {
+    screen: 'Products > Changeover (execute)', control: /^Execute \d+ steps?$/, minRank: 2, page: true,
+    open: '/next/?s=products&t=changeover', routes: CHANGEOVER_ROUTES, ready: /Pick or name a blend\./,
+    drive: async () => {
+      const f = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      await screen.findByLabelText('Blend');
+      await new Promise((r) => setTimeout(r, 800)); // let the shell finish its first fetches before the form is touched
+      f('Blend', '1'); f('Count', '3'); f('Tube type', '5'); f('Target weight', '1960');
+      f('Allowed below target', '50'); f('Allowed above target', '50'); f('Product name', '205-IL0-SD Amber'); f('Reason', 'Customer moved to the amber tube');
+      fireEvent.click(screen.getByRole('button', { name: CO.checkPlan }));
+      await screen.findByText(CO.reviewIntro, {}, { timeout: 5000 });
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    },
+  },
+  {
+    screen: 'Products > Limits (save)', control: LM.confirmSms, minRank: 2, page: true,
+    open: '/next/?s=products&t=limits', routes: LIMITS_ROUTES, ready: /1,960 ± 50 g/,
+    drive: async (rank) => {
+      if (rank < 2) return;
+      fireEvent.change(await screen.findByLabelText(LM.target), { target: { value: '1965' } });
+      fireEvent.change(screen.getByLabelText(LM.reason), { target: { value: 'Align with the spec sheet' } });
+      fireEvent.click(screen.getByRole('button', { name: LM.reviewNext }));
+    },
+  },
+  {
+    screen: 'Reports (downloads)', control: 'Download', role: 'group', minRank: 3, page: true,
+    open: '/next/?s=reports&rt=daily', routes: REPORTS_ROUTES, ready: /^Preview$/,
+  },
+  {
+    screen: 'System > Diagnostics (acknowledge)', control: 'Acknowledge', minRank: 2, page: true,
+    open: '/next/?s=system&t=diagnostics', routes: DIAGNOSTICS_ROUTES, ready: /Two readings weigh nothing\./,
+  },
+  {
+    screen: 'System > Setup (new account)', control: 'New account', minRank: 4, page: true,
+    open: '/next/?s=system&t=setup', routes: SETUP_ROUTES, ready: /^New account$/, readyBelow: /^Today$/,
+  },
+  {
+    screen: 'System > Account (change password)', control: SY.account.save, minRank: 1, page: true,
+    open: '/next/?s=system&t=account', routes: {}, ready: new RegExp(`^${SY.account.save}$`),
   },
 ];
 
@@ -144,6 +225,22 @@ describe.each(ROLES)('$role (rank $rank)', ({ role, rank }) => {
     it(`${w.screen}: "${w.control}" ${rank >= w.minRank ? 'present' : 'absent'}`, async () => {
       mount(role, w.open, w.routes);
       await screen.findByRole('navigation', { name: 'Main navigation' });
+      if (w.page) {
+        const find = () => within(document.body).queryAllByRole((w.role ?? 'button') as never, { name: w.control });
+        if (rank >= w.minRank) {
+          if (w.drive) {
+            await within(document.body).findAllByText(w.ready, {}, { timeout: 6000 });
+            await w.drive!(rank);
+          }
+          await vi.waitFor(() => expect(find().length).toBeGreaterThan(0), { timeout: 6000 });
+        } else {
+          await within(document.body).findAllByText(w.readyBelow ?? w.ready, {}, { timeout: 6000 });
+          if (w.drive) await w.drive(rank);
+          await new Promise((r) => setTimeout(r, 300));
+          expect(find()).toHaveLength(0);
+        }
+        return;
+      }
       await screen.findByRole('dialog', {}, { timeout: 4000 });
       await within(await screen.findByRole('dialog')).findAllByText(w.ready, {}, { timeout: 4000 });
       const btn = () => within(screen.getByRole('dialog')).queryByRole('button', { name: w.control });
@@ -153,6 +250,6 @@ describe.each(ROLES)('$role (rank $rank)', ({ role, rank }) => {
         await new Promise((r) => setTimeout(r, 300));
         expect(btn()).toBeNull();
       }
-    });
+    }, 20000);
   }
 });
