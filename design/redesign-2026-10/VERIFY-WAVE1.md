@@ -71,19 +71,19 @@ Owner PNGs: scratchpad `v1/for-owner/` (7 files).
 
 ## Fixes (L1) - 13 Oct 2026
 
-Method as V1: real Edge via Playwright, api/dist on an ephemeral port, DB sms_audit READ_ONLY, render-token identity, web-next built to scratchpad . 123 cells before and after (PD1, PL, PR, default at 1366, 1920, 375; Wall at 1366, 1920 and 1920 with  1.3). Before PNGs: ; after PNGs:  (same file names); owner set: .
+Method as V1: real Edge via Playwright, api/dist on an ephemeral port, DB sms_audit READ_ONLY, render-token identity, web-next built to scratchpad l1/next. 123 cells before and after (PD1, PL, PR, default at 1366, 1920, 375; Wall at 1366, 1920 and 1920 with sms.uiScale 1.3). Before PNGs: scratchpad/l1/shots-before/; after PNGs: scratchpad/l1/shots-after/ (same file names); owner set: scratchpad/l1/for-owner/.
 Result: horizontal overflow 42 of 123 cells before, 0 after; console errors/warnings 0, failed requests 0 in both. Wall page height 1080 at 1920 in all 8 cells, including uiScale 1.3.
 
 Commits: d4cc79c (layout), 90aa9f0 (charts), 51e510b (Wall, uiScale), b710379 (vocabulary, banner, delta, empty trend).
 
 | Defect | Status | What changed |
 |---|---|---|
-| D1 phone overflow | fixed |  grid column was content-sized (1116 px); now .  min-width 200 px removed. Stations table scrolls inside its box with a fade and "Scroll for more". |
-| D2 1366 KPI row | fixed | auto-fit minmax(176px) grid, five across at 1366 and 1920; tiles shrink with . |
+| D1 phone overflow | fixed | .qw grid column was content-sized (1116 px); now minmax(0,1fr). .kpi min-width 200 px removed. Stations table scrolls inside its box with a fade and "Scroll for more". |
+| D2 1366 KPI row | fixed | auto-fit minmax(176px) grid, five across at 1366 and 1920; tiles shrink with min-width:0. |
 | D3 phone tiles and top bar | fixed | tiles no longer overflow, so no stagger; top bar wraps (title on its own row, then period, health, account). |
-| D4 negative count axes | fixed |   (the shared  padded below 0); used by Bar, Histogram, Pareto, zero-base Line. Unit-tested. |
-| D5 Wall | fixed | shifts Morning, Evening, Night (); station name on its own wrapping line, never cut.  now read: 1 keeps the 1.6 TV scale, 1.3 gives 1.7 (2.08 = 1.6 x 1.3 did not fit one 1080p screen). Old Desk/Wall labels map: key honoured, not the same multiplier. |
-| D6 Weight indent and tile | fixed | removed extra horizontal padding on ; 5 tiles fit. |
+| D4 negative count axes | fixed | charts/domain.ts zeroBasedDomain (the shared niceDomain padded below 0); used by Bar, Histogram, Pareto, zero-base Line. Unit-tested. |
+| D5 Wall | fixed | shifts Morning, Evening, Night (inShiftOrder); station name on its own wrapping line, never cut. sms.uiScale now read: 1 keeps the 1.6 TV scale, 1.3 gives 1.7 (2.08 = 1.6 x 1.3 did not fit one 1080p screen). Old Desk/Wall labels map: key honoured, not the same multiplier. |
+| D6 Weight indent and tile | fixed | removed extra horizontal padding on .qw; 5 tiles fit. |
 | D7 Stations pattern columns | fixed | tighter cell padding, wrapping headers, result column narrower: whole table fits 1366; contained scroll with cue below that. |
 | D8 empty daily card | fixed | when the 14-day window has no readings, a one-line note names the newest reading instead of an empty chart card. |
 | D9 vocabulary and "Not weighed" | fixed | station sheet reasons use "Code 2/1" (and weight rejects keep their own name). Quality-reject rows carry no weight in all 200 checked (reject_event.weight_g null), so the cell reads "No weight on this record" with a one-line explanation. |
