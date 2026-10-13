@@ -1,0 +1,37 @@
+/* TV wall, dark Style C. Colour tokens come from styles/wall-dark.css (.wall.dark); type is scaled 1.6x by .wall in tokens.css. */
+.wl { min-height: 100vh; box-sizing: border-box; padding: var(--space-6) var(--space-7); display: grid; grid-template-rows: auto auto auto 1fr auto auto; gap: var(--space-5); background: var(--bg); color: var(--ink-2); }
+.wl-hdr { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-5); }
+.wl-brand { font-size: var(--fs-5); font-weight: var(--fw-semibold); color: var(--ink-1); }
+.wl-brand span { margin-left: var(--space-3); font-size: var(--fs-3); font-weight: var(--fw-regular); color: var(--ink-3); }
+.wl-clock { display: flex; align-items: baseline; gap: var(--space-3); font-size: var(--fs-3); color: var(--ink-3); }
+.wl-clock b { font-size: var(--fs-5); color: var(--ink-1); font-feature-settings: var(--tnum); }
+.wl-exit { margin-left: var(--space-4); font-size: var(--fs-1); color: var(--ink-3); text-decoration: underline; }
+.wl-exit:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.wl-hero { margin: 0; font-size: var(--fs-6); line-height: 1.15; font-weight: var(--fw-semibold); letter-spacing: -.025em; color: var(--ink-1); }
+.wl-hero[data-state] { color: var(--fg); }
+.wl-hero-rest { color: var(--ink-2); font-weight: var(--fw-medium); }
+.wl-hero-rest .state { color: var(--fg); }
+.wl-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); }
+.wl-kpi { padding: var(--space-4) var(--space-5); border-radius: var(--radius-card); background: var(--card-bg); box-shadow: var(--card-shadow); }
+.wl-kpi-label { font-size: var(--fs-2); color: var(--ink-3); }
+.wl-kpi-value { font-size: var(--fs-kpi); line-height: var(--lh-kpi); font-weight: var(--fw-bold); letter-spacing: -.04em; color: var(--ink-1); font-feature-settings: var(--tnum); }
+.wl-kpi-unit { margin-left: 6px; font-size: var(--fs-3); font-weight: var(--fw-regular); letter-spacing: 0; color: var(--ink-3); }
+.wl-heat { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--space-3); align-content: stretch; }
+.wl-tile { display: grid; align-content: start; gap: 2px; padding: var(--space-3) var(--space-4); border-radius: var(--radius-tile); background: var(--card-bg); box-shadow: 0 0 0 1px var(--line); min-width: 0; }
+.wl-tile-top { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.wl-tile-name { font-size: var(--fs-3); font-weight: var(--fw-semibold); color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-tile-big { font-size: var(--fs-5); line-height: var(--lh-5); font-weight: var(--fw-bold); letter-spacing: -.04em; color: var(--ink-1); font-feature-settings: var(--tnum); }
+.wl-tile-meta { font-size: var(--fs-1); line-height: var(--lh-1); color: var(--ink-3); }
+.wl-tile-meta:first-of-type { color: var(--ink-2); }
+.wl-tile[data-state="nodata"] { background: var(--surface-sunk); box-shadow: none; }
+.wl-tile[data-state="nodata"] .wl-tile-big { color: var(--ink-3); font-weight: var(--fw-medium); }
+.wl-tile[data-state="watch"], .wl-tile[data-state="act"] { background: var(--tint); box-shadow: 0 0 0 1.5px var(--edge), 0 0 40px -6px var(--edge); }
+.wl-tile[data-state="watch"] .wl-tile-big, .wl-tile[data-state="act"] .wl-tile-big { color: var(--fg); }
+.wl-shifts { display: grid; gap: var(--space-2); }
+.wl-shift { display: grid; grid-template-columns: 8ch 1fr 8ch; align-items: center; gap: var(--space-4); font-size: var(--fs-3); color: var(--ink-2); }
+.wl-shift b { color: var(--ink-1); text-align: right; font-feature-settings: var(--tnum); }
+.wl-trk { display: block; height: 14px; border-radius: 7px; background: var(--surface-sunk); overflow: hidden; }
+.wl-fil { display: block; height: 100%; background: var(--accent); }
+.wl-missing { margin: 0; font-size: var(--fs-3); color: var(--ink-1); }
+.wl-foot { margin: 0; font-size: var(--fs-2); color: var(--ink-3); }
+.wl-foot[data-state] { color: var(--fg); }
