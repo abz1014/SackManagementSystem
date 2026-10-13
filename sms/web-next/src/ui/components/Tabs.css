@@ -1,8 +1,8 @@
 .ui-tabs {
   position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-5);
   overflow-x: auto; scrollbar-width: none; background: var(--bg);
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
-  mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(90deg, var(--ink-1) calc(100% - 24px), transparent);
+  mask-image: linear-gradient(90deg, var(--ink-1) calc(100% - 24px), transparent);
 }
 .ui-tabs::-webkit-scrollbar { display: none; }
 @media (min-width: 768px) { .ui-tabs { -webkit-mask-image: none; mask-image: none; } }
