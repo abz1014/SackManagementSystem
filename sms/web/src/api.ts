@@ -32,6 +32,20 @@ export interface ProductionData {
    * count was product-filtered too and had no caveat of its own.
    */
   unattributed: { cones: { rows: number; of: number }; rejects: { rows: number; of: number } } | null;
+  /**
+   * Only when the call asked `compare=prev|week` (commit 7f614c9): the same
+   * query over the comparison period. OPTIONAL so older fixtures type-check.
+   */
+  previous?: ProductionPrevious;
+}
+
+export interface ProductionPrevious {
+  from: string;
+  to: string;
+  /** Encoded `YYYY-MM-DD.shift` bounds, null when the period is not shift-bounded. */
+  fromShift: string | null;
+  toShift: string | null;
+  result: ProductionData;
 }
 
 export interface Envelope<T> {
@@ -56,6 +70,8 @@ export interface ProductionQuery {
   /** material_id. Narrows cones and rejects only; see ProductionData.unattributed. */
   product?: number;
   groupBy?: GroupBy;
+  /** 'prev' = the period just before; 'week' = the same period one week earlier. Adds data.previous. */
+  compare?: 'prev' | 'week';
 }
 
 // Global 401 handler — set by App so an expired session bounces to login
@@ -546,6 +562,7 @@ export function getProduction(q: ProductionQuery): Promise<Envelope<ProductionDa
   if (q.tsTo) p.set('tsTo', q.tsTo);
   if (q.product != null) p.set('product', String(q.product));
   p.set('groupBy', q.groupBy ?? 'none');
+  if (q.compare) p.set('compare', q.compare);
   return get(`/api/production?${p.toString()}`);
 }
 
@@ -2035,6 +2052,16 @@ export interface MachineRunning {
   lastProductActive?: boolean | null;
   /** That cone's time, plant clock labelled UTC. */
   lastStampedUtc?: string | null;
+  /**
+   * When the current run of this product began (first cone of the product).
+   * NOT `sinceUtc`, which is not a product-change time. Optional so older
+   * fixtures type-check; null when the winder is not running.
+   */
+  runStartUtc?: string | null;
+  /** True when no change was found in the lookback: the run may be older than `runStartUtc`. Common. */
+  runStartIsLookbackLimit?: boolean;
+  /** The newest product change inside the lookback, timed at the first cone of the new product. Null when none. */
+  lastChange?: { fromMaterialId: number | null; fromProductName: string | null; atUtc: string } | null;
 }
 export interface MachinesRunningData {
   asOfUtc: string | null;
@@ -2050,6 +2077,43 @@ export function getMachinesRunning(at?: string | null): Promise<Envelope<Machine
   if (at) p.set('at', at);
   const qs = p.toString();
   return get(qs ? `/api/machines/running?${qs}` : '/api/machines/running');
+}
+
+/** Mirrors api/src/services/stationStatus.ts (redesign task D2b). */
+export type StationStatusState = 'ok' | 'watch' | 'act' | 'nodata';
+export interface StationStatusRow {
+  station: number;
+  name: string | null;
+  cones: number;
+  /** Percent of inspected cones that failed inspection; null when no cones. */
+  failedPct: number | null;
+  state: StationStatusState;
+  reasons: string[];
+  /** Mean cone weight minus the station's own target, grams; null when none can be stated. */
+  vsTargetG: number | null;
+  product: string | null;
+}
+export interface StationStatusData {
+  from: string;
+  to: string;
+  lineFailedPct: number | null;
+  /** `assumed`: the multiples are developer defaults until IFL confirms them. */
+  thresholds: { watch: number; act: number; minCones: number; assumed: true };
+  stations: StationStatusRow[];
+}
+export interface StationStatusQuery {
+  from: string;
+  to: string;
+  shift?: string;
+  fromShift?: string;
+  toShift?: string;
+}
+export function getStationStatus(q: StationStatusQuery): Promise<Envelope<StationStatusData>> {
+  const p = new URLSearchParams({ from: q.from, to: q.to });
+  if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift) p.set('fromShift', q.fromShift);
+  if (q.toShift) p.set('toShift', q.toShift);
+  return get(`/api/station-status?${p.toString()}`);
 }
 
 export interface ShiftCheckData {
