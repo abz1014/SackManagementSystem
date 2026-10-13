@@ -21,6 +21,8 @@ export interface KpiCardProps {
   /** Icon chip hue 1-5 (blue, violet, teal, indigo, slate). Never a state hue. */
   chip?: 1 | 2 | 3 | 4 | 5;
   delta?: KpiDelta | null;
+  /** A small line under the value, for the count behind it ("14 of 3,089 cones"). Shown only when the value is. */
+  note?: string | null;
   /** Server-decided judgement. Omit for neutral cards (cones produced). */
   state?: UiState;
   /** Data hook status. */
@@ -32,7 +34,7 @@ export interface KpiCardProps {
 
 const ARROW = { up: '▲', down: '▼', flat: '▬' } as const;
 
-export function KpiCard({ label, value, unit, icon, chip = 1, delta, state, status = 'ok', part, onRetry }: KpiCardProps) {
+export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, state, status = 'ok', part, onRetry }: KpiCardProps) {
   const loading = status === 'loading';
   const error = status === 'error';
   const empty = status === 'empty';
@@ -65,6 +67,7 @@ export function KpiCard({ label, value, unit, icon, chip = 1, delta, state, stat
             {value ?? '–'}
             {unit && value != null && <span className="kpi-unit">{unit}</span>}
           </div>
+          {note && value != null && <div className="kpi-note">{note}</div>}
           {delta && (
             <div className="kpi-delta" data-direction={delta.direction}>
               <span aria-hidden="true">{ARROW[delta.direction]}</span> {delta.text} {delta.vs}

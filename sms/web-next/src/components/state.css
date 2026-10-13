@@ -15,6 +15,7 @@
 .kpi-label { font-size: var(--fs-2); line-height: var(--lh-2); font-weight: var(--fw-medium); color: var(--ink-3); }
 .kpi-value { font-size: var(--fs-kpi); line-height: var(--lh-kpi); font-weight: var(--fw-bold); font-feature-settings: var(--tnum); color: var(--ink-1); }
 .kpi-unit { margin-left: 4px; font-size: var(--fs-2); font-weight: var(--fw-regular); color: var(--ink-3); }
+.kpi-note { margin-top: var(--space-1); color: var(--ink-2); font-size: var(--fs-2); }
 .kpi-delta { display: inline-block; margin: var(--space-1) var(--space-2) var(--space-1) 0; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-sunk); color: var(--ink-2); font-size: var(--fs-2); }
 .kpi-skel { height: var(--lh-kpi); width: 60%; border-radius: var(--radius-ctl); background: var(--surface-sunk); }
 .kpi-errtext { font-size: var(--fs-2); color: var(--ink-2); }

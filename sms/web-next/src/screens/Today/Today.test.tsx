@@ -227,6 +227,19 @@ describe('status band (A3-023, health rule)', () => {
     expect(document.body.textContent).not.toContain('Line 3 is running');
   });
 
+  it('says which data is counted when a newer reading sits in another data set (A3-024, both ways)', async () => {
+    const other = liveLine({ generation: { ...liveLine().generation, newerElsewhereUtc: '2026-09-07T12:00:00.000Z', newerElsewhereSimulator: false } });
+    mount('/?s=today&p=shift', { '/api/live': env({ lines: [other] }) });
+    expect(await screen.findByTestId('today-generation')).toBeTruthy();
+    expect(screen.getByTestId('today-generation').textContent).toContain('Newer readings from a different data set are not counted.');
+  });
+
+  it('prints no generation line when nothing newer sits elsewhere (A3-024)', async () => {
+    mount('/?s=today&p=shift');
+    expect(await screen.findByText(/Line 3 is running\./)).toBeTruthy();
+    expect(screen.queryByTestId('today-generation')).toBeNull();
+  });
+
   it('names the period generation note from the server (A3-024)', async () => {
     mount();
     fireEvent.click(await screen.findByText('About these figures'));
@@ -355,6 +368,14 @@ describe('detail cards (A3-025, A3-026, G-10)', () => {
     mount('/?s=today&p=pick&from=2026-09-01&to=2026-09-01', { '/api/attention': new Response('{"error":"down"}', { status: 500 }) });
     expect(await screen.findByText("Couldn't load the attention check.")).toBeTruthy();
     expect(screen.queryByText('Nothing needs attention.')).toBeNull();
+  });
+
+  it('a drift finding with a projection carries the station sheet sentence, with its assumption', async () => {
+    const projection = { slopeGPerDay: 1.2, overDays: 5, towards: 'upper', limitG: 2000, targetG: 1950, distanceG: 30, daysToLimit: 25, status: 'projected' };
+    const att = { ...pd.attention, findings: [{ kind: 'station_drift', requirement: 5, screen: 'weight', station: 5, deltaG: 9, days: 4, projection }], totalFindings: 1 };
+    mount('/?s=today&p=pick&from=2026-09-01&to=2026-09-01', { '/api/attention': env(att) });
+    const region = await screen.findByRole('region', { name: 'Needs attention' });
+    expect(within(region).getByRole('button').textContent).toMatch(/\+1\.2 g/);
   });
 
   it('a drift finding opens the station sheet; the others hop to their new homes', async () => {

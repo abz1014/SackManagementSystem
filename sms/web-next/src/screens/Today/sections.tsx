@@ -8,6 +8,7 @@ import type {
   AttentionData, AttentionFinding, Envelope, LiveLine, ProductionData, ProductionRow, RejectDataFiltered, SackSummaryData,
 } from '../../bridge/api';
 import { fmt, period as P } from '../../bridge/lib';
+import { projectionSentence } from '../../bridge/station';
 import { W } from '../../bridge/words';
 import { BarChart, Pareto } from '../../charts';
 import { C, formatClock, formatDate } from '../../copy';
@@ -163,7 +164,9 @@ export function AttentionCard({
         const name = f.station == null ? T.latest.unknownStation : stationText({ station: f.station, name: names.get(f.station) ?? null });
         if (f.deltaG == null || f.days == null) return T.attention.driftUnreadable(name);
         const g = fmt.fmtG(Math.abs(f.deltaG));
-        return `${name} ${f.deltaG > 0 ? W.weight.readsHeavier(g, f.days) : W.weight.readsLighter(g, f.days)}`;
+        const said = `${name} ${f.deltaG > 0 ? W.weight.readsHeavier(g, f.days) : W.weight.readsLighter(g, f.days)}`;
+        // The same projection line the station sheet draws, in the same words, only when the API computed one.
+        return f.projection ? `${said} ${projectionSentence(f.projection, { targetG: f.projection.targetG })}` : said;
       }
       case 'reject_rise':
         return T.attention.rejectRise(

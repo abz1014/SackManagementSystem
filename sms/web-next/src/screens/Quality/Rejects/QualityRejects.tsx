@@ -234,8 +234,8 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               status={figState}
               part={R.part.figureInspection}
               onRetry={retryFigs}
+              note={fig && figState === 'ok' ? R.ofChecked(fmtCount(fig.inspectionN), fmtCount(fig.inspected)) : null}
             />
-            {fig && figState === 'ok' && <p className="qr-note">{R.ofChecked(fmtCount(fig.inspectionN), fmtCount(fig.inspected))}</p>}
           </div>
           <div className="qr-kpi">
             <KpiCard
@@ -246,8 +246,8 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               status={figState}
               part={R.part.figureWeight}
               onRetry={retryFigs}
+              note={fig && figState === 'ok' ? R.recordsOf(fmtCount(fig.weightN), fmtCount(fig.inspected)) : null}
             />
-            {fig && figState === 'ok' && <p className="qr-note">{R.recordsOf(fmtCount(fig.weightN), fmtCount(fig.inspected))}</p>}
           </div>
           <div className="qr-kpi">
             <KpiCard

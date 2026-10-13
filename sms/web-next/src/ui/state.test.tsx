@@ -49,6 +49,13 @@ describe('KpiCard', () => {
     expect(d.textContent).toContain('▲');
     expect(container.querySelector('.kpi')!.className).toContain('kpi-act');
   });
+  it('note prints under the value, and only when there is a value', () => {
+    const { container, rerender } = render(<KpiCard label="Failed" value="3.1" unit="%" note="14 of 450 cones" />);
+    expect(container.querySelector('.kpi-note')!.textContent).toBe('14 of 450 cones');
+    expect(container.querySelector('.kpi-unit')!.textContent).toBe('%');
+    rerender(<KpiCard label="Failed" value={null} note="14 of 450 cones" />);
+    expect(container.querySelector('.kpi-note')).toBeNull();
+  });
   it('state comes from the prop, not the number', () => {
     render(<KpiCard label="Failed" value="99.9" state="ok" />);
     expect(screen.getByText('OK')).toBeTruthy();

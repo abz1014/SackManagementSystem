@@ -16,7 +16,7 @@ import {
   type AttentionData, type Envelope, type MachinesRunningData, type ProductionData, type StationStatusData,
 } from '../../bridge/api';
 import { W } from '../../bridge/words';
-import { fmt, health as healthLib, live, period as P, productLabel } from '../../bridge/lib';
+import { fmt, generationWords, health as healthLib, live, period as P, productLabel } from '../../bridge/lib';
 import { C, RESERVED, formatClock, formatDate } from '../../copy';
 import { useData, useRange, useStationStatus, usePeriod, useProduction, type DataState } from '../../data';
 import type { Compare } from '../../data';
@@ -243,6 +243,15 @@ function Band({
   const second = stationSentence(counts);
   const sentence = empty && !(period.live && !known) ? T.band.nothing : [first, second].filter((s) => s !== null).join(' ');
 
+  // TRACE A3-024: when a newer reading sits in another data set, say which figures are counted (RT-007, both directions).
+  const quiet = line && line.dataAsOfUtc && generationWords.hasNewerElsewhere(line.generation)
+    ? generationWords.quietBecauseGeneration(
+        line.generation,
+        fmt.fmtClockOn(line.dataAsOfUtc, line.plantNowUtc),
+        fmt.secondsBetween(line.dataAsOfUtc, line.plantNowUtc) >= 60 ? fmt.fmtSpan(fmt.secondsBetween(line.dataAsOfUtc, line.plantNowUtc)) : null,
+      )
+    : null;
+
   const prev = prod.data?.data.previous;
   const caption = `${periodWords(period)}, ${T.band.plantTime}${prev ? `, ${T.band.comparedWith(dayRange(prev.from, prev.to))}` : ''}`;
 
@@ -252,6 +261,7 @@ function Band({
       {pending && sentence === '' ? <span className="band-skel" role="status" aria-label="Loading the line status" /> : <p className="sentence">{sentence}</p>}
       <p className="cap">{caption}.</p>
       <p className="cap">{T.answers}</p>
+      {quiet && <p className="cap" data-testid="today-generation">{quiet}</p>}
       {period.live && <p className="cap">{T.band.updatedLive}</p>}
     </header>
   );
@@ -269,10 +279,10 @@ function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: 
 
   const common = { status, part: T.kpi.partName, onRetry: prod.refresh } as const;
   const fmtRate = (r: { pct: number | null; unreadable: boolean }) => (r.unreadable || r.pct === null ? null : r.pct.toFixed(1));
-  const rateUnit = (r: { n: number | null; of: number | null }, kind: 'inspection' | 'weight') =>
-    r.n === null ? T.kpi.percent
-      : kind === 'inspection' ? `${T.kpi.percent} · ${T.kpi.coneCount(nf0(r.n))}`
-      : `${T.kpi.percent} · ${T.kpi.ofCones(nf0(r.n), r.of === null ? '-' : nf0(r.of))}`;
+  const rateNote = (r: { n: number | null; of: number | null }, kind: 'inspection' | 'weight'): string | null =>
+    r.n === null ? null
+      : kind === 'inspection' ? T.kpi.coneCount(nf0(r.n))
+      : T.kpi.ofCones(nf0(r.n), r.of === null ? '-' : nf0(r.of));
 
   return (
     <>
@@ -283,10 +293,10 @@ function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: 
       <KpiCard {...common} label={T.kpi.packed} chip={3} icon={<Icon name="weight" />}
         value={k?.kg.text ?? null} unit={T.kpi.kg} delta={k && pk ? countDelta(k.kg, pk.kg, live, T.kpi.vsKg) : null} />
       <KpiCard {...common} label={C.checks.failedInspection} chip={4} icon={<Icon name="rejects" />}
-        value={k ? fmtRate(k.inspection) : null} unit={k ? rateUnit(k.inspection, 'inspection') : T.kpi.percent}
+        value={k ? fmtRate(k.inspection) : null} unit={T.kpi.percent} note={k ? rateNote(k.inspection, 'inspection') : null}
         delta={k && pk ? rateDelta(k.inspection, pk.inspection) : null} />
       <KpiCard {...common} label={C.checks.failedWeight} chip={5} icon={<Icon name="health" />}
-        value={k ? fmtRate(k.weight) : null} unit={k ? rateUnit(k.weight, 'weight') : T.kpi.percent}
+        value={k ? fmtRate(k.weight) : null} unit={T.kpi.percent} note={k ? rateNote(k.weight, 'weight') : null}
         delta={k && pk ? rateDelta(k.weight, pk.weight) : null} />
     </>
   );

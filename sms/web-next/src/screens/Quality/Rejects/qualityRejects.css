@@ -11,7 +11,6 @@
 
 .qr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--gutter); }
 .qr-kpi { display: flex; flex-direction: column; gap: var(--space-2); }
-.qr-kpi .qr-note { padding: 0 var(--space-2); }
 
 .qr-verdict { margin: 0; color: var(--ink-2); font: var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans); }
 
