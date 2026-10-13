@@ -19,20 +19,13 @@ import { ErrorState } from '../../../ui/ErrorState';
 import { Disclosure } from '../../../ui/Disclosure';
 import { Skeleton } from '../../../ui/Skeleton';
 import { StatusPill } from '../../../ui/StatusPill';
-import { Tabs } from '../../../ui/Tabs';
+import { QualityTabs } from '../QualityTabs';
 import type { ScreenProps } from '../../registry';
 import { buildRows, missingFromFeed, pct, sortWorstFirst } from './model';
 import { S } from './stationsCopy';
 import { StationsTable } from './StationsTable';
 import { usePatternCheck, useStationCounts } from './useStationsData';
 import './stations.css';
-
-const TABS = [
-  { id: 'weight', label: C.tabs.quality.weight },
-  { id: 'rejects', label: C.tabs.quality.rejects },
-  { id: 'stations', label: C.tabs.quality.stations },
-  { id: 'register', label: C.tabs.quality.register },
-] as const;
 
 function span(from: string, to: string): string {
   return from === to ? formatDate(from) : C.period(formatDate(from), formatDate(to));
@@ -46,15 +39,7 @@ function stationList(ns: readonly number[]): string {
 export function QualityStationsScreen(props: ScreenProps) {
   const { route, go } = props;
   const per = usePeriod();
-  const tabs = (
-    <Tabs
-      label={C.nav.quality}
-      value="stations"
-      idPrefix="quality"
-      items={TABS}
-      onChange={(id) => go({ ...route, t: id, sheet: null })}
-    />
-  );
+  const tabs = <QualityTabs route={route} go={go} />;
   return (
     <div className="qs-page">
       {tabs}

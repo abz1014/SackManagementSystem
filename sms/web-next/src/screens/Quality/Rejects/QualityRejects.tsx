@@ -39,6 +39,7 @@ import { hrefFor, plainClick } from '../../../ui/nav';
 import { Skeleton } from '../../../ui/Skeleton';
 import type { Route } from '../../../route';
 import type { ScreenProps } from '../../registry';
+import { QualityTabs } from '../QualityTabs';
 import { HeatMatrix } from './HeatMatrix';
 import {
   TOP_REASONS,
@@ -64,7 +65,16 @@ const wait = (): Promise<never> => new Promise<never>(() => {});
 const keyOf = (p: P.Period): string => [p.key, p.from, p.to, p.shift ?? '', p.fromShift ? P.encodeShiftRef(p.fromShift) : '', p.toShift ? P.encodeShiftRef(p.toShift) : ''].join('|');
 const intKey = (v: string | undefined): number | null => (v !== undefined && /^\d{1,9}$/.test(v) ? Number(v) : null);
 
-export function QualityRejectsScreen({ route, rank, go }: ScreenProps) {
+export function QualityRejectsScreen(props: ScreenProps) {
+  return (
+    <>
+      <QualityTabs route={props.route} go={props.go} />
+      <RejectsBody {...props} />
+    </>
+  );
+}
+
+function RejectsBody({ route, rank, go }: ScreenProps) {
   const { period, status: periodStatus, failed: periodFailed } = usePeriod();
   const { line } = live.useLive();
   const range = useRange();

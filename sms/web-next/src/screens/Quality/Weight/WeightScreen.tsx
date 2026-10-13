@@ -24,7 +24,8 @@ import {
   type Subgroup,
   type WeightStationsData,
 } from '../../../bridge/api';
-import { projectionSentence } from '../../../bridge/calibration';
+import { projectionSentence } from '../../../bridge/station';
+import { QualityTabs } from '../QualityTabs';
 import { fmt, live, period as P, productLabel as PL } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
 import { C, formatDate, RESERVED } from '../../../copy';
@@ -74,6 +75,15 @@ const shortDay = (date: string) => {
 /* ------------------------------------------------------------------ entry */
 
 export function QualityWeightScreen({ route, go }: ScreenProps) {
+  return (
+    <>
+      <QualityTabs route={route} go={go} />
+      <WeightEntry route={route} go={go} />
+    </>
+  );
+}
+
+function WeightEntry({ route, go }: Pick<ScreenProps, 'route' | 'go'>) {
   const ps = usePeriod();
   if (!ps.period) {
     return ps.status === 'error' ? (
