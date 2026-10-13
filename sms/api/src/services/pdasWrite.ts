@@ -286,8 +286,8 @@ const MIN_REASON_CHARS = 10;
  * the test suite that predates this task, and any future one that does not
  * care about this guard).
  */
-const DEFAULT_MAX_SETPOINT_CHANGE_PCT = 3;
-const DEFAULT_MAX_OFFSET_CHANGE_G = 20;
+export const DEFAULT_MAX_SETPOINT_CHANGE_PCT = 3;
+export const DEFAULT_MAX_OFFSET_CHANGE_G = 20;
 /** The reason required to push a large change through, longer than the ordinary MIN_REASON_CHARS. */
 const MIN_LARGE_CHANGE_REASON_CHARS = 20;
 

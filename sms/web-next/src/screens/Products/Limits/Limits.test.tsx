@@ -18,7 +18,7 @@ import { LIVE_FIXTURE } from '../../../../../web/src/testkit/fixtures';
 import { live } from '../../../bridge/lib';
 import { parseRoute } from '../../../route';
 import { ProductsLimitsScreen } from './LimitsScreen';
-import { guardOf, limitsLabel, outcomeKind } from './model';
+import { FALLBACK_BOUNDS, boundsOf, guardOf, limitsLabel, outcomeKind } from './model';
 import { LM, collectStrings } from './strings';
 
 installDomStubs();
@@ -207,6 +207,19 @@ describe('guard and reason lengths (B5-12)', () => {
     expect(guardOf(before, { setpointG: 2019, offsetMinusG: 50, offsetPlusG: 50 }).large).toBe(true);
     expect(guardOf(before, { setpointG: 1960, offsetMinusG: 50, offsetPlusG: 50 }).changed).toBe(false);
     expect(limitsLabel(1960, -50, 40)).toBe('1,960 g, minus 50, plus 40');
+  });
+});
+
+describe('guard thresholds come from the server (limits)', () => {
+  const before = { setpointG: 1960, offsetMinusG: 50, offsetPlusG: 50, desc1: null, desc2: null, active: true };
+  it('uses the server bounds when sent, the labelled fallback only when absent', () => {
+    expect(boundsOf({ maxSetpointChangePct: 5, maxOffsetChangeG: 40 })).toEqual({ maxSetpointChangePct: 5, maxOffsetChangeG: 40 });
+    expect(boundsOf(undefined)).toEqual({ maxSetpointChangePct: 3, maxOffsetChangeG: 20 });
+    expect(boundsOf({ maxSetpointChangePct: 0, maxOffsetChangeG: Number.NaN })).toEqual(FALLBACK_BOUNDS);
+    // 71 vs 50 is outside at 20 g, inside at the server's 40 g
+    expect(guardOf(before, { setpointG: 1960, offsetMinusG: 71, offsetPlusG: 50 }, boundsOf({ maxSetpointChangePct: 3, maxOffsetChangeG: 40 })).large).toBe(false);
+    expect(guardOf(before, { setpointG: 1960, offsetMinusG: 91, offsetPlusG: 50 }, boundsOf({ maxSetpointChangePct: 3, maxOffsetChangeG: 40 })).large).toBe(true);
+    expect(guardOf(before, { setpointG: 2000, offsetMinusG: 50, offsetPlusG: 50 }, boundsOf({ maxSetpointChangePct: 1, maxOffsetChangeG: 20 })).large).toBe(true);
   });
 });
 

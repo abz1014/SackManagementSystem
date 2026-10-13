@@ -230,6 +230,15 @@ describe('PUT /api/reject-codes/:id — renaming must not touch the pass flag', 
   });
 });
 
+describe('GET /api/product-write/status — carries the limits guard bounds', () => {
+  it('states the guard thresholds the server enforces (defaults 3 % / 20 g when not configured)', async () => {
+    const r = await call('viewer', 'GET', '/api/product-write/status');
+    expect(r.status).toBe(200);
+    expect(r.json.limits).toEqual({ maxSetpointChangePct: 3, maxOffsetChangeG: 20 });
+    expect(r.json.enabled).toBe(false);
+  });
+});
+
 describe('POST /api/products/:id/active — booleans are booleans', () => {
   const reason = 'retiring after the trial run ended';
 

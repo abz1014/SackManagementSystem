@@ -413,6 +413,8 @@ export interface ProductWriteStatus {
    * button that only ever answers 403.
    */
   local: { canWrite: boolean };
+  /** The large-change guard's bounds (PDAS_LIMIT_MAX_*). Absent on an older server. */
+  limits?: { maxSetpointChangePct: number; maxOffsetChangeG: number };
 }
 export interface ProductOptions {
   blends: { id: number; name: string }[];

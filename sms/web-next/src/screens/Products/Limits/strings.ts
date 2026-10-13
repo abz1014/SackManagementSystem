@@ -36,7 +36,8 @@ export const LM = {
   guardOutside: 'Outside guard',
   guardNone: 'No change',
   guardDetail: (pct: string, g: string) => `The target moves ${pct} %. The largest offset change is ${g} g.`,
-  guardNote: 'Guard limits are 3 % of the target and 20 g of an offset. They are developer defaults and not confirmed. The guard applies to saves in PDAS.',
+  guardNote: (pct: string, g: string) => `Guard limits are ${pct} % of the target and ${g} g of an offset, as set on the server. They are developer defaults and not confirmed. The guard applies to saves in PDAS.`,
+  guardNoteFallback: (pct: string, g: string) => `Guard limits of ${pct} % of the target and ${g} g of an offset are assumed here because the server did not state them. They are developer defaults and not confirmed. The guard applies to saves in PDAS.`,
   guardUnknown: 'PDAS values for this product are not known, so the guard cannot be checked.',
 
   where: 'Where it is saved',

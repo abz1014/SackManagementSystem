@@ -27,7 +27,7 @@ import { epochFragment, createScopeCache, resolveGenerationScope } from './servi
 import { getAttention } from './services/attention.js';
 import { loadProductTimeline, productDisagreement } from './services/productAt.js';
 import { loadProductCatalogue } from './services/productLimits.js';
-import { PdasWriter } from './services/pdasWrite.js';
+import { PdasWriter, DEFAULT_MAX_SETPOINT_CHANGE_PCT, DEFAULT_MAX_OFFSET_CHANGE_G } from './services/pdasWrite.js';
 import { listPallets } from './services/pallets.js';
 import { plantNowMs, plantOffsetMinutes } from './services/plantClock.js';
 import { getWeightStations } from './services/weightStations.js';
@@ -1799,6 +1799,12 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
       reason: pdas.disabledReason,
       canWrite: Boolean(user) && (user?.rank ?? 0) >= PDAS_WRITE_RANK && pdas.enabled,
       local: { canWrite: Boolean(user) && (user?.rank ?? 0) >= LOCAL_LIMITS_RANK },
+      // Additive: the large-change guard's bounds the server will enforce on a PDAS limits write
+      // (PDAS_LIMIT_MAX_*), so a client never hard-codes them.
+      limits: {
+        maxSetpointChangePct: cfg.pdasWrite.maxSetpointChangePct ?? DEFAULT_MAX_SETPOINT_CHANGE_PCT,
+        maxOffsetChangeG: cfg.pdasWrite.maxOffsetChangeG ?? DEFAULT_MAX_OFFSET_CHANGE_G,
+      },
     });
   });
 

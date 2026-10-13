@@ -47,7 +47,7 @@ import { Wizard } from '../../../ui/Wizard';
 import type { ScreenProps } from '../../registry';
 import { usePdasWriteStatus } from '../PdasStatusCard';
 import { ProductsTabs } from '../ProductsTabs';
-import { LARGE_REASON_MIN, REASON_MIN, fieldsOf, guardOf, limitsLabel, outcomeKind, rangeOf, versionLabel, type OutcomeKind } from './model';
+import { LARGE_REASON_MIN, REASON_MIN, boundsOf, type GuardBounds, fieldsOf, guardOf, limitsLabel, outcomeKind, rangeOf, versionLabel, type OutcomeKind } from './model';
 import { LM } from './strings';
 import './limits.css';
 
@@ -216,7 +216,8 @@ function Editor({ product, mirror, statusState, onSaved }: {
   const cur = latest && latest.setpointG != null && latest.offsetMinusG != null && latest.offsetPlusG != null
     ? { setpointG: latest.setpointG, offsetMinusG: Math.abs(latest.offsetMinusG), offsetPlusG: Math.abs(latest.offsetPlusG) } : null;
   const changed = after !== null && (cur === null || after.setpointG !== cur.setpointG || after.offsetMinusG !== cur.offsetMinusG || after.offsetPlusG !== cur.offsetPlusG);
-  const guard = before && after ? guardOf(before, after) : null;
+  const bounds = boundsOf(st?.limits);
+  const guard = before && after ? guardOf(before, after, bounds) : null;
   const large = dest === 'pdas' && guard !== null && guard.large;
   const need = large ? LARGE_REASON_MIN : REASON_MIN;
   const reasonOk = reason.trim().length >= need;
@@ -283,7 +284,7 @@ function Editor({ product, mirror, statusState, onSaved }: {
               <NumberField label={LM.above} unit="g" value={vals.op} onChange={(op2) => setVals({ ...vals, op: op2 })} min={0} step={1} />
             </div>
 
-            <Guard guard={guard} known={before !== null} />
+            <Guard guard={guard} known={before !== null} bounds={bounds} fromServer={st?.limits != null} />
 
             <fieldset className="lm-dest">
               <legend>{LM.where}</legend>
@@ -357,7 +358,7 @@ function Editor({ product, mirror, statusState, onSaved }: {
   );
 }
 
-function Guard({ guard, known }: { guard: ReturnType<typeof guardOf> | null; known: boolean }) {
+function Guard({ guard, known, bounds, fromServer }: { guard: ReturnType<typeof guardOf> | null; known: boolean; bounds: GuardBounds; fromServer: boolean }) {
   if (!known) return <p className="lm-note">{LM.guardUnknown}</p>;
   const state = guard === null || !guard.changed ? 'nodata' : guard.large ? 'watch' : 'ok';
   const word = guard === null || !guard.changed ? LM.guardNone : guard.large ? LM.guardOutside : LM.guardWithin;
@@ -366,7 +367,7 @@ function Guard({ guard, known }: { guard: ReturnType<typeof guardOf> | null; kno
       <span className="pill state" data-state={state}>{word}</span>
       <div>
         {guard && guard.changed && <p className="lm-verbatim">{LM.guardDetail(guard.pct.toFixed(1), String(guard.maxOffsetG))}</p>}
-        <p className="lm-note">{LM.guardNote}</p>
+        <p className="lm-note">{(fromServer ? LM.guardNote : LM.guardNoteFallback)(String(bounds.maxSetpointChangePct), String(bounds.maxOffsetChangeG))}</p>
       </div>
     </div>
   );
