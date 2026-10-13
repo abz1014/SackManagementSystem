@@ -11,7 +11,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getPallets, getProducts, setPalletActive, setProductActive, type PalletRow } from '../../../bridge/api';
-import { fmt, productLabel } from '../../../bridge/lib';
+import { fmt, pdasWords, productLabel } from '../../../bridge/lib';
 import { C, REASON_MIN_CHARS } from '../../../copy';
 import { useData, useMachinesRunning } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
@@ -225,7 +225,7 @@ export function ProductsCatalogueScreen({ route, rank, go }: ScreenProps) {
           <p className="pc-refusal__title">{K.notChanged}</p>
           <p className="pc-refusal__line">{K.didNotRun(refusal.action, refusal.what)}</p>
           <p className="pc-refusal__line">
-            {K.serverSaid} <span className="pc-refusal__server">{refusal.server}</span>
+            {K.serverSaid} <span className="pc-refusal__server">{pdasWords.pdasReasonForDisplay(refusal.server)}</span>
           </p>
           <button type="button" className="ui-link" onClick={() => setRefusal(null)}>{K.dismiss}</button>
         </div>

@@ -7,6 +7,7 @@
  * sentence that tells an engineer what to change on the plant server, so it is never reworded.
  * `local.canWrite` is a separate gate for the weight limits SMS keeps itself; it does not depend on PDAS.
  */
+import { pdasWords } from '../../bridge/lib';
 import { getProductWriteStatus, type ProductWriteStatus } from '../../bridge/api';
 import { C } from '../../copy';
 import { useData, type DataState } from '../../data';
@@ -60,7 +61,7 @@ export function PdasStatusCard({ status, reasonId = 'pds-reason', compact = fals
         <div className="pds__reason">
           <span className="pds__reason-label">{S.reasonLabel}</span>
           <p id={reasonId} className="pds__reason-text">
-            {d.reason ? d.reason : S.noReason}
+            {pdasWords.pdasReasonForDisplay(d.reason) ?? S.noReason}
           </p>
         </div>
         {!compact && (

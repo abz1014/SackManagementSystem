@@ -159,7 +159,7 @@ describe('Products > Board on PD1 (replayed at 1 Sep 2026)', () => {
   it('prints the PDAS connection reason exactly as the server sent it', async () => {
     const { container } = mount();
     await screen.findByText('Writes switched off');
-    expect(container.querySelector('#pds-reason')!.textContent).toBe('PDAS_WRITE_ENABLED is not true.');
+    expect(container.querySelector('#pds-reason')!.textContent).toBe('Writing to PDAS was switched off in this system’s settings.');
   });
 });
 

@@ -24,7 +24,8 @@ import { LM, collectStrings } from './strings';
 installDomStubs();
 
 const ME = { username: 'test-user', displayName: 'Test User', role: 'engineer' } as const;
-const OFF_REASON = 'PDAS_WRITE_ENABLED is not true.';
+const OFF_REASON = 'PDAS_WRITE_ENABLED is not true.'; // what the server sends
+const OFF_PLAIN = 'Writing to PDAS was switched off in this system’s settings.'; // what the current app shows
 const STATUS_ON = { enabled: true, reason: null, canWrite: true, local: { canWrite: true } };
 const STATUS_OFF = { enabled: false, reason: OFF_REASON, canWrite: false, local: { canWrite: true } };
 const STATUS_NO_LOCAL = { enabled: false, reason: OFF_REASON, canWrite: false, local: { canWrite: false } };
@@ -148,11 +149,11 @@ describe('the editor is for engineers (A4-11)', () => {
     expect(screen.getByText(LM.needsChange)).toBeTruthy();
   });
 
-  it('PDAS writes off: the PDAS choice is disabled and the server reason is shown as sent', async () => {
+  it('PDAS writes off: the PDAS choice is disabled and the reason is worded as the current app words it', async () => {
     open(2, {}, STATUS_OFF);
     await editor();
     await waitFor(() => expect(dest(/^PDAS/).disabled).toBe(true));
-    expect(screen.getAllByText(OFF_REASON).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(OFF_PLAIN).length).toBeGreaterThan(0);
     expect(dest(/^SMS/).disabled).toBe(false);
     expect(dest(/^SMS/).checked).toBe(true);
     expect(screen.getByText(LM.pdasOff)).toBeTruthy();
@@ -299,7 +300,7 @@ describe('PDAS action history (A1-090, A3-079)', () => {
     expect(within(table).getByText(LM.refused)).toBeTruthy();
     expect(within(table).getByText(LM.done)).toBeTruthy();
     expect(within(table).getByText(/Material already exist \(-7001\)/)).toBeTruthy();
-    expect(within(table).getAllByText(OFF_REASON).length).toBeGreaterThan(0);
+    expect(within(table).getAllByText(OFF_PLAIN).length).toBeGreaterThan(0);
   });
 
   it('the outcome filter narrows the rows', async () => {

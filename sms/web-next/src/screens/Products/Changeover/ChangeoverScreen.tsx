@@ -31,7 +31,7 @@ import {
   type ChangeoverRequestBody,
   type ProductOption,
 } from '../../../bridge/api';
-import { productLabel } from '../../../bridge/lib';
+import { pdasWords, productLabel } from '../../../bridge/lib';
 import { useData, type DataState } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { ConfirmDialog } from '../../../ui/ConfirmDialog';
@@ -406,7 +406,7 @@ function WritesOff({ plan }: { plan: ChangeoverPlan }) {
     <div className="co-off state" data-state="watch">
       <p className="co-off__t"><Icon name="lock" size={16} /> {CO.writesOffTitle}</p>
       {plan.disabledReason && (
-        <p className="co-verbatim"><span className="co-cap">{CO.reasonGiven}</span>{plan.disabledReason}</p>
+        <p className="co-verbatim"><span className="co-cap">{CO.reasonGiven}</span>{pdasWords.pdasReasonForDisplay(plan.disabledReason)}</p>
       )}
     </div>
   );
@@ -417,7 +417,7 @@ function WritesOff({ plan }: { plan: ChangeoverPlan }) {
 function ExecuteControl({ rank, plan, blocked, busy, done, onAsk }: {
   rank: number; plan: ChangeoverPlan; blocked: boolean; busy: boolean; done: boolean; onAsk: () => void;
 }) {
-  const reason = plan.writesEnabled ? null : (plan.disabledReason ?? CO.writesOffTitle);
+  const reason = plan.writesEnabled ? null : (pdasWords.pdasReasonForDisplay(plan.disabledReason) ?? CO.writesOffTitle);
   return (
     <WriteGate rank={rank} minRank={ENGINEER_RANK} disabledReason={reason}>
       <button type="button" className="ui-btn" disabled={blocked || busy || done} onClick={onAsk} aria-busy={busy || undefined}>
@@ -464,7 +464,7 @@ function Refusal({ refusal }: { refusal: { status: number; message: string } }) 
   return (
     <div className="co-fail state" data-state="act" role="alert">
       <p className="co-fail__t"><Icon name="info" size={16} /> {lead}</p>
-      <p className="co-verbatim">{refusal.message}</p>
+      <p className="co-verbatim">{pdasWords.pdasReasonForDisplay(refusal.message)}</p>
     </div>
   );
 }

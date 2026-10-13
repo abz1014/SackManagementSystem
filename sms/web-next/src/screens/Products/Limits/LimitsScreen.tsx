@@ -34,7 +34,7 @@ import {
   type ProductOption,
   type TimelineEntry,
 } from '../../../bridge/api';
-import { fmt, productLabel } from '../../../bridge/lib';
+import { fmt, pdasWords, productLabel } from '../../../bridge/lib';
 import { useData } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { DataTable, type Column } from '../../../ui/DataTable';
@@ -262,7 +262,7 @@ function Editor({ product, mirror, statusState, onSaved }: {
     setStep(i);
   };
 
-  const pdasReason = st && !st.enabled ? (st.reason ?? LM.pdasOff) : null;
+  const pdasReason = st && !st.enabled ? (pdasWords.pdasReasonForDisplay(st.reason) ?? LM.pdasOff) : null;
 
   return (
     <div className="lm-edit">
@@ -461,7 +461,7 @@ function ActionHistory({ nonce }: { nonce: number }) {
       render: (c) => (
         <>
           {c.reason && <span>{c.reason}</span>}
-          {c.message && <small className="lm-sub2 lm-verbatim">{c.message}{c.pdasErrorCode != null ? ` (${c.pdasErrorCode})` : ''}</small>}
+          {c.message && <small className="lm-sub2 lm-verbatim">{pdasWords.pdasReasonForDisplay(c.message)}{c.pdasErrorCode != null ? ` (${c.pdasErrorCode})` : ''}</small>}
           {!c.reason && !c.message && '—'}
         </>
       ),

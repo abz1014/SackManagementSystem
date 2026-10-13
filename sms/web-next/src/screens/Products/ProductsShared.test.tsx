@@ -47,13 +47,13 @@ describe('PdasStatusCard', () => {
     vi.unstubAllGlobals();
   });
 
-  it('writes off: prints the server reason exactly, and says local limits stay available', async () => {
+  it('writes off: prints the server reason as the current app words it (env name never shown), and says local limits stay available', async () => {
     installFakeFetch({
       '/api/product-write/status': { enabled: false, reason: 'PDAS_WRITE_ENABLED is not true.', canWrite: false, local: { canWrite: true } },
     });
     const { container } = render(<Card />);
     await screen.findByText('Writes switched off');
-    expect(container.querySelector('#pds-reason')!.textContent).toBe('PDAS_WRITE_ENABLED is not true.');
+    expect(container.querySelector('#pds-reason')!.textContent).toBe('Writing to PDAS was switched off in this system’s settings.');
     expect(screen.getByText(/Local weight limits can still be changed in SMS\./)).toBeTruthy();
     expect(screen.getByText(/Plans and reviews still work and nothing is sent to PDAS\./)).toBeTruthy();
   });

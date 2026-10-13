@@ -23,7 +23,8 @@ import { CO, collectStrings } from './strings';
 installDomStubs();
 
 const ME = { username: 'test-user', displayName: 'Test User', role: 'engineer' } as const;
-const DISABLED_REASON = 'PDAS_WRITE_ENABLED is not true.';
+const DISABLED_REASON = 'PDAS_WRITE_ENABLED is not true.'; // what the server sends
+const PLAIN_REASON = 'Writing to PDAS was switched off in this system’s settings.'; // what the current app shows for it
 const DUP = 'PDAS allows only one product per blend + count + tube type, active or not: 205-IL0 · 30 · AMBER already exists as product 21 (205-IL0-SD Blue). Change one of the three, or change the limits on product 21 instead.';
 
 const REFS = {
@@ -232,14 +233,14 @@ describe('Execute (A1-089, A4-06, B5-10)', () => {
     expect(screen.queryByRole('button', { name: /^Execute \d+ steps?$/ })).toBeNull();
   });
 
-  it('is disabled at rank 2 while writes are off, with the server reason exactly as sent', async () => {
+  it('is disabled at rank 2 while writes are off, with the reason worded as the current app words it', async () => {
     await toExecute(2, { '/api/changeover/plan': PLAN({ writesEnabled: false, disabledReason: DISABLED_REASON }) }, STATUS_OFF);
     const btn = screen.getByRole('button', { name: CO.execute(3) }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     // the same sentence, character for character, in its own element (never inside a longer string)
-    const hits = screen.getAllByText(DISABLED_REASON);
+    const hits = screen.getAllByText(PLAIN_REASON);
     expect(hits.length).toBeGreaterThan(0);
-    expect(document.body.textContent).not.toContain('switched off in this system');
+    expect(document.body.textContent).not.toContain('PDAS_WRITE_ENABLED');
     expect(screen.getByText(`${CO.nothingSent} ${CO.planStillWorks}`)).toBeTruthy();
     fireEvent.click(btn);
     expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -256,12 +257,12 @@ describe('Execute (A1-089, A4-06, B5-10)', () => {
     expect(posts('/api/changeover/execute')).toHaveLength(0);
   });
 
-  it('503 DISABLED is printed as sent, says nothing was sent, and draws no result', async () => {
+  it('503 DISABLED is printed in the words of the current app, says nothing was sent, and draws no result', async () => {
     await toExecute(2, { '/api/changeover/execute': json(503, { error: DISABLED_REASON, code: 'DISABLED' }) });
     fireEvent.click(screen.getByRole('button', { name: CO.execute(3) }));
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: CO.confirm }));
     expect(await screen.findByText(CO.refusedOff)).toBeTruthy();
-    expect(screen.getByText(DISABLED_REASON)).toBeTruthy();
+    expect(screen.getByText(PLAIN_REASON)).toBeTruthy();
     expect(screen.queryByText(CO.resultTitle)).toBeNull();
     expect(screen.queryByText(CO.done)).toBeNull();
   });

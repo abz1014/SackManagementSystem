@@ -135,11 +135,11 @@ describe('Retire and reactivate', () => {
     await loaded();
     await screen.findByText('id 20');
     await waitFor(() => expect(container.querySelector('#pds-reason')).toBeTruthy());
-    expect(container.querySelector('#pds-reason')!.textContent).toBe('PDAS_WRITE_ENABLED is not true.');
+    expect(container.querySelector('#pds-reason')!.textContent).toBe('Writing to PDAS was switched off in this system’s settings.');
     const b = within(rowOf(20)).getByRole('button', { name: 'Retire' }) as HTMLButtonElement;
     expect(b.disabled).toBe(true);
     expect(b.getAttribute('aria-describedby')).toBe('pds-reason');
-    expect(container.textContent!.split('PDAS_WRITE_ENABLED is not true.').length - 1).toBe(1);
+    expect(container.textContent!.split('Writing to PDAS was switched off in this system’s settings.').length - 1).toBe(1);
   });
 
   it('rank 2 with writes on: needs a reason of ten characters, then sends it, and shows nothing before the answer', async () => {
