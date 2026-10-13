@@ -51,13 +51,20 @@ function liveLine(over: Record<string, unknown> = {}) {
   };
 }
 
-const PREV = {
+/** The captured fixtures predate `conesFailedScale`; give each row the scale-flag sum the API now sends. */
+const withScale = <T extends { rows: object[]; states?: { rejected: number } | null }>(d: T, extra = 0): T => ({
+  ...d,
+  rows: d.rows.map((r) => ({ conesFailedScale: (d.states?.rejected ?? 0) + extra, ...r })),
+});
+
+const PREV_RAW = {
   groupBy: 'none',
   rows: [{ group: 'total', cones: 3191, rejectedCones: 431, unmatchedRejects: 5, sacks: 131, sackWeightKg: 6190.7, conesInRangePct: 100 }],
   unattributed: null,
   states: { within: 3187, low: 0, high: 0, rejected: 4, unknown: 0 },
   implausible: 0,
 };
+const PREV = withScale(PREV_RAW);
 
 const ST = (station: number, cones: number, failedPct: number | null, state: string, product: string | null) => ({
   station, name: `Winder ${station}`, cones, failedPct, state, reasons: [], vsTargetG: null, product,
@@ -84,7 +91,7 @@ function routes(over: Routes = {}, opts: { compareOk?: boolean } = {}): Routes {
     '/api/production': (req: RouteRequest) => {
       const g = req.search.get('groupBy');
       const base = g === 'shift' ? pd.prodShift : g === 'day' ? pd.prodDay : g === 'station' ? pd.prodStation : pd.prodNone;
-      const out = { ...base };
+      const out = { ...withScale(base) };
       if (req.search.get('compare') && g === 'none' && opts.compareOk !== false) {
         out.previous = { from: '2026-08-31', to: '2026-08-31', fromShift: null, toShift: null, result: PREV };
       }
@@ -145,6 +152,23 @@ describe('KPI row (A3-023)', () => {
     expect(fw).toContain('0 of 3,089 cones');
   });
 
+  it('counts every cone the scale flagged, including one with an implausible weight (VERIFY-SCALE-COUNT)', async () => {
+    // states.rejected is 0 here (the exclusive classification put the flagged cone under "unknown");
+    // the scale-flag sum is 3: the tile must read 3, as the summary KPI does.
+    const prod = { ...pd.prodNone, states: { ...pd.prodNone.states, rejected: 2, unknown: 1 }, rows: [{ ...pd.prodNone.rows[0], conesFailedScale: 3 }] };
+    expect(kpis(prod).weight.n).toBe(3);
+    mount('/?s=today&p=pick&from=2026-09-01&to=2026-09-01', { '/api/production': env(prod) });
+    await waitFor(() => expect((card('Failed weight check (scale)').textContent ?? '')).toContain('3 of 3,089 cones'));
+  });
+
+  it('a row without conesFailedScale is a dash, never states.rejected', () => {
+    const row = { ...pd.prodNone.rows[0] };
+    delete (row as Record<string, unknown>).conesFailedScale;
+    const k = kpis({ ...pd.prodNone, states: { ...pd.prodNone.states, rejected: 2 }, rows: [row] });
+    expect(k.weight.unreadable).toBe(true);
+    expect(k.weight.pct).toBeNull();
+  });
+
   it('shows no comparison unless one is asked for', async () => {
     mount();
     await waitFor(() => expect(card('Cones').textContent).toContain('3,089'));
@@ -187,14 +211,14 @@ describe('KPI row (A3-023)', () => {
   it('an unreadable field is a dash, not a zero (WS-B1)', () => {
     const row = { ...pd.prodNone.rows[0] };
     delete (row as Record<string, unknown>).unmatchedRejects;
-    const k = kpis({ ...pd.prodNone, rows: [row] });
+    const k = kpis({ ...withScale(pd.prodNone), rows: [{ ...withScale({ ...pd.prodNone, rows: [row] }).rows[0] }] });
     expect(k.inspection.unreadable).toBe(true);
     expect(k.inspection.pct).toBeNull();
     expect(k.cones.text).toBe('3,089');
   });
 
   it('pure delta arithmetic', () => {
-    const cur = kpis(pd.prodNone);
+    const cur = kpis(withScale(pd.prodNone));
     const prev = kpis(PREV as never);
     expect(countDelta(cur.cones, prev.cones, false, (p) => `vs ${p}`)).toEqual({ text: '3.2 %', direction: 'down', vs: 'vs 3,191' });
     expect(rateDelta(cur.inspection, prev.inspection)?.text).toBe('1.1 points');

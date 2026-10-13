@@ -82,12 +82,16 @@ export function failedInspection(r: ProductionRow | null, data: ProductionData):
   return { pct: weighed > 0 ? Math.round((10000 * n) / weighed) / 100 : null, n, of: weighed, unreadable: false };
 }
 
-/** Failed weight check (scale): cones the scale marked out of range, over cones. */
+/**
+ * Failed weight check (scale): every cone the scale marked out of range, over cones. The count is
+ * the row's own `conesFailedScale` (SUM of in_range = 0), the same population as the summary KPI.
+ * It is NOT `states.rejected`: that is an exclusive five-way classification in which a scale-flagged
+ * cone with an implausible weight counts as "unknown" (design/redesign-2026-10/VERIFY-SCALE-COUNT.md).
+ */
 export function failedWeightCheck(r: ProductionRow | null, data: ProductionData): RateFigure {
   if (r === null) return { pct: null, n: null, of: null, unreadable: false };
-  const states = data.states;
   const cones = num(r.cones);
-  const n = states ? num(states.rejected) : null;
+  const n = unreadable(r, data, 'conesFailedScale') ? null : num(r.conesFailedScale);
   if (unreadable(r, data, 'cones') || cones === null || n === null) return { pct: null, n, of: cones, unreadable: true };
   return { pct: cones > 0 ? Math.round((10000 * n) / cones) / 100 : null, n, of: cones, unreadable: false };
 }
