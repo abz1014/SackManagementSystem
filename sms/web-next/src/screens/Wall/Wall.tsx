@@ -21,7 +21,7 @@ import { fmt, generationWords, health as healthLib, live, period as P, simulator
 import { W } from '../../bridge/words';
 import { C, FRAGMENTS } from '../../copy';
 import { todayRoute } from '../../appRoute';
-import { useData, usePeriod, useProduction, useStationStatus } from '../../data';
+import { useData, usePeriod, useProduction, useStationStatus, useLive } from '../../data';
 import { hrefFor, plainClick } from '../../ui/nav';
 import { StatusPill, type UiState } from '../../ui/StatusPill';
 import type { ScreenProps } from '../registry';
@@ -120,7 +120,7 @@ function WallNeedsLargeScreen({ route }: Pick<ScreenProps, 'route'>) {
 
 function WallLoader(props: ScreenProps) {
   const { period, status, failed } = usePeriod();
-  const { error } = live.useLive();
+  const { error } = useLive();
   if (!period) {
     return (
       <div className="wall dark wl" data-wall style={wallStyleNow()}>
@@ -136,7 +136,7 @@ function WallLoader(props: ScreenProps) {
 }
 
 function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
-  const { line, error, updatedAt } = live.useLive();
+  const { line, error, updatedAt } = useLive();
   const browserNow = live.useTicker(1000);
   const stationsD = useStationStatus(period);
   const prodD = useProduction(period);

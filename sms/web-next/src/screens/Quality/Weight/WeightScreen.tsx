@@ -32,7 +32,7 @@ import { C, RESERVED } from '../../../copy';
 import { fmtAppDateTime, fmtDate, fmtDateTime } from '../../../lib/fmt';
 import { Histogram, LineChart } from '../../../charts';
 import type { LimitSpec } from '../../../charts';
-import { useData, useProduction, usePeriod, type DataState } from '../../../data';
+import { SHAPE, useData, useProduction, usePeriod, type DataState, useLive } from '../../../data';
 import { Icon } from '../../../ui/Icon';
 import { PageHead } from '../../../ui/PageHead';
 import { KpiCard } from '../../../ui/KpiCard';
@@ -118,7 +118,7 @@ function useAfterNewest(period: P.Period): { text: string | null; newest: string
   let newest: string | null = null;
   let plantNow: string | null = null;
   try {
-    const { line } = live.useLive();
+    const { line } = useLive();
     newest = line?.dataAsOfUtc ?? null;
     plantNow = line?.plantNowUtc ?? null;
   } catch {
@@ -155,7 +155,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
         periodToShift: pq.toShift,
       }),
     `qw:ws:${pkey}`,
-    { live: period.live, intervalMs: SLOW_POLL },
+    { live: period.live, intervalMs: SLOW_POLL, shape: SHAPE.weightStations },
   );
   const productId = stationsD.data?.data.productId ?? null;
   const spcQuery = (type: 'cone' | 'sack', extra: { station?: number; productId?: number }) => ({
@@ -176,7 +176,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
     'the cone weight figures',
     () => (productKnown ? getSpc(spcQuery('cone', { productId: productId ?? undefined })) : never<Envelope<SpcData>>()),
     `qw:cone:${pkey}:${productKnown ? (productId ?? 'none') : 'wait'}`,
-    { live: period.live, intervalMs: every, isEmpty: (e) => e.data.count === 0 },
+    { live: period.live, intervalMs: every, isEmpty: (e) => e.data.count === 0, shape: SHAPE.spc },
   );
   // The chart's own population. A plain cone chart of the whole line reuses coneLine.
   const ownChart = !(chartType === 'cone' && station === null);
@@ -189,14 +189,14 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
           ? getSpc(spcQuery(chartType, isSack ? {} : { productId: productId ?? undefined, station: station ?? undefined }))
           : never<Envelope<SpcData>>(),
     `qw:chart:${chartType}:${station ?? 'line'}:${pkey}:${productKnown ? (productId ?? 'none') : 'wait'}`,
-    { live: period.live, intervalMs: every },
+    { live: period.live, intervalMs: every, shape: SHAPE.spc },
   );
   const prod = useProduction(period);
   const sackSum = useData(
     'the sack summary',
     () => (isSack ? getSackSummary({ ...pq, tsTo: undefined }) : Promise.resolve(null)),
     `qw:sacks:${isSack}:${pkey}:${asOf ?? 'now'}`,
-    { live: period.live, intervalMs: every },
+    { live: period.live, intervalMs: every, shape: SHAPE.sackSummary },
   );
   const sackDays = useData(
     'the sack weights by day',

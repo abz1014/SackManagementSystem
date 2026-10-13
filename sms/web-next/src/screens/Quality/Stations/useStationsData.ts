@@ -7,7 +7,7 @@
 import { FRAGMENTS } from '../../../copy';
 import { getProduction, getRejects, getWeightStations, listAdjustments } from '../../../bridge/api';
 import { period as P } from '../../../bridge/lib';
-import { useData, type DataState } from '../../../data';
+import { SHAPE, useData, type DataState } from '../../../data';
 import type { Envelope, ProductionData, RejectData, WeightStationsData, AdjustmentList } from '../../../bridge/api';
 
 const SF = FRAGMENTS.qualityStations;
@@ -23,7 +23,7 @@ export function useStationCounts(period: P.Period): DataState<Envelope<Productio
     SF.partCounts,
     () => getProduction({ ...P.periodQuery(period), groupBy: 'station' }),
     `stations:counts:${key(period)}`,
-    { live: period.live },
+    { live: period.live, shape: SHAPE.productionRows },
   );
 }
 
@@ -33,7 +33,7 @@ export function useOneStationCounts(period: P.Period, station: number): DataStat
     SF.partSheetCounts,
     () => getProduction({ ...P.periodQuery(period), station, groupBy: 'none' }),
     `station:${station}:counts:${key(period)}`,
-    { live: period.live },
+    { live: period.live, shape: SHAPE.productionRows },
   );
 }
 
@@ -53,7 +53,7 @@ export function usePatternCheck(period: P.Period, part: string): DataState<Envel
         periodToShift: pq.toShift,
       }),
     `stations:pattern:${key(period)}`,
-    { live: period.live, intervalMs: 5 * 60_000 },
+    { live: period.live, intervalMs: 5 * 60_000, shape: SHAPE.weightStationsDays },
   );
 }
 

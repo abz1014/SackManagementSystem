@@ -21,10 +21,10 @@ import {
   type MovementType,
   type StockLedgerData,
 } from '../../../bridge/api';
-import { live, fmt, period as P } from '../../../bridge/lib';
+import { fmt, period as P } from '../../../bridge/lib';
 import { REASON_MIN_CHARS, RESERVED, C, FRAGMENTS, withFragments } from '../../../copy';
 import { fmtDate } from '../../../lib/fmt';
-import { useData } from '../../../data';
+import { useData, useLive } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import type { Route } from '../../../route';
 import { DataTable, type Column } from '../../../ui/DataTable';
@@ -203,7 +203,7 @@ function LedgerBody({ d, unit, shiftNarrowed, onOpenDay }: { d: StockLedgerData;
 const plantLocal = (iso: string | null | undefined): string => (iso ? iso.slice(0, 16) : '');
 
 function MovementSheet({ onClose, onRecorded }: { onClose: () => void; onRecorded: () => void }) {
-  const { line } = live.useLive();
+  const { line } = useLive();
   const plantNow = plantLocal(line?.plantNowUtc);
   const products = useData(R.fProduct, () => getProducts(), 'products', { live: false });
   const [type, setType] = useState<MovementType>('issue');

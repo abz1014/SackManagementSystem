@@ -17,7 +17,7 @@ import { fmt, generationWords, period as P, productLabel } from '../../../bridge
 import { W } from '../../../bridge/words';
 import { C, withFragments, FRAGMENTS } from '../../../copy';
 import { fmtAppDate, fmtDate, fmtTime } from '../../../lib/fmt';
-import { useData, useMachinesRunning, usePeriod, type DataState } from '../../../data';
+import { SHAPE, useData, useMachinesRunning, usePeriod, type DataState } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { Disclosure } from '../../../ui/Disclosure';
 import { ConfirmDialog } from '../../../ui/ConfirmDialog';
@@ -72,7 +72,7 @@ function Body({ route, rank, go, period }: ScreenProps & { period: P.Period }) {
     B.partCones,
     () => getProduction({ ...P.periodQuery(period), groupBy: 'station' }),
     `products:cones:${key(period)}`,
-    { live: period.live },
+    { live: period.live, shape: SHAPE.productionRows },
   );
   const status = usePdasWriteStatus();
   const [filter, setFilter] = useState<Filter>('all');

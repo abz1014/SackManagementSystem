@@ -23,6 +23,7 @@ import { HealthDot } from './ui/HealthDot';
 import { hrefFor, plainClick, routeFor } from './ui/nav';
 import { PeriodChip } from './ui/PeriodChip';
 import './app.css';
+import { useLive, usePlantNow } from './data';
 
 /* The component gallery exists only in the dev server: the whole branch (and its chunk) is removed from a production build. */
 const Gallery = import.meta.env.DEV ? lazy(() => import('./Gallery').then((m) => ({ default: m.Gallery }))) : null;
@@ -112,8 +113,8 @@ export function bannerView(route: Route): { view: BannerView; productTab: Banner
 }
 
 function Frame({ user, rank, route, onSignedOut }: { user: AuthUser; rank: number; route: Route; onSignedOut: () => void }) {
-  const { line } = live.useLive();
-  const plantNow = live.usePlantNow();
+  const { line } = useLive();
+  const plantNow = usePlantNow();
   const { period } = usePeriod();
   const go = useCallback((next: Route, opts?: { replace?: boolean }) => navigate(next, opts), []);
 

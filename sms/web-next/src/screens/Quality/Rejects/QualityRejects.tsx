@@ -23,10 +23,10 @@ import {
   getStations,
   type RejectFilters,
 } from '../../../bridge/api';
-import { live, period as P, productLabel } from '../../../bridge/lib';
+import { period as P, productLabel } from '../../../bridge/lib';
 import { C, FRAGMENTS } from '../../../copy';
 import { fmtDate, fmtRange } from '../../../lib/fmt';
-import { useData, useRange } from '../../../data';
+import { SHAPE, useData, useRange, useLive } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { Pareto, LineChart } from '../../../charts';
 import { NameIt } from '../../../sheets/ReasonSheet/NameIt';
@@ -85,7 +85,7 @@ export function QualityRejectsScreen(props: ScreenProps) {
 
 function RejectsBody({ route, rank, go }: ScreenProps) {
   const { period, status: periodStatus, failed: periodFailed } = usePeriod();
-  const { line } = live.useLive();
+  const { line } = useLive();
   const range = useRange();
 
   const station = intKey(route.keys.st);
@@ -110,9 +110,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
   const polls = period?.live === true;
 
   // ---- the period's figures, reasons and days
-  const reasons = useData('reasons', () => (periodF ? getRejectsFiltered(periodF) : wait()), `rj:reasons:${pKey}`, { live: polls });
-  const periodQ = useData('the failed-inspection rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'quality', bucket: 'day' }) : wait()), `rj:pq:${pKey}`, { live: polls });
-  const periodW = useData('the weight-reject rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'weight', bucket: 'day' }) : wait()), `rj:pw:${pKey}`, { live: polls });
+  const reasons = useData('reasons', () => (periodF ? getRejectsFiltered(periodF) : wait()), `rj:reasons:${pKey}`, { live: polls, shape: SHAPE.rejectsWithCounts });
+  const periodQ = useData('the failed-inspection rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'quality', bucket: 'day' }) : wait()), `rj:pq:${pKey}`, { live: polls, shape: SHAPE.rejectSpc });
+  const periodW = useData('the weight-reject rate', () => (periodF ? getRejectSpcFiltered({ ...periodF, from: periodF.from!, to: periodF.to!, rejectType: 'weight', bucket: 'day' }) : wait()), `rj:pw:${pKey}`, { live: polls, shape: SHAPE.rejectSpc });
   const byDay = useData('the days by reason', () => (periodF ? getRejectsByDayCode({ ...periodF, from: periodF.from!, to: periodF.to! }) : wait()), `rj:byday:${pKey}`, { live: polls });
 
   // ---- the trend: the fixed window, never the period
@@ -132,7 +132,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
     'the trend',
     () => (win ? getRejectSpcFiltered({ ...narrow, from: win.from, to: win.to, rejectType: code ? 'all' : 'quality', bucket: 'day', code: code ?? undefined }) : wait()),
     `rj:trend:${win?.from ?? 'wait'}:${win?.to ?? ''}:${narrowKey}:${code ?? ''}`,
-    { live: polls },
+    { live: polls, shape: SHAPE.rejectSpc },
   );
 
   const stations = useData('the station list', () => getStations(), 'stations', { live: false });

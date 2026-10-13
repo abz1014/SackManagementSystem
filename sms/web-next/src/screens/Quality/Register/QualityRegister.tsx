@@ -24,11 +24,11 @@ import {
   type RegisterRow,
   CONE_STATES,
 } from '../../../bridge/api';
-import { live, period as P } from '../../../bridge/lib';
+import { period as P } from '../../../bridge/lib';
 import { RegisterPrintHead } from '../../../bridge/register';
 import { RESERVED, C, FRAGMENTS, withFragments } from '../../../copy';
 import { fmtDate, fmtTimeSec } from '../../../lib/fmt';
-import { useData } from '../../../data';
+import { useData, useLive } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { EXPORT_MIN_RANK } from '../../../ranks';
 import { Chip } from '../../../ui/Chip';
@@ -92,7 +92,7 @@ export function QualityRegisterScreen(props: ScreenProps) {
 
 function RegisterBody({ route, rank, go }: ScreenProps) {
   const { period, status: periodStatus, failed: periodFailed } = usePeriod();
-  const { line, asOf } = live.useLive();
+  const { line, asOf } = useLive();
 
   const keys = route.keys;
   const listing = parseListing(keys);

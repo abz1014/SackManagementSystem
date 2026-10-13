@@ -55,7 +55,10 @@ export function usePeriod(): PeriodState {
   const liveD = useData('plant clock', () => getLive(at), `period:live:${at ?? 'now'}`);
   const rangeD = useData('data range', () => getRange(), 'period:range', { live: false });
 
-  const line = liveD.data?.data.lines[0] ?? null;
+  const rawLine = liveD.data?.data?.lines?.[0] ?? null;
+  // A clock body with a hole (no shift, no plant time) is a failed plant clock, never a crash and never a guessed period.
+  const line = rawLine && rawLine.shift && typeof rawLine.plantNowUtc === 'string' ? rawLine : null;
+  const clockBroken = liveD.status !== 'loading' && liveD.status !== 'error' && liveD.data !== null && line === null;
   const period = line
     ? P.resolvePeriod(
         params.key,
@@ -75,10 +78,10 @@ export function usePeriod(): PeriodState {
   // A failed range fetch is named, never silent: the period may still resolve
   // from the live anchor, but firstDay / the data-as-of fallback are then missing.
   const failed = [
-    ...(liveD.status === 'error' ? [liveD.part] : []),
+    ...(liveD.status === 'error' || clockBroken ? [liveD.part] : []),
     ...(rangeD.error !== null ? [rangeD.part] : []),
   ];
-  const status = liveD.status === 'error' ? 'error' : period ? 'ok' : 'loading';
+  const status = liveD.status === 'error' || clockBroken ? 'error' : period ? 'ok' : 'loading';
 
   const setParams = useCallback((p: P.PeriodParams) => push((s) => P.writePeriodParams(s, p)), []);
   const setCompare = useCallback(

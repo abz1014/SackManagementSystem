@@ -10,12 +10,12 @@
  * weighing data cannot tell a scale that reads heavy from cones that really are heavy.
  */
 import { useCallback } from 'react';
-import { health as healthLib, live, fmt } from '../../../bridge/lib';
+import { health as healthLib, fmt } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
 import { C, RESERVED, FRAGMENTS } from '../../../copy';
 import { fmtRange } from '../../../lib/fmt';
 import { PageHead } from '../../../ui/PageHead';
-import { useRange, useStationStatus, usePeriod } from '../../../data';
+import { useRange, useStationStatus, usePeriod, useLive } from '../../../data';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
 import { Disclosure } from '../../../ui/Disclosure';
@@ -67,7 +67,7 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
   const counts = useStationCounts(period);
   const pattern = usePatternCheck(period, SF.partPattern);
   const range = useRange();
-  const { line } = live.useLive();
+  const { line } = useLive();
   const dataNow = healthLib.assessHealth(line).kind === 'ok';
 
   const open = useCallback(

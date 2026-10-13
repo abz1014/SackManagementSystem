@@ -14,7 +14,7 @@ import {
 import { fmt, healthWords, live, period as P } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
 import { C, formatClock, formatDate, FRAGMENTS, withFragments } from '../../../copy';
-import { useData, usePeriod, type DataState } from '../../../data';
+import { useData, usePeriod, type DataState, useLive } from '../../../data';
 import { fmtAppDateTime, fmtAppTime, fmtTime } from '../../../lib/fmt';
 import { Disclosure } from '../../../ui/Disclosure';
 import { ErrorState } from '../../../ui/ErrorState';
@@ -39,7 +39,7 @@ const plain = (iso: string) => `${formatDate(iso)} ${formatClock(iso)}`;
 
 export function DiagnosticsScreen(props: ScreenProps) {
   const { route, rank, go } = props;
-  const { line } = live.useLive();
+  const { line } = useLive();
   const health = useData('system status', () => getHealth(), 'system-health', { intervalMs: 30_000 });
   const ops = useData('data checks', () => getOperations(), 'system-operations', { intervalMs: 60_000 });
   const history = useData('data sources', () => getSystemHistory(), 'system-history', { intervalMs: 5 * 60_000 });

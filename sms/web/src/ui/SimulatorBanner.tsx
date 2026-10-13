@@ -100,7 +100,7 @@ export function SimulatorBanner({
   const liveSimulator = hasLiveFigures && currentIsSimulator(line?.generation ?? null);
   const periodSimulator: boolean | undefined = hasPeriodFigures
     ? period.data
-      ? period.data.batches.some((b) => b.simulator)
+      ? period.data.batches?.some((b) => b.simulator)
       : undefined
     : undefined;
 

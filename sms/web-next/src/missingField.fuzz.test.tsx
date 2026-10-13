@@ -23,7 +23,7 @@
  * NOT covered: report bodies (old renderers, bridged), sheets, Wall, write forms, text/boolean-only fields.
  * jsdom computes no layout, so this says nothing about how a stripped field LOOKS, only about its text.
  */
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
@@ -93,10 +93,15 @@ export function without(body: unknown, path: Path): unknown {
   return copy;
 }
 
-/** Zero figures as they would read on screen: "0 cones", "0%", "0.0 g". */
+/**
+ * Zero figures as they would read on screen: "0 cones", "0%", "0.0 g". Compared as bare tokens, with no surrounding text:
+ * a neighbouring cell that turns into a dash or "No data" (correctly) must not make an unchanged legitimate zero look new
+ * (13 Oct 2026: both former KNOWN_ZERO entries and a third candidate were exactly that, a baseline "0.0 %" failed-weight
+ * share beside a cell that changed). A missing field that prints a zero where a figure stood still raises the count of that token.
+ */
 export const ZERO_RE = /(?<![\w.,\d-])0(?:\.0+)?(?:\s?%|\s(?:cones?|sacks?|weighed|rejected|rejects?|readings?|stations?|machines?|products?|g|kg|days?|failed|checked|inspected)\b)/g;
 export function zeroFigures(text: string): string[] {
-  return [...text.matchAll(ZERO_RE)].map((m) => text.slice(Math.max(0, m.index! - 14), m.index! + m[0].length).replace(/\s+/g, ' ').trim());
+  return [...text.matchAll(ZERO_RE)].map((m) => m[0].replace(/\s+/g, ' ').trim());
 }
 /** Zero figures in `after` that `before` does not have (multiset difference). */
 export function newZeroes(before: string[], after: string[]): string[] {
@@ -123,9 +128,11 @@ const textOf = (el: Element): string => {
 };
 const LOADING = '.ui-skel, .kpi-skel, .ui-dt__skel, .ui-skel-chart, .ui-skel-kpis, .ck-skel, .skel';
 
-interface Snapshot { text: string; crashed: boolean; shellAlive: boolean; requested: string[] }
+interface Snapshot { text: string; crashed: boolean; shellAlive: boolean; requested: string[]; error: string }
+let thrown: string[] = [];
 let fake: FakeFetch | null = null;
 async function mountAndRead(url: string, rank: string, mutate?: { key: string; path: Path }): Promise<Snapshot> {
+  thrown = [];
   window.history.replaceState(null, '', url);
   const routes: Routes = {};
   for (const key of Object.keys(FX)) {
@@ -156,6 +163,7 @@ async function mountAndRead(url: string, rank: string, mutate?: { key: string; p
   const snap: Snapshot = {
     text: main ? textOf(main) : '',
     crashed: !!container.querySelector('.sh-page-error'),
+    error: thrown[0] ?? '',
     shellAlive: !!container.querySelector('.sh-side, .sh-tabbar, .sh-top'),
     requested: [...new Set(fake.requests.map((r) => r.split('?')[0]!))],
   };
@@ -175,7 +183,12 @@ async function mountAndRead(url: string, rank: string, mutate?: { key: string; p
 
 // A missing field may make a screen throw; the shell's boundary catches it and this test counts it. React and jsdom would print every such throw.
 beforeAll(() => {
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+    for (const a of args) {
+      if (a instanceof Error) thrown.push(a.message);
+      else if (typeof a === 'string' && /TypeError|Cannot read|is not iterable|is not a function/.test(a)) thrown.push(a.slice(0, 120));
+    }
+  });
 });
 
 afterEach(() => {
@@ -205,12 +218,7 @@ const MAX_PER_SCREEN = ALL ? 100000 : 40;
  * 224df3d on 13 Oct 2026 and recorded, not fixed (this task owns tests only). Delete an entry when its screen is
  * fixed: the exhaustive run reports it stale.
  */
-const KNOWN_ZERO: Record<string, string> = {
-  'Quality > Stations | /api/station-status | data.stations.[].failedPct':
-    'A station row without failedPct prints "No data 0.0 %": the failed-inspection rate is shown as a measured zero beside the words No data. Quality > Stations (T2).',
-  'Quality > Stations | /api/production?groupBy=station | data.rows.[].rejectedCones':
-    'Station rows without rejectedCones print "- 0.0 %" next to a real cone count, so a missing count reads as a 0 % reject rate. Quality > Stations (T2).',
-};
+const KNOWN_ZERO: Record<string, string> = {};
 
 describe('fuzz helpers', () => {
   it('canary: fieldPaths finds figure-bearing fields through arrays, and without() deletes from every row', () => {
@@ -231,10 +239,15 @@ describe('fuzz helpers', () => {
     expect(newZeroes(base, zeroFigures('Rejected - cones today, rate -'))).toEqual([]);
     expect(zeroFigures('0 weighed, 402 rejected (0%)').length).toBe(2);
     expect(zeroFigures('100 cones, 1.05 g, 20%, 2026')).toEqual([]);
+    // a changed neighbour cell does not make an unchanged zero new
+    expect(newZeroes(zeroFigures('1.2 % 12 cones 0.0 % 4.2 g'), zeroFigures('No data 0.0 % 4.2 g'))).toEqual([]);
+    // but a zero standing where a figure was does
+    expect(newZeroes(zeroFigures('1.2 % 12 cones 4.2 g'), zeroFigures('0.0 % 12 cones 4.2 g')).length).toBe(1);
+    expect(newZeroes(zeroFigures('0.0 % x'), zeroFigures('0.0 % x 0.0 % y')).length).toBe(1);
   });
 });
 
-for (const screen of SCREENS) {
+for (const screen of SCREENS.filter((x) => !process.env.SMS_FUZZ_ONLY || x.name.includes(process.env.SMS_FUZZ_ONLY))) {
   describe(`missing field: ${screen.name}`, () => {
     it('never prints a confident zero for a missing field, and never takes the page down', async () => {
       const base = await mountAndRead(screen.url, 'manager');
@@ -251,12 +264,14 @@ for (const screen of SCREENS) {
       const zeroHits: string[] = [];
       const shellLost: string[] = [];
       let crashes = 0;
+      const crashIds: string[] = [];
       const seenKnown = new Set<string>();
       for (const c of picked) {
         const id = `${screen.name} | ${c.key} | ${c.path.join('.')}`;
         const snap = await mountAndRead(screen.url, 'manager', c);
         if (snap.crashed) {
           crashes++;
+          crashIds.push(`${id}   ::  ${snap.error}`);
           if (!snap.shellAlive) shellLost.push(id);
         }
         const extra = newZeroes(baseZeroes, zeroFigures(snap.text));
@@ -266,7 +281,9 @@ for (const screen of SCREENS) {
         }
       }
       expect(zeroHits, `${zeroHits.length} field(s) whose absence prints a confident zero on ${screen.name} (${picked.length} of ${cases.length} fields tried):\n${zeroHits.join('\n')}`).toEqual([]);
+      if (process.env.SMS_FUZZ_LOG) appendFileSync(process.env.SMS_FUZZ_LOG, crashIds.map((c) => `CRASH ${c}\n`).join(''));
       console.info(`[fuzz] ${screen.name}: ${picked.length} of ${cases.length} fields tried, ${crashes} made the page throw (shell kept)`);
+      expect(crashIds, `${crashIds.length} missing field(s) made ${screen.name} throw (a page must name the part, never crash):\n${crashIds.join('\n')}`).toEqual([]);
       expect(shellLost, `these missing fields took the whole shell down, not just the page: ${shellLost.join(' ; ')}`).toEqual([]);
       const stale = ALL ? Object.keys(KNOWN_ZERO).filter((k) => k.startsWith(screen.name + ' |') && !seenKnown.has(k)) : [];
       expect(stale, 'allow-list entries that no longer fail (delete them)').toEqual([]);

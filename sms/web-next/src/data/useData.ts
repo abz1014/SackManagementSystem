@@ -1,4 +1,5 @@
 import { live } from '../bridge/lib';
+import { assertShape, type Shape } from './shape';
 
 export type DataStatus = 'loading' | 'error' | 'ok' | 'empty';
 
@@ -21,6 +22,8 @@ export interface UseDataOptions<T> {
   /** Decides "empty" for successfully fetched data only. */
   isEmpty?: (data: T) => boolean;
   intervalMs?: number;
+  /** Required body paths (see shape.ts). A body without one is a failed fetch that names the part, never a crash or a zero. */
+  shape?: Shape;
 }
 
 /**
@@ -33,7 +36,9 @@ export function useData<T>(
   key: string,
   opts: UseDataOptions<T> = {},
 ): DataState<T> {
-  const poll = live.usePolling(fn, opts.intervalMs ?? live.LIST_POLL_MS, key, { enabled: opts.live !== false });
+  const shape = opts.shape;
+  const checked = shape ? async () => { const body = await fn(); return body === null ? body : assertShape(body, shape, part); } : fn;
+  const poll = live.usePolling(checked, opts.intervalMs ?? live.LIST_POLL_MS, key, { enabled: opts.live !== false });
   let status: DataStatus;
   if (poll.data !== null) status = opts.isEmpty && opts.isEmpty(poll.data) ? 'empty' : 'ok';
   else if (poll.error !== null) status = 'error';

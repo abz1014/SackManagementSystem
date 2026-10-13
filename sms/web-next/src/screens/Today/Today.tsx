@@ -18,7 +18,7 @@ import {
 import { W } from '../../bridge/words';
 import { fmt, generationWords, health as healthLib, live, period as P, productLabel } from '../../bridge/lib';
 import { C, RESERVED, formatClock, formatDate, FRAGMENTS } from '../../copy';
-import { useData, useRange, useStationStatus, usePeriod, useProduction, type DataState } from '../../data';
+import { SHAPE, useData, useRange, useStationStatus, usePeriod, useProduction, type DataState, useLive } from '../../data';
 import type { Compare } from '../../data';
 import type { Route } from '../../route';
 import { Disclosure } from '../../ui/Disclosure';
@@ -78,7 +78,7 @@ function TodayBody({
   compare: Compare | null;
   setParams: (p: P.PeriodParams) => void;
 }) {
-  const liveCtx = live.useLive();
+  const liveCtx = useLive();
   const line = liveCtx.line;
   const asOf = live.useAsOf();
   const pq = P.periodQuery(period);
@@ -87,14 +87,14 @@ function TodayBody({
   const spreadKind: 'day' | 'shift' = period.days >= 2 ? 'day' : 'shift';
 
   const prod = useProduction(period, compare);
-  const spread = useData(TF.shifts.partName, () => getProduction({ ...pq, groupBy: spreadKind }), `today-spread:${spreadKind}:${key}`, { live: isLive });
+  const spread = useData(TF.shifts.partName, () => getProduction({ ...pq, groupBy: spreadKind }), `today-spread:${spreadKind}:${key}`, { live: isLive, shape: SHAPE.productionRows });
   const stations = useStationStatus(period);
-  const sacks = useData(TF.sacks.partName, () => getSackSummary(pq), `today-sacks:${key}`, { live: isLive });
-  const reasons = useData(TF.reasons.partName, () => getRejectsFiltered(pq), `today-reasons:${key}`, { live: isLive });
+  const sacks = useData(TF.sacks.partName, () => getSackSummary(pq), `today-sacks:${key}`, { live: isLive, shape: SHAPE.sackSummary });
+  const reasons = useData(TF.reasons.partName, () => getRejectsFiltered(pq), `today-reasons:${key}`, { live: isLive, shape: SHAPE.rejects });
   const attention = useData(TF.attention.partName, () => getAttention({
     from: period.from, to: period.to, shift: period.shift, fromShift: pq.fromShift, toShift: pq.toShift,
-  }), `today-attention:${periodKey(period)}`, { live: isLive });
-  const machines = useData(TF.productChange.partName, () => getMachinesRunning(period.tsTo), `today-machines:${isLive ? (asOf ?? 'now') : period.tsTo}`, { live: isLive });
+  }), `today-attention:${periodKey(period)}`, { live: isLive, shape: SHAPE.attention });
+  const machines = useData(TF.productChange.partName, () => getMachinesRunning(period.tsTo), `today-machines:${isLive ? (asOf ?? 'now') : period.tsTo}`, { live: isLive, shape: SHAPE.machinesRunning });
   const products = useData(TF.sacks.productsPartName, () => getProducts(), 'today-products', { live: false });
   const range = useRange();
 
@@ -221,7 +221,7 @@ function Band({
   empty: boolean;
   health: healthLib.Health;
 }) {
-  const { line, loading } = live.useLive();
+  const { line, loading } = useLive();
   const counts = stations.data ? stationCounts(stations.data.data.stations) : null;
   const known = healthLib.stateIsKnowable(health);
 

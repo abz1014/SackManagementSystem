@@ -1,6 +1,7 @@
 import { getMachinesRunning, getProduction, getRange, getStationStatus } from '../bridge/api';
 import { period as P } from '../bridge/lib';
 import { useData, type DataState } from './useData';
+import { SHAPE } from './shapes';
 import type { Compare } from './usePeriod';
 
 type Api = typeof import('../bridge/api');
@@ -20,7 +21,7 @@ export function useProduction(period: P.Period, compare: Compare | null = null):
     'production',
     () => getProduction({ ...P.periodQuery(period), groupBy: 'none', ...(compare ? { compare } : {}) }),
     `production:${periodKey(period)}:${compare ?? ''}:${period.live ? period.tsTo : ''}`,
-    { live: period.live },
+    { live: period.live, shape: SHAPE.productionRows },
   );
 }
 
@@ -28,12 +29,12 @@ export function useProduction(period: P.Period, compare: Compare | null = null):
 export function useStationStatus(period: P.Period): DataState<StationStatusResult> {
   const { tsTo: _tsTo, ...q } = P.periodQuery(period);
   void _tsTo;
-  return useData('station status', () => getStationStatus(q), `station-status:${periodKey(period)}`, { live: period.live });
+  return useData('station status', () => getStationStatus(q), `station-status:${periodKey(period)}`, { live: period.live, shape: SHAPE.stationStatus });
 }
 
 /** Which product each winder runs now. Always live: it describes the present. */
 export function useMachinesRunning(): DataState<MachinesRunningResult> {
-  return useData('machines running', () => getMachinesRunning(null), 'machines-running');
+  return useData('machines running', () => getMachinesRunning(null), 'machines-running', { shape: SHAPE.machinesRunning });
 }
 
 /** First and last production day held. Fetched once. */

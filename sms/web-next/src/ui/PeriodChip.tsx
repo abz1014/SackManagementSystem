@@ -20,7 +20,8 @@ export function PeriodChip({ className }: { className?: string }) {
   const range = useRange();
   const [open, setOpen] = useState(false);
 
-  const line = live.data?.data.lines[0] ?? null;
+  const rawLine = live.data?.data?.lines?.[0] ?? null;
+  const line = rawLine && rawLine.shift && typeof rawLine.plantNowUtc === 'string' ? rawLine : null;
   const maxDate = range.data?.maxDate ?? null;
   const anchor: P.PeriodAnchor | null = line
     ? {
