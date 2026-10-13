@@ -22,7 +22,8 @@ import {
   type StockLedgerData,
 } from '../../../bridge/api';
 import { live, fmt, period as P } from '../../../bridge/lib';
-import { REASON_MIN_CHARS, RESERVED, formatDate, C, FRAGMENTS, withFragments } from '../../../copy';
+import { REASON_MIN_CHARS, RESERVED, C, FRAGMENTS, withFragments } from '../../../copy';
+import { fmtDate } from '../../../lib/fmt';
 import { useData } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import type { Route } from '../../../route';
@@ -137,7 +138,7 @@ function LedgerBody({ d, unit, shiftNarrowed, onOpenDay }: { d: StockLedgerData;
   const nothing = d.opening.sacks === 0 && d.closing.sacks === 0 && d.days.every((x) => x.movements === 0 && x.weighed.sacks === 0);
 
   const cols: Column<LedgerDay>[] = [
-    { key: 'day', header: R.colDayStock, render: (r) => formatDate(`${r.day}T12:00:00Z`) },
+    { key: 'day', header: R.colDayStock, render: (r) => fmtDate(r.day) },
     { key: 'opening', header: RESERVED.sackColOpening, numeric: true, render: (r) => flow(r.opening, unit) },
     ...(hasCounts ? [{ key: 'count', header: R.colCount, numeric: true, render: (r: LedgerDay) => signed(r.openingEntries, unit) }] : []),
     { key: 'receipts', header: RESERVED.sackColReceipts, numeric: true, render: (r) => flow(r.receipts, unit) },

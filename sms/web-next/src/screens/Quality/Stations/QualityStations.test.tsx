@@ -77,7 +77,7 @@ describe('Quality > Stations on PD1 (1 Sep 2026)', () => {
     const box = groups[1]!;
     expect(box.textContent).toMatch(/Pattern check/);
     expect(box.textContent).toMatch(/always the last 14 production days/);
-    expect(box.textContent).toMatch(/19 Aug 2026 to 1 Sep 2026/);
+    expect(box.getAttribute('title')).toMatch(/19 Aug 2026 . 1 Sep 2026/);
     expect(box.getAttribute('colspan')).toBe('2');
     const heads = Array.from(container.querySelectorAll('thead tr:nth-child(2) th')).map((h) => h.textContent);
     expect(heads).toEqual(expect.arrayContaining(['Days with a note', 'Result', 'Failed inspection', 'Failed weight check (scale)']));

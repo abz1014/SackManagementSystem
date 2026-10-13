@@ -9,7 +9,7 @@ import { zeroBasedDomain } from './domain';
 import { XLabels, YAxis } from './Axes';
 import { Frame, type LegendItem } from './Frame';
 import { LimitBand } from './LimitBand';
-import { catVar, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
+import { catVar, chartTop, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
 
 export interface BarSeries {
   name: string;
@@ -46,7 +46,7 @@ export function BarChart(p: BarChartProps) {
     : undefined;
 
   const geo = (w: number, h: number, fontPx: number) => {
-    const m: Margins = { left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4, right: 12, top: 22, bottom: 28 };
+    const m: Margins = { left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4, right: 12, top: chartTop(fontPx), bottom: 28 };
     const plotW = Math.max(1, w - m.left - m.right);
     const slot = plotW / Math.max(1, n);
     const y = linear(domain, [h - m.bottom, m.top]);
@@ -82,6 +82,7 @@ export function BarChart(p: BarChartProps) {
       emptyMessage={p.emptyMessage}
       emptyAction={p.emptyAction}
       defaultH={p.defaultH}
+      reserve={p.reserve}
       legend={legend}
       table={table}
       frame={{

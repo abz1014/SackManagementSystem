@@ -285,7 +285,7 @@ describe('filters round-trip through the URL (A3-052, A6-08..A6-10)', () => {
     await waitFor(() => expect(rowsOf(container)).toHaveLength(101));
     expect(reqs().some((r) => r.includes('page=1'))).toBe(true);
     expect(reqs().some((r) => r.includes('page=2'))).toBe(true);
-    expect(screen.getByText('Showing 1–101 of 150')).toBeTruthy();
+    expect(screen.getAllByText('Showing 1–101 of 150').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
     expect(go.mock.calls[0]![0].keys.rp).toBe('3');
   });

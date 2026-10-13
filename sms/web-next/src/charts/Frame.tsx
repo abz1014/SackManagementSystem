@@ -11,7 +11,7 @@ import { ChartFrame, type ChartFrameProps } from '../bridge/chart';
 import { EmptyState } from '../ui/EmptyState';
 import { ErrorState } from '../ui/ErrorState';
 import { TableView, type TableData } from './TableView';
-import type { ChartStatus } from './types';
+import type { ChartReserve, ChartStatus } from './types';
 import { markingZoom } from './zoomMarker';
 
 export interface LegendItem {
@@ -39,6 +39,9 @@ export function Legend({ items }: { items: LegendItem[] }) {
   );
 }
 
+/** N empty text lines, so a placeholder takes the same line boxes as the text it stands in for. */
+const blankLines = (n: number) => Array.from({ length: n }, (_, i) => <span key={i} style={{ display: 'block' }}>{' '}</span>);
+
 export interface FrameProps {
   chartId: string;
   title: string;
@@ -52,6 +55,8 @@ export interface FrameProps {
   legend?: LegendItem[];
   table: TableData;
   defaultH?: number;
+  /** Rows the loaded chart adds, reserved while it loads. */
+  reserve?: ChartReserve;
   /** Everything ChartFrame needs to draw and hover the plot. */
   frame: Omit<ChartFrameProps, 'chartId' | 'defaultH' | 'title' | 'caption' | 'ariaLabel'>;
 }
@@ -75,7 +80,14 @@ export function Frame(p: FrameProps) {
         )}
       </header>
       {status === 'ready' && p.legend && <Legend items={p.legend} />}
-      {status === 'loading' && <div className="skel ck-skel" style={{ height: h }} role="status" aria-label={C.chart.loading} />}
+      {status === 'loading' && (
+        <>
+          {p.reserve?.legend && <div className="ck-legend ck-legend--ph" aria-hidden="true" />}
+          <div className="readout ck-ph" aria-hidden="true">{blankLines(Math.max(1, p.reserve?.captionLines ?? 0))}</div>
+          <div className="skel ck-skel" style={{ height: h }} role="status" aria-label={C.chart.loading} />
+          {!!p.reserve?.captionLines && <div className="ck-caption ck-caption--ph" aria-hidden="true">{blankLines(p.reserve.captionLines)}</div>}
+        </>
+      )}
       {status === 'error' && <ErrorState part={p.errorPart ?? p.title} onRetry={p.onRetry} minHeight={h} />}
       {status === 'empty' && <EmptyState message={p.emptyMessage} action={p.emptyAction} />}
       {status === 'ready' &&

@@ -12,7 +12,9 @@
 import { useCallback } from 'react';
 import { health as healthLib, live, fmt } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
-import { C, RESERVED, formatDate, FRAGMENTS } from '../../../copy';
+import { C, RESERVED, FRAGMENTS } from '../../../copy';
+import { fmtRange } from '../../../lib/fmt';
+import { PageHead } from '../../../ui/PageHead';
 import { useRange, useStationStatus, usePeriod } from '../../../data';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
@@ -29,8 +31,12 @@ import './stations.css';
 const S = C.qualityStations;
 const SF = FRAGMENTS.qualityStations;
 
+/** The line has fourteen stations; the loading table draws that many rows at the table's own row height. */
+const SKEL_ROWS = 14;
+const STATION_ROW_H = 52;
+
 function span(from: string, to: string): string {
-  return from === to ? formatDate(from) : C.period(formatDate(from), formatDate(to));
+  return fmtRange(from, to);
 }
 
 function stationList(ns: readonly number[]): string {
@@ -74,9 +80,23 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
 
   let content;
   if (status.status === 'loading') {
-    content = <Skeleton part={SF.partStations} height={480} onRetry={status.refresh} />;
+    content = (
+      <>
+        <PageHead title={S.title} sentence={' '} />
+        <p className="qs-note qs-period">{' '}</p>
+        <section className="card qs-card" aria-busy="true">
+          <div className="qs-card__head"><div><h2 className="qs-card__title">{S.tableTitle}</h2><span className="caption">{' '}</span></div></div>
+          <Skeleton part={SF.partStations} rows={SKEL_ROWS} rowHeight={STATION_ROW_H} onRetry={status.refresh} />
+        </section>
+      </>
+    );
   } else if (status.status === 'error' || !status.data) {
-    content = <ErrorState part={SF.partStations} cause={status.error ?? undefined} onRetry={status.refresh} />;
+    content = (
+      <>
+        <PageHead title={S.title} />
+        <ErrorState part={SF.partStations} cause={status.error ?? undefined} onRetry={status.refresh} />
+      </>
+    );
   } else {
     const sd = status.data.data;
     const countsRows = counts.data ? counts.data.data.rows : null;
@@ -98,18 +118,18 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
 
     content = (
       <>
-        <header className="qs-head">
-          <div>
-            <h1 className="qs-title">{S.title}</h1>
-            {!nothing && (
-              <p className="qs-sentence">
-                <b>{acting > 0 ? S.needAction(acting) : S.noneNeedAction}</b>
+        <PageHead
+          title={S.title}
+          sentence={
+            nothing ? undefined : (
+              <>
+                <b className="qs-lead">{acting > 0 ? S.needAction(acting) : S.noneNeedAction}</b>
                 {acting > 0 && linePct ? ` ${S.actRule(t.act, linePct)}` : ''}
-              </p>
-            )}
-          </div>
-          <p className="caption">{S.periodCaption(periodSpan, period.days)}</p>
-        </header>
+              </>
+            )
+          }
+        />
+        <p className="qs-note qs-period">{S.periodCaption(periodSpan, period.days)}</p>
 
         {!dataNow && <p className="qs-fail">{S.dataNotCurrent}</p>}
 

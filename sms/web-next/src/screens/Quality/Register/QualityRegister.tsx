@@ -13,7 +13,7 @@
  *  - Export CSV is manager rank and absent below it; Print is for everyone and waits until the rows have loaded.
  *  - Print layout is keyed to the stable `.rg` class (decision E-6), not to any translatable label.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   eventsExportUrl,
   getEvents,
@@ -26,7 +26,8 @@ import {
 } from '../../../bridge/api';
 import { live, period as P } from '../../../bridge/lib';
 import { RegisterPrintHead } from '../../../bridge/register';
-import { RESERVED, formatClock, formatDate, C, FRAGMENTS, withFragments } from '../../../copy';
+import { RESERVED, C, FRAGMENTS, withFragments } from '../../../copy';
+import { fmtDate, fmtTimeSec } from '../../../lib/fmt';
 import { useData } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { EXPORT_MIN_RANK } from '../../../ranks';
@@ -35,6 +36,7 @@ import { DataTable, type Column } from '../../../ui/DataTable';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
 import { SelectField } from '../../../ui/Field';
+import { PageHead } from '../../../ui/PageHead';
 import { Skeleton } from '../../../ui/Skeleton';
 import { Tabs } from '../../../ui/Tabs';
 import { WriteGate } from '../../../ui/WriteGate';
@@ -124,17 +126,33 @@ function RegisterBody({ route, rank, go }: ScreenProps) {
   const stations = useData(R.filterStation, () => getStations(), 'stations', { live: false });
   const products = useData(R.filterProduct, () => getProducts(), 'products', { live: false });
 
+  // The stable print hook (register.css names the page "Page N of M" after it), like Reports' `report-print`.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const hasPeriod = period !== null;
+  useLayoutEffect(() => {
+    const main = rootRef.current?.closest('main');
+    main?.classList.add('register-print');
+    return () => main?.classList.remove('register-print');
+  }, [hasPeriod]);
+
   if (periodStatus === 'error') {
     return <ErrorState part={periodFailed[0] ?? 'the plant clock'} onRetry={() => window.location.reload()} />;
   }
-  if (!period) return <Skeleton part={RF.rowsPart} height={320} />;
+  if (!period) {
+    return (
+      <div className="rg">
+        <PageHead title={C.tabs.quality.register} sentence={' '} />
+        <Skeleton part={RF.rowsPart} rows={8} />
+      </div>
+    );
+  }
 
   const opts = { station, product, states, outsideOnly, batch };
   const filterKey = `${listing}:${sig}:${station ?? 'any'}:${product ?? 'any'}:${outsideOnly}:${states.join('+')}:${batch}:${period.live ? 'live' : 'closed'}`;
   const tabs = LISTINGS.map((id) => ({ id, label: R.listings[id] }));
 
   return (
-    <div className="rg">
+    <div className="rg" ref={rootRef}>
       <div className="rg-print" aria-hidden="true">
         <RegisterPrintHead
           from={period.from}
@@ -191,10 +209,7 @@ function RegisterBody({ route, rank, go }: ScreenProps) {
 function StockPanel({ route, rank, go, period }: { route: ScreenProps['route']; rank: number; go: ScreenProps['go']; period: P.Period }) {
   return (
     <>
-      <header>
-        <h1 className="rg-h1">{R.listings.stock}</h1>
-        <p className="rg-sub">{periodWords(period)}</p>
-      </header>
+      <PageHead title={C.tabs.quality.register} sentence={`${R.listings.stock} · ${periodWords(period)}`} />
       <StockLedger route={route} rank={rank} period={period} go={go} />
     </>
   );
@@ -294,8 +309,8 @@ function RowsPanel(p: RowsPanelProps) {
   }, [data, p.search, stationList]);
 
   const columns = useMemo<Column<RegisterRow>[]>(() => {
-    const time: Column<RegisterRow> = { key: 'time', header: R.colTime, sortValue: (r) => r.production_ts_utc, render: (r) => formatClock(r.production_ts_utc, true) };
-    const day: Column<RegisterRow> = { key: 'day', header: R.colDay, sortValue: (r) => String(r.shift_date).slice(0, 10), render: (r) => formatDate(`${String(r.shift_date).slice(0, 10)}T12:00:00Z`) };
+    const time: Column<RegisterRow> = { key: 'time', header: R.colTime, sortValue: (r) => r.production_ts_utc, render: (r) => fmtTimeSec(r.production_ts_utc) };
+    const day: Column<RegisterRow> = { key: 'day', header: R.colDay, sortValue: (r) => String(r.shift_date).slice(0, 10), render: (r) => fmtDate(String(r.shift_date).slice(0, 10)) };
     const stationCol: Column<RegisterRow> = { key: 'station', header: R.colStation, render: (r) => stationName(r.source_station ?? null) };
     const record: Column<RegisterRow> = { key: 'record', header: R.colRecord, numeric: true, render: (r) => String(r.event_id) };
     const prod: Column<RegisterRow> = { key: 'product', header: R.colProduct, render: (r) => r.product_name ?? R.noProductOnRow };
@@ -369,10 +384,11 @@ function RowsPanel(p: RowsPanelProps) {
 
   return (
     <>
-      <header>
-        <h1 className="rg-h1">{headline}</h1>
-        <p className="rg-sub">{R.question}</p>
-      </header>
+      <PageHead title={C.tabs.quality.register} sentence={headline} />
+      <p className="rg-note rg-lede">{R.question}</p>
+      {data && !countUnknown && data.total > 0 && (
+        <p className="rg-print rg-print-count" aria-hidden="true">{C.ui.showingRange(1, visible.length, data.total)}</p>
+      )}
 
       {others.length > 0 && (
         <p className="rg-note rg-noprint">

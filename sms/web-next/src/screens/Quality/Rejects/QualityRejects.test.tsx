@@ -302,7 +302,7 @@ describe('a failed fetch is named, never "none" (CLAUDE.md, rule: name which par
   it('failed rate series: the KPI says which part, and the headline asserts nothing', async () => {
     open(QUERY, 1, { '/api/reject-spc': ({ search }: { search: URLSearchParams }) => (search.get('rejectType') === 'weight' ? new Response('{}', { status: 500 }) : env(spc(6048))) });
     expect(await screen.findAllByText(/Couldn't load the (failed-inspection|weight-reject) rate\./)).not.toHaveLength(0);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('How many cones failed a check, why, is it getting worse, and where?');
+    expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toBe('How many cones failed a check, why, is it getting worse, and where?');
   });
   it('failed trend: the chart names its part, no rising verdict, the list and rates are unaffected', async () => {
     open(QUERY, 1, { '/api/reject-spc': ({ search }: { search: URLSearchParams }) => (search.has('shift') ? env(search.get('rejectType') === 'weight' ? spc(41) : spc(6048)) : new Response('{}', { status: 500 })) });
@@ -317,7 +317,7 @@ describe('the trend is a fixed, labelled window with a mean line (A3-039, A1-038
   it('asks /api/range, labels the window, draws daily rate and window mean, states a rise', async () => {
     open(QUERY, 1);
     await findList();
-    expect(await screen.findByText(/Daily failed-inspection rate, last \d+ production days/, { selector: 'h2' })).toBeTruthy();
+    expect((await screen.findAllByRole('region', { name: /Daily failed-inspection rate, last \d+ production days/ })).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Fixed window: it does not follow the period/).length).toBeGreaterThan(0);
     expect(await screen.findByText(/^Failed inspection has been rising since Sun 6 Sep/)).toBeTruthy();
     expect(ff!.requests.some((r) => r === '/api/range')).toBe(true);

@@ -1,9 +1,10 @@
 /* Quality > Register. Tokens only (uniformity guard). Print is keyed to the stable .rg class (decision E-6). */
 .rg { display: flex; flex-direction: column; gap: var(--space-4); }
 .rg-panel { display: flex; flex-direction: column; gap: var(--space-4); }
-.rg-h1 { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-5)/var(--lh-5) var(--font-sans); letter-spacing: -0.02em; }
 .rg-h2 { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
-.rg-sub { margin: var(--space-1) 0 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+/* PageHead owns the h1 and the sentence; the plain-words question sits under it. */
+.rg > .ui-pagehead, .rg-panel > .ui-pagehead { margin: 0; }
+.rg-lede { margin-top: calc(-1 * var(--space-2)); }
 .rg-note { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .rg-note--wide { max-width: 90ch; }
 .rg-note-cell { color: var(--ink-3); }
@@ -34,8 +35,23 @@
 
 /* the print masthead is for paper only */
 .rg-print { display: none; }
+
+/* Print: its own named page with "Page N of M" on every sheet (fix-wave D20, M-19). Keyed to the stable class
+   `main.register-print`, which the screen puts on the shell's <main> while it is mounted, never to a label. */
+@page register-portrait {
+  size: A4 portrait;
+  margin: 16mm 14mm 18mm;
+  @bottom-left {
+    content: "IFL internal · Sack Management System · Page " counter(page) " of " counter(pages);
+    font-family: "Instrument Sans", "Segoe UI", Arial, sans-serif; font-size: x-small; color: dimgray;
+  }
+}
+main.register-print { page: register-portrait; }
+.rg-print-count { margin: 0 0 var(--space-3); color: var(--ink-2); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+
 @media print {
   .rg-print { display: block; }
+  .rg .ui-pagehead { margin: 0 0 var(--space-2); }
   .rg-noprint, .rg .ui-tabs, .rg .ui-dt__foot .ui-btn { display: none !important; }
   .rg .ui-dt__wrap { overflow: visible; }
   /* sort arrows and the row chevron column are controls, not content */

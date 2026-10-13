@@ -24,7 +24,8 @@ import {
   type RejectFilters,
 } from '../../../bridge/api';
 import { live, period as P, productLabel } from '../../../bridge/lib';
-import { C, formatDate, FRAGMENTS } from '../../../copy';
+import { C, FRAGMENTS } from '../../../copy';
+import { fmtDate, fmtRange } from '../../../lib/fmt';
 import { useData, useRange } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { Pareto, LineChart } from '../../../charts';
@@ -34,9 +35,11 @@ import { Disclosure } from '../../../ui/Disclosure';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
 import { SelectField } from '../../../ui/Field';
+import { Icon } from '../../../ui/Icon';
 import { KpiCard } from '../../../ui/KpiCard';
 import { hrefFor, plainClick } from '../../../ui/nav';
-import { Skeleton } from '../../../ui/Skeleton';
+import { PageHead } from '../../../ui/PageHead';
+import { ChartSkeleton, KpiRowSkeleton, Skeleton } from '../../../ui/Skeleton';
 import type { Route } from '../../../route';
 import type { ScreenProps } from '../../registry';
 import { QualityTabs } from '../QualityTabs';
@@ -60,6 +63,9 @@ import { fmtCount, fmtRate, rateNum, reasonName, reasonShort } from './format';
 import './qualityRejects.css';
 
 const R = C.qualityRejects;
+
+/** Plot height of the Pareto's card while the page waits for the plant clock (the loaded card is 442 px tall: head, legend, readout, plot, caption). */
+const PARETO_SKEL_H = 374;
 const RF = FRAGMENTS.qualityRejects;
 
 /** A request that never settles: the part stays "loading" until its inputs exist, with no request and no error. */
@@ -152,7 +158,16 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
   if (periodStatus === 'error') {
     return <ErrorState part={periodFailed[0] ?? 'the plant clock'} onRetry={() => window.location.reload()} />;
   }
-  if (!period) return <Skeleton part={RF.part.figures} height={320} />;
+  if (!period) {
+    return (
+      <div className="qr">
+        <PageHead title={C.tabs.quality.rejects} sentence={' '} />
+        <div className="qr-filters qr-filters--skel" aria-hidden="true" />
+        <KpiRowSkeleton cards={3} minWidth={224} />
+        <ChartSkeleton part={RF.part.reasons} height={PARETO_SKEL_H} />
+      </div>
+    );
+  }
 
   const afterNewest = !!line?.dataAsOfUtc && P.periodAfterNewest(period, line.dataAsOfUtc);
   const top = rows[0] ?? null;
@@ -182,11 +197,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
 
   return (
     <div className="qr">
-      <header>
-        <h1 className="qr-h1">{headline}</h1>
-        <p className="qr-sub">{`${formatDate(`${period.from}T12:00:00Z`)} to ${formatDate(`${period.to}T12:00:00Z`)}`}</p>
-        {(periodQ.data?.data.spansGenerations || periodW.data?.data.spansGenerations) && <p className="qr-note">{R.periodGenerations}</p>}
-      </header>
+      <PageHead title={C.tabs.quality.rejects} sentence={headline} />
+      <p className="qr-note qr-period">{fmtRange(period.from, period.to)}</p>
+      {(periodQ.data?.data.spansGenerations || periodW.data?.data.spansGenerations) && <p className="qr-note">{R.periodGenerations}</p>}
 
       <div className="qr-filters">
         <SelectField
@@ -228,9 +241,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       {/* ---- KPI row: two verdicts and the top reason, never merged */}
       <section className="qr-sec" aria-label={R.failedInspection}>
         <div className="qr-kpis">
-          <div className="qr-kpi">
             <KpiCard
               label={R.failedInspection}
+              icon={<Icon name="rejects" size={18} />}
               value={fig ? rateNum(fig.inspectionPct) : null}
               unit="%"
               chip={1}
@@ -239,10 +252,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               onRetry={retryFigs}
               note={fig && figState === 'ok' ? R.ofChecked(fmtCount(fig.inspectionN), fmtCount(fig.inspected)) : null}
             />
-          </div>
-          <div className="qr-kpi">
             <KpiCard
               label={R.weightRecords}
+              icon={<Icon name="weight" size={18} />}
               value={fig ? rateNum(fig.weightPct) : null}
               unit="%"
               chip={3}
@@ -251,19 +263,17 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               onRetry={retryFigs}
               note={fig && figState === 'ok' ? R.recordsOf(fmtCount(fig.weightN), fmtCount(fig.inspected)) : null}
             />
-          </div>
-          <div className="qr-kpi">
             <KpiCard
               label={R.topReasonShare}
+              icon={<Icon name="rejects" size={18} />}
               value={top ? rateNum(top.share) : null}
               unit="%"
               chip={2}
               status={reasons.status === 'error' ? 'error' : reasons.status === 'loading' ? 'loading' : top ? 'ok' : 'empty'}
               part={RF.part.reasons}
               onRetry={reasons.refresh}
+              note={top ? `${reasonName(top)} · ${fmtCount(top.count)} ${RF.cones}` : null}
             />
-            {top && <p className="qr-note">{`${reasonName(top)} · ${fmtCount(top.count)} ${RF.cones}`}</p>}
-          </div>
         </div>
         {figState === 'error' && figError && <p className="qr-note">{figError}</p>}
         {fig && figState === 'ok' && (
@@ -272,12 +282,14 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       </section>
 
       {/* ---- Pareto and the list that makes it clickable */}
-      <section className="qr-sec" aria-labelledby="qr-pareto-h">
-        <h2 id="qr-pareto-h" className="qr-sec__h">{R.paretoTitle}</h2>
+      <section className="qr-sec" aria-label={R.paretoTitle}>
         {reasons.status === 'error' ? (
           <ErrorState part={RF.part.reasons} cause={reasons.error} onRetry={reasons.refresh} />
         ) : reasons.status === 'loading' ? (
-          <Skeleton part={RF.part.reasons} height={260} onRetry={reasons.refresh} />
+          <div className="qr-two">
+            <Pareto chartId="qr-pareto" title={R.paretoTitle} unit={RF.cones} rows={[]} status="loading" reserve={{ legend: true, captionLines: 2 }} />
+            <Skeleton part={RF.part.reasons} height={PARETO_SKEL_H} onRetry={reasons.refresh} />
+          </div>
         ) : rows.length === 0 ? (
           afterNewest ? <EmptyState newest={line?.dataAsOfUtc ?? null} /> : <EmptyState message={R.noReasons} />
         ) : (
@@ -287,8 +299,9 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               title={R.paretoTitle}
               unit={RF.cones}
               rows={paretoRows(shown, reasonShort)}
-              caption={cover ? `${R.coverTop(cover.k, rateNum(cover.pct) + ' %')} ${R.paretoCaption(`${formatDate(`${period.from}T12:00:00Z`)} to ${formatDate(`${period.to}T12:00:00Z`)}`, fmtCount(rows.reduce((s, r) => s + r.count, 0)))}` : undefined}
+              caption={cover ? `${R.coverTop(cover.k, rateNum(cover.pct) + ' %')} ${R.paretoCaption(fmtRange(period.from, period.to), fmtCount(rows.reduce((s, r) => s + r.count, 0)))}` : undefined}
               errorPart={RF.part.reasons}
+              reserve={{ legend: true, captionLines: 2 }}
             />
             <div>
               <ul className="qr-list" aria-label={R.paretoTitle}>
@@ -354,8 +367,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
       </section>
 
       {/* ---- trend: fixed window with a mean line */}
-      <section className="qr-sec" aria-labelledby="qr-trend-h">
-        <h2 id="qr-trend-h" className="qr-sec__h">{active ? R.trendTitleOne(reasonName(active), days) : R.trendTitle(days)}</h2>
+      <section className="qr-sec" aria-label={active ? R.trendTitleOne(reasonName(active), days) : R.trendTitle(days)}>
         {risk && trendStatus === 'ready' && (
           <p className="qr-verdict" role="status">
             {risk.since
@@ -366,7 +378,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
           </p>
         )}
         {trendStatus === 'empty' ? (
-          <p className="qr-note" role="status">{R.trendEmpty(days, line?.dataAsOfUtc ? formatDate(line.dataAsOfUtc) : null)}</p>
+          <p className="qr-note" role="status">{R.trendEmpty(days, line?.dataAsOfUtc ? fmtDate(line.dataAsOfUtc) : null)}</p>
         ) : (
         <LineChart
           chartId="qr-trend"

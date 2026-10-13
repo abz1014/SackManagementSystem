@@ -1,7 +1,9 @@
 /* Quality > Rejects. Tokens only (uniformity guard: no raw colours, no raw font sizes, no state tokens). */
 .qr { display: flex; flex-direction: column; gap: var(--space-5); }
-.qr-h1 { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-5)/var(--lh-5) var(--font-sans); }
-.qr-sub { margin: var(--space-1) 0 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+/* PageHead owns the page's h1 and sentence; its bottom margin is replaced by this column's gap. */
+.qr > .ui-pagehead { margin: 0; }
+.qr-note.qr-period { margin-top: calc(-1 * var(--space-3)); }
+.qr-filters--skel { min-height: 56px; }
 .qr-note { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .qr-sec { display: flex; flex-direction: column; gap: var(--space-3); }
 .qr-sec__h { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
@@ -10,7 +12,12 @@
 .qr-filters .wr-field { min-width: 12rem; }
 
 .qr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--gutter); }
-.qr-kpi { display: flex; flex-direction: column; gap: var(--space-2); }
+.qr-kpis > * { min-width: 0; }
+.qr-kpis, .qr .ui-skel-kpis { container-type: inline-size; }
+/* A loading card keeps the loaded card's value line and note lines (one line when wide, two when the cards are narrower), so the row does not change height when the figures land (M-15). */
+.qr .kpi-loading .kpi-skel { height: calc(var(--lh-kpi) + var(--space-2)); }
+.qr .kpi-loading .kpi-skel-note { height: calc(var(--lh-3) - var(--space-1)); }
+@container (max-width: 900px) { .qr .kpi-loading .kpi-skel-note { height: calc(2 * var(--lh-3) - var(--space-1)); } }
 
 .qr-verdict { margin: 0; color: var(--ink-2); font: var(--fw-medium) var(--fs-3)/var(--lh-3) var(--font-sans); }
 

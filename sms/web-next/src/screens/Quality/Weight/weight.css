@@ -1,16 +1,24 @@
 /* Quality > Weight. Tokens only; chart parts come from charts/chart.css. */
 .qw { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-5); padding: var(--space-4) 0 var(--space-6); max-width: var(--page-max); margin: 0 auto; }
-.qw-sentence { margin: 0; max-width: 56ch; font-size: var(--fs-5); line-height: var(--lh-5); font-weight: var(--fw-bold); color: var(--ink-1); letter-spacing: -0.01em; text-wrap: balance; }
+/* PageHead owns the h1 and the one headline sentence (fix-wave D16, D26); the caption under it holds the product and when its limits began. */
+.qw > .ui-pagehead { margin: 0; }
+.qw-note.qw-headline-note { margin-top: calc(-1 * var(--space-4)); }
 .qw-note { margin: 0; max-width: 80ch; font-size: var(--fs-2); line-height: var(--lh-2); color: var(--ink-3); }
 .qw-muted { color: var(--ink-3); }
 .qw-lead { margin: 0 0 var(--space-3); font-size: var(--fs-3); line-height: var(--lh-3); color: var(--ink-1); }
+.qw-bar--skel { min-height: var(--control-h, 40px); }
 .qw-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
 .qw-bar .wr-field { min-width: 180px; }
-.qw-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: var(--space-4); }
+.qw-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); }
+/* A loading card keeps the loaded card's value line and its (up to) three note lines, so the row does not change height when the figures land (M-15). */
+.qw .kpi-loading .kpi-skel { height: calc(var(--lh-kpi) + var(--space-2)); }
+.qw .kpi-loading .kpi-skel-note { height: calc(3 * var(--lh-3) - var(--space-1)); }
+.qw-kpis, .qw .ui-skel-kpis { container-type: inline-size; }
+@container (max-width: 900px) { .qw .kpi-loading .kpi-skel-note { height: calc(2 * var(--lh-3) - var(--space-1)); } }
 .qw-kpis > * { min-width: 0; }
 .qw-hop { margin: 0; font-size: var(--fs-3); color: var(--ink-1); }
 .qw-bar-fill, .ck-bar.qw-bar { fill: var(--cat-1); }
 .qw-advisory .ck-title { margin-bottom: var(--space-3); }
 .qw-adv-list { margin: 0 0 var(--space-3); padding-left: var(--space-5); display: grid; gap: var(--space-2); font-size: var(--fs-3); line-height: var(--lh-3); color: var(--ink-2); }
 .qw-products .ck-title { margin-bottom: var(--space-3); }
-@media (max-width: 767px) { .qw { gap: var(--space-4); } .qw-sentence { font-size: var(--fs-4); line-height: var(--lh-4); } }
+@media (max-width: 767px) { .qw { gap: var(--space-4); } }

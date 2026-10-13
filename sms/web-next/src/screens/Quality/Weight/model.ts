@@ -4,6 +4,7 @@
  */
 import type { Route } from '../../../route';
 import type { SpcType } from '../../../bridge/api';
+import { fmtDate, fmtDateTime, fmtTime } from '../../../lib/fmt';
 
 /** URL key `wm`. null = the period-conditional default (a day or less: spread; longer: over time). */
 export type WeightMode = 'time' | 'dist';
@@ -69,23 +70,18 @@ export function stationSheetHop(route: Route, station: number): Route {
   return { ...route, sheet: { kind: 'station', id: String(station) } };
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** A group's axis label from its plant-clock ISO start: "06:00" within a day, "5 Aug" across days. */
 export function groupLabel(ts: string, multiDay: boolean): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n: number) => String(n).padStart(2, '0');
-  if (!multiDay) return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  if (Number.isNaN(new Date(ts).getTime())) return '';
+  if (!multiDay) return fmtTime(ts);
+  return fmtDate(ts).replace(/ \d{4}$/, '');
 }
 
 /** Heading of a group in the tooltip: "5 Aug 06:00" . */
 export function groupHeading(ts: string): string {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+  if (Number.isNaN(new Date(ts).getTime())) return '';
+  return fmtDateTime(ts);
 }
 
 /** Signed one-decimal grams for the offset figure: "−8.2", "+1.9", "0.0". */

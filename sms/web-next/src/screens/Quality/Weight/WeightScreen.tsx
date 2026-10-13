@@ -28,18 +28,20 @@ import { projectionSentence } from '../../../bridge/station';
 import { QualityTabs } from '../QualityTabs';
 import { fmt, live, period as P, productLabel as PL } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
-import { C, formatDate, RESERVED } from '../../../copy';
+import { C, RESERVED } from '../../../copy';
+import { fmtAppDateTime, fmtDate, fmtDateTime } from '../../../lib/fmt';
 import { Histogram, LineChart } from '../../../charts';
 import type { LimitSpec } from '../../../charts';
 import { useData, useProduction, usePeriod, type DataState } from '../../../data';
 import { Icon } from '../../../ui/Icon';
+import { PageHead } from '../../../ui/PageHead';
 import { KpiCard } from '../../../ui/KpiCard';
 import { Disclosure } from '../../../ui/Disclosure';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
 import { SelectField } from '../../../ui/Field';
 import { Segmented } from '../../../ui/Segmented';
-import { Skeleton } from '../../../ui/Skeleton';
+import { ChartSkeleton, KpiRowSkeleton, Skeleton } from '../../../ui/Skeleton';
 import type { ScreenProps } from '../../registry';
 import { DivergingBars, type DivergingItem } from './Diverging';
 import {
@@ -60,6 +62,9 @@ import './weight.css';
 
 const QW = C.qualityWeight;
 
+/** Plot height of the chart card while the page waits for the plant clock (the loaded card is 374 px tall: head, readout, plot, caption). */
+const WEIGHT_SKEL_H = 306;
+
 const TRAILING_DAYS = P.TRAILING_DAYS;
 const POLL = 60_000;
 const SLOW_POLL = 5 * 60_000;
@@ -71,8 +76,8 @@ const signedKg = (v: number) => {
   return r === 0 ? '0.00' : `${r > 0 ? '+' : '−'}${Math.abs(r).toFixed(2)}`;
 };
 const shortDay = (date: string) => {
-  const d = new Date(`${date.slice(0, 10)}T12:00:00Z`);
-  return Number.isNaN(d.getTime()) ? date : formatDate(d).replace(/ \d{4}$/, '');
+  const label = fmtDate(`${date.slice(0, 10)}T12:00:00Z`);
+  return label === '–' ? date : label.replace(/ \d{4}$/, '');
 };
 
 /* ------------------------------------------------------------------ entry */
@@ -92,7 +97,12 @@ function WeightEntry({ route, go }: Pick<ScreenProps, 'route' | 'go'>) {
     return ps.status === 'error' ? (
       <ErrorState part="the plant clock" cause={C.periodUi.clockUnread} />
     ) : (
-      <Skeleton part="the weight screen" height={320} />
+      <div className="qw">
+        <PageHead title={QW.question} sentence={' '} />
+        <div className="qw-bar qw-bar--skel" aria-hidden="true" />
+        <KpiRowSkeleton cards={5} minWidth={200} />
+        <ChartSkeleton part="the weight screen" height={WEIGHT_SKEL_H} />
+      </div>
     );
   }
   return <WeightBody route={route} go={go} period={ps.period} params={ps.params} setParams={ps.setParams} />;
@@ -115,7 +125,7 @@ function useAfterNewest(period: P.Period): { text: string | null; newest: string
     /* no provider (a test mount): no newest reading is known */
   }
   if (!newest || !plantNow || !P.periodAfterNewest(period, newest)) return { text: null, newest };
-  return { text: W.periodAfterNewest(fmt.fmtClockOn(newest, plantNow)), newest };
+  return { text: W.periodAfterNewest(fmtDateTime(newest)), newest };
 }
 
 function WeightBody({ route, go, period, params, setParams }: BodyProps) {
@@ -365,6 +375,7 @@ function Headline({
   afterNewest: string | null;
 }) {
   let text: string;
+  let detail: string | null = null;
   if (isSack) {
     if (sack === null) text = W.loading;
     else if (sack.totals.sacks === 0) text = afterNewest ?? QW.headline.noSacks;
@@ -383,18 +394,26 @@ function Headline({
   } else if (d.targetG === null) {
     text = W.weight.headlineNoTarget(fmt.fmtG(cone.mean));
   } else {
-    text = RESERVED.weightHeadlineUnconfirmed(fmt.fmtG(cone.mean), targetPhrase(d));
+    // One sentence (RESERVED wording, verbatim). The product, its retired marker and when its limits
+    // began go on the caption line under it (fix-wave D26), not into the sentence.
+    text = RESERVED.weightHeadlineUnconfirmed(fmt.fmtG(cone.mean), fmt.fmtG(d.targetG));
+    detail = targetDetail(d);
   }
-  return <h1 className="qw-sentence">{text}</h1>;
+  return (
+    <>
+      <PageHead title={QW.question} sentence={text} />
+      {detail && <p className="qw-note qw-headline-note">{`${QW.charts.target}: ${detail}`}</p>}
+    </>
+  );
 }
 
-/** "1,960 g (201-IH0-SD), in force since ...": the target with its product and the instant its limits began. */
-function targetPhrase(d: WeightStationsData): string {
+/** "201-IH0-SD (retired in PDAS) · in force since 1 Sep 2026, 14:00": the target's product and when its limits began. */
+function targetDetail(d: WeightStationsData): string {
   const retired = d.productActive === false ? ` ${W.retiredProduct.marker}` : '';
-  const base = `${fmt.fmtG(d.targetG)} (${d.productLabel ?? W.reports.wholeLine}${retired})`;
+  const base = `${d.productLabel ?? W.reports.wholeLine}${retired}`;
   if (!d.targetEffectiveFromUtc) return base;
-  const at = fmt.fmtAppInstant(d.targetEffectiveFromUtc);
-  return `${base}, ${d.targetEffectiveIsLowerBound ? W.reports.targetNoLaterThan(at) : W.reports.targetSince(at)}`;
+  const at = fmtAppDateTime(d.targetEffectiveFromUtc);
+  return `${base} · ${d.targetEffectiveIsLowerBound ? W.reports.targetNoLaterThan(at) : W.reports.targetSince(at)}`;
 }
 
 /* --------------------------------------------------------------------- KPIs */
@@ -425,19 +444,13 @@ function ConeKpis({
 
   // The target: its product, and when its limits began. Withheld with the server's own reason.
   let targetValue: string | null = null;
-  let targetDetail: string | null = null;
+  let targetNote: string | null = null;
   if (d !== null) {
     if (d.targetG !== null) {
       targetValue = d.targetG.toLocaleString('en-GB');
-      const at = d.targetEffectiveFromUtc ? fmt.fmtAppInstant(d.targetEffectiveFromUtc) : null;
-      targetDetail = [
-        `${d.productLabel ?? W.reports.wholeLine}${d.productActive === false ? ` ${W.retiredProduct.marker}` : ''}`,
-        at ? (d.targetEffectiveIsLowerBound ? W.reports.targetNoLaterThan(at) : W.reports.targetSince(at)) : null,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+      targetNote = targetDetail(d);
     } else {
-      targetDetail = d.targetOmittedReason ?? W.weight.noTarget;
+      targetNote = d.targetOmittedReason ?? W.weight.noTarget;
     }
   }
 
@@ -482,7 +495,7 @@ function ConeKpis({
         value={targetValue}
         unit="g"
         noteWhenEmpty
-        note={targetDetail}
+        note={targetNote}
       />
       <KpiCard
         icon={<Icon name="weight" size={18} />} chip={1}
@@ -622,6 +635,7 @@ function MainChart({
         unit={isSack ? 'sacks' : 'cones'}
         valueUnit={unit}
         caption={target !== null ? `${QW.charts.target} ${fmt.fmtG(target)}.` : undefined}
+        reserve={{ captionLines: 1 }}
         bins={(spc?.histogram ?? []).map((b) => ({ from: b.start, to: b.end, count: b.count }))}
         limits={spc ? limitSpec(spc, fmtLimit) : undefined}
         emptyMessage={W.nothingHere}
@@ -659,6 +673,7 @@ function MainChart({
       onZoom={onZoom}
       onBack={onBack}
       defaultH={260}
+      reserve={{ legend: !isSack, captionLines: 1 }}
       emptyMessage={W.nothingHere}
       {...common}
     />

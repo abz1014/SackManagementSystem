@@ -10,7 +10,7 @@ import { zeroBasedDomain } from './domain';
 import { XLabels, YAxis } from './Axes';
 import { Frame, type LegendItem } from './Frame';
 import { LimitBand } from './LimitBand';
-import { catVar, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
+import { catVar, chartTop, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
 
 export interface LineSeries {
   name: string;
@@ -42,7 +42,7 @@ export function LineChart(p: LineChartProps) {
     const m: Margins = {
       left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4,
       right: direct ? Math.min(120, Math.ceil(longest * fontPx * 0.55) + 14) : 16,
-      top: 22,
+      top: chartTop(fontPx),
       bottom: 28,
     };
     const plotW = Math.max(1, w - m.left - m.right);
@@ -77,6 +77,7 @@ export function LineChart(p: LineChartProps) {
       emptyMessage={p.emptyMessage}
       emptyAction={p.emptyAction}
       defaultH={p.defaultH}
+      reserve={p.reserve}
       legend={legend}
       table={{
         columns: ['', ...p.series.map((s) => `${s.name} (${p.unit})`)],

@@ -49,13 +49,13 @@ export function HeatMatrix({ heat, rows, activeCode, onOpen }: HeatMatrixProps) 
                       <button
                         type="button"
                         className={cellClass(c.pct)}
-                        aria-label={R.heatOpen(reasonName(row.reason), fmt.fmtDay(`${c.day}T12:00:00Z`), `${fmtRate(c.pct)}, ${fmt.fmtInt(c.count)} cones`)}
+                        aria-label={R.heatOpen(reasonName(row.reason), dayLabel(c.day), `${fmtRate(c.pct)}, ${fmt.fmtInt(c.count)} cones`)}
                         onClick={() => onOpen(row, c.day)}
                       >
                         {c.pct >= 10 ? Math.round(c.pct) : c.pct.toFixed(1)}
                       </button>
                     ) : (
-                      <span className="qr-heat__cell qr-heat__cell--s0" aria-label={`${reasonName(row.reason)}, ${fmt.fmtDay(`${c.day}T12:00:00Z`)}: ${RF.heatLegendNone}`} />
+                      <span className="qr-heat__cell qr-heat__cell--s0" aria-label={`${reasonName(row.reason)}, ${dayLabel(c.day)}: ${RF.heatLegendNone}`} />
                     )}
                   </td>
                 ))}

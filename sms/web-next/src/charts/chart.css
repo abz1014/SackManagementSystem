@@ -1,7 +1,9 @@
 /* Chart kit (DESIGN-SYSTEM 6.9, 3b). Restyles the existing ChartFrame classes (.chart-tip, .readout,
    .chart-resize ...) and adds the kit's own (.ck-*). Colours come from tokens only. */
 
+.card .ck-frame { background: transparent; box-shadow: none; border-radius: 0; padding: 0; width: 100%; }
 .ck-frame { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); padding: var(--space-4, 16px) var(--space-5, 20px) var(--space-4, 16px); position: relative; }
+.ck-frame .ck-head, .ck-frame.ui-skel-chart .ck-head { min-height: 32px; } /* the toggle's height, so a loading card's head is the loaded one's */
 .ck-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
 .ck-title { margin: 0; font-size: var(--fs-4); line-height: var(--lh-4); color: var(--ink-1); font-weight: 600; }
 .ck-unit { font-size: var(--fs-1); color: var(--ink-3); }
@@ -11,6 +13,7 @@
 @media (pointer: coarse) { .ck-toggle, .ck-btn { min-height: 44px; } }
 
 .ck-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; margin: 4px 0 8px; padding: 0; font-size: var(--fs-2); color: var(--ink-2); }
+.ck-legend--ph { min-height: 22px; } /* the legend row's own height (swatch and text line) */
 .ck-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .ck-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 2px solid transparent; box-sizing: border-box; }
 .ck-swatch.line { height: 0; width: 16px; border-radius: 0; border: 0; border-top: 2px solid; background: none !important; }

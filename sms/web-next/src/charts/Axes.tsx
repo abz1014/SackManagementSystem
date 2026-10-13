@@ -32,7 +32,8 @@ export function YAxis({
           </text>
         </g>
       ))}
-      <text x={left ? x0 - 8 : width - 2} y={Math.max(fontPx, margins.top - 8)} textAnchor="end" className="ck-unit-label" fontSize={fontPx}>
+      {/* The axis title lives in the band reserved above the top tick (chartTop), never in the tick column. */}
+      <text x={left ? 0 : width - 2} y={fontPx} textAnchor={left ? 'start' : 'end'} className="ck-unit-label" fontSize={fontPx}>
         {unit}
       </text>
     </g>
@@ -50,16 +51,31 @@ export function XLabels({
   fontPx?: number;
 }) {
   const widest = labels.reduce((m, s) => Math.max(m, Math.min(s.length, 14)), 1);
-  const every = Math.max(1, Math.ceil((widest * fontPx * 0.6 + 6) / Math.max(slot, 1)));
+  const gap = widest * fontPx * 0.6 + 10;
+  // A label is drawn when it differs from the last one drawn and clears it by its own width, so a
+  // chart with thousands of points that share a day label never overprints (fix-wave M-18).
+  const shown: number[] = [];
+  let lastX = -Infinity;
+  let lastText = '';
+  labels.forEach((l, i) => {
+    const x = xs[i] as number;
+    if (l !== '' && l !== lastText && x - lastX >= gap) {
+      shown.push(i);
+      lastX = x;
+      lastText = l;
+    }
+  });
+  void slot;
   return (
     <g className="ck-xlabels">
-      {labels.map((l, i) =>
-        i % every === 0 ? (
+      {shown.map((i) => {
+        const l = labels[i] as string;
+        return (
           <text key={i} x={xs[i]} y={y} textAnchor="middle" className="ck-tick" fontSize={fontPx}>
             {l.length > 14 ? `${l.slice(0, 13)}…` : l}
           </text>
-        ) : null,
-      )}
+        );
+      })}
     </g>
   );
 }

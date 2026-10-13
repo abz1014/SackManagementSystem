@@ -7,6 +7,7 @@ import { pareto, preferredGeneration } from '../../../bridge/lib';
 import type { RejectDayCodeRow, RejectReason, RejectSpcData } from '../../../bridge/api';
 import { rejectCodeParam } from '../../../bridge/api';
 import { writeRoute, type Route } from '../../../route';
+import { fmtDayShort } from '../../../lib/fmt';
 
 /** How many reasons the Pareto, its list and the heat matrix show before "Show all". */
 export const TOP_REASONS = 8;
@@ -108,8 +109,7 @@ export function risingState(d: RejectSpcData | null): RisingState | null {
 }
 
 /** "Thu 9 Jul" from a bucket timestamp or a bare day. */
-export const dayLabel = (ts: string): string =>
-  new Date(ts.length === 10 ? `${ts}T12:00:00Z` : ts).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+export const dayLabel = (ts: string): string => fmtDayShort(ts.length === 10 ? `${ts}T12:00:00Z` : ts);
 
 /** A day bucket as percent of cones; null where the server gave no valid rate (a gap, never a zero). */
 export const ratePct = (rate: number | null): number | null => (rate == null || !Number.isFinite(rate) ? null : 100 * rate);

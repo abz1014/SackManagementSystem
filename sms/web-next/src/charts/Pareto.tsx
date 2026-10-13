@@ -13,7 +13,7 @@ import { zeroBasedDomain } from './domain';
 import { XLabels, YAxis } from './Axes';
 import { barPath } from './BarChart';
 import { Frame, type LegendItem } from './Frame';
-import { defaultFormat, type ChartCommonProps, type Margins } from './types';
+import { chartTop, defaultFormat, type ChartCommonProps, type Margins } from './types';
 
 export interface ParetoRow {
   label: string;
@@ -40,7 +40,7 @@ export function Pareto(p: ParetoProps) {
   const gradId = `ck-pareto-${p.chartId}`;
 
   const geo = (w: number, h: number, fontPx: number) => {
-    const m: Margins = { left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4, right: 56, top: 22, bottom: 28 };
+    const m: Margins = { left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4, right: 56, top: chartTop(fontPx), bottom: 28 };
     const slot = Math.max(1, w - m.left - m.right) / Math.max(1, n);
     return { m, slot, yL: linear(domain, [h - m.bottom, m.top]), yR: linear([0, 100], [h - m.bottom, m.top]) };
   };
@@ -75,6 +75,7 @@ export function Pareto(p: ParetoProps) {
       emptyMessage={p.emptyMessage}
       emptyAction={p.emptyAction}
       defaultH={p.defaultH}
+      reserve={p.reserve}
       legend={legend}
       table={{
         columns: ['', `Count (${p.unit})`, C.chart.cumulativeAxis],

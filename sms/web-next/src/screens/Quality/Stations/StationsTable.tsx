@@ -141,8 +141,8 @@ export function StationsTable(p: StationsTableProps) {
                 <th colSpan={6} scope="colgroup" className="qs-group__period">
                   {S.thisPeriod(p.periodSpan)}
                 </th>
-                <th colSpan={2} scope="colgroup" className="qs-pat qs-pat--l qs-pat--r qs-pat--head">
-                  {p.patternSpan ? S.patternHead(p.patternSpan) : S.patternHeadShort}
+                <th colSpan={2} scope="colgroup" className="qs-pat" title={p.patternSpan ? S.patternHead(p.patternSpan) : S.patternHeadShort}>
+                  {S.patternHeadShort}
                 </th>
                 <th className="ui-dt__chev-col" aria-hidden="true" />
               </tr>
@@ -175,7 +175,7 @@ export function StationsTable(p: StationsTableProps) {
                   >
                     <td className="qs-name">
                       <b>{stationText(r)}</b>
-                      <span className="qs-sub">{r.product ?? S.noProduct}</span>
+                      <span className="qs-sub qs-clip" title={r.product ?? undefined}>{r.product ?? S.noProduct}</span>
                     </td>
                     <td>
                       <StatusPill state={r.state} />
@@ -191,7 +191,7 @@ export function StationsTable(p: StationsTableProps) {
                       <TargetValue cell={r.target} failed={false} />
                     </td>
                     <td className={`ui-dt__num qs-pat qs-pat--l${last ? ' qs-pat--b' : ''}`}>{patternDays(r.pattern, p.patternFailed)}</td>
-                    <td className={`qs-pat qs-pat--r qs-pat--result${last ? ' qs-pat--b' : ''}`}>
+                    <td className={`qs-pat qs-pat--r qs-pat--result${last ? ' qs-pat--b' : ''}`} title={r.pattern.kind === 'flag' ? r.pattern.text : undefined}>
                       <PatternResult cell={r.pattern} failed={p.patternFailed} />
                     </td>
                     <td className="ui-dt__chev-col" aria-hidden="true">

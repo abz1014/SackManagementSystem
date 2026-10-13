@@ -1,9 +1,10 @@
 /* Quality > Stations. Tokens only (uniformity guard). */
 .qs-page { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
 .qs-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-5); flex-wrap: wrap; }
-.qs-title { margin: 0; color: var(--ink-1); font: var(--fw-extrabold) var(--fs-5)/var(--lh-5) var(--font-sans); letter-spacing: -0.02em; }
-.qs-sentence { margin: var(--space-2) 0 0; max-width: 60ch; color: var(--ink-2); font: var(--fw-regular) var(--fs-4)/var(--lh-4) var(--font-sans); }
-.qs-sentence b { color: var(--ink-1); font-weight: var(--fw-semibold); }
+/* PageHead owns the h1 and the sentence; the period line sits under it. */
+.qs-page > .ui-pagehead { margin: 0; }
+.qs-note.qs-period { margin-top: calc(-1 * var(--space-3)); }
+.qs-lead { color: var(--ink-1); font-weight: var(--fw-semibold); }
 .qs-card { display: flex; flex-direction: column; gap: var(--space-3); }
 .qs-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
 .qs-card__title { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-4)/var(--lh-4) var(--font-sans); }
@@ -15,20 +16,17 @@
 .qs-name b { color: var(--accent); font-weight: var(--fw-semibold); }
 .qs-table td b { color: var(--ink-1); font-weight: var(--fw-semibold); }
 .qs-table td.qs-name b { color: var(--accent); }
-.qs-table td { height: 56px; padding-inline: var(--space-3); }
-.qs-table th { padding-inline: var(--space-3); white-space: normal; vertical-align: bottom; line-height: var(--lh-1); }
+.qs-table td { height: 52px; padding-inline: var(--space-3); }
+.qs-table th { padding-inline: var(--space-3); white-space: normal; overflow-wrap: anywhere; vertical-align: bottom; line-height: var(--lh-1); }
 .qs-table th.qs-name-col { min-width: 0; }
 .qs-sel td { background: var(--accent-tint); }
-.qs-group th { height: auto; padding: var(--space-2) var(--space-4); background: none; color: var(--ink-2); font-size: var(--fs-2); font-weight: var(--fw-semibold); white-space: normal; vertical-align: bottom; }
-.qs-pat { background: var(--surface-sunk); }
-.qs-group th.qs-pat { background: var(--surface-sunk); border-radius: var(--radius-ctl) var(--radius-ctl) 0 0; }
-.qs-pat--l { box-shadow: inset 1px 0 0 var(--line-strong); }
-.qs-pat--r { box-shadow: inset -1px 0 0 var(--line-strong); }
-.qs-pat--head { box-shadow: inset 1px 0 0 var(--line-strong), inset -1px 0 0 var(--line-strong), inset 0 1px 0 var(--line-strong); }
-.qs-pat--b { border-bottom: 1px solid var(--line-strong); }
-.qs-table td.qs-pat--result { white-space: normal; min-width: 150px; max-width: 260px; }
+.qs-group th { height: auto; padding: var(--space-2) var(--space-3); background: var(--surface-sunk); color: var(--ink-2); font-size: var(--fs-2); font-weight: var(--fw-semibold); white-space: normal; vertical-align: bottom; }
+/* The pattern-check columns are a plain captioned group: a hairline on their left edge, no box, no fill, no shadow (fix-wave D17, M-04). */
+.qs-pat--l, .qs-group th.qs-pat { border-left: 1px solid var(--line); }
+.qs-group th.qs-pat { text-align: left; }
+.qs-table td.qs-pat--result { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qs-clip { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qs-result { color: var(--ink-1); }
-.qs-table tr:hover td.qs-pat { background: var(--surface-sunk); }
 /* phone cards */
 .qs-cards { display: flex; flex-direction: column; gap: var(--space-3); }
 .qs-card-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }

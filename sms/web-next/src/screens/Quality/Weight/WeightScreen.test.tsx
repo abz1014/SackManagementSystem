@@ -151,7 +151,7 @@ async function mount(url: string, over: Record<string, unknown> = {}) {
   window.history.replaceState(null, '', url);
   ff = installFakeFetch(routes(over));
   render(<Harness />);
-  await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).not.toMatch(/Loading/));
+  await waitFor(() => { const t = (document.querySelector('.ui-pagehead__sentence')?.textContent ?? '').replace(/ /g, '').trim(); expect(t).toBeTruthy(); expect(t).not.toMatch(/Loading/); });
   await waitFor(() => expect(screen.getByText('About these figures')).toBeTruthy());
 }
 
@@ -165,7 +165,7 @@ afterEach(() => {
 describe('Quality > Weight: headline (RESERVED weight-basis wording)', () => {
   it('states the mean and the target as two facts, not a verdict', async () => {
     await mount(MULTI);
-    const h = screen.getByRole('heading', { level: 1 }).textContent ?? '';
+    const h = (document.querySelector('.ui-pagehead__sentence')?.textContent ?? '') ?? '';
     expect(h).toMatch(/Average recorded weight is 1,952/);
     expect(h).toMatch(/the product target is 1,960/);
     expect(h).toMatch(/weight basis not yet confirmed/);
@@ -173,7 +173,7 @@ describe('Quality > Weight: headline (RESERVED weight-basis wording)', () => {
   });
   it('says so when no product target is recorded', async () => {
     await mount(MULTI, { '/api/weight-stations': env(stationsData({ targetG: null, productId: null, productLabel: null, targetEffectiveFromUtc: null })) });
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/No product target is recorded/);
+    expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toMatch(/No product target is recorded/);
   });
 });
 
@@ -184,7 +184,8 @@ describe('Quality > Weight: KPI row', () => {
     expect(screen.getAllByText('Mean cone weight').length).toBeGreaterThan(0);
     expect(screen.getByText('1,951.8')).toBeTruthy();
     expect(screen.getByText('1,960')).toBeTruthy();
-    expect(screen.getByText(/201-IH0-SD · in force since/)).toBeTruthy();
+    // the product and its start time are on the target card and on the caption under the headline (fix-wave D26)
+    expect(screen.getAllByText(/201-IH0-SD · in force since/)).toHaveLength(2);
     expect(screen.getByText('Mean minus target')).toBeTruthy();
     expect(screen.getByText('−8.2')).toBeTruthy();
     expect(screen.getByText('Failed weight check (scale)')).toBeTruthy();
@@ -247,7 +248,7 @@ describe('Quality > Weight: wm and wt in the URL', () => {
     expect(screen.getByText(/No product tolerance applies/)).toBeTruthy();
     await waitFor(() => expect(screen.getByText('Average sack weight per day')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('Sacks the scale passed, by product')).toBeTruthy());
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/Average sack weight is 47\.28/);
+    expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toMatch(/Average sack weight is 47\.28/);
     fireEvent.click(screen.getByRole('radio', { name: 'Cones' }));
     expect(window.location.search).not.toContain('wt=');
     await waitFor(() => expect(screen.getByText('Average cone weight over time')).toBeTruthy());
@@ -317,20 +318,20 @@ describe('Quality > Weight: hops and advisory', () => {
 describe('Quality > Weight: states', () => {
   it('a failed spc fetch is named, never drawn as an empty period', async () => {
     await mount(MULTI, { '/api/spc': fail() });
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/Could not load this/);
+    expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toMatch(/Could not load this/);
     expect(screen.queryByText('Nothing recorded in this period.')).toBeNull();
     await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
     expect(screen.getAllByText(/Couldn't load/).length).toBeGreaterThan(0);
   });
   it('a failed station fetch keeps the chart and names the missing half', async () => {
     await mount(MULTI, { '/api/weight-stations': fail() });
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/Station and target data could not be loaded/);
+    expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toMatch(/Station and target data could not be loaded/);
     await waitFor(() => expect(screen.getByText('Average cone weight over time')).toBeTruthy());
     await waitFor(() => expect(screen.getByText("Couldn't load the station pattern check.")).toBeTruthy());
   });
   it('an empty period says nothing was weighed', async () => {
     await mount(MULTI, { '/api/spc': () => env(spc({ count: 0, mean: null, subgroups: [], histogram: [], stations: [] })) });
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/No cones were weighed in this period/);
+    expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toMatch(/No cones were weighed in this period/);
     expect(screen.getByText(/Nothing in this period/)).toBeTruthy();
   });
   it('lets a chart switch to its table view', async () => {

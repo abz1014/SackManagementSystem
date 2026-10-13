@@ -11,7 +11,7 @@ import { YAxis } from './Axes';
 import { barPath } from './BarChart';
 import { Frame } from './Frame';
 import { LimitBand } from './LimitBand';
-import { defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
+import { chartTop, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
 
 export interface HistogramBin {
   from: number;
@@ -38,7 +38,7 @@ export function Histogram(p: HistogramProps) {
   const xMax = n > 0 ? (p.bins[n - 1] as HistogramBin).to : 1;
 
   const geo = (w: number, h: number, fontPx: number) => {
-    const m: Margins = { left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4, right: 12, top: 22, bottom: 40 };
+    const m: Margins = { left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4, right: 12, top: chartTop(fontPx), bottom: 40 };
     return {
       m,
       slot: Math.max(1, w - m.left - m.right) / Math.max(1, n),
@@ -69,6 +69,7 @@ export function Histogram(p: HistogramProps) {
       emptyMessage={p.emptyMessage}
       emptyAction={p.emptyAction}
       defaultH={p.defaultH}
+      reserve={p.reserve}
       table={{ columns: [`Range (${p.valueUnit})`, `Count (${p.unit})`], rows: p.bins.map((b) => [label(b), fmt(b.count)]) }}
       frame={{
         count: n,

@@ -9,7 +9,7 @@ import { useRef } from 'react';
 import { leftGutterFor, linear, nearestIndex, textPx, type ChartTip } from '../../../bridge/chart';
 import { XLabels } from '../../../charts/Axes';
 import { Frame } from '../../../charts/Frame';
-import type { ChartStatus } from '../../../charts/types';
+import { chartTop, type ChartStatus } from '../../../charts/types';
 
 export interface DivergingItem {
   key: string;
@@ -73,8 +73,8 @@ export function DivergingBars(p: DivergingProps) {
 
   const margins = (fontPx: number): Margins =>
     rows
-      ? { left: Math.max(64, Math.ceil(textPx(longest, fontPx)) + 8), right: 44, top: 26, bottom: 30 }
-      : { left: leftGutterFor([p.format(-half), p.format(half)], fontPx, 44, 0) + 4, right: 12, top: 22, bottom: 28 };
+      ? { left: Math.max(64, Math.ceil(textPx(longest, fontPx)) + 8), right: 44, top: chartTop(fontPx), bottom: 30 }
+      : { left: leftGutterFor([p.format(-half), p.format(half)], fontPx, 44, 0) + 4, right: 12, top: chartTop(fontPx), bottom: 28 };
 
   /** Size of one item's slot along the category axis. */
   const slotOf = (w: number, h: number, m: Margins): number =>
@@ -150,7 +150,7 @@ export function DivergingBars(p: DivergingProps) {
                     <text x={x(t)} y={height - 8} textAnchor="middle" className="ck-tick" fontSize={fontPx}>{p.format(t)}</text>
                   </g>
                 ))}
-                <text x={width - m.right} y={m.top - 8} textAnchor="end" className="ck-unit-label" fontSize={fontPx}>{p.unit}</text>
+                <text x={0} y={fontPx} textAnchor="start" className="ck-unit-label" fontSize={fontPx}>{p.unit}</text>
                 {p.band && (
                   <text x={x0} y={m.top - 8} textAnchor="middle" className="ck-band-text" fontSize={fontPx}>{p.band.label}</text>
                 )}
@@ -203,7 +203,7 @@ export function DivergingBars(p: DivergingProps) {
                   <text x={m.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="ck-tick" fontSize={fontPx}>{p.format(t)}</text>
                 </g>
               ))}
-              <text x={m.left - 8} y={Math.max(fontPx, m.top - 8)} textAnchor="end" className="ck-unit-label" fontSize={fontPx}>{p.unit}</text>
+              <text x={0} y={fontPx} textAnchor="start" className="ck-unit-label" fontSize={fontPx}>{p.unit}</text>
               {p.items.map((it, i) =>
                 it.value === null ? null : (
                   <rect
