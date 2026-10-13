@@ -14,6 +14,10 @@
 .kpi-chip { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-ctl); }
 .kpi-label { font-size: var(--fs-2); line-height: var(--lh-2); font-weight: var(--fw-medium); color: var(--ink-3); }
 .kpi-value { font-size: var(--fs-kpi); line-height: var(--lh-kpi); font-weight: var(--fw-bold); font-feature-settings: var(--tnum); color: var(--ink-1); }
+.kpi-info-wrap { position: relative; display: inline-block; }
+.kpi-info { width: 18px; height: 18px; margin-left: var(--space-2); padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: none; color: var(--ink-3); font: var(--fw-semibold) var(--fs-1)/1 var(--font-sans); cursor: help; vertical-align: 1px; }
+.kpi-info:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.kpi-pop { position: absolute; z-index: 5; top: calc(100% + var(--space-2)); left: 0; width: max-content; max-width: 240px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-ctl); background: var(--surface); box-shadow: var(--elev-2, var(--elev-1)); color: var(--ink-2); font-size: var(--fs-2); line-height: var(--lh-2); font-weight: var(--fw-regular); }
 .kpi-unit { margin-left: 4px; font-size: var(--fs-2); font-weight: var(--fw-regular); color: var(--ink-3); }
 .kpi-note { margin-top: var(--space-1); color: var(--ink-2); font-size: var(--fs-2); }
 .kpi-delta { display: inline-block; margin: var(--space-1) var(--space-2) var(--space-1) 0; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-sunk); color: var(--ink-2); font-size: var(--fs-2); }

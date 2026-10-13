@@ -32,6 +32,8 @@ import { C, formatDate, RESERVED } from '../../../copy';
 import { Histogram, LineChart } from '../../../charts';
 import type { LimitSpec } from '../../../charts';
 import { useData, useProduction, usePeriod, type DataState } from '../../../data';
+import { Icon } from '../../../ui/Icon';
+import { KpiCard } from '../../../ui/KpiCard';
 import { Disclosure } from '../../../ui/Disclosure';
 import { EmptyState } from '../../../ui/EmptyState';
 import { ErrorState } from '../../../ui/ErrorState';
@@ -397,49 +399,6 @@ function targetPhrase(d: WeightStationsData): string {
 
 /* --------------------------------------------------------------------- KPIs */
 
-interface KpiProps {
-  label: string;
-  info?: string;
-  value?: string | null;
-  unit?: string;
-  detail?: string | null;
-  status?: 'loading' | 'ok' | 'error';
-  part?: string;
-  onRetry?: () => void;
-}
-
-function Kpi({ label, info, value, unit, detail, status = 'ok', part, onRetry }: KpiProps) {
-  return (
-    <section className="kpi qw-kpi" aria-busy={status === 'loading' || undefined} data-status={status}>
-      <div className="kpi-label">
-        {label}
-        {info && (
-          <button type="button" className="qw-info" aria-label={`How ${label.toLowerCase()} is counted`} title={info}>
-            ?
-          </button>
-        )}
-      </div>
-      {status === 'loading' ? (
-        <div className="kpi-skel" aria-label={C.chart.loading} />
-      ) : status === 'error' ? (
-        <>
-          <div className="kpi-value">{'–'}</div>
-          <div className="kpi-errtext" role="alert">{C.couldntLoad(part ?? label.toLowerCase())}</div>
-          {onRetry && <button type="button" className="kpi-retry" onClick={onRetry}>{C.tryAgain}</button>}
-        </>
-      ) : (
-        <>
-          <div className="kpi-value">
-            {value ?? '–'}
-            {unit && value != null && <span className="kpi-unit">{unit}</span>}
-          </div>
-          {detail && <div className="qw-detail">{detail}</div>}
-        </>
-      )}
-    </section>
-  );
-}
-
 const asKpi = (s: DataState<unknown>['status']): 'loading' | 'ok' | 'error' =>
   s === 'loading' ? 'loading' : s === 'error' ? 'error' : 'ok';
 
@@ -502,7 +461,8 @@ function ConeKpis({
 
   return (
     <div className="qw-kpis" role="group" aria-label={QW.kpi.mean}>
-      <Kpi
+      <KpiCard
+        icon={<Icon name="weight" size={18} />} chip={1}
         label={QW.kpi.mean}
         info={QW.kpi.infoMean}
         status={asKpi(coneLine.status)}
@@ -510,26 +470,32 @@ function ConeKpis({
         onRetry={coneLine.refresh}
         value={hasMean ? oneDecimal(cone.mean!) : null}
         unit="g"
-        detail={meanDetail}
+        noteWhenEmpty
+        note={meanDetail}
       />
-      <Kpi
+      <KpiCard
+        icon={<Icon name="weight" size={18} />} chip={1}
         label={QW.kpi.target}
         status={asKpi(stationsD.status)}
         part="the target"
         onRetry={stationsD.refresh}
         value={targetValue}
         unit="g"
-        detail={targetDetail}
+        noteWhenEmpty
+        note={targetDetail}
       />
-      <Kpi
+      <KpiCard
+        icon={<Icon name="weight" size={18} />} chip={1}
         label={QW.kpi.offset}
         status={offsetStatus}
         part="the offset"
         value={offset === null ? null : signed1(offset)}
         unit="g"
-        detail={offset === null ? QW.kpi.offsetNone : QW.kpi.offsetDetail}
+        noteWhenEmpty
+        note={offset === null ? QW.kpi.offsetNone : QW.kpi.offsetDetail}
       />
-      <Kpi
+      <KpiCard
+        icon={<Icon name="weight" size={18} />} chip={1}
         label={QW.kpi.within}
         info={QW.kpi.infoWithin}
         status={prodStatus}
@@ -537,7 +503,8 @@ function ConeKpis({
         onRetry={prod.refresh}
         value={states && judged > 0 && !omitted ? oneDecimal((states.within / judged) * 100) : null}
         unit="%"
-        detail={
+        noteWhenEmpty
+        note={
           omitted
             ? omitted
             : states && judged > 0
@@ -549,7 +516,8 @@ function ConeKpis({
               : C.checks.notChecked
         }
       />
-      <Kpi
+      <KpiCard
+        icon={<Icon name="rejects" size={18} />} chip={1}
         label={QW.kpi.failedCheck}
         info={QW.kpi.infoFailed}
         status={prodStatus}
@@ -557,7 +525,8 @@ function ConeKpis({
         onRetry={prod.refresh}
         value={failedPct === null ? null : oneDecimal(failedPct)}
         unit="%"
-        detail={row ? QW.kpi.failedDetail(fmt.fmtInt(row.cones)) : null}
+        noteWhenEmpty
+        note={row ? QW.kpi.failedDetail(fmt.fmtInt(row.cones)) : null}
       />
     </div>
   );
@@ -568,17 +537,20 @@ function SackKpis({ sum }: { sum: DataState<Envelope<import('../../../bridge/api
   const st = asKpi(sum.status);
   return (
     <div className="qw-kpis" role="group" aria-label={W.readings.sacks}>
-      <Kpi label={QW.sackKpi.weighed} status={st} part="the sack summary" onRetry={sum.refresh} value={t ? fmt.fmtInt(t.sacks) : null} detail={t ? QW.sackKpi.weighedDetail : null} />
-      <Kpi
+      <KpiCard icon={<Icon name="sacks" size={18} />} chip={1} label={QW.sackKpi.weighed} status={st} part="the sack summary" onRetry={sum.refresh} value={t ? fmt.fmtInt(t.sacks) : null} note={t ? QW.sackKpi.weighedDetail : null} />
+      <KpiCard
+        icon={<Icon name="sacks" size={18} />} chip={1}
         label={QW.sackKpi.mean}
         status={st}
         part="the sack summary"
         onRetry={sum.refresh}
         value={t && t.avgKg !== null ? twoDecimals(t.avgKg) : null}
         unit="kg"
-        detail={t && t.implausible > 0 ? W.sacks.avgExcluded(fmt.fmtInt(t.implausible)) : null}
+        noteWhenEmpty
+        note={t && t.implausible > 0 ? W.sacks.avgExcluded(fmt.fmtInt(t.implausible)) : null}
       />
-      <Kpi
+      <KpiCard
+        icon={<Icon name="sacks" size={18} />} chip={1}
         label={QW.sackKpi.passed}
         info={QW.sackKpi.infoPassed}
         status={st}
@@ -586,7 +558,8 @@ function SackKpis({ sum }: { sum: DataState<Envelope<import('../../../bridge/api
         onRetry={sum.refresh}
         value={t && t.inRangePct !== null ? oneDecimal(t.inRangePct) : null}
         unit="%"
-        detail={t ? W.sacks.inRangeNote(fmt.fmtInt(t.inRange), fmt.fmtInt(t.sacks - t.noFlag)) : null}
+        noteWhenEmpty
+        note={t ? W.sacks.inRangeNote(fmt.fmtInt(t.inRange), fmt.fmtInt(t.sacks - t.noFlag)) : null}
       />
     </div>
   );

@@ -123,3 +123,24 @@ describe('AttentionList', () => {
     expect(open).toHaveBeenCalled();
   });
 });
+
+describe('KpiCard info popover', () => {
+  it('opens on click with aria-expanded, closes on Escape, hidden by default', () => {
+    render(<KpiCard label="Within tolerance" value="9" info="Share of cones inside the limits." />);
+    const b = screen.getByRole('button', { name: /how within tolerance is counted/i });
+    expect(b.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('note')).toBeNull();
+    fireEvent.click(b);
+    expect(b.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('note').textContent).toContain('inside the limits');
+    fireEvent.keyDown(b, { key: 'Escape' });
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+  it('shows a note without a value only when asked', () => {
+    const { unmount } = render(<KpiCard label="T" value={null} note="withheld" />);
+    expect(screen.queryByText('withheld')).toBeNull();
+    unmount();
+    render(<KpiCard label="T" value={null} note="withheld" noteWhenEmpty />);
+    expect(screen.getByText('withheld')).toBeTruthy();
+  });
+});

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { C } from '../copy';
 import { StatusPill, type UiState } from './StatusPill';
 import '../components/state.css';
@@ -23,6 +23,10 @@ export interface KpiCardProps {
   delta?: KpiDelta | null;
   /** A small line under the value, for the count behind it ("14 of 3,089 cones"). Shown only when the value is. */
   note?: string | null;
+  /** Show the note even when there is no value (a withheld figure explains itself). */
+  noteWhenEmpty?: boolean;
+  /** Help text for a small "?" button beside the label; opens a popover (Esc or outside click closes). */
+  info?: string;
   /** Server-decided judgement. Omit for neutral cards (cones produced). */
   state?: UiState;
   /** Data hook status. */
@@ -32,9 +36,49 @@ export interface KpiCardProps {
   onRetry?: () => void;
 }
 
+function InfoButton({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const wrap = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
+  return (
+    <span
+      className="kpi-info-wrap"
+      ref={wrap}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && open) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="kpi-info"
+        aria-label={`How ${label.toLowerCase()} is counted`}
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen(!open)}
+      >
+        ?
+      </button>
+      {open && (
+        <span id={id} role="note" className="kpi-pop">{text}</span>
+      )}
+    </span>
+  );
+}
+
 const ARROW = { up: '▲', down: '▼', flat: '▬' } as const;
 
-export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, state, status = 'ok', part, onRetry }: KpiCardProps) {
+export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, noteWhenEmpty, info, state, status = 'ok', part, onRetry }: KpiCardProps) {
   const loading = status === 'loading';
   const error = status === 'error';
   const empty = status === 'empty';
@@ -45,7 +89,10 @@ export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, state
       <span className="kpi-chip" style={{ background: `var(--chip-${chip}-bg)`, color: `var(--chip-${chip}-fg)` }} aria-hidden="true">
         {icon}
       </span>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-label">
+        {label}
+        {info && <InfoButton label={label} text={info} />}
+      </div>
       {loading ? (
         <div className="kpi-skel" aria-label="Loading" />
       ) : error ? (
@@ -67,7 +114,7 @@ export function KpiCard({ label, value, unit, icon, chip = 1, delta, note, state
             {value ?? '–'}
             {unit && value != null && <span className="kpi-unit">{unit}</span>}
           </div>
-          {note && value != null && <div className="kpi-note">{note}</div>}
+          {note && (value != null || noteWhenEmpty) && <div className="kpi-note">{note}</div>}
           {delta && (
             <div className="kpi-delta" data-direction={delta.direction}>
               <span aria-hidden="true">{ARROW[delta.direction]}</span> {delta.text} {delta.vs}

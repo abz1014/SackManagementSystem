@@ -7,10 +7,6 @@
 .qw-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
 .qw-bar .wr-field { min-width: 180px; }
 .qw-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-4); }
-.qw-kpi .kpi-value { font-size: var(--fs-kpi); }
-.qw-detail { font-size: var(--fs-2); line-height: var(--lh-2); color: var(--ink-3); }
-.qw-info { width: 18px; height: 18px; margin-left: var(--space-2); padding: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: none; color: var(--ink-3); font: var(--fw-semibold) var(--fs-1)/1 var(--font-sans); cursor: help; vertical-align: 1px; }
-.qw-info:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .qw-hop { margin: 0; font-size: var(--fs-3); color: var(--ink-1); }
 .qw-bar-fill, .ck-bar.qw-bar { fill: var(--cat-1); }
 .qw-advisory .ck-title { margin-bottom: var(--space-3); }
