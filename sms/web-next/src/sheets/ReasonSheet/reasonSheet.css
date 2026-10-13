@@ -1,0 +1,14 @@
+/* Reason sheet and the "Name it" control. Tokens only (uniformity guard). */
+.rs-body { display: flex; flex-direction: column; gap: var(--space-3); }
+.rs-day { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rs-count { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+.rs-h { margin: var(--space-4) 0 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.rs-hop { margin: 0; }
+.rs-note { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rs-nowrap { white-space: nowrap; }
+.rs-sub { display: block; color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
+
+.rs-nameit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.rs-nameit__form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.rs-nameit__form .wr-input { min-width: 12rem; }
+.rs-nameit__err { flex-basis: 100%; color: var(--ink-1); font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans); }
