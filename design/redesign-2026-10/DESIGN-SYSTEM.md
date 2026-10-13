@@ -206,7 +206,7 @@ Global rules: focus ring `:focus-visible` 2 px `--focus-ring`, offset 2 (sidebar
 Grid: floating sidebar card column + (frosted topbar over the page), padded and gapped by `--shell-pad`. Slot for page content. Loading: shell renders immediately, page area shows page skeleton. Error: shell stays; page area shows ErrorState (a failing screen never blanks the sidebar). Do: one shell for every screen incl. Setup. Don't: nested scrollbars; only the page area scrolls (sidebar fixed, topbar sticky). Wall: shell without sidebar/topbar, header strip only.
 
 ### 6.2 Sidebar
-232 wide white card, `--side-bg`, `--radius-side` 22, `--elev-1`. Top: wordmark "SMS" (weight 800, `--side-fg-strong`) + plant name "Ibrahim Fibres, TP1 Line 3" (`--side-fg-dim`). Items (icon 20 + label), grouped: **Monitor** (Overview, Stations, Rejects, Sacks), **Analyse** (Weight, Product, Reports), **System** (Health, Setup). Eight current screens map into these groups in Phase B. Items are 40 high, `--radius-tile`. Active = `--side-active-bg` fill + accent text (weight 700) + accent icon. Rank-gated items (Setup) are absent below rank. Bottom: health dot summary and collapse chevron. States: default, hover (`--side-bg-hover`), active, focus (accent ring), collapsed (icon only, tooltip with label). Don't: badges in colour other than a state glyph; more than 9 items.
+232 wide white card, `--side-bg`, `--radius-side` 22, `--elev-1`. Top: wordmark "SMS" (weight 800, `--side-fg-strong`) + plant name "Ibrahim Fibres, TP1 Line 3" (`--side-fg-dim`). Items (icon 20 + label), grouped (approved IA, 13 Oct 2026): **Monitor** (Today, Quality), **Operate** (Products & PDAS), **Analyse** (Reports), **System** (Diagnostics, Setup, Account). The eight current screens map into these groups per IA-MAP.md. Items are 40 high, `--radius-tile`. Active = `--side-active-bg` fill + accent text (weight 700) + accent icon. Rank-gated items (Setup) are absent below rank. Bottom: health dot summary and collapse chevron. States: default, hover (`--side-bg-hover`), active, focus (accent ring), collapsed (icon only, tooltip with label). Don't: badges in colour other than a state glyph; more than 9 items.
 
 ### 6.3 TopBar
 56 high, sticky, frosted (`--topbar-bg` + blur 16 + saturate 1.6), `--radius-bar` 18, `--elev-topbar`. Left: page title (`--fs-5`) may live in the page instead; topbar holds breadcrumb only when there is a drill-down. Right-to-left: user menu (name, rank, Sign out), **health dot** (StatusPill compact: glyph + "Data 2 min old" / "Data stale" / "No data"; opens a popover with the sync verdict and a link to Health), **PeriodChip**. Phone: title + PeriodChip + menu. States: health dot has all four states; popover loading/error as Section 6.17/6.18.
@@ -298,7 +298,7 @@ Bottom-left, `--elev-2`, 5 s (persist if it has Undo or an error), one line with
 
 | Width | Shell | Grid | Notes |
 |---|---|---|---|
-| 375 | Bottom tab bar (Overview, Stations, Rejects, Reports, More), no sidebar, TopBar compact | 1 col, KPI 2 per row, tiles 2 per row | Tables become cards, Sheets are bottom sheets, PeriodPanel is a bottom sheet |
+| 375 | Bottom tab bar (Today, Quality, Products, Reports, More), no sidebar, TopBar compact | 1 col, KPI 2 per row, tiles 2 per row | Tables become cards, Sheets are bottom sheets, PeriodPanel is a bottom sheet |
 | 768 | Sidebar collapsed 64 | 8-col feel, KPI 3 per row | |
 | 1024 | Sidebar 232 | 12 col | |
 | 1366 | Sidebar 232 | 12 col, design size | Hero + KPI row above fold |
@@ -340,11 +340,11 @@ Old `app.css` tokens `--ok`, `--warn`, `--acc` map to `--ok-edge`, `--watch-edge
 
 OQ-1. Sidebar groups and the 8 to 9 item set in 6.2: approve or reorder.
 OQ-2. Accent blue and the 5-colour categorical set include a bronze; confirm bronze is acceptable (it sits near Watch amber in hue family but fails no CVD or normal-vision check; if it feels confusable, a swap to slate-grey-blue costs one chart slot).
-OQ-3. Font (decide before Phase B): Style C is drawn in **Manrope** (OFL, variable 400-800, supports tabular figures). The app currently self-hosts Instrument Sans. Switching means adding one Manrope variable woff2 (a font file, not an npm dependency) and an @font-face, removing the Instrument Sans file, and re-checking the 1366 layout because Manrope has different glyph widths from Instrument Sans (not yet measured against the real screens). Switch to Manrope, or keep Instrument Sans and accept a small drift from the Style C look?
-OQ-4. Wall in light (as designed) vs dark theme for the TV hall. A dark Wall needs a second token block; not planned unless asked.
+OQ-3. RESOLVED 13 Oct 2026: Manrope approved; self-host file pending owner (stack falls back to Instrument Sans until then). Original question: Font (decide before Phase B): Style C is drawn in **Manrope** (OFL, variable 400-800, supports tabular figures). The app currently self-hosts Instrument Sans. Switching means adding one Manrope variable woff2 (a font file, not an npm dependency) and an @font-face, removing the Instrument Sans file, and re-checking the 1366 layout because Manrope has different glyph widths from Instrument Sans (not yet measured against the real screens). Switch to Manrope, or keep Instrument Sans and accept a small drift from the Style C look?
+OQ-4. RESOLVED 13 Oct 2026: Wall: dark Style C, token block `.wall.dark` (approved 13 Oct 2026; sms/web-next/src/styles/wall-dark.css).
 OQ-5. Threshold ownership: which numbers map to Watch vs Act (e.g. % failed inspection, weight offset) come from the server/Setup; confirm IFL values or keep the assumed defaults printed in Disclosure.
 OQ-6. Phone bottom tab: which 4 items besides "More".
 OQ-7. The status sentence in the band ("Four stations need attention.") is server-derived plain text from the same thresholds as the states; confirm that one sentence per screen is wanted on every screen, or only on Overview.
 
 ## 14. Non-goals in v1
-No dark theme (the sidebar is light too), no user-themed colours, no animation beyond Section 5, no new dependencies, no change to data, API or rank rules.
+No dark theme for desk and phone (the sidebar is light too); the only dark surface is the TV wall: dark Style C, token block `.wall.dark` (approved 13 Oct 2026), no user-themed colours, no animation beyond Section 5, no new dependencies, no change to data, API or rank rules.

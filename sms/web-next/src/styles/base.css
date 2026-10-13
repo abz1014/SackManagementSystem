@@ -1,0 +1,82 @@
+/* ==========================================================================
+   Reference usage - proves each token is consumed. Production CSS may move
+   these into component files but must not change what they read.
+   ========================================================================== */
+body { margin: 0; background: var(--bg); color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); font-variant-numeric: tabular-nums lining-nums; font-feature-settings: var(--tnum); }
+h1 { font-size: var(--fs-5); line-height: var(--lh-5); color: var(--ink-1); font-weight: var(--fw-bold); }
+h2 { font-size: var(--fs-4); line-height: var(--lh-4); color: var(--ink-1); font-weight: var(--fw-semibold); }
+.caption { font-size: var(--fs-1); line-height: var(--lh-1); color: var(--ink-3); }
+.small   { font-size: var(--fs-2); line-height: var(--lh-2); }
+.hero-fig { font-size: var(--fs-6); line-height: var(--lh-6); color: var(--ink-1); font-weight: var(--fw-extrabold); }
+a { color: var(--accent); } a:hover { color: var(--accent-hover); }
+
+.app { display: grid; grid-template-columns: var(--side-w) 1fr; gap: var(--shell-pad); padding: var(--shell-pad); min-height: 100vh; }
+.app[data-collapsed] { grid-template-columns: var(--side-w-collapsed) 1fr; }
+.sidebar { background: var(--side-bg); color: var(--side-fg); border-radius: var(--radius-side); box-shadow: var(--elev-1); padding: 18px var(--space-3) 14px; align-self: start; }
+.sidebar a { display: flex; align-items: center; gap: var(--space-3); height: var(--nav-h); padding: 0 var(--space-3); border-radius: var(--radius-tile); color: var(--side-fg); font-weight: var(--fw-medium); text-decoration: none; transition: background var(--dur-fast) var(--ease); }
+.sidebar a:hover { background: var(--side-bg-hover); color: var(--side-fg-strong); }
+.sidebar a[aria-current="page"] { background: var(--side-active-bg); color: var(--side-active-fg); font-weight: var(--fw-bold); }
+.sidebar .dim { color: var(--side-fg-dim); }
+.sidebar :focus-visible { outline: 2px solid var(--side-focus); outline-offset: -2px; }
+.topbar { position: sticky; top: 0; z-index: 2; height: var(--topbar-h); display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--page-pad); background: var(--topbar-bg); -webkit-backdrop-filter: blur(16px) saturate(1.6); backdrop-filter: blur(16px) saturate(1.6); border-radius: var(--radius-bar); box-shadow: var(--elev-topbar); }
+.band { padding: 30px 34px 28px; border-radius: var(--radius-band); background: linear-gradient(120deg, var(--band-1) 0%, var(--band-2) 58%, var(--band-3) 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .75); }
+.band h1 { color: var(--accent); }
+.band .sentence { font-size: var(--fs-sent); line-height: var(--lh-sent); color: var(--ink-1); font-weight: var(--fw-bold); max-width: 30ch; }
+.page { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--page-pad) var(--space-5); display: grid; grid-template-columns: repeat(var(--grid-cols), 1fr); gap: var(--gutter); }
+.card { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); padding: var(--card-pad); }
+.popover, .sheet, .dialog { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-2); }
+.scrim { background: var(--scrim); }
+.field { height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); font: inherit; }
+.field:disabled { background: var(--surface-sunk); color: var(--ink-3); }
+.btn { height: var(--control-h); padding: 0 var(--space-4); border: 0; border-radius: var(--radius-ctl); background: var(--accent); color: var(--on-accent); box-shadow: var(--elev-accent); font: var(--fw-semibold) var(--fs-3) var(--font-sans); transition: background var(--dur-fast) var(--ease); }
+.btn:hover { background: var(--accent-hover); }
+.btn.quiet { background: var(--accent-tint); color: var(--accent); box-shadow: none; }
+.th { background: var(--surface-sunk); color: var(--ink-3); font-size: var(--fs-1); font-weight: var(--fw-semibold); }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (max-width: 767px) { .app, .app[data-collapsed] { grid-template-columns: 1fr; padding-bottom: var(--tabbar-h); } .page { padding: 0 var(--space-4) var(--space-4); gap: var(--space-4); } .sidebar { display: none; } }
+@media (hover: none) { .btn, .field, .sidebar a { min-height: var(--tap-min); } }
+
+/* State kit: colour + glyph + word, always together. */
+.state { --fg: var(--nodata-fg); --tint: var(--nodata-tint); --edge: var(--nodata-edge); --glyph: var(--nodata-glyph); --word: var(--nodata-word); }
+.state[data-state="ok"]     { --fg: var(--ok-fg);     --tint: var(--ok-tint);     --edge: var(--ok-edge);     --glyph: var(--ok-glyph);     --word: var(--ok-word); }
+.state[data-state="watch"]  { --fg: var(--watch-fg);  --tint: var(--watch-tint);  --edge: var(--watch-edge);  --glyph: var(--watch-glyph);  --word: var(--watch-word); }
+.state[data-state="act"]    { --fg: var(--act-fg);    --tint: var(--act-tint);    --edge: var(--act-edge);    --glyph: var(--act-glyph);    --word: var(--act-word); }
+.state[data-state="nodata"] { --fg: var(--nodata-fg); --tint: var(--nodata-tint); --edge: var(--nodata-edge); --glyph: var(--nodata-glyph); --word: var(--nodata-word); }
+.pill { display: inline-flex; align-items: center; gap: var(--space-1); height: 24px; padding: 0 10px; border-radius: var(--radius-pill); background: var(--tint); color: var(--fg); font-size: var(--fs-2); line-height: var(--lh-2); font-weight: var(--fw-semibold); }
+.pill::before { content: var(--glyph); }
+.pill:empty::after { content: var(--word); }
+.kpi { background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); padding: var(--kpi-pad-y) var(--kpi-pad-x); }
+.kpi.state { background: var(--tint); box-shadow: inset 0 0 0 1px var(--edge), var(--elev-1); }
+.kpi .kicon { width: 38px; height: 38px; border-radius: var(--radius-ctl); display: grid; place-items: center; background: var(--chip-1-bg); color: var(--chip-1-fg); } /* chip-2..5 by metric */
+.kpi .value { font-size: var(--fs-kpi); line-height: var(--lh-kpi); color: var(--ink-1); font-weight: var(--fw-bold); }
+.kpi .unit { font-size: var(--fs-2); color: var(--ink-3); }
+.kpi .delta { background: var(--surface-sunk); color: var(--ink-2); border-radius: var(--radius-pill); padding: 2px 10px; }
+.tile { background: var(--tint); border-radius: var(--radius-tile); padding: var(--space-3) var(--space-4); transition: box-shadow var(--dur-base) var(--ease); }
+.tile[data-state="ok"]     { background: var(--surface); box-shadow: var(--tile-quiet); }
+.tile[data-state="ok"]:hover { box-shadow: var(--tile-quiet-hover); }
+.tile[data-state="watch"]  { box-shadow: var(--tile-watch); }
+.tile[data-state="watch"]:hover { box-shadow: var(--tile-watch-hover); }
+.tile[data-state="act"]    { box-shadow: var(--tile-act); }
+.tile[data-state="act"]:hover { box-shadow: var(--tile-act-hover); }
+.tile[data-state="nodata"] { background: var(--surface-sunk); }
+
+/* Chart helpers */
+.chart .grid { stroke: var(--chart-grid); } .chart .axis { stroke: var(--chart-axis); } .chart .tick { fill: var(--ink-3); font-size: var(--fs-1); }
+.chart .band { fill: var(--chart-limit-band); } .chart .limit { stroke: var(--chart-limit-edge); stroke-dasharray: 4 3; }
+.chart .mark { stroke: var(--chart-gap); stroke-width: 2px; }
+/* single-series bars: <linearGradient id="barGrad" x1=0 y1=0 x2=0 y2=1> with stops var(--bar-from) then var(--bar-to) */
+.chart .bar { fill: url(#barGrad); }
+.s1 { fill: var(--cat-1); stroke: var(--cat-1); } .s2 { fill: var(--cat-2); stroke: var(--cat-2); } .s3 { fill: var(--cat-3); stroke: var(--cat-3); }
+.s4 { fill: var(--cat-4); stroke: var(--cat-4); } .s5 { fill: var(--cat-5); stroke: var(--cat-5); } .sother { fill: var(--cat-other); stroke: var(--cat-other); }
+.seq1 { fill: var(--seq-1); } .seq2 { fill: var(--seq-2); } .seq3 { fill: var(--seq-3); } .seq4 { fill: var(--seq-4); } .seq5 { fill: var(--seq-5); }
+
+/* Skeleton: fixed dimensions, never a false zero */
+.skel { background: linear-gradient(90deg, var(--surface-sunk), var(--bg), var(--surface-sunk)); background-size: 200% 100%; animation: skel var(--dur-slow) linear infinite; animation-duration: 1.4s; border-radius: var(--radius-ctl); }
+@keyframes skel { to { background-position: -200% 0; } }
+
+/* Accessibility floors */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: 0.01ms !important; } }
+@media (forced-colors: active) {
+  .pill, .tile, .kpi, .card { border: 1px solid CanvasText; box-shadow: none; }
+  .sidebar a[aria-current="page"] { border-left: 3px solid Highlight; }
+}

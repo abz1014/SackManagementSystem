@@ -8,6 +8,8 @@ Conventions: "rank" = `ROLE_RANK` (1 viewer, 2 engineer, 3 manager, 4 admin). **
 
 ## 1. The new navigation tree
 
+> Note (13 Oct 2026): the approved build renders this navigation as a sidebar (Monitor: Today, Quality; Operate: Products & PDAS; Analyse: Reports; System); the top-bar sketch below is superseded. The tree itself is unchanged.
+
 ```
 Top bar:  SMS | Today | Quality | Products & PDAS | Reports | System     [period control] [Back-from-zoom] [Wall display] [user menu]
                                                                         (the Setup gear is removed: Setup is now System > Setup)

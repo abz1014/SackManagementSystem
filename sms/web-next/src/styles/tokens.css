@@ -1,0 +1,164 @@
+/* ==========================================================================
+   SMS redesign tokens - design/redesign-2026-10/tokens.css
+   STYLE C, "Soft premium" (owner decision 13 Oct 2026; replaces the first
+   dark-sidebar, 6px-radius draft). Single source for colour, type, space,
+   layout, elevation, motion.
+   Rules: components read ONLY these tokens, never raw hex. Light work area,
+   white floating sidebar card. No dark theme in v1 (DESIGN-SYSTEM.md section 14).
+   Contrast figures for every pair are in DESIGN-SYSTEM.md section 3.
+   Font: Manrope. The plant PC has no internet, so production must self-host a
+   Manrope variable woff2 (OFL, a font file, not an npm dependency) with an
+   @font-face; see the commented block below. Do not link Google Fonts in production.
+   ========================================================================== */
+
+/* Instrument Sans is self-hosted now (web-next/public/fonts). Manrope is the approved face but its woff2 is
+   not supplied yet: see fonts-manrope.css. The stack falls through Manrope to Instrument Sans. */
+@font-face { font-family: "Instrument Sans"; src: url("/fonts/InstrumentSans-Variable.woff2") format("woff2"); font-weight: 400 700; font-style: normal; font-display: swap; }
+
+:root {
+  color-scheme: light;
+
+  /* ---- Sidebar (white floating card, radius-side, elev-1) ------------- */
+  --side-bg:          #ffffff;
+  --side-bg-hover:    #f3f5fb;
+  --side-active-bg:   #eaf0ff;   /* active item: accent text, weight 700, on this fill; no edge bar */
+  --side-line:        #e7eaf3;   /* dividers inside the sidebar */
+  --side-fg:          #3d4560;
+  --side-fg-dim:      #5d6580;
+  --side-fg-strong:   #12162b;
+  --side-active-fg:   var(--accent);
+  --side-focus:       var(--accent);
+
+  /* ---- Work area ------------------------------------------------------- */
+  --bg:             #f3f5fb;     /* cool-tinted floor */
+  --surface:        #ffffff;
+  --surface-sunk:   #eef1f8;     /* table header, inputs at rest, disclosure body, delta pill */
+  --line:           #e7eaf3;     /* decorative hairlines only (1.2:1, never the sole boundary of a control) */
+  --line-strong:    #7d88a0;     /* control borders, dashed limit lines (>=3:1) */
+  --ink-1:          #12162b;     /* headings, KPI values */
+  --ink-2:          #3d4560;     /* body */
+  --ink-3:          #5d6580;     /* captions, axis labels, units (>=4.5:1 on bg/surface/sunk) */
+  --scrim:          rgba(18, 22, 43, .48);
+
+  /* ---- Accent: interaction ONLY (links, buttons, focus, selection, band title). Never a state. */
+  --accent:         #2b59e0;
+  --accent-hover:   #1f46bd;
+  --accent-tint:    #e9efff;
+  --on-accent:      #ffffff;
+  --focus-ring:     #2b59e0;
+
+  /* ---- Status band: the ONE gradient in the product (120deg, stops at 0 / 58 / 100 %) */
+  --band-1: #e9efff;  --band-2: #f0ebff;  --band-3: #e6f5fb;
+  --topbar-bg: rgba(255, 255, 255, .72);   /* with backdrop-filter: blur(16px) saturate(1.6) */
+
+  /* ---- KPI icon chips: soft non-state hues (never green, amber or red) */
+  --chip-1-bg: #e6eeff;  --chip-1-fg: #2b59e0;   /* blue   */
+  --chip-2-bg: #efe9ff;  --chip-2-fg: #6a46d9;   /* violet */
+  --chip-3-bg: #e2f5f8;  --chip-3-fg: #0b7f92;   /* teal   */
+  --chip-4-bg: #e8ebfb;  --chip-4-fg: #3b46c4;   /* indigo */
+  --chip-5-bg: #edf0f6;  --chip-5-fg: #475069;   /* slate  */
+
+  /* ---- Four states. Each = fg (text/glyph), tint (fill), edge (ring), glyph, word. */
+  --ok-fg:      #087a4a;   --ok-tint:      #e5f7ee;   --ok-edge:      #2a9c6c;   --ok-glyph:      "\25CF"; /* ● */  --ok-word:      "OK";
+  --watch-fg:   #8f5c00;   --watch-tint:   #fff4dc;   --watch-edge:   #b58315;   --watch-glyph:   "\25B2"; /* ▲ */  --watch-word:   "Watch";
+  --act-fg:     #c0293a;   --act-tint:     #ffe9ec;   --act-edge:     #ea5566;   --act-glyph:     "\25A0"; /* ■ */  --act-word:     "Act";
+  --nodata-fg:  #566079;   --nodata-tint:  #eef1f8;   --nodata-edge:  #7f8aa4;   --nodata-glyph:  "\25CB"; /* ○ */  --nodata-word:  "No data";
+
+  /* ---- Categorical chart palette (identity only; no state hue; fixed order; max 5 series, then "Other") */
+  --cat-1: #2b59e0;  /* blue    */
+  --cat-2: #e0457b;  /* magenta */
+  --cat-3: #7c5ce6;  /* violet  (also the second line colour) */
+  --cat-4: #0f9fb5;  /* teal    (3.16:1 - direct labels mandatory) */
+  --cat-5: #b8791b;  /* bronze  (3.63:1 - direct labels mandatory) */
+  --cat-other: #7f8aa4;
+  /* scatter / any all-pairs form: use slots 1, 2, 5 only */
+
+  /* ---- Sequential ramp (magnitude, one hue, light -> dark) */
+  --seq-1: #e3eaff;  --seq-2: #bccaf8;  --seq-3: #8aa5f2;  --seq-4: #2b59e0;  --seq-5: #1b3a9c;
+
+  /* ---- Chart anatomy */
+  --bar-from:       #2b59e0;       /* single-series bar gradient, top (data end) */
+  --bar-to:         #8aa5f2;       /* ... bottom (baseline end); multi-series bars stay flat cat-n */
+  --chart-grid:     #e9ecf5;       /* solid, recessive gridlines */
+  --chart-axis:     #d5dae8;       /* decorative: tick and bar labels carry the values */
+  --chart-limit-band: rgba(42, 156, 108, .10);  /* shaded in-limit band; OK-green tint, never a line colour */
+  --chart-limit-edge: var(--line-strong);       /* dashed limit lines */
+  --chart-gap:      var(--surface);             /* 2px gap/ring between adjacent fills */
+
+  /* ---- Typography */
+  --font-sans: "Manrope", "Instrument Sans", system-ui, sans-serif;
+  --fs-1: 12px;   --lh-1: 16px;   /* caption, axis tick, unit */
+  --fs-2: 13px;   --lh-2: 18px;   /* table body, helper text, pill */
+  --fs-3: 15px;   --lh-3: 22px;   /* body, form fields, nav */
+  --fs-4: 18px;   --lh-4: 26px;   /* card title, section heading */
+  --fs-5: 24px;   --lh-5: 30px;   /* page title (accent, in the band) */
+  --fs-sent: 30px; --lh-sent: 38px; /* status sentence in the band */
+  --fs-kpi: 38px; --lh-kpi: 46px; /* KpiCard value */
+  --fs-6: 44px;   --lh-6: 50px;   /* hero figure (one per screen) */
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700; --fw-extrabold: 800;
+  --tnum: "tnum" 1, "lnum" 1;             /* Manrope carries tnum (verified: equal digit widths) */
+  --wall-scale: 1.6;                      /* applied on .wall root: every --fs-* and three --space-* multiply */
+
+  /* ---- Spacing (4px base) */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;  --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px;  --space-8: 64px;
+  --card-pad: 28px;  --kpi-pad-y: 22px;  --kpi-pad-x: 24px;
+  --shell-pad: 12px;                /* around and between the sidebar card and the main column */
+
+  /* ---- Layout */
+  --grid-cols: 12;
+  --gutter: 24px;
+  --page-max: 1600px;
+  --page-pad: 20px;                 /* 16px < 768 */
+  --side-w: 232px;
+  --side-w-collapsed: 72px;
+  --topbar-h: 56px;
+  --tabbar-h: 56px;                 /* bottom tab bar < 768px */
+  --bp-phone: 375px; --bp-tablet: 768px; --bp-laptop: 1024px; --bp-plant: 1366px; --bp-tv: 1920px;
+  --tap-min: 44px;                  /* touch target on phone/tablet */
+  --control-h: 36px;                /* desktop control height */
+  --nav-h: 40px;                    /* sidebar item height */
+
+  /* ---- Radius */
+  --radius-card: 16px;    /* cards, chart frames, KPI cards, empty/error states, sheets, dialogs */
+  --radius-tile: 14px;    /* station tiles, sidebar items */
+  --radius-ctl:  12px;    /* buttons, fields, table header ends, disclosure body, KPI icon chips */
+  --radius-bar:  18px;    /* frosted top bar */
+  --radius-side: 22px;    /* floating sidebar card */
+  --radius-band: 24px;    /* status band */
+  --radius-pill: 999px;
+
+  /* ---- Elevation: soft, no borders */
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(18, 22, 43, .04), 0 10px 28px -12px rgba(30, 50, 110, .14);        /* cards, KPI, sidebar card */
+  --elev-1-hover: 0 1px 2px rgba(18, 22, 43, .05), 0 16px 36px -12px rgba(30, 50, 110, .22);  /* card that is a link */
+  --elev-2: 0 20px 48px -12px rgba(30, 50, 110, .28);                                          /* sheet, popover, dialog */
+  --elev-xs: 0 1px 2px rgba(18, 22, 43, .05);
+  --elev-seg: 0 1px 3px rgba(18, 22, 43, .14);                                                 /* selected segmented thumb */
+  --elev-topbar: inset 0 1px 0 rgba(255, 255, 255, .8), 0 8px 24px -14px rgba(30, 50, 110, .25);
+  --elev-accent: 0 6px 14px -6px rgba(43, 89, 224, .55);                                       /* primary button only */
+  --tile-quiet: 0 1px 2px rgba(18, 22, 43, .05), 0 0 0 1px #e7eaf3;                            /* OK tile */
+  --tile-quiet-hover: 0 0 0 1.5px #b9c6ee, 0 10px 22px -10px rgba(30, 50, 110, .25);
+  --tile-watch: 0 0 0 1px rgba(224, 162, 26, .4), 0 8px 20px -10px rgba(224, 162, 26, .4);
+  --tile-watch-hover: 0 0 0 1.5px #e0a21a, 0 12px 24px -10px rgba(224, 162, 26, .5);
+  --tile-act: 0 0 0 1px rgba(234, 85, 102, .4), 0 8px 20px -10px rgba(234, 85, 102, .45);
+  --tile-act-hover: 0 0 0 1.5px #ea5566, 0 12px 24px -10px rgba(234, 85, 102, .55);
+
+  /* ---- Motion */
+  --dur-fast: 120ms;  --dur-base: 160ms;  --dur-slow: 200ms;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* Wall (TV, 3-4 m): one switch scales type and spacing. Component CSS uses the tokens, so nothing else changes. */
+.wall {
+  --fs-1: calc(12px * var(--wall-scale)); --lh-1: calc(16px * var(--wall-scale));
+  --fs-2: calc(13px * var(--wall-scale)); --lh-2: calc(18px * var(--wall-scale));
+  --fs-3: calc(15px * var(--wall-scale)); --lh-3: calc(22px * var(--wall-scale));
+  --fs-4: calc(18px * var(--wall-scale)); --lh-4: calc(26px * var(--wall-scale));
+  --fs-5: calc(24px * var(--wall-scale)); --lh-5: calc(30px * var(--wall-scale));
+  --fs-sent: calc(30px * var(--wall-scale)); --lh-sent: calc(38px * var(--wall-scale));
+  --fs-kpi: calc(38px * var(--wall-scale)); --lh-kpi: calc(46px * var(--wall-scale));
+  --fs-6: calc(44px * var(--wall-scale)); --lh-6: calc(50px * var(--wall-scale));
+  --space-3: 18px; --space-4: 24px; --space-5: 36px;
+}
+

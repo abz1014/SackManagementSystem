@@ -1,0 +1,18 @@
+/* Dark Style C for the TV wall. Verbatim from design/redesign-2026-10/mockups/Wall.dc.html
+   (approved 13 Oct 2026). Apply with class "wall dark" on the wall root. */
+.wall.dark{
+  color-scheme:dark;
+  --bg:#0b0d12; --surface:#12151c; --surface-sunk:#1a1f2a;
+  --line:rgba(255,255,255,.08); --line-strong:#5b6578;
+  --ink-1:#f2f4f8; --ink-2:#b7bfcc; --ink-3:#8b94a3;
+  --accent:#6f93ff; --accent-tint:rgba(111,147,255,.16); --on-accent:#0b0d12; --focus-ring:#8fa9ff;
+  --ok-fg:#5ed596; --ok-tint:#10241b; --ok-edge:#2f8f66;
+  --watch-fg:#f4bd50; --watch-tint:#271f0f; --watch-edge:#b8872b;
+  --act-fg:#ff8178; --act-tint:#2a171a; --act-edge:#d9524a;
+  --nodata-fg:#8b94a1; --nodata-tint:#1a1f2a; --nodata-edge:#4a5363;
+  --cat-1:#6f93ff; --cat-2:#ff7fae; --cat-3:#a58cf3; --cat-4:#4fc3d6; --cat-5:#e0a447;
+  --card-bg:linear-gradient(160deg,#12151c,#151924);
+  --card-shadow:0 0 0 1px rgba(255,255,255,.07),0 18px 40px -18px rgba(0,0,0,.7);
+  --elev-1:var(--card-shadow);
+  background:var(--bg);color:var(--ink-2);font-family:var(--font-sans);
+}

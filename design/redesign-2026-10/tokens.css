@@ -3,8 +3,10 @@
    STYLE C, "Soft premium" (owner decision 13 Oct 2026; replaces the first
    dark-sidebar, 6px-radius draft). Single source for colour, type, space,
    layout, elevation, motion.
+   13 Oct 2026 update: owner approved Manrope (self-host file pending; web-next falls back to Instrument Sans)
+   and a dark Style C for the TV wall (block appended at the end of this file). Implemented copy: sms/web-next/src/styles/.
    Rules: components read ONLY these tokens, never raw hex. Light work area,
-   white floating sidebar card. No dark theme in v1 (DESIGN-SYSTEM.md section 14).
+   white floating sidebar card. Dark only on the wall (.wall.dark, appended below).
    Contrast figures for every pair are in DESIGN-SYSTEM.md section 3.
    Font: Manrope. The plant PC has no internet, so production must self-host a
    Manrope variable woff2 (OFL, a font file, not an npm dependency) with an
@@ -243,4 +245,23 @@ a { color: var(--accent); } a:hover { color: var(--accent-hover); }
 @media (forced-colors: active) {
   .pill, .tile, .kpi, .card { border: 1px solid CanvasText; box-shadow: none; }
   .sidebar a[aria-current="page"] { border-left: 3px solid Highlight; }
+}
+
+
+/* ==== Wall dark variant (approved 13 Oct 2026; from mockups/Wall.dc.html). Use class "wall dark". ==== */
+.wall.dark{
+  color-scheme:dark;
+  --bg:#0b0d12; --surface:#12151c; --surface-sunk:#1a1f2a;
+  --line:rgba(255,255,255,.08); --line-strong:#5b6578;
+  --ink-1:#f2f4f8; --ink-2:#b7bfcc; --ink-3:#8b94a3;
+  --accent:#6f93ff; --accent-tint:rgba(111,147,255,.16); --on-accent:#0b0d12; --focus-ring:#8fa9ff;
+  --ok-fg:#5ed596; --ok-tint:#10241b; --ok-edge:#2f8f66;
+  --watch-fg:#f4bd50; --watch-tint:#271f0f; --watch-edge:#b8872b;
+  --act-fg:#ff8178; --act-tint:#2a171a; --act-edge:#d9524a;
+  --nodata-fg:#8b94a1; --nodata-tint:#1a1f2a; --nodata-edge:#4a5363;
+  --cat-1:#6f93ff; --cat-2:#ff7fae; --cat-3:#a58cf3; --cat-4:#4fc3d6; --cat-5:#e0a447;
+  --card-bg:linear-gradient(160deg,#12151c,#151924);
+  --card-shadow:0 0 0 1px rgba(255,255,255,.07),0 18px 40px -18px rgba(0,0,0,.7);
+  --elev-1:var(--card-shadow);
+  background:var(--bg);color:var(--ink-2);font-family:var(--font-sans);
 }
