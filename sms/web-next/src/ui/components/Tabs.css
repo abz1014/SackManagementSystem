@@ -18,3 +18,4 @@
 .ui-tabs__tab:disabled { opacity: .5; cursor: default; }
 @media (pointer: coarse) { .ui-tabs__tab { min-height: var(--tap-min); } }
 @media (prefers-reduced-motion: reduce) { .ui-tabs__tab { transition: none; } }
+@media print { .ui-tabs { display: none !important; } } /* navigation, not content: a printed page never carries the tab strip */
