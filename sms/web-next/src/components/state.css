@@ -7,7 +7,7 @@
 .pill-nodata { background: var(--nodata-tint); color: var(--nodata-fg); }
 .pill-glyph { font-size: var(--fs-1); line-height: 1; }
 
-.kpi { position: relative; display: grid; gap: var(--space-2); align-content: start; min-width: 200px; min-height: 96px; padding: var(--kpi-pad-y) var(--kpi-pad-x); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); color: var(--ink-1); }
+.kpi { position: relative; display: grid; gap: var(--space-2); align-content: start; min-width: 0; min-height: 96px; padding: var(--kpi-pad-y) var(--kpi-pad-x); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); color: var(--ink-1); }
 .kpi-ok { background: var(--ok-tint); box-shadow: 0 0 0 1px var(--ok-edge); }
 .kpi-watch { background: var(--watch-tint); box-shadow: 0 0 0 1px var(--watch-edge); }
 .kpi-act { background: var(--act-tint); box-shadow: 0 0 0 1px var(--act-edge); }

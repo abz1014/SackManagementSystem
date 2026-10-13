@@ -62,6 +62,10 @@
   .sh-app, .sh-app[data-collapsed] { grid-template-columns: minmax(0, 1fr); padding-bottom: calc(var(--tabbar-h) + var(--shell-pad)); }
   .sh-side { display: none; }
   .sh-user-name, .sh-user-role { display: none; }
+  .sh-top { flex-wrap: wrap; row-gap: var(--space-1); padding-block: var(--space-2); }
+  .sh-top-title { flex: 1 1 100%; }
+  .sh-top-right { flex: 1 1 100%; justify-content: space-between; gap: var(--space-2); }
+  .sh-top-right .pp-chip { flex: 0 1 auto; min-width: 0; }
   .sh-tabbar { position: fixed; left: var(--shell-pad); right: var(--shell-pad); bottom: var(--shell-pad); z-index: 32; display: grid; grid-template-columns: repeat(5, 1fr); height: var(--tabbar-h); background: var(--surface); border-radius: var(--radius-side); box-shadow: var(--elev-2); }
   .sh-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: var(--tap-min); border: 0; border-radius: var(--radius-tile); background: transparent; color: var(--ink-3); font: var(--fw-medium) var(--fs-1)/var(--lh-1) var(--font-sans); text-decoration: none; cursor: pointer; }
   .sh-tab[aria-current="page"] { color: var(--accent); font-weight: var(--fw-bold); background: var(--side-active-bg); }

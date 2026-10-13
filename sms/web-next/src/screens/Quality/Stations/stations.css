@@ -15,7 +15,9 @@
 .qs-name b { color: var(--accent); font-weight: var(--fw-semibold); }
 .qs-table td b { color: var(--ink-1); font-weight: var(--fw-semibold); }
 .qs-table td.qs-name b { color: var(--accent); }
-.qs-table td { height: 56px; }
+.qs-table td { height: 56px; padding-inline: var(--space-3); }
+.qs-table th { padding-inline: var(--space-3); white-space: normal; vertical-align: bottom; line-height: var(--lh-1); }
+.qs-table th.qs-name-col { min-width: 0; }
 .qs-sel td { background: var(--accent-tint); }
 .qs-group th { height: auto; padding: var(--space-2) var(--space-4); background: none; color: var(--ink-2); font-size: var(--fs-2); font-weight: var(--fw-semibold); white-space: normal; vertical-align: bottom; }
 .qs-pat { background: var(--surface-sunk); }
@@ -24,7 +26,7 @@
 .qs-pat--r { box-shadow: inset -1px 0 0 var(--line-strong); }
 .qs-pat--head { box-shadow: inset 1px 0 0 var(--line-strong), inset -1px 0 0 var(--line-strong), inset 0 1px 0 var(--line-strong); }
 .qs-pat--b { border-bottom: 1px solid var(--line-strong); }
-.qs-table td.qs-pat--result { white-space: normal; min-width: 220px; max-width: 320px; }
+.qs-table td.qs-pat--result { white-space: normal; min-width: 150px; max-width: 260px; }
 .qs-result { color: var(--ink-1); }
 .qs-table tr:hover td.qs-pat { background: var(--surface-sunk); }
 /* phone cards */
@@ -33,4 +35,4 @@
 .qs-pat-card { margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--radius-ctl); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .qs-pat-card__head { margin: 0; color: var(--ink-2); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .qs-dt-note { margin: 0; }
-@media (max-width: 767px) { .qs-head { align-items: flex-start; } }
+@media (max-width: 767px) { .qs-page { max-width: 100%; } .qs-head { align-items: flex-start; } }

@@ -1,12 +1,13 @@
 /* Quality > Weight. Tokens only; chart parts come from charts/chart.css. */
-.qw { display: grid; gap: var(--space-5); padding: 0 var(--page-pad) var(--space-6); max-width: var(--page-max); margin: 0 auto; }
+.qw { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-5); padding: var(--space-4) 0 var(--space-6); max-width: var(--page-max); margin: 0 auto; }
 .qw-sentence { margin: 0; max-width: 56ch; font-size: var(--fs-5); line-height: var(--lh-5); font-weight: var(--fw-bold); color: var(--ink-1); letter-spacing: -0.01em; text-wrap: balance; }
 .qw-note { margin: 0; max-width: 80ch; font-size: var(--fs-2); line-height: var(--lh-2); color: var(--ink-3); }
 .qw-muted { color: var(--ink-3); }
 .qw-lead { margin: 0 0 var(--space-3); font-size: var(--fs-3); line-height: var(--lh-3); color: var(--ink-1); }
 .qw-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
 .qw-bar .wr-field { min-width: 180px; }
-.qw-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-4); }
+.qw-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: var(--space-4); }
+.qw-kpis > * { min-width: 0; }
 .qw-hop { margin: 0; font-size: var(--fs-3); color: var(--ink-1); }
 .qw-bar-fill, .ck-bar.qw-bar { fill: var(--cat-1); }
 .qw-advisory .ck-title { margin-bottom: var(--space-3); }

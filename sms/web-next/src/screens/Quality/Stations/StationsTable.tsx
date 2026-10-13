@@ -8,7 +8,7 @@
  * It looks like ui/DataTable (same classes, same keyboard and phone behaviour) but has the
  * grouped header DataTable cannot draw.
  */
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { W } from '../../../bridge/words';
 import { fmt } from '../../../bridge/lib';
 import { C, FRAGMENTS } from '../../../copy';
@@ -98,6 +98,21 @@ function FailedWeight({ r, failed }: { r: StationRowModel; failed: boolean }): R
 
 export function StationsTable(p: StationsTableProps) {
   const phone = useMediaQuery('(max-width: 767px)');
+  const wrap = useRef<HTMLDivElement>(null);
+  const [cue, setCue] = useState(false);
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el || phone) return;
+    const check = () => setCue(el.scrollWidth > el.clientWidth + 1 && el.scrollLeft + el.clientWidth < el.scrollWidth - 8);
+    check();
+    el.addEventListener('scroll', check, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(check) : null;
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', check);
+      ro?.disconnect();
+    };
+  }, [phone, p.rows.length]);
   const key = (e: KeyboardEvent, n: number) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -118,7 +133,7 @@ export function StationsTable(p: StationsTableProps) {
   return (
     <div className="ui-dt">
       <div className="ui-dt__frame">
-        <div className="ui-dt__wrap qs-wrap" tabIndex={0} role="region" aria-label={S.tableAria}>
+        <div ref={wrap} className="ui-dt__wrap qs-wrap" tabIndex={0} role="region" aria-label={S.tableAria}>
           <table className="ui-dt__table qs-table">
             <caption className="ui-sr">{S.tableAria}</caption>
             <thead>
@@ -190,7 +205,9 @@ export function StationsTable(p: StationsTableProps) {
             </tbody>
           </table>
         </div>
+        {cue && <div className="ui-dt__fade" aria-hidden="true" />}
       </div>
+      {cue && <div className="ui-dt__cue">{C.ui.scrollForMore}</div>}
     </div>
   );
 }

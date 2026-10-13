@@ -11,8 +11,9 @@
 .today .band-skel { display: block; height: var(--lh-sent); width: min(32ch, 100%); border-radius: var(--radius-ctl); background: var(--surface-sunk); opacity: 0.8; margin-bottom: var(--space-3); }
 
 /* ---- KPI row (row 2) ---- */
-.today-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--gutter); }
-@media (min-width: 1280px) { .today-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.today-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: var(--gutter); }
+.today-kpis > * { min-width: 0; }
+@media (min-width: 1280px) { .today-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-4); } }
 .today-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: calc(-1 * var(--space-2)) 0 0; color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); }
 .today-note { margin: 0; color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); max-width: 72ch; }
 
