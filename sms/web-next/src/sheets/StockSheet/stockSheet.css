@@ -1,0 +1,6 @@
+/* Stock day sheet. Tokens only (uniformity guard). */
+.sk { display: flex; flex-direction: column; gap: var(--space-3); }
+.sk-day { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+.sk-weighed { margin: 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.sk-sub { display: block; color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
+.sk-note { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); max-width: 64ch; }

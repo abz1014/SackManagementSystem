@@ -1,0 +1,41 @@
+/* Quality > Register. Tokens only (uniformity guard). Print is keyed to the stable .rg class (decision E-6). */
+.rg { display: flex; flex-direction: column; gap: var(--space-4); }
+.rg-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.rg-h1 { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-5)/var(--lh-5) var(--font-sans); letter-spacing: -0.02em; }
+.rg-h2 { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+.rg-sub { margin: var(--space-1) 0 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.rg-note { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rg-note--wide { max-width: 90ch; }
+.rg-note-cell { color: var(--ink-3); }
+.rg-line { margin: 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.rg-ok { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rg-error { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rg-fail { font-weight: var(--fw-bold); color: var(--ink-1); }
+
+.rg-bar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-4); }
+.rg-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.rg-filters .wr-field { min-width: 12rem; }
+.rg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.rg-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.rg-states { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.rg-states__label { color: var(--ink-3); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); margin-right: var(--space-1); }
+.rg-state { min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink-2); font: var(--fw-medium) var(--fs-2)/var(--lh-2) var(--font-sans); cursor: pointer; }
+.rg-state[aria-pressed='true'] { background: var(--accent-tint); color: var(--accent); border-color: var(--accent); font-weight: var(--fw-semibold); }
+.rg-state:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (pointer: coarse) { .rg-state { min-height: var(--tap-min); } }
+
+.rg-stock { display: flex; flex-direction: column; gap: var(--space-4); }
+.rg-stock__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.rg-stock__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+
+.rg-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.rg-form__actions { display: flex; align-items: center; gap: var(--space-3); }
+
+/* the print masthead is for paper only */
+.rg-print { display: none; }
+@media print {
+  .rg-print { display: block; }
+  .rg-noprint, .rg .ui-tabs, .rg .ui-dt__foot .ui-btn { display: none !important; }
+  .rg .ui-dt__wrap { overflow: visible; }
+}
