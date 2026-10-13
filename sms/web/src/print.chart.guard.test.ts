@@ -21,9 +21,12 @@ import { describe, expect, it } from 'vitest';
 const WEB_SRC = fileURLToPath(new URL('.', import.meta.url));
 const APP_CSS = `${WEB_SRC}app.css`;
 const WEB_NEXT_STYLES = fileURLToPath(new URL('../../web-next/src/styles', import.meta.url));
-const WEB_NEXT_CSS = readdirSync(WEB_NEXT_STYLES)
-  .filter((f) => f.endsWith('.css'))
-  .map((f) => `${WEB_NEXT_STYLES}/${f}`);
+const WEB_NEXT_REPORTS = fileURLToPath(new URL('../../web-next/src/screens/Reports', import.meta.url));
+const WEB_NEXT_CSS = [WEB_NEXT_STYLES, WEB_NEXT_REPORTS].flatMap((dir) =>
+  readdirSync(dir)
+    .filter((f) => f.endsWith('.css'))
+    .map((f) => `${dir}/${f}`),
+);
 
 const CHART_PRINT_CLASSES = ['.chart-tip', '.chart-resize'];
 
@@ -64,16 +67,14 @@ describe('chart overlay classes are hidden under @media print (web/src/app.css)'
   checkChartPrint('app.css', printBlocks);
 });
 
-describe('chart overlay classes are hidden under @media print (web-next/src/styles/*.css)', () => {
+describe('chart overlay classes are hidden under @media print (web-next/src/styles/*.css, screens/Reports/*.css)', () => {
   it('canary: web-next stylesheets were found', () => {
     expect(WEB_NEXT_CSS.length).toBeGreaterThan(0);
   });
 
   const printBlocks = WEB_NEXT_CSS.flatMap((f) => printBlocksOf(readFileSync(f, 'utf8')));
-  if (printBlocks.length === 0) {
-    // web-next has no print CSS yet; the gap stays visible instead of passing vacuously.
-    it.todo('web-next print CSS: hide .chart-tip / .chart-resize under @media print (owner: E-reports print, decision E-6: stable class hook main.report-print)');
-  } else {
-    checkChartPrint('web-next/src/styles', printBlocks);
-  }
+  it('canary: web-next has at least one @media print block (the Reports print stylesheet)', () => {
+    expect(printBlocks.length, 'no @media print block in web-next at all').toBeGreaterThan(0);
+  });
+  checkChartPrint('web-next', printBlocks);
 });

@@ -92,28 +92,33 @@ describe('the print-landscape CSS hook and the Report aria-label it keys off sta
 });
 
 /**
- * web-next (the redesign) must carry the same landscape rule, keyed to the
- * stable class hook `main.report-print` (decision E-6) rather than to a
- * translatable aria-label. It has no print CSS yet, so the gap is a visible
- * todo owned by the E-reports print task, not a silent pass.
+ * web-next (the redesign) carries the same landscape rule, keyed to the stable class hook `main.report-print`
+ * (decision E-6) rather than to a translatable aria-label. The Reports screen (task E11) puts that class on the
+ * shell's <main> while it is mounted, and its print stylesheet (screens/Reports/print.css) binds the named page to it.
  */
 const WEB_NEXT_STYLES = fileURLToPath(new URL('../../web-next/src/styles', import.meta.url));
-const WEB_NEXT_CSS_SRC = readdirSync(WEB_NEXT_STYLES)
-  .filter((f) => f.endsWith('.css'))
-  .map((f) => readFileSync(`${WEB_NEXT_STYLES}/${f}`, 'utf8'))
+const WEB_NEXT_REPORTS = fileURLToPath(new URL('../../web-next/src/screens/Reports', import.meta.url));
+const WEB_NEXT_CSS_SRC = [WEB_NEXT_STYLES, WEB_NEXT_REPORTS]
+  .flatMap((dir) => readdirSync(dir).filter((f) => f.endsWith('.css')).map((f) => readFileSync(`${dir}/${f}`, 'utf8')))
   .join('\n');
+const WEB_NEXT_REPORTS_SCREEN = readFileSync(`${WEB_NEXT_REPORTS}/ReportsScreen.tsx`, 'utf8');
 
-describe('web-next print-landscape hook (web-next/src/styles/*.css)', () => {
+describe('web-next print-landscape hook (web-next/src/styles/*.css, screens/Reports/*.css)', () => {
   it('canary: web-next stylesheets were read', () => {
     expect(WEB_NEXT_CSS_SRC.length).toBeGreaterThan(0);
   });
 
-  if (!NAMED_PAGE_RE.test(WEB_NEXT_CSS_SRC)) {
-    it.todo('web-next print CSS: @page report-landscape + main.report-print { page: report-landscape } (owner: E-reports print, decision E-6: stable class hook main.report-print)');
-  } else {
-    it('the named page is bound to the stable class hook, not to an aria-label', () => {
-      expect(/main\.report-print\s*\{[^}]*page:\s*report-landscape/.test(WEB_NEXT_CSS_SRC)).toBe(true);
-      expect(/aria-label/.test(WEB_NEXT_CSS_SRC.match(/[^{}]*\{[^}]*page:\s*report-landscape[^}]*\}/)?.[0] ?? '')).toBe(false);
-    });
-  }
+  it('the named report-landscape page exists (A4 landscape)', () => {
+    expect(NAMED_PAGE_RE.test(WEB_NEXT_CSS_SRC), 'no @page report-landscape { size: A4 landscape } in web-next').toBe(true);
+  });
+
+  it('the named page is bound to the stable class hook, not to an aria-label', () => {
+    expect(/main\.report-print\s*\{[^}]*page:\s*report-landscape/.test(WEB_NEXT_CSS_SRC), 'main.report-print { page: report-landscape } is missing').toBe(true);
+    expect(/aria-label/.test(WEB_NEXT_CSS_SRC.match(/[^{}]*\{[^}]*page:\s*report-landscape[^}]*\}/)?.[0] ?? '')).toBe(false);
+  });
+
+  it('the Reports screen actually puts report-print on the page <main> (the CSS hook has something to key off)', () => {
+    expect(/classList\.add\('report-print'\)/.test(WEB_NEXT_REPORTS_SCREEN), 'ReportsScreen no longer adds the report-print class').toBe(true);
+    expect(/closest\('main'\)/.test(WEB_NEXT_REPORTS_SCREEN)).toBe(true);
+  });
 });

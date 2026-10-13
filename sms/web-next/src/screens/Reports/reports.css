@@ -1,0 +1,119 @@
+/* Reports (task E11). Tokens only (uniformity guard: no raw colours, no raw font sizes, no state tokens).
+   Part 1 is the screen: cards, builder, preview frame. Part 2 maps the existing report renderers' own class names
+   and variables (legacy-report.css, generated and scoped to .rp-doc) onto the Style C tokens. */
+
+/* ---------------------------------------------------------------- the screen */
+.rp-root { display: flex; flex-direction: column; gap: var(--gutter); width: 100%; max-width: var(--page-max); margin: 0 auto; min-width: 0; }
+.rp-root > * { min-width: 0; }
+
+.rp-title h1 { margin: 0; }
+.rp-title__sentence { margin: var(--space-1) 0 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); max-width: 70ch; }
+
+.rp-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gutter); align-items: start; }
+@media (min-width: 1100px) { .rp-grid { grid-template-columns: minmax(0, 1fr) 340px; } }
+
+.rp-cards { display: flex; flex-direction: column; gap: var(--gutter); }
+.rp-cards__sub { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gutter); }
+@media (min-width: 720px) { .rp-cards__sub { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.rp-card { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--card-pad); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); }
+.rp-card[data-selected] { box-shadow: 0 0 0 2px var(--accent), var(--elev-1); }
+.rp-card--feat { background: var(--accent-tint); }
+.rp-card__head { display: flex; align-items: center; gap: var(--space-3); }
+.rp-card__ico { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: var(--radius-ctl); background: var(--chip-1-bg); color: var(--chip-1-fg); }
+.rp-card__title { margin: 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+.rp-card__who { display: block; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-card__badge { margin-left: auto; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--surface); color: var(--accent); font: var(--fw-semibold) var(--fs-1)/var(--lh-1) var(--font-sans); }
+.rp-card__what { margin: 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); max-width: 60ch; }
+.rp-card__lockhint { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-top: auto; padding-top: var(--space-2); }
+
+.rp-items { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.rp-items li + li { border-top: 1px solid var(--line); }
+.rp-item {
+  display: grid; gap: 0 var(--space-3); grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; width: 100%;
+  padding: var(--space-2) var(--space-2); border: 0; border-radius: var(--radius-ctl); background: none; text-align: left; cursor: pointer;
+  color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans);
+}
+.rp-item:hover { background: var(--surface-sunk); }
+.rp-item[aria-pressed="true"] { background: var(--accent-tint); color: var(--accent); }
+.rp-item:disabled { cursor: default; color: var(--ink-3); background: none; }
+.rp-item:focus-visible, .rp-use:focus-visible, .rp-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.rp-item__hint { grid-column: 1; color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
+.rp-item__ifl { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
+
+.rp-fmts { display: flex; gap: var(--space-2); }
+.rp-fmts span { padding: 2px 10px; border-radius: var(--radius-pill); background: var(--surface-sunk); color: var(--ink-2); font: var(--fw-semibold) var(--fs-1)/var(--lh-1) var(--font-sans); }
+.rp-card--feat .rp-fmts span { background: var(--surface); }
+.rp-lock { color: var(--ink-3); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+
+.rp-use, .rp-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-h); padding: 0 var(--space-4);
+  border: 0; border-radius: var(--radius-ctl); background: var(--accent); color: var(--on-accent); box-shadow: var(--elev-accent);
+  font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); cursor: pointer; text-decoration: none;
+}
+.rp-use:hover, .rp-btn:hover { background: var(--accent-hover); color: var(--on-accent); }
+.rp-use--on, .rp-btn--quiet { background: var(--accent-tint); color: var(--accent); box-shadow: none; }
+.rp-use--on:hover, .rp-btn--quiet:hover { background: var(--surface-sunk); color: var(--accent-hover); }
+.rp-btn:disabled { background: var(--surface-sunk); color: var(--ink-3); box-shadow: none; cursor: default; }
+@media (pointer: coarse) { .rp-use, .rp-btn, .rp-item { min-height: var(--tap-min); } }
+
+/* builder */
+.rp-build { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--card-pad); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); }
+@media (min-width: 1100px) { .rp-build { position: sticky; top: calc(var(--topbar-h) + var(--shell-pad) * 2); } }
+.rp-build__h { margin: 0; }
+.rp-build__sel { margin: 0; color: var(--accent); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-build__row { display: flex; gap: var(--space-3); align-items: flex-end; flex-wrap: wrap; }
+.rp-build__row > * { flex: 1 1 8rem; min-width: 0; }
+.rp-build__problem { margin: 0; color: var(--ink-2); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-build__lock { margin: 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-1)/var(--lh-1) var(--font-sans); }
+.rp-field { display: flex; flex-direction: column; gap: var(--space-2); color: var(--ink-1); font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-field input { min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.rp-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding-top: var(--space-2); }
+.rp-exports { display: inline-flex; gap: var(--space-2); }
+
+/* preview frame */
+.rp-preview { display: flex; flex-direction: column; gap: var(--space-3); outline: none; }
+.rp-preview__hd { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+.rp-preview__hd h2 { margin: 0; }
+.rp-preview__cap { color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-paper { padding: var(--card-pad); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--elev-1); min-width: 0; overflow-x: clip; }
+.rp-doc__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-5); flex-wrap: wrap; margin-bottom: var(--space-4); }
+.rp-doc__title { margin: 0; color: var(--ink-1); font: var(--fw-bold) var(--fs-5)/var(--lh-5) var(--font-sans); }
+.rp-doc__period { margin: var(--space-1) 0 0; color: var(--ink-1); font: var(--fw-semibold) var(--fs-3)/var(--lh-3) var(--font-sans); max-width: 70ch; }
+.rp-doc__question { margin: var(--space-1) 0 0; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-note { margin: 0 0 var(--space-3); color: var(--ink-2); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+
+/* ------------------------------------------- the renderers, in Style C tokens */
+.rp-doc {
+  --ink: var(--ink-1); --graphite: var(--ink-2); --muted: var(--ink-3); --grid: var(--line-strong);
+  --paper: var(--surface); --paper-2: var(--surface-sunk); --paper-3: var(--surface-sunk);
+  --rule: var(--line); --rule-2: var(--line-strong); --track: var(--surface-sunk);
+  --acc: var(--accent); --acc-fill: var(--accent); --acc-pale: var(--accent-tint);
+  --ok: var(--ink-2); --warn: var(--ink-2);
+  --font: var(--font-sans);
+  --ui-scale: 1;
+  --fs-tick: var(--fs-1); --fs-small: var(--fs-2); --fs-body: var(--fs-3); --fs-qual: var(--fs-4);
+  --fs-head: var(--fs-5); --fs-display: var(--fs-kpi); --fs-fig: var(--fs-kpi);
+  --gap-block: var(--space-5); --radius: var(--radius-ctl); --t: var(--dur-fast) var(--ease);
+  font-family: var(--font-sans);
+  color: var(--ink-2);
+}
+/* base.css speaks for .page, .band and .btn on the app's own pages; inside a report they mean the old things. */
+.rp-doc .page { display: block; max-width: none; margin: 0; padding: var(--space-4) 0 0; gap: 0; }
+.rp-doc .band { padding: 0; background: none; border-radius: 0; box-shadow: none; border-top: 1px solid var(--line); margin-top: var(--space-4); }
+.rp-doc .band > .page { padding: var(--space-4) 0 0; }
+.rp-doc .band h1 { color: inherit; }
+.rp-doc .block { display: block; padding: var(--space-4) 0 0; border-top: 0; }
+.rp-doc .block.first { padding-top: 0; }
+.rp-doc .block > .h2 { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
+.rp-doc .h2 { color: var(--ink-1); font: var(--fw-semibold) var(--fs-4)/var(--lh-4) var(--font-sans); }
+.rp-doc .h2 .note, .rp-doc .block > .note { display: block; position: static; margin: 0 0 var(--space-2); text-align: left; color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-doc .block > * { grid-column: auto; }
+.rp-doc .fig-val { color: var(--ink-1); font-weight: var(--fw-bold); }
+.rp-doc th { color: var(--ink-3); background: var(--surface-sunk); }
+.rp-doc .ifl-table th { background: var(--seq-2); color: var(--ink-1); }
+.rp-doc .btn { height: auto; min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); box-shadow: none; font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans); }
+.rp-doc .btn:hover { background: var(--surface-sunk); }
+.rp-doc .verdict { border-radius: var(--radius-ctl); }
+.rp-doc .ph-mast, .rp-doc .print-head { font-family: var(--font-sans); }

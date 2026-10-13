@@ -1,0 +1,67 @@
+/* Reports print (task E11, decision E-6). Print is keyed to the stable class `main.report-print`, which the
+   Reports screen puts on the shell's <main> while it is mounted. It is never keyed to an aria-label or any other
+   text a copy edit could change. Guards: web/src/print.landscape.guard.test.ts and print.chart.guard.test.ts. */
+
+@page report-landscape {
+  size: A4 landscape;
+  margin: 13mm 14mm 16mm;
+  /* Running footer on every sheet: the confidentiality line and "Page X of Y" (Chrome and Edge 131+, so browser
+     Print and the server's PDF export both carry it). */
+  @bottom-left {
+    content: "IFL internal · Sack Management System · Page " counter(page) " of " counter(pages);
+    font-family: "Manrope", "Instrument Sans", "Segoe UI", Arial, sans-serif; font-size: x-small; color: dimgray;
+  }
+}
+main.report-print { page: report-landscape; }
+
+/* IFL's portrait reports mark their own root with data-report-orientation="portrait". Same specificity as the
+   landscape rule and later in source, so it wins when both hooks are present. */
+@page report-portrait {
+  size: A4 portrait;
+  margin: 18mm 18mm 20mm;
+  @bottom-left {
+    content: "IFL internal · Sack Management System · Page " counter(page) " of " counter(pages);
+    font-family: "Manrope", "Instrument Sans", "Segoe UI", Arial, sans-serif; font-size: x-small; color: dimgray;
+  }
+}
+main.report-print:has([data-report-orientation="portrait"]) { page: report-portrait; }
+
+@media print {
+  /* The page is the report: no shell, no builder, no cards. */
+  .sh-skip, .sh-side, .sh-top, .sh-tabbar, .app-banner, .simulator-banner { display: none !important; }
+  .sh-app:has(main.report-print) { display: block; padding: 0; min-height: 0; }
+  .sh-app:has(main.report-print) .sh-col { display: block; }
+  main.report-print { padding: 0; }
+  html, body { background: var(--surface); }
+  body { font-size: var(--pt-9-5); line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .rp-root .no-print, .rp-title, .rp-grid { display: none !important; }
+  .rp-preview { margin: 0; padding: 0; }
+  .rp-paper { box-shadow: none; border-radius: 0; padding: 0; background: none; max-width: none; }
+
+  /* Print gets no tooltip and no drag handle: fixed width, default height (owner decision, chart overhaul). */
+  .chart-tip, .chart-resize { display: none !important; }
+
+  /* The report's own print type scale (the renderers read these tokens). */
+  .rp-doc {
+    --fs-tick: 7.5pt; --fs-small: 8.5pt; --fs-body: 9.5pt; --fs-qual: 11pt;
+    --fs-head: 15pt; --fs-display: 22pt;
+  }
+
+  /* The print type steps the ported report rules ask for (the uniformity guard allows sizes only through variables). */
+  .rp-doc {
+    --pt-10: 10pt;
+    --pt-11: 11pt;
+    --pt-12: 12pt;
+    --pt-15: 15pt;
+    --pt-17: 17pt;
+    --pt-18: 18pt;
+    --pt-20: 20pt;
+    --pt-7: 7pt;
+    --pt-7-5: 7.5pt;
+    --pt-8: 8pt;
+    --pt-8-5: 8.5pt;
+    --pt-9: 9pt;
+    --pt-9-5: 9.5pt;
+  }
+}
