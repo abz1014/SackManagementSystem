@@ -2323,6 +2323,20 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   // JSON 404 for unmatched API routes
   app.use('/api', (_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));
 
+  // Redesign build, served beside the current UI at /next (independent of
+  // WEB_DIST). resolve() for the same reason as below: sendFile refuses a
+  // relative path. Registered BEFORE the old SPA's `*` fallback so /next/...
+  // client routes get the redesign's index.html, not the old one.
+  const nextDist = resolve(process.env.WEB_NEXT_DIST ?? join(process.cwd(), 'web-next', 'dist'));
+  if (existsSync(join(nextDist, 'index.html'))) {
+    // Express routing is non-strict, so '/next' also matches '/next/': redirect
+    // only the slash-less form or '/next/' would redirect to itself forever.
+    app.get('/next', (req: Request, res: Response, nxt: NextFunction) =>
+      req.path === '/next' ? res.redirect(301, '/next/') : nxt());
+    app.use('/next', express.static(nextDist));
+    app.get('/next/*', (_req: Request, res: Response) => res.sendFile(join(nextDist, 'index.html')));
+  }
+
   // production single-service: serve the built React app if WEB_DIST is set/exists
   //
   // resolve(), not the raw value: res.sendFile REFUSES a relative path

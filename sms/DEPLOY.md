@@ -36,6 +36,7 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
    - `MIGRATE_DB_USER`/`MIGRATE_DB_PASSWORD` → NOT set in the persistent `.env` a service reads; set them only in the shell that runs `npm run db:migrate` (step 6), then leave them unset.
    - No `SESSION_SECRET` to set — sessions are server-side random UUIDs, not signed cookies (see `.env.example`).
    - `WEB_DIST=./web/dist`.
+   - `WEB_NEXT_DIST=./web-next/dist` (optional) → the redesign build, served at `/next/` beside the current UI; omitted or missing, `/next` is simply not served.
    - **`COOKIE_SECURE=false`** — required for a plain-HTTP intranet. See below.
    - `LINE_ID` (default `1`) → the line this worker and this API serve; every row is stamped with it. Rows carry no line identity of their own — `LINE_ID` is the ground truth, so it must be set the same on the sync worker and the API and never changed after data has been ingested. `LINE_NAME` is only the **seed** for that line's display name on a fresh database; afterwards the plant, unit and line names live in `sms.line` and are edited in **Setup › Line** (roadmap Phase 1, migration 028).
    - **`LIVE_ALLOW_AS_OF=false`** (the default) — keep it off in production. See the wall display section.
