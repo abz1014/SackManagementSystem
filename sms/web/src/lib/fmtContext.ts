@@ -25,6 +25,12 @@ export interface DateFmt {
   plantInstant: (iso: string) => string;
   /** An instant this system wrote, in the viewer's zone. Old: "14/09/2026, 10:34:12". */
   appInstant: (iso: string) => string;
+  /**
+   * The masthead's own date stamps (PrintHead). Old and IFL report mastheads: "15-09-2026" and "15-09-2026 14:03" (IFL house
+   * style, owner decisions 30 Sep and 13 Oct 2026, RESERVED). A non-IFL print head (the Register) swaps these for the app's one format.
+   */
+  dayStamp: (day: string) => string;
+  plantStamp: (iso: string) => string;
 }
 
 export const OLD_DATE_FMT: DateFmt = {
@@ -37,6 +43,16 @@ export const OLD_DATE_FMT: DateFmt = {
   plantInstant: (iso) =>
     new Date(iso).toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
   appInstant: fmtAppInstant,
+  // Exact copies of screens/report/PrintHead.tsx fmtDmy and fmtPlantDmyTime (not imported: PrintHead imports this file).
+  dayStamp: (d) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : d;
+  },
+  plantStamp: (iso) => {
+    const t = new Date(iso);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(t.getUTCDate())}-${p(t.getUTCMonth() + 1)}-${t.getUTCFullYear()} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+  },
 };
 
 export const DateFmtContext = createContext<DateFmt>(OLD_DATE_FMT);

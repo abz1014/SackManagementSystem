@@ -43,6 +43,7 @@ Ban bare "rejected" as a label. Two named facts, each **always with its denomina
 - A plant time carries no "UTC" marker. Label: "Plant time".
 - **Sheets and exports show both**: calendar date, then the production day (06:00 to 06:00): "1 Sep 2026, 02:15 - production day 31 Aug 2026". A production day is shown only when it differs from the calendar date.
 - Period sentences: "1 Sep 2026 to 3 Sep 2026", "Morning shift, 1 Sep 2026, 06:00 to 14:00".
+- **RESERVED (owner decision 13 Oct 2026, confirming owner 30 Sep 2026): IFL report tables and mastheads keep IFL house style, "01-09-2026" and "01-09-2026 21:33"** (`fmtDayDmy` / `fmtAppInstantDmy` in the IFL report renderers; `dayStamp` / `plantStamp` in `bridge/dateFmt.tsx`). This is the one exception to the form above. Everything that is not an IFL report (the Register print header, Setup, chart labels, every screen) prints "1 Sep 2026", 24-hour. Pinned by `web-next/src/dates.reserved.test.tsx`.
 
 ### 1.5 State words
 

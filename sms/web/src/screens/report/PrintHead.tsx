@@ -77,8 +77,8 @@ export function fmtPlantDmyTime(iso: string): string {
   return `${p(t.getUTCDate())}-${p(t.getUTCMonth() + 1)}-${t.getUTCFullYear()} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
 }
 
-function periodText(from: string, to: string): string {
-  return from === to ? fmtDmy(from) : `${fmtDmy(from)} to ${fmtDmy(to)}`;
+function periodText(from: string, to: string, day: (d: string) => string = fmtDmy): string {
+  return from === to ? day(from) : `${day(from)} to ${day(to)}`;
 }
 
 /**
@@ -88,8 +88,9 @@ function periodText(from: string, to: string): string {
  * `periodLabel` is the plain `from to to` when there is no shift range (header.ts), which prints nothing extra; the same rule as csv.ts's
  * `periodText`, which the CSV's period row and the workbook's banner use.
  */
-export function mastheadPeriod(h: Pick<ReportHeader, 'period' | 'periodLabel'>): string {
-  const plain = periodText(h.period.from, h.period.to);
+export function mastheadPeriod(h: Pick<ReportHeader, 'period' | 'periodLabel'>, day: (d: string) => string = fmtDmy): string {
+  if (!h.period) return ''; // a header answer with no period: say nothing rather than crash or invent one
+  const plain = periodText(h.period.from, h.period.to, day);
   const label = h.periodLabel?.trim();
   return label && label !== `${h.period.from} to ${h.period.to}` ? `${plain} (${label})` : plain;
 }
@@ -148,11 +149,11 @@ export function PrintHead({ header, title, inlineNotes = false }: { header: Repo
       <Masthead title={title ?? header.title} place={mastheadPlace(header)} />
       <dl className="ph-meta">
         <div><dt>{W.printDoc.line}</dt><dd>{header.lineName}</dd></div>
-        <div><dt>{W.printDoc.period}</dt><dd>{mastheadPeriod(header)}</dd></div>
+        {mastheadPeriod(header, df.dayStamp) && <div><dt>{W.printDoc.period}</dt><dd>{mastheadPeriod(header, df.dayStamp)}</dd></div>}
         {shift && <div><dt>{W.printDoc.shift}</dt><dd>{shift}</dd></div>}
         {other && <div><dt>{W.printDoc.filters}</dt><dd>{other}</dd></div>}
         <div><dt>{W.printDoc.generatedBy}</dt><dd>{header.generatedBy}</dd></div>
-        <div><dt>{W.printDoc.generatedAt}</dt><dd>{fmtPlantDmyTime(header.generatedAtPlantUtc)}</dd></div>
+        <div><dt>{W.printDoc.generatedAt}</dt><dd>{df.plantStamp(header.generatedAtPlantUtc)}</dd></div>
       </dl>
       <div className="ph-foot">
         <span>{generatedLine(header, df.plantInstant)}</span>
