@@ -1,0 +1,146 @@
+/**
+ * Station state, decided on the server (redesign task D2a).
+ *
+ * One answer per active station for the period on screen: how many cones it
+ * weighed, what share of its inspected cones FAILED inspection, and whether
+ * that is ok / watch / act compared with the line's own rate.
+ *
+ * THE RATE IS THE REJECTS SCREEN'S RATE. `failedPct` and `lineFailedPct` come
+ * straight from `rejectRatesByStation` (weightStations.ts): rejects over
+ * cones plus the rejects that are not already a cone row, the one definition
+ * `rejectRateThreeWayAgreement.test.ts` pins against the Rejects headline and
+ * the reports. Nothing is re-derived here.
+ *
+ * THE RULE (strictly greater, no rounding before comparing):
+ *   - 0 cones in the period      -> 'nodata' (never 'ok': silence is not health)
+ *   - line rate is 0             -> every station with cones is 'ok'
+ *   - rate > 2.0 x line rate     -> 'act'
+ *   - rate > 1.5 x line rate     -> 'watch'
+ *   - otherwise                  -> 'ok'
+ * The 1.5 / 2.0 multiples are OUR assumption, not an IFL-confirmed limit;
+ * `thresholds.assumed` is true and the screen must say so.
+ *
+ * THE PERIOD ONLY. This is a plain count over the period on screen. It does
+ * NOT use `flagged` / `projection` / drift from the 14-day detector window
+ * (CLAUDE.md: the detectors ignore the period). `vsTargetG` and `product` are
+ * taken only from the period rows' `n` and `vsTargetG`.
+ *
+ * `tsTo` (replay instant) is accepted for the route's convenience but the
+ * underlying count services have no instant cap, so it is NOT applied here.
+ */
+import type { ConnectionPool } from 'mssql';
+import type { ShiftRange } from '../shiftRange.js';
+import { listStations } from './admin.js';
+import { getWeightStations, rejectRatesByStation } from './weightStations.js';
+
+export type StationState = 'ok' | 'watch' | 'act' | 'nodata';
+
+export const WATCH_MULTIPLE = 1.5;
+export const ACT_MULTIPLE = 2.0;
+
+export interface StationStatusRow {
+  station: number;
+  name: string | null;
+  cones: number;
+  /** Percent of inspected cones that failed inspection; null when no cones. */
+  failedPct: number | null;
+  state: StationState;
+  reasons: string[];
+  /** Mean cone weight minus the station's own target, grams; null when none can be stated. */
+  vsTargetG: number | null;
+  /** Label of the line's product the target belongs to, when known. */
+  product: string | null;
+}
+
+export interface StationStatusData {
+  from: string;
+  to: string;
+  lineFailedPct: number | null;
+  thresholds: { watch: number; act: number; assumed: true };
+  stations: StationStatusRow[];
+}
+
+export interface StationStatusOptions {
+  from: string;
+  to: string;
+  shift?: 'morning' | 'evening' | 'night' | null;
+  shiftRange?: ShiftRange;
+  /** Accepted, not applied: see file header. */
+  tsTo?: string | null;
+}
+
+const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
+
+/** Pure decision, exported for tests. `rate` and `lineRate` are percents. */
+export function decideState(
+  cones: number,
+  rate: number | null,
+  lineRate: number | null,
+): { state: StationState; reasons: string[] } {
+  if (cones <= 0 || rate == null) {
+    return { state: 'nodata', reasons: ['No cones weighed in this period'] };
+  }
+  if (lineRate == null || lineRate <= 0) return { state: 'ok', reasons: [] };
+  if (rate > ACT_MULTIPLE * lineRate) {
+    return { state: 'act', reasons: [`More than ${ACT_MULTIPLE} times the line rate (over ${round(ACT_MULTIPLE * lineRate, 1)} %)`] };
+  }
+  if (rate > WATCH_MULTIPLE * lineRate) {
+    return { state: 'watch', reasons: [`More than ${WATCH_MULTIPLE} times the line rate (over ${round(WATCH_MULTIPLE * lineRate, 1)} %)`] };
+  }
+  return { state: 'ok', reasons: [] };
+}
+
+export async function getStationStatus(
+  pool: ConnectionPool,
+  lineId: number,
+  opts: StationStatusOptions,
+): Promise<StationStatusData> {
+  const { from, to } = opts;
+  const [stationRows, rates] = await Promise.all([
+    listStations(pool, lineId),
+    rejectRatesByStation(pool, lineId, from, to, undefined, opts.shiftRange, opts.shift ?? null),
+  ]);
+
+  const denom = rates.totalCones + rates.totalUnmatchedRejects;
+  const lineRate = denom > 0 ? (100 * rates.totalRejects) / denom : null;
+
+  // Optional target context. Never let it break the state decision.
+  const targets = new Map<number, number | null>();
+  let product: string | null = null;
+  try {
+    const w = await getWeightStations(pool, lineId, from, to, undefined, {
+      from, to, shiftRange: opts.shiftRange, shift: opts.shift ?? null,
+    });
+    product = w.productLabel ?? null;
+    for (const s of w.stations) targets.set(s.station, s.n > 0 ? s.vsTargetG : null);
+  } catch {
+    /* target context unavailable: the state is unaffected */
+  }
+
+  const stations: StationStatusRow[] = stationRows
+    .filter((s) => s.isActive)
+    .map((s) => {
+      const cones = rates.cones.get(s.stationId) ?? 0;
+      const rate = cones > 0 ? (rates.rates.get(s.stationId) ?? null) : null;
+      const { state, reasons } = decideState(cones, rate, lineRate);
+      const vs = targets.get(s.stationId);
+      return {
+        station: s.stationId,
+        name: s.name,
+        cones,
+        failedPct: rate == null ? null : round(rate, 2),
+        state,
+        reasons,
+        vsTargetG: vs == null ? null : round(vs, 1),
+        product,
+      };
+    });
+
+  return {
+    from,
+    to,
+    lineFailedPct: lineRate == null ? null : round(lineRate, 2),
+    thresholds: { watch: WATCH_MULTIPLE, act: ACT_MULTIPLE, assumed: true },
+    stations,
+  };
+}

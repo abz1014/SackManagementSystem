@@ -898,6 +898,8 @@ export async function rejectRatesByStation(
   shift?: 'morning' | 'evening' | 'night' | null,
 ): Promise<{
   rates: Map<number, number>;
+  /** Cones weighed per station in the same window (the rate's own cone count; stations with no station id are absent). */
+  cones: Map<number, number>;
   totalCones: number;
   totalRejects: number;
   totalUnmatchedRejects: number;
@@ -987,8 +989,10 @@ export async function rejectRatesByStation(
   for (const n of unmatchedOf.values()) totalUnmatchedRejects += n;
 
   const out = new Map<number, number>();
+  const conesOut = new Map<number, number>();
   for (const row of r.recordset) {
     const cones = Number(row.cones);
+    conesOut.set(Number(row.st), cones);
     const rejects = Number(row.rejects);
     // A station whose rejects ALL matched a cone row has no group in
     // `unmatchedOf` at all (a zero count produces no GROUP BY row), which is
@@ -1001,6 +1005,7 @@ export async function rejectRatesByStation(
 
   return {
     rates: out,
+    cones: conesOut,
     totalCones: Number(t?.cones ?? 0),
     totalRejects: Number(t?.rejects ?? 0),
     totalUnmatchedRejects,

@@ -145,3 +145,18 @@ describe('getWeightStations — line reject rate (finding H2)', () => {
     expect(data.lineRejectRatePct).toBeCloseTo(4, 2);
   });
 });
+
+describe('rejectRatesByStation — per-station cone counts', () => {
+  it('returns each station cone count alongside its rate', async () => {
+    const { rejectRatesByStation } = await import('./weightStations.js');
+    const pool = fakePool(
+      [{ st: 1, cones: 200, rejects: 20 }, { st: 2, cones: 1800, rejects: 18 }],
+      [{ cones: 2000, rejects: 38 }],
+      [{ grp: '1', n: 5 }],
+    );
+    const r = await rejectRatesByStation(pool, 1, '2026-07-01', '2026-07-19');
+    expect(r.cones.get(1)).toBe(200);
+    expect(r.cones.get(2)).toBe(1800);
+    expect(r.rates.get(1)).toBeCloseTo((100 * 20) / 205, 2);
+  });
+});
