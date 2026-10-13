@@ -8,7 +8,8 @@
 import { useRef } from 'react';
 import { C } from '../copy';
 import { pareto } from '../bridge/lib';
-import { bandHit, gridValues, leftGutterFor, linear, linePath, niceDomain, type ChartTip } from '../bridge/chart';
+import { bandHit, gridValues, leftGutterFor, linear, linePath, type ChartTip } from '../bridge/chart';
+import { zeroBasedDomain } from './domain';
 import { XLabels, YAxis } from './Axes';
 import { barPath } from './BarChart';
 import { Frame, type LegendItem } from './Frame';
@@ -32,7 +33,7 @@ export function Pareto(p: ParetoProps) {
   const th = p.thresholdPct ?? 80;
   const n = p.rows.length;
   const vital = pareto.vitalFew(p.rows, th);
-  const domain = niceDomain(p.rows.map((r) => r.count), { zero: true, pad: 0.05 });
+  const domain = zeroBasedDomain(p.rows.map((r) => r.count), { pad: 0.05 });
   const tickLabels = [...gridValues(domain, 3), domain[1]].map(fmt);
   const status = p.status ?? (n === 0 ? 'empty' : 'ready');
   const last = useRef({ w: 0, h: 0, fontPx: 12 });

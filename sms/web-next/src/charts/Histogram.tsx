@@ -5,7 +5,8 @@
  */
 import { useRef } from 'react';
 import { C } from '../copy';
-import { bandHit, gridValues, leftGutterFor, linear, niceDomain, type ChartTip } from '../bridge/chart';
+import { bandHit, gridValues, leftGutterFor, linear, type ChartTip } from '../bridge/chart';
+import { zeroBasedDomain } from './domain';
 import { YAxis } from './Axes';
 import { barPath } from './BarChart';
 import { Frame } from './Frame';
@@ -29,7 +30,7 @@ export function Histogram(p: HistogramProps) {
   const fmt = p.formatValue ?? defaultFormat;
   const n = p.bins.length;
   const width0 = n > 0 ? (p.bins[0] as HistogramBin).to - (p.bins[0] as HistogramBin).from : 0;
-  const domain = niceDomain(p.bins.map((b) => b.count), { zero: true, pad: 0.05 });
+  const domain = zeroBasedDomain(p.bins.map((b) => b.count), { pad: 0.05 });
   const tickLabels = [...gridValues(domain, 3), domain[1]].map(fmt);
   const status = p.status ?? (n === 0 ? 'empty' : 'ready');
   const last = useRef({ w: 0, h: 0, fontPx: 12 });
@@ -96,7 +97,7 @@ export function Histogram(p: HistogramProps) {
                 </linearGradient>
               </defs>
               <YAxis scale={g.y} margins={g.m} width={width} unit={p.unit} format={fmt} fontPx={fontPx} />
-              {p.limits && <LimitBand limits={p.limits} scale={g.x} axis="x" from={g.m.top} to={height - g.m.bottom} fontPx={fontPx} />}
+              {p.limits && <LimitBand limits={p.limits} scale={g.x} axis="x" from={g.m.top} to={height - g.m.bottom} fontPx={fontPx} bounds={[g.m.left, width - g.m.right]} />}
               {p.bins.map((b, i) => (
                 <path
                   key={i}

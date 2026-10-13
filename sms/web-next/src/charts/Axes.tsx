@@ -32,7 +32,7 @@ export function YAxis({
           </text>
         </g>
       ))}
-      <text x={left ? x0 - 8 : x1 + 8} y={Math.max(fontPx, margins.top - 8)} textAnchor={left ? 'end' : 'start'} className="ck-unit-label" fontSize={fontPx}>
+      <text x={left ? x0 - 8 : width - 2} y={Math.max(fontPx, margins.top - 8)} textAnchor="end" className="ck-unit-label" fontSize={fontPx}>
         {unit}
       </text>
     </g>

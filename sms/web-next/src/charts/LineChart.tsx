@@ -6,6 +6,7 @@
 import { useRef } from 'react';
 import { C } from '../copy';
 import { gridValues, leftGutterFor, linear, linePath, nearestIndex, niceDomain, type ChartTip } from '../bridge/chart';
+import { zeroBasedDomain } from './domain';
 import { XLabels, YAxis } from './Axes';
 import { Frame, type LegendItem } from './Frame';
 import { LimitBand } from './LimitBand';
@@ -29,7 +30,8 @@ export function LineChart(p: LineChartProps) {
   const fmt = p.formatValue ?? defaultFormat;
   const n = p.categories.length;
   const all = p.series.flatMap((s) => s.values.filter((v): v is number => v != null));
-  const domain = niceDomain(p.limits ? [...all, p.limits.lower, p.limits.upper] : all, { zero: p.zeroBase });
+  const dvals = p.limits ? [...all, p.limits.lower, p.limits.upper] : all;
+  const domain = p.zeroBase ? zeroBasedDomain(dvals) : niceDomain(dvals, {});
   const tickLabels = [...gridValues(domain, 3), domain[1]].map(fmt);
   const status = p.status ?? (n === 0 || all.length === 0 ? 'empty' : 'ready');
   const direct = p.series.length >= 2 && p.series.length <= 4;
