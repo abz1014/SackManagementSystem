@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { fmt, health as healthLib } from '../bridge/lib';
 import { W } from '../bridge/words';
 import { C } from '../copy';
+import { fmtDateTime, fmtTime } from '../lib/fmt';
 
 type Health = healthLib.Health;
 
@@ -14,7 +15,8 @@ export interface HealthView { state: DotState; short: string; sentence: string }
  * and a missing verdict (null: loading or failed) is "Status unknown", never OK.
  */
 export function describeHealth(health: Health | null, plantNowUtc?: string | null): HealthView {
-  const when = (iso: string) => (plantNowUtc ? fmt.fmtClockOn(iso, plantNowUtc) : fmt.fmtClock(iso));
+  /* One date format (lib/fmt, 24-hour): a time alone when it is the plant's current day, else the full date and time. */
+  const when = (iso: string) => (!plantNowUtc || iso.slice(0, 10) === plantNowUtc.slice(0, 10) ? fmtTime(iso) : fmtDateTime(iso));
   if (!health) return { state: 'nodata', short: C.shell.health.unknown, sentence: C.shell.health.unknownSentence };
   switch (health.kind) {
     case 'ok':

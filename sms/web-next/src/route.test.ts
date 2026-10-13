@@ -43,6 +43,7 @@ describe('legacyRedirect, one case per IA-MAP section 3 row', () => {
     expect(redir('s=report&rt=daily&rsh=night&st=1&pr=2')).toEqual({
       s: 'reports', rt: 'daily', rsh: 'night', st: '1', pr: '2',
     }));
+  it('s=report with no rt opens the daily report (P3)', () => expect(redir('s=report')).toEqual({ s: 'reports', rt: 'daily' }));
   it.each(['shift', 'product', 'station', 'sack'])('s=report&rt=%s keeps rt', (rt) =>
     expect(redir(`s=report&rt=${rt}`)).toEqual({ s: 'reports', rt }));
   it('s=health', () => expect(redir('s=health')).toEqual({ s: 'system', t: 'diagnostics' }));

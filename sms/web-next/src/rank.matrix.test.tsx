@@ -146,7 +146,7 @@ const WRITE_CONTROLS: Array<{
   },
   {
     screen: 'System > Setup (new account)', control: 'New account', minRank: 4, page: true,
-    open: '/next/?s=system&t=setup', routes: SETUP_ROUTES, ready: /^New account$/, readyBelow: /^Today$/,
+    open: '/next/?s=system&t=setup', routes: SETUP_ROUTES, ready: /^New account$/, readyBelow: new RegExp(`^${SY.setup.notAllowed}$`),
   },
   {
     screen: 'System > Account (change password)', control: SY.account.save, minRank: 1, page: true,
@@ -213,12 +213,15 @@ describe.each(ROLES)('$role (rank $rank)', ({ role, rank }) => {
     }
   });
 
-  it('a typed Setup address is refused below rank 4 and kept at rank 4', async () => {
+  it('a typed Setup address stays at every rank; below rank 4 it shows the admin-only sentence and no section', async () => {
     mount(role, '/next/?s=system&t=setup');
     await screen.findByRole('navigation', { name: 'Main navigation' });
     const sp = new URLSearchParams(window.location.search);
-    if (rank >= 4) expect([sp.get('s'), sp.get('t')]).toEqual(['system', 'setup']);
-    else await vi.waitFor(() => expect(new URLSearchParams(window.location.search).get('s')).toBe('today'));
+    expect([sp.get('s'), sp.get('t')]).toEqual(['system', 'setup']);
+    if (rank < 4) {
+      expect(await screen.findByText(SY.setup.notAllowed)).toBeTruthy();
+      expect(document.querySelectorAll('[data-section]')).toHaveLength(0);
+    }
   });
 
   for (const w of WRITE_CONTROLS) {

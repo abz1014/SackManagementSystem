@@ -22,9 +22,11 @@ export interface StationHeatGridProps {
   onOpen?: (station: number) => void;
   /** Initial sort. */
   sort?: 'worst' | 'number';
+  /** Most tiles in one row (default 7: 14 stations make two full rows, never a short last one). */
+  maxPerRow?: number;
 }
 
-export function StationHeatGrid({ stations, onOpen, sort = 'worst' }: StationHeatGridProps) {
+export function StationHeatGrid({ stations, onOpen, sort = 'worst', maxPerRow = 7 }: StationHeatGridProps) {
   const [by, setBy] = useState<'worst' | 'number'>(sort);
   const [frozen, setFrozen] = useState<number[] | null>(null);
   const [active, setActive] = useState<number | null>(null);
@@ -87,6 +89,8 @@ export function StationHeatGrid({ stations, onOpen, sort = 'worst' }: StationHea
         className="heat-grid"
         role="group"
         aria-label={C.stationUi.stations}
+        /* D14: columns fill the width, but no tile is narrower than a seventh of it, so a wide screen never leaves an orphan row. */
+        style={{ gridTemplateColumns: `repeat(auto-fit, minmax(max(var(--tile-min, 136px), calc((100% - ${maxPerRow - 1} * var(--space-3)) / ${maxPerRow})), 1fr))` }}
         onKeyDown={onKey}
         onMouseEnter={() => setFrozen(ids)}
         onMouseLeave={() => setFrozen(null)}

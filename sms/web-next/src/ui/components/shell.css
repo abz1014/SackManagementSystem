@@ -115,3 +115,17 @@ html[data-ui-scale="1.3"] .sh-app { min-height: calc(100vh / 1.3); }
 /* CSS-001/002 class: between the phone layout and a wide desktop the bar has no room for the name and role beside the period and health;
    the button keeps its icon and its accessible name, and the page no longer scrolls sideways at 768. */
 @media (max-width: 1023px) { .sh-user-name, .sh-user-role { display: none; } }
+
+/* D4: the bar never outgrows the page. The title and the period chip give way first (ellipsis); the health word is trimmed
+   next; the user button keeps its icon and its size. */
+.sh-top-title { flex: 1 1 auto; min-width: 0; }
+.sh-top-right { flex: 0 1 auto; min-width: 0; }
+.sh-top-right .pp-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.sh-health { flex: 0 1 auto; min-width: 0; }
+.sh-health-btn { max-width: 100%; min-width: 0; }
+.sh-health-btn .pill { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-user { flex: none; }
+@media (max-width: 1023px) {
+  .sh-user-btn { padding: 0 var(--space-2); }
+  .sh-user-btn .ui-icon, .sh-user-btn svg { flex: none; }
+}

@@ -95,6 +95,7 @@ export function AppShell({
           user={user}
           onOpenAccount={() => onNavigate(routeFor(route, { s: 'system', t: 'account' }))}
           onSignOut={signOut}
+          onOpenWall={() => onNavigate({ s: 'today', t: null, sheet: null, wall: true, keys: route.keys })}
           signOutError={signOutError}
         />
         <main id="sh-main" className="sh-main" tabIndex={-1}>

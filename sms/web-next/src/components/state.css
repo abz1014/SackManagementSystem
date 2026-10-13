@@ -39,10 +39,11 @@
 .tile-watch:hover { box-shadow: var(--tile-watch-hover); }
 .tile-act { background: var(--act-tint); box-shadow: var(--tile-act); }
 .tile-act:hover { box-shadow: var(--tile-act-hover); }
-.tile-nodata { background: var(--surface-sunk); box-shadow: none; }
+.tile-nodata { background: var(--surface-sunk); box-shadow: none; outline: 1px dashed var(--line-strong); outline-offset: -1px; } /* D27: a quiet station is marked by its edge as well as by the word */
 .tile:focus-visible, .heat-toggle:focus-visible, .attn-row:focus-visible, .kpi-retry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.tile-top { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
-.tile-name { font-size: var(--fs-3); font-weight: var(--fw-semibold); }
+.tile-top { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); min-width: 0; }
+.tile-name { min-width: 0; font-size: var(--fs-3); font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* D14: one line, the full name on hover (title) */
+.tile .tile-top .pill-compact { flex: none; width: 20px; height: 20px; padding: 0; justify-content: center; }
 .tile-big { font-size: var(--fs-4); line-height: var(--lh-4); font-weight: var(--fw-bold); font-feature-settings: var(--tnum); }
 .tile-small { font-size: var(--fs-1); line-height: var(--lh-1); color: var(--ink-3); }
 .tile-state-word { font-size: var(--fs-1); font-weight: var(--fw-semibold); }

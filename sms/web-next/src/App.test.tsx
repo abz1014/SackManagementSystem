@@ -20,6 +20,7 @@ import { Placeholder } from './screens/Placeholder';
 import { SCREENS, SCREEN_KEYS, SHEETS, resolveScreen } from './screens/registry';
 import { legacyHref } from './screens/legacyHref';
 import { parseRoute } from './route';
+import { C } from './copy';
 
 installDomStubs();
 
@@ -139,13 +140,14 @@ describe('navigation by rank (A3-004, A3-073, one audience)', () => {
     expect(within(sidebar()).getByRole('link', { name: 'Setup' })).toBeTruthy();
   });
 
-  it('a typed Setup address below rank 4 falls back to Today', async () => {
+  it('a typed Setup address below rank 4 stays and says it is for an administrator, with no section (P4)', async () => {
     setup('viewer', {}, '/next/?s=system&t=setup');
     render(<App />);
     await findSidebar();
-    await waitFor(() => expect(new URLSearchParams(window.location.search).get('s')).toBe('today'));
-    expect(new URLSearchParams(window.location.search).get('t')).toBeNull();
-    expect(document.title).toBe('Today - SMS');
+    expect(await screen.findByText(C.system.setup.notAllowed)).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get('t')).toBe('setup');
+    expect(document.title).toBe('Setup - SMS');
+    expect(document.querySelectorAll('[data-section]')).toHaveLength(0);
   });
 
   it('a typed Setup address at rank 4 stays', async () => {

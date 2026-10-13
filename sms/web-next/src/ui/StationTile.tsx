@@ -42,7 +42,7 @@ export const StationTile = forwardRef<HTMLButtonElement, StationTileProps>(funct
       onClick={() => onOpen?.(item.station)}
     >
       <span className="tile-top">
-        <span className="tile-name">{label}</span>
+        <span className="tile-name" title={label}>{label}</span>
         <StatusPill state={item.state} compact />
       </span>
       <span className="tile-big">
@@ -57,7 +57,7 @@ export const StationTile = forwardRef<HTMLButtonElement, StationTileProps>(funct
           {item.product ?? C.stationUi.noProduct}
         </span>
       )}
-      <span className="tile-state-word">{STATE_WORD[item.state]}</span>
+      {!nodata && <span className="tile-state-word">{STATE_WORD[item.state]}</span>}
     </button>
   );
 });

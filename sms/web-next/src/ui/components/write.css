@@ -29,7 +29,7 @@
 .wr-count--ok { color: var(--ok-fg); }
 .wr-field__error { color: var(--act-fg); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); }
 .wr-input-wrap { position: relative; display: flex; align-items: center; }
-.wr-input { width: 100%; min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+.wr-input { box-sizing: border-box; width: 100%; min-height: var(--control-h); padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-ctl); background: var(--surface); color: var(--ink-1); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
 .wr-input-wrap .wr-input { padding-right: 3.5rem; }
 .wr-input-unit { position: absolute; right: var(--space-3); color: var(--ink-3); font: var(--fw-regular) var(--fs-2)/var(--lh-2) var(--font-sans); pointer-events: none; }
 .wr-textarea { padding: var(--space-2) var(--space-3); resize: vertical; }

@@ -144,6 +144,7 @@ export function legacyRedirect(sp: URLSearchParams): URLSearchParams | null {
     }
     case 'report':
       out.set('s', 'reports');
+      if (!out.get('rt')) out.set('rt', 'daily');
       break;
     case 'health':
       out.set('s', 'system');

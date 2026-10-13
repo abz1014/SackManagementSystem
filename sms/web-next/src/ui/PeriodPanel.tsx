@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { C, FRAGMENTS } from '../copy';
 import { createPortal } from 'react-dom';
 import { period as P, fmt } from '../bridge/lib';
+import { fmtDate } from '../lib/fmt';
 import type { PeriodState } from '../data/usePeriod';
 import { Segmented } from './Segmented';
 import { Sheet } from './Sheet';
@@ -58,12 +59,6 @@ function invalidReason(d: Draft): string | null {
   if (!P.isRealDate(d.td)) return C.periodUi.needEnd;
   const r = refs(d);
   return P.decodeRangeParams(P.encodeShiftRef(r.from), P.encodeShiftRef(r.to)) ? null : C.periodUi.endBeforeStart;
-}
-
-function longDate(date: string): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  const month = d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short' });
-  return `${d.getUTCDate()} ${month} ${d.getUTCFullYear()}`;
 }
 
 function ShiftSelect({ id, label, value, onChange }: { id: string; label: string; value: ShiftChoice; onChange: (v: ShiftChoice) => void }) {
@@ -159,7 +154,7 @@ function PanelOpen({ onClose, state, anchor, maxDate }: Omit<PeriodPanelProps, '
       )}
       {showNewest && (
         <div className="pp-newest">
-          <span>{C.periodUi.newestData(longDate(maxDate!))}</span>
+          <span>{C.periodUi.newestData(fmtDate(maxDate!))}</span>
           <button type="button" className="ui-link" onClick={goNewest}>
             {C.periodUi.goNewest}
           </button>

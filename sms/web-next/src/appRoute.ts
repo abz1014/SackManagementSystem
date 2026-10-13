@@ -5,7 +5,6 @@
  * location and rank.
  */
 import { useEffect, useState } from 'react';
-import { ADMIN_RANK } from './ranks';
 import { legacyRedirect, parseRoute, writeRoute, type Route } from './route';
 
 /** The same event data/usePeriod.ts fires, so a period change and a navigation re-render together. */
@@ -19,11 +18,6 @@ export interface Resolved {
   canonical: string | null;
 }
 
-/** The only gated tab: Setup, rank 4. Everything else is open to every signed-in account. */
-export function isForbidden(route: Route, rank: number): boolean {
-  return route.s === 'system' && route.t === 'setup' && rank < ADMIN_RANK;
-}
-
 export function todayRoute(from: Route): Route {
   return { s: 'today', t: null, sheet: null, wall: false, keys: from.keys };
 }
@@ -32,19 +26,15 @@ export function galleryEnabled(dev: boolean = import.meta.env.DEV): boolean {
   return dev === true;
 }
 
-export function resolveLocation(search: string, rank: number, dev: boolean = import.meta.env.DEV): Resolved {
+export function resolveLocation(search: string, _rank: number, dev: boolean = import.meta.env.DEV): Resolved {
   const sp = new URLSearchParams(search);
   if (galleryEnabled(dev) && sp.get('s') === 'gallery') {
     return { route: parseRoute(new URLSearchParams()), gallery: true, canonical: null };
   }
   const redirected = legacyRedirect(sp);
-  let route = parseRoute(redirected ?? sp);
-  let rewrite = redirected !== null;
-  if (isForbidden(route, rank)) {
-    route = todayRoute(route);
-    rewrite = true;
-  }
-  return { route, gallery: false, canonical: rewrite ? writeRoute(route).toString() : null };
+  const route = parseRoute(redirected ?? sp);
+  /* Fix-wave P4: Setup below rank 4 is not redirected. The screen itself says it is for an administrator and draws no section. */
+  return { route, gallery: false, canonical: redirected !== null ? writeRoute(route).toString() : null };
 }
 
 /** window.location.search, kept current across popstate and this app's own navigations. */

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AuthUser } from '../bridge/api';
 import { C } from '../copy';
 import { Icon } from './Icon';
+import { useMediaQuery } from './useMediaQuery';
 const A11Y = C.a11y;
 import { TextSizeControl, useUiScale } from './TextSize';
 import { useZoomed, zoomBack } from '../charts/zoomMarker';
@@ -16,17 +17,20 @@ export interface TopBarProps {
   /** Rank 1..4 is already applied by the caller; the menu has only Account and Sign out. */
   onOpenAccount: () => void;
   onSignOut: () => void;
+  /** Opens the TV wall. The menu item is offered only at 1024 px and wider: the wall is for a large screen (owner, 13 Oct 2026). */
+  onOpenWall?: () => void;
   /** Set after a failed sign-out; shown in the menu. */
   signOutError?: string | null;
 }
 
-export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSignOut, signOutError }: TopBarProps) {
+export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSignOut, onOpenWall, signOutError }: TopBarProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [scale, setScale] = useUiScale();
   const zoomed = useZoomed();
+  const largeScreen = useMediaQuery('(min-width: 1024px)');
 
   useEffect(() => {
     if (!open) return;
@@ -88,6 +92,20 @@ export function TopBar({ title, periodChip, healthDot, user, onOpenAccount, onSi
                   <Icon name="lock" />
                   {C.tabs.system.account}
                 </button>
+                {onOpenWall && largeScreen && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="sh-menu-item"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenWall();
+                    }}
+                  >
+                    <Icon name="overview" />
+                    {C.shell.openWall}
+                  </button>
+                )}
                 <button type="button" role="menuitem" className="sh-menu-item" onClick={onSignOut}>
                   <Icon name="close" />
                   {C.signOut}

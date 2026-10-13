@@ -33,6 +33,31 @@ export function focusablesIn(root: HTMLElement): HTMLElement[] {
   });
 }
 
+/* D24: the control that opened a Sheet is not always the focused element when the Sheet mounts (a chart mark, a clickable
+   row that cannot take focus, a Sheet opened from the address). Remember the last pointer or key target so focus can go back
+   to it, and fall back to the page's main region rather than to <body>. */
+let lastTarget: HTMLElement | null = null;
+if (typeof document !== 'undefined') {
+  const note = (e: Event) => {
+    lastTarget = e.target instanceof HTMLElement && !e.target.closest('.ui-sheet-root') ? e.target : lastTarget;
+  };
+  document.addEventListener('pointerdown', note, true);
+  document.addEventListener('keydown', note, true);
+}
+
+const OPENER = 'button,a[href],summary,input,select,textarea,[tabindex],[role="button"],[role="row"],tr';
+
+function findOpener(): HTMLElement | null {
+  const a = document.activeElement;
+  if (a instanceof HTMLElement && a !== document.body && !a.closest('.ui-sheet-root')) return a;
+  return lastTarget && document.contains(lastTarget) ? (lastTarget.closest<HTMLElement>(OPENER) ?? null) : null;
+}
+
+function giveFocus(el: HTMLElement) {
+  if (!el.matches('button,a[href],input,select,textarea,summary,[tabindex]')) el.setAttribute('tabindex', '-1');
+  el.focus();
+}
+
 export function Sheet({ sheet, kind, open, onClose, title, status, width = 480, footer, children }: SheetProps) {
   const isOpen = open ?? (!!sheet && (kind === undefined || sheet.kind === kind));
   const panel = useRef<HTMLDivElement>(null);
@@ -41,12 +66,13 @@ export function Sheet({ sheet, kind, open, onClose, title, status, width = 480, 
   useEffect(() => {
     if (!isOpen) return;
     /* the trigger had focus when the effect runs: the panel is not focused yet */
-    returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    returnTo.current = findOpener();
     const first = panel.current ? focusablesIn(panel.current)[0] : undefined;
     (first ?? panel.current)?.focus();
     return () => {
       const t = returnTo.current;
-      if (t && document.contains(t)) t.focus();
+      const target = t && document.contains(t) ? t : document.getElementById('sh-main');
+      if (target) giveFocus(target);
     };
   }, [isOpen]);
 

@@ -14,6 +14,7 @@
  * Rows that share a key: row 141 is W.config.rules.basis; row 153 is the
  * W.reports.stockCol* set; row 164 is a family of four sentences (iflNotSaid).
  */
+import { fmtDate, fmtTime, fmtTimeSec } from './lib/fmt';
 import { W } from './bridge/words';
 import { stationLabel } from './bridge/api';
 
@@ -1539,19 +1540,14 @@ export const REASON_MIN_CHARS = 10;
 
 /* ---- helpers for the date and clock rule (GLOSSARY 1.4) ----------------- */
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
-
-/** "1 Sep 2026" from a plant-clock ISO string or millisecond value (plant wall clock, no UTC marker shown). */
+/** "1 Sep 2026" from a plant-clock ISO string or millisecond value (plant wall clock, no UTC marker shown). Built in lib/fmt. */
 export function formatDate(at: string | number | Date): string {
-  const d = at instanceof Date ? at : new Date(at);
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  return fmtDate(at);
 }
 
-/** "14:30", or "14:30:05" when seconds are asked for. */
+/** "14:30", or "14:30:05" when seconds are asked for. Built in lib/fmt. */
 export function formatClock(at: string | number | Date, seconds = false): string {
-  const d = at instanceof Date ? at : new Date(at);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}${seconds ? `:${p(d.getUTCSeconds())}` : ''}`;
+  return seconds ? fmtTimeSec(at) : fmtTime(at);
 }
 
 /* ---- RESERVED wording, by reference ------------------------------------- */
