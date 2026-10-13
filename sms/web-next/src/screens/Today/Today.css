@@ -1,0 +1,70 @@
+/* Today screen layout (task E2). Tokens only; the card, band, pill and tile styles come from base.css and state.css. */
+
+.today { display: flex; flex-direction: column; gap: var(--gutter); width: 100%; max-width: var(--page-max); margin: 0 auto; min-width: 0; }
+.today > * { min-width: 0; }
+
+/* ---- status band (page template row 1) ---- */
+.today .band h1 { margin: 0 0 var(--space-2); }
+.today .band .sentence { margin: 0 0 var(--space-3); max-width: 36ch; }
+.today .band .cap { margin: 0; max-width: 72ch; color: var(--ink-2); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today .band .cap + .cap { margin-top: var(--space-1); }
+.today .band-skel { display: block; height: var(--lh-sent); width: min(32ch, 100%); border-radius: var(--radius-ctl); background: var(--surface-sunk); opacity: 0.8; margin-bottom: var(--space-3); }
+
+/* ---- KPI row (row 2) ---- */
+.today-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--gutter); }
+@media (min-width: 1280px) { .today-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.today-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: calc(-1 * var(--space-2)) 0 0; color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today-note { margin: 0; color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); max-width: 72ch; }
+
+/* ---- cards (rows 3 and 4) ---- */
+.today-card { display: flex; flex-direction: column; gap: var(--space-3); }
+.today-card > h2 { margin: 0; font-size: var(--fs-4); line-height: var(--lh-4); font-weight: var(--fw-semibold); color: var(--ink-1); }
+.today-card .cap { margin: 0; color: var(--ink-3); font-size: var(--fs-1); line-height: var(--lh-1); max-width: 72ch; }
+.today-card .cap-sm { margin: 0; color: var(--ink-2); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.today-head > h2 { margin: 0; font-size: var(--fs-4); line-height: var(--lh-4); font-weight: var(--fw-semibold); color: var(--ink-1); }
+
+.today-change { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-ctl); background: var(--accent-tint); color: var(--ink-1); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today-change p { margin: 0; max-width: 72ch; }
+
+.today .heat-grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); }
+
+.today-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gutter); }
+.today-grid > * { grid-column: span 12; min-width: 0; }
+@media (min-width: 1024px) {
+  .today-grid > .span-7 { grid-column: span 7; }
+  .today-grid > .span-5 { grid-column: span 5; }
+  .today-grid > .span-6 { grid-column: span 6; }
+}
+
+/* ---- latest readings ---- */
+.today-latest { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.today-latest li { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: var(--space-2) var(--space-4); align-items: baseline; padding: var(--space-3) 0; border-top: 1px solid var(--line); }
+.today-latest li:first-child { border-top: 0; padding-top: 0; }
+.today-latest .k { color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today-latest .v { color: var(--ink-1); font-size: var(--fs-3); line-height: var(--lh-3); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); }
+.today-latest button.ui-link, .today-latest a.ui-link { text-align: left; }
+
+/* ---- sack section ---- */
+.today-sackfigs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; }
+.today-sackfigs div { display: flex; flex-direction: column; gap: 2px; }
+.today-sackfigs dt { color: var(--ink-3); font-size: var(--fs-2); line-height: var(--lh-2); }
+.today-sackfigs dd { margin: 0; color: var(--ink-1); font-size: var(--fs-4); line-height: var(--lh-4); font-weight: var(--fw-bold); font-feature-settings: var(--tnum); }
+.today-sackhops { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+
+.today-details { display: flex; flex-direction: column; gap: var(--space-3); }
+.today-details p { margin: 0; color: var(--ink-2); font-size: var(--fs-2); line-height: var(--lh-2); max-width: 72ch; }
+
+/* ---- phone (TodayPhone board): one column, KPI two per row, stations two per row ---- */
+@media (max-width: 767px) {
+  .today { gap: var(--space-4); }
+  .today .band { padding: var(--space-4); }
+  .today-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  .today-kpis > :last-child:nth-child(odd) { grid-column: span 2; }
+  .today .heat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-latest li { grid-template-columns: 1fr; gap: 2px; }
+  .today-grid { gap: var(--space-4); }
+}
+
+.today-subhead { margin: var(--space-3) 0 0; font-size: var(--fs-3); line-height: var(--lh-3); font-weight: var(--fw-semibold); color: var(--ink-1); }
+.today-links a, .today-links span { white-space: nowrap; }
