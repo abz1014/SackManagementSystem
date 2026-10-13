@@ -15,7 +15,8 @@ import './components/period.css';
  */
 export function PeriodChip({ className }: { className?: string }) {
   const state = usePeriod();
-  const live = useData('plant clock', () => getLive(null), 'period:live', { live: false });
+  const at = new URLSearchParams(window.location.search).get('at');
+  const live = useData('plant clock', () => getLive(at), `period:live:${at ?? 'now'}`, { live: false });
   const range = useRange();
   const [open, setOpen] = useState(false);
 

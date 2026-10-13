@@ -133,6 +133,26 @@ export const C = {
     },
   },
 
+  /* ---- App frame: sign-in, placeholders, banners ---- */
+  login: {
+    title: 'Sign in',
+    subtitle: 'Sack management system',
+    username: 'Username',
+    password: 'Password',
+    submit: 'Sign in',
+    busy: 'Signing in',
+    mismatch: 'That username and password did not match.',
+    tooMany: (mins: number) => `Too many attempts. Try again in ${mins} ${mins === 1 ? 'minute' : 'minutes'}.`,
+  },
+  app: {
+    checking: 'Checking your sign-in',
+    wallTitle: 'Wall display',
+    leaveReplay: 'Leave replay',
+    placeholder: 'This screen is being rebuilt.',
+    placeholderSheet: 'This detail view is being rebuilt.',
+    openCurrent: 'Open it in the current app',
+  },
+
   /* ---- General components (was ui/strings.ts) ---- */
   ui: {
     showDate: (date: string) => `Show ${date}`,

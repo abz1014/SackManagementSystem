@@ -51,7 +51,8 @@ export function usePeriod(): PeriodState {
   const sp = new URLSearchParams(search);
   const params = P.parsePeriodParams(sp);
   const compare = parseCompare(sp);
-  const liveD = useData('plant clock', () => getLive(null), 'period:live');
+  const at = sp.get('at');
+  const liveD = useData('plant clock', () => getLive(at), `period:live:${at ?? 'now'}`);
   const rangeD = useData('data range', () => getRange(), 'period:range', { live: false });
 
   const line = liveD.data?.data.lines[0] ?? null;

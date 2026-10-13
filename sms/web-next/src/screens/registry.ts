@@ -1,0 +1,65 @@
+/**
+ * Which component draws which (screen, tab), and which draws each sheet kind.
+ *
+ * E2..E7 REPLACE entries here; nothing else in the frame changes:
+ *
+ *   import { TodayScreen } from './today/Today';
+ *   SCREENS['today/'] = TodayScreen;                 // eager
+ *   SCREENS['quality/weight'] = lazy(() => import('./quality/Weight').then((m) => ({ default: m.WeightScreen })));
+ *   SHEETS.station = StationSheet;
+ *
+ * Keys are `${s}/${t ?? ''}` (see screenKey). Wall mode is `today/wall`.
+ * Products and PDAS screens must be EAGER: rank.matrix pins their write controls
+ * synchronously and a lazy chunk would make that test hollow.
+ */
+import type { ComponentType, LazyExoticComponent } from 'react';
+import type { AuthUser } from '../bridge/api';
+import { SCREENS as SCREEN_IDS, TABS, type Route, type SheetKind } from '../route';
+import { Placeholder } from './Placeholder';
+import { PlaceholderSheet } from './PlaceholderSheet';
+
+export interface ScreenProps {
+  route: Route;
+  /** 1 viewer .. 4 admin. Writes are gated on this by the screen, never the read. */
+  rank: number;
+  user: AuthUser;
+  /** Navigate: pushes a history entry, or replaces it with { replace: true } (pagers, steppers). */
+  go: (next: Route, opts?: { replace?: boolean }) => void;
+}
+export interface SheetProps extends ScreenProps {
+  /** Close = remove `sheet` from the URL. */
+  onClose: () => void;
+}
+
+export type ScreenComponent = ComponentType<ScreenProps> | LazyExoticComponent<ComponentType<ScreenProps>>;
+export type SheetComponent = ComponentType<SheetProps> | LazyExoticComponent<ComponentType<SheetProps>>;
+
+export const WALL_KEY = 'today/wall';
+
+export function screenKey(r: { s: string; t: string | null; wall?: boolean }): string {
+  if (r.wall) return WALL_KEY;
+  return `${r.s}/${r.t ?? ''}`;
+}
+
+/** Every key the route model can produce. */
+export const SCREEN_KEYS: string[] = [
+  ...SCREEN_IDS.flatMap((s) => {
+    const tabs = (TABS as Partial<Record<string, readonly string[]>>)[s];
+    return tabs ? tabs.map((t) => `${s}/${t}`) : [`${s}/`];
+  }),
+  WALL_KEY,
+];
+
+export const SCREENS: Record<string, ScreenComponent> = Object.fromEntries(
+  SCREEN_KEYS.map((k) => [k, Placeholder]),
+);
+
+export const SHEETS: Partial<Record<SheetKind, SheetComponent>> = {};
+
+export function resolveScreen(r: Route): ScreenComponent {
+  return SCREENS[screenKey(r)] ?? Placeholder;
+}
+
+export function resolveSheet(kind: SheetKind): SheetComponent {
+  return SHEETS[kind] ?? PlaceholderSheet;
+}

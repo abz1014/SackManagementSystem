@@ -1,0 +1,10 @@
+/* App frame extras: the replay banner and the simulated-data notice, in the redesign's own voice. Tokens only. */
+.app-banner,
+.simulator-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap;
+  margin-bottom: var(--space-4); padding: var(--space-3) var(--space-4);
+  background: var(--accent-tint); color: var(--ink-1); border-radius: var(--radius-ctl);
+  font: var(--fw-semibold) var(--fs-2)/var(--lh-2) var(--font-sans);
+}
+.app-loading { margin: 0; padding: var(--space-5); color: var(--ink-3); font: var(--fw-regular) var(--fs-3)/var(--lh-3) var(--font-sans); }
+@media print { .app-banner, .simulator-banner { display: none; } }
