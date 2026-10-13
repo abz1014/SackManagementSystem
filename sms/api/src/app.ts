@@ -71,6 +71,7 @@ import { mountCalibrationRoutes } from './routes/calibration.js';
 import { mountSacksRoutes } from './routes/sacks.js';
 import { mountChangeoverRoutes } from './routes/changeover.js';
 import { mountDqAckRoutes } from './routes/dqAck.js';
+import { mountStationStatusRoutes } from './routes/stationStatus.js';
 import { isoDate, isoTimestamp } from './dates.js';
 import { responseCap, largestKnownArray } from './middleware/responseCap.js';
 import { decodeShiftRangeParam, isShiftRangeError } from './routes/shiftRangeParam.js';
@@ -2368,6 +2369,7 @@ export function createApp(pool: ConnectionPool, cfg: ApiConfig): Express {
   mountSacksRoutes(routeCtx);
   mountChangeoverRoutes(routeCtx);
   mountDqAckRoutes(routeCtx);
+  mountStationStatusRoutes(routeCtx);
 
   // JSON 404 for unmatched API routes
   app.use('/api', (_req: Request, res: Response) => res.status(404).json({ error: 'not found' }));

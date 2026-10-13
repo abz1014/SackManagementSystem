@@ -134,6 +134,7 @@ describe('date query params reject impossible calendar dates', () => {
     ['/api/weights', (d: string) => `/api/weights?from=${d}&to=${d}`],
     ['/api/spc', (d: string) => `/api/spc?from=${d}&to=${d}`],
     ['/api/reject-spc', (d: string) => `/api/reject-spc?from=${d}&to=${d}`],
+    ['/api/station-status', (d: string) => `/api/station-status?from=${d}&to=${d}`],
     ['/api/weight-stations', (d: string) => `/api/weight-stations?from=${d}&to=${d}`],
     ['/api/events', (d: string) => `/api/events?type=cone&from=${d}&to=${d}`],
     ['/api/downtime', (d: string) => `/api/downtime?date=${d}`],

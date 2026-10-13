@@ -229,6 +229,7 @@ const ROUTES: RouteCase[] = [
   { method: 'GET', path: '/api/events?type=cone', minRank: 1 },
   { method: 'GET', path: '/api/events/cone/1', minRank: 1 },
   { method: 'GET', path: '/api/rejects', minRank: 1 },
+  { method: 'GET', path: '/api/station-status?from=2026-09-01&to=2026-09-01', minRank: 1 },
   { method: 'GET', path: '/api/weights', minRank: 1 },
   { method: 'GET', path: '/api/products', minRank: 1 },
   { method: 'GET', path: '/api/current-product', minRank: 1 },

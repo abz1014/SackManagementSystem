@@ -13,11 +13,14 @@
  *
  * THE RULE (strictly greater, no rounding before comparing):
  *   - 0 cones in the period      -> 'nodata' (never 'ok': silence is not health)
+ *   - 1-49 cones in the period   -> 'ok', reason "Too few cones to judge (under 50)"
+ *                                   (decision E-4: a handful of cones can swing a
+ *                                   rate past any multiple by chance; never watch/act)
  *   - line rate is 0             -> every station with cones is 'ok'
  *   - rate > 2.0 x line rate     -> 'act'
  *   - rate > 1.5 x line rate     -> 'watch'
  *   - otherwise                  -> 'ok'
- * The 1.5 / 2.0 multiples are OUR assumption, not an IFL-confirmed limit;
+ * The 1.5 / 2.0 multiples and the 50-cone floor are OUR assumptions, not an IFL-confirmed limit;
  * `thresholds.assumed` is true and the screen must say so.
  *
  * THE PERIOD ONLY. This is a plain count over the period on screen. It does
@@ -25,8 +28,11 @@
  * (CLAUDE.md: the detectors ignore the period). `vsTargetG` and `product` are
  * taken only from the period rows' `n` and `vsTargetG`.
  *
- * `tsTo` (replay instant) is accepted for the route's convenience but the
- * underlying count services have no instant cap, so it is NOT applied here.
+ * NO `tsTo`. The underlying count services (rejectRatesByStation,
+ * getWeightStations) cannot cap by instant, so a replay instant could not be
+ * honoured honestly. Decision (D2b): the option and the route parameter are
+ * both dropped; the route accepts from/to (+ shift / shift range) only, and an
+ * unknown `tsTo` query key is ignored rather than pretending to cap.
  */
 import type { ConnectionPool } from 'mssql';
 import type { ShiftRange } from '../shiftRange.js';
@@ -37,6 +43,8 @@ export type StationState = 'ok' | 'watch' | 'act' | 'nodata';
 
 export const WATCH_MULTIPLE = 1.5;
 export const ACT_MULTIPLE = 2.0;
+/** Fewer cones than this in the period: the rate is not judged (decision E-4). */
+export const MIN_CONES = 50;
 
 export interface StationStatusRow {
   station: number;
@@ -56,7 +64,7 @@ export interface StationStatusData {
   from: string;
   to: string;
   lineFailedPct: number | null;
-  thresholds: { watch: number; act: number; assumed: true };
+  thresholds: { watch: number; act: number; minCones: number; assumed: true };
   stations: StationStatusRow[];
 }
 
@@ -65,8 +73,6 @@ export interface StationStatusOptions {
   to: string;
   shift?: 'morning' | 'evening' | 'night' | null;
   shiftRange?: ShiftRange;
-  /** Accepted, not applied: see file header. */
-  tsTo?: string | null;
 }
 
 const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;
@@ -79,6 +85,9 @@ export function decideState(
 ): { state: StationState; reasons: string[] } {
   if (cones <= 0 || rate == null) {
     return { state: 'nodata', reasons: ['No cones weighed in this period'] };
+  }
+  if (cones < MIN_CONES) {
+    return { state: 'ok', reasons: [`Too few cones to judge (under ${MIN_CONES})`] };
   }
   if (lineRate == null || lineRate <= 0) return { state: 'ok', reasons: [] };
   if (rate > ACT_MULTIPLE * lineRate) {
@@ -140,7 +149,7 @@ export async function getStationStatus(
     from,
     to,
     lineFailedPct: lineRate == null ? null : round(lineRate, 2),
-    thresholds: { watch: WATCH_MULTIPLE, act: ACT_MULTIPLE, assumed: true },
+    thresholds: { watch: WATCH_MULTIPLE, act: ACT_MULTIPLE, minCones: MIN_CONES, assumed: true },
     stations,
   };
 }

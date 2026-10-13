@@ -66,11 +66,11 @@ describe('getStationStatus', () => {
     expect((await run()).stations.map((s) => s.station)).toEqual([1]);
   });
   it('reason text states the threshold, thresholds are assumed', async () => {
-    setup(14.55, [{ id: 1, cones: 10, rate: 40 }, { id: 2, cones: 10, rate: 25 }]);
+    setup(14.55, [{ id: 1, cones: 100, rate: 40 }, { id: 2, cones: 100, rate: 25 }]);
     const r = await run();
     expect(r.stations[0]!.reasons).toEqual(['More than 2 times the line rate (over 29.1 %)']);
     expect(r.stations[1]!.reasons).toEqual(['More than 1.5 times the line rate (over 21.8 %)']);
-    expect(r.thresholds).toEqual({ watch: 1.5, act: 2, assumed: true });
+    expect(r.thresholds).toEqual({ watch: 1.5, act: 2, minCones: 50, assumed: true });
     expect(r.lineFailedPct).toBe(14.55);
   });
   it('carries vsTargetG and product from the period rows only', async () => {
@@ -79,6 +79,19 @@ describe('getStationStatus', () => {
     expect(r.stations[0]!.vsTargetG).toBe(-4.3);
     expect(r.stations[0]!.product).toBe('P12');
     expect(r.stations[1]!.vsTargetG).toBeNull();
+  });
+  it('49 cones is never watch/act: ok with the too-few reason; 50 is judged', async () => {
+    setup(2, [{ id: 1, cones: 49, rate: 90 }, { id: 2, cones: 50, rate: 90 }, { id: 3, cones: 1, rate: 100 }]);
+    const r = await run();
+    expect(r.stations[0]!.state).toBe('ok');
+    expect(r.stations[0]!.reasons).toEqual(['Too few cones to judge (under 50)']);
+    expect(r.stations[0]!.failedPct).toBe(90);
+    expect(r.stations[1]!.state).toBe('act');
+    expect(r.stations[2]!.state).toBe('ok');
+  });
+  it('0 cones stays nodata, not the too-few case', () => {
+    expect(decideState(0, null, 2).state).toBe('nodata');
+    expect(decideState(1, 5, 2).state).toBe('ok');
   });
   it('decideState: unknown line rate is ok', () => {
     expect(decideState(5, 9, null).state).toBe('ok');
