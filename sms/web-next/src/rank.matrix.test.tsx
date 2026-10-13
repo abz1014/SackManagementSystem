@@ -18,6 +18,7 @@ import { App } from './App';
 import { ROLE_RANK } from './bridge/api';
 import { SCREEN_KEYS } from './screens/registry';
 import { ADMIN_RANK } from './ranks';
+import { URLS, routes as stationRoutes } from './screens/Quality/Stations/testkit/pd1';
 
 installDomStubs();
 
@@ -28,12 +29,54 @@ const ROLES = [
   { role: 'admin', rank: 4 },
 ] as const;
 
-/** Write controls the screens add, as { label, minRank }. Empty until E2..E7 append theirs. */
-const WRITE_CONTROLS: Array<{ screen: string; label: RegExp; minRank: number }> = [];
+/** One reason, one day, as /api/rejects/reason answers it: enough for the reason sheet to open. */
+const REASON_ONE = {
+  day: '2026-09-06', dayBasis: 'production_day', code: { rejectType: 'quality', tubeCode: 2, materialCode: 1 },
+  rejectCodeId: 11, label: null, displayLabel: 'Tube 2 · Mat 1', isPass: null, total: 1, page: 1, pageSize: 200,
+  rows: [{ eventId: 9001, productionTsUtc: '2026-09-06T08:14:09Z', shiftCode: 'morning', station: 3, materialId: null, productLabel: null, weightG: null, sourceRowId: 77, epochLabel: null, epochOrdinal: 3, epochSimulator: false, attributionMethod: null }],
+};
+const BY_DAY = { dayBasis: 'production_day', denominator: 'cones_plus_rejects', days: 1, total: 10, rows: [] };
 
-function mount(role: string, url = '/next/') {
+/**
+ * Write controls the screens add. `open` is the address that shows the control and `routes` the data it needs
+ * (the shell's own routes are always added); `ready` waits until the surface is drawn, so "absent" cannot pass
+ * on a blank screen.
+ */
+const WRITE_CONTROLS: Array<{
+  screen: string;
+  control: string;
+  minRank: number;
+  open: string;
+  routes: Record<string, unknown>;
+  ready: RegExp;
+}> = [
+  {
+    screen: 'Quality > Stations > station sheet',
+    control: 'Log an adjustment',
+    minRank: 2,
+    open: `${URLS.pd1}&sheet=station:8`,
+    routes: stationRoutes('pd1') as Record<string, unknown>,
+    ready: /^Pattern check$/,
+  },
+  {
+    screen: 'Quality > Rejects > reason sheet',
+    control: 'Name it',
+    minRank: 2,
+    open: '/next/?s=quality&t=rejects&p=pick&from=2026-09-06&to=2026-09-06&sheet=reason:2026-09-06|quality|2|1',
+    routes: {
+      '/api/rejects/reason': { data: REASON_ONE, metadata: LIVE_FIXTURE.metadata },
+      '/api/rejects/by-day-code': { data: BY_DAY, metadata: LIVE_FIXTURE.metadata },
+      '/api/stations': { stations: [] },
+      '/api/products': { products: [] },
+    },
+    ready: /Failures for one reason|Code 2\/1/,
+  },
+];
+
+function mount(role: string, url = '/next/', extra: Record<string, unknown> = {}) {
   window.history.replaceState(null, '', url);
   installFakeFetch({
+    ...(extra as Record<string, never>),
     '/api/auth/me': { user: { username: 'u', displayName: 'U', role } },
     '/api/live': LIVE_FIXTURE,
     '/api/range': { minDate: '2026-08-05', maxDate: '2026-09-07', excludedDays: [], minProductionRows: 50 },
@@ -98,8 +141,18 @@ describe.each(ROLES)('$role (rank $rank)', ({ role, rank }) => {
   });
 
   for (const w of WRITE_CONTROLS) {
-    it(`${w.screen}: "${w.label}" ${rank >= w.minRank ? 'present' : 'absent'}`, () => {
-      expect(w).toBeDefined();
+    it(`${w.screen}: "${w.control}" ${rank >= w.minRank ? 'present' : 'absent'}`, async () => {
+      mount(role, w.open, w.routes);
+      await screen.findByRole('navigation', { name: 'Main navigation' });
+      await screen.findByRole('dialog', {}, { timeout: 4000 });
+      await within(await screen.findByRole('dialog')).findAllByText(w.ready, {}, { timeout: 4000 });
+      const btn = () => within(screen.getByRole('dialog')).queryByRole('button', { name: w.control });
+      if (rank >= w.minRank) await vi.waitFor(() => expect(btn()).toBeTruthy(), { timeout: 4000 });
+      else {
+        // Let the sheet's data land, then assert the control is still not there.
+        await new Promise((r) => setTimeout(r, 300));
+        expect(btn()).toBeNull();
+      }
     });
   }
 });
