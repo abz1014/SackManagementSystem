@@ -1,6 +1,6 @@
 import './chart.css';
 
-export { Frame, Legend, ChartEmpty, ChartError } from './Frame';
+export { Frame, Legend } from './Frame';
 export type { FrameProps, LegendItem } from './Frame';
 export { YAxis, XLabels } from './Axes';
 export { LimitBand } from './LimitBand';

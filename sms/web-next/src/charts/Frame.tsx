@@ -8,6 +8,8 @@
 import { useId, useState, type ReactNode } from 'react';
 import { C } from '../copy';
 import { ChartFrame, type ChartFrameProps } from '../bridge/chart';
+import { EmptyState } from '../ui/EmptyState';
+import { ErrorState } from '../ui/ErrorState';
 import { TableView, type TableData } from './TableView';
 import type { ChartStatus } from './types';
 
@@ -33,35 +35,6 @@ export function Legend({ items }: { items: LegendItem[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-/* TODO(C6): swap for ui/EmptyState and ui/ErrorState once they land; these are the minimal stand-ins. */
-export function ChartEmpty({ message, action, height }: { message: string; action?: { label: string; onClick: () => void }; height: number }) {
-  return (
-    <div className="ck-state" style={{ minHeight: height }} role="status">
-      <p>{message}</p>
-      {action && (
-        <button type="button" className="ck-btn" onClick={action.onClick}>
-          {action.label}
-        </button>
-      )}
-    </div>
-  );
-}
-
-export function ChartError({ part, onRetry, height }: { part: string; onRetry?: () => void; height: number }) {
-  return (
-    <div className="ck-state ck-error" style={{ minHeight: height }} role="alert">
-      <p>
-        <span className="ck-act-glyph" aria-hidden="true" /> {C.couldntLoad(part)}
-      </p>
-      {onRetry && (
-        <button type="button" className="ck-btn" onClick={onRetry}>
-          {C.tryAgain}
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -100,8 +73,8 @@ export function Frame(p: FrameProps) {
       </header>
       {status === 'ready' && p.legend && <Legend items={p.legend} />}
       {status === 'loading' && <div className="skel ck-skel" style={{ height: h }} role="status" aria-label={C.chart.loading} />}
-      {status === 'error' && <ChartError part={p.errorPart ?? p.title} onRetry={p.onRetry} height={h} />}
-      {status === 'empty' && <ChartEmpty message={p.emptyMessage ?? C.nothingInPeriodNoNewest} action={p.emptyAction} height={h} />}
+      {status === 'error' && <ErrorState part={p.errorPart ?? p.title} onRetry={p.onRetry} minHeight={h} />}
+      {status === 'empty' && <EmptyState message={p.emptyMessage} action={p.emptyAction} />}
       {status === 'ready' &&
         (asTable ? (
           <TableView caption={C.chart.tableCaption(p.title)} data={p.table} />

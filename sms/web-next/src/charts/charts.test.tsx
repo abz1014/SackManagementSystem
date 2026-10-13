@@ -97,6 +97,9 @@ describe('histogram', () => {
   });
 });
 
+/** Plot svgs only: the empty-state icon is a decorative svg inside an aria-hidden span. */
+const plots = (c: HTMLElement) => Array.from(c.querySelectorAll('svg')).filter((s) => !s.closest('[aria-hidden="true"]'));
+
 describe('states', () => {
   const props = { chartId: 's', title: 'Reject chart', unit: 'cones', categories: ['a'], series: [{ name: 'x', values: [1] }] };
   it('loading draws a skeleton and no plot', () => {
@@ -119,11 +122,11 @@ describe('states', () => {
     expect(screen.getByText('Nothing in this period.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Show newest data' }));
     expect(go).toHaveBeenCalled();
-    expect(container.querySelector('svg')).toBeNull();
+    expect(plots(container)).toHaveLength(0);
   });
   it('an all-null series is empty, not a flat plot', () => {
     const { container } = render(<BarChart {...props} series={[{ name: 'x', values: [null] }]} />);
-    expect(container.querySelector('svg')).toBeNull();
+    expect(plots(container)).toHaveLength(0);
   });
 });
 
