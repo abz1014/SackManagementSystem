@@ -15,7 +15,7 @@
  *  - Nothing is measured against the browser clock except the age of this
  *    browser's own last answer (a fact about the browser, not the plant).
  */
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { getProduction, type LiveLine, type StationStatusRow } from '../../bridge/api';
 import { fmt, generationWords, health as healthLib, live, period as P, simulatorWords } from '../../bridge/lib';
 import { W } from '../../bridge/words';
@@ -25,6 +25,8 @@ import { useData, usePeriod, useProduction, useStationStatus } from '../../data'
 import { hrefFor, plainClick } from '../../ui/nav';
 import { StatusPill, type UiState } from '../../ui/StatusPill';
 import type { ScreenProps } from '../registry';
+import { readUiScale, wallScale } from '../../ui/uiScale';
+import { inShiftOrder } from './shifts';
 import './wall.css';
 
 const WC = C.wall;
@@ -74,12 +76,15 @@ function lagSentence(health: ReturnType<typeof healthLib.assessHealth>): string 
 interface Kpi { key: string; label: string; value: string; unit: string; cls: string }
 
 /** Waits for the plant clock (which fixes the period), then draws the board. Nothing is fetched for an invented period. */
+/** The Wall honours the old app's saved display scale (localStorage sms.uiScale: 1 Desk, 1.3 Wall). */
+const wallStyleNow = (): CSSProperties => ({ '--wall-scale': wallScale(readUiScale()) } as CSSProperties);
+
 export function WallScreen(props: ScreenProps) {
   const { period, status, failed } = usePeriod();
   const { error } = live.useLive();
   if (!period) {
     return (
-      <div className="wall dark wl" data-wall>
+      <div className="wall dark wl" data-wall style={wallStyleNow()}>
         <a className="wl-exit" href={hrefFor(todayRoute(props.route))}>{WC.exit}</a>
         <p className="wl-hero state" data-state="watch">{WC.waiting}</p>
         <p className="wl-foot">
@@ -120,7 +125,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
 
   if (!line) {
     return (
-      <div className="wall dark wl" data-wall>
+      <div className="wall dark wl" data-wall style={wallStyleNow()}>
         {exit}
         <p className="wl-hero state" data-state="watch">{WC.waiting}</p>
         <p className="wl-foot">{error ? W.offline : W.loading}</p>
@@ -165,7 +170,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
     },
   ];
 
-  const shiftRows = shiftsD.data?.data.rows ?? null;
+  const shiftRows = shiftsD.data ? inShiftOrder(shiftsD.data.data.rows) : null;
   const shiftMax = shiftRows ? Math.max(1, ...shiftRows.map((r) => r.cones)) : 1;
 
   const failedParts: string[] = [];
@@ -178,7 +183,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
   const placeText = [line.plantName, line.unitName].filter(Boolean).join(', ');
 
   return (
-    <div className="wall dark wl" data-wall data-known={knowable ? 'yes' : 'no'}>
+    <div className="wall dark wl" data-wall data-known={knowable ? 'yes' : 'no'} style={wallStyleNow()}>
       <header className="wl-hdr">
         <div className="wl-brand">
           SMS <span>{[placeText, periodText].filter(Boolean).join(' · ')}</span>
@@ -266,7 +271,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
 
 function WallTile({ row, quiet }: { row: StationStatusRow; quiet: string | null }) {
   const nodata = row.state === 'nodata';
-  const name = row.name?.trim() ? C.stationWithName(row.station, row.name.trim()) : C.station(row.station);
+  const label = row.name?.trim() ?? '';
   const big = nodata || row.failedPct == null ? '–' : `${row.failedPct.toFixed(1)} %`;
   const m1 = nodata
     ? quiet
@@ -276,7 +281,15 @@ function WallTile({ row, quiet }: { row: StationStatusRow; quiet: string | null 
   return (
     <div className="wl-tile state" role="listitem" data-station={row.station} data-state={row.state}>
       <span className="wl-tile-top">
-        <span className="wl-tile-name">{name}</span>
+        <span className="wl-tile-name">
+          <span className="wl-tile-no">{C.station(row.station)}</span>
+          {label && (
+            <span className="wl-tile-sub">
+              <span className="sr-only"> · </span>
+              {label}
+            </span>
+          )}
+        </span>
         <StatusPill state={row.state} compact />
       </span>
       <span className="wl-tile-big">{big}</span>

@@ -1,5 +1,5 @@
 /* TV wall, dark Style C. Colour tokens come from styles/wall-dark.css (.wall.dark); type is scaled 1.6x by .wall in tokens.css. */
-.wl { min-height: 100vh; box-sizing: border-box; padding: var(--space-6) var(--space-7); display: grid; grid-template-rows: auto auto auto 1fr auto auto; gap: var(--space-5); background: var(--bg); color: var(--ink-2); }
+.wl { min-height: 100vh; box-sizing: border-box; padding: var(--space-5) var(--space-7); display: grid; grid-template-rows: auto auto auto 1fr auto auto; gap: var(--space-4); background: var(--bg); color: var(--ink-2); }
 .wl-hdr { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-5); }
 .wl-brand { font-size: var(--fs-5); font-weight: var(--fw-semibold); color: var(--ink-1); }
 .wl-brand span { margin-left: var(--space-3); font-size: var(--fs-3); font-weight: var(--fw-regular); color: var(--ink-3); }
@@ -18,8 +18,10 @@
 .wl-kpi-unit { margin-left: 6px; font-size: var(--fs-3); font-weight: var(--fw-regular); letter-spacing: 0; color: var(--ink-3); }
 .wl-heat { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--space-3); align-content: stretch; }
 .wl-tile { display: grid; align-content: start; gap: 2px; padding: var(--space-3) var(--space-4); border-radius: var(--radius-tile); background: var(--card-bg); box-shadow: 0 0 0 1px var(--line); min-width: 0; }
-.wl-tile-top { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
-.wl-tile-name { font-size: var(--fs-3); font-weight: var(--fw-semibold); color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-tile-no { white-space: nowrap; }
+.wl-tile-sub { display: block; font-size: var(--fs-1); line-height: var(--lh-1); font-weight: var(--fw-regular); color: var(--ink-2); overflow-wrap: break-word; }
+.wl-tile-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-2); }
+.wl-tile-name { font-size: var(--fs-3); font-weight: var(--fw-semibold); color: var(--ink-1); min-width: 0; line-height: var(--lh-3); }
 .wl-tile-big { font-size: var(--fs-5); line-height: var(--lh-5); font-weight: var(--fw-bold); letter-spacing: -.04em; color: var(--ink-1); font-feature-settings: var(--tnum); }
 .wl-tile-meta { font-size: var(--fs-1); line-height: var(--lh-1); color: var(--ink-3); }
 .wl-tile-meta:first-of-type { color: var(--ink-2); }
