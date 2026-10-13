@@ -13,7 +13,7 @@
  * browser. The old app had seven date controls that disagreed with each other,
  * which is why nobody could say what period a number described.
  */
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
 import {
   getMe, logout as apiLogout, setUnauthorizedHandler, ROLE_RANK, REPORT_TYPES, CONE_STATES,
   type AuthUser, type ReportType, type ConeState, type SpcType,
@@ -27,21 +27,27 @@ import { Loading } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { SimulatorBanner } from './ui/SimulatorBanner';
 import { LineScreen } from './screens/Line';
+import { ProductScreen } from './screens/Product';
 import { ReadingsScreen, LISTINGS, type Listing } from './screens/Readings';
 import { ReadingSheet } from './screens/ReadingSheet';
 import { StationSheet } from './screens/StationSheet';
-import { ProductScreen } from './screens/Product';
-import { ReportScreen } from './screens/Report';
 import { WeightScreen, type WeightMode } from './screens/Weight';
 import { RejectsScreen } from './screens/Rejects';
 import { ReasonSheet, reasonIdOf } from './screens/ReasonSheet';
-import { WallScreen } from './screens/Wall';
-import { SetupScreen } from './screens/Setup';
-import { HealthScreen } from './screens/Health';
 import { SacksScreen, type SackUnit } from './screens/Sacks';
 import { StockSheet } from './screens/StockSheet';
 import { LoginScreen } from './screens/Login';
 import './app.css';
+
+/* Route-level code splitting (Phase 3 / P3-04, 12 Oct 2026). Measured: the app was ONE 642,671 B script, so opening Line
+ * downloaded and parsed about 174 kB of Report, Setup, Health and Wall code it does not show (M-BUNDLE; measured 468.6 kB after). These four load
+ * on first visit; a failed chunk load is caught by the surrounding ErrorBoundary. Line, Readings, Weight, Rejects and Sacks stay
+ * in the main file because their shared report pieces (PrintHead, report/shared) are value-imported by them anyway. Product also
+ * stays: rank.matrix.test.tsx pins its rank-gated write control synchronously, and a lazy Product would turn that test hollow. */
+const ReportScreen = lazy(() => import('./screens/Report').then((m) => ({ default: m.ReportScreen })));
+const WallScreen = lazy(() => import('./screens/Wall').then((m) => ({ default: m.WallScreen })));
+const SetupScreen = lazy(() => import('./screens/Setup').then((m) => ({ default: m.SetupScreen })));
+const HealthScreen = lazy(() => import('./screens/Health').then((m) => ({ default: m.HealthScreen })));
 
 /* ------------------------------------------------------------------- zoom */
 
@@ -507,7 +513,9 @@ function Chrome({
   if (route.view === 'wall') {
     return (
       <ErrorBoundary variant="wall" label={W.wall}>
-        <WallScreen onExit={() => go({ view: 'line' })} />
+        <Suspense fallback={<Loading />}>
+          <WallScreen onExit={() => go({ view: 'line' })} />
+        </Suspense>
       </ErrorBoundary>
     );
   }
@@ -612,6 +620,7 @@ function Chrome({
         {/* Not .page any more: every band carries its own 1100px page inside a
             full-bleed rule, and each screen wraps its head area in one. */}
         <main id="main" tabIndex={-1}>
+          <Suspense fallback={<Loading />}>
           {route.view === 'line' && (
             <LineScreen
               period={period}
@@ -767,6 +776,7 @@ function Chrome({
           {route.view === 'health' && (
             <HealthScreen isAdmin={rank >= 4} canAcknowledge={rank >= ENGINEER_RANK} onOpenReading={(kind, id) => go({ sheet: { kind, id: String(id) } })} />
           )}
+          </Suspense>
         </main>
 
         {/* Drill-downs open over the screen and close with Escape, so the reader
