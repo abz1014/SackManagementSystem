@@ -706,7 +706,7 @@ export const C = {
     /* reason sheet */
     sheetTitle: 'Failures for one reason',
     malformed: 'This link does not name a reason and a day.',
-    dayBasisLine: (day: string) => `${day} · production day`,
+    dayBasisLine: (day: string, scope?: string) => (scope ? `${day} · production day · limited to ${scope}` : `${day} · production day`),
     sheetCount: (n: string, reason: string) => `${n} ${n === '1' ? 'cone' : 'cones'} failed inspection for ${reason}`,
     sheetCountWeight: (n: string) => `${n} weight-reject records`,
     stationNamesMissing: "Station names couldn't be loaded, so stations show as numbers.",

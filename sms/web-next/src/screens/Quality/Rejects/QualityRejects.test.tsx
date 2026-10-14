@@ -372,6 +372,25 @@ describe('ReasonSheet (A3-057, A6-S5, A1-067)', () => {
     expect(within(cones).queryByText('205-IL0-SD')).toBeNull();
   });
 
+  it('header count and cone list follow the page shift, and the sheet says so (never 47 above a table row of 8)', async () => {
+    openSheet(1, '2026-09-06|quality|2|1', {}, 's=quality&t=rejects&p=shift');
+    await screen.findByText(/2 cones failed inspection/);
+    const req = ff!.requests.find((r) => r.startsWith('/api/rejects/reason?'))!;
+    expect(new URLSearchParams(req.split('?')[1]).get('shift')).toMatch(/^(morning|evening|night)$/);
+    expect(screen.getByText(/production day · limited to .*shift/)).toBeTruthy();
+    // the by-day table asks with the same shift
+    const byDay = ff!.requests.find((r) => r.startsWith('/api/rejects/by-day-code?'))!;
+    expect(new URLSearchParams(byDay.split('?')[1]).get('shift')).toBe(new URLSearchParams(req.split('?')[1]).get('shift'));
+  });
+
+  it('a whole-day period adds no limit and no note', async () => {
+    openSheet(1, '2026-09-06|quality|2|1', {}, 's=quality&t=rejects&p=yesterday');
+    await screen.findByText(/2 cones failed inspection/);
+    const req = ff!.requests.find((r) => r.startsWith('/api/rejects/reason?'))!;
+    expect(new URLSearchParams(req.split('?')[1]).has('shift')).toBe(false);
+    expect(screen.queryByText(/limited to/)).toBeNull();
+  });
+
   it('never prints "data batch" in the cone list, though the rows carry a batch ordinal (TRACE B7-8)', async () => {
     openSheet(1);
     expect(await screen.findByText('Station 3')).toBeTruthy();

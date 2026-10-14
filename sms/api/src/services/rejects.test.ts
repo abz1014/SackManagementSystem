@@ -408,6 +408,20 @@ describe('listRejectsOfDayCode — the reason sheet\'s list', () => {
     expect(b).toContain('20 Slub');
   });
 
+  it('a shift range clips the day: the clause and its params reach the count and the page', async () => {
+    const { pool, statements } = recordingPool([[], [{ n: 0 }], []]);
+    await listRejectsOfDayCode(pool, 1, {
+      day: '2026-09-06', code: { kind: 'weight' }, page: 1, pageSize: 50,
+      shiftRange: { from: '2026-09-05', fromShift: 'evening', to: '2026-09-07', toShift: 'morning' },
+    });
+    const [, countQ, rowsQ] = statements;
+    for (const s of [countQ!, rowsQ!]) {
+      expect(s.sql).toContain('@srFrom');
+      expect(s.inputs.get('srFromOrd')).toBe(2);
+      expect(s.inputs.get('from')).toBe('2026-09-06');
+    }
+  });
+
   it('a weight code without a dictionary row yet has no id to rename and the kind as its label', async () => {
     const { pool } = recordingPool([[], [{ n: 0 }], []]);
     const out = await listRejectsOfDayCode(pool, 1, { day: '2026-09-06', code: { kind: 'weight' }, page: 1, pageSize: 50 });

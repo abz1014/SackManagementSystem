@@ -22,6 +22,7 @@ import { envelope } from '../envelope.js';
 import { MAX_RANGE_DAYS } from '../config.js';
 import { getRejectsByDayCode, listRejectsOfDayCode, parseCodeParam, type RejectFilters } from '../services/rejects.js';
 import { isoDate, isoTimestamp } from '../dates.js';
+import type { ShiftRange } from '../shiftRange.js';
 import { decodeShiftRangeParam, isShiftRangeError } from './shiftRangeParam.js';
 
 /**
@@ -66,6 +67,17 @@ const reasonQuery = z.object({
   shift: filterSchema.shift,
   station: filterSchema.station,
   product: filterSchema.product,
+  /**
+   * The PAGE's period, optional (14 Oct 2026). The sheet's header count and cone
+   * list used to cover the whole production day while its day-by-day table
+   * followed the page's shift / shift range ("47 cones" over a table row of 8).
+   * A caller that passes `from`/`to` with `fromShift`/`toShift` gets the day
+   * clipped to that shift range, exactly the clause the by-day table applied.
+   */
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  fromShift: shiftRefParam,
+  toShift: shiftRefParam,
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(200),
 });
@@ -122,8 +134,23 @@ export function mountRejectsRoutes(ctx: RouteContext): void {
         res.status(400).json({ error: 'invalid code — expected weight or <tube>-<material>' });
         return;
       }
+      let shiftRange: ShiftRange | undefined;
+      if (q.data.fromShift != null || q.data.toShift != null) {
+        const decoded = decodeShiftRangeParam({
+          from: q.data.from,
+          to: q.data.to,
+          fromShift: q.data.fromShift,
+          toShift: q.data.toShift,
+        });
+        if (isShiftRangeError(decoded)) {
+          res.status(400).json({ error: decoded.error });
+          return;
+        }
+        shiftRange = decoded;
+      }
       const data = await listRejectsOfDayCode(pool, cfg.lineId, {
         day: q.data.day,
+        shiftRange,
         code,
         shift: q.data.shift,
         station: q.data.station,

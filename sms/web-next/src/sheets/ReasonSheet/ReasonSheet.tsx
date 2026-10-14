@@ -47,9 +47,24 @@ export function ReasonSheet({ route, rank, go, onClose }: SheetProps) {
 function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: SheetProps['route']; go: SheetProps['go'] }) {
   const code = codeOf(id);
   const { period, status: periodStatus, failed: periodFailed } = usePeriod();
-  const reason = useData('this reason', () => getRejectReason({ day: id.day, code, pageSize: 200 }), `reason:${id.day}:${code}`, { live: false });
-  const stations = useData('station list', () => getStations(), 'stations', { live: false });
   const pq = period ? P.periodQuery(period) : null;
+  /*
+   * The header count and the cone list cover the SAME shifts as the day-by-day table below: the page's shift or
+   * shift range, clipped to this day. (They used to cover the whole production day while the table followed the
+   * period, so a sheet could say "47 cones" above a table row of 8.) A whole-day range adds no limit. If the
+   * period itself could not be read the table says so, and the count falls back to the whole day, labelled so.
+   */
+  const wholeDay = !!period && period.key === 'range' && period.fromShift?.shift === 'morning' && period.toShift?.shift === 'night';
+  const scoped = !!pq && !wholeDay && !!(pq.shift || (pq.fromShift && pq.toShift));
+  const scopeWords = scoped && period ? P.describePeriod(period) : null;
+  const reasonScope = scoped && pq ? { shift: pq.shift, from: pq.from, to: pq.to, fromShift: pq.fromShift, toShift: pq.toShift } : {};
+  const reason = useData(
+    'this reason',
+    () => (pq || periodStatus === 'error' ? getRejectReason({ day: id.day, code, pageSize: 200, ...reasonScope }) : new Promise<never>(() => {})),
+    `reason:${id.day}:${code}:${scoped ? [pq?.shift ?? '', pq?.from, pq?.to, pq?.fromShift ?? '', pq?.toShift ?? ''].join('|') : pq || periodStatus === 'error' ? 'whole-day' : `wait:${periodStatus}`}`,
+    { live: false },
+  );
+  const stations = useData('station list', () => getStations(), 'stations', { live: false });
   const days = useData(
     'days for this reason',
     () => (pq ? getRejectsByDayCode({ ...pq, code }) : periodStatus === 'error' ? Promise.reject(new Error(`${periodFailed[0] ?? 'The plant clock'} could not be read, so the days cannot be listed.`)) : new Promise<never>(() => {})),
@@ -102,7 +117,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
   return (
     <div className="rs-body">
       {stations.status === 'error' && <p className="rs-note" role="status">{R.stationNamesMissing} {stations.error}</p>}
-      <p className="rs-day">{R.dayBasisLine(fmtDate(id.day))}</p>
+      <p className="rs-day">{R.dayBasisLine(fmtDate(id.day), scopeWords ?? undefined)}</p>
 
       {reason.status === 'error' ? (
         <ErrorState part={RF.part.thisReason} cause={reason.error} onRetry={reason.refresh} />

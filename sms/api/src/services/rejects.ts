@@ -544,10 +544,10 @@ export interface RejectReasonResult {
 export async function listRejectsOfDayCode(
   pool: ConnectionPool,
   lineId: number,
-  q: { day: string; code: RejectCodeFilter; station?: number; product?: number; shift?: RejectFilters['shift']; page: number; pageSize: number },
+  q: { day: string; code: RejectCodeFilter; station?: number; product?: number; shift?: RejectFilters['shift']; shiftRange?: ShiftRange; page: number; pageSize: number },
 ): Promise<RejectReasonResult> {
   const { f, note } = await scoped(pool, lineId, {
-    from: q.day, to: q.day, code: q.code, station: q.station, product: q.product, shift: q.shift,
+    from: q.day, to: q.day, code: q.code, station: q.station, product: q.product, shift: q.shift, shiftRange: q.shiftRange,
   });
 
   const codeRow = await pool

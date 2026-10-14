@@ -245,6 +245,18 @@ describe('GET /api/rejects/reason', () => {
     expect(list.inputs.get('codeTube')).toBe(1);
   });
 
+  it('a page shift range clips the day, so the header and cone list agree with the day-by-day table', async () => {
+    const r = await get('/api/rejects/reason?day=2026-09-06&code=1-3&from=2026-09-05&to=2026-09-07&fromShift=2026-09-05.evening&toShift=2026-09-07.morning');
+    expect(r.status).toBe(200);
+    const list = db.statements.find((s) => s.sql.includes('OFFSET @offset'))!;
+    expect(list.sql).toContain('@srFrom');
+    expect(list.inputs.get('srFromOrd')).toBe(2);
+    expect(list.inputs.get('srToOrd')).toBe(1);
+    expect(list.inputs.get('from')).toBe('2026-09-06');
+    // a half-given pair is refused, like every other route
+    expect((await get('/api/rejects/reason?day=2026-09-06&code=1-3&fromShift=2026-09-05.evening')).status).toBe(400);
+  });
+
   it('refuses a missing day or code, a bad code, and a page size over 500', async () => {
     expect((await get('/api/rejects/reason?code=1-3')).status).toBe(400);
     expect((await get('/api/rejects/reason?day=2026-09-06')).status).toBe(400);

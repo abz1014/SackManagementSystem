@@ -1776,9 +1776,17 @@ export interface RejectReasonData {
 }
 export function getRejectReason(q: {
   day: string; code: string; shift?: string; station?: number; product?: number; page?: number; pageSize?: number;
+  /** The page's period (from/to + the encoded fromShift/toShift of a shift range), so the day is clipped to the same shifts as the by-day table. */
+  from?: string; to?: string; fromShift?: string; toShift?: string;
 }): Promise<Envelope<RejectReasonData>> {
   const p = new URLSearchParams({ day: q.day, code: q.code });
   if (q.shift) p.set('shift', q.shift);
+  if (q.fromShift && q.toShift) {
+    if (q.from) p.set('from', q.from);
+    if (q.to) p.set('to', q.to);
+    p.set('fromShift', q.fromShift);
+    p.set('toShift', q.toShift);
+  }
   if (q.station != null) p.set('station', String(q.station));
   if (q.product != null) p.set('product', String(q.product));
   if (q.page) p.set('page', String(q.page));
