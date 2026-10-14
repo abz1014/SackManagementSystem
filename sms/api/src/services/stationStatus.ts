@@ -26,7 +26,10 @@
  * THE PERIOD ONLY. This is a plain count over the period on screen. It does
  * NOT use `flagged` / `projection` / drift from the 14-day detector window
  * (CLAUDE.md: the detectors ignore the period). `vsTargetG` and `product` are
- * taken only from the period rows (each station's OWN product and target).
+ * taken only from the period rows (each station's OWN product and target),
+ * and under a shift or shift range they are taken over THAT shift's cones
+ * (getWeightStations' `narrowPopulation`), the same population `cones` and
+ * `failedPct` count - fixed 14 Oct 2026, they used to cover the whole day.
  *
  * NO `tsTo`. The underlying count services (rejectRatesByStation,
  * getWeightStations) cannot cap by instant, so a replay instant could not be
@@ -127,7 +130,7 @@ export async function getStationStatus(
   const products = new Map<number, { label: string | null; basis: 'own' | 'mixed' | 'line'; materials?: number }>();
   try {
     const w = await getWeightStations(pool, lineId, from, to, undefined, {
-      from, to, shiftRange: opts.shiftRange, shift: opts.shift ?? null,
+      from, to, shiftRange: opts.shiftRange, shift: opts.shift ?? null, narrowPopulation: true,
     });
     for (const s of w.stations) {
       targets.set(s.station, s.n > 0 ? s.vsTargetG : null);

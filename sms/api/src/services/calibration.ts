@@ -52,6 +52,7 @@ import type { PlausibilityRule } from './admin.js';
 import { nelsonViolations, nelsonRuleTable, type NelsonRuleId, type NelsonRuleInfo } from './nelson.js';
 import { consecutiveProductionDays, plantOffsetMinutes, toPlantIso, toPlantMs } from './plantClock.js';
 import { plausibleWhere } from './coneState.js';
+import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
 import { epochFragment, noteOf, resolveGenerationScope, type GenerationNote } from './generation.js';
 
 function round(n: number, dp = 2): number {
@@ -132,6 +133,16 @@ export interface StationDriftOptions {
    * for the raw series.
    */
   restarts?: Restarts;
+  /**
+   * OPTIONAL shift narrowing of the POPULATION the means are taken over (fix of
+   * 14 Oct 2026, station tiles under a shift): `/api/station-status` needs the
+   * mean and material mix of the SHIFT on screen, not of the whole production
+   * day. Omitted (every other caller) the query is byte-identical. The rows are
+   * still grouped by `shift_date`, so this is one population per call; it is
+   * only meaningful for a caller that ignores the Nelson/run output (those need
+   * whole days).
+   */
+  population?: { shift?: 'morning' | 'evening' | 'night' | null; shiftRange?: ShiftRange };
 }
 
 /** End-of-day instant of a production day on the production clock, for comparing against a restart. */
@@ -212,17 +223,28 @@ export async function getStationDrift(
     for (const q of gen0.params) rq.input(q.name, mssql.Int, q.id);
     return rq;
   };
-  const r = await bindGen(pool.request())
+  const popReq = (rq: mssql.Request): string => {
+    let frag = '';
+    const pop = opts.population;
+    if (pop?.shiftRange) frag += ` AND ${shiftRangeClause(pop.shiftRange, { date: 'shift_date', code: 'shift_code' }, rq)}`;
+    if (pop?.shift) {
+      rq.input('popShift', mssql.VarChar(10), pop.shift);
+      frag += ' AND shift_code = @popShift';
+    }
+    return frag;
+  };
+  const mainReq = bindGen(pool.request())
     .input('line', mssql.Int, lineId)
     .input('from', mssql.Date, from)
     .input('to', mssql.Date, to)
     .input('plausLo', mssql.Float, plausibility.coneLoG)
-    .input('plausHi', mssql.Float, plausibility.coneHiG)
-    .query<{ st: number; d: Date; n: number; mean: number; sd: number | null }>(
+    .input('plausHi', mssql.Float, plausibility.coneHiG);
+  const mainPop = popReq(mainReq);
+  const r = await mainReq.query<{ st: number; d: Date; n: number; mean: number; sd: number | null }>(
       `SELECT source_station st, shift_date d, COUNT(*) n,
               AVG(CAST(weight_g AS float)) mean, STDEV(CAST(weight_g AS float)) sd
        FROM sms.cone_event
-       WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}
+       WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}${mainPop}
          AND weight_g IS NOT NULL AND weight_g BETWEEN @plausLo AND @plausHi
          AND source_station IS NOT NULL
        GROUP BY source_station, shift_date
@@ -237,11 +259,12 @@ export async function getStationDrift(
     .input('from', mssql.Date, from)
     .input('to', mssql.Date, to);
   const medWhere = plausibleWhere(medReq, 'weight_g', { loG: plausibility.coneLoG, hiG: plausibility.coneHiG });
+  const medPop = popReq(medReq);
   const med = await medReq.query<{ st: number; med: number | null }>(
     `SELECT DISTINCT source_station st,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(weight_g AS float)) OVER (PARTITION BY source_station) med
      FROM sms.cone_event
-     WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}
+     WHERE line_id=@line AND shift_date BETWEEN @from AND @to${genAnd}${medPop}
        AND weight_g IS NOT NULL AND ${medWhere}
        AND source_station IS NOT NULL`,
   );

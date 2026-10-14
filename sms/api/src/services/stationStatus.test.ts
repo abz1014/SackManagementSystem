@@ -15,6 +15,7 @@ const defaultWs = () => ({
   stations: [{ station: 1, n: 100, meanG: 1950, vsTargetG: -4.26 }, { station: 2, n: 0, meanG: 0, vsTargetG: 3 }] as Record<string, unknown>[],
 });
 const ws = { data: defaultWs() };
+const wsArgs = vi.hoisted(() => ({ last: [] as unknown[] }));
 
 vi.mock('./admin.js', () => ({ listStations: async () => st.stations }));
 vi.mock('./weightStations.js', () => ({
@@ -22,7 +23,10 @@ vi.mock('./weightStations.js', () => ({
     rates: st.rates, cones: st.cones, totalCones: st.totalCones,
     totalRejects: st.totalRejects, totalUnmatchedRejects: st.totalUnmatchedRejects,
   }),
-  getWeightStations: async () => ws.data,
+  getWeightStations: async (...a: unknown[]) => {
+    wsArgs.last = a;
+    return ws.data;
+  },
 }));
 
 const { getStationStatus, decideState } = await import('./stationStatus.js');
@@ -119,5 +123,14 @@ describe('getStationStatus', () => {
     } finally {
       ws.data = defaultWs();
     }
+  });
+});
+
+describe('getStationStatus - shift scope of the target context (14 Oct 2026)', () => {
+  it('asks getWeightStations to narrow the mean to the same shift and range as the counts', async () => {
+    setup(2, [{ id: 1, cones: 100, rate: 2 }]);
+    const range = { from: '2026-09-01', fromShift: 'morning', to: '2026-09-02', toShift: 'evening' } as never;
+    await getStationStatus(pool, 1, { from: '2026-09-01', to: '2026-09-02', shift: 'evening', shiftRange: range });
+    expect(wsArgs.last[5]).toMatchObject({ from: '2026-09-01', to: '2026-09-02', shift: 'evening', shiftRange: range, narrowPopulation: true });
   });
 });

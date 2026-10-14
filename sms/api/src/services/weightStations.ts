@@ -456,7 +456,21 @@ export async function getWeightStations(
    * and, just as importantly, what it deliberately is NOT (the drift/target
    * window, which stays `from`/`to`, untouched). Defaults to `{ from, to }`.
    */
-  period?: { from: string; to: string; shiftRange?: ShiftRange; shift?: 'morning' | 'evening' | 'night' | null },
+  period?: {
+    from: string;
+    to: string;
+    shiftRange?: ShiftRange;
+    shift?: 'morning' | 'evening' | 'night' | null;
+    /**
+     * OPT-IN (14 Oct 2026, /api/station-status): also narrow the means and the
+     * material mix (`meanG`, `vsLineG`, `vsTargetG`, `targetBasis`) to the
+     * period's shift / shift range. ALL of them move together, so the "one
+     * population per row" contract above still holds. Only valid when the
+     * caller's `from`/`to` are the period itself (no trailing window) and it
+     * does not use the run/flag/projection output, which needs whole days.
+     */
+    narrowPopulation?: boolean;
+  },
 ): Promise<WeightStationsData> {
   const periodWindow = period ?? { from, to };
   // No second resolve when the period coincides with the trailing window
@@ -581,14 +595,15 @@ export async function getWeightStations(
   // fixture that supplies no fourth response simply gets an empty
   // recordset here, which resolves to every station falling back to
   // targetBasis 'line_product' — the same target those tests already expect.
+  const population = period?.narrowPopulation ? { shift: periodWindow.shift ?? null, shiftRange: periodWindow.shiftRange } : undefined;
   const [drift, rejectStats] = await Promise.all([
-    getStationDrift(pool, lineId, from, to, plausibility, { restarts }),
+    getStationDrift(pool, lineId, from, to, plausibility, { restarts, ...(population ? { population } : {}) }),
     rejectRatesByStation(pool, lineId, periodWindow.from, periodWindow.to, periodScope, periodWindow.shiftRange, periodWindow.shift),
   ]);
   const rejects = rejectStats.rates;
   // stationMaterialCounts stays on the TRAILING window/scope — see this
   // function's file-header note on why it is not extended to `period`.
-  const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility, scope);
+  const stationMaterials = await stationMaterialCounts(pool, lineId, from, to, plausibility, scope, population);
   // NOTE: when `period` differs from the trailing window, this single field
   // describes `rejectRatesByStation`'s (the period's) generation, not
   // `stationMaterialCounts`'s (the trailing window's) — the WS-A1/WS-PERF4
@@ -802,6 +817,7 @@ async function stationMaterialCounts(
   to: string,
   plausibility: PlausibilityRule,
   scope: GenerationScope,
+  population?: { shift?: 'morning' | 'evening' | 'night' | null; shiftRange?: ShiftRange },
 ): Promise<Map<number, { materialId: number | null; n: number }[]>> {
   // WS-PERF4 (24 Sep 2026): `scope` is now RESOLVED BY THE CALLER
   // (`getWeightStations`, once, for the window it shares with
@@ -813,12 +829,19 @@ async function stationMaterialCounts(
   // with the union its OTHER consumer (`rejectRatesByStation`) also needs.
   const req = pool.request().input('line', mssql.Int, lineId).input('from', mssql.Date, from).input('to', mssql.Date, to);
   const plaus = plausibleWhere(req, 'weight_g', { loG: plausibility.coneLoG, hiG: plausibility.coneHiG });
-  const where = andEpoch(
-    `line_id=@line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL AND ${plaus}`,
-    req,
-    scope,
-    'cone_event',
-  );
+  let popFrag = '';
+  if (population?.shiftRange) popFrag += ` AND ${shiftRangeClause(population.shiftRange, { date: 'shift_date', code: 'shift_code' }, req)}`;
+  if (population?.shift) {
+    req.input('popShift', mssql.VarChar(10), population.shift);
+    popFrag += ' AND shift_code = @popShift';
+  }
+  const where =
+    andEpoch(
+      `line_id=@line AND shift_date BETWEEN @from AND @to AND source_station IS NOT NULL AND ${plaus}`,
+      req,
+      scope,
+      'cone_event',
+    ) + popFrag;
   const r = await req.query<{ st: number; mat: number | null; n: number }>(
     `SELECT source_station st, material_id mat, COUNT(*) n
        FROM sms.cone_event
