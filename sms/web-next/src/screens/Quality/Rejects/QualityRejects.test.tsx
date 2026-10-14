@@ -338,10 +338,10 @@ describe('reason ids keep the old shape', () => {
 });
 
 describe('ReasonSheet (A3-057, A6-S5, A1-067)', () => {
-  function openSheet(rank: number, id = '2026-09-06|quality|2|1', extra: Routes = {}) {
-    window.history.replaceState(null, '', '/next/?s=quality&t=rejects');
+  function openSheet(rank: number, id = '2026-09-06|quality|2|1', extra: Routes = {}, q = 's=quality&t=rejects') {
+    window.history.replaceState(null, '', `/next/?${q}`);
     ff = installFakeFetch(routes(extra));
-    const route = { ...parseRoute(new URLSearchParams('s=quality&t=rejects')), sheet: { kind: 'reason' as const, id } };
+    const route = { ...parseRoute(new URLSearchParams(q)), sheet: { kind: 'reason' as const, id } };
     return render(
       <live.LiveProvider asOf={null}>
         <ReasonSheet route={route} rank={rank} user={ME as never} go={go} onClose={vi.fn()} />
@@ -357,6 +357,19 @@ describe('ReasonSheet (A3-057, A6-S5, A1-067)', () => {
     expect(await screen.findByText('Station 3')).toBeTruthy();
     expect(screen.getByText('Product not recorded')).toBeTruthy();
     expect(ff!.requests.some((r) => r.startsWith('/api/rejects/reason?') && r.includes('day=2026-09-06') && r.includes('code=2-1'))).toBe(true);
+  });
+
+  it('names each cone product by the distinct label, the short form growing only where two would read alike', async () => {
+    const A = '205-IL0-SD · ORANGE · PVSD8020 · 30';
+    const B = '205-IL0-SD · ORANGE · PVSD8020 · 20 Slub';
+    const C = '205-IL0-SD · Blue · PVSD8020 · 36';
+    const row = (eventId: number, label: string) => ({ ...REASON_ONE.rows[0]!, eventId, productLabel: label });
+    openSheet(1, '2026-09-06|quality|2|1', { '/api/rejects/reason': env({ ...REASON_ONE, total: 3, rows: [row(1, A), row(2, B), row(3, C)] }) });
+    const cones = await screen.findByRole('table', { name: 'Cones on 2026-09-06' });
+    await within(cones).findByText(A);
+    expect(within(cones).getByText(B)).toBeTruthy();
+    expect(within(cones).getByText('205-IL0-SD · Blue').getAttribute('title')).toBe(C);
+    expect(within(cones).queryByText('205-IL0-SD')).toBeNull();
   });
 
   it('never prints "data batch" in the cone list, though the rows carry a batch ordinal (TRACE B7-8)', async () => {

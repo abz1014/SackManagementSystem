@@ -25,6 +25,7 @@ import {
   type GenerationNote, type GenerationScope,
 } from './generation.js';
 import { shiftRangeClause, type ShiftRange } from '../shiftRange.js';
+import { loadProductCatalogue } from './productLimits.js';
 
 /**
  * Resolve the source generation for a filter bag and return the bag with it
@@ -587,6 +588,17 @@ export async function listRejectsOfDayCode(
     OFFSET @offset ROWS FETCH NEXT @take ROWS ONLY
   `);
 
+  // The label every other screen prints for a product (the Board, the tiles): the
+  // PDAS description is shared by several materials, so it is not enough on its own.
+  // Loaded only when a row carries a material, after the page queries.
+  const catalogue = rows.recordset.some((x) => x.material_id != null) ? await loadProductCatalogue(pool) : null;
+  const productLabelOf = (x: { material_id: number | null; description: string | null; lot_code: string | null }): string | null => {
+    if (x.material_id == null) return null;
+    const id = Number(x.material_id);
+    if (catalogue?.product(id)) return catalogue.distinctLabel(id);
+    return x.description || x.lot_code || `Product ${id}`;
+  };
+
   const base = {
     rejectType: q.code.kind,
     tubeCode: q.code.kind === 'quality' ? q.code.tube : null,
@@ -610,9 +622,9 @@ export async function listRejectsOfDayCode(
       shiftCode: x.shift_code,
       station: x.source_station == null ? null : Number(x.source_station),
       materialId: x.material_id == null ? null : Number(x.material_id),
-      // The same words currentProduct.ts uses for a product, so the sheet and
-      // the Line screen name it identically.
-      productLabel: x.material_id == null ? null : x.description || x.lot_code || `Product ${x.material_id}`,
+      // The distinct label (code · colour · tube · count), so the sheet names a
+      // cone's product the way the Board and the tiles do.
+      productLabel: productLabelOf(x),
       weightG: x.weight_g == null ? null : Number(x.weight_g),
       sourceRowId: x.source_row_id == null ? null : Number(x.source_row_id),
       epochLabel: x.epoch_label ?? null,

@@ -13,6 +13,7 @@ import { getRejectReason, getRejectsByDayCode, getStations, stationLabel, type R
 import { fmt, period as P } from '../../bridge/lib';
 import { W } from '../../bridge/words';
 import { fmtDate, fmtDayShort, fmtTime } from '../../lib/fmt';
+import { shortProductLabel } from '../../lib/stationProduct';
 import { useData } from '../../data';
 import { usePeriod } from '../../data/usePeriod';
 import { hrefFor, plainClick } from '../../ui/nav';
@@ -64,6 +65,8 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
     go({ ...route, sheet: { kind: 'reason', id: reasonIdOf({ ...id, day }) } }, { replace: true });
   const hop = (r: ReturnType<typeof dayRegisterHop>) => ({ href: hrefFor(r), onClick: (e: React.MouseEvent) => plainClick(e, () => go(r)) });
 
+  const shownProducts = (d?.rows ?? []).map((r) => r.productLabel);
+
   const dayCols: Column<RejectDayCodeRow>[] = [
     { key: 'day', header: R.colDay, render: (r) => fmtDayShort(`${r.day}T12:00:00Z`) },
     { key: 'count', header: R.colCones, numeric: true, render: (r) => fmtCount(r.count) },
@@ -86,7 +89,7 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
       header: R.colProductRecord,
       render: (r) => (
         <>
-          <span>{r.productLabel ?? R.noProductThen}</span>
+          <span title={r.productLabel ?? undefined}>{r.productLabel ? shortProductLabel(r.productLabel, shownProducts) : R.noProductThen}</span>
           <span className="rs-sub">
             {r.sourceRowId == null ? '–' : String(r.sourceRowId)}
           </span>

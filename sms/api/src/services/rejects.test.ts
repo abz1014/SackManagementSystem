@@ -385,6 +385,29 @@ describe('listRejectsOfDayCode — the reason sheet\'s list', () => {
     expect(rowsQ!.sql).toContain('ep.label AS epoch_label');
   });
 
+  it('names each cone product by the distinct label the Board uses, not the shared description', async () => {
+    const { pool } = recordingPool([
+      [{ reject_code_id: 11, label: null, is_pass: false }],
+      [{ n: 2 }],
+      [
+        { event_id: 1, production_ts_utc: new Date('2026-09-06T07:12:00Z'), shift_code: 'morning', source_station: 3, material_id: 1021, description: '205-IL0-SD', lot_code: null, weight_g: null, source_row_id: 1, epoch_label: null, attribution_method: 'source_column' },
+        { event_id: 2, production_ts_utc: new Date('2026-09-06T07:13:00Z'), shift_code: 'morning', source_station: 3, material_id: 1023, description: '205-IL0-SD', lot_code: null, weight_g: null, source_row_id: 2, epoch_label: null, attribution_method: 'source_column' },
+      ],
+      // loadProductCatalogue: product rows, then limit versions
+      [
+        { product_id: 1021, description: '205-IL0-SD', lot_code: null, active_flag: true, color: 'ORANGE', blend: 'PVSD8020', count_text: '30', tube_type: 'T' },
+        { product_id: 1023, description: '205-IL0-SD', lot_code: null, active_flag: true, color: 'ORANGE', blend: 'PVSD8020', count_text: '20 Slub', tube_type: 'T' },
+      ],
+      [],
+    ]);
+    const out = await listRejectsOfDayCode(pool, 1, { day: '2026-09-06', code: { kind: 'quality', tube: 1, material: 3 }, page: 1, pageSize: 200 });
+    const [a, b] = out.rows.map((r) => r.productLabel);
+    expect(a).not.toBe(b);
+    expect(a).toContain('ORANGE');
+    expect(a).toContain('30');
+    expect(b).toContain('20 Slub');
+  });
+
   it('a weight code without a dictionary row yet has no id to rename and the kind as its label', async () => {
     const { pool } = recordingPool([[], [{ n: 0 }], []]);
     const out = await listRejectsOfDayCode(pool, 1, { day: '2026-09-06', code: { kind: 'weight' }, page: 1, pageSize: 50 });
