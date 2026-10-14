@@ -14,6 +14,7 @@ import { fmt } from '../../../bridge/lib';
 import { C, FRAGMENTS } from '../../../copy';
 import { StatusPill } from '../../../ui/StatusPill';
 import { stationText } from '../../../ui/StationTile';
+import { stationProductText } from '../../../lib/stationProduct';
 import { useMediaQuery } from '../../../ui/useMediaQuery';
 import '../../../ui/components/DataTable.css';
 import './stations.css';
@@ -175,7 +176,7 @@ export function StationsTable(p: StationsTableProps) {
                   >
                     <td className="qs-name">
                       <b>{stationText(r)}</b>
-                      <span className="qs-sub qs-clip" title={r.product ?? undefined}>{r.product ?? S.noProduct}</span>
+                      <span className="qs-sub qs-clip" title={stationProductText(r).full}>{stationProductText(r).short}</span>
                     </td>
                     <td>
                       <StatusPill state={r.state} />
@@ -228,7 +229,7 @@ function PhoneCard({ r, p, onKey }: { r: StationRowModel; p: StationsTableProps;
         <span>{stationText(r)}</span>
         <StatusPill state={r.state} />
       </div>
-      <span className="qs-sub">{r.product ?? S.noProduct}</span>
+      <span className="qs-sub" title={stationProductText(r).full}>{stationProductText(r).short}</span>
       <dl className="ui-dt__card-fields">
         <div>
           <dt>{S.colCones}</dt>

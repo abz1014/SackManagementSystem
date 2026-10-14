@@ -133,6 +133,7 @@ function limitsAt(id: number, ms: number) {
 }
 vi.mock('./productLimits.js', () => ({
   loadProductCatalogue: async () => ({
+    distinctLabel: (id: number) => `Product ${id}`,
     product: (id: number) => ({ productId: id, label: `Product ${id}`, activeFlag: true }),
     versionAt,
     limitsAt,

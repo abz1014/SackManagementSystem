@@ -75,6 +75,7 @@ function limitsAt(id: number, ms: number) {
 // both the per-material path and the line-wide fallback need to carry it.
 vi.mock('./productLimits.js', () => ({
   loadProductCatalogue: async () => ({
+    distinctLabel: (id: number) => `Product ${id}`,
     product: (id: number) => ({ productId: id, label: `Product ${id}`, activeFlag: false }),
     versionAt,
     limitsAt,

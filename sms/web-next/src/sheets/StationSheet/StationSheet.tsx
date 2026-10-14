@@ -34,6 +34,7 @@ import { useAdjustments, useLineReasons, useOneStationCounts, usePatternCheck } 
 import { AdjustmentForm } from './AdjustmentForm';
 import { DailyChart } from './DailyChart';
 import { hopHref, hopRoute, type HopKind } from './hops';
+import { stationProductText } from '../../lib/stationProduct';
 import './stationSheet.css';
 
 const S = C.qualityStations;
@@ -191,7 +192,7 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
             <dl className="ss-dl">
               <div>
                 <dt>{S.productJudged}</dt>
-                <dd>{srow ? (srow.product ?? S.noProduct) : SF.dash}</dd>
+                <dd>{srow ? stationProductText(srow).full : SF.dash}</dd>
               </div>
               <div>
                 <dt>{S.lastReading}</dt>

@@ -215,6 +215,9 @@ export interface WeightStationRow {
    * Label of the product this row's target belongs to: the station's own
    * material for 'station_material', the line-wide product for
    * 'line_product', null for 'mixed' (several products, no single label).
+   * It is the DISTINCT label (code, then colour / blend / count / tube where
+   * several materials share a description), the same one the Products Board
+   * prints, never the shared description alone.
    */
   targetProductLabel?: string | null;
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
@@ -679,7 +682,7 @@ export async function getWeightStations(
       limits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - limits.targetG);
     // RT-018: the line-wide fallback's retired flag is the line target's own.
     let rowTargetProductActive: boolean | null = productActive;
-    let rowTargetProductLabel: string | null = product?.label ?? null;
+    let rowTargetProductLabel: string | null = product ? catalogue.distinctLabel(product.productId) : null;
     if (distinctMaterials.length === 1) {
       targetBasis = 'station_material';
       const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
@@ -687,7 +690,7 @@ export async function getWeightStations(
       rowTargetProvenance = resolveTarget(distinctMaterials[0]!);
       rowVsTargetG = mLimits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - mLimits.targetG);
       rowTargetProductActive = catalogue.product(distinctMaterials[0]!)?.activeFlag ?? null;
-      rowTargetProductLabel = catalogue.product(distinctMaterials[0]!)?.label ?? null;
+      rowTargetProductLabel = catalogue.product(distinctMaterials[0]!) ? catalogue.distinctLabel(distinctMaterials[0]!) : null;
     } else if (distinctMaterials.length > 1) {
       targetBasis = 'mixed';
       materialsInWindow = distinctMaterials.length;

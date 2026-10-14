@@ -1,6 +1,7 @@
 import { forwardRef } from 'react';
 import { C } from '../copy';
 import { StatusPill, STATE_WORD, type UiState } from './StatusPill';
+import { stationProductText } from '../lib/stationProduct';
 import '../components/state.css';
 
 /** Mirrors api/src/services/stationStatus.ts StationStatusRow. State arrives decided. */
@@ -13,6 +14,7 @@ export interface StationItem {
   reasons: string[];
   vsTargetG: number | null;
   product: string | null;
+  productBasis?: 'own' | 'mixed' | 'line' | null;
 }
 
 export function stationText(s: Pick<StationItem, 'station' | 'name'>): string {
@@ -52,9 +54,9 @@ export const StationTile = forwardRef<HTMLButtonElement, StationTileProps>(funct
         {nodata ? C.noCones : `${C.stationUi.failedInspection.toLowerCase()} · ${C.stationUi.cones(item.cones)}`}
       </span>
       {!nodata && (
-        <span className="tile-small">
+        <span className="tile-small" title={stationProductText(item).full}>
           {item.vsTargetG != null ? `${C.stationUi.vsTarget(item.vsTargetG)} · ` : ''}
-          {item.product ?? C.stationUi.noProduct}
+          {stationProductText(item).short}
         </span>
       )}
       {!nodata && <span className="tile-state-word">{STATE_WORD[item.state]}</span>}

@@ -21,6 +21,7 @@ import { fmt, generationWords, health as healthLib, live, period as P, simulator
 import { W } from '../../bridge/words';
 import { C, FRAGMENTS } from '../../copy';
 import { todayRoute } from '../../appRoute';
+import { stationProductText } from '../../lib/stationProduct';
 import { useData, usePeriod, useProduction, useStationStatus, useLive, liveKey } from '../../data';
 import { hrefFor, plainClick } from '../../ui/nav';
 import { StatusPill, type UiState } from '../../ui/StatusPill';
@@ -321,7 +322,7 @@ function WallTile({ row, quiet }: { row: StationStatusRow; quiet: string | null 
       </span>
       <span className="wl-tile-big">{big}</span>
       <span className="wl-tile-meta">{m1}</span>
-      <span className="wl-tile-meta">{row.product ?? (nodata ? '' : C.stationUi.noProduct)}</span>
+      <span className="wl-tile-meta" title={nodata ? undefined : stationProductText(row).full}>{nodata ? '' : stationProductText(row).short}</span>
     </div>
   );
 }

@@ -53,6 +53,7 @@ export interface StationRowModel {
   weightFailPct: number | null;
   target: TargetCell;
   product: string | null;
+  productBasis: 'own' | 'mixed' | 'line' | null;
   pattern: PatternCell;
 }
 
@@ -99,6 +100,7 @@ export function buildRows(
       weightFailPct: c && c.conesInRangePct != null ? Math.max(0, 100 - c.conesInRangePct) : null,
       target: targetOf(s, ws, data),
       product: s.product,
+      productBasis: s.productBasis ?? null,
       pattern: patternOf(ws, data),
     };
   });

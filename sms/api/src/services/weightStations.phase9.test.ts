@@ -40,6 +40,7 @@ vi.mock('./productAt.js', () => ({
 }));
 vi.mock('./productLimits.js', () => ({
   loadProductCatalogue: async () => ({
+    distinctLabel: (id: number) => `Product ${id}`,
     product: () => null,
     versionAt: () => null,
     limitsAt: () => ({ targetG: 1960, loG: 1920, hiG: 2000 }),
