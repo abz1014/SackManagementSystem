@@ -84,6 +84,7 @@ export const C = {
     s.name?.trim() ? `Station ${s.stationId} · ${s.name.trim()}` : `Station ${s.stationId}`,
   /** GLOSSARY rows 115-116: older readings are named by the date IFL rebuilt its database, never by "batch". */
   rebuildNote: {
+    testData: "These figures are test data, not readings from IFL's plant.",
     notCounted: (n: string | null) =>
       `${n ? `${n} readings` : 'Some readings'} from before the 5 Aug 2026 IFL database rebuild are not counted.`,
     chartShows: (shown: string, excluded: string) =>
@@ -200,6 +201,8 @@ export const C = {
     failedInspection: 'Failed inspection or weight check',
     cones: (n: number) => `${n.toLocaleString('en-GB')} cones`,
     noProduct: 'No product',
+    severalProducts: 'Several products',
+    lineProductMark: 'Line product',
     vsTarget: (g: number) => `${g > 0 ? '+' : g < 0 ? '-' : ''}${Math.abs(g)} g vs target`,
     worstFirst: 'Worst first',
     byNumber: 'By station number',

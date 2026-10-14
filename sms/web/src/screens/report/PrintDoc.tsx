@@ -10,6 +10,7 @@
  * scale from heavy cones), and never compares a mean to a target as one
  * "X g below" judgement; the two are stated side by side.
  */
+import { useDisclosureOverride } from '../../lib/reportTextContext';
 import { W } from '../../lib/words';
 import { fmtInt, fmtKg, fmtSpan } from '../../lib/fmt';
 import type { KpiRow, ReportHeader, ReportResponse, ReportType, ReportData } from '../../api';
@@ -576,6 +577,7 @@ const IFL_PRINT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>([
 /** Print-only: the closing notes — the report's own method note, caveats, definitions status, provenance. */
 export function PrintNotes({ type, data, header }: { type: ReportType; data: ReportResponse<ReportType>; header: ReportHeader }) {
   const s = safeSummarise(type, data);
+  const disclosureOverride = useDisclosureOverride();
   const isLine = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
   // D6 (1 Oct 2026): the report's own notes — method, caveats, plausibility
   // window and every assumption awaiting IFL — composed once by the server
@@ -609,7 +611,9 @@ export function PrintNotes({ type, data, header }: { type: ReportType; data: Rep
     // Task B (28 Sep 2026): the same widened trigger as PrintHead.tsx —
     // spanning batches OR the source itself being the simulator, since a
     // simulator-only period excludes nothing and never sets spansGenerations.
-    ...((header.spansGenerations || header.simulatorSource) && header.generationLine
+    ...(disclosureOverride
+      ? ((header.spansGenerations || header.simulatorSource) ? [disclosureOverride(header)].filter(isLine) : [])
+      : (header.spansGenerations || header.simulatorSource) && header.generationLine
       ? [header.generationLine]
       : header.spansGenerations
       ? [W.printDoc.generationNote(header.sourceGeneration ?? 'unknown', `${fmtInt(header.otherGenerationExcluded?.count ?? 0)} readings${header.otherGenerationExcluded?.percent != null ? ` (${header.otherGenerationExcluded.percent}%)` : ''}`)]

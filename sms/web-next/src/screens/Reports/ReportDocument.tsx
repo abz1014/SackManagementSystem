@@ -6,6 +6,7 @@
  *    skeleton, never a figure; a period after the newest reading says when the newest reading is (X-3).
  *  - EVERY EMPTY MACHINE-AND-PRODUCT PERIOD IS EMPTY (E-7): rows with no cones on any station are not "0 machines".
  */
+import { NextDisclosureText } from '../../bridge/disclosureText';
 import { useEffect, useMemo, useRef } from 'react';
 import {
   rejectCodeParam,
@@ -228,6 +229,7 @@ export function ReportDocument({ type, period, state, periodFailed = null, names
   const header = data?.header ?? null;
   return (
     <NextDateFmt>
+    <NextDisclosureText>
     <article ref={paper} className="rp-paper rp-doc" aria-label={variant.title} data-report-type={type}>
       <PrintHead header={header} />
       <header className="rp-doc__head no-print">
@@ -242,6 +244,7 @@ export function ReportDocument({ type, period, state, periodFailed = null, names
       {fetch.staleError && data ? <p className="rp-note no-print" role="status">{C.couldntLoad(R.preview.failed(variant.title))}</p> : null}
       {body}
     </article>
+    </NextDisclosureText>
     </NextDateFmt>
   );
 }

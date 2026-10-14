@@ -17,6 +17,7 @@ import { useLive, usePolling } from '../../lib/live';
 import { W } from '../../lib/words';
 import { getReportHeader, type ReportHeader } from '../../api';
 import { useDateFmt } from '../../lib/fmtContext';
+import { useDisclosureOverride } from '../../lib/reportTextContext';
 
 /** "15 Sep 2026, 14:03" on the plant's clock (rendered in UTC, like every reading time). */
 export function fmtPlantInstant(iso: string): string {
@@ -59,7 +60,8 @@ export function generationDisclosureText(h: ReportHeader): string | null {
  */
 export function GenerationDisclosure({ header }: { header: ReportHeader | null }) {
   if (!header) return null;
-  const text = generationDisclosureText(header);
+  const override = useDisclosureOverride();
+  const text = override ? (header.spansGenerations || header.simulatorSource ? override(header) : null) : generationDisclosureText(header);
   if (!text) return null;
   return <p className="mut sm no-print" style={{ marginTop: 4 }}>{text}</p>;
 }
@@ -138,7 +140,11 @@ function Masthead({ title, place }: { title: string; place?: string }) {
  */
 export function PrintHead({ header, title, inlineNotes = false }: { header: ReportHeader | null; title?: string; inlineNotes?: boolean }) {
   const df = useDateFmt();
+  const override = useDisclosureOverride();
   if (!header) return null;
+  const disclosure = override
+    ? (header.spansGenerations || header.simulatorSource ? override(header) : null)
+    : generationDisclosureText(header);
   const other = Object.entries(header.filters)
     .filter(([k, v]) => v != null && k !== 'shift')
     .map(([k, v]) => `${k} ${String(v)}`)
@@ -160,8 +166,8 @@ export function PrintHead({ header, title, inlineNotes = false }: { header: Repo
         {inlineNotes && <span>{W.reports.definitionsNote}</span>}
       </div>
       {inlineNotes && header.shiftNote && <div className="ph-foot mut">{header.shiftNote}</div>}
-      {inlineNotes && generationDisclosureText(header) && (
-        <div className="ph-foot mut">{generationDisclosureText(header)}</div>
+      {inlineNotes && disclosure && (
+        <div className="ph-foot mut">{disclosure}</div>
       )}
     </div>
   );
