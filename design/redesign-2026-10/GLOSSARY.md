@@ -36,6 +36,11 @@ Ban bare "rejected" as a label. Two named facts, each **always with its denomina
 
 "quality" is merged into "inspection" everywhere ("quality reject" -> "failed inspection"). A cone that passed the scale but sits outside the product's limits is a **third** fact, named **"Outside product limits (scale passed)"** and shown only when a product was in force at that reading's time. IFL's report titles that contain "Rejected" are reserved and keep their words (see 3.5).
 
+
+### 1.8 The combined failed figure (owner decision, 14 Oct 2026; data audit M1)
+
+The figure that adds inspection fails and weight-reject records (6,089 for 5 Aug to 7 Sep 2026) keeps its NUMBERS everywhere (parity with the old app and the reports; station Act/Watch unchanged). Its LABEL is **"Failed inspection or weight check"** and never bare "rejected" or bare "Failed inspection": Today KPI tile and station tiles, Wall, Quality > Stations (columns, caption, station sheet), the Register list that holds both kinds ("Inspection or weight-check fails"). A figure that is inspection-only (the Rejects tab's 6,048) keeps "Failed inspection". Not changed, owner-reserved or old-app wording (audit M2, pre-existing): the old app, IFL report column titles and CSV headers such as `rejected_at_inspection`, and the Reports daily on-screen label (old renderer). Pinned by `web-next/src/auditFixes.test.ts` and the Today and Stations tests.
+
 ### 1.4 Dates and clocks
 
 - One date form: **1 Sep 2026** (day, three-letter month, year). Never "7 Sept", "Mon 7 Sep", "06/05/2026", "13 October 2026".

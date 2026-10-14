@@ -79,5 +79,3 @@
 @media print { .no-print, .chart-tip, .chart-resize { display: none !important; } }
 @media (forced-colors: active) { .ck-band { fill: none; stroke: CanvasText; stroke-dasharray: 2 2; } .ck-line { stroke: CanvasText; } }
 
-/* css-003/050: the direct end label is drawn from a right margin sized for a narrower face; tighten it so "Window mean" ends inside the svg at every text size */
-.ck-direct { letter-spacing: -0.04em; }

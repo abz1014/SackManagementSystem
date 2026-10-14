@@ -80,7 +80,7 @@ describe('Quality > Stations on PD1 (1 Sep 2026)', () => {
     expect(box.getAttribute('title')).toMatch(/19 Aug 2026 . 1 Sep 2026/);
     expect(box.getAttribute('colspan')).toBe('2');
     const heads = Array.from(container.querySelectorAll('thead tr:nth-child(2) th')).map((h) => h.textContent);
-    expect(heads).toEqual(expect.arrayContaining(['Days with a note', 'Result', 'Failed inspection', 'Failed weight check (scale)']));
+    expect(heads).toEqual(expect.arrayContaining(['Days with a note', 'Result', 'Failed inspection or weight check', 'Failed weight check (scale)']));
     // the two boxed headers carry the box class, the period headers do not
     const boxed = Array.from(container.querySelectorAll('thead tr:nth-child(2) th.qs-pat')).map((h) => h.textContent);
     expect(boxed).toEqual(['Days with a note', 'Result']);

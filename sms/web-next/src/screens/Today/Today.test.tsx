@@ -144,7 +144,7 @@ describe('KPI row (A3-023)', () => {
     expect(card('Sacks').textContent).toContain('133');
     expect(card('Packed').textContent).toContain('6,296.7');
     expect(card('Packed').textContent).toContain('kg');
-    const fi = card('Failed inspection').textContent ?? '';
+    const fi = card('Failed inspection or weight check').textContent ?? '';
     expect(fi).toContain('14.6');
     expect(fi).toContain('451 cones');
     const fw = card('Failed weight check (scale)').textContent ?? '';
@@ -184,16 +184,16 @@ describe('KPI row (A3-023)', () => {
     expect(card('Sacks').textContent).toContain('1.5 %');
     expect(card('Sacks').textContent).toContain('vs 131');
     expect(card('Packed').textContent).toContain('vs 6,190.7 kg');
-    expect(card('Failed inspection').textContent).toContain('1.1 points');
-    expect(card('Failed inspection').textContent).toContain('vs 13.5 %');
-    expect(card('Failed inspection').querySelector('[data-direction="up"]')).not.toBeNull();
+    expect(card('Failed inspection or weight check').textContent).toContain('1.1 points');
+    expect(card('Failed inspection or weight check').textContent).toContain('vs 13.5 %');
+    expect(card('Failed inspection or weight check').querySelector('[data-direction="up"]')).not.toBeNull();
     expect(ff!.requests.some((r) => r.startsWith('/api/production') && r.includes('compare=prev'))).toBe(true);
   });
 
   it('labels a live period "so far" on the counts', async () => {
     mount('/?s=today&p=shift&cmp=prev');
     await waitFor(() => expect(card('Cones').textContent).toContain('so far'));
-    expect(card('Failed inspection').textContent).not.toContain('so far');
+    expect(card('Failed inspection or weight check').textContent).not.toContain('so far');
   });
 
   it('says so when the comparison did not arrive instead of inventing changes', async () => {

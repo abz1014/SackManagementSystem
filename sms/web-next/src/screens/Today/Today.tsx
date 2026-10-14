@@ -308,7 +308,7 @@ function KpiGhost() {
     { label: T.kpi.cones, chip: 1, value: '0,000' },
     { label: T.kpi.sacks, chip: 2, value: '000' },
     { label: T.kpi.packed, chip: 3, value: '0,000.0', unit: TF.kpi.kg },
-    { label: C.checks.failedInspection, chip: 4, value: '00.0', unit: TF.kpi.percent, note: T.kpi.coneCount('000') },
+    { label: C.checks.failedInspectionOrWeight, chip: 4, value: '00.0', unit: TF.kpi.percent, note: T.kpi.coneCount('000') },
     { label: C.checks.failedWeight, chip: 5, value: '0.0', unit: TF.kpi.percent, note: T.kpi.ofCones('0', '0,000') },
   ];
   return (
@@ -346,7 +346,7 @@ function KpiRow({ prod, period, empty }: { prod: Prod; period: P.Period; empty: 
         value={k?.sacks.text ?? null} delta={k && pk ? countDelta(k.sacks, pk.sacks, live, TF.kpi.vsCount) : null} />
       <KpiCard {...common} label={T.kpi.packed} chip={3} icon={<Icon name="weight" />}
         value={k?.kg.text ?? null} unit={TF.kpi.kg} delta={k && pk ? countDelta(k.kg, pk.kg, live, TF.kpi.vsKg) : null} />
-      <KpiCard {...common} label={C.checks.failedInspection} chip={4} icon={<Icon name="rejects" />}
+      <KpiCard {...common} label={C.checks.failedInspectionOrWeight} chip={4} icon={<Icon name="rejects" />}
         value={k ? fmtRate(k.inspection) : null} unit={TF.kpi.percent} note={k ? rateNote(k.inspection, 'inspection') : null}
         delta={k && pk ? rateDelta(k.inspection, pk.inspection) : null} />
       <KpiCard {...common} label={C.checks.failedWeight} chip={5} icon={<Icon name="health" />}

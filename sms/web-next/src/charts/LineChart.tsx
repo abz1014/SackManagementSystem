@@ -12,6 +12,20 @@ import { Frame, type LegendItem } from './Frame';
 import { LimitBand } from './LimitBand';
 import { catVar, chartTop, defaultFormat, type ChartCommonProps, type LimitSpec, type Margins } from './types';
 
+/** Widest of `names` in the page font, measured on a canvas; a 0.62 em/char estimate where no canvas exists (tests). */
+function textWidth(names: string[], fontPx: number, longest: number): number {
+  const est = longest * fontPx * 0.62;
+  try {
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (!ctx) return est;
+    ctx.font = `${fontPx}px ${getComputedStyle(document.body).fontFamily || 'sans-serif'}`;
+    const w = Math.max(...names.map((n) => ctx.measureText(n).width));
+    return Number.isFinite(w) && w > 0 ? Math.max(w, 0) : est;
+  } catch {
+    return est;
+  }
+}
+
 export interface LineSeries {
   name: string;
   values: (number | null)[];
@@ -41,7 +55,7 @@ export function LineChart(p: LineChartProps) {
     const longest = direct ? Math.max(...p.series.map((s) => s.name.length)) : 0;
     const m: Margins = {
       left: leftGutterFor(tickLabels, fontPx, 44, 0) + 4,
-      right: direct ? Math.min(120, Math.ceil(longest * fontPx * 0.55) + 14) : 16,
+      right: direct ? Math.min(Math.round(w * 0.6), Math.ceil(textWidth(p.series.map((s) => s.name), fontPx, longest)) + 10) : 16,
       top: chartTop(fontPx),
       bottom: 28,
     };

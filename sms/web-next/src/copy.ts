@@ -62,6 +62,8 @@ export const C = {
     passedWeight: 'Passed weight check',
     failedWeight: 'Failed weight check (scale)',
     failedInspection: 'Failed inspection',
+    /** The combined figure (inspection fails plus weight-reject records). Owner decision 14 Oct 2026 (GLOSSARY 1.8): never bare "rejected". */
+    failedInspectionOrWeight: 'Failed inspection or weight check',
     outsideLimits: 'Outside product limits (scale passed)',
     withinLimits: 'Within product limits',
     notChecked: 'Not checked (no product set)',
@@ -184,7 +186,7 @@ export const C = {
 
   /* ---- Station tiles, heat grid, KPI card (were local constants) ---- */
   stationUi: {
-    failedInspection: 'Failed inspection',
+    failedInspection: 'Failed inspection or weight check',
     cones: (n: number) => `${n.toLocaleString('en-GB')} cones`,
     noProduct: 'No product',
     vsTarget: (g: number) => `${g > 0 ? '+' : g < 0 ? '-' : ''}${Math.abs(g)} g vs target`,
@@ -417,7 +419,7 @@ export const C = {
     stationsAction: (n: number) => `${n} ${n === 1 ? 'station needs' : 'stations need'} action`,
     stationsWatch: (n: number) => `${n} to watch`,
     allStationsOk: 'No station needs action.',
-    kpi: { cones: 'Cones', sacks: 'Sacks', packed: 'Packed', failed: 'Failed inspection' },
+    kpi: { cones: 'Cones', sacks: 'Sacks', packed: 'Packed', failed: 'Failed inspection or weight check' },
     unreadable: 'Not available',
     shiftBars: 'Cones by shift',
     quietSince: (clock: string) => `No cones since ${clock}`,
@@ -435,12 +437,12 @@ export const C = {
     title: 'Stations',
     noneNeedAction: 'No station needs action.',
     needAction: (n: number) => (n === 1 ? '1 station needs action.' : `${n} stations need action.`),
-    /** "Each one's failed-inspection rate is more than twice the line's 4.59 %." */
+    /** "Each one's rate of failed inspection or weight check is more than twice the line's 4.59 %." */
     actRule: (multiple: number, linePct: string) =>
-      `Each one's failed-inspection rate is more than ${multiple === 2 ? 'twice' : `${multiple} times`} the line's ${linePct}.`,
+      `Each one's rate of failed inspection or weight check is more than ${multiple === 2 ? 'twice' : `${multiple} times`} the line's ${linePct}.`,
     periodCaption: (span: string, days: number) => `${span}, ${days} production ${days === 1 ? 'day' : 'days'} (06:00 to 06:00 plant time)`,
     tableTitle: 'Stations, worst first',
-    tableCaption: (n: number, cones: string, linePct: string) => `${n} stations · ${cones} cones · line failed-inspection rate ${linePct}`,
+    tableCaption: (n: number, cones: string, linePct: string) => `${n} stations · ${cones} cones · line rate of failed inspection or weight check ${linePct}`,
     tableAria: 'Stations, worst first',
     thisPeriod: (span: string) => `This period · ${span}`,
     patternHead: (span: string) => `Pattern check · always the last 14 production days (${span})`,
@@ -448,7 +450,7 @@ export const C = {
     colStation: 'Station and product',
     colState: 'State',
     colCones: 'Cones',
-    colFailedInspection: 'Failed inspection',
+    colFailedInspection: 'Failed inspection or weight check',
     colFailedWeight: 'Failed weight check (scale)',
     colVsTarget: 'Mean weight vs target',
     colDaysNote: 'Days with a note',
@@ -474,7 +476,7 @@ export const C = {
 
     /* ---- station sheet ---- */
     sheetPeriod: (span: string) => `${span}`,
-    kpiFailedInspection: 'Failed inspection',
+    kpiFailedInspection: 'Failed inspection or weight check',
     kpiFailedWeight: 'Failed weight check (scale)',
     kpiMeanVsTarget: 'Mean cone weight vs target',
     kpiCones: 'Cones weighed',
@@ -527,6 +529,7 @@ export const C = {
       passed: 'Passed by the scale',
       infoPassed: 'Share of sacks the scale itself marked as in range.',
     },
+    perProductLimits: "Cones in this view ran different products, so each is judged against its own product's limits and no single tolerance band is drawn.",
     kpi: {
       mean: 'Mean cone weight',
       meanDetail: (spread: string) => `Spread ${spread} (standard deviation)`,
@@ -538,6 +541,8 @@ export const C = {
       offsetNone: 'Needs a product target.',
       within: 'Within product tolerance',
       withinDetail: (lo: string, hi: string, n: string) => `${lo} to ${hi} · ${n} cones judged`,
+      /** Audit M7: when the cones ran different products there is no single band to print. */
+      withinDetailPerProduct: (n: string) => `Each cone against its own product's limits · ${n} cones judged`,
       withinNone: 'Not checked (no product set)',
       failedCheck: 'Failed weight check (scale)',
       failedDetail: (n: string) => `Of ${n} cones weighed. The scale\u2019s own check.`,
@@ -688,7 +693,7 @@ export const C = {
     sheetTitle: 'Failures for one reason',
     malformed: 'This link does not name a reason and a day.',
     dayBasisLine: (day: string) => `${day} · production day`,
-    sheetCount: (n: string, reason: string) => `${n} cones failed inspection for ${reason}`,
+    sheetCount: (n: string, reason: string) => `${n} ${n === '1' ? 'cone' : 'cones'} failed inspection for ${reason}`,
     sheetCountWeight: (n: string) => `${n} weight-reject records`,
     stationNamesMissing: "Station names couldn't be loaded, so stations show as numbers.",
     perDayTitle: 'Day by day in this period',
@@ -718,7 +723,7 @@ export const C = {
     listings: {
       cones: 'Cones',
       sacks: 'Sacks',
-      inspectionRejects: 'Inspection fails',
+      inspectionRejects: 'Inspection or weight-check fails',
       rejected: 'Weight-check fails',
       stock: 'Sack stock',
     },
@@ -726,12 +731,12 @@ export const C = {
     /* count lines (a count that has not arrived is never printed as zero) */
     countFailed: "Couldn't load this period's count. The plant connection may be down.",
     countPending: (what: string) => `${what}: counting the readings in this period.`,
-    conesWeighed: (what: string, n: string) => `${what}: ${n} cones weighed.`,
+    conesWeighed: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} weighed.`,
     sacksWeighed: (what: string, n: string) => `${what}: ${n} sacks weighed.`,
-    inspectionFails: (what: string, n: string) => `${what}: ${n} cones failed inspection.`,
-    weightFails: (what: string, n: string) => `${what}: ${n} cones failed the weight check (scale).`,
-    filteredCones: (what: string, n: string, states: string) => `${what}: ${n} cones, ${states}.`,
-    outsideLimits: (what: string, n: string) => `${what}: ${n} cones passed by the scale but outside the product limits.`,
+    inspectionFails: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} failed inspection or the weight check.`,
+    weightFails: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} failed the weight check (scale).`,
+    filteredCones: (what: string, n: string, states: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'}, ${states}.`,
+    outsideLimits: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} passed by the scale but outside the product limits.`,
     weightFailsUnknown: (what: string, n: string) => `${what}: ${n} cones weighed. How many failed the weight check could not be loaded.`,
     weightFailsPending: (what: string, n: string) => `${what}: ${n} cones weighed. Still counting how many failed the weight check.`,
     weightFailsNoRate: (what: string, n: string, f: string) => `${what}: ${n} cones weighed, ${f} failed the weight check (scale).`,
@@ -856,7 +861,7 @@ export const C = {
     /* reading sheets */
     coneTitle: 'Cone',
     sackTitle: 'Sack',
-    rejectTitle: 'Inspection fail',
+    rejectTitle: 'Inspection or weight-check fail',
     shift: 'Shift',
     station: 'Station',
     sourceRecord: 'Source record',

@@ -314,7 +314,7 @@ describe('hops from the other screens land with their state (A6-H04, A6-H06, A6-
     await waitFor(() => expect(rowsOf(container).length).toBeGreaterThan(0));
     expect(reqs().some((r) => r.includes('state=low%2Chigh'))).toBe(true);
     expect(screen.getByText('Outside product limits')).toBeTruthy();
-    expect(screen.getByText(/cones passed by the scale but outside the product limits\./)).toBeTruthy();
+    expect(screen.getByText(/cones? passed by the scale but outside the product limits\./)).toBeTruthy();
     // the cone check-result chips are hidden while the hop filter is on
     expect(screen.queryByRole('group', { name: R.filterState })).toBeNull();
   });
@@ -334,7 +334,7 @@ describe('hops from the other screens land with their state (A6-H04, A6-H06, A6-
     expect(parseListing(parseRoute(new URLSearchParams(q)).keys)).toBe('inspectionRejects');
     open(q, 1);
     await waitFor(() => expect(reqs().some((r) => r.includes('type=reject') && r.includes('station=3') && r.includes('product=12'))).toBe(true));
-    expect(screen.getByRole('tab', { name: 'Inspection fails', selected: true })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Inspection or weight-check fails', selected: true })).toBeTruthy();
   });
 
   it('Reason sheet > this day: one picked day, inspection fails', async () => {

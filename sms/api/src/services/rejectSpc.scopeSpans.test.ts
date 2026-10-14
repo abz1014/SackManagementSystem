@@ -44,4 +44,10 @@ describe('getRejectSpc under a one-generation scope (C-015)', () => {
     const d = await getRejectSpc(fakePool(), 1, '2026-08-05', '2026-08-20', 'day', 'quality', { scope: scope(false) });
     expect(d.spansGenerations).toBe(false);
   });
+
+  it('does not report a boundary when everything dropped was a plant simulator (audit M3)', async () => {
+    const sc = { ...scope(true), otherGenerationExcluded: 500, excludedSimulator: 500 };
+    const d = await getRejectSpc(fakePool(), 1, '2026-09-01', '2026-09-01', 'day', 'quality', { scope: sc });
+    expect(d.spansGenerations).toBe(false);
+  });
 });

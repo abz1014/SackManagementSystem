@@ -452,7 +452,11 @@ export async function getRejectSpc(
     pBarOf.set(generation, inspected > 0 ? g.rejects / inspected : null);
   }
   // C-015 (D-79, 2 Oct 2026): a scoped read holds one generation, so the series alone can never show a boundary; the scope knows another generation was present and dropped.
-  const spansGenerations = perGen.size > 1 || filters.scope?.spansGenerations === true;
+  // Audit M3 (14 Oct 2026): a plant-simulator generation is practice data, never a boundary the reader should be told about ("includes the 5 Aug rebuild"); only a REAL generation boundary counts.
+  const realPresent = [...perGen.keys()].filter((o) => !simulatorOrdinals.has(o)).length;
+  const scopeNote = filters.scope;
+  const realExcluded = scopeNote ? scopeNote.otherGenerationExcluded - (scopeNote.excludedSimulator ?? 0) : 0;
+  const spansGenerations = realPresent > 1 || (scopeNote?.spansGenerations === true && realExcluded > 0);
   // Within one generation this IS the pooled p̄, exactly as before. Across a
   // boundary it is the PREFERRED generation's — see the file header's 23 Sep
   // 2026 correction. Prefer a REAL generation over a simulator one

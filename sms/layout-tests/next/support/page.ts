@@ -30,6 +30,11 @@ export async function settle(page: Page, ms = 6000): Promise<void> {
       { timeout: ms },
     );
   } catch { /* a screen may keep a skeleton; the spec measures what is there */ }
+  // A report body is a lazily loaded legacy renderer: under load (a long run, a busy host) it can arrive after the
+  // network goes quiet. Wait for the document itself, so "no document" can only mean the report really did not draw.
+  try {
+    if (/[?&]rt=/.test(page.url()) && /[?&]s=reports/.test(page.url())) await page.waitForSelector('.rp-doc', { timeout: Math.max(ms, 12000) });
+  } catch { /* the spec reports a report that never drew */ }
   await page.waitForTimeout(250);
 }
 

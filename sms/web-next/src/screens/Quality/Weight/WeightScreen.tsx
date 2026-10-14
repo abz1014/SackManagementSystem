@@ -207,6 +207,8 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
   const products = useData('the product names', () => getProducts(), 'qw:products', { live: false });
 
   const d = stationsD.data?.data ?? null;
+  // Audit M7: a band is drawn only when ONE product's limits judge the whole view (readings with no material of their own). Station rows that ran their own material, or several, are judged per product.
+  const perProduct = d !== null && d.stations.length > 0 && d.stations.some((r) => r.targetBasis !== 'line_product');
   const cone = coneLine.data?.data ?? null;
   const chart: SpcData | null = ownChart ? (chartD.data?.data ?? null) : cone;
   const chartStatus: DataState<unknown>['status'] = ownChart ? chartD.status : coneLine.status;
@@ -298,6 +300,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
             status={chartStatus}
             onRetry={chartRetry}
             target={isSack ? null : (d?.targetG ?? null)}
+            perProduct={perProduct}
             period={period}
             params={params}
             onZoom={zoomTo}
@@ -307,6 +310,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
             <p className="qw-note">{W.weight.limitsChanged(chart.spec.limitsChangedInPeriod)}</p>
           )}
           {chart !== null && chart.spec.limitsOmittedReason && <p className="qw-note">{chart.spec.limitsOmittedReason}</p>}
+          {!isSack && perProduct && <p className="qw-note">{QW.perProductLimits}</p>}
           {isSack && <p className="qw-note">{W.weight.sackNoTarget}</p>}
           {chart !== null && chart.spansGenerations && (
             <p className="qw-note">{W.weight.oneGeneration(fmt.fmtInt(chart.count), fmt.fmtInt(chart.otherGenerationExcluded))}</p>
@@ -462,6 +466,7 @@ function ConeKpis({
   const judged = states ? states.within + states.low + states.high : 0;
   const omitted = cone?.spec.limitsOmittedReason ?? null;
   const spec = cone?.spec ?? null;
+  const perProduct = d !== null && d.stations.length > 0 && d.stations.some((r) => r.targetBasis !== 'line_product');
   const prodStatus = asKpi(prod.status);
   const failedPct = row && row.conesInRangePct !== null ? 100 - row.conesInRangePct : null;
   const offsetStatus = asKpi(
@@ -521,7 +526,9 @@ function ConeKpis({
           omitted
             ? omitted
             : states && judged > 0
-              ? QW.kpi.withinDetail(
+              ? perProduct
+                ? QW.kpi.withinDetailPerProduct(fmt.fmtInt(judged))
+                : QW.kpi.withinDetail(
                   spec && spec.lsl !== null ? fmt.fmtG(spec.lsl) : '–',
                   spec && spec.usl !== null ? fmt.fmtG(spec.usl) : '–',
                   fmt.fmtInt(judged),
@@ -580,8 +587,8 @@ function SackKpis({ sum }: { sum: DataState<Envelope<import('../../../bridge/api
 
 /* ------------------------------------------------------------------- charts */
 
-function limitSpec(spc: SpcData, unitFmt: (v: number) => string): LimitSpec | undefined {
-  if (spc.spec.source === 'none' || spc.spec.limitsOmittedReason) return undefined;
+function limitSpec(spc: SpcData, unitFmt: (v: number) => string, perProduct = false): LimitSpec | undefined {
+  if (perProduct || spc.spec.source === 'none' || spc.spec.limitsOmittedReason) return undefined;
   const { lsl, usl } = spc.spec;
   if (lsl === null || usl === null) return undefined;
   return { lower: lsl, upper: usl, lowerText: unitFmt(lsl), upperText: unitFmt(usl) };
@@ -600,6 +607,7 @@ function MainChart({
   status,
   onRetry,
   target,
+  perProduct,
   period,
   params,
   onZoom,
@@ -611,6 +619,7 @@ function MainChart({
   status: DataState<unknown>['status'];
   onRetry: () => void;
   target: number | null;
+  perProduct: boolean;
   period: P.Period;
   params: P.PeriodParams;
   onZoom: (p: P.PeriodParams | null) => void;
@@ -637,7 +646,7 @@ function MainChart({
         caption={target !== null ? `${QW.charts.target} ${fmt.fmtG(target)}.` : undefined}
         reserve={{ captionLines: 1 }}
         bins={(spc?.histogram ?? []).map((b) => ({ from: b.start, to: b.end, count: b.count }))}
-        limits={spc ? limitSpec(spc, fmtLimit) : undefined}
+        limits={spc ? limitSpec(spc, fmtLimit, perProduct && !isSack) : undefined}
         emptyMessage={W.nothingHere}
         {...common}
       />
@@ -665,7 +674,7 @@ function MainChart({
       }
       categories={categories}
       series={series}
-      limits={spc ? limitSpec(spc, fmtLimit) : undefined}
+      limits={spc ? limitSpec(spc, fmtLimit, perProduct && !isSack) : undefined}
       periodFor={(i) => {
         const r = shiftRange(g, i);
         return r ? P.snapToShifts(r.from, r.to, params) : null;
