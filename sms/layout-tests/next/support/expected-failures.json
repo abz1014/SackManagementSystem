@@ -25,22 +25,8 @@
       "wall": "D9 (no large-screen message and overflow at 375) and D22 (type 70 px at 1 vs 75 px at 1.3)"
     }
   },
-  "at_62cbba2": {
-    "build": "62cbba2 (HEAD after T1-T5 landed), scratch build served on an ephemeral port",
-    "result": "81 tests, 12 failed, 69 passed (7.5 min). Dates guard green, wall, login, m-18, date-format, css-001, css-009, css-031, css-033's date splits, charts all pass.",
-    "failures": {
-      "css-003": "D8 residual: 'Window mean' label ends 2 px past the svg at 320-600",
-      "css-004": "M-04 residual: calibration report cells overprint by 1.5 px at 1366@1.3 ('Days flagged' | 'Adjustments')",
-      "css-007": "NEW after a19c529: Diagnostics overflows the page by 36 px at 320",
-      "css-015": "D27 not done (no dashed edge on the quiet tile)",
-      "css-017": "NEW after a19c529: Diagnostics page overflow at 1366@1.3 (table fit itself now passes)",
-      "css-022": "D12 / M-15 residual: Weight at 375 1244->1178 px, Rejects at 375 756->690 px (the 1366 cells now pass)",
-      "css-034": "M-19 residual: Name it prints on Rejects, Segmented toggles print on Weight",
-      "css-047": "NEW after b1b8925: Catalogue rows 53 px and Limits rows 61 px (limit 50; passed at 224df3d)",
-      "css-050": "D8 residual: 'Window mean' end label 2-5 px past the svg",
-      "css-067": "D18 residual: Diagnostics finding rows median 266 px (limit 215); page height now under 3,000",
-      "css-073": "D11 / M-12 not delivered: report tables that scroll at 768 still have no fade cue",
-      "css-078": "D23b / M-30: Outcome column is 103 px at 768 (needs 276)"
-    }
+  "at_b32d9cf": {
+    "build": "b32d9cf (HEAD at the end of fix-wave T7c)",
+    "result": "81 tests, 81 passed, twice in a row (7.2 min each), no expected failures remain. The report-document wait in support/page.ts settle() removed the earlier transient 'no document' failures."
   }
 }
