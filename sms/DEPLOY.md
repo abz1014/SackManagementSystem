@@ -183,6 +183,8 @@ if (-not $running) {
 }
 ```
 
+The live loop has a watchdog: every SQL write is time-boxed (60 s), and on a timeout or dropped connection it logs the error, closes and reopens the connection with 5 s / 15 s / 30 s backoff, re-reads the stored maximum ids, and catches up the gap, so a hung connection no longer leaves the process alive but idle.
+
 Sync worker:
 
 ```powershell

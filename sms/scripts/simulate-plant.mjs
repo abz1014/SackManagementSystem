@@ -108,6 +108,49 @@ function assertSafeTarget() {
   }
 }
 
+/** Watchdog limits. A dropped connection once left an awaited write that never
+ *  settled (14 Oct 2026), so every awaited SQL call in the live loop is raced
+ *  against SQL_OP_TIMEOUT_MS and the driver is given its own timeouts too. */
+export const SQL_OP_TIMEOUT_MS = 60_000;
+export const BACKOFF_STEPS_MS = [5_000, 15_000, 30_000];
+
+/** Reject if `promise` has not settled within `ms`. The timer is always cleared. */
+export function withTimeout(promise, ms, label = 'operation') {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** 5 s, 15 s, then 30 s for every further consecutive failure (attempt is 1-based). */
+export const backoffMs = (attempt) => BACKOFF_STEPS_MS[Math.min(Math.max(attempt, 1), BACKOFF_STEPS_MS.length) - 1];
+
+/**
+ * One recovery after a failed tick: close the old pool (best effort, itself
+ * time-boxed because closing a dead pool can hang), wait out the backoff, then
+ * reconnect and re-read the database state. Retries until it succeeds.
+ * Dependencies are injected so a test can drive it with fake promises.
+ */
+export async function recoverPool(deps, oldPool, failures) {
+  const { connect: doConnect, loadState: doLoad, sleep, log, opTimeoutMs = SQL_OP_TIMEOUT_MS } = deps;
+  try { await withTimeout(Promise.resolve(oldPool?.close?.()), 5_000, 'pool close'); } catch { /* best effort */ }
+  let attempt = failures;
+  for (;;) {
+    await sleep(backoffMs(attempt));
+    let pool;
+    try {
+      pool = await withTimeout(doConnect(), opTimeoutMs, 'reconnect');
+      const state = await withTimeout(doLoad(pool), opTimeoutMs, 'state reload');
+      return { pool, state };
+    } catch (e) {
+      log(`reconnect failed: ${e.message}`);
+      try { await withTimeout(Promise.resolve(pool?.close?.()), 5_000, 'pool close'); } catch { /* best effort */ }
+      attempt += 1;
+    }
+  }
+}
+
 const connect = () =>
   mssql.connect({
     server: SERVER,
@@ -118,6 +161,11 @@ const connect = () =>
     password: requireEnv('SIM_DB_PASSWORD'),
     options: { encrypt: env.IFL_DB_ENCRYPT === 'true', trustServerCertificate: true, useUTC: true },
     pool: { max: 4, min: 0, idleTimeoutMillis: 30000 },
+    connectionTimeout: 15_000,
+    requestTimeout: 45_000, // below SQL_OP_TIMEOUT_MS so the driver usually fails first
+  }).then((pool) => {
+    pool.on('error', (e) => console.error(`${new Date().toISOString()} pool error: ${e.message}`));
+    return pool;
   });
 
 /* ------------------------------------------------------------------ clock */
@@ -533,20 +581,48 @@ async function main() {
       sim.coneCursor = state.lastProdMs ?? plantNowMs() - clampLag(sampleLagMs());
       sim.sackCursor = sim.coneCursor;
     }
+    // Watchdog. Idempotency: writeAll is four separate bulk inserts (each atomic,
+    // together NOT one transaction), so a timeout can leave some tables written
+    // and the in-memory ids/cursors already advanced past rows that never landed.
+    // After any failure the pool is closed (the server rolls back whatever was in
+    // flight on that connection) and ids, SackNum and the cone cursor are re-read
+    // from the database, exactly as at start-up. Ids are therefore always above
+    // what is stored, so no row can be written twice; the worst case is a few
+    // never-written sacks/rejects from the failed batch, which is harmless.
+    let live = pool;
+    let failures = 0;
     for (;;) {
-      const now = plantNowMs();
-      const target = now - clampLag(sampleLagMs());
-      if (target > sim.coneCursor) {
-        // Rows inserted NOW carry a production time ~18 minutes old.
-        const t = liveInsertTimes(now);
-        const batch = generate(sim.coneCursor, target, state.ids, sim, t.cone, t.sack);
-        const n = await writeAll(pool, batch);
-        if (n.cones || n.sacks || n.qcs || n.wrej) {
-          console.log(
-            `${new Date(now).toISOString().slice(11, 19)}  +${n.cones} cones  +${n.sacks} sacks` +
-              `  +${n.qcs} quality  +${n.wrej} weight  (production up to ${new Date(target).toISOString().slice(11, 19)})`,
-          );
+      try {
+        const now = plantNowMs();
+        const target = now - clampLag(sampleLagMs());
+        if (target > sim.coneCursor) {
+          // Rows inserted NOW carry a production time ~18 minutes old.
+          const t = liveInsertTimes(now);
+          const batch = generate(sim.coneCursor, target, state.ids, sim, t.cone, t.sack);
+          const n = await withTimeout(writeAll(live, batch), SQL_OP_TIMEOUT_MS, 'writeAll');
+          if (failures > 0) console.log(`${new Date().toISOString()} write recovered after ${failures} failure(s)`);
+          failures = 0;
+          if (n.cones || n.sacks || n.qcs || n.wrej) {
+            console.log(
+              `${new Date(now).toISOString().slice(11, 19)}  +${n.cones} cones  +${n.sacks} sacks` +
+                `  +${n.qcs} quality  +${n.wrej} weight  (production up to ${new Date(target).toISOString().slice(11, 19)})`,
+            );
+          }
         }
+      } catch (e) {
+        failures += 1;
+        console.error(`${new Date().toISOString()} live tick failed (#${failures}): ${e.message}; reconnecting`);
+        const r = await recoverPool(
+          { connect, loadState, sleep: (ms) => new Promise((res) => setTimeout(res, ms)), log: (m) => console.error(`${new Date().toISOString()} ${m}`) },
+          live,
+          failures,
+        );
+        live = r.pool;
+        Object.assign(state.ids, r.state.ids);
+        sim.sackNum = r.state.sackNum;
+        if (r.state.lastProdMs) { sim.coneCursor = r.state.lastProdMs; sim.sackCursor = r.state.lastProdMs; }
+        console.error(`${new Date().toISOString()} reconnected; resuming from ${new Date(sim.coneCursor).toISOString()}`);
+        continue; // catch up the gap at once
       }
       await new Promise((r) => setTimeout(r, tickMs));
     }
