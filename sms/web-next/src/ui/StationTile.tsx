@@ -25,14 +25,17 @@ export interface StationTileProps {
   item: StationItem;
   tabIndex?: number;
   onOpen?: (station: number) => void;
+  /** Product labels of every tile on screen, so two products that read alike get a longer short form. */
+  shownProducts?: readonly (string | null)[];
 }
 
 export const StationTile = forwardRef<HTMLButtonElement, StationTileProps>(function StationTile(
-  { item, tabIndex, onOpen },
+  { item, tabIndex, onOpen, shownProducts },
   ref,
 ) {
   const label = stationText(item);
   const nodata = item.state === 'nodata';
+  const prod = stationProductText(item, shownProducts);
   return (
     <button
       ref={ref}
@@ -54,9 +57,9 @@ export const StationTile = forwardRef<HTMLButtonElement, StationTileProps>(funct
         {nodata ? C.noCones : `${C.stationUi.failedInspection.toLowerCase()} · ${C.stationUi.cones(item.cones)}`}
       </span>
       {!nodata && (
-        <span className="tile-small" title={stationProductText(item).full}>
+        <span className="tile-small" title={prod.full}>
           {item.vsTargetG != null ? `${C.stationUi.vsTarget(item.vsTargetG)} · ` : ''}
-          {stationProductText(item).short}
+          {prod.short}
         </span>
       )}
       {!nodata && <span className="tile-state-word">{STATE_WORD[item.state]}</span>}

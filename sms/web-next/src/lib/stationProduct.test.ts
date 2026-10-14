@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stationProductText } from './stationProduct';
+import { shortProductLabel, stationProductText } from './stationProduct';
 
 describe('stationProductText', () => {
   it('two stations on materials sharing a description read differently on a tile, full label in the tooltip', () => {
@@ -20,5 +20,33 @@ describe('stationProductText', () => {
   });
   it('no product', () => {
     expect(stationProductText({ product: null, productBasis: null }).short).toBe('No product');
+  });
+
+  describe('collisions among the products shown together', () => {
+    const A = '205-IL0-SD · ORANGE · PVSD8020 · 30';
+    const B = '205-IL0-SD · ORANGE · PVSD8020 · 20 Slub';
+    const C = '205-IL0-SD · Blue · PVSD8020 · 30';
+    it('products that would both read "code · colour" grow to the segment that tells them apart', () => {
+      const shown = [A, B, C];
+      expect(stationProductText({ product: A, productBasis: 'own' }, shown).short).toBe('205-IL0-SD · ORANGE · PVSD8020 · 30');
+      expect(stationProductText({ product: B, productBasis: 'own' }, shown).short).toBe('205-IL0-SD · ORANGE · PVSD8020 · 20 Slub');
+      expect(stationProductText({ product: A, productBasis: 'own' }, shown).full).toBe(A);
+    });
+    it('a product with no look-alike stays at code · colour', () => {
+      expect(stationProductText({ product: C, productBasis: 'own' }, [A, B, C]).short).toBe('205-IL0-SD · Blue');
+    });
+    it('stops at the first distinguishing segment (count differs, not tube)', () => {
+      const x = '205-IL0-SD · ORANGE · PVSD8020 · 30';
+      const y = '205-IL0-SD · ORANGE · PVSD8030 · 30';
+      expect(shortProductLabel(x, [x, y])).toBe('205-IL0-SD · ORANGE · PVSD8020');
+      expect(shortProductLabel(y, [x, y])).toBe('205-IL0-SD · ORANGE · PVSD8030');
+    });
+    it('the same product on several stations is not a collision', () => {
+      expect(shortProductLabel(A, [A, A, C])).toBe('205-IL0-SD · ORANGE');
+    });
+    it('null and mixed entries in the list are ignored; line basis keeps its mark', () => {
+      expect(shortProductLabel(A, [null, A, undefined])).toBe('205-IL0-SD · ORANGE');
+      expect(stationProductText({ product: A, productBasis: 'line' }, [A, B]).short).toBe('205-IL0-SD · ORANGE · PVSD8020 · 30 (line product)');
+    });
   });
 });

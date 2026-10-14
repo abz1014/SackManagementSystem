@@ -69,6 +69,18 @@ describe('StationHeatGrid', () => {
     expect(within(screen.getByText('Station 1').closest('button')!).getAllByText('OK').length).toBeGreaterThan(0);
     expect(screen.getByText('Station 2').closest('button')!.getAttribute('data-state')).toBe('act');
   });
+  it('tiles whose code and colour collide show the segment that tells them apart; full label in the tooltip', () => {
+    const A = '205-IL0-SD · ORANGE · PVSD8020 · 30';
+    const B = '205-IL0-SD · ORANGE · PVSD8020 · 20 Slub';
+    const C = '205-IL0-SD · Blue · PVSD8020 · 30';
+    render(<StationHeatGrid stations={[st(1, 'ok', 1, { product: A, productBasis: 'own' }), st(2, 'ok', 1, { product: B, productBasis: 'own' }), st(3, 'ok', 1, { product: C, productBasis: 'own' })]} />);
+    const prod = (n: number) => screen.getByText('Station ' + n).closest('button')!.querySelector('[title^="205"]')!;
+    expect(prod(1).textContent).toContain(A);
+    expect(prod(2).textContent).toContain(B);
+    expect(prod(3).textContent).toContain('205-IL0-SD · Blue');
+    expect(prod(3).textContent).not.toContain('PVSD8020');
+    expect(prod(2).getAttribute('title')).toBe(B);
+  });
   it('sorts worst first then by failedPct desc', () => {
     const r = sortStations([st(1, 'ok', 9), st(2, 'nodata', null), st(3, 'watch', 2), st(4, 'act', 1), st(5, 'watch', 3)], 'worst');
     expect(r.map((s) => s.station)).toEqual([4, 5, 3, 2, 1]);

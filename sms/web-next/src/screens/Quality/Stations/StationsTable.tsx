@@ -114,6 +114,7 @@ export function StationsTable(p: StationsTableProps) {
       ro?.disconnect();
     };
   }, [phone, p.rows.length]);
+  const shown = p.rows.map((r) => r.product);
   const key = (e: KeyboardEvent, n: number) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -176,7 +177,7 @@ export function StationsTable(p: StationsTableProps) {
                   >
                     <td className="qs-name">
                       <b>{stationText(r)}</b>
-                      <span className="qs-sub qs-clip" title={stationProductText(r).full}>{stationProductText(r).short}</span>
+                      <span className="qs-sub qs-clip" title={stationProductText(r, shown).full}>{stationProductText(r, shown).short}</span>
                     </td>
                     <td>
                       <StatusPill state={r.state} />
@@ -215,6 +216,7 @@ export function StationsTable(p: StationsTableProps) {
 
 function PhoneCard({ r, p, onKey }: { r: StationRowModel; p: StationsTableProps; onKey: (e: KeyboardEvent, n: number) => void }) {
   const [all, setAll] = useState(false);
+  const shown = p.rows.map((x) => x.product);
   return (
     <div
       className="ui-dt__card ui-dt__card--open"
@@ -229,7 +231,7 @@ function PhoneCard({ r, p, onKey }: { r: StationRowModel; p: StationsTableProps;
         <span>{stationText(r)}</span>
         <StatusPill state={r.state} />
       </div>
-      <span className="qs-sub" title={stationProductText(r).full}>{stationProductText(r).short}</span>
+      <span className="qs-sub" title={stationProductText(r, shown).full}>{stationProductText(r, shown).short}</span>
       <dl className="ui-dt__card-fields">
         <div>
           <dt>{S.colCones}</dt>

@@ -148,6 +148,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
     () => (rows ? [...rows].sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.station - b.station) : null),
     [rows],
   );
+  const shownProducts = (sorted ?? []).map((r) => r.product);
 
   if (!line) {
     return (
@@ -253,7 +254,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
       {sorted ? (
         <div className="wl-heat" role="list">
           {sorted.map((s) => (
-            <WallTile key={s.station} row={s} quiet={quietClock(s.station)} />
+            <WallTile key={s.station} row={s} shown={shownProducts} quiet={quietClock(s.station)} />
           ))}
         </div>
       ) : (
@@ -297,7 +298,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
   );
 }
 
-function WallTile({ row, quiet }: { row: StationStatusRow; quiet: string | null }) {
+function WallTile({ row, quiet, shown }: { row: StationStatusRow; quiet: string | null; shown: readonly (string | null)[] }) {
   const nodata = row.state === 'nodata';
   const label = row.name?.trim() ?? '';
   const big = nodata || row.failedPct == null ? '–' : `${row.failedPct.toFixed(1)} %`;
@@ -322,7 +323,7 @@ function WallTile({ row, quiet }: { row: StationStatusRow; quiet: string | null 
       </span>
       <span className="wl-tile-big">{big}</span>
       <span className="wl-tile-meta">{m1}</span>
-      <span className="wl-tile-meta" title={nodata ? undefined : stationProductText(row).full}>{nodata ? '' : stationProductText(row).short}</span>
+      <span className="wl-tile-meta" title={nodata ? undefined : stationProductText(row, shown).full}>{nodata ? '' : stationProductText(row, shown).short}</span>
     </div>
   );
 }

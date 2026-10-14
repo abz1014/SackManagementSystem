@@ -99,6 +99,7 @@ export function StationHeatGrid({ stations, onOpen, sort = 'worst', maxPerRow = 
           <StationTile
             key={s.station}
             item={s}
+            shownProducts={ordered.map((o) => o.product)}
             ref={(el) => {
               if (el) refs.current.set(s.station, el);
               else refs.current.delete(s.station);
