@@ -4,6 +4,7 @@ import '../../web/src/testkit/render';
 import { installFakeFetch } from '../../web/src/testkit/fetchRouter';
 import { LIVE_FIXTURE } from '../../web/src/testkit/fixtures';
 import { Gallery } from './Gallery';
+import { live } from './bridge/lib';
 
 afterEach(() => {
   cleanup();
@@ -13,7 +14,7 @@ afterEach(() => {
 describe('Gallery', () => {
   it('renders every block without throwing', async () => {
     installFakeFetch({ '/api/live': LIVE_FIXTURE, '/api/range': { minDate: '2026-08-05', maxDate: '2026-09-05' } });
-    const { container } = render(<Gallery />);
+    const { container } = render(<live.LiveProvider asOf={null}><Gallery /></live.LiveProvider>);
     for (const h of ['Shell', 'State vocabulary', 'KPI cards', 'Station heat grid', 'Charts', 'Data table', 'Empty, error and loading states', 'Write controls']) {
       expect(screen.getByRole('heading', { name: h })).toBeTruthy();
     }

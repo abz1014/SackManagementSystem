@@ -66,4 +66,14 @@ describe('data hooks', () => {
     render(<Probe hook={useRange} />);
     await waitFor(() => expect(screen.getByTestId('s').textContent).toMatch(/^error\|data range/));
   });
+  it('a live period keeps its figures when the plant clock moves on (no "Not available" flash)', async () => {
+    ff = installFakeFetch({ '/api/production': env({ rows: [{ cones: 91 }] }) });
+    const live1: P.Period = { ...period, key: 'shift', live: true, tsTo: '2026-09-06T06:00:00Z' };
+    const live2: P.Period = { ...live1, tsTo: '2026-09-06T06:00:10Z' };
+    const Show = ({ p }: { p: P.Period }) => { const d = useProduction(p); return <div data-testid="s">{d.status}</div>; };
+    const { rerender } = render(<Show p={live1} />);
+    await waitFor(() => expect(screen.getByTestId('s').textContent).toBe('ok'));
+    rerender(<Show p={live2} />);
+    expect(screen.getByTestId('s').textContent).toBe('ok');
+  });
 });

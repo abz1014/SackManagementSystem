@@ -17,7 +17,7 @@ import { fmt, generationWords, period as P, productLabel } from '../../../bridge
 import { W } from '../../../bridge/words';
 import { C, withFragments, FRAGMENTS } from '../../../copy';
 import { fmtAppDate, fmtDate, fmtTime } from '../../../lib/fmt';
-import { SHAPE, useData, useMachinesRunning, usePeriod, type DataState } from '../../../data';
+import { SHAPE, liveKey, useData, useMachinesRunning, usePeriod, type DataState } from '../../../data';
 import { ENGINEER_RANK } from '../../../ranks';
 import { Disclosure } from '../../../ui/Disclosure';
 import { ConfirmDialog } from '../../../ui/ConfirmDialog';
@@ -45,7 +45,7 @@ export function stamp(at: string): string {
 
 function key(period: P.Period): string {
   const q = P.periodQuery(period);
-  return [q.from, q.to, q.shift ?? '', q.fromShift ?? '', q.toShift ?? '', period.live ? q.tsTo : ''].join('|');
+  return [q.from, q.to, q.shift ?? '', q.fromShift ?? '', q.toShift ?? '', liveKey(period)].join('|');
 }
 
 export function ProductsBoardScreen(props: ScreenProps) {

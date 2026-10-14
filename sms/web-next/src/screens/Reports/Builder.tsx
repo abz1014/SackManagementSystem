@@ -168,7 +168,7 @@ export function Builder({ type, rank, period: ps, today, range, filters, state, 
               onChange={(v) => onFilter('st', v || null)}
               options={[
                 { value: '', label: RB.all },
-                ...stations.names.map((s) => ({ value: String(s.stationId), label: s.name?.trim() ? C.stationWithName(s.stationId, s.name.trim()) : C.station(s.stationId) })),
+                ...stations.names.map((s) => ({ value: String(s.stationId), label: C.stationOption(s) })),
               ]}
             />
           )

@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { C, FRAGMENTS } from '../copy';
-import { getLive } from '../bridge/api';
 import { period as P } from '../bridge/lib';
-import { useData } from '../data/useData';
+import { usePlantClock } from '../data/useLive';
 import { useRange } from '../data/hooks';
 import { usePeriod } from '../data/usePeriod';
 import { Icon } from './Icon';
@@ -15,13 +14,11 @@ import './components/period.css';
  */
 export function PeriodChip({ className }: { className?: string }) {
   const state = usePeriod();
-  const at = new URLSearchParams(window.location.search).get('at');
-  const live = useData('plant clock', () => getLive(at), `period:live:${at ?? 'now'}`, { live: false });
+  const clock = usePlantClock();
   const range = useRange();
   const [open, setOpen] = useState(false);
 
-  const rawLine = live.data?.data?.lines?.[0] ?? null;
-  const line = rawLine && rawLine.shift && typeof rawLine.plantNowUtc === 'string' ? rawLine : null;
+  const line = clock.line;
   const maxDate = range.data?.maxDate ?? null;
   const anchor: P.PeriodAnchor | null = line
     ? {
@@ -46,7 +43,7 @@ export function PeriodChip({ className }: { className?: string }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={!period}
-        title={live.error !== null && !anchor ? C.periodUi.clockUnread : undefined}
+        title={(clock.failed || clock.broken) && !anchor ? C.periodUi.clockUnread : undefined}
         aria-label={period ? C.periodUi.chipLabel(sentence + (cmpTag ? `, ${cmpTag}` : '')) : sentence}
         onClick={() => setOpen(true)}
       >

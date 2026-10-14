@@ -7,14 +7,14 @@
 import { FRAGMENTS } from '../../../copy';
 import { getProduction, getRejects, getWeightStations, listAdjustments } from '../../../bridge/api';
 import { period as P } from '../../../bridge/lib';
-import { SHAPE, useData, type DataState } from '../../../data';
+import { SHAPE, liveKey, useData, type DataState } from '../../../data';
 import type { Envelope, ProductionData, RejectData, WeightStationsData, AdjustmentList } from '../../../bridge/api';
 
 const SF = FRAGMENTS.qualityStations;
 
 function key(period: P.Period): string {
   const q = P.periodQuery(period);
-  return [q.from, q.to, q.shift ?? '', q.fromShift ?? '', q.toShift ?? '', period.live ? q.tsTo : ''].join('|');
+  return [q.from, q.to, q.shift ?? '', q.fromShift ?? '', q.toShift ?? '', liveKey(period)].join('|');
 }
 
 /** Cones, rejected cones and the scale's in-range share, one row per station, for the period. */

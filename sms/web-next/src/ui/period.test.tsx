@@ -4,6 +4,7 @@ import '../../../web/src/testkit/render';
 import { installFakeFetch } from '../../../web/src/testkit/fetchRouter';
 import { LIVE_FIXTURE } from '../../../web/src/testkit/fixtures';
 import { PeriodChip } from './PeriodChip';
+import { live } from '../bridge/lib';
 
 const routes = { '/api/live': LIVE_FIXTURE, '/api/range': { minDate: '2026-08-05', maxDate: '2026-09-05' } };
 const search = () => new URLSearchParams(window.location.search);
@@ -11,7 +12,7 @@ const search = () => new URLSearchParams(window.location.search);
 async function openPanel(url = '/') {
   window.history.replaceState(null, '', url);
   installFakeFetch(routes);
-  render(<PeriodChip />);
+  render(<live.LiveProvider asOf={null}><PeriodChip /></live.LiveProvider>);
   const chip = await screen.findByRole('button', { name: /Change period/ });
   await waitFor(() => expect((chip as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(chip);
@@ -30,7 +31,7 @@ describe('PeriodChip and PeriodPanel', () => {
   it('shows the resolved period and compare tag', async () => {
     window.history.replaceState(null, '', '/?p=yesterday&cmp=prev');
     installFakeFetch(routes);
-    render(<PeriodChip />);
+    render(<live.LiveProvider asOf={null}><PeriodChip /></live.LiveProvider>);
     const chip = await screen.findByRole('button', { name: /6 Sep/ });
     expect(chip.textContent).toContain('6 Sep');
     expect(chip.textContent).toContain('vs previous');

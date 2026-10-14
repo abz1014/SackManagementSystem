@@ -207,7 +207,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
           value={station === null ? '' : String(station)}
           placeholder={R.all}
           onChange={(v) => setKey('st', v)}
-          options={(stations.data?.stations ?? []).map((s) => ({ value: String(s.stationId), label: s.name?.trim() || `Station ${s.stationId}` }))}
+          options={(stations.data?.stations ?? []).map((s) => ({ value: String(s.stationId), label: C.stationOption(s) }))}
         />
         <SelectField
           label={R.filterProduct}

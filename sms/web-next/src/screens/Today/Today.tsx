@@ -39,6 +39,7 @@ import {
   rateDelta, ranSentence, stationCounts, stationSentence,
 } from './model';
 import { Hop } from './Hop';
+import { lagSentence } from '../../lib/lagSentence';
 import './Today.css';
 
 const T = C.today;
@@ -277,6 +278,7 @@ function Band({
       <div className="today-meta">
         <p className="cap">{caption}.</p>
         <p className="cap">{T.answers}</p>
+        {period.live && line && <p className="cap" data-testid="today-lag">{lagSentence(health)}</p>}
         {quiet && <p className="cap" data-testid="today-generation">{quiet}</p>}
         {period.live && <p className="cap">{T.band.updatedLive}</p>}
       </div>
@@ -474,7 +476,7 @@ function Notes({
           <p>{T.about.productStamped}</p>
           {lookbackLimited && <p>{T.about.lookback}</p>}
           {generation?.spansGenerations && (
-            <p>{W.state.periodGenerations(generation.otherGenerationExcluded > 0 ? nf0(generation.otherGenerationExcluded) : null)}</p>
+            <p>{C.rebuildNote.notCounted(generation.otherGenerationExcluded > 0 ? nf0(generation.otherGenerationExcluded) : null)}</p>
           )}
           {prodData?.limitProvenance?.note && <p>{prodData.limitProvenance.note}</p>}
           {prodData?.implausible != null && prodData.implausible > 0 && <p>{W.detailsImplausible(nf0(prodData.implausible))}</p>}

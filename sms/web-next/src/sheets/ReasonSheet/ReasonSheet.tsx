@@ -10,7 +10,7 @@
  */
 import { C, FRAGMENTS } from '../../copy';
 import { getRejectReason, getRejectsByDayCode, getStations, stationLabel, type RejectDayCodeRow, type RejectReasonRow } from '../../bridge/api';
-import { batchName, fmt, period as P } from '../../bridge/lib';
+import { fmt, period as P } from '../../bridge/lib';
 import { W } from '../../bridge/words';
 import { fmtDate, fmtDayShort, fmtTime } from '../../lib/fmt';
 import { useData } from '../../data';
@@ -89,7 +89,6 @@ function Body({ id, rank, route, go }: { id: ReasonId; rank: number; route: Shee
           <span>{r.productLabel ?? R.noProductThen}</span>
           <span className="rs-sub">
             {r.sourceRowId == null ? '–' : String(r.sourceRowId)}
-            {r.epochOrdinal != null && ` · ${batchName.batchName({ ordinal: r.epochOrdinal, simulator: r.epochSimulator })}`}
           </span>
         </>
       ),

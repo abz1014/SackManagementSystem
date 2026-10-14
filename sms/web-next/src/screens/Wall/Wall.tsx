@@ -21,12 +21,13 @@ import { fmt, generationWords, health as healthLib, live, period as P, simulator
 import { W } from '../../bridge/words';
 import { C, FRAGMENTS } from '../../copy';
 import { todayRoute } from '../../appRoute';
-import { useData, usePeriod, useProduction, useStationStatus, useLive } from '../../data';
+import { useData, usePeriod, useProduction, useStationStatus, useLive, liveKey } from '../../data';
 import { hrefFor, plainClick } from '../../ui/nav';
 import { StatusPill, type UiState } from '../../ui/StatusPill';
 import type { ScreenProps } from '../registry';
 import { readUiScale } from '../../ui/uiScale';
 import { fmtTime } from '../../lib/fmt';
+import { lagSentence } from '../../lib/lagSentence';
 import { clockOn } from '../Today/model';
 import { inShiftOrder } from './shifts';
 import './wall.css';
@@ -57,21 +58,6 @@ function stateSentence(line: LiveLine, anchor: string): string {
         : `${name} ${W.state.stoppedUnknownDuration}`;
     default:
       return `${name} ${W.state.idle(fmtTime(anchor))}`;
-  }
-}
-
-function lagSentence(health: ReturnType<typeof healthLib.assessHealth>): string {
-  switch (health.kind) {
-    case 'stale':
-      return W.lag.stale(health.readingUtc ? fmtTime(health.readingUtc) : '—');
-    case 'late':
-      return W.lag.late(fmt.fmtSpan(health.lagSeconds));
-    case 'ok':
-      return health.lagSeconds != null
-        ? W.lag.ok(fmtTime(health.readingUtc), fmt.fmtSpan(health.lagSeconds))
-        : W.lag.okNoLag(fmtTime(health.readingUtc));
-    default:
-      return W.lag.noData;
   }
 }
 
@@ -143,7 +129,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
   const shiftsD = useData(
     'shift output',
     () => getProduction({ ...P.periodQuery(period), groupBy: 'shift' }),
-    `wall-shifts:${period.key}|${period.from}|${period.to}|${period.shift ?? ''}:${period.live ? period.tsTo : ''}`,
+    `wall-shifts:${period.key}|${period.from}|${period.to}|${period.shift ?? ''}:${liveKey(period)}`,
     { live: period.live },
   );
 
@@ -193,7 +179,9 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
   };
 
   const prodRow = prodD.data?.data.rows[0] ?? null;
-  const unread = WC.unreadable;
+  // "Not available" is for a part that FAILED. A part still on its way shows a dash, never the failure words.
+  const unreadFor = (d: { status: string }) => (d.status === 'loading' ? '–' : WC.unreadable);
+  const unread = unreadFor(prodD);
   const packed = prodRow ? fmt.kgParts(prodRow.sackWeightKg) : { value: unread, unit: '' };
   const failedPct = stationsD.data ? stationsD.data.data.lineFailedPct : null;
   const kpis: Kpi[] = [
@@ -203,7 +191,7 @@ function WallBoard({ route, period }: ScreenProps & { period: P.Period }) {
     {
       key: 'failed',
       label: WC.kpi.failed,
-      value: stationsD.data ? (failedPct == null ? '–' : failedPct.toFixed(1)) : unread,
+      value: stationsD.data ? (failedPct == null ? '–' : failedPct.toFixed(1)) : unreadFor(stationsD),
       unit: failedPct == null ? '' : '%',
       cls: 'k-insp',
     },

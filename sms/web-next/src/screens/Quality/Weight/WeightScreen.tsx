@@ -238,7 +238,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
         afterNewest={after.text}
       />
       {cone?.spansGenerations && !isSack && (
-        <p className="qw-note">{W.state.periodGenerations(cone.otherGenerationExcluded > 0 ? fmt.fmtInt(cone.otherGenerationExcluded) : null)}</p>
+        <p className="qw-note">{C.rebuildNote.notCounted(cone.otherGenerationExcluded > 0 ? fmt.fmtInt(cone.otherGenerationExcluded) : null)}</p>
       )}
 
       <div className="qw-bar" role="group" aria-label={QW.toolbar.chart}>
@@ -267,7 +267,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
             onChange={(v) => setKey({ st: v === '' ? null : v })}
             options={[
               { value: '', label: W.cone.wholeLine },
-              ...stationRows.map((s) => ({ value: String(s.stationId), label: nameOf(s.stationId) })),
+              ...stationRows.map((s) => ({ value: String(s.stationId), label: C.stationOption(s) })),
             ]}
           />
         )}
@@ -313,7 +313,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
           {!isSack && perProduct && <p className="qw-note">{QW.perProductLimits}</p>}
           {isSack && <p className="qw-note">{W.weight.sackNoTarget}</p>}
           {chart !== null && chart.spansGenerations && (
-            <p className="qw-note">{W.weight.oneGeneration(fmt.fmtInt(chart.count), fmt.fmtInt(chart.otherGenerationExcluded))}</p>
+            <p className="qw-note">{C.rebuildNote.chartShows(fmt.fmtInt(chart.count), fmt.fmtInt(chart.otherGenerationExcluded))}</p>
           )}
           {chart !== null && chart.count + chart.implausible > 0 && (
             <p className="qw-note">

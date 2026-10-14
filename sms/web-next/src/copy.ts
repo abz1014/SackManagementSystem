@@ -79,6 +79,16 @@ export const C = {
   station: (n: number) => `Station ${n}`,
   /** Decision E-9: "Station N · <name>", the existing name string verbatim. */
   stationWithName: (n: number, name: string) => `Station ${n} · ${name}`,
+  /** A station in a picker: the same "Station N · <name>" as the tiles, or "Station N" when no name is configured. */
+  stationOption: (s: { stationId: number; name?: string | null }) =>
+    s.name?.trim() ? `Station ${s.stationId} · ${s.name.trim()}` : `Station ${s.stationId}`,
+  /** GLOSSARY rows 115-116: older readings are named by the date IFL rebuilt its database, never by "batch". */
+  rebuildNote: {
+    notCounted: (n: string | null) =>
+      `${n ? `${n} readings` : 'Some readings'} from before the 5 Aug 2026 IFL database rebuild are not counted.`,
+    chartShows: (shown: string, excluded: string) =>
+      `This chart shows ${shown} readings. ${excluded} readings from before the 5 Aug 2026 rebuild are not shown.`,
+  },
   noCones: 'No cones',
   noConesFor: (n: number, span: string) => `Station ${n}: no cones for ${span}`,
 
@@ -161,6 +171,7 @@ export const C = {
     checking: 'Checking your sign-in',
     wallTitle: 'Wall display',
     leaveReplay: 'Leave replay',
+    replayUnreadable: (raw: string) => `The replay time "${raw}" could not be read, so the live picture is shown. Write it as a plant time, for example 2026-10-13T15:30.`,
     placeholder: 'This screen is being rebuilt.',
     placeholderSheet: 'This detail view is being rebuilt.',
     openCurrent: 'Open it in the current app',

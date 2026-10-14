@@ -6,6 +6,7 @@
  * the registry (screens/registry.ts) inside a page boundary, so a screen that
  * throws never takes the shell with it.
  */
+import { normalizeAt } from './lib/replayAt';
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentProps } from 'react';
 import { getMe, setUnauthorizedHandler, ROLE_RANK, type AuthUser } from './bridge/api';
 import { ErrorBoundary, SimulatorBanner } from './bridge/components';
@@ -63,7 +64,8 @@ function Session({ user, onSignedOut }: { user: AuthUser; onSignedOut: () => voi
     if (canonical !== null) replaceQuery(canonical);
   }, [canonical]);
 
-  const at = route.keys.at ?? null;
+  const replay = normalizeAt(route.keys.at);
+  const at = replay.kind === 'ok' ? replay.value : null;
 
   if (gallery && Gallery) {
     return (
@@ -76,7 +78,7 @@ function Session({ user, onSignedOut }: { user: AuthUser; onSignedOut: () => voi
   }
   return (
     <live.LiveProvider asOf={at}>
-      <Frame user={user} rank={rank} route={route} onSignedOut={onSignedOut} />
+      <Frame user={user} rank={rank} route={route} onSignedOut={onSignedOut} badAt={replay.kind === 'bad' ? replay.raw : null} />
     </live.LiveProvider>
   );
 }
@@ -112,7 +114,7 @@ export function bannerView(route: Route): { view: BannerView; productTab: Banner
   }
 }
 
-function Frame({ user, rank, route, onSignedOut }: { user: AuthUser; rank: number; route: Route; onSignedOut: () => void }) {
+function Frame({ user, rank, route, onSignedOut, badAt = null }: { user: AuthUser; rank: number; route: Route; onSignedOut: () => void; badAt?: string | null }) {
   const { line } = useLive();
   const plantNow = usePlantNow();
   const { period } = usePeriod();
@@ -177,6 +179,14 @@ function Frame({ user, rank, route, onSignedOut }: { user: AuthUser; rank: numbe
         />
       }
     >
+      {badAt !== null && (
+        <div className="app-banner" role="status" data-testid="replay-unreadable">
+          <span>{C.app.replayUnreadable(badAt)}</span>
+          <a className="ui-link" href={hrefFor(leaveReplay)} onClick={(e) => plainClick(e, () => go(leaveReplay))}>
+            {C.app.leaveReplay}
+          </a>
+        </div>
+      )}
       {line?.replay && (
         <div className="app-banner" role="status">
           <span>

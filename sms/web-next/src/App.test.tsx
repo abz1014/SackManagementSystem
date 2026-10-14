@@ -300,6 +300,34 @@ describe('banners (A3-011, G-17, A3-012)', () => {
     expect(new URLSearchParams(window.location.search).get('at')).toBeNull();
   });
 
+  it('a replay time without a zone is plant wall time: the API gets the same instant with Z (live-sim finding 1)', async () => {
+    const ff = setup('viewer', {}, '/next/?s=today&at=2026-10-13T15:30:00.000&p=shift');
+    render(<App />);
+    await findSidebar();
+    await waitFor(() => expect(ff.requests.some((r) => r.startsWith('/api/live'))).toBe(true));
+    expect(ff.requests.filter((r) => r.startsWith('/api/live')).every((r) => r.includes(encodeURIComponent('2026-10-13T15:30:00.000Z')))).toBe(true);
+    expect(screen.queryByText(/Couldn't load plant clock/)).toBeNull();
+    expect(screen.queryByTestId('replay-unreadable')).toBeNull();
+  });
+
+  it('a replay time that is no date-time is named in the banner and the live picture is shown', async () => {
+    const ff = setup('viewer', {}, '/next/?s=today&at=yesterday-ish&p=shift');
+    render(<App />);
+    const b = await screen.findByTestId('replay-unreadable');
+    expect(b.textContent).toContain('"yesterday-ish" could not be read');
+    expect(ff.requests.filter((r) => r.startsWith('/api/live')).every((r) => !r.includes('asOf'))).toBe(true);
+    expect(screen.queryByText(/Couldn't load plant clock/)).toBeNull();
+  });
+
+  it('runs ONE /api/live poll for the whole app, however many places read the plant clock (live-sim finding 6)', async () => {
+    const ff = setup('viewer', {}, '/next/?s=today&p=yesterday');
+    render(<App />);
+    await findSidebar();
+    await waitFor(() => expect(screen.getByRole('button', { name: /Data current/ })).toBeTruthy());
+    await screen.findByRole('button', { name: /Change period/ });
+    expect(ff.requests.filter((r) => r.startsWith('/api/live'))).toHaveLength(1);
+  });
+
   it('shows no replay banner on a live line', async () => {
     setup('viewer');
     render(<App />);

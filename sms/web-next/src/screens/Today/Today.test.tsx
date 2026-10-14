@@ -260,6 +260,19 @@ describe('status band (A3-023, health rule)', () => {
     expect(screen.getByTestId('today-generation').textContent).toContain('Newer readings from a different data set are not counted.');
   });
 
+  it('a live period states the acquisition lag, from the same server field the Wall uses (live-sim finding 2)', async () => {
+    const ok = liveLine({ health: { ...pd.live.lines[0].health, kind: 'ok', lagSeconds: 1080 } });
+    mount('/?s=today&p=shift', { '/api/live': env({ lines: [ok] }) });
+    const lag = await screen.findByTestId('today-lag');
+    expect(lag.textContent).toMatch(/they reach this system about \d+ min after weighing/);
+  });
+
+  it('a closed period prints no lag sentence', async () => {
+    mount();
+    expect(await screen.findByText(/Line ran all three shifts\./)).toBeTruthy();
+    expect(screen.queryByTestId('today-lag')).toBeNull();
+  });
+
   it('prints no generation line when nothing newer sits elsewhere (A3-024)', async () => {
     mount('/?s=today&p=shift');
     expect(await screen.findByText(/Line 3 is running\./)).toBeTruthy();
@@ -269,7 +282,7 @@ describe('status band (A3-023, health rule)', () => {
   it('names the period generation note from the server (A3-024)', async () => {
     mount();
     fireEvent.click(await screen.findByText('About these figures'));
-    expect(await screen.findByText(/different data batch/)).toBeTruthy();
+    expect(await screen.findByText(/from before the 5 Aug 2026 IFL database rebuild are not counted/)).toBeTruthy();
   });
 });
 

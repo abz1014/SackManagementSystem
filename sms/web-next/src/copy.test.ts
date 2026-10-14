@@ -86,5 +86,7 @@ describe('tab labels match route.ts TABS', () => {
   });
   it('station with name uses a middle dot', () => {
     expect(C.stationWithName(5, 'East Conveyor')).toBe('Station 5 · East Conveyor');
+    expect(C.stationOption({ stationId: 5, name: ' East Conveyor ' })).toBe('Station 5 · East Conveyor');
+    expect(C.stationOption({ stationId: 5, name: null })).toBe('Station 5');
   });
 });

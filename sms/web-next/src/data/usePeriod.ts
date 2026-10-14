@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getLive, getRange } from '../bridge/api';
+import { getRange } from '../bridge/api';
 import { period as P } from '../bridge/lib';
 import { useData } from './useData';
+import { usePlantClock } from './useLive';
 
 export type Compare = 'prev' | 'week';
 
@@ -51,14 +52,13 @@ export function usePeriod(): PeriodState {
   const sp = new URLSearchParams(search);
   const params = P.parsePeriodParams(sp);
   const compare = parseCompare(sp);
-  const at = sp.get('at');
-  const liveD = useData('plant clock', () => getLive(at), `period:live:${at ?? 'now'}`);
+  // ONE /api/live poll for the whole app: the clock comes from the shared LiveProvider, not from a poll of our own.
+  const clock = usePlantClock();
   const rangeD = useData('data range', () => getRange(), 'period:range', { live: false });
 
-  const rawLine = liveD.data?.data?.lines?.[0] ?? null;
   // A clock body with a hole (no shift, no plant time) is a failed plant clock, never a crash and never a guessed period.
-  const line = rawLine && rawLine.shift && typeof rawLine.plantNowUtc === 'string' ? rawLine : null;
-  const clockBroken = liveD.status !== 'loading' && liveD.status !== 'error' && liveD.data !== null && line === null;
+  const line = clock.line;
+  const clockBroken = clock.broken;
   const period = line
     ? P.resolvePeriod(
         params.key,
@@ -78,10 +78,10 @@ export function usePeriod(): PeriodState {
   // A failed range fetch is named, never silent: the period may still resolve
   // from the live anchor, but firstDay / the data-as-of fallback are then missing.
   const failed = [
-    ...(liveD.status === 'error' || clockBroken ? [liveD.part] : []),
+    ...(clock.failed || clockBroken ? [clock.part] : []),
     ...(rangeD.error !== null ? [rangeD.part] : []),
   ];
-  const status = liveD.status === 'error' || clockBroken ? 'error' : period ? 'ok' : 'loading';
+  const status = clock.failed || clockBroken ? 'error' : period ? 'ok' : 'loading';
 
   const setParams = useCallback((p: P.PeriodParams) => push((s) => P.writePeriodParams(s, p)), []);
   const setCompare = useCallback(

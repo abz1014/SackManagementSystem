@@ -28,3 +28,29 @@ export function usePlantNow(): string | null {
   const t = new Date(line.plantNowUtc).getTime() + (now - updatedAt);
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
+
+export interface PlantClock {
+  /** The line whose plant clock and shift are readable, or null. */
+  line: LiveLineT | null;
+  /** The shared poll answered, but with a body that has no usable shift or plant time. */
+  broken: boolean;
+  /** The shared poll failed and there is nothing to show (a stale line from an earlier answer still counts as shown). */
+  failed: boolean;
+  part: string;
+}
+
+/**
+ * The plant clock, read from the one shared /api/live poll (the app's LiveProvider). usePeriod and the period chip use this
+ * instead of polling /api/live themselves; three loops on one URL tripled the traffic for nothing.
+ */
+export function usePlantClock(): PlantClock {
+  const v = live.useLive();
+  const raw = v.line;
+  const line = usableLine(raw);
+  return {
+    line,
+    broken: v.updatedAt !== null && !v.loading && v.error === null && line === null,
+    failed: v.error !== null && line === null,
+    part: 'plant clock',
+  };
+}

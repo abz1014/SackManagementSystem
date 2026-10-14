@@ -6,6 +6,7 @@ import { LIVE_FIXTURE } from '../../../../../web/src/testkit/fixtures';
 import { navigate, useLocationSearch } from '../../../appRoute';
 import { parseRoute } from '../../../route';
 import { QualityWeightScreen } from './WeightScreen';
+import { live } from '../../../bridge/lib';
 
 const USER = { username: 'asma', displayName: 'Asma', role: 'engineer' };
 
@@ -150,7 +151,7 @@ const ONE_DAY = '/?s=quality&t=weight&p=pick&from=2026-09-01&to=2026-09-01';
 async function mount(url: string, over: Record<string, unknown> = {}) {
   window.history.replaceState(null, '', url);
   ff = installFakeFetch(routes(over));
-  render(<Harness />);
+  render(<live.LiveProvider asOf={null}><Harness /></live.LiveProvider>);
   await waitFor(() => { const t = (document.querySelector('.ui-pagehead__sentence')?.textContent ?? '').replace(/ /g, '').trim(); expect(t).toBeTruthy(); expect(t).not.toMatch(/Loading/); });
   await waitFor(() => expect(screen.getByText('About these figures')).toBeTruthy());
 }
@@ -353,8 +354,10 @@ describe('Quality > Weight: states', () => {
 describe('Quality > Weight: disclosures and the 90% range', () => {
   it('says when a period spans two data batches (A3-038)', async () => {
     await mount(MULTI, { '/api/spc': () => env(spc({ spansGenerations: true, otherGenerationExcluded: 2000 })) });
-    await waitFor(() => expect(screen.getAllByText(/different data batch/).length).toBeGreaterThan(0));
-    expect(screen.getAllByText(/IFL rebuilt its tables|tables were rebuilt/).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText(/from before the 5 Aug 2026/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/readings from before the 5 Aug 2026 (IFL database )?rebuild/).length).toBeGreaterThan(1);
+    // TRACE B7-8: the page never says "data batch" (GLOSSARY rows 115-116).
+    expect(document.body.textContent ?? '').not.toMatch(/data batch/i);
   });
   it('states the 90% range on the days to the limit, never a bare day count (A3-035, RT-020)', async () => {
     const row = {

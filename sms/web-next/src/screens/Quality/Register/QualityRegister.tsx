@@ -414,7 +414,7 @@ function RowsPanel(p: RowsPanelProps) {
               value={p.station === null ? '' : String(p.station)}
               placeholder={R.all}
               onChange={(v) => go(withKey(route, 'st', v), { replace: true })}
-              options={stationList.map((s) => ({ value: String(s.stationId), label: RESERVED.stationLabel(s, s.stationId) }))}
+              options={stationList.map((s) => ({ value: String(s.stationId), label: C.stationOption(s) }))}
               hint={p.stations.status === 'error' ? R.stationsUnavailable : undefined}
             />
           )}

@@ -15,12 +15,22 @@ function periodKey(p: P.Period): string {
   return [p.key, p.from, p.to, p.shift ?? '', p.fromShift ? P.encodeShiftRef(p.fromShift) : '', p.toShift ? P.encodeShiftRef(p.toShift) : ''].join('|');
 }
 
+/**
+ * The poll-key part for a live period. It is the replay instant (or "now"), never the moving plant clock `tsTo`: a key that
+ * moves every 10 s clears the screen's figures on every poll and the tiles read "Not available" while the refetch is in
+ * flight (live-sim finding 5). The fetch function still reads the newest `tsTo` each time it runs.
+ */
+export function liveKey(period: P.Period): string {
+  if (!period.live) return '';
+  return new URLSearchParams(window.location.search).get('at') ?? 'now';
+}
+
 /** Production for the period; with `compare`, data.previous carries the comparison period. Polls only a live period. */
 export function useProduction(period: P.Period, compare: Compare | null = null): DataState<ProductionResult> {
   return useData(
     'production',
     () => getProduction({ ...P.periodQuery(period), groupBy: 'none', ...(compare ? { compare } : {}) }),
-    `production:${periodKey(period)}:${compare ?? ''}:${period.live ? period.tsTo : ''}`,
+    `production:${periodKey(period)}:${compare ?? ''}:${liveKey(period)}`,
     { live: period.live, shape: SHAPE.productionRows },
   );
 }

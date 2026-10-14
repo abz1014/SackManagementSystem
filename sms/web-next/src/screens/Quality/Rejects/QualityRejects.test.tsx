@@ -359,6 +359,12 @@ describe('ReasonSheet (A3-057, A6-S5, A1-067)', () => {
     expect(ff!.requests.some((r) => r.startsWith('/api/rejects/reason?') && r.includes('day=2026-09-06') && r.includes('code=2-1'))).toBe(true);
   });
 
+  it('never prints "data batch" in the cone list, though the rows carry a batch ordinal (TRACE B7-8)', async () => {
+    openSheet(1);
+    expect(await screen.findByText('Station 3')).toBeTruthy();
+    expect(document.body.textContent ?? '').not.toMatch(/data batch/i);
+  });
+
   it('shows the per-day breakdown for the period and a day row moves the sheet (replace)', async () => {
     openSheet(1);
     const table = await screen.findByRole('table', { name: 'Day by day in this period' });
