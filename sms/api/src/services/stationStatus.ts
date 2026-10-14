@@ -26,7 +26,7 @@
  * THE PERIOD ONLY. This is a plain count over the period on screen. It does
  * NOT use `flagged` / `projection` / drift from the 14-day detector window
  * (CLAUDE.md: the detectors ignore the period). `vsTargetG` and `product` are
- * taken only from the period rows' `n` and `vsTargetG`.
+ * taken only from the period rows (each station's OWN product and target).
  *
  * NO `tsTo`. The underlying count services (rejectRatesByStation,
  * getWeightStations) cannot cap by instant, so a replay instant could not be
@@ -56,8 +56,17 @@ export interface StationStatusRow {
   reasons: string[];
   /** Mean cone weight minus the station's own target, grams; null when none can be stated. */
   vsTargetG: number | null;
-  /** Label of the line's product the target belongs to, when known. */
+  /** The station's OWN product the target belongs to; null when mixed or unknown. */
   product: string | null;
+  /**
+   * Where `product`/`vsTargetG` came from: 'own' (the one material this
+   * station ran), 'mixed' (several; product and vsTargetG are null), 'line'
+   * (readings carry no material, the line-wide product is used), null when
+   * the target context was unavailable.
+   */
+  productBasis: 'own' | 'mixed' | 'line' | null;
+  /** Only when productBasis is 'mixed': how many materials the station ran. */
+  materialsInPeriod?: number;
 }
 
 export interface StationStatusData {
@@ -115,13 +124,20 @@ export async function getStationStatus(
 
   // Optional target context. Never let it break the state decision.
   const targets = new Map<number, number | null>();
-  let product: string | null = null;
+  const products = new Map<number, { label: string | null; basis: 'own' | 'mixed' | 'line'; materials?: number }>();
   try {
     const w = await getWeightStations(pool, lineId, from, to, undefined, {
       from, to, shiftRange: opts.shiftRange, shift: opts.shift ?? null,
     });
-    product = w.productLabel ?? null;
-    for (const s of w.stations) targets.set(s.station, s.n > 0 ? s.vsTargetG : null);
+    for (const s of w.stations) {
+      targets.set(s.station, s.n > 0 ? s.vsTargetG : null);
+      const basis = s.targetBasis === 'station_material' ? 'own' : s.targetBasis === 'mixed' ? 'mixed' : 'line';
+      products.set(s.station, {
+        label: basis === 'mixed' ? null : (s.targetProductLabel ?? (basis === 'line' ? (w.productLabel ?? null) : null)),
+        basis,
+        materials: s.materialsInWindow,
+      });
+    }
   } catch {
     /* target context unavailable: the state is unaffected */
   }
@@ -133,6 +149,7 @@ export async function getStationStatus(
       const rate = cones > 0 ? (rates.rates.get(s.stationId) ?? null) : null;
       const { state, reasons } = decideState(cones, rate, lineRate);
       const vs = targets.get(s.stationId);
+      const pr = products.get(s.stationId);
       return {
         station: s.stationId,
         name: s.name,
@@ -141,7 +158,9 @@ export async function getStationStatus(
         state,
         reasons,
         vsTargetG: vs == null ? null : round(vs, 1),
-        product,
+        product: pr?.label ?? null,
+        productBasis: pr?.basis ?? null,
+        ...(pr?.basis === 'mixed' && pr.materials != null ? { materialsInPeriod: pr.materials } : {}),
       };
     });
 

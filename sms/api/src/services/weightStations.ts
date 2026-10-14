@@ -211,6 +211,12 @@ export interface WeightStationRow {
    *    the same readings.
    */
   targetBasis: 'station_material' | 'mixed' | 'line_product';
+  /**
+   * Label of the product this row's target belongs to: the station's own
+   * material for 'station_material', the line-wide product for
+   * 'line_product', null for 'mixed' (several products, no single label).
+   */
+  targetProductLabel?: string | null;
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
   /**
@@ -673,6 +679,7 @@ export async function getWeightStations(
       limits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - limits.targetG);
     // RT-018: the line-wide fallback's retired flag is the line target's own.
     let rowTargetProductActive: boolean | null = productActive;
+    let rowTargetProductLabel: string | null = product?.label ?? null;
     if (distinctMaterials.length === 1) {
       targetBasis = 'station_material';
       const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
@@ -680,6 +687,7 @@ export async function getWeightStations(
       rowTargetProvenance = resolveTarget(distinctMaterials[0]!);
       rowVsTargetG = mLimits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - mLimits.targetG);
       rowTargetProductActive = catalogue.product(distinctMaterials[0]!)?.activeFlag ?? null;
+      rowTargetProductLabel = catalogue.product(distinctMaterials[0]!)?.label ?? null;
     } else if (distinctMaterials.length > 1) {
       targetBasis = 'mixed';
       materialsInWindow = distinctMaterials.length;
@@ -688,6 +696,7 @@ export async function getWeightStations(
       // No single target means no single target provenance either.
       rowTargetProvenance = { usable: false, effectiveFromUtc: null, isLowerBound: false, afterWindowEnd: false, omittedReason: null };
       rowTargetProductActive = null;
+      rowTargetProductLabel = null;
     }
 
     const r = rejects.get(st.station);
@@ -705,6 +714,7 @@ export async function getWeightStations(
       runVsLineG: runMeanIsRun && lineMeanG != null ? round(runMean - lineMeanG) : null,
       targetBasis,
       targetProductActive: rowTargetProductActive,
+      targetProductLabel: rowTargetProductLabel,
       ...(materialsInWindow != null ? { materialsInWindow } : {}),
       // F6: these describe the VERSION this row resolved, and they are no
       // longer gated on `vsTargetG != null` — under the withholding rule

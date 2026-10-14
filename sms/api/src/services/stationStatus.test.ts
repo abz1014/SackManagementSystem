@@ -10,16 +10,19 @@ const st = {
   totalUnmatchedRejects: 0,
 };
 
+const defaultWs = () => ({
+  productLabel: 'P12',
+  stations: [{ station: 1, n: 100, meanG: 1950, vsTargetG: -4.26 }, { station: 2, n: 0, meanG: 0, vsTargetG: 3 }] as Record<string, unknown>[],
+});
+const ws = { data: defaultWs() };
+
 vi.mock('./admin.js', () => ({ listStations: async () => st.stations }));
 vi.mock('./weightStations.js', () => ({
   rejectRatesByStation: async () => ({
     rates: st.rates, cones: st.cones, totalCones: st.totalCones,
     totalRejects: st.totalRejects, totalUnmatchedRejects: st.totalUnmatchedRejects,
   }),
-  getWeightStations: async () => ({
-    productLabel: 'P12',
-    stations: [{ station: 1, n: 100, meanG: 1950, vsTargetG: -4.26 }, { station: 2, n: 0, meanG: 0, vsTargetG: 3 }],
-  }),
+  getWeightStations: async () => ws.data,
 }));
 
 const { getStationStatus, decideState } = await import('./stationStatus.js');
@@ -95,5 +98,26 @@ describe('getStationStatus', () => {
   });
   it('decideState: unknown line rate is ok', () => {
     expect(decideState(5, 9, null).state).toBe('ok');
+  });
+  it('each station gets its own product and target; mixed is null with a marker; July rows use the line product', async () => {
+    setup(2, [{ id: 1, cones: 100, rate: 2 }, { id: 2, cones: 100, rate: 2 }, { id: 3, cones: 100, rate: 2 }, { id: 4, cones: 100, rate: 2 }]);
+    ws.data = {
+      productLabel: 'LINE-DEFAULT',
+      stations: [
+        { station: 1, n: 100, vsTargetG: -2, targetBasis: 'station_material', targetProductLabel: '205-IL0-SD' },
+        { station: 2, n: 100, vsTargetG: 5, targetBasis: 'station_material', targetProductLabel: 'Star Green' },
+        { station: 3, n: 100, vsTargetG: null, targetBasis: 'mixed', targetProductLabel: null, materialsInWindow: 2 },
+        { station: 4, n: 100, vsTargetG: 1.04, targetBasis: 'line_product', targetProductLabel: 'LINE-DEFAULT' },
+      ],
+    };
+    try {
+      const r = (await run()).stations;
+      expect(r[0]).toMatchObject({ product: '205-IL0-SD', productBasis: 'own', vsTargetG: -2 });
+      expect(r[1]).toMatchObject({ product: 'Star Green', productBasis: 'own', vsTargetG: 5 });
+      expect(r[2]).toMatchObject({ product: null, productBasis: 'mixed', vsTargetG: null, materialsInPeriod: 2 });
+      expect(r[3]).toMatchObject({ product: 'LINE-DEFAULT', productBasis: 'line', vsTargetG: 1 });
+    } finally {
+      ws.data = defaultWs();
+    }
   });
 });

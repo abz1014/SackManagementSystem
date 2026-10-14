@@ -2095,7 +2095,10 @@ export interface StationStatusRow {
   reasons: string[];
   /** Mean cone weight minus the station's own target, grams; null when none can be stated. */
   vsTargetG: number | null;
+  /** The station's own product; null when mixed or unknown. */
   product: string | null;
+  productBasis: 'own' | 'mixed' | 'line' | null;
+  materialsInPeriod?: number;
 }
 export interface StationStatusData {
   from: string;
