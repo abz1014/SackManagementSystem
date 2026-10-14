@@ -2832,3 +2832,65 @@ Gate G1r (HEAD `7bcc386` with the three items in the tree): typecheck clean; vit
 - Triple scope resolution (24 Sep): holds (weight-stations 5 scope-shaped statements at 34 days).
 
 Not verified: the plant PC, IFL's server, a real network, many real users, a signed-in session, growth with months of data, the 10 Jul - 5 Aug month.
+
+## Part 19 - 13 to 14 Oct 2026: the web-next redesign (defects found by the survey, the browser checks and the data audit)
+
+Ids are those of the verify documents in `design/redesign-2026-10/` (`VERIFY-V2-VISUAL.md` D1-D32 and M-01..M-30, `VERIFY-V2-PARITY.md` P1-P9, `VERIFY-DATA-AUDIT.md` M1-M9, `VERIFY-SCALE-COUNT.md`, `VERIFY-V3.md`). They are not D-numbers of this register. Everything was measured on this dev PC only (`sms_audit`, Edge via Playwright, render-token identity); nothing on the plant. Re-check: `VERIFY-V3.md` (HEAD `2ecb594`): 32 defects and 30 M-checks, 52 fixed, 10 known-limit, 0 open. The fix wave's commits: T0 `224df3d`, T1 `7fa7987`, T2 `62cbba2`, T3 `b1b8925`, T4 `a19c529`, T5 `d52c50b`, T6 `6c45e01`, copy fold `1140dea`, then `2f80776`, `be47b40`, `4ed5713`, `3685ed0`, `e337a17`, `b354f9d`, `f65c903`, `ba7a675`, `703fc12`, `43434b8`, and T7 `a468c91`, `b32d9cf`, `2ecb594`, `ddda940`.
+
+### Wave 1 (VERIFY-WAVE1, HEAD `2961432`)
+| Id | Sev | Item | Status | SHA |
+|---|---|---|---|---|
+| L1 | S1 | Horizontal overflow at 375 on Today and every Quality tab; Today KPI row overflowed 1366 and clipped the fifth tile; further S2 layout problems (count charts, limit band, Wall shift order) | fixed | `d4cc79c`, `90aa9f0`, `51e510b`, `b710379` |
+| scale-count | S3 | Today showed 49 "Failed weight check (scale)" and the summary 53 (5 Aug - 7 Sep). 49 is the mutually exclusive state count (4 scale-flagged cones with implausible weight counted as unknown); 53 is the scale's own bit. Defect in the Today tile's source mapping | fixed (production now reports `conesFailedScale`; Today reads it) | `c9d6ffc`, `d540035`; reasoning `a4108e3` |
+
+### Wave 2 (VERIFY-V2-VISUAL, HEAD `f65b4ab`: S1 0, S2 9, S3 17, S4 6)
+| Id | Item | Status | SHA |
+|---|---|---|---|
+| D1, D2 | Changeover and Limits fields spill out of their cards | fixed | `b1b8925` |
+| D3 | Board cards touch | fixed | `b1b8925` |
+| D4 | Top bar overflows at 768 | fixed | `7fa7987` |
+| D5 | Login inputs wider than the card at 375 | fixed | `7fa7987` |
+| D6 | Reports preview clips | fixed | `a19c529` |
+| D7, D13 | KPI unit wrap, uneven KPI cards | fixed | `224df3d` |
+| D8 | Chart axis titles overlap ticks | fixed | `62cbba2`, `e337a17` |
+| D9 | Wall breaks on phones | fixed by owner decision: large-screen message below 1024 px | `d52c50b` |
+| D10 | Reports and Setup still look like the old app | known-limit: restyled by scoped CSS over the old markup | `a19c529` |
+| D11 | IFL tables split dates and scroll at 768 | fixed (dates) / known-limit (11 of 14 tables still scroll, with a fade cue) | `a19c529`, `f65c903` |
+| D12 | Skeletons differ from loaded layout | known-limit: first row delta 0-3 px; whole page still moves (Today +773, Weight +530, Rejects -286 px at 1366) | `224df3d`, `b354f9d`, `b32d9cf` |
+| D14, D27 | Station tiles; quiet-tile edge | fixed | `7fa7987`, `e337a17` |
+| D15 | Mixed date formats | fixed (one format; IFL tables keep DD-MM-YYYY, reserved) | `224df3d`, `3685ed0` |
+| D16 | Headings differ per tab | fixed (one PageHead) | `224df3d`, `62cbba2` |
+| D17, D25 | Pattern caption; station rows too tall | fixed (rows 53 px at 1366, 69 px at 1920@1.3) | `62cbba2` |
+| D18 | Diagnostics 8,600 px tall | fixed (2,926 px at 1366) | `a19c529`, `ba7a675` |
+| D19 | Changeover Review printed raw keys | fixed | `b1b8925` |
+| D20 | Register print without page numbers | fixed (Page N of M) | `62cbba2` |
+| D21 | Checkbox alignment | fixed | `b1b8925` |
+| D22 | Wall at text size 1.3 | fixed | `d52c50b` |
+| D23, D23b | Catalogue clip; Outcome column | fixed (Outcome 301 px at 768) | `703fc12` |
+| D24 | Escape does not return focus | fixed | `7fa7987` |
+| D26 | Weight headline a paragraph | fixed | `62cbba2` |
+| D28 | 16 px links | known-limit: owner decision A on CSS-061 | - |
+| D29, D31, D32 | Today hero, Reports landing space, duplicate captions | known-limit (S4) | - |
+| D30 | Rejects KPI heights | fixed | `62cbba2` |
+| M-12, M-15, M-23, M-26 | IFL tables scroll at 768; page moves on load; Rejects trend does not zoom on click; 16 px links | known-limit (cue present / unchanged / owner A) | - |
+| other M-checks | M-04, 08, 18, 19, 20, 21, 22 and the rest of the 13 that failed at V2a | fixed, numbers in `VERIFY-V3.md` | fix wave |
+
+### Parity (VERIFY-V2-PARITY)
+P1 Board dropped blend, count and tube (fixed `b1b8925`); P2 no way into the TV wall (fixed, user menu and Today, from 1024 px, `7fa7987`, `d52c50b`); P3 `?s=report` without `rt` (fixed `7fa7987`); P4 Setup below rank 4 redirected silently (fixed, says "This is only available to an administrator", `7fa7987`); P5 data-batch table reduced to summary lines (fixed, back in Technical detail, `a19c529`); P6 Manrope woff2 not supplied (open, the owner's file; falls back to Instrument Sans); P7 Station 5 naming (fixed `b1b8925`); P8 record-sheet label case (fixed `d52c50b`); P9 uneven Board cards (fixed `b1b8925`). Trace audit: 175 non-built rows, 163 built, 12 gap, 9 decision-needed at that date; the six guard tests not ported were ported in `6c45e01`.
+
+### Independent data audit (VERIFY-DATA-AUDIT, HEAD `43434b8`)
+| Id | Item | Status | SHA |
+|---|---|---|---|
+| M1 | "Failed inspection" counted weight-reject records too (PL 6,089 against 6,048 inspection-only; PE2 82 against 81); shared API definition the old app has | numbers unchanged; relabelled "Failed inspection or weight check" by owner decision 14 Oct | `a468c91` |
+| M2 | Old Daily report column `rejected_at_inspection` and old "rejected" wording carry the combined figure | known-limit, pre-existing, owner-reserved (IFL titles and CSV headers); not changed | - |
+| M3 | Rejects named "the 5 Aug 2026 database rebuild" on periods that do not contain it (7,470 simulator readings counted as a second generation) | fixed | `a468c91` |
+| M4, M6, M8 | Board "as at the newest reading"; plausibility exclusion of 4 readings; empty periods print "No data" | explained, not defects | - |
+| M5a, M5b | Stock ledger note contradicts its rows on a shift range; opening ignores the real-only rule in simulator-only periods (both apps) | open, pre-existing in both apps, reported | - |
+| M7 | Weight tab showed a line-wide +-40 g band (37 of 132,497 outside) while cones are judged per product (+-50 g, 0 outside) | fixed (no band drawn when stations ran their own materials) | `a468c91`, `b32d9cf` |
+| M9 | "1 cones failed" plural | fixed | `a468c91` |
+
+### Environment incidents during the build (recorded from the orchestrator's brief; no evidence file for either is in the repository)
+- A `node_modules` damage incident, repaired offline. Status: repaired. Details not in the repository evidence files.
+- A hung survey script. Status: recorded. Details not in the repository evidence files.
+
+Not verified: the plant, a printer, the server PDF route, signed-in sessions, live data after 7 Sep, a person looking at a screen.

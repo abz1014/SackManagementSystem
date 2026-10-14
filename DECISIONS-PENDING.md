@@ -628,3 +628,31 @@ Not an IFL question but waiting on the **owner**: nothing in this list may be se
 
 The fix stage changed 44 report, screen, export and operator-tool behaviours that no longer need a decision (`DEFECTS.md` D-57 to D-105; sections "fixed" in Part 15). **Not committed yet** (fix written in the working tree, or not fixed): C-133 (D-83), C-134 (D-93), C-015 (D-79), C-138 (D-80), C-174 (D-81), C-117 (D-98). The owner's action on those is simply to commit them (after re-running the gate) or tell the next agent to; they are not judgement calls.
 
+---
+
+## 15. Web-next redesign, 13-14 Oct 2026 - decisions taken and decisions open
+
+**Resolved (owner, chat).** Source: `design/redesign-2026-10/APPROVAL.md`, `GLOSSARY.md` 1.8, `FIX-WAVE-PLAN.md`.
+
+| Date | Decision | Result |
+|---|---|---|
+| 13 Oct | Full redesign, "approved, go with your recommendations and start building" | Built as `sms/web-next`, served at /next |
+| 13 Oct | Style C "Soft premium" for desk and phone; dark Style C for the TV wall | Done |
+| 13 Oct | Information architecture: Today / Quality / Products & PDAS / Reports / System; phone bottom bar | Done |
+| 13 Oct | Manrope replaces Instrument Sans (self-hosted woff2) | Open for the file; see below |
+| 13 Oct | Station state rule: Act above 2x the line failed-inspection rate, Watch above 1.5x, No data at 0 cones, 50-cone floor | Assumed default, server-side, unconfirmed by IFL |
+| 13 Oct | The Attention list is unchanged | Done |
+| 13 Oct | Four report merges (shift into daily, sack into sack-weight-summary, product into machine-product, station into cone-weight), UI only | Done; API and exports unchanged |
+| 13 Oct | Sack stock ledger under Quality > Register | Done |
+| 13 Oct | No new libraries; no schema change; export restyle later | Done |
+| 13 Oct | Owner-reserved wording kept verbatim | Done |
+| 13 Oct | No TV wall below 1024 px; one line and a link back to Today | Done (`d52c50b`) |
+| 13 Oct | IFL report tables keep DD-MM-YYYY; the rest of the app uses one format | Done, pinned by a test (`3685ed0`) |
+| 14 Oct | Combined failed figure keeps its numbers and is labelled "Failed inspection or weight check"; the Rejects tab's inspection-only figure keeps "Failed inspection" (data audit M1) | Done (`a468c91`) |
+
+**Open.**
+1. **Manrope file.** The owner supplies the woff2; until then the page uses the self-hosted Instrument Sans (VERIFY-V2-PARITY P6).
+2. **Switch-over go/no-go** (make /next the root, retire the old UI). The new app is ready for owner review (`VERIFY-V3.md`: 0 open defects, 10 known limits); the decision is the owner's.
+3. **Owner-reserved wording that still says "rejected" for the combined figure** (audit M2): the old Daily report column `rejected_at_inspection`, IFL report titles and CSV headers, and the on-screen Reports rows from the old renderers. Not changed; relabel or leave is the owner's call.
+4. **Stock ledger note on a shift range** (audit M5a) and **ledger opening in simulator-only periods** (M5b) are pre-existing in both apps; the owner decides whether to fix them.
+5. **IFL KPI approval** is unchanged (every KPI row still "awaiting"), and the station state thresholds stay an assumed default until IFL confirms.

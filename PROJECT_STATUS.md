@@ -59,6 +59,25 @@ Phase numbering follows `IFL_SMS_Claude_Code_Development_Roadmap.md`; the eviden
 
 ## 2. Completed
 
+### 14 October 2026 - Full UI redesign (web-next at /next): built, fix-waved, verified on the dev copy; switch-over pending the owner
+
+Roadmap rule 15 record. Not a roadmap phase; it replaces the web interface and changes no database schema. Approved by the owner on 13 Oct 2026 (`design/redesign-2026-10/APPROVAL.md`). Defects: `DEFECTS.md` Part 19.
+
+| Redesign phase | Status |
+|---|---|
+| B - web-next workspace served at /next beside the old UI | done (`f6f3583`, `33b1030`) |
+| C - design system (Style C tokens, dark wall tokens, components, uniformity guard, gallery) | done |
+| D - API additions (compare, station-status, run start, conesFailedScale, limit guard thresholds) | done; first run on a real database in `VERIFY-D2-D4.md` |
+| E - screens (Today, Wall, Quality x4, Products x4, Reports, System, sheets, Register, stock ledger) | done |
+| F - tests and parity (guards ported, Playwright layout specs, fix wave T0-T7, final recheck) | done |
+| G - switch-over (G2/G3: make /next the root, retire the old UI) | pending the owner's go/no-go |
+
+**Completed:** all 18 report types and every figure compared with the old UI show no mismatch (`VERIFY-V3.md`); the 32 layout defects and 30 M-checks are 52 fixed, 10 known-limit, 0 open. **Test status (HEAD `2ecb594`):** typecheck clean; vitest twice identical, 471 files passed / 1 skipped, 5,047 tests passed / 4 skipped, 0 failed; Playwright for the new app 81 of 81, twice; 858 page loads with 0 overflow, 0 console errors, 0 failed requests. The dev API on :4000 was restarted on 14 Oct 2026 at the owner's request and serves the new build.
+
+**Blocked on the owner:** the Manrope woff2 file (the page uses the self-hosted Instrument Sans meanwhile); review at `/next`; the switch-over decision. **Unchanged IFL dependency:** KPI approval (every row still "awaiting"); the station state thresholds are an assumed default until IFL confirms.
+
+**Not verified:** the plant, real users, live data after 7 Sep, a real printer and the server PDF route, signed-in sessions (render token only), writes against a real database, touch, Urdu, a physical TV.
+
 ### 12 October 2026 - Stage 3: owner items after the CSS recovery (D-300 to D-310)
 
 Roadmap rule 15 record. **Completed:** C-005 (a winder-filtered Product report no longer prints line-wide sack figures; owner option A), F-1 (Product > Running shows the last product each stopped winder stamped), F-2 (product changes in the Product, shift-production, daily, shift and machine-product reports), X-1, X-2, X-3 (Weight mixed marker; Custom range and Pick dates start from the period shown; empty-period-after-newest wording) and the four Part 16 follow-ups (CSS-053, 060, 036, 033). 12 commits `ea16464`..`b6a1767`; `DEFECTS.md` Part 17. No migration and no database write; all derived at read time. **In progress / open:** X-3 reached 3 of 18 report types at acceptance; X-3b (D-310, `20b7615`, 12 Oct 2026) raised that to 17 of 18, and the machine-product report still does not name the newest reading (independent re-check NOT-VERIFIED; 150 cells at 1366 only). **Blocked / IFL dependency, unchanged:** KPI approval (every row awaiting), weight basis (Q4/Q5), the 10 Jul to 5 Aug data, reject-code meanings. The reporting (phase 8) and Product/PDAS (phase 6) rows keep their status; nothing is marked complete on the strength of this entry, and everything was measured on the dev copy only. **Test status:** `S/stage3/accept/A1/gate.json`: vitest 401 files passed / 1 skipped, 4,137 tests passed / 4 skipped, 0 failed; layout 381 passed / 38 skipped / 0 failed; mirror 414 passed / 5 known failures; typecheck clean.
