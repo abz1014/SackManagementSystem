@@ -33,6 +33,6 @@ describe('M9: singular and plural', () => {
 describe('M7: no single band when products differ', () => {
   it('has a plain per-product sentence and a per-product tolerance note', () => {
     expect(C.qualityWeight.perProductLimits).toMatch(/own product/);
-    expect(C.qualityWeight.kpi.withinDetailPerProduct('5')).toMatch(/own product/);
+    expect(C.qualityWeight.kpi.withinDetailPerProduct('5')).toMatch(/own product/i);
   });
 });

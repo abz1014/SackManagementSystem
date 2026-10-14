@@ -542,7 +542,7 @@ export const C = {
       within: 'Within product tolerance',
       withinDetail: (lo: string, hi: string, n: string) => `${lo} to ${hi} · ${n} cones judged`,
       /** Audit M7: when the cones ran different products there is no single band to print. */
-      withinDetailPerProduct: (n: string) => `Each cone against its own product's limits · ${n} cones judged`,
+      withinDetailPerProduct: (n: string) => `Own product limits · ${n} cones judged`,
       withinNone: 'Not checked (no product set)',
       failedCheck: 'Failed weight check (scale)',
       failedDetail: (n: string) => `Of ${n} cones weighed. The scale\u2019s own check.`,
