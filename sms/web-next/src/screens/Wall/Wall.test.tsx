@@ -31,7 +31,7 @@ function liveWith(over: Partial<LiveLine>): Envelope<LiveData> {
   return { ...LIVE_FIXTURE, data: { lines: [{ ...BASE, ...over }] } };
 }
 const row = (station: number, over: Partial<StationStatusRow> = {}): StationStatusRow => ({
-  station, name: null, cones: 300, failedPct: 2.5, state: 'ok', reasons: [], vsTargetG: null, product: 'Blue', ...over,
+  station, name: null, cones: 300, failedPct: 2.5, state: 'ok', reasons: [], vsTargetG: null, product: 'Blue', productBasis: 'own', ...over,
 });
 const status = (stations: StationStatusRow[], lineFailedPct: number | null = 4.6): Envelope<StationStatusData> => ({
   data: { from: '2026-09-07', to: '2026-09-07', lineFailedPct, thresholds: { watch: 1.5, act: 2, minCones: 50, assumed: true }, stations },
