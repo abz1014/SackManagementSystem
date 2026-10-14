@@ -10,7 +10,7 @@
     ".": { "types": "./dist/lib.d.ts", "default": "./dist/lib.js" }
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "sync:once": "node dist/index.js --once"
   },
   "dependencies": {

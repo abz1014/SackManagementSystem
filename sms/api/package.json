@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Express REST API — queries the app DB only (no IFL connection).",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "start": "node dist/index.js"
   },
   "dependencies": {
