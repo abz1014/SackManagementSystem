@@ -328,3 +328,24 @@ describe('days to limit and the ledger', () => {
 });
 
 void META;
+
+describe('"Running now" uses the distinct product label (not the bare description two materials share)', () => {
+  const products = {
+    products: [
+      { productId: 20, description: '205-IL0-SD', color: 'ORANGE', blend: 'PVSD8020', countText: '30', tubeType: null, setpointG: 1960, weightOffsetMinusG: -50, weightOffsetPlusG: 50, activeFlag: true },
+      { productId: 21, description: '205-IL0-SD', color: 'ORANGE', blend: 'PVSD8020', countText: '20 Slub', tubeType: null, setpointG: 1960, weightOffsetMinusG: -50, weightOffsetPlusG: 50, activeFlag: true },
+    ],
+  };
+
+  it('station 8 (material 21) names the product apart from material 20, with the full label in the tooltip', async () => {
+    mount('pd1', 8, { over: { '/api/products': products } });
+    const el = await screen.findByText(/^Running now: 205-IL0-SD · ORANGE · PVSD8020 · 20 Slub/);
+    expect(el.getAttribute('title')).toBe('205-IL0-SD · ORANGE · PVSD8020 · 20 Slub');
+  });
+
+  it('falls back to the bare description when the product list cannot be read', async () => {
+    mount('pd1', 8, { over: { '/api/products': () => { throw new Error('down'); } } });
+    const el = await screen.findByText(/^Running now: 205-IL0-SD, since/);
+    expect(el).toBeTruthy();
+  });
+});

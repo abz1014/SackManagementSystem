@@ -13,13 +13,13 @@
  * cones). The projection is a straight line through recent daily means and says so. A winder's
  * product is known only from the cones it weighed.
  */
-import { useEffect, useState, type ReactNode } from 'react';
-import { NELSON_RULE_LABEL, type NelsonRuleId, type NelsonRuleInfo, type StationStatusRow, type WeightStationRow, type WeightStationsData } from '../../bridge/api';
-import { fmt } from '../../bridge/lib';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { getProducts, NELSON_RULE_LABEL, type NelsonRuleId, type NelsonRuleInfo, type StationStatusRow, type WeightStationRow, type WeightStationsData } from '../../bridge/api';
+import { fmt, productLabel as productLabelLib } from '../../bridge/lib';
 import { projectionSentence } from '../../bridge/station';
 import { W } from '../../bridge/words';
 import { C, formatClock, formatDate, FRAGMENTS } from '../../copy';
-import { useMachinesRunning, usePeriod, useStationStatus } from '../../data';
+import { useData, useMachinesRunning, usePeriod, useStationStatus } from '../../data';
 import { Disclosure } from '../../ui/Disclosure';
 import { EmptyState } from '../../ui/EmptyState';
 import { ErrorState } from '../../ui/ErrorState';
@@ -34,7 +34,7 @@ import { useAdjustments, useLineReasons, useOneStationCounts, usePatternCheck } 
 import { AdjustmentForm } from './AdjustmentForm';
 import { DailyChart } from './DailyChart';
 import { hopHref, hopRoute, type HopKind } from './hops';
-import { stationProductText } from '../../lib/stationProduct';
+import { shortProductLabel, stationProductText } from '../../lib/stationProduct';
 import './stationSheet.css';
 
 const S = C.qualityStations;
@@ -120,6 +120,17 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
   const wsd: WeightStationsData | null = pattern.data ? pattern.data.data : null;
   const wrow: WeightStationRow | undefined = wsd?.stations.find((s) => s.station === station);
   const machine = machines.data?.data.machines.find((m) => m.station === station) ?? null;
+  // The machine row carries the bare PDAS description, which several materials share. The distinct label
+  // is the one the Products board prints, made from the same product list; it falls back to the bare name.
+  const products = useData(SF.partSheetMachine, () => getProducts(), 'products:list', { live: false });
+  // A product list that could not be read leaves the bare description (stated, not hidden: the label is only a refinement).
+  const listFailed = products.status === 'error';
+  const distinct = useMemo(() => productLabelLib.distinctProductLabels(!listFailed && products.data ? products.data.products : []), [listFailed, products.data]);
+  const onScreen = (machines.data?.data.machines ?? []).flatMap((m) => [m.materialId, m.lastMaterialId]).map((id) => (id != null ? distinct.get(id) : null));
+  const named = (id: number | null | undefined, bare: string): { short: string; full: string } => {
+    const full = id != null ? distinct.get(id) : undefined;
+    return full ? { short: shortProductLabel(full, onScreen), full } : { short: bare, full: bare };
+  };
   const label = srow ? stationText(srow) : C.station(station);
   const periodSpan = period.from === period.to ? formatDate(period.from) : C.period(formatDate(period.from), formatDate(period.to));
 
@@ -214,9 +225,13 @@ function Loaded({ route, rank, go, station, period, setParams, onHead }: LoadedP
                   <button type="button" className="ui-link" onClick={machines.refresh}>{C.tryAgain}</button>
                 </>
               ) : machine?.state === 'running' && machine.productName ? (
-                S.runningNow(machine.productName, stamp(machine.runStartUtc ?? machine.sinceUtc))
+                <span title={named(machine.materialId, machine.productName).full}>
+                  {S.runningNow(named(machine.materialId, machine.productName).short, stamp(machine.runStartUtc ?? machine.sinceUtc))}
+                </span>
               ) : machine?.lastProductName ? (
-                S.lastStamped(machine.lastProductName, stamp(machine.lastStampedUtc))
+                <span title={named(machine.lastMaterialId, machine.lastProductName).full}>
+                  {S.lastStamped(named(machine.lastMaterialId, machine.lastProductName).short, stamp(machine.lastStampedUtc))}
+                </span>
               ) : null}{' '}
               {S.productFromCones}
             </p>
