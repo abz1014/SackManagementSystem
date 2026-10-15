@@ -220,6 +220,13 @@ export interface WeightStationRow {
    * prints, never the shared description alone.
    */
   targetProductLabel?: string | null;
+  /**
+   * Additive (15 Oct 2026): the product id, the setpoint and the in-force time behind THIS row's target, so a screen
+   * can tell when every station in the view was judged by the same product. Null for 'mixed', or when the target is withheld.
+   */
+  targetProductId?: number | null;
+  targetG?: number | null;
+  targetEffectiveFromUtc?: string | null;
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
   /**
@@ -698,6 +705,7 @@ export async function getWeightStations(
     // RT-018: the line-wide fallback's retired flag is the line target's own.
     let rowTargetProductActive: boolean | null = productActive;
     let rowTargetProductLabel: string | null = product ? catalogue.distinctLabel(product.productId) : null;
+    let rowTargetProductId: number | null = product ? product.productId : null;
     if (distinctMaterials.length === 1) {
       targetBasis = 'station_material';
       const mLimits = catalogue.limitsAt(distinctMaterials[0]!, endMs);
@@ -706,6 +714,7 @@ export async function getWeightStations(
       rowVsTargetG = mLimits == null || !rowTargetProvenance.usable ? null : round(st.grandMean - mLimits.targetG);
       rowTargetProductActive = catalogue.product(distinctMaterials[0]!)?.activeFlag ?? null;
       rowTargetProductLabel = catalogue.product(distinctMaterials[0]!) ? catalogue.distinctLabel(distinctMaterials[0]!) : null;
+      rowTargetProductId = distinctMaterials[0]!;
     } else if (distinctMaterials.length > 1) {
       targetBasis = 'mixed';
       materialsInWindow = distinctMaterials.length;
@@ -715,6 +724,7 @@ export async function getWeightStations(
       rowTargetProvenance = { usable: false, effectiveFromUtc: null, isLowerBound: false, afterWindowEnd: false, omittedReason: null };
       rowTargetProductActive = null;
       rowTargetProductLabel = null;
+      rowTargetProductId = null;
     }
 
     const r = rejects.get(st.station);
@@ -733,6 +743,9 @@ export async function getWeightStations(
       targetBasis,
       targetProductActive: rowTargetProductActive,
       targetProductLabel: rowTargetProductLabel,
+      targetProductId: rowTargetProductId,
+      targetG: rowTargetProvenance.usable ? (stationLimits?.targetG ?? null) : null,
+      targetEffectiveFromUtc: rowTargetProvenance.effectiveFromUtc,
       ...(materialsInWindow != null ? { materialsInWindow } : {}),
       // F6: these describe the VERSION this row resolved, and they are no
       // longer gated on `vsTargetG != null` — under the withholding rule

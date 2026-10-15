@@ -2289,6 +2289,11 @@ export interface WeightStationRow {
    *    timeline, exactly as coneState.ts does for the same readings.
    */
   targetBasis: 'station_material' | 'mixed' | 'line_product';
+  /** Additive (15 Oct 2026): the product, setpoint and in-force time behind this row's target; null for 'mixed' or a withheld target. */
+  targetProductLabel?: string | null;
+  targetProductId?: number | null;
+  targetG?: number | null;
+  targetEffectiveFromUtc?: string | null;
   /** Only set when `targetBasis` is 'mixed' — how many distinct materials this station ran in the window. */
   materialsInWindow?: number;
   /** RT-018: whether the material this row's target came from is retired in PDAS, as last mirrored. Null/absent when 'mixed', unknown, or an older fixture predates this field. */

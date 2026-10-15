@@ -87,4 +87,14 @@ describe('getWeightStations - distinct product labels per station', () => {
     expect(by(3).targetBasis).toBe('line_product');
     expect(by(3).targetProductLabel).toBe('OTHER-LINE');
   });
+
+  it('each row also carries the product id behind its target (additive), null when mixed', async () => {
+    const data = await getWeightStations(pool(), 1, FROM, TO);
+    const by = (n: number) => data.stations.find((s) => s.station === n)!;
+    expect(by(1).targetProductId).toBe(20);
+    expect(by(2).targetProductId).toBe(21);
+    expect(by(4).targetProductId).toBeNull();
+    expect(by(4).targetG).toBeNull();
+    expect(by(3).targetProductId).toBe(30);
+  });
 });

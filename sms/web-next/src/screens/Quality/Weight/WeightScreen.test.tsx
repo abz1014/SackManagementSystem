@@ -97,7 +97,7 @@ function stationsData(over: Record<string, unknown> = {}) {
     from: '2026-08-05', to: '2026-09-07', days: 14, lineMeanG: 1951.8, targetG: 1960, productId: 12, productLabel: '201-IH0-SD',
     thresholdG: 8, minDaysHeld: 6, lineRejectRatePct: 1,
     stations: [
-      { station: 1, n: 5000, meanG: 1953.6, vsLineG: 1.8, vsTargetG: -6.4, daysHeld: 0, flagged: false, rejectRatePct: 1, lastAdjustedUtc: null, days: [], projection: null, longestRun: 12, targetBasis: 'station_material' },
+      { station: 1, n: 5000, meanG: 1953.6, vsLineG: 1.8, vsTargetG: -6.4, daysHeld: 0, flagged: false, rejectRatePct: 1, lastAdjustedUtc: null, days: [], projection: null, longestRun: 12, targetBasis: 'station_material', targetProductId: 12, targetProductLabel: '201-IH0-SD', targetG: 1960, targetEffectiveFromUtc: '2026-09-01T09:00:00Z' },
     ],
     disagreement: { passedButOutside: 0, rejectedButInside: 0, judged: 100, unjudged: 0 },
     limits: { loG: 1920, hiG: 2000 },
@@ -173,8 +173,40 @@ describe('Quality > Weight: headline (RESERVED weight-basis wording)', () => {
     expect(h).not.toMatch(/below target|above target|under target/i);
   });
   it('says so when no product target is recorded', async () => {
-    await mount(MULTI, { '/api/weight-stations': env(stationsData({ targetG: null, productId: null, productLabel: null, targetEffectiveFromUtc: null })) });
+    await mount(MULTI, { '/api/weight-stations': env(stationsData({ targetG: null, productId: null, productLabel: null, targetEffectiveFromUtc: null, stations: [{ ...stationsData().stations[0], targetBasis: 'line_product' }] })) });
     expect((document.querySelector('.ui-pagehead__sentence')?.textContent ?? '')).toMatch(/No product target is recorded/);
+  });
+});
+
+describe('Quality > Weight: which product the target belongs to (15 Oct 2026)', () => {
+  const own = (station: number, id: number, g: number, label: string) => ({
+    station, n: 100, meanG: g - 8, vsLineG: 0, vsTargetG: -8, daysHeld: 0, flagged: false, rejectRatePct: 1, lastAdjustedUtc: null, days: [], projection: null, longestRun: 12,
+    targetBasis: 'station_material', targetProductId: id, targetProductLabel: label, targetG: g, targetEffectiveFromUtc: '2026-05-06T09:00:00Z',
+  });
+  const sentence = () => document.querySelector('.ui-pagehead__sentence')?.textContent ?? '';
+
+  it('stations that ran their own, different products: no single target, the line default is not shown, no product id in the cone request', async () => {
+    await mount(MULTI, {
+      '/api/weight-stations': env(stationsData({ stations: [own(1, 20, 1960, '205-IL0-SD · A'), own(2, 21, 1960, '205-IL0-SD · B')] })),
+    });
+    await waitFor(() => expect(sentence()).toMatch(/judged against its own product/));
+    expect(sentence()).toMatch(/Average cone weight is/);
+    expect(sentence()).not.toMatch(/the product target is/);
+    expect(document.body.textContent).not.toMatch(/Target: 201-IH0-SD|201-IH0-SD · in force/);
+    const spc = (ff?.requests ?? []).filter((c: string) => c.includes("/api/spc"));
+    expect(spc.length).toBeGreaterThan(0);
+    expect(spc.some((c: string) => /productId=/.test(c))).toBe(false);
+  });
+
+  it('one product on every station: that product’s target, with its in-force time, and its id in the request', async () => {
+    await mount(MULTI, {
+      '/api/weight-stations': env(stationsData({ stations: [own(1, 20, 1960, '205-IL0-SD · A'), own(2, 20, 1960, '205-IL0-SD · A')] })),
+    });
+    await waitFor(() => expect(sentence()).toMatch(/the product target is 1,960/));
+    expect(screen.getAllByText(/205-IL0-SD · A · in force since/).length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(/Target: 201-IH0-SD|201-IH0-SD · in force/);
+    const spc = (ff?.requests ?? []).filter((c: string) => c.includes("/api/spc"));
+    expect(spc.some((c: string) => /productId=20/.test(c))).toBe(true);
   });
 });
 

@@ -3,7 +3,7 @@
  * rules (those stay in the API and in the bridged libraries).
  */
 import type { Route } from '../../../route';
-import type { SpcType } from '../../../bridge/api';
+import type { SpcType, WeightStationsData } from '../../../bridge/api';
 import { fmtDate, fmtDateTime, fmtTime } from '../../../lib/fmt';
 
 /** URL key `wm`. null = the period-conditional default (a day or less: spread; longer: over time). */
@@ -94,4 +94,37 @@ export function signed1(v: number): string {
 /** True for a count that is present and above zero (narrows away null and undefined; absence is never read as zero). */
 export function positive(n: number | null | undefined): n is number {
   return typeof n === 'number' && n > 0;
+}
+
+/* --------------------------------------------------------------- target scope */
+
+/** The target a Weight view can honestly state (fix 3, 15 Oct 2026). */
+export type TargetScope =
+  | { kind: 'line' }
+  | { kind: 'one'; productId: number; targetG: number; label: string | null; retired: boolean; inForceUtc: string | null; lowerBound: boolean }
+  | { kind: 'several' };
+
+/**
+ * Which product(s) judged the cones in this view.
+ *  - line: no station ran a product of its own (July readings carry none), so the line's default product is the target, as before.
+ *  - one: every station that weighed cones ran the same product of its own; that product's target is the target.
+ *  - several: stations ran their own, different products (or one ran several); no single target is stated and the line default must not stand in for them.
+ * Read from the rows the server already decided; nothing is re-derived.
+ */
+export function targetScope(d: WeightStationsData | null): TargetScope {
+  const rows = d ? d.stations.filter((r) => r.n > 0) : [];
+  if (rows.length === 0 || rows.every((r) => r.targetBasis === 'line_product')) return { kind: 'line' };
+  const first = rows[0]!;
+  const same =
+    rows.every((r) => r.targetBasis === 'station_material' && r.targetProductId != null && r.targetProductId === first.targetProductId && r.targetG != null && r.targetG === first.targetG);
+  if (!same) return { kind: 'several' };
+  return {
+    kind: 'one',
+    productId: first.targetProductId!,
+    targetG: first.targetG!,
+    label: first.targetProductLabel ?? null,
+    retired: first.targetProductActive === false,
+    inForceUtc: first.targetEffectiveFromUtc ?? null,
+    lowerBound: first.targetIsLowerBound === true,
+  };
 }

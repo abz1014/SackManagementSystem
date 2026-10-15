@@ -55,7 +55,9 @@ import {
   signed1,
   stationSheetHop,
   stationsHop,
+  targetScope,
   withKeys,
+  type TargetScope,
   type WeightMode,
 } from './model';
 import './weight.css';
@@ -157,7 +159,9 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
     `qw:ws:${pkey}`,
     { live: period.live, intervalMs: SLOW_POLL, shape: SHAPE.weightStations },
   );
-  const productId = stationsD.data?.data.productId ?? null;
+  // Which product(s) judged the cones: the line default only when no station ran its own (fix 3, 15 Oct 2026).
+  const scope = targetScope(stationsD.data ? stationsD.data.data : null);
+  const productId = scope.kind === 'line' ? (stationsD.data?.data.productId ?? null) : scope.kind === 'one' ? scope.productId : null;
   const spcQuery = (type: 'cone' | 'sack', extra: { station?: number; productId?: number }) => ({
     type,
     from: period.from,
@@ -208,7 +212,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
 
   const d = stationsD.data?.data ?? null;
   // Audit M7: a band is drawn only when ONE product's limits judge the whole view (readings with no material of their own). Station rows that ran their own material, or several, are judged per product.
-  const perProduct = d !== null && d.stations.length > 0 && d.stations.some((r) => r.targetBasis !== 'line_product');
+  const perProduct = scope.kind === 'several';
   const cone = coneLine.data?.data ?? null;
   const chart: SpcData | null = ownChart ? (chartD.data?.data ?? null) : cone;
   const chartStatus: DataState<unknown>['status'] = ownChart ? chartD.status : coneLine.status;
@@ -233,6 +237,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
         cone={cone}
         coneStatus={coneLine.status}
         d={d}
+        scope={scope}
         stationsStatus={stationsD.status}
         sack={sackSum.data?.data ?? null}
         afterNewest={after.text}
@@ -277,7 +282,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
       {isSack ? (
         <SackKpis sum={sackSum} />
       ) : (
-        <ConeKpis cone={cone} coneLine={coneLine} d={d} stationsD={stationsD} prod={prod} />
+        <ConeKpis cone={cone} coneLine={coneLine} d={d} scope={scope} stationsD={stationsD} prod={prod} />
       )}
 
       {!isSack && d !== null && d.disagreement.passedButOutside > 0 && (
@@ -299,7 +304,7 @@ function WeightBody({ route, go, period, params, setParams }: BodyProps) {
             spc={chart}
             status={chartStatus}
             onRetry={chartRetry}
-            target={isSack ? null : (d?.targetG ?? null)}
+            target={isSack ? null : scopedTarget(scope, d).g}
             perProduct={perProduct}
             period={period}
             params={params}
@@ -366,6 +371,7 @@ function Headline({
   cone,
   coneStatus,
   d,
+  scope,
   stationsStatus,
   sack,
   afterNewest,
@@ -374,6 +380,7 @@ function Headline({
   cone: SpcData | null;
   coneStatus: DataState<unknown>['status'];
   d: WeightStationsData | null;
+  scope: TargetScope;
   stationsStatus: DataState<unknown>['status'];
   sack: { totals: { sacks: number; avgKg: number | null } } | null;
   afterNewest: string | null;
@@ -395,13 +402,17 @@ function Headline({
     text = afterNewest ?? QW.headline.noCones;
   } else if (d === null) {
     text = stationsStatus === 'error' ? `${QW.headline.mean(fmt.fmtG(cone.mean))} ${W.weight.headlineStationDataFailed}` : QW.headline.mean(fmt.fmtG(cone.mean));
-  } else if (d.targetG === null) {
+  } else if (scope.kind === 'several') {
+    // Stations ran their own, different products: the line default is not their target, and no single one exists.
+    text = `${QW.headline.mean(fmt.fmtG(cone.mean))} ${QW.perProductTarget}`;
+  } else if (scopedTarget(scope, d).g === null) {
     text = W.weight.headlineNoTarget(fmt.fmtG(cone.mean));
   } else {
     // One sentence (RESERVED wording, verbatim). The product, its retired marker and when its limits
     // began go on the caption line under it (fix-wave D26), not into the sentence.
-    text = RESERVED.weightHeadlineUnconfirmed(fmt.fmtG(cone.mean), fmt.fmtG(d.targetG));
-    detail = targetDetail(d);
+    const t = scopedTarget(scope, d);
+    text = RESERVED.weightHeadlineUnconfirmed(fmt.fmtG(cone.mean), fmt.fmtG(t.g!));
+    detail = t.detail;
   }
   return (
     <>
@@ -409,6 +420,19 @@ function Headline({
       {detail && <p className="qw-note qw-headline-note">{`${QW.charts.target}: ${detail}`}</p>}
     </>
   );
+}
+
+/** The target this view may state: the line product's, the one product every station ran, or none when several did. */
+function scopedTarget(scope: TargetScope, d: WeightStationsData | null): { g: number | null; detail: string | null } {
+  if (d === null || scope.kind === 'several') return { g: null, detail: null };
+  if (scope.kind === 'one') {
+    const retired = scope.retired ? ` ${W.retiredProduct.marker}` : '';
+    const base = `${scope.label ?? W.reports.wholeLine}${retired}`;
+    if (!scope.inForceUtc) return { g: scope.targetG, detail: base };
+    const at = fmtAppDateTime(scope.inForceUtc);
+    return { g: scope.targetG, detail: `${base} · ${scope.lowerBound ? W.reports.targetNoLaterThan(at) : W.reports.targetSince(at)}` };
+  }
+  return { g: d.targetG, detail: d.targetG === null ? null : targetDetail(d) };
 }
 
 /** "201-IH0-SD (retired in PDAS) · in force since 1 Sep 2026, 14:00": the target's product and when its limits began. */
@@ -429,12 +453,14 @@ function ConeKpis({
   cone,
   coneLine,
   d,
+  scope,
   stationsD,
   prod,
 }: {
   cone: SpcData | null;
   coneLine: DataState<Envelope<SpcData>>;
   d: WeightStationsData | null;
+  scope: TargetScope;
   stationsD: DataState<Envelope<WeightStationsData>>;
   prod: ReturnType<typeof useProduction>;
 }) {
@@ -449,16 +475,19 @@ function ConeKpis({
   // The target: its product, and when its limits began. Withheld with the server's own reason.
   let targetValue: string | null = null;
   let targetNote: string | null = null;
+  const st = scopedTarget(scope, d);
   if (d !== null) {
-    if (d.targetG !== null) {
-      targetValue = d.targetG.toLocaleString('en-GB');
-      targetNote = targetDetail(d);
+    if (scope.kind === 'several') {
+      targetNote = QW.perProductTarget;
+    } else if (st.g !== null) {
+      targetValue = st.g.toLocaleString('en-GB');
+      targetNote = st.detail;
     } else {
       targetNote = d.targetOmittedReason ?? W.weight.noTarget;
     }
   }
 
-  const offset = hasMean && d !== null && d.targetG !== null ? cone.mean! - d.targetG : null;
+  const offset = hasMean && st.g !== null ? cone.mean! - st.g : null;
 
   // Within tolerance: only when cones were judged by a product's limits at their own time.
   const row = prod.data?.data.rows?.[0] ?? null;
@@ -466,7 +495,7 @@ function ConeKpis({
   const judged = states ? states.within + states.low + states.high : 0;
   const omitted = cone?.spec.limitsOmittedReason ?? null;
   const spec = cone?.spec ?? null;
-  const perProduct = d !== null && d.stations.length > 0 && d.stations.some((r) => r.targetBasis !== 'line_product');
+  const perProduct = scope.kind === 'several';
   const prodStatus = asKpi(prod.status);
   const failedPct = row && row.conesInRangePct !== null ? 100 - row.conesInRangePct : null;
   const offsetStatus = asKpi(
