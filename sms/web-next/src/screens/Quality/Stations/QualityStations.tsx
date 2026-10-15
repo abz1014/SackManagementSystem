@@ -14,6 +14,7 @@ import { health as healthLib, fmt } from '../../../bridge/lib';
 import { W } from '../../../bridge/words';
 import { C, RESERVED, FRAGMENTS } from '../../../copy';
 import { fmtRange } from '../../../lib/fmt';
+import { isShiftBounded, periodWords } from '../../../lib/periodWords';
 import { PageHead } from '../../../ui/PageHead';
 import { useRange, useStationStatus, usePeriod, useLive } from '../../../data';
 import { EmptyState } from '../../../ui/EmptyState';
@@ -76,7 +77,7 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
   );
 
   const selected = route.sheet?.kind === 'station' ? Number(route.sheet.id) : null;
-  const periodSpan = span(period.from, period.to);
+  const periodSpan = periodWords(period);
 
   let content;
   if (status.status === 'loading') {
@@ -129,7 +130,7 @@ function Body({ route, go, period }: ScreenProps & { period: NonNullable<ReturnT
             )
           }
         />
-        <p className="qs-note qs-period">{S.periodCaption(periodSpan, period.days)}</p>
+        <p className="qs-note qs-period">{S.periodCaption(periodSpan, period.days, isShiftBounded(period))}</p>
 
         {!dataNow && <p className="qs-fail">{S.dataNotCurrent}</p>}
 

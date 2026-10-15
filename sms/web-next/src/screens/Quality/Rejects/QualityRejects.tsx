@@ -25,7 +25,8 @@ import {
 } from '../../../bridge/api';
 import { period as P, productLabel } from '../../../bridge/lib';
 import { C, FRAGMENTS } from '../../../copy';
-import { fmtDate, fmtRange } from '../../../lib/fmt';
+import { fmtDate } from '../../../lib/fmt';
+import { periodWords } from '../../../lib/periodWords';
 import { SHAPE, useData, useRange, useLive } from '../../../data';
 import { usePeriod } from '../../../data/usePeriod';
 import { Pareto, LineChart } from '../../../charts';
@@ -198,7 +199,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
   return (
     <div className="qr">
       <PageHead title={C.tabs.quality.rejects} sentence={headline} />
-      <p className="qr-note qr-period">{fmtRange(period.from, period.to)}</p>
+      <p className="qr-note qr-period">{periodWords(period)}</p>
       {(periodQ.data?.data.spansGenerations || periodW.data?.data.spansGenerations) && <p className="qr-note">{R.periodGenerations}</p>}
 
       <div className="qr-filters">
@@ -299,7 +300,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               title={R.paretoTitle}
               unit={RF.cones}
               rows={paretoRows(shown, reasonShort)}
-              caption={cover ? `${R.coverTop(cover.k, rateNum(cover.pct) + ' %')} ${R.paretoCaption(fmtRange(period.from, period.to), fmtCount(rows.reduce((s, r) => s + r.count, 0)))}` : undefined}
+              caption={cover ? `${R.coverTop(cover.k, rateNum(cover.pct) + ' %')} ${R.paretoCaption(periodWords(period), fmtCount(rows.reduce((s, r) => s + r.count, 0)))}` : undefined}
               errorPart={RF.part.reasons}
               reserve={{ legend: true, captionLines: 2 }}
             />

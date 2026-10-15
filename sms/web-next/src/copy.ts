@@ -454,7 +454,8 @@ export const C = {
     /** "Each one's rate of failed inspection or weight check is more than twice the line's 4.59 %." */
     actRule: (multiple: number, linePct: string) =>
       `Each one's rate of failed inspection or weight check is more than ${multiple === 2 ? 'twice' : `${multiple} times`} the line's ${linePct}.`,
-    periodCaption: (span: string, days: number) => `${span}, ${days} production ${days === 1 ? 'day' : 'days'} (06:00 to 06:00 plant time)`,
+    periodCaption: (span: string, days: number, shiftBounded = false) =>
+      shiftBounded ? `${span} (plant time)` : `${span}, ${days} production ${days === 1 ? 'day' : 'days'} (06:00 to 06:00 plant time)`,
     tableTitle: 'Stations, worst first',
     tableCaption: (n: number, cones: string, linePct: string) => `${n} stations · ${cones} cones · line rate of failed inspection or weight check ${linePct}`,
     tableAria: 'Stations, worst first',
@@ -543,6 +544,7 @@ export const C = {
       passed: 'Passed by the scale',
       infoPassed: 'Share of sacks the scale itself marked as in range.',
     },
+    perProductTarget: 'Each station is judged against its own product’s limits, so no single target is stated.',
     perProductLimits: "Cones in this view ran different products, so each is judged against its own product's limits and no single tolerance band is drawn.",
     kpi: {
       mean: 'Mean cone weight',

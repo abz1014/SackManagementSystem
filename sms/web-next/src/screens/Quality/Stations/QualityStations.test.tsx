@@ -47,6 +47,28 @@ afterEach(() => {
 const rowsOf = (c: HTMLElement) => Array.from(c.querySelectorAll('tbody tr[data-station]')) as HTMLElement[];
 const order = (c: HTMLElement) => rowsOf(c).map((r) => Number(r.getAttribute('data-station')));
 
+describe('the sub-line names the period actually shown', () => {
+  it('says the shift, not "1 production day", when the period is one shift', async () => {
+    const orig = URLS.pd1;
+    URLS.pd1 = '/next/?s=quality&t=stations&p=range&from=2026-09-01.evening&to=2026-09-01.evening';
+    try {
+      const { container } = mount('pd1');
+      await waitFor(() => expect(rowsOf(container).length).toBeGreaterThan(0));
+      const line = container.querySelector('.qs-period')!.textContent ?? '';
+      expect(line).toMatch(/1 Sep, evening shift/);
+      expect(line).not.toMatch(/production day/);
+    } finally {
+      URLS.pd1 = orig;
+    }
+  });
+
+  it('keeps the production-day wording for whole days', async () => {
+    const { container } = mount('pd1');
+    await waitFor(() => expect(rowsOf(container).length).toBeGreaterThan(0));
+    expect(container.querySelector('.qs-period')!.textContent).toMatch(/1 production day \(06:00 to 06:00 plant time\)/);
+  });
+});
+
 describe('Quality > Stations on PD1 (1 Sep 2026)', () => {
   it('lists all 14 stations worst first with station 8 as Act at 53.9 %', async () => {
     const { container } = mount('pd1');

@@ -9,7 +9,6 @@ import { C, withFragments, FRAGMENTS } from '../../../copy';
 import { CONE_STATES, type ConeState, type RegisterQuery, type RegisterType } from '../../../bridge/api';
 import { period as P } from '../../../bridge/lib';
 import { fmt } from '../../../bridge/lib';
-import { fmtDate, fmtRange } from '../../../lib/fmt';
 import type { Route } from '../../../route';
 const R = withFragments(C.register, FRAGMENTS.registerParts);
 
@@ -107,10 +106,7 @@ export function countStateOf(error: string | null, n: number | undefined): Count
 
 const nf = (n: number): string => fmt.fmtInt(n);
 
-export function periodWords(p: P.Period): string {
-  if (p.shift || p.fromShift || p.toShift) return P.describePeriod(p);
-  return p.from === p.to ? fmtDate(p.from) : fmtRange(p.from, p.to);
-}
+export { periodWords } from '../../../lib/periodWords';
 
 export interface CountLineInput {
   what: string;
