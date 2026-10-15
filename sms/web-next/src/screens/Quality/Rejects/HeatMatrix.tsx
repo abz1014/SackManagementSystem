@@ -3,7 +3,7 @@
  * (--seq-*), light to dark; every non-zero cell also prints its number, so colour is never the only cue.
  * A cell opens the reason sheet for that reason and day. Capped by the caller (top 8, then "Show all").
  */
-import { C, FRAGMENTS } from '../../../copy';
+import { C, FRAGMENTS, pl } from '../../../copy';
 import { fmt } from '../../../bridge/lib';
 import { dayLabel, heatStep, HEAT_STEPS, type Heat, type HeatRow } from './model';
 import { fmtRate, reasonName, reasonShort } from './format';
@@ -49,7 +49,7 @@ export function HeatMatrix({ heat, rows, activeCode, onOpen }: HeatMatrixProps) 
                       <button
                         type="button"
                         className={cellClass(c.pct)}
-                        aria-label={R.heatOpen(reasonName(row.reason), dayLabel(c.day), `${fmtRate(c.pct)}, ${fmt.fmtInt(c.count)} cones`)}
+                        aria-label={R.heatOpen(reasonName(row.reason), dayLabel(c.day), `${fmtRate(c.pct)}, ${pl(fmt.fmtInt(c.count), 'cone', 'cones')}`)}
                         onClick={() => onOpen(row, c.day)}
                       >
                         {c.pct >= 10 ? Math.round(c.pct) : c.pct.toFixed(1)}

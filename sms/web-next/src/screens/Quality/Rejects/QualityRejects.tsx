@@ -24,7 +24,7 @@ import {
   type RejectFilters,
 } from '../../../bridge/api';
 import { period as P, productLabel } from '../../../bridge/lib';
-import { C, FRAGMENTS } from '../../../copy';
+import { C, FRAGMENTS, pl } from '../../../copy';
 import { fmtDate } from '../../../lib/fmt';
 import { periodWords } from '../../../lib/periodWords';
 import { SHAPE, useData, useRange, useLive } from '../../../data';
@@ -273,7 +273,7 @@ function RejectsBody({ route, rank, go }: ScreenProps) {
               status={reasons.status === 'error' ? 'error' : reasons.status === 'loading' ? 'loading' : top ? 'ok' : 'empty'}
               part={RF.part.reasons}
               onRetry={reasons.refresh}
-              note={top ? `${reasonName(top)} · ${fmtCount(top.count)} ${RF.cones}` : null}
+              note={top ? `${reasonName(top)} · ${pl(fmtCount(top.count), 'cone', RF.cones)}` : null}
             />
         </div>
         {figState === 'error' && figError && <p className="qr-note">{figError}</p>}

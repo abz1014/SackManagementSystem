@@ -18,6 +18,9 @@ import { fmtDate, fmtTime, fmtTimeSec } from './lib/fmt';
 import { W } from './bridge/words';
 import { stationLabel } from './bridge/api';
 
+/** One place for "1 cone" / "2 cones". `n` may be a number or an already formatted count ("1", "1,204"). */
+export const pl = (n: number | string, one: string, many: string): string => `${n} ${String(n) === '1' ? one : many}`;
+
 export const C = {
   /* Navigation (GLOSSARY 3.1, rows 1-10) */
   nav: {
@@ -69,10 +72,10 @@ export const C = {
     notChecked: 'Not checked (no product set)',
     /** "Failed weight check (scale): 123 of 8,402 cones weighed (1.5%)" */
     failedWeightOf: (n: string, total: string, pct: string) =>
-      `Failed weight check (scale): ${n} of ${total} cones weighed (${pct})`,
+      `Failed weight check (scale): ${n} of ${pl(total, 'cone', 'cones')} weighed (${pct})`,
     /** "Failed inspection: 87 of 8,402 cones weighed (1.0%)" */
     failedInspectionOf: (n: string, total: string, pct: string) =>
-      `Failed inspection: ${n} of ${total} cones weighed (${pct})`,
+      `Failed inspection: ${n} of ${pl(total, 'cone', 'cones')} weighed (${pct})`,
   },
 
   /* Stations: "Station N" is the primary label (GLOSSARY 1.2). */
@@ -86,9 +89,9 @@ export const C = {
   rebuildNote: {
     testData: "These figures are test data, not readings from IFL's plant.",
     notCounted: (n: string | null) =>
-      `${n ? `${n} readings` : 'Some readings'} from before the 5 Aug 2026 IFL database rebuild are not counted.`,
+      `${n ? `${pl(n, 'reading', 'readings')}` : 'Some readings'} from before the 5 Aug 2026 IFL database rebuild are not counted.`,
     chartShows: (shown: string, excluded: string) =>
-      `This chart shows ${shown} readings. ${excluded} readings from before the 5 Aug 2026 rebuild are not shown.`,
+      `This chart shows ${pl(shown, 'reading', 'readings')}. ${pl(excluded, 'reading', 'readings')} from before the 5 Aug 2026 rebuild are not shown.`,
   },
   noCones: 'No cones',
   noConesFor: (n: number, span: string) => `Station ${n}: no cones for ${span}`,
@@ -199,7 +202,7 @@ export const C = {
   /* ---- Station tiles, heat grid, KPI card (were local constants) ---- */
   stationUi: {
     failedInspection: 'Failed inspection or weight check',
-    cones: (n: number) => `${n.toLocaleString('en-GB')} cones`,
+    cones: (n: number) => pl(n.toLocaleString('en-GB'), 'cone', 'cones'),
     noProduct: 'No product',
     severalProducts: 'Several products',
     lineProductMark: 'Line product',
@@ -283,7 +286,7 @@ export const C = {
     band: {
       nothing: 'Nothing has been recorded in this period.',
       ranAll: 'Line ran all three shifts.',
-      ranShifts: (k: number, n: number) => `Line ran ${k} of ${n} shifts.`,
+      ranShifts: (k: number, n: number) => `Line ran ${k} of ${pl(n, 'shift', 'shifts')}.`,
       ranShift: 'Line ran in this shift.',
       ranDays: (k: number, n: number) => `Line ran on ${k} of ${n} production days.`,
       running: (line: string) => `${line} is running.`,
@@ -299,8 +302,8 @@ export const C = {
       cones: 'Cones',
       sacks: 'Sacks',
       packed: 'Packed',
-      coneCount: (n: string) => `${n} cones`,
-      ofCones: (n: string, total: string) => `${n} of ${total} cones`,
+      coneCount: (n: string) => `${pl(n, 'cone', 'cones')}`,
+      ofCones: (n: string, total: string) => `${n} of ${pl(total, 'cone', 'cones')}`,
       couldNotRead: 'Could not be read',
       points: (v: string) => `${v} points`,
       pointsMoved: (v: string, way: 'lower' | 'higher') => `${v} points ${way}`,
@@ -334,7 +337,7 @@ export const C = {
       title: (spread: 'day' | 'shift') => (spread === 'day' ? 'Cones per day' : 'Cones per shift'),
       series: 'Cones',
       caption: (period: string, total: string, sacks: string | null) =>
-        `Plant time, ${period}. Total ${total} cones.${sacks ? ` ${sacks}` : ''}`,
+        `Plant time, ${period}. Total ${pl(total, 'cone', 'cones')}.${sacks ? ` ${sacks}` : ''}`,
       sacksBy: (parts: string) => `Sacks packed: ${parts}.`,
       onePoint: (spread: 'day' | 'shift') =>
         spread === 'day' ? 'Only one production day has cones, so there is no shape to draw.' : 'Only one shift has cones, so there is no shape to draw.',
@@ -342,7 +345,7 @@ export const C = {
 
     reasons: {
       title: 'Failed inspection by reason',
-      caption: (period: string, total: string) => `${period}. ${total} cones in total.`,
+      caption: (period: string, total: string) => `${period}. ${pl(total, 'cone', 'cones')} in total.`,
       unnamed: (tube: number | null, mat: number | null) => `Code ${tube ?? '?'}/${mat ?? '?'} (not named yet)`,
       none: 'No cones failed inspection in this period.',
     },
@@ -391,7 +394,7 @@ export const C = {
       none: 'No sacks were packed in this period.',
       namesNotDistinct: "Product names didn't load, so products with the same name can't be told apart.",
       noProduct: 'No product recorded',
-      unattributed: (n: string, of: string) => `${n} of ${of} sacks carry no product.`,
+      unattributed: (n: string, of: string) => `${n} of ${pl(of, 'sack', 'sacks')} carry no product.`,
       list: 'Sack list',
       stock: 'Sack stock',
       weights: 'Sack weights',
@@ -408,7 +411,7 @@ export const C = {
       title: 'How states are decided',
       rule: (act: string, watch: string, actPct: string | null, watchPct: string | null, period: string) =>
         `Act: a station's failed-inspection rate is more than ${act} times the line's rate${actPct ? ` (over ${actPct} on ${period})` : ''}. Watch: more than ${watch} times${watchPct ? ` (over ${watchPct})` : ''}. A station with no cones in the period shows No data, never OK.`,
-      minCones: (n: number) => `A station with fewer than ${n} cones is not judged.`,
+      minCones: (n: number) => `A station with fewer than ${pl(n, 'cone', 'cones')} is not judged.`,
     },
 
     about: {
@@ -457,7 +460,7 @@ export const C = {
     periodCaption: (span: string, days: number, shiftBounded = false) =>
       shiftBounded ? `${span} (plant time)` : `${span}, ${days} production ${days === 1 ? 'day' : 'days'} (06:00 to 06:00 plant time)`,
     tableTitle: 'Stations, worst first',
-    tableCaption: (n: number, cones: string, linePct: string) => `${n} stations · ${cones} cones · line rate of failed inspection or weight check ${linePct}`,
+    tableCaption: (n: number, cones: string, linePct: string) => `${pl(n, 'station', 'stations')} · ${pl(cones, 'cone', 'cones')} · line rate of failed inspection or weight check ${linePct}`,
     tableAria: 'Stations, worst first',
     thisPeriod: (span: string) => `This period · ${span}`,
     patternHead: (span: string) => `Pattern check · always the last 14 production days (${span})`,
@@ -470,7 +473,7 @@ export const C = {
     colVsTarget: 'Mean weight vs target',
     colDaysNote: 'Days with a note',
     colResult: 'Result',
-    conesSub: (n: string) => `${n} cones`,
+    conesSub: (n: string) => `${pl(n, 'cone', 'cones')}`,
     nothingFlagged: 'Nothing flagged',
     noProduct: 'No product',
     noData: 'No data',
@@ -481,7 +484,7 @@ export const C = {
     actRuleLong: (multiple: number, pct: string, span: string) =>
       `Act: a station's failed-inspection rate is more than ${multiple} times the line's rate (over ${pct} for ${span}).`,
     watchRuleLong: (multiple: number, pct: string) => `Watch: more than ${multiple} times (over ${pct}).`,
-    tooFew: (min: number) => `A station with fewer than ${min} cones in the period is not judged and shows OK. A station with no cones shows No data, never OK.`,
+    tooFew: (min: number) => `A station with fewer than ${pl(min, 'cone', 'cones')} in the period is not judged and shows OK. A station with no cones shows No data, never OK.`,
     boxExplain:
       'The two columns in the box are not affected by the period you pick: pattern tests need consecutive days, so they always look at the last 14 production days.',
     failedPart: (part: string) => `Couldn't load ${part}. Its columns show a dash.`,
@@ -495,7 +498,7 @@ export const C = {
     kpiFailedWeight: 'Failed weight check (scale)',
     kpiMeanVsTarget: 'Mean cone weight vs target',
     kpiCones: 'Cones weighed',
-    nOfCones: (n: string, total: string) => `${n} of ${total} cones`,
+    nOfCones: (n: string, total: string) => `${n} of ${pl(total, 'cone', 'cones')}`,
     dailyTitle: 'Cone weight by day',
     seriesSince: 'Since the last adjustment',
     seriesBefore: 'Before the last adjustment',
@@ -534,8 +537,8 @@ export const C = {
       mean: (m: string) => `Average cone weight is ${m}.`,
       noCones: 'No cones were weighed in this period.',
       noSacks: 'No sacks were weighed in this period.',
-      sack: (kg: string, n: string) => `Average sack weight is ${kg}, from ${n} sacks.`,
-      sackNoMean: (n: string) => `${n} sacks were weighed, and none had a plausible weight to average.`,
+      sack: (kg: string, n: string) => `Average sack weight is ${kg}, from ${pl(n, 'sack', 'sacks')}.`,
+      sackNoMean: (n: string) => `${pl(n, 'sack', 'sacks')} were weighed, and none had a plausible weight to average.`,
     },
     sackKpi: {
       weighed: 'Sacks weighed',
@@ -556,12 +559,12 @@ export const C = {
       offsetDetail: 'Two separate facts until the weight basis is confirmed.',
       offsetNone: 'Needs a product target.',
       within: 'Within product tolerance',
-      withinDetail: (lo: string, hi: string, n: string) => `${lo} to ${hi} · ${n} cones judged`,
+      withinDetail: (lo: string, hi: string, n: string) => `${lo} to ${hi} · ${pl(n, 'cone', 'cones')} judged`,
       /** Audit M7: when the cones ran different products there is no single band to print. */
-      withinDetailPerProduct: (n: string) => `Own product limits · ${n} cones judged`,
+      withinDetailPerProduct: (n: string) => `Own product limits · ${pl(n, 'cone', 'cones')} judged`,
       withinNone: 'Not checked (no product set)',
       failedCheck: 'Failed weight check (scale)',
-      failedDetail: (n: string) => `Of ${n} cones weighed. The scale\u2019s own check.`,
+      failedDetail: (n: string) => `Of ${pl(n, 'cone', 'cones')} weighed. The scale\u2019s own check.`,
       infoMean: 'Average of every cone weighed in the period.',
       infoWithin: 'Share of judged cones between the product\u2019s lower and upper limit.',
       infoFailed: 'Share of cones the scale itself marked as out of range.',
@@ -632,14 +635,14 @@ export const C = {
     weightRecords: 'Weight-reject records',
     topReasonShare: 'Top reason share',
     /** "6,048 of 132,665 cones checked" */
-    ofChecked: (n: string, total: string) => `${n} of ${total} cones checked`,
+    ofChecked: (n: string, total: string) => `${n} of ${pl(total, 'cone', 'cones')} checked`,
     /** The two verdicts together: the one figure Today and Reports print as the line's failure rate. */
     together: (n: string, pct: string, total: string) =>
-      `Together ${n} of ${total} cones checked (${pct}), the same rate Today and Reports use.`,
+      `Together ${n} of ${pl(total, 'cone', 'cones')} checked (${pct}), the same rate Today and Reports use.`,
     rangeFromTo: (from: string, to: string) => `${from} to ${to}`,
 
     paretoTitle: 'Failed inspection by reason',
-    paretoCaption: (period: string, total: string) => `Cones, ${period}. Share is of ${total} cones that failed inspection.`,
+    paretoCaption: (period: string, total: string) => `Cones, ${period}. Share is of ${pl(total, 'cone', 'cones')} that failed inspection.`,
     colReason: 'Reason',
     colCones: 'Cones',
     colShare: 'Share',
@@ -653,7 +656,7 @@ export const C = {
     heatTitle: 'When each reason happened',
     heatCaption: "Share of the day's cones, by production day",
     heatLegendLabel: 'Share of the day\'s cones',
-    heatCapped: (k: number, n: number) => `Top ${k} reasons shown. Use "Show all ${n}" above for the rest.`,
+    heatCapped: (k: number, n: number) => `Top ${pl(k, 'reason', 'reasons')} shown. Use "Show all ${n}" above for the rest.`,
     heatOpen: (reason: string, day: string, pct: string) => `${reason}, ${day}: ${pct}. Open this day.`,
     heatNoRows: 'No cones failed inspection on any day in this period.',
 
@@ -668,7 +671,7 @@ export const C = {
     notRising: 'Not rising now.',
     notRisingAfter: (n: number, last: string) =>
       n === 1 ? `Not rising now, after one rise in this window that ended ${last}.` : `Not rising now, after ${n} rises in this window, the last ending ${last}.`,
-    daysHold: (n: number, of: number) => `Only ${n} of those ${of} days hold readings.`,
+    daysHold: (n: number, of: number) => `Only ${n} of those ${pl(of, 'day', 'days')} ${n === 1 ? 'holds' : 'hold'} readings.`,
 
     filterStation: 'Station',
     filterProduct: 'Product',
@@ -687,10 +690,10 @@ export const C = {
       'Percentages use cones that were checked. Times are plant time and a production day runs 06:00 to 06:00.',
     ],
     aboutCounts: (inspection: string, weight: string) =>
-      `In this period ${inspection} cones failed inspection and ${weight} weight-reject records were logged. The reason list holds the inspection failures only.`,
+      `In this period ${pl(inspection, 'cone', 'cones')} failed inspection and ${weight} weight-reject records were logged. The reason list holds the inspection failures only.`,
     aboutScale: (records: string) =>
       `Weight-reject records (${records}) are rows in the weight-reject log. "Failed weight check (scale)" on Today and Reports counts the cones the scale flagged out of range, which can be more: some flagged cones have no reject record.`,
-    recordsOf: (n: string, total: string) => `${n} records over ${total} cones checked`,
+    recordsOf: (n: string, total: string) => `${pl(n, 'record', 'records')} over ${pl(total, 'cone', 'cones')} checked`,
     detectorFixed: (days: number) => `The trend and its rising verdict always look at the last ${days} production days.`,
     spansBatches: 'This window includes the 5 Aug 2026 database rebuild. The normal range is worked out for each side separately.',
     dayBasis: 'IFL has not confirmed whether reject reports should count by production day or by calendar date; this screen uses the production day.',
@@ -748,14 +751,14 @@ export const C = {
     countFailed: "Couldn't load this period's count. The plant connection may be down.",
     countPending: (what: string) => `${what}: counting the readings in this period.`,
     conesWeighed: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} weighed.`,
-    sacksWeighed: (what: string, n: string) => `${what}: ${n} sacks weighed.`,
+    sacksWeighed: (what: string, n: string) => `${what}: ${pl(n, 'sack', 'sacks')} weighed.`,
     inspectionFails: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} failed inspection or the weight check.`,
     weightFails: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} failed the weight check (scale).`,
     filteredCones: (what: string, n: string, states: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'}, ${states}.`,
     outsideLimits: (what: string, n: string) => `${what}: ${n} ${n === '1' ? 'cone' : 'cones'} passed by the scale but outside the product limits.`,
-    weightFailsUnknown: (what: string, n: string) => `${what}: ${n} cones weighed. How many failed the weight check could not be loaded.`,
-    weightFailsPending: (what: string, n: string) => `${what}: ${n} cones weighed. Still counting how many failed the weight check.`,
-    weightFailsNoRate: (what: string, n: string, f: string) => `${what}: ${n} cones weighed, ${f} failed the weight check (scale).`,
+    weightFailsUnknown: (what: string, n: string) => `${what}: ${pl(n, 'cone', 'cones')} weighed. How many failed the weight check could not be loaded.`,
+    weightFailsPending: (what: string, n: string) => `${what}: ${pl(n, 'cone', 'cones')} weighed. Still counting how many failed the weight check.`,
+    weightFailsNoRate: (what: string, n: string, f: string) => `${what}: ${pl(n, 'cone', 'cones')} weighed, ${f} failed the weight check (scale).`,
 
     /* filters */
     filterStation: 'Station',
@@ -785,7 +788,7 @@ export const C = {
     },
 
     /* data sets */
-    periodHoldsOther: (n: string) => `This period also holds ${n} readings from another data set. The list shows one.`,
+    periodHoldsOther: (n: string) => `This period also holds ${pl(n, 'reading', 'readings')} from another data set. The list shows one.`,
     showOther: 'Show the other data set',
     showingOther: 'Showing the other data set.',
     backToDefault: 'Back to the default data set',
@@ -863,7 +866,7 @@ export const C = {
     /* the stock day sheet */
     stockSheetTitle: 'Stock movements',
     stockSheetDay: (day: string) => `${day}, production day`,
-    stockWeighed: (n: string, kg: string) => `${n} sacks weighed this day (${kg} kg) count as receipts.`,
+    stockWeighed: (n: string, kg: string) => `${pl(n, 'sack', 'sacks')} weighed this day (${kg} kg) count as receipts.`,
     stockWeighedNone: 'No sacks were weighed this day.',
     stockEmpty: 'No movements were recorded by hand this day.',
     malformedDay: 'This day link is not a valid date.',
@@ -892,7 +895,7 @@ export const C = {
     insertTimeCaveat:
       'The plant records no separate weighing time for a sack. This is when the reading was written, which can trail the actual weighing.',
     aroundSack: (n: string) =>
-      `${n} cones were weighed between the previous sack and this one. The plant records no link between a cone and its sack, so this is an approximate count and never a packing list.`,
+      `${pl(n, 'cone', 'cones')} were weighed between the previous sack and this one. The plant records no link between a cone and its sack, so this is an approximate count and never a packing list.`,
     noPreviousSack: 'There is no earlier sack on record to count cones from.',
     provenance: 'Where this reading came from',
     provenanceNote: 'Every line is a field the server sent. Nothing here is worked out in the browser.',
@@ -1437,9 +1440,9 @@ export const C = {
         current: 'Current IFL database',
         older: 'Older IFL database',
         practice: 'Practice data on this computer',
-        currentLine: (n: string) => `${n} cones. Reports use this one.`,
+        currentLine: (n: string) => `${pl(n, 'cone', 'cones')}. Reports use this one.`,
         currentLineNoCount: 'Reports use this one.',
-        olderLine: (n: string) => `${n} cones. Kept as history.`,
+        olderLine: (n: string) => `${pl(n, 'cone', 'cones')}. Kept as history.`,
         olderLineNoCount: 'Kept as history.',
         practiceLine: 'Made for testing. Never counted in a report.',
         none: 'No data source has been registered yet.',
@@ -1450,7 +1453,7 @@ export const C = {
         title: 'Data checks',
         caption: 'Engineers and above can acknowledge',
         none: 'No data check has found anything open.',
-        showAll: (n: number) => `Show all ${n} checks`,
+        showAll: (n: number) => `Show all ${pl(n, 'check', 'checks')}`,
         showFewer: 'Show fewer',
         ackSummary: (n: number) => (n === 1 ? '1 finding has been acknowledged.' : `${n} findings have been acknowledged.`),
         acknowledge: 'Acknowledge',
@@ -1731,7 +1734,7 @@ export const FRAGMENTS = {
   qualityStations: {
     partSheetMachine: 'the station’s product',
     vsTargetSub: 'vs product target',
-    ofConesWeighed: (n: string) => `of ${n} cones weighed`,
+    ofConesWeighed: (n: string) => `of ${pl(n, 'cone', 'cones')} weighed`,
     dash: '\u2013',
     partCounts: 'the per-station counts',
     partPattern: 'the 14-day pattern check',

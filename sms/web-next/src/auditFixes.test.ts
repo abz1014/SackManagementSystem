@@ -1,6 +1,6 @@
 /** Data-audit fixes (14 Oct 2026): M1 label of the combined figure, M9 singular/plural, M7 per-product wording. */
 import { describe, expect, it } from 'vitest';
-import { C } from './copy';
+import { C, pl } from './copy';
 
 describe('M1: the combined failed figure is never labelled bare "Failed inspection"', () => {
   const L = 'Failed inspection or weight check';
@@ -34,5 +34,32 @@ describe('M7: no single band when products differ', () => {
   it('has a plain per-product sentence and a per-product tolerance note', () => {
     expect(C.qualityWeight.perProductLimits).toMatch(/own product/);
     expect(C.qualityWeight.kpi.withinDetailPerProduct('5')).toMatch(/own product/i);
+  });
+});
+
+describe('plural helper and count lines (15 Oct 2026)', () => {
+  it('pl says one for 1 and many otherwise, for numbers and formatted strings', () => {
+    expect(pl(1, 'cone', 'cones')).toBe('1 cone');
+    expect(pl('1', 'cone', 'cones')).toBe('1 cone');
+    expect(pl(2, 'cone', 'cones')).toBe('2 cones');
+    expect(pl('1,204', 'cone', 'cones')).toBe('1,204 cones');
+    expect(pl(0, 'cone', 'cones')).toBe('0 cones');
+  });
+  it('Stations sub-lines and tile counts read 1 cone / 2 cones', () => {
+    expect(C.qualityStations.conesSub('1')).toBe('1 cone');
+    expect(C.qualityStations.conesSub('2')).toBe('2 cones');
+    expect(C.qualityStations.nOfCones('1', '1')).toBe('1 of 1 cone');
+    expect(C.qualityStations.nOfCones('1', '2')).toBe('1 of 2 cones');
+    expect(C.qualityStations.tableCaption(1, '1', '2%')).toMatch(/^1 station \u00b7 1 cone \u00b7/);
+    expect(C.stationUi.cones(1)).toBe('1 cone');
+    expect(C.stationUi.cones(2)).toBe('2 cones');
+    expect(C.today.kpi.coneCount('1')).toBe('1 cone');
+    expect(C.today.kpi.ofCones('1', '1')).toBe('1 of 1 cone');
+  });
+  it('no template in copy.ts prints a count with a plural cone/sack/reading/record noun outside pl()', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./copy.ts', import.meta.url), 'utf8');
+    const bad = src.split(/\r?\n/).filter((l) => /\$\{[a-zA-Z.]+\} (cones|sacks|readings|records)\b/.test(l));
+    expect(bad).toEqual([]);
   });
 });
