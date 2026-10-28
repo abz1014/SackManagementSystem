@@ -21,6 +21,10 @@ Single-plant, single-server, intranet. Two Node processes (sync-worker + api) an
 
 ---
 
+## Installing from the source-free package (28 Oct 2026)
+
+The plant PC gets compiled code only, never the source. On the dev PC: `npm run build`, then `bash deploy/build-bundle.sh` → `Desktop\SMS-install\SMS-install.zip` (compiled JS, no `.ts`/`.map`/`.d.ts`/tests; production `node_modules`; Node 22 MSI and `nssm.exe` from `Desktop\SMS-install\prereqs`). The script refuses to zip if it finds source, links or a `.env`. On the plant PC: unzip, then `powershell -ExecutionPolicy Bypass -File .\install.ps1` as administrator; it performs steps 1, 3, 4, 6, 7 and 9 below plus the firewall rule, asks before restarting SQL Server for TCP / mixed auth / a fixed port, and connects the plant later with `-PlantOnly` (read-only checks, then `epoch:accept`). Installer sources: `deploy/bundle/` (`INSTALL.txt` is the on-site guide). Verified on the dev PC only: the unzipped package boots (`/api/health`, `/`, `/next/` 200) and the installer's helpers were tested in isolation; the full installer has not been run end to end on any PC.
+
 ## First-time production setup
 
 1. **Install** Node **22** (pinned: `sms/.nvmrc`, `engines` in `sms/package.json`; Node 20 reached end-of-life 30 Apr 2026) and SQL Server (Express is fine) on the plant server. `npm ci` needs the npm registry — see *Internet access* below for an air-gapped host.

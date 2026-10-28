@@ -1,0 +1,72 @@
+IFL SACK MANAGEMENT SYSTEM (SMS) - INSTALLING ON A PLANT PC
+=============================================================
+
+WHAT IS IN THIS PACKAGE
+  install.ps1          guided installer (run this)
+  uninstall.ps1        removes the SMS services and firewall rule
+  prereqs\             Node.js 22 installer and nssm.exe (Windows service helper)
+  api, sync-worker,    the application (compiled)
+  cli, shared,
+  web, web-next
+  db\                  SQL scripts that create the SMS database
+  scripts\             database migrations and backup scripts
+  .env.example         settings template (install.ps1 writes .env from it)
+
+BEFORE YOU START
+  - SQL Server (Express is fine) must already be installed on this PC.
+  - Use a Windows account that is an administrator on the PC AND a sysadmin
+    on SQL Server (normally the account that installed SQL Server).
+  - If SQL Server's network settings need changing, the installer will ask
+    before it restarts SQL Server (about 30 seconds). If IFL's own plant
+    database runs on the same SQL Server, get IFL's OK first and do it
+    between shifts.
+  - The PC's time zone should be (UTC+05:00) Islamabad, Karachi.
+
+INSTALL
+  1. Copy the zip to the PC and unzip it to C:\sms (any folder works; the
+     folder you choose is where SMS runs from, so do not move it later).
+  2. Start PowerShell with "Run as administrator".
+  3. Run:
+        cd C:\sms
+        powershell -ExecutionPolicy Bypass -File .\install.ps1
+  4. Answer the questions. The installer will:
+        - install Node.js 22 if it is not there
+        - find SQL Server and check it accepts SMS's connections
+        - create SMS's own database [sms] and two logins (sms_app, sms_migrate)
+          with random passwords, stored only in C:\sms\.env
+        - create the tables
+        - ask for the first admin account's username and password
+        - optionally connect to IFL's plant database (read-only login)
+        - install two Windows services that start with Windows:
+            SMS-Api   the web application on port 4000
+            SMS-Sync  reads the plant database every 60 seconds
+        - open port 4000 in the firewall (it asks first)
+        - check SMS answers, and print the address to open
+  5. Open http://localhost:4000 and sign in with the admin account.
+
+CONNECTING THE PLANT DATA LATER
+  SMS needs a read-only SQL login from IFL with db_datareader on BOTH
+  DATA_TP1U2 and PDAS_TP1U2. When you have it:
+        powershell -ExecutionPolicy Bypass -File .\install.ps1 -PlantOnly
+  It tests the login with four read-only queries, saves it, shows which
+  plant tables SMS will read, and starts SMS-Sync once you confirm.
+  SMS never writes to IFL's databases.
+
+ACCOUNTS FOR IFL STAFF
+  Sign in as admin and use Setup, or on this PC:
+        node cli\dist\index.js user:create --username=NAME --password=PASS --role=manager
+  Give IFL's GM, managers and process engineers the "manager" role.
+
+WHERE THINGS ARE
+  Settings           C:\sms\.env   (passwords; readable by administrators only)
+  Logs               C:\sms\logs\api.log, api.err.log, sync.log, sync.err.log
+  Install transcript C:\sms\logs\install-<date>.log
+  Services           services.msc -> "IFL SMS - api", "IFL SMS - sync"
+
+IF SOMETHING GOES WRONG
+  - Login page keeps coming back from another PC: COOKIE_SECURE must be
+    false in .env (the installer sets this), then restart SMS-Api.
+  - "SMS did not answer": read logs\api.err.log.
+  - Plant data not arriving: read logs\sync.log; the newest error line names
+    the table and the reason.
+  - Re-running install.ps1 is safe; it keeps the database and existing users.
