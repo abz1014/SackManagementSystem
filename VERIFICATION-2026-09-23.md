@@ -354,4 +354,34 @@ and should be repeated by whoever next looks at them.
 
 Nothing else in this report is affected: `Line.tsx` and `Rejects.tsx` (I-1),
 `Readings.tsx`/`ReadingSheet.tsx` (I-2) and every service behind claims 1–3 and 5–8 are
-untouched by `c17c0cd`. **I-1 in particular is still live at `c17c0cd`.**
+untouched by `c17c0cd`.
+
+### The tree and the API kept moving after the measurements
+
+By the time this file was closed, work had continued past `c17c0cd` — HEAD reached
+**`3370886`**, `api/dist` had been rebuilt (newest artefact 13:23, against 12:50 when I
+measured), and **the API process I built and started (pid 47036) had been replaced by
+another worker's (pid 60048, up 10:51:05 UTC)**.
+
+This does not invalidate anything above. My measurements ran 08:00–08:15 UTC and were
+served by pid 47036, built from `api/src` as of 12:49:50 — the process I verified as
+current at the time, and the one whose request log confirms the traffic. But **a reader
+re-running these numbers today will be hitting a different process against a different
+tree**, and should re-measure rather than assume.
+
+(The background-task notice that my API "failed with exit code 127" is a wrapper artefact,
+not a crash: the process logged a clean startup, served every measurement in this report,
+and was still answering `/api/health` with 200 hours later.)
+
+### I-1 re-verified at the current HEAD
+
+Because I-1 is the headline finding and the tree moved, I re-checked it rather than assume
+it survived. **It is still live**, with one line number shifted:
+
+- `web/src/screens/Line.tsx:477-478` — was `:438-439` when first found; the file grew.
+  Still `Math.round((1000 * rejected) / (cones + rejected)) / 10`.
+- `web/src/screens/Rejects.tsx:271-273` — unchanged, still
+  `(100 * rejectCount.n) / (produced + rejectCount.n)`.
+
+Both still divide by produced-plus-every-reject. Nothing in `c17c0cd`, `3370886` or the
+in-flight edits has touched either.
