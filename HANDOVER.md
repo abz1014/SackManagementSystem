@@ -1,6 +1,28 @@
 # HANDOVER — IFL Sack Management System (SMS)
 
-Written 28 Oct 2026 for the move to a new Claude account. It replaces `HANDOVER-2026-09-15.md` as the place to start (that file is historical). Every fact below was checked against the repository, the dev machine or the past chat transcripts on 28 Oct 2026; where something could not be checked, it says so.
+Written 28 Oct 2026 for the move to a new Claude account; **refreshed 2 Nov 2026** (git counts, the plant-PC install package of 28 Oct, the project paths). It replaces `HANDOVER-2026-09-15.md` as the place to start (that file is historical). Every fact below was checked against the repository, the dev machine or the past chat transcripts on the date given; where something could not be checked, it says so.
+
+## 0. Where everything is (project directory)
+
+| What | Path |
+|---|---|
+| **Project root (git repo, open the session here)** | `C:\Users\ABDULLAH SAJID\Desktop\sag database` |
+| The application (npm-workspaces monorepo) | `C:\Users\ABDULLAH SAJID\Desktop\sag database\sms` |
+| New UI / old UI | `sms\web-next` (served at `/next`) / `sms\web` (served at `/`) |
+| API, sync worker, CLI, shared types | `sms\api`, `sms\sync-worker`, `sms\cli`, `sms\shared` |
+| DB migrations | `sms\db\migrations` |
+| Plant-PC install package sources | `sms\deploy\build-bundle.sh`, `sms\deploy\bundle\` |
+| Built install package (not in git) | `C:\Users\ABDULLAH SAJID\Desktop\SMS-install\SMS-install.zip` (50 MB; `prereqs\` holds the Node 22 MSI and nssm.exe) |
+| Secrets / settings (never commit, never print) | `sms\.env` (template: `sms\.env.example`) |
+| Redesign contract and evidence | `design\redesign-2026-10\` |
+| Handover kits, manuals, incident notes | `handover\` |
+| Client questionnaire | `QUESTIONS.md` **in the project root** (CLAUDE.md still says `../QUESTIONS.md` on the Desktop; that is stale, the file is not on the Desktop any more) |
+| IFL's original archives / unpacked DB files (not in git) | `extracted\`, `extracted-sps-2026-09-07\`, `schema_dump\`; originals also on `D:\google download\` |
+| SQL backups | `D:\sms-backups` (same laptop, second disk) |
+| Claude memory for this project | `C:\Users\ABDULLAH SAJID\.claude\projects\C--Users-ABDULLAH-SAJID-Desktop-sag-database\memory\` (21 notes + `MEMORY.md`) |
+| GitHub remote | `https://github.com/abz1014/SackManagementSystem.git`, branch `floor-first-rework` |
+
+Note: the folder name has a space (`sag database`) and the user folder has one too (`ABDULLAH SAJID`). Quote every path in shell commands.
 
 **If you are the new Claude session, read in this order:**
 1. This file, top to bottom.
@@ -16,19 +38,26 @@ SMS is a web app for **Ibrahim Fibres Limited (IFL)**. It reports on cone and sa
 
 ---
 
-## 2. Development checkpoint (as of 28 Oct 2026)
+## 2. Development checkpoint (re-checked 2 Nov 2026)
 
 | Item | State |
 |---|---|
 | Branch | `floor-first-rework` |
-| HEAD | `c0e08be` "docs(redesign): old vs new head-to-head before the switch" (15 Oct 2026) |
-| Last code commit | `e5f853a` (15 Oct 2026): the `pl()` plural helper |
-| Pushed? | **No.** `origin/floor-first-rework` is at `f829d30` (2 Oct 2026). **262 commits are local only** (261 before this handover), and 631 are ahead of `origin/main`. Remote: `https://github.com/abz1014/SackManagementSystem.git`. **Only the owner pushes.** |
+| HEAD | `6aece5d` "feat(deploy): source-free install package and guided plant-PC installer" (28 Oct 2026) |
+| Last UI code commit | `e5f853a` (15 Oct 2026): the `pl()` plural helper |
+| Pushed? | **Partly.** `origin/floor-first-rework` is at `92000bc` (this handover's first commit, 28 Oct), so the owner pushed after 28 Oct. **1 commit is local only** (`6aece5d`, the install package), and 633 are ahead of `origin/main`. **Only the owner pushes.** |
 | CI | Has never run on this branch. |
-| Work since 15 Oct | None in this repo. The 26 Oct activity in the "Orchestrator workflow setup" chat was only a compaction. |
-| Working tree | `VERIFICATION-2026-09-23.md` modified (+31 lines, not committed). Untracked: proposal build files under `proposal/IFL-SMS-2026-09/`, `drafts/`, `docs/guide/capture/proof/`, two screenshots (`bar375_top.png`, `zeroed_768.png`), `scratch-serve.log`, a stray root copy of `simulate-plant.mjs`, and `.claude/worktrees/` (two leftover agent worktrees; both branches are already merged into HEAD, so they are safe to remove with `git worktree remove`). |
-| Dev API (:4000) | **Not running** on 28 Oct. It was last restarted on 15 Oct to serve the new build. |
-| SQL Server | `.\SQLEXPRESS`, reachable on **`tcp:localhost,14330`**. Named pipes and the instance name fail from `sqlcmd`, so use the TCP form. |
+| Work since 15 Oct | Only the install package (§2b), 28 Oct. No UI or API change. |
+| Working tree | Clean of tracked changes. Untracked: proposal build files under `proposal/IFL-SMS-2026-09/`, `drafts/`, `HANDOVER.pdf`, `handover/AUDIT-DECISIONS-AND-DEFECTS-2026-10-02.docx`, two screenshots (`bar375_top.png`, `zeroed_768.png`), `scratch-serve.log`, a stray 0-byte root `simulate-plant.mjs`, and `.claude/worktrees/` (two leftover agent worktrees, `agent-ace30c5b2cb887375` on `tooling-upgrade` and `agent-afe6628a05fbbc239`; both commits are already in HEAD, so `git worktree remove` is safe once the owner agrees). |
+| Dev API (:4000) / Vite (:5173) | **Not running** on 2 Nov (nothing listening). Start it as in §4 when needed. |
+| SQL Server | `.\SQLEXPRESS`, listening on **`tcp:localhost,14330`** (confirmed 2 Nov). Named pipes and the instance name fail from `sqlcmd`, so use the TCP form. |
+
+### 2b. Plant-PC install package (28 Oct 2026)
+- On 28 Oct the owner was given remote (AnyDesk) access to IFL's sack-packing PC and asked to install SMS there. **Owner rule: IFL never gets source code**; the plant PC gets compiled JS only. No minification, by owner choice.
+- Build: from `sms/`, `npm run build`, then `bash deploy/build-bundle.sh`. Output: `Desktop\SMS-install\SMS-install.zip` (compiled JS, production `node_modules`, web builds, migrations, backup scripts, Node 22 MSI and nssm.exe). The script refuses to zip if it finds `.ts`/`.map`/`.d.ts`, links, or a `.env`.
+- On the plant PC: unzip to `C:\sms`, admin PowerShell, `powershell -ExecutionPolicy Bypass -File C:\sms\install.ps1`. It installs Node, checks SQL Server (asks before restarting it), creates `[sms]` with `sms_app`/`sms_migrate` logins and random passwords (only in `C:\sms\.env`), migrates, asks for the first admin, installs the `SMS-Api` and `SMS-Sync` services with NSSM, opens the firewall port, checks health. `-PlantOnly` connects IFL's read-only login later (then `epoch:accept`). `uninstall.ps1` keeps the data. On-site guide: `sms/deploy/bundle/INSTALL.txt`.
+- **Verified on the dev PC only:** the unzipped package boots (`/api/health`, `/`, `/next/` all 200); installer helpers were tested piecewise. **The full installer has never been run end to end on any PC.**
+- **Unknown:** whether the owner actually ran it on IFL's PC, and with what result. The transcripts stop at the package being built. **Ask the owner first** — if it was installed, the plant PC now carries production settings (`LIVE_ALLOW_AS_OF` / `LIVE_ALLOW_SIMULATOR` must be false there, `PDAS_WRITE_ENABLED` false) and any problems seen on site matter more than anything else in this file.
 
 ### The new UI (`web-next`) — where it stands
 - It was built 13-14 Oct 2026 after the owner approved a full redesign ("approved, go with your recommendations and start building"; `design/redesign-2026-10/APPROVAL.md`).
@@ -40,7 +69,7 @@ SMS is a web app for **Ibrahim Fibres Limited (IFL)**. It reports on cone and sa
   - **`VERIFY-PRESWITCH-PARITY.md`** (`5805b66`). The new app equals independent SQL and the old app on every figure checked: about 190 headline figures, 382 station figures, 1,489 register rows, about 63,000 report tokens and 36 byte-identical CSVs. There are **no wrong numbers**, but there are four wording defects, D1-D4.
   - **`VERIFY-PRESWITCH-H2H.md`** (`c0e08be`). The new app is the same or better on most things. It is worse on one missing interaction (W1) and on speed and request counts on three screens (W2-W7).
 
-### ⏸ THE OPEN DECISION (the very next thing to resolve)
+### ⏸ THE OPEN DECISION (the very next thing to resolve, after asking about the plant install in §2b)
 Claude's last message to the owner (15 Oct, unanswered) recommended **one fix round, a quick re-check, then the switch**, and asked: *"Shall I go ahead with that fix round, then the switch? Or switch now and fix afterwards?"*
 
 **Ask the owner this again before doing anything else.** Explain it plainly (see the rules in §6). Here is the fix round that was proposed:
@@ -69,7 +98,8 @@ W6 (bundle size, +35 %) and W8 (no Wall below 1024 px, an owner decision) were j
 
 ### A. Owner-only actions (never do these yourself)
 1. **Answer the open decision above** and review `/next`.
-2. **`git push origin floor-first-rework`** (262 commits). Pushing is the owner's alone, and the permission classifier has blocked agent pushes before.
+2. **`git push origin floor-first-rework`** (1 commit outstanding on 2 Nov: `6aece5d`, plus whatever lands after). Pushing is the owner's alone, and the permission classifier has blocked agent pushes before.
+2a. **Tell Claude whether SMS was installed on IFL's sack-packing PC** (§2b), and what happened.
 3. **Supply the Manrope woff2 font file.** Until then the UI falls back to the self-hosted Instrument Sans.
 4. **Run the two rehearsal kits:** `handover/REHEARSAL-RBAC-BELOW-RANK.md` (a real viewer or engineer sign-in) and `handover/REHEARSAL-RT24-05-EXECUTE-ONLY.md` (an EXECUTE-only PDAS login). Agents may not create logins.
 5. **Send the IFL questions.** `IFL-OPEN-QUESTIONS.md` is the single list: the first asks, then items 22-29 (the eight reports' assumed definitions) and 30-41 (data-trust audit). **None has ever been sent.**
@@ -106,7 +136,7 @@ W6 (bundle size, +35 %) and W8 (no Wall below 1024 px, an owner decision) were j
 
 ## 4. Dev environment
 
-**Paths.** The repo root is `C:\Users\ABDULLAH SAJID\Desktop\sag database`, and the app is in `sms\`. `QUESTIONS.md` (the client questionnaire) lives one level up, on the Desktop. Backups are in `D:\sms-backups` (the same laptop).
+**Paths.** The repo root is `C:\Users\ABDULLAH SAJID\Desktop\sag database`, and the app is in `sms\`. `QUESTIONS.md` (the client questionnaire) is in the project root (checked 2 Nov; older notes say the Desktop). Backups are in `D:\sms-backups` (the same laptop).
 
 **SQL Server `.\SQLEXPRESS`** (mixed auth, static TCP port 14330). Databases that matter:
 
@@ -166,7 +196,8 @@ node api/dist/index.js
 
 ## 6. How the owner wants Claude to work (carry these over; they came from real incidents)
 1. **The owner decides; explain options plainly first.** Lead with what each option does and costs, then give a recommendation. When the owner delegates, decide, say why in one line, and proceed.
-2. **Never do these without the owner:** push; create any account or SQL login, even to verify your own work (three appeared unasked on 16 Sep); send anything to IFL; delete data; change `.env` comments; write to `DATA_TP1U2`.
+2. **Never ship source code to IFL** (owner rule, 28 Oct): anything sent to the plant is the compiled install package (§2b).
+2b. **Never do these without the owner:** push; create any account or SQL login, even to verify your own work (three appeared unasked on 16 Sep); send anything to IFL; delete data; change `.env` comments; write to `DATA_TP1U2`.
 3. **Orchestrator style.** For big tasks the owner often opens with an "ORCHESTRATOR" prompt: Opus plans via a planner sub-agent, Sonnet workers do all hands-on work, results are reviewed against acceptance criteria, then a short report. The owner said *"dont set anything without me giving you a plan to follow"*: do not pick models or launch waves without a plan they have seen.
 4. **Hard cap: 12 sub-agents at once**, including inside workflows. Fewer, larger, well-specified tasks are better, because the owner reviews every diff.
 5. **Show a design before building UI.** The owner reacted badly twice to things first seen after they were built.
@@ -202,14 +233,17 @@ node api/dist/index.js
 ---
 
 ## 8. Moving accounts — practical notes
-- **Memory.** Claude Code's memory for this project lives at `C:\Users\ABDULLAH SAJID\.claude\projects\C--Users-ABDULLAH-SAJID-Desktop-sag-database\memory\` (20 notes). It is local to this Windows user, so it may or may not follow a new account. §5 and §6 above carry everything important from it. If the new account doesn't see it, copy that folder or re-save the rules from §6.
-- **Past chats** are in the same folder as `*.jsonl` transcripts. The SMS ones are "Orchestrator workflow setup" (13-15 Oct, the redesign build and the pre-switch checks), "Usability and design survey" (13 Oct), "Product information template" (7 Oct, a marketing write-up; the owner chose the mockup option) and "Sagpacking project audit" (24 Sep).
+- **Memory.** Claude Code's memory for this project lives at `C:\Users\ABDULLAH SAJID\.claude\projects\C--Users-ABDULLAH-SAJID-Desktop-sag-database\memory\` (21 notes on 2 Nov). It is local to this Windows user, so it may or may not follow a new account. §5 and §6 above carry everything important from it. If the new account doesn't see it, copy that folder or re-save the rules from §6.
+- **Past chats** are in the same folder as `*.jsonl` transcripts. The SMS ones are the install-package session (28 Oct, `deb05f52-…jsonl`), "Orchestrator workflow setup" (13-15 Oct, the redesign build and the pre-switch checks), "Usability and design survey" (13 Oct), "Product information template" (7 Oct, a marketing write-up; the owner chose the mockup option) and "Sagpacking project audit" (24 Sep).
 - **Databases are not in git** and must never be. On the same machine, nothing needs moving. On a new machine, attach copies from the original archives (see `DEPLOY.md` and `INSTALLATION-FIRST-HOUR.md`) and recreate the SQL logins. The owner does that, not an agent.
-- **First message for the new session:** "Read HANDOVER.md, then ask me the open switch-over decision."
+- **First message for the new session:** open the project folder `C:\Users\ABDULLAH SAJID\Desktop\sag database`, then say: "Read HANDOVER.md, then ask me about the plant install and the open switch-over decision."
 
 ---
 
-## 9. What is not on GitHub (checked 28 Oct 2026, after `git fetch`)
+## 9. What is not on GitHub (checked 28 Oct 2026, after `git fetch`; **updated 2 Nov 2026**)
+
+> **2 Nov 2026:** the owner has since pushed up to `92000bc`. Only `6aece5d` (install package) and this refresh are local. The 28 Oct text below is kept as written.
+
 
 - **Commits:** `floor-first-rework` has **262 commits that exist only on this laptop** (everything after `f829d30`, 2 Oct, including this handover commit). That is the whole CSS recovery, Stage 3, the performance pass and the web-next redesign. Every other local branch is already contained in origin. The tag `v0.1.0-baseline` is on origin, and there is no stash. Fix: `git push origin floor-first-rework`, which is the owner's step.
 - **Remote-only:** `origin/claude/stoic-thompson-8e1775` holds 1 commit not in HEAD (the caveman skill, from a cloud session). It is harmless and can be ignored.
